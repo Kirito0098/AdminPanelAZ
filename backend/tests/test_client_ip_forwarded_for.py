@@ -45,3 +45,17 @@ def test_all_trusted_chain_falls_back_to_leftmost(service):
 
 def test_empty_forwarded_for_uses_peer(service):
     assert service.get_client_ip(_request("127.0.0.1", " , ")) == "127.0.0.1"
+
+
+@pytest.mark.parametrize(
+    ("client_ip", "expected"),
+    [(None, "203.0.113.5"), ("192.0.2.44", "192.0.2.44")],
+)
+def test_geo_routing_hint_ignores_spoofed_forwarded_for(service, monkeypatch, client_ip, expected):
+    from app.routers import nodes
+
+    seen = {}
+    monkeypatch.setattr(nodes, "build_geo_routing_hint", lambda _db, client_ip: seen.setdefault("ip", client_ip))
+    request = _request("127.0.0.1", "198.51.100.7, 203.0.113.5")
+    nodes.geo_routing_hint(request=request, client_ip=client_ip, _=None, db=None)
+    assert seen["ip"] == expected

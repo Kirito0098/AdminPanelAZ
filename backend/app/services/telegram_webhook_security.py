@@ -5,7 +5,6 @@ from __future__ import annotations
 import hmac
 import ipaddress
 
-from app.config import get_settings
 from app.services.rate_limit.backends import MemoryRateLimitBackend
 from app.services.rate_limit.sliding_window import SlidingWindowLimiter
 
@@ -38,10 +37,10 @@ def get_telegram_webhook_client_ip(request) -> str:
     X-Real-IP (set by the panel nginx to $remote_addr) is honoured only when the direct peer is a
     trusted proxy; X-Forwarded-For is never used.
     """
-    peer = (request.client.host if request.client else "") or ""
-    if peer.startswith("::ffff:"):
-        peer = peer[7:]
-    if peer and peer in set(get_settings().trusted_proxy_ip_list):
+    from app.services.ip_restriction import ip_restriction_service
+
+    peer = ip_restriction_service._normalize_remote_ip((request.client.host if request.client else "") or "")
+    if ip_restriction_service._remote_is_trusted_proxy(peer):
         real_ip = (request.headers.get("x-real-ip") or "").strip()
         if real_ip:
             return real_ip

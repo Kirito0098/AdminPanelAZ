@@ -151,7 +151,8 @@ def real_client(db_factory):
 @pytest.mark.parametrize(("method", "path"), _MINI_APP_CALLS)
 def test_real_mini_app_routes_accept_tg_mini_token(real_client, method, path):
     response = _call(real_client, method, path, create_tg_mini_token("bob", "555"))
-    assert response.status_code != 401, response.text
+    assert response.status_code not in (401, 405), response.text
+    assert response.json() != {"detail": "Not Found"}, "route is missing"
 
 
 @pytest.mark.parametrize(("method", "path"), _PANEL_ONLY_CALLS)

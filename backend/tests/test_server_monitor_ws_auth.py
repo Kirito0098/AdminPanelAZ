@@ -11,7 +11,7 @@ from sqlalchemy.pool import StaticPool
 from starlette.websockets import WebSocketDisconnect
 
 import app.database as database_module
-from app.auth import create_2fa_pending_token, create_access_token
+from app.auth import create_2fa_pending_token, create_access_token, create_tg_mini_token
 from app.database import Base
 from app.models import User, UserRole
 from app.routers import server_monitor
@@ -25,7 +25,7 @@ def ws_client(monkeypatch):
     db = factory()
     db.add_all(
         [
-            User(username="admin", password_hash="x", role=UserRole.admin, is_active=True),
+            User(username="admin", password_hash="x", role=UserRole.admin, is_active=True, telegram_id="777"),
             User(username="alice", password_hash="x", role=UserRole.user, is_active=True),
             User(username="retired", password_hash="x", role=UserRole.admin, is_active=False),
         ]
@@ -68,6 +68,10 @@ def test_ws_rejects_inactive_admin(ws_client):
 
 def test_ws_rejects_unknown_user(ws_client):
     _assert_rejected(ws_client, create_access_token({"sub": "ghost"}))
+
+
+def test_ws_rejects_mini_app_token(ws_client):
+    _assert_rejected(ws_client, create_tg_mini_token("admin", "777"))
 
 
 def test_ws_streams_metrics_for_active_admin(ws_client):

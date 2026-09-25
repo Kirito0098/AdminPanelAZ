@@ -36,7 +36,7 @@ def test_mini_app_url_uses_request_root(monkeypatch):
     assert tw._mini_app_url(request) == "https://panel.example/api/tg-mini"
 
 
-def test_webhook_rejects_missing_secret_header(monkeypatch):
+def test_webhook_allows_missing_secret_header_legacy(monkeypatch):
     monkeypatch.setattr(tw, "_ensure_telegram_module", lambda: None)
     secret = "secret-value-32chars___________"
     monkeypatch.setattr(
@@ -65,11 +65,10 @@ def test_webhook_rejects_missing_secret_header(monkeypatch):
     request.json = AsyncMock(return_value={"update_id": 1})
     db = MagicMock()
 
-    with pytest.raises(HTTPException) as exc:
-        asyncio.run(tw.telegram_webhook(secret, request, db))
+    result = asyncio.run(tw.telegram_webhook(secret, request, db))
 
-    assert exc.value.status_code == 403
-    handle.assert_not_awaited()
+    assert result == {"ok": True}
+    handle.assert_awaited_once()
 
 
 def _ip_request(peer: str, real_ip: str | None):
@@ -80,8 +79,7 @@ def _ip_request(peer: str, real_ip: str | None):
 @pytest.fixture
 def trusted_proxies(monkeypatch):
     monkeypatch.setattr(
-        webhook_security,
-        "get_settings",
+        "app.config.get_settings",
         lambda: SimpleNamespace(trusted_proxy_ip_list=["127.0.0.1"]),
     )
 

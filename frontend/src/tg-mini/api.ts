@@ -77,6 +77,7 @@ async function tgFetch<T>(path: string, options: RequestInit = {}, retry = true)
   return parseApiResponse<T>(response)
 }
 
+/** Mini App token is accepted only by backend endpoints marked `@tg_mini_token_allowed` (401 otherwise). */
 async function panelApiFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
   const headers = new Headers(options.headers)
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {

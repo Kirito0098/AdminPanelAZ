@@ -71,8 +71,8 @@ async def telegram_webhook(
     header_secret = (request.headers.get(TELEGRAM_SECRET_TOKEN_HEADER) or "").strip()
     if not expected or not secrets_match(secret, expected):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-    if not secrets_match(header_secret, expected):
-        logger.warning("Telegram webhook rejected: missing or invalid %s header", TELEGRAM_SECRET_TOKEN_HEADER)
+    # Webhooks registered before secret_token was sent have no header; the URL secret still authenticates.
+    if header_secret and not secrets_match(header_secret, expected):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     client_ip = get_telegram_webhook_client_ip(request)

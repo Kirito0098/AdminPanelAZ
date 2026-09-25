@@ -68,7 +68,6 @@ from app.services.node_manager import (
 from app.services.action_log import log_action
 from app.services.crypto import encrypt_secret
 from app.services.feature_guards import module_disabled_message
-from app.services.ip_restriction import ip_restriction_service
 from app.services.feature_toggles import is_node_ssh_transport_enabled, is_nodes_enabled, is_proxy_nodes_enabled
 from app.services.ip_restriction import ip_restriction_service
 from app.services.node_update_roll import enqueue_node_update_roll

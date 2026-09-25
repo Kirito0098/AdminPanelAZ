@@ -50,10 +50,7 @@ _EndpointT = TypeVar("_EndpointT", bound=Callable[..., Any])
 
 
 def tg_mini_token_allowed(endpoint: _EndpointT) -> _EndpointT:
-    """Let a panel endpoint accept Mini App tokens (it is called from frontend/src/tg-mini/api.ts).
-
-    Must be applied below the router decorator so the marked function is the registered endpoint.
-    """
+    """Let a panel endpoint accept Mini App tokens (it is called from frontend/src/tg-mini/api.ts)."""
     setattr(endpoint, _TG_MINI_ENDPOINT_ATTR, True)
     return endpoint
 
