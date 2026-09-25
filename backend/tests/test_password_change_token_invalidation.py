@@ -180,3 +180,33 @@ def test_stream_and_docs_token_checks_reject_stale_tokens(db_factory):
     assert openapi_docs_gate._is_admin_token(stale, db) is False
     assert openapi_docs_gate._is_admin_token(create_user_access_token(admin), db) is True
     db.close()
+
+
+def test_active_session_middleware_ignores_stale_token(db_factory, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from app.middleware import active_session
+
+    touch = MagicMock()
+    monkeypatch.setattr(active_session, "SessionLocal", db_factory)
+    monkeypatch.setattr(active_session.active_web_session_service, "touch_active_web_session", touch)
+    app = FastAPI()
+    app.add_middleware(active_session.ActiveSessionMiddleware)
+
+    @app.get("/api/ping")
+    def ping():
+        return {"ok": True}
+
+    with db_factory() as db:
+        admin = db.query(User).filter(User.username == "admin").one()
+        stale = create_user_access_token(admin)
+        rt.invalidate_user_sessions(db, admin, reason="password")
+        current = create_user_access_token(admin)
+
+    client = TestClient(app)
+    client.get("/api/ping", headers={"Authorization": f"Bearer {stale}", "X-Web-Session-Id": "sess-1"})
+    assert touch.call_count == 0
+
+    client.get("/api/ping", headers={"Authorization": f"Bearer {current}", "X-Web-Session-Id": "sess-1"})
+    assert touch.call_count == 1
+    assert touch.call_args.args[1] == "admin"

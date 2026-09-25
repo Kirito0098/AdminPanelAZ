@@ -124,17 +124,6 @@ def authenticate_user(db: Session, username: str, password: str) -> User | None:
     return user
 
 
-def decode_access_token_username(token: str) -> str | None:
-    try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        if payload.get("type") not in (None, "access"):
-            return None
-        username: str | None = payload.get("sub")
-        return username
-    except jwt.PyJWTError:
-        return None
-
-
 def get_active_user_from_access_token(db: Session, token: str) -> User | None:
     try:
         payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])

@@ -8,6 +8,7 @@ import secrets
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -71,11 +72,17 @@ def _revoke_family_on_reuse(db: Session, row: RefreshToken) -> None:
 
 
 def _within_rotation_grace(row: RefreshToken, now: datetime) -> bool:
-    return (
-        row.revoke_reason == "rotated"
-        and row.revoked_at is not None
-        and now - row.revoked_at <= timedelta(seconds=ROTATION_GRACE_SECONDS)
-    )
+    return row.revoked_at is not None and now - row.revoked_at <= timedelta(seconds=ROTATION_GRACE_SECONDS)
+
+
+def _family_has_live_token(db: Session, row: RefreshToken, now: datetime) -> bool:
+    """Grace only covers a sibling tab: the session must still be alive (not logged out / invalidated)."""
+    query = db.query(RefreshToken.id).filter(RefreshToken.revoked.is_(False), RefreshToken.expires_at > now)
+    if row.family_id:
+        query = query.filter(RefreshToken.family_id == row.family_id)
+    else:
+        query = query.filter(RefreshToken.user_id == row.user_id)
+    return query.first() is not None
 
 
 def rotate_refresh_token(db: Session, raw_token: str) -> tuple[str | None, User]:
@@ -89,9 +96,12 @@ def rotate_refresh_token(db: Session, raw_token: str) -> tuple[str | None, User]
     if row is None or row.expires_at < now:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_INVALID_TOKEN_DETAIL)
     if row.revoked:
-        if _within_rotation_grace(row, now):
-            return None, _active_user(db, row.user_id)
-        _revoke_family_on_reuse(db, row)
+        # Only a rotated token signals theft; logout / password / pre-upgrade revocations are plain 401.
+        if row.revoke_reason == "rotated":
+            if not _within_rotation_grace(row, now):
+                _revoke_family_on_reuse(db, row)
+            elif _family_has_live_token(db, row, now):
+                return None, _active_user(db, row.user_id)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_INVALID_TOKEN_DETAIL)
 
     user = _active_user(db, row.user_id)
@@ -122,7 +132,7 @@ def revoke_refresh_token(db: Session, raw_token: str) -> None:
 
 def invalidate_user_sessions(db: Session, user: User, *, reason: str, commit: bool = True) -> None:
     """End every issued session: bump ``token_version`` (access / Mini App JWTs) and revoke refresh tokens."""
-    user.token_version = (user.token_version or 0) + 1
+    user.token_version = func.coalesce(User.token_version, 0) + 1
     revoke_all_user_tokens(db, user.id, reason=reason, commit=commit)
 
 

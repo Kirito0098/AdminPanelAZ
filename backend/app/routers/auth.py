@@ -8,7 +8,7 @@ from datetime import timedelta
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
@@ -573,7 +573,13 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
     raw = request.cookies.get(settings.refresh_token_cookie_name)
     if not raw:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh-токен отсутствует")
-    new_raw, user = rotate_refresh_token(db, raw)
+    try:
+        new_raw, user = rotate_refresh_token(db, raw)
+    except HTTPException as exc:
+        # Drop the dead cookie so the browser stops replaying it on every page load / tab focus.
+        failed = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        _clear_refresh_cookie(failed, request)
+        return failed
     access = create_user_access_token(user)
     if new_raw is not None:
         _set_refresh_cookie(response, new_raw, request)

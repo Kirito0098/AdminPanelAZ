@@ -672,9 +672,12 @@ nginx_render_cloudflare_origin_geo() {
   printf 'geo $realip_remote_addr $adminpanelaz_cf_origin {\n'
   printf '    default 0;\n'
   awk '
-    /^[[:space:]]*allow[[:space:]]+[^;[:space:]]+[[:space:]]*;[[:space:]]*$/ {
-      addr = $2
-      sub(/;$/, "", addr)
+    {
+      line = $0
+      sub(/#.*/, "", line)
+      if (line !~ /^[[:space:]]*allow[[:space:]]+[^;[:space:]]+[[:space:]]*;[[:space:]]*$/) { next }
+      split(line, parts, /[[:space:];]+/)
+      addr = (parts[1] == "") ? parts[3] : parts[2]
       if (addr == "all") { next }
       printf "    %s 1;\n", addr
     }

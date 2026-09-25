@@ -119,33 +119,82 @@ def test_lost_rotation_race_issues_no_second_token(db, user, monkeypatch):
     assert db.query(RefreshToken).count() == 1
 
 
-def test_reuse_of_legacy_token_without_family_revokes_all_user_tokens(db, user):
-    legacy_raw = "legacy-token"
+def _legacy_token(db, user, raw: str, **fields) -> None:
     db.add(
         RefreshToken(
             user_id=user.id,
-            token_hash=rt._hash_token(legacy_raw),
+            token_hash=rt._hash_token(raw),
             expires_at=datetime.utcnow() + timedelta(days=1),
-            revoked=True,
-            revoked_at=datetime.utcnow() - timedelta(days=1),
+            **fields,
         )
     )
     db.commit()
+
+
+def test_reuse_of_rotated_legacy_token_without_family_revokes_all_user_tokens(db, user):
+    _legacy_token(db, user, "legacy-token", revoked=False)
+    rt.rotate_refresh_token(db, "legacy-token")
+    _age_revocation(db, "legacy-token", rt.ROTATION_GRACE_SECONDS + 5)
     live_raw, _ = rt.create_refresh_token(db, user)
 
     with pytest.raises(HTTPException):
-        rt.rotate_refresh_token(db, legacy_raw)
+        rt.rotate_refresh_token(db, "legacy-token")
 
     assert _row(db, live_raw).revoked is True
 
 
-def test_logged_out_token_is_not_accepted_in_grace(db, user):
+def test_token_revoked_before_upgrade_is_rejected_without_revoking_others(db, user):
+    _legacy_token(db, user, "legacy-token", revoked=True)
+    live_raw, _ = rt.create_refresh_token(db, user)
+
+    with pytest.raises(HTTPException) as exc:
+        rt.rotate_refresh_token(db, "legacy-token")
+
+    assert exc.value.status_code == 401
+    assert _row(db, live_raw).revoked is False
+
+
+def test_logged_out_token_is_rejected_without_revoking_other_sessions(db, user):
     raw, _ = rt.create_refresh_token(db, user)
+    other_device, _ = rt.create_refresh_token(db, user)
     rt.revoke_refresh_token(db, raw)
 
     with pytest.raises(HTTPException):
         rt.rotate_refresh_token(db, raw)
-    assert _row(db, raw).revoke_reason in {"logout", "reuse"}
+    assert _row(db, raw).revoke_reason == "logout"
+    assert _row(db, other_device).revoked is False
+
+
+def test_grace_does_not_outlive_session_invalidation(db, user):
+    raw, _ = rt.create_refresh_token(db, user)
+    rt.rotate_refresh_token(db, raw)
+    rt.invalidate_user_sessions(db, user, reason="password")
+
+    with pytest.raises(HTTPException) as exc:
+        rt.rotate_refresh_token(db, raw)
+    assert exc.value.status_code == 401
+
+
+def test_grace_does_not_outlive_reuse_detection(db, user):
+    raw, _ = rt.create_refresh_token(db, user)
+    first_rotation, _ = rt.rotate_refresh_token(db, raw)
+    rt.rotate_refresh_token(db, first_rotation)
+    _age_revocation(db, raw, rt.ROTATION_GRACE_SECONDS + 5)
+    with pytest.raises(HTTPException):
+        rt.rotate_refresh_token(db, raw)
+
+    with pytest.raises(HTTPException):
+        rt.rotate_refresh_token(db, first_rotation)
+
+
+def test_invalidate_sessions_increments_current_db_version(db, user):
+    assert (user.token_version or 0) == 0
+    db.execute(text("UPDATE users SET token_version = 5 WHERE id = :id"), {"id": user.id})
+
+    rt.invalidate_user_sessions(db, user, reason="password")
+
+    assert db.execute(text("SELECT token_version FROM users WHERE id = :id"), {"id": user.id}).scalar() == 6
+    assert user.token_version == 6
 
 
 def test_inactive_user_cannot_use_grace(db, user):
@@ -190,3 +239,17 @@ def test_refresh_route_in_grace_does_not_overwrite_cookie(db, user):
 
     assert token.access_token
     assert "set-cookie" not in response.headers
+
+
+def test_refresh_route_failure_clears_cookie(db, user):
+    raw, _ = rt.create_refresh_token(db, user)
+    rt.revoke_refresh_token(db, raw)
+    cookie_name = get_settings().refresh_token_cookie_name
+    request = MagicMock()
+    request.cookies = {cookie_name: raw}
+
+    result = auth_router.refresh_token(request, Response(), db)
+
+    assert result.status_code == 401
+    set_cookie = result.headers.get("set-cookie", "")
+    assert set_cookie.startswith(f"{cookie_name}=") and "Max-Age=0" in set_cookie
