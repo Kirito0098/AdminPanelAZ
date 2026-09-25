@@ -41,6 +41,27 @@ run_reset
 grep -qx 'SECRET_KEY=change-me-in-production-use-long-random-string' "$TMP_DIR/.env"
 echo "  OK"
 
+echo "[test] резервная копия .env при переустановке и её восстановление доступны только владельцу"
+mkdir -p "$TMP_DIR/root/backend"
+printf 'SECRET_KEY=existing-real-secret-0123456789abcdef\n' >"$TMP_DIR/root/backend/.env"
+chmod 644 "$TMP_DIR/root/backend/.env"
+ROOT_DIR_UNDER_TEST="$TMP_DIR/root" bash -c '
+  set -euo pipefail
+  log() { :; }
+  ROOT_DIR="$ROOT_DIR_UNDER_TEST"
+  ENV_FILE="$ROOT_DIR/backend/.env"
+  NODE_ENV_FILE="$ROOT_DIR/backend/node_agent.env"
+  PROXY_ENV_FILE="$ROOT_DIR/backend/proxy_agent.env"
+  eval "$1"
+  backup_env_for_reinstall
+  [[ "$(stat -c %a "$ROOT_DIR/.reinstall-backup")" == 700 ]]
+  [[ "$(stat -c %a "$ENV_BACKUP_DIR/.env")" == 600 ]]
+  rm -f "$ENV_FILE"
+  restore_env_backup
+  [[ "$(stat -c %a "$ENV_FILE")" == 600 ]]
+' bash "$(extract_functions backup_env_for_reinstall restore_env_backup)"
+echo "  OK"
+
 echo "[test] setup_env ограничивает права backend/.env до 600"
 setup_env_body="$(sed -n '/^setup_env() {/,/^}/p' "$ROOT_DIR/install.sh")"
 if ! grep -qF 'chmod 600 "$ENV_FILE"' <<<"$setup_env_body"; then

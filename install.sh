@@ -514,18 +514,21 @@ backup_env_for_reinstall() {
   local stamp
   stamp="$(date +%Y%m%d-%H%M%S)"
   ENV_BACKUP_DIR="$ROOT_DIR/.reinstall-backup/$stamp"
-  mkdir -p "$ENV_BACKUP_DIR"
+  install -d -m 700 "$ROOT_DIR/.reinstall-backup" "$ENV_BACKUP_DIR"
 
   if [[ -f "$ENV_FILE" ]]; then
     cp -a "$ENV_FILE" "$ENV_BACKUP_DIR/.env"
+    chmod 600 "$ENV_BACKUP_DIR/.env"
     log "Резервная копия: $ENV_BACKUP_DIR/.env"
   fi
   if [[ -f "$NODE_ENV_FILE" ]]; then
     cp -a "$NODE_ENV_FILE" "$ENV_BACKUP_DIR/node_agent.env"
+    chmod 600 "$ENV_BACKUP_DIR/node_agent.env"
     log "Резервная копия: $ENV_BACKUP_DIR/node_agent.env"
   fi
   if [[ -f "$PROXY_ENV_FILE" ]]; then
     cp -a "$PROXY_ENV_FILE" "$ENV_BACKUP_DIR/proxy_agent.env"
+    chmod 600 "$ENV_BACKUP_DIR/proxy_agent.env"
     log "Резервная копия: $ENV_BACKUP_DIR/proxy_agent.env"
   fi
 }
@@ -551,14 +554,17 @@ offer_restore_env_backup() {
 restore_env_backup() {
   if [[ -f "$ENV_BACKUP_DIR/.env" ]]; then
     cp -a "$ENV_BACKUP_DIR/.env" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
     log "Восстановлен backend/.env из $ENV_BACKUP_DIR"
   fi
   if [[ -f "$ENV_BACKUP_DIR/node_agent.env" ]]; then
     cp -a "$ENV_BACKUP_DIR/node_agent.env" "$NODE_ENV_FILE"
+    chmod 600 "$NODE_ENV_FILE"
     log "Восстановлен backend/node_agent.env из $ENV_BACKUP_DIR"
   fi
   if [[ -f "$ENV_BACKUP_DIR/proxy_agent.env" ]]; then
     cp -a "$ENV_BACKUP_DIR/proxy_agent.env" "$PROXY_ENV_FILE"
+    chmod 600 "$PROXY_ENV_FILE"
     log "Восстановлен backend/proxy_agent.env из $ENV_BACKUP_DIR"
   fi
 }
