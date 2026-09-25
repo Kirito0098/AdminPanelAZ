@@ -101,15 +101,26 @@
 - **AZ-WARP / sing-box** — start/stop/restart идут через `warper_api` 1.5.0; `systemctl` остаётся только fallback для старых версий AZ-WARP.
 - **AZ-WARP / статус** — пароль Shadowsocks донора (`slave.password`) больше не уходит в ответ API статуса; бейдж режима в статусе показывает человекочитаемое название.
 - **Конфиг AntiZapret** — числовые значения `ANTIZAPRET_WARP` / `VPN_WARP` (новый AntiZapret-VPN) больше не читаются как `n`.
+- **Трафик / HA-группы** — сбор трафика больше не ломается, когда один и тот же клиент WireGuard/AWG2 подключается к primary и реплике: `traffic_session_state` уникален по паре `(node_id, session_key)`, а не по `session_key` глобально (миграция при старте). Ошибка сбора на одном узле откатывает транзакцию и пишется в лог как warning, поэтому следующие узлы в цикле собираются нормально (раньше каскадный `PendingRollbackError` тихо останавливал учёт трафика, лимиты и алерты).
 - **Установщик** — `install.sh` больше не может завершиться с кодом 141 (SIGPIPE) до появления меню: версия Python в `scripts/python-runtime.sh` выбирается через `sed -n '1p'` вместо `head -n1`, который при `pipefail` обрывал канал. [PR #14](https://github.com/Kirito0098/AdminPanelAZ/pull/14), спасибо @NZainchkovskiy.
 
 ### 🗑️ Removed
 
 ### 🔒 Security
 
+- **Раздача фронтенда** — SPA catch-all (`serve_spa` в `main.py`) отдавал любой файл сервера по пути вида `/..%2f..%2fbackend%2f.env` без авторизации (включая `SECRET_KEY` и БД). Теперь отдаются только файлы внутри `frontend/dist`. Уязвимы были режимы прямой публикации (uvicorn на `0.0.0.0`); nginx такие запросы отклонял. **После обновления на установках с прямой публикацией смените `SECRET_KEY`** (Настройки → Безопасность → ротация секретов).
+- **Скачивание профилей** — пользователь с ролью «Пользователь» мог через параметр `path` скачать, получить QR или одноразовую ссылку на профиль другого клиента (с приватным ключом). Теперь `path` обязан входить в список файлов своего конфига, иначе `403`.
+- **Права на секреты** — `backend/.env`, `adminpanel.db`, `cidr.db` и их WAL/SHM-файлы при старте панели получают права `600`; установщик сразу создаёт `backend/.env` с правами `600` (раньше `644`, файлы читались любым локальным пользователем).
+- **Переустановка** — «Переустановка» и повторная установка через мастер (`--force`) больше не генерируют новый `SECRET_KEY`: прежний ключ сохраняется, поэтому API-ключи узлов, SSH-ключи транспорта и секреты 2FA в сохранённой БД остаются читаемыми.
+
 ### 🧪 Tests
 
 - Backend: `test_tg_mini_configs_visibility` — каталог Mini App скрывает протоколы вне `visible_vpn_profiles`; админ видит все.
+- Backend: `test_spa_path_traversal` — `..%2f`, `%2e%2e`, `..%5c` не выходят за пределы `frontend/dist`; обычные файлы и клиентские маршруты работают.
+- Backend: `test_configs_profile_path_access` — download / qr / one-time-link отклоняют чужой `path` для пользователя; свой путь и админ без изменений.
+- Backend: `test_traffic_session_state_node_scope` — один WG-peer на двух узлах, восстановление сборщика после ошибки БД, миграция уникального индекса (идемпотентна).
+- Backend: `test_sensitive_file_permissions` — `600` на `.env`, БД и WAL/SHM.
+- Shell: `test-install-env-preserve-secret.sh` — сброс `.env` при `--force` сохраняет `SECRET_KEY`, `setup_env` ставит права `600` (добавлен в CI).
 - Frontend: `src/tg-mini/lib/vpnVisibility.test.ts` — чипы/видимость типов по policy.
 - Frontend: `src/lib/accessUntil.test.ts` — разбор `409 access_until_conflict` (ApiError и уже разобранный payload) и конвенция «конец дня» для date-picker.
 - Backend: `test_access_until` — guard конфликта на `wireguard/set-expiry` (409 / `confirm_override` / orphan), сохранение переопределения при неизменном сроке пользователя, разворот `YYYY-MM-DD` в конец дня.
