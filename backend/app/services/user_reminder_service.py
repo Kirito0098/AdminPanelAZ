@@ -70,7 +70,7 @@ def _build_owner_message(
         _format_notify_card,
         _fmt_when,
         _line_code,
-        _line_text,
+        _line_html,
     )
     from app.services.notify_time import format_notify_when
 
@@ -84,7 +84,7 @@ def _build_owner_message(
     detail_lines = []
     if config is not None:
         detail_lines.append(_line_code("📁", "Клиент", config.client_name))
-    detail_lines.append(_line_text("📋", "Детали", details))
+    detail_lines.append(_line_html("📋", "Детали", details))
     return _format_notify_card(
         titles[reminder_type],
         when,

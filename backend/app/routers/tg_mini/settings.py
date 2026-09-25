@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -162,7 +163,7 @@ def mini_test_admin_notify(
     events_text = "\n".join(f"  ✓ {item}" for item in enabled) if enabled else "  (нет включённых событий)"
     text = (
         "🔔 <b>Тест уведомлений AdminPanelAZ</b>\n\n"
-        f"Аккаунт: <code>{current_user.username}</code>\n\n"
+        f"Аккаунт: <code>{html.escape(current_user.username)}</code>\n\n"
         f"Включённые события:\n{events_text}"
     )
     if current_user.role != UserRole.admin:

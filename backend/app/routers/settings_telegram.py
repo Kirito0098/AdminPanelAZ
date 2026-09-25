@@ -1,3 +1,4 @@
+import html
 import json
 import secrets
 from datetime import datetime, timezone
@@ -267,7 +268,7 @@ def test_admin_notify(db: Session = Depends(get_db), admin: User = Depends(requi
     events_text = "\n".join(f"  ✓ {item}" for item in enabled) if enabled else "  (нет включённых событий)"
     text = (
         "🔔 <b>Тест уведомлений AdminPanelAZ</b>\n\n"
-        f"Аккаунт: <code>{admin.username}</code>\n\n"
+        f"Аккаунт: <code>{html.escape(admin.username)}</code>\n\n"
         f"Включённые события:\n{events_text}"
     )
     sent, total = _send_test_message_to_recipients(db, admin, text)

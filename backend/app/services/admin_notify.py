@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import threading
 import time
@@ -186,7 +187,7 @@ def _mini_protocol_label(raw_value: str | None) -> str:
 
 def _fmt_code(value: str | None) -> str:
     text = str(value or "").strip()
-    return f"<code>{text or '—'}</code>"
+    return f"<code>{html.escape(text) if text else '—'}</code>"
 
 
 def _fmt_protocol(target_type: str | None) -> str:
@@ -249,7 +250,12 @@ def _line_code(icon: str, label: str, value: str | None) -> str:
 
 
 def _line_text(icon: str, label: str, text: str) -> str:
-    return f"{icon} {label} : {text}"
+    return _line_html(icon, label, html.escape(text))
+
+
+def _line_html(icon: str, label: str, markup: str) -> str:
+    """``markup`` must be trusted server-generated Telegram HTML."""
+    return f"{icon} {label} : {markup}"
 
 
 def _client_detail_lines(target_type: str | None, target_name: str | None) -> list[str]:
@@ -299,7 +305,7 @@ def _fmt_device(user_agent: str | None, *, login_via: str | None = None) -> str 
     if not label:
         return None
     icon = "📱" if is_mobile_user_agent(user_agent) and not login_via else "💻"
-    return f"{icon} Устройство {label}"
+    return f"{icon} Устройство {html.escape(label)}"
 
 
 def _login_context_lines(
@@ -1270,7 +1276,7 @@ class AdminNotifyService:
             detail_lines = [_line_code("👤", "Пользователь", subject_name or actor_username)]
             if event_type != "user_access_expiry_reminder":
                 detail_lines.extend(_client_detail_lines(target_type, target_name))
-            detail_lines.append(_line_text("📋", "Детали", details or "-"))
+            detail_lines.append(_line_html("📋", "Детали", details or "-"))
             _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
             return _format_notify_card(
                 titles[event_type],
@@ -1325,7 +1331,7 @@ def _preview_owner_reminder_text(event_key: str) -> str | None:
             "⚠️ <b>Доступ скоро истечёт</b>",
             when,
             detail_lines=[
-                _line_text("📋", "Детали", "Доступ до <code>2026-07-10</code>, осталось <b>5</b> дн."),
+                _line_html("📋", "Детали", "Доступ до <code>2026-07-10</code>, осталось <b>5</b> дн."),
             ],
         ),
         "cert_expiry_reminder": _format_notify_card(
