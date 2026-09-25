@@ -48,6 +48,14 @@ def test_spa_catch_all_does_not_serve_system_files(spa_client: TestClient):
     assert "root:" not in response.text
 
 
+@pytest.mark.parametrize("path", ["/%00", "/foo%00bar"])
+def test_spa_catch_all_falls_back_to_index_for_null_byte_paths(spa_client: TestClient, path: str):
+    response = spa_client.get(path)
+
+    assert response.status_code == 200
+    assert response.text == "INDEX"
+
+
 def test_spa_catch_all_still_serves_real_dist_files(spa_client: TestClient):
     response = spa_client.get("/favicon.svg")
 

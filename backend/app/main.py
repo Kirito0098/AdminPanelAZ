@@ -493,7 +493,7 @@ def _mount_frontend(app: FastAPI) -> None:
         # When ACCESS_PATH is set, /p/… is handled by serve_portal_spa_root.
         # Without ACCESS_PATH, portal pages share this catch-all at domain root.
         portal_root = (not spa_prefix) and (full_path == "p" or full_path.startswith("p/"))
-        if full_path:
+        if full_path and "\x00" not in full_path:
             candidate = (dist_root / full_path).resolve()
             if candidate.is_relative_to(dist_root) and candidate.is_file():
                 return FileResponse(candidate)
