@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 from app.middleware.api_rate_limit import ApiRateLimitMiddleware
 from app.middleware.http_security import HttpSecurityMiddleware, build_robots_txt, build_security_txt, get_panel_branding
 from app.middleware.active_session import ActiveSessionMiddleware
-from app.services.security_bootstrap import validate_panel_settings
+from app.services.security_bootstrap import restrict_sensitive_file_permissions, validate_panel_settings
 from app.database import Base, SessionLocal, engine, run_db_migrations
 from app.cidr_database import run_cidr_db_migrations
 from app.models import User, UserRole, VpnConfig, VpnType
@@ -147,6 +147,9 @@ async def lifespan(_: FastAPI):
     if not db_path.is_absolute():
         db_path = app_root / db_path
     env_path = app_root / ".env"
+    from app.cidr_database import resolve_cidr_db_path
+
+    restrict_sensitive_file_permissions([env_path, db_path, resolve_cidr_db_path()])
     background_tasks = spawn_background_tasks(app_root=app_root, db_path=db_path, env_path=env_path)
     from app.services.admin_notify import admin_notify_service
 
@@ -449,6 +452,7 @@ def _mount_frontend(app: FastAPI) -> None:
         if _ACCESS_PREFIX:
             app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets-portal-root")
 
+    dist_root = dist.resolve()
     index_file = dist / "index.html"
     spa_prefix = _ACCESS_PREFIX or ""
 
@@ -490,8 +494,8 @@ def _mount_frontend(app: FastAPI) -> None:
         # Without ACCESS_PATH, portal pages share this catch-all at domain root.
         portal_root = (not spa_prefix) and (full_path == "p" or full_path.startswith("p/"))
         if full_path:
-            candidate = dist / full_path
-            if candidate.is_file():
+            candidate = (dist_root / full_path).resolve()
+            if candidate.is_relative_to(dist_root) and candidate.is_file():
                 return FileResponse(candidate)
         return serve_html_with_nonce(request, index_file, portal_root=portal_root)
 
