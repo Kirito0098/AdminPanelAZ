@@ -1271,6 +1271,39 @@ def _migrate_user_traffic_sample_node_created_index() -> None:
     logger.info("DB migration: created ix_user_traffic_sample_node_created index")
 
 
+def migrate_traffic_session_state_node_scoped_key(conn) -> bool:
+    """HA replicas share WireGuard peers, so session_key is unique per node, not globally."""
+    conn_inspector = inspect(conn)
+    if "traffic_session_state" not in conn_inspector.get_table_names():
+        return False
+    indexes = {idx["name"]: idx for idx in conn_inspector.get_indexes("traffic_session_state")}
+    if "uq_traffic_session_state_node_session" in indexes:
+        return False
+    legacy = indexes.get("ix_traffic_session_state_session_key")
+    if legacy and legacy.get("unique"):
+        conn.execute(text("DROP INDEX ix_traffic_session_state_session_key"))
+    conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_traffic_session_state_session_key "
+            "ON traffic_session_state (session_key)"
+        )
+    )
+    conn.execute(
+        text(
+            "CREATE UNIQUE INDEX uq_traffic_session_state_node_session "
+            "ON traffic_session_state (node_id, session_key)"
+        )
+    )
+    return True
+
+
+def _migrate_traffic_session_state_node_scoped_key() -> None:
+    with engine.begin() as conn:
+        migrated = migrate_traffic_session_state_node_scoped_key(conn)
+    if migrated:
+        logger.info("DB migration: traffic_session_state session_key is now unique per node")
+
+
 def _migrate_client_portal_tokens_active_unique() -> None:
     """One active (revoked_at IS NULL) portal token per (node_id, client_name)."""
     inspector = inspect(engine)
@@ -1403,6 +1436,7 @@ def run_db_migrations() -> None:
     _migrate_webauthn_credentials_table()
     _migrate_webhook_delivery_destination_type()
     _migrate_user_traffic_sample_node_created_index()
+    _migrate_traffic_session_state_node_scoped_key()
     inspector = inspect(engine)
     migrations = {
         "wg_access_policy": [

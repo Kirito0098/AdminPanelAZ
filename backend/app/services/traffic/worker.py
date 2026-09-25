@@ -76,7 +76,8 @@ def _collect_all_nodes():
                     clients_changed,
                 )
             except Exception as exc:
-                logger.debug("Traffic collect failed for node %s: %s", node.name, exc)
+                db.rollback()
+                logger.warning("Traffic collect failed for node %s: %s", node.name, exc)
     finally:
         db.close()
     logger.info(

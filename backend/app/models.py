@@ -301,10 +301,11 @@ class AppSetting(Base):
 
 class TrafficSessionState(Base):
     __tablename__ = "traffic_session_state"
+    __table_args__ = (Index("uq_traffic_session_state_node_session", "node_id", "session_key", unique=True),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
-    session_key: Mapped[str] = mapped_column(String(512), unique=True, index=True)
+    session_key: Mapped[str] = mapped_column(String(512), index=True)
     profile: Mapped[str] = mapped_column(String(64), default="unknown")
     common_name: Mapped[str] = mapped_column(String(128), index=True)
     real_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
