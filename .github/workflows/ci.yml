@@ -131,3 +131,4 @@ jobs:
           ./scripts/test-install-publish-modes.sh
           ./scripts/test-nginx-telegram-webhook-realip.sh
           ./scripts/test-install-reboot-check.sh
+          ./scripts/test-python-runtime-pipefail.sh

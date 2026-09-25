@@ -100,6 +100,7 @@
 - **AZ-WARP / sing-box** — start/stop/restart идут через `warper_api` 1.5.0; `systemctl` остаётся только fallback для старых версий AZ-WARP.
 - **AZ-WARP / статус** — пароль Shadowsocks донора (`slave.password`) больше не уходит в ответ API статуса; бейдж режима в статусе показывает человекочитаемое название.
 - **Конфиг AntiZapret** — числовые значения `ANTIZAPRET_WARP` / `VPN_WARP` (новый AntiZapret-VPN) больше не читаются как `n`.
+- **Установщик** — `install.sh` больше не может завершиться с кодом 141 (SIGPIPE) до появления меню: версия Python в `scripts/python-runtime.sh` выбирается через `sed -n '1p'` вместо `head -n1`, который при `pipefail` обрывал канал. [PR #14](https://github.com/Kirito0098/AdminPanelAZ/pull/14), спасибо @NZainchkovskiy.
 
 ### 🗑️ Removed
 
@@ -114,6 +115,7 @@
 - Backend: `test_user_subscription` — inherit owner deadline on create (I7), HA replicate on cascade (I8), reconcile error isolation (I9); однократность backfill'а `users.access_until`; `test_client_portal` — redeem пропускает вручную заблокированный профиль.
 - Backend: `test_warper_az15` — `az_warp_mode`, маркер незавершённого обновления, отсутствие конфликта в health, скрытие `slave.password`, Slave `ss://`, VLESS/Hy2/OpenVPN, источники ключа, sing-box API + fallback, авто-резолв, маршруты local/remote адаптера и 503 для старого агента.
 - Backend: `test_antizapret_warp_choice` — чтение/запись 1–4 / 1–2, legacy `y/n` в обе стороны, отказ 3/4 на legacy, предупреждение при расхождении со старым агентом; `test_antizapret_ha_settings` — `WARP_PROTECTION` реплицируется; `test_node_link_errors` — node agent `1.9.0`.
+- Scripts: `test-python-runtime-pipefail.sh` — загрузка `python-runtime.sh` при `set -euo pipefail` без SIGPIPE; добавлен в CI.
 
 ---
 
