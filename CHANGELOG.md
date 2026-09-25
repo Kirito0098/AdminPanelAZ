@@ -126,11 +126,11 @@
 - Backend: `test_configs_profile_path_access` — download / qr / one-time-link отклоняют чужой `path` для пользователя; свой путь и админ без изменений.
 - Backend: `test_traffic_session_state_node_scope` — один WG-peer на двух узлах, восстановление сборщика после ошибки БД, уровни логирования (ошибка БД — warning, недоступный узел — debug), миграция уникального индекса (идемпотентна).
 - Backend: `test_sensitive_file_permissions` — `600` на `.env`, БД и WAL/SHM.
-- Backend: `test_server_monitor_ws_auth` — WebSocket мониторинга отклоняет `2fa_pending`, не-админа, отключённого и неизвестного пользователя; админ получает метрики.
-- Backend: `test_tg_mini_token_scope` — токен `tg_mini` работает на всех 25 вызовах Mini App к настоящим роутерам и отклоняется на остальных эндпоинтах панели, после перепривязки Telegram и в WebSocket; `/tg-mini/auth` выдаёт токен `tg_mini` и отклоняет пустой Telegram ID и отключённого пользователя.
+- Backend: `test_server_monitor_ws_auth` — WebSocket мониторинга отклоняет `2fa_pending`, токен Mini App, не-админа, отключённого и неизвестного пользователя; админ получает метрики.
+- Backend: `test_tg_mini_token_scope` — токен `tg_mini` работает на всех 25 вызовах Mini App к настоящим роутерам (маршрут существует, не 401/405) и отклоняется на остальных эндпоинтах панели и после перепривязки Telegram; `/tg-mini/auth` выдаёт токен `tg_mini` и отклоняет пустой Telegram ID и отключённого пользователя.
 - Backend: `test_admin_notify_html_escape` — экранирование логина, User-Agent, имён и деталей; HTML напоминаний (серверный) сохраняется.
-- Backend: `test_telegram_webhook` — отказ без секретного заголовка; `X-Real-IP` только от доверенного прокси. `test_telegram_bot_private_only` — команды и callback'и в группах/каналах игнорируются.
-- Backend: `test_client_ip_forwarded_for` — подделанный левый элемент `X-Forwarded-For` игнорируется, доверенные прокси пропускаются справа.
+- Backend: `test_telegram_webhook` — `X-Real-IP` только от доверенного прокси. `test_telegram_bot_private_only` — команды и callback'и в группах/каналах игнорируются.
+- Backend: `test_client_ip_forwarded_for` — подделанный левый элемент `X-Forwarded-For` игнорируется, доверенные прокси пропускаются справа; гео-подсказка узлов использует тот же адрес.
 - Shell: `test-install-env-preserve-secret.sh` — сброс `.env` при `--force` сохраняет `SECRET_KEY`, `setup_env` ставит права `600`, резервные копии переустановки `700`/`600` (добавлен в CI).
 - Frontend: `src/tg-mini/lib/vpnVisibility.test.ts` — чипы/видимость типов по policy.
 - Frontend: `src/lib/accessUntil.test.ts` — разбор `409 access_until_conflict` (ApiError и уже разобранный payload) и конвенция «конец дня» для date-picker.
