@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_admin
+from app.auth import get_current_user, require_admin, tg_mini_token_allowed
 from app.database import get_db
 from app.models import User, UserRole
 from app.schemas import (
@@ -40,6 +40,7 @@ def _active_node_id(db: Session) -> int:
 
 
 @router.get("", response_model=list[ClientTemplateResponse])
+@tg_mini_token_allowed
 def list_client_templates(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -96,6 +97,7 @@ def delete_client_template(
 
 
 @router.post("/{template_id}/apply", response_model=VpnConfigResponse, status_code=status.HTTP_201_CREATED)
+@tg_mini_token_allowed
 def apply_client_template(
     template_id: int,
     payload: ClientTemplateApplyRequest,

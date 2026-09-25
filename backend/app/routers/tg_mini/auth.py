@@ -26,8 +26,12 @@ def tg_auth(payload: TelegramAuthRequest, request: Request, db: Session = Depend
         tg_user = root._verify_telegram_init_data(payload.init_data, token, max_age=max_age)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
-    tg_id = str(tg_user.get("id", ""))
+    tg_id = str(tg_user.get("id") or "").strip()
+    if not tg_id:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="init_data не содержит пользователя Telegram")
     user = db.query(User).filter(User.telegram_id == tg_id).first()
+    if user is not None and not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Пользователь отключён")
     if not user:
         root.admin_notify_service.send_tg_login_unlinked(
             db,
@@ -40,5 +44,5 @@ def tg_auth(payload: TelegramAuthRequest, request: Request, db: Session = Depend
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Этот Telegram аккаунт не привязан ни к одному пользователю панели",
         )
-    access_token = root.create_access_token({"sub": user.username})
+    access_token = root.create_tg_mini_token(user.username, tg_id)
     return {"access_token": access_token, "token_type": "bearer", "telegram_id": tg_id}

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, get_password_hash, require_admin
+from app.auth import get_current_user, get_password_hash, require_admin, tg_mini_token_allowed
 from app.config import get_settings
 from app.database import get_db
 from app.models import (
@@ -69,6 +69,7 @@ def _purge_user_before_delete(db: Session, user: User, successor: User) -> None:
 
 
 @router.get("", response_model=list[UserResponse])
+@tg_mini_token_allowed
 def list_users(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     return db.query(User).order_by(User.id).all()
 

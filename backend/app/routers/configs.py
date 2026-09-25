@@ -8,7 +8,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_admin
+from app.auth import get_current_user, require_admin, tg_mini_token_allowed
 from app.database import get_db
 from app.models import AppSetting, User, UserRole, VpnConfig, VpnType
 from app.schemas import (
@@ -309,6 +309,7 @@ def _require_profile_path_allowed(
 
 
 @router.get("/quota", response_model=SelfServiceQuotaResponse)
+@tg_mini_token_allowed
 def get_config_quota(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -507,6 +508,7 @@ async def import_configs_csv(
 
 
 @router.post("", response_model=VpnConfigResponse, status_code=status.HTTP_201_CREATED)
+@tg_mini_token_allowed
 def create_config(
     payload: VpnConfigCreate,
     request: Request,
@@ -632,6 +634,7 @@ def create_config(
 
 
 @router.get("/{config_id}", response_model=VpnConfigResponse)
+@tg_mini_token_allowed
 def get_config(
     config_id: int,
     include_files: bool = Query(True, description="Загружать список файлов профилей с узла"),
@@ -654,6 +657,7 @@ def get_config(
 
 
 @router.patch("/{config_id}", response_model=VpnConfigResponse)
+@tg_mini_token_allowed
 def update_config(
     config_id: int,
     payload: VpnConfigUpdate,
@@ -721,6 +725,7 @@ def update_config(
 
 
 @router.delete("/{config_id}", response_model=MessageResponse)
+@tg_mini_token_allowed
 def delete_config(
     config_id: int,
     request: Request,

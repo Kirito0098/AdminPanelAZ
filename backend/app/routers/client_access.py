@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_admin
+from app.auth import get_current_user, require_admin, tg_mini_token_allowed
 from app.config import get_settings
 from app.database import get_db
 from app.models import AmneziaWg2AccessPolicy, User, UserRole, VpnConfig, VpnType
@@ -200,6 +200,7 @@ def _notify_client_ban(
 
 
 @router.get("/policies")
+@tg_mini_token_allowed
 def list_policies(
     clients: str = "",
     db: Session = Depends(get_db),
@@ -229,6 +230,7 @@ def get_openvpn_policy(client_name: str, db: Session = Depends(get_db), _: User 
 
 
 @router.post("/openvpn/temp-block")
+@tg_mini_token_allowed
 def openvpn_temp_block(payload: BlockRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     if not payload.days:
         raise HTTPException(status_code=400, detail="Укажите срок блокировки")
@@ -257,6 +259,7 @@ def openvpn_temp_block(payload: BlockRequest, request: Request, db: Session = De
 
 
 @router.post("/openvpn/permanent-block")
+@tg_mini_token_allowed
 def openvpn_perm_block(payload: BlockRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     result = _service(db).openvpn_permanent_block(payload.client_name, actor=user.username)
     log_action(db, action="openvpn_perm_block", user_id=user.id, username=user.username,
@@ -280,6 +283,7 @@ def openvpn_perm_block(payload: BlockRequest, request: Request, db: Session = De
 
 
 @router.post("/openvpn/unblock")
+@tg_mini_token_allowed
 def openvpn_unblock(payload: BlockRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     try:
         result = _service(db).openvpn_unblock(payload.client_name, actor=user.username)
@@ -381,6 +385,7 @@ def wg_set_expiry(payload: ExpiryRequest, request: Request, db: Session = Depend
 
 
 @router.patch("/openvpn/{client_name}/access-until")
+@tg_mini_token_allowed
 def openvpn_set_access_until(
     client_name: str,
     payload: AccessUntilRequest,
@@ -423,6 +428,7 @@ def openvpn_set_access_until(
 
 
 @router.patch("/wireguard/{client_name}/access-until")
+@tg_mini_token_allowed
 def wg_set_access_until(
     client_name: str,
     payload: AccessUntilRequest,
@@ -465,6 +471,7 @@ def wg_set_access_until(
 
 
 @router.patch("/amneziawg2/{client_name}/access-until")
+@tg_mini_token_allowed
 def awg2_set_access_until(
     client_name: str,
     payload: AccessUntilRequest,
@@ -539,6 +546,7 @@ def sync_client_access_until_from_owner(
 
 
 @router.post("/wireguard/temp-block")
+@tg_mini_token_allowed
 def wg_temp_block(payload: BlockRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     if not payload.days:
         raise HTTPException(status_code=400, detail="Укажите срок блокировки")
@@ -567,6 +575,7 @@ def wg_temp_block(payload: BlockRequest, request: Request, db: Session = Depends
 
 
 @router.post("/wireguard/permanent-block")
+@tg_mini_token_allowed
 def wg_perm_block(payload: BlockRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     result = _service(db).wg_permanent_block(payload.client_name, actor=user.username)
     log_action(db, action="wg_perm_block", user_id=user.id, username=user.username,
@@ -590,6 +599,7 @@ def wg_perm_block(payload: BlockRequest, request: Request, db: Session = Depends
 
 
 @router.post("/wireguard/unblock")
+@tg_mini_token_allowed
 def wg_unblock(payload: BlockRequest, request: Request, db: Session = Depends(get_db), user: User = Depends(require_admin)):
     try:
         result = _service(db).wg_unblock(payload.client_name, actor=user.username)
@@ -743,6 +753,7 @@ def awg2_unblock(payload: BlockRequest, request: Request, db: Session = Depends(
 
 
 @router.post("/amneziawg2/set-traffic-limit")
+@tg_mini_token_allowed
 def awg2_set_traffic_limit(
     payload: TrafficLimitRequest,
     request: Request,
@@ -807,6 +818,7 @@ def awg2_clear_traffic_limit(
 
 
 @router.post("/openvpn/set-traffic-limit")
+@tg_mini_token_allowed
 def openvpn_set_traffic_limit(
     payload: TrafficLimitRequest,
     request: Request,
@@ -871,6 +883,7 @@ def openvpn_clear_traffic_limit(
 
 
 @router.post("/wireguard/set-traffic-limit")
+@tg_mini_token_allowed
 def wg_set_traffic_limit(
     payload: TrafficLimitRequest,
     request: Request,
