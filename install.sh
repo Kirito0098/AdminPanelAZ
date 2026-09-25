@@ -1189,6 +1189,17 @@ apply_wiz_env_settings() {
   fi
 }
 
+reset_env_from_example() {
+  # SECRET_KEY is the Fernet root for node API keys, SSH keys and TOTP secrets stored in the DB.
+  local preserved_secret_key
+  preserved_secret_key="$(env_get SECRET_KEY)"
+  cp "$ENV_EXAMPLE" "$ENV_FILE"
+  if ! is_placeholder_secret "$preserved_secret_key"; then
+    env_set SECRET_KEY "$preserved_secret_key"
+    log "SECRET_KEY сохранён из прежнего backend/.env"
+  fi
+}
+
 setup_env() {
   install_set_step "Настройка backend/.env"
   if ! install_controller_selected; then
@@ -1204,11 +1215,12 @@ setup_env() {
     log "backend/.env уже существует — не перезаписываем (флаг --force для перезаписи)"
   elif [[ -f "$ENV_FILE" && "$FORCE" == true ]]; then
     log "Перезапись backend/.env из .env.example (--force)"
-    cp "$ENV_EXAMPLE" "$ENV_FILE"
+    reset_env_from_example
   else
     log "Создание backend/.env из .env.example"
     cp "$ENV_EXAMPLE" "$ENV_FILE"
   fi
+  chmod 600 "$ENV_FILE"
 
   local secret_key
   secret_key="$(env_get SECRET_KEY)"

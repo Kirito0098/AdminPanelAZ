@@ -132,3 +132,4 @@ jobs:
           ./scripts/test-nginx-telegram-webhook-realip.sh
           ./scripts/test-install-reboot-check.sh
           ./scripts/test-python-runtime-pipefail.sh
+          ./scripts/test-install-env-preserve-secret.sh
