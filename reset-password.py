@@ -24,7 +24,7 @@ sys.path.insert(0, str(BACKEND))
 from app.auth import get_password_hash  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.models import User, UserRole, WebAuthnCredential  # noqa: E402
-from app.services.refresh_token import revoke_all_user_tokens  # noqa: E402
+from app.services.refresh_token import invalidate_user_sessions  # noqa: E402
 from app.services.webauthn_service import user_has_passkeys  # noqa: E402
 
 ROLE_LABELS = {
@@ -227,7 +227,7 @@ def reset_passwords(
             password = generate_password(password_length)
             row.password_hash = get_password_hash(password)
             row.must_change_password = True
-            revoke_all_user_tokens(db, row.id)
+            invalidate_user_sessions(db, row, reason="password", commit=False)
             if disable_second_factor:
                 totp_disabled = disable_user_totp(row)
                 passkeys_removed = disable_user_passkeys(db, row.id)

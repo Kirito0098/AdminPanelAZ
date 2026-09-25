@@ -78,11 +78,14 @@ def upsert_bootstrap_admin(
         )
 
     if user:
+        from app.services.refresh_token import invalidate_user_sessions
+
         user.password_hash = get_password_hash(password)
         user.must_change_password = cfg.default_admin_must_change_password
         user.is_active = True
         if user.role != UserRole.admin:
             user.role = UserRole.admin
+        invalidate_user_sessions(db, user, reason="password", commit=False)
         db.commit()
         return "updated"
 

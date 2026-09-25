@@ -102,7 +102,7 @@ def test_tg_auth_issues_token_when_linked(monkeypatch):
         "app.routers.tg_mini._verify_telegram_init_data",
         lambda *_a, **_k: {"id": int(tg_id)},
     )
-    monkeypatch.setattr("app.routers.tg_mini.create_tg_mini_token", lambda username, telegram_id: "jwt-token")
+    monkeypatch.setattr("app.routers.tg_mini.create_tg_mini_token", lambda username, telegram_id, **_kw: "jwt-token")
 
     request = MagicMock()
     payload = TelegramAuthRequest(init_data="user=%7B%22id%22%3A555%7D&hash=x")

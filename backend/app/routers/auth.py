@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.auth import (
     authenticate_user,
     create_2fa_pending_token,
-    create_access_token,
+    create_user_access_token,
     decode_2fa_pending_token,
     get_current_user,
     get_password_hash,
@@ -37,6 +37,7 @@ from app.schemas import (
     PasskeyRegisterVerifyRequest,
     PasskeyRenameRequest,
     PasswordChangeRequest,
+    PasswordChangeResponse,
     TelegramOidcTokenRequest,
     Token,
     TwoFABackupCodesResponse,
@@ -57,7 +58,7 @@ from app.services.ip_restriction import ip_restriction_service
 from app.services.password_policy import validate_password
 from app.services.refresh_token import (
     create_refresh_token,
-    revoke_all_user_tokens,
+    invalidate_user_sessions,
     revoke_refresh_token,
     rotate_refresh_token,
 )
@@ -139,10 +140,7 @@ def _resolve_user_by_telegram_id(db: Session, tg_id: str) -> User | None:
 
 
 def _telegram_login_redirect(user: User) -> RedirectResponse:
-    access_token = create_access_token(
-        data={"sub": user.username, "role": user.role.value},
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-    )
+    access_token = create_user_access_token(user)
     return RedirectResponse(url=f"{with_access_path(settings, '/login')}#token={access_token}", status_code=302)
 
 
@@ -221,10 +219,7 @@ def _issue_token_pair(
     response: Response | None = None,
     request: Request | None = None,
 ) -> Token:
-    access = create_access_token(
-        data={"sub": user.username, "role": user.role.value},
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-    )
+    access = create_user_access_token(user)
     raw_refresh, _ = create_refresh_token(db, user)
     web_session_id = active_web_session_service.generate_session_id()
     if response is not None:
@@ -505,10 +500,7 @@ def telegram_oidc_token(payload: TelegramOidcTokenRequest, request: Request, db:
         user = _complete_telegram_login(db, request, tg_id, mini=False)
     except HTTPException:
         raise
-    access_token = create_access_token(
-        data={"sub": user.username, "role": user.role.value},
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-    )
+    access_token = create_user_access_token(user)
     return {"access_token": access_token, "token_type": "bearer"}
 
 
@@ -582,10 +574,7 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
     if not raw:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh-токен отсутствует")
     new_raw, user = rotate_refresh_token(db, raw)
-    access = create_access_token(
-        data={"sub": user.username, "role": user.role.value},
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-    )
+    access = create_user_access_token(user)
     if new_raw is not None:
         _set_refresh_cookie(response, new_raw, request)
     return Token(access_token=access)
@@ -611,10 +600,11 @@ def me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
-@router.post("/change-password", response_model=MessageResponse)
+@router.post("/change-password", response_model=PasswordChangeResponse)
 def change_password(
     payload: PasswordChangeRequest,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -623,8 +613,10 @@ def change_password(
     validate_password(payload.new_password, username=current_user.username)
     current_user.password_hash = get_password_hash(payload.new_password)
     current_user.must_change_password = False
-    revoke_all_user_tokens(db, current_user.id)
-    db.commit()
+    invalidate_user_sessions(db, current_user, reason="password")
+    access = create_user_access_token(current_user)
+    raw_refresh, _ = create_refresh_token(db, current_user)
+    _set_refresh_cookie(response, raw_refresh, request)
     if should_scrub_env_after_password_change(current_user.username):
         scrub_admin_bootstrap_secret_from_env()
     if settings.audit_log_enabled:
@@ -635,7 +627,7 @@ def change_password(
             username=current_user.username,
             remote_addr=ip_restriction_service.get_client_ip(request),
         )
-    return MessageResponse(message="Пароль успешно изменён")
+    return PasswordChangeResponse(message="Пароль успешно изменён", access_token=access)
 
 
 @router.get("/2fa/status", response_model=TwoFAStatusResponse)

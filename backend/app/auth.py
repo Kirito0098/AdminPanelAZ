@@ -42,6 +42,21 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
 
 
+def create_user_access_token(user: User) -> str:
+    return create_access_token(
+        data={"sub": user.username, "role": user.role.value, "tv": user.token_version or 0},
+        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
+    )
+
+
+def _token_version_current(payload: dict, user: User) -> bool:
+    """Tokens issued before the user's last password change carry an older ``tv`` (absent = 0)."""
+    try:
+        return int(payload.get("tv") or 0) == (user.token_version or 0)
+    except (TypeError, ValueError):
+        return False
+
+
 TG_MINI_TOKEN_TYPE = "tg_mini"
 _TG_MINI_ENDPOINT_ATTR = "_tg_mini_token_allowed"
 _TG_MINI_ROUTER_PACKAGE = "app.routers.tg_mini"
@@ -55,9 +70,15 @@ def tg_mini_token_allowed(endpoint: _EndpointT) -> _EndpointT:
     return endpoint
 
 
-def create_tg_mini_token(username: str, telegram_id: str) -> str:
+def create_tg_mini_token(username: str, telegram_id: str, *, token_version: int = 0) -> str:
     expire = datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
-    payload = {"sub": username, "tg": telegram_id, "exp": expire, "type": TG_MINI_TOKEN_TYPE}
+    payload = {
+        "sub": username,
+        "tg": telegram_id,
+        "tv": token_version,
+        "exp": expire,
+        "type": TG_MINI_TOKEN_TYPE,
+    }
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
@@ -115,11 +136,17 @@ def decode_access_token_username(token: str) -> str | None:
 
 
 def get_active_user_from_access_token(db: Session, token: str) -> User | None:
-    username = decode_access_token_username(token)
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+    except jwt.PyJWTError:
+        return None
+    if payload.get("type") not in (None, "access"):
+        return None
+    username = payload.get("sub")
     if not username:
         return None
     user = db.query(User).filter(User.username == username).first()
-    if user is None or not user.is_active:
+    if user is None or not user.is_active or not _token_version_current(payload, user):
         return None
     return user
 
@@ -137,6 +164,8 @@ def _get_active_user_from_tg_mini_token(db: Session, token: str) -> User | None:
         return None
     user = db.query(User).filter(User.username == username).first()
     if user is None or not user.is_active or (user.telegram_id or "").strip() != telegram_id:
+        return None
+    if not _token_version_current(payload, user):
         return None
     return user
 

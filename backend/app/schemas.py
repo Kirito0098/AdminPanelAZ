@@ -313,6 +313,11 @@ class PasswordChangeRequest(BaseModel):
     new_password: str = Field(min_length=4)
 
 
+class PasswordChangeResponse(BaseModel):
+    message: str
+    access_token: str
+
+
 class VpnConfigCreate(BaseModel):
     client_name: str = Field(min_length=1, max_length=32, pattern=r"^[a-zA-Z0-9_-]+$")
     vpn_type: VpnType

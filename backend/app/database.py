@@ -1500,6 +1500,7 @@ def run_db_migrations() -> None:
             ("noc_weekly_dow", "VARCHAR(1) DEFAULT ''"),
             ("noc_weekly_time", "VARCHAR(5) DEFAULT ''"),
             ("access_until", "DATETIME"),
+            ("token_version", "INTEGER DEFAULT 0"),
         ],
     }
     with engine.begin() as conn:

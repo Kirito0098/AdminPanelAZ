@@ -120,7 +120,13 @@ def revoke_refresh_token(db: Session, raw_token: str) -> None:
         db.commit()
 
 
-def revoke_all_user_tokens(db: Session, user_id: int, *, reason: str = "revoked") -> None:
+def invalidate_user_sessions(db: Session, user: User, *, reason: str, commit: bool = True) -> None:
+    """End every issued session: bump ``token_version`` (access / Mini App JWTs) and revoke refresh tokens."""
+    user.token_version = (user.token_version or 0) + 1
+    revoke_all_user_tokens(db, user.id, reason=reason, commit=commit)
+
+
+def revoke_all_user_tokens(db: Session, user_id: int, *, reason: str = "revoked", commit: bool = True) -> None:
     db.query(RefreshToken).filter(
         RefreshToken.user_id == user_id,
         RefreshToken.revoked.is_(False),
@@ -128,4 +134,5 @@ def revoke_all_user_tokens(db: Session, user_id: int, *, reason: str = "revoked"
         {"revoked": True, "revoked_at": datetime.utcnow(), "revoke_reason": reason},
         synchronize_session=False,
     )
-    db.commit()
+    if commit:
+        db.commit()

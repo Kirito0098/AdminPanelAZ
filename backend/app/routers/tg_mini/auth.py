@@ -44,5 +44,5 @@ def tg_auth(payload: TelegramAuthRequest, request: Request, db: Session = Depend
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Этот Telegram аккаунт не привязан ни к одному пользователю панели",
         )
-    access_token = root.create_tg_mini_token(user.username, tg_id)
+    access_token = root.create_tg_mini_token(user.username, tg_id, token_version=user.token_version or 0)
     return {"access_token": access_token, "token_type": "bearer", "telegram_id": tg_id}

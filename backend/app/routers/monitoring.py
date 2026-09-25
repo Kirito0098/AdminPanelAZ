@@ -3,10 +3,9 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-import jwt
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_admin
+from app.auth import get_active_user_from_access_token, get_current_user, require_admin
 from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models import User
@@ -42,7 +41,6 @@ from app.services.panel_resource_metrics import query_history as query_panel_his
 from app.services.resource_metrics import VALID_PERIODS, query_history
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
-_settings = get_settings()
 
 
 def _monitoring_cache_ttl() -> int:
@@ -141,23 +139,12 @@ def monitoring_incidents(
 
 
 def _user_from_access_token(token: str, db: Session) -> User:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Неверный токен авторизации",
-    )
-    try:
-        payload = jwt.decode(token, _settings.secret_key, algorithms=[_settings.algorithm])
-        if payload.get("type") not in (None, "access"):
-            raise credentials_exception
-        username: str | None = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-    except jwt.PyJWTError as exc:
-        raise credentials_exception from exc
-
-    user = db.query(User).filter(User.username == username).first()
-    if user is None or not user.is_active:
-        raise credentials_exception
+    user = get_active_user_from_access_token(db, token)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Неверный токен авторизации",
+        )
     return user
 
 

@@ -80,6 +80,7 @@ class User(Base):
     noc_weekly_time: Mapped[str] = mapped_column(String(5), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     must_change_password: Mapped[bool] = mapped_column(Boolean, default=False)
+    token_version: Mapped[int] = mapped_column(Integer, default=0)
     totp_secret_encrypted: Mapped[str | None] = mapped_column(String(512), nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     totp_backup_codes_encrypted: Mapped[str | None] = mapped_column(String(1024), nullable=True)

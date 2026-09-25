@@ -34,6 +34,7 @@ from app.services.admin_bootstrap import (
     should_scrub_env_after_password_change,
 )
 from app.services.password_policy import validate_password
+from app.services.refresh_token import invalidate_user_sessions
 from app.services.user_subscription import (
     get_user_access_until,
     normalize_access_until,
@@ -166,6 +167,7 @@ def update_user(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
         validate_password(payload.password, username=user.username)
         user.password_hash = get_password_hash(payload.password)
+        invalidate_user_sessions(db, user, reason="password", commit=False)
     if payload.telegram_id is not None:
         tg_id = payload.telegram_id.strip()
         # Non-admins may only clear their own telegram_id (self-unlink).

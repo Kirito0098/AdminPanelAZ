@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.auth import decode_access_token_username, require_admin
+from app.auth import get_active_user_from_access_token, require_admin
 from app.database import SessionLocal, get_db
 from app.models import User, UserRole
 from app.schemas import Awg2ObfuscationApply
@@ -29,11 +29,10 @@ def _node_meta(node) -> dict:
 
 
 def _admin_from_stream_token(token: str, db: Session) -> User:
-    username = decode_access_token_username(token)
-    if not username:
+    user = get_active_user_from_access_token(db, token)
+    if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    user = db.query(User).filter(User.username == username).first()
-    if user is None or not user.is_active or user.role != UserRole.admin:
+    if user.role != UserRole.admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     return user
 

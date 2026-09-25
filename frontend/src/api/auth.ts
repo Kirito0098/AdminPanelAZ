@@ -1,3 +1,4 @@
+import { setAccessToken } from '@/lib/accessToken'
 import { clearWebSessionId } from '@/lib/webSession'
 import { apiFetch } from './http'
 import type { User, ActiveWebSession } from '../types'
@@ -150,10 +151,13 @@ export async function getMe() {
 }
 
 export async function changePassword(current: string, newPassword: string) {
-  return apiFetch('/auth/change-password', {
+  const result = await apiFetch<{ message: string; access_token?: string }>('/auth/change-password', {
     method: 'POST',
     body: JSON.stringify({ current_password: current, new_password: newPassword }),
   })
+  // The server ends all sessions issued before the change; keep this tab signed in with the new one.
+  if (result.access_token) setAccessToken(result.access_token)
+  return result
 }
 
 export async function getActiveWebSessions() {
