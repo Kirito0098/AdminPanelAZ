@@ -297,8 +297,7 @@ def _require_profile_path_allowed(
     files = node_adapter.get_profile_files(config.client_name, config.vpn_type)
     match = next((item for item in files if item.get("path") == path), None)
     if match is None:
-        # Path may still be readable; deny if policy would hide all matches by path suffix.
-        match = {"protocol": "", "variant": "", "path": path}
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Файл профиля недоступен")
     policy = _viewer_visibility_policy(db, current_user)
     if not profile_file_allowed(
         policy,
