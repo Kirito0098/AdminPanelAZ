@@ -125,6 +125,9 @@ class RefreshToken(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    family_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoke_reason: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="refresh_tokens")
 

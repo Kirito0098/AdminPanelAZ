@@ -1271,6 +1271,13 @@ def _migrate_user_traffic_sample_node_created_index() -> None:
     logger.info("DB migration: created ix_user_traffic_sample_node_created index")
 
 
+def _migrate_refresh_tokens_family_index() -> None:
+    with engine.begin() as conn:
+        conn.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_refresh_tokens_family_id ON refresh_tokens (family_id)")
+        )
+
+
 def migrate_traffic_session_state_node_scoped_key(conn) -> bool:
     """HA replicas share WireGuard peers, so session_key is unique per node, not globally."""
     conn_inspector = inspect(conn)
@@ -1473,6 +1480,11 @@ def run_db_migrations() -> None:
             ("cert_expires_at", "DATETIME"),
             ("expires_at", "DATETIME"),
         ],
+        "refresh_tokens": [
+            ("family_id", "VARCHAR(32)"),
+            ("revoked_at", "DATETIME"),
+            ("revoke_reason", "VARCHAR(16)"),
+        ],
         "users": [
             ("totp_secret_encrypted", "VARCHAR(512)"),
             ("totp_enabled", "INTEGER DEFAULT 0"),
@@ -1500,6 +1512,8 @@ def run_db_migrations() -> None:
                     continue
                 conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}"))
                 logger.info("DB migration: added %s.%s", table, name)
+    if "refresh_tokens" in inspector.get_table_names():
+        _migrate_refresh_tokens_family_index()
 
     _migrate_user_config_access_table()
     _migrate_viewer_role_to_user()

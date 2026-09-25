@@ -586,7 +586,8 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
         data={"sub": user.username, "role": user.role.value},
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
-    _set_refresh_cookie(response, new_raw, request)
+    if new_raw is not None:
+        _set_refresh_cookie(response, new_raw, request)
     return Token(access_token=access)
 
 
