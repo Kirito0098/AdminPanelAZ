@@ -189,10 +189,11 @@ Webhook бота проверяет, что запрос пришёл с IP Tele
 прокси (orange-cloud) nginx без `real_ip` передаёт в панель IP edge Cloudflare →
 webhook отвечает 403, команды и кнопки «молчат».
 
-AdminPanelAZ ставит snippet `cloudflare-realip.conf` и отдельный location только для
-`/api/telegram/webhook/` (или `{ACCESS_PATH}/api/telegram/webhook/`), чтобы
-`X-Real-IP` стал адресом Telegram. Остальная панель не переключается на
-`CF-Connecting-IP`.
+AdminPanelAZ подключает snippet `cloudflare-realip.conf` во всех location’ах панели
+(включая `/api/telegram/webhook/` и клиентский портал), чтобы `X-Real-IP` стал реальным
+адресом клиента (для webhook — адресом Telegram). `CF-Connecting-IP` принимается только
+от диапазонов Cloudflare, поэтому прямые запросы на origin подделать IP не могут.
+Лимиты входа, блокировки и журнал аудита видят адрес клиента, а не edge Cloudflare.
 
 #### Управление в панели
 
@@ -204,7 +205,7 @@ AdminPanelAZ ставит snippet `cloudflare-realip.conf` и отдельный
 | **Автообновление списков IP Cloudflare** | Планировщик панели периодически скачивает актуальные CIDR Cloudflare и обновляет snippet (по умолчанию раз в 7 дней, интервал 1–90). |
 | **Обновить сейчас** | Ручное обновление CIDR; доступно только при включённом proxy-mode. |
 | Статус | Время последнего успешного обновления, hash snippet и текст последней ошибки (если была). |
-| **Доступ только через Cloudflare** | Опционально. При включённом proxy-mode nginx в location’ах панели разрешает только IP Cloudflare, localhost и RFC1918 (клиенты AntiZapret / az-awg2 в туннеле проходят). Прямой доступ по публичному IP origin → 403. `/status/` и ACME не затрагиваются. |
+| **Доступ только через Cloudflare** | Опционально. При включённом proxy-mode nginx в location’ах панели разрешает только IP Cloudflare, localhost и RFC1918 (клиенты AntiZapret / az-awg2 в туннеле проходят). Прямой доступ по публичному IP origin → 403. Проверяется адрес TCP-соединения (geo в `conf.d/adminpanelaz-cloudflare-origin.conf`), а не подставленный realip. `/status/` и ACME не затрагиваются. |
 
 Переключатели сохраняются сразу; при смене **proxy-mode** панель перегенерирует nginx
 (`nginx-repair`).

@@ -8,10 +8,10 @@ location = __ACCESS_PATH__ {
     return 301 __ACCESS_PATH__/;
 }
 
-# Telegram Bot API webhook: Cloudflare real client IP only here
+# Telegram Bot API webhook
 location ^~ __ACCESS_PATH__/api/telegram/webhook/ {
     include snippets/cloudflare-realip.conf;
-    include snippets/cloudflare-origin-allow.conf;
+    include snippets/cloudflare-origin-lock.conf;
 
     proxy_pass http://127.0.0.1:__BACKEND_PORT__;
     proxy_http_version 1.1;
@@ -25,7 +25,8 @@ location ^~ __ACCESS_PATH__/api/telegram/webhook/ {
 
 # Telegram Mini App — без X-Frame-Options (WebView Telegram блокируется SAMEORIGIN)
 location ^~ __ACCESS_PATH__/api/tg-mini {
-    include snippets/cloudflare-origin-allow.conf;
+    include snippets/cloudflare-realip.conf;
+    include snippets/cloudflare-origin-lock.conf;
     proxy_pass http://127.0.0.1:__BACKEND_PORT__;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
@@ -39,7 +40,8 @@ location ^~ __ACCESS_PATH__/api/tg-mini {
 }
 
 location ^~ __ACCESS_PATH__/ {
-    include snippets/cloudflare-origin-allow.conf;
+    include snippets/cloudflare-realip.conf;
+    include snippets/cloudflare-origin-lock.conf;
     proxy_pass http://127.0.0.1:__BACKEND_PORT__;
     proxy_http_version 1.1;
     proxy_set_header Host $host;

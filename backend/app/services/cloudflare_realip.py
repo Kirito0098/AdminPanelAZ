@@ -45,7 +45,7 @@ def render_cloudflare_realip_conf(
     snapshot_date: str,
 ) -> str:
     lines = [
-        "# Cloudflare IP ranges for ngx_http_realip_module (Telegram webhook only).",
+        "# Cloudflare IP ranges for ngx_http_realip_module (all panel and portal locations).",
         f"# Source: {CF_IPS_V4_URL} / {CF_IPS_V6_URL}",
         f"# snapshot: {snapshot_date}",
         "",
@@ -74,7 +74,7 @@ def render_cloudflare_origin_allow_conf(
     snapshot_date: str,
 ) -> str:
     lines = [
-        "# Cloudflare origin allowlist for panel locations (optional CLOUDFLARE_ORIGIN_LOCK).",
+        "# Cloudflare origin allowlist (CLOUDFLARE_ORIGIN_LOCK); source for conf.d/adminpanelaz-cloudflare-origin.conf geo.",
         f"# Source: {CF_IPS_V4_URL} / {CF_IPS_V6_URL}",
         f"# snapshot: {snapshot_date}",
         "",

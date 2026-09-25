@@ -91,8 +91,8 @@ export default function CloudflareProxyCard() {
     confirm({
       title: checked ? 'Включить Cloudflare proxy-mode?' : 'Выключить Cloudflare proxy-mode?',
       description: checked
-        ? 'Nginx пересоберёт конфиг панели: для Telegram webhook подключится cloudflare-realip. Включайте только если домен панели в Cloudflare в режиме Proxied (оранжевое облако).'
-        : 'Nginx уберёт realip для webhook. Если домен панели всё ещё за Proxied Cloudflare, Telegram-бот снова может отвечать 403. «Доступ только через Cloudflare» тоже будет выключен.',
+        ? 'Nginx пересоберёт конфиг панели: во всех location’ах подключится cloudflare-realip (реальный IP клиента). Включайте только если домен панели в Cloudflare в режиме Proxied (оранжевое облако).'
+        : 'Nginx уберёт realip. Если домен панели всё ещё за Proxied Cloudflare, Telegram-бот снова может отвечать 403, а лимиты входа и аудит будут видеть IP Cloudflare. «Доступ только через Cloudflare» тоже будет выключен.',
       alert: {
         variant: 'warning',
         title: 'Пересборка nginx',
@@ -218,8 +218,8 @@ export default function CloudflareProxyCard() {
           </Badge>
         </div>
         <CardDescription className="mt-1.5">
-          Для Telegram webhook за Cloudflare в режиме Proxied (orange-cloud). Nginx подставляет реальный IP
-          клиента из списков Cloudflare. Без Cloudflare можно выключить.
+          Для домена за Cloudflare в режиме Proxied (orange-cloud). Nginx подставляет реальный IP клиента
+          из CF-Connecting-IP (только от адресов Cloudflare). Без Cloudflare можно выключить.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">

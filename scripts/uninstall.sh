@@ -253,6 +253,16 @@ remove_nginx_site_if_present() {
     rm -f /etc/nginx/snippets/cloudflare-origin-allow.conf
     log "Удалён snippet Cloudflare origin allow: /etc/nginx/snippets/cloudflare-origin-allow.conf"
   fi
+
+  if [[ -f /etc/nginx/snippets/cloudflare-origin-lock.conf ]]; then
+    rm -f /etc/nginx/snippets/cloudflare-origin-lock.conf
+    log "Удалён snippet Cloudflare origin lock: /etc/nginx/snippets/cloudflare-origin-lock.conf"
+  fi
+
+  if [[ -f /etc/nginx/conf.d/adminpanelaz-cloudflare-origin.conf ]]; then
+    rm -f /etc/nginx/conf.d/adminpanelaz-cloudflare-origin.conf
+    log "Удалён Cloudflare origin geo: /etc/nginx/conf.d/adminpanelaz-cloudflare-origin.conf"
+  fi
 }
 
 remove_firewall_rules() {
