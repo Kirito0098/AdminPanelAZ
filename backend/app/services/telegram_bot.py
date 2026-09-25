@@ -53,6 +53,12 @@ logger = logging.getLogger(__name__)
 _PUBLIC_COMMANDS = frozenset({"/start", "/help", "/link"})
 
 
+def _is_shared_chat(chat: dict[str, Any]) -> bool:
+    """Group/supergroup/channel: replies (configs, QR, links) would be visible to other members."""
+    chat_type = chat.get("type")
+    return chat_type is not None and chat_type != "private"
+
+
 def _parse_command(text: str) -> tuple[str, str]:
     raw = (text or "").strip()
     if not raw.startswith("/"):
@@ -232,6 +238,8 @@ class TelegramBotService:
 
         from_user = message.get("from") or {}
         chat = message.get("chat") or {}
+        if _is_shared_chat(chat):
+            return
         telegram_user_id = str(from_user.get("id", ""))
         chat_id = chat.get("id", telegram_user_id)
         if not telegram_user_id:
@@ -278,7 +286,7 @@ class TelegramBotService:
         if callback_id:
             await answer_callback_query(snap.bot_token, callback_id)
 
-        if not data or not telegram_user_id:
+        if not data or not telegram_user_id or _is_shared_chat(chat):
             return
 
         ctx = _build_context(
