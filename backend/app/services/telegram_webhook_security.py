@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import ipaddress
 
+from app.config import get_settings
 from app.services.rate_limit.backends import MemoryRateLimitBackend
 from app.services.rate_limit.sliding_window import SlidingWindowLimiter
 
@@ -32,11 +33,19 @@ def secrets_match(provided: str | None, expected: str | None) -> bool:
 
 
 def get_telegram_webhook_client_ip(request) -> str:
-    """Resolve client IP for webhook allowlist — never trust client X-Forwarded-For."""
-    real_ip = (request.headers.get("x-real-ip") or "").strip()
-    if real_ip:
-        return real_ip
-    return (request.client.host if request.client else "") or ""
+    """Resolve client IP for webhook allowlist.
+
+    X-Real-IP (set by the panel nginx to $remote_addr) is honoured only when the direct peer is a
+    trusted proxy; X-Forwarded-For is never used.
+    """
+    peer = (request.client.host if request.client else "") or ""
+    if peer.startswith("::ffff:"):
+        peer = peer[7:]
+    if peer and peer in set(get_settings().trusted_proxy_ip_list):
+        real_ip = (request.headers.get("x-real-ip") or "").strip()
+        if real_ip:
+            return real_ip
+    return peer
 
 
 def is_telegram_ip(client_ip: str) -> bool:
