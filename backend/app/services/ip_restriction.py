@@ -45,11 +45,16 @@ class IpRestrictionService:
     def get_client_ip(self, request) -> str:
         remote_ip = (request.client.host if request.client else "") or ""
         remote_ip = self._normalize_remote_ip(remote_ip)
-        if self._remote_is_trusted_proxy(remote_ip):
-            forwarded = request.headers.get("x-forwarded-for", "")
-            if forwarded:
-                return forwarded.split(",")[0].strip() or remote_ip
-        return remote_ip
+        if not self._remote_is_trusted_proxy(remote_ip):
+            return remote_ip
+        hops = [hop.strip() for hop in request.headers.get("x-forwarded-for", "").split(",") if hop.strip()]
+        if not hops:
+            return remote_ip
+        # Proxies append the peer they saw, so only the rightmost untrusted hop is reliable.
+        for hop in reversed(hops):
+            if not self._remote_is_trusted_proxy(hop):
+                return self._normalize_remote_ip(hop)
+        return self._normalize_remote_ip(hops[0])
 
     def _normalize_ip(self, ip_str: str) -> str | None:
         ip_str = (ip_str or "").strip()

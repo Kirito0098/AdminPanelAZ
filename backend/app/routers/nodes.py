@@ -68,6 +68,7 @@ from app.services.node_manager import (
 from app.services.action_log import log_action
 from app.services.crypto import encrypt_secret
 from app.services.feature_guards import module_disabled_message
+from app.services.ip_restriction import ip_restriction_service
 from app.services.feature_toggles import is_node_ssh_transport_enabled, is_nodes_enabled, is_proxy_nodes_enabled
 from app.services.ip_restriction import ip_restriction_service
 from app.services.node_update_roll import enqueue_node_update_roll
@@ -362,12 +363,7 @@ def geo_routing_hint(
     _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    resolved_ip = client_ip
-    if not resolved_ip and request.client:
-        resolved_ip = request.client.host
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        resolved_ip = forwarded.split(",")[0].strip()
+    resolved_ip = client_ip or ip_restriction_service.get_client_ip(request)
     return build_geo_routing_hint(db, client_ip=resolved_ip)
 
 
