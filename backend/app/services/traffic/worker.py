@@ -4,6 +4,8 @@ import asyncio
 import logging
 import time
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Node
@@ -48,6 +50,7 @@ def _collect_all_nodes():
         for node in nodes:
             if not _is_vpn_node(node):
                 continue
+            node_name = node.name
             node_started = time.perf_counter()
             wg_runtime_calls = 0
             clients_changed = 0
@@ -75,9 +78,12 @@ def _collect_all_nodes():
                     wg_runtime_calls,
                     clients_changed,
                 )
+            except SQLAlchemyError as exc:
+                db.rollback()
+                logger.warning("Traffic collect failed for node %s: %s", node_name, exc)
             except Exception as exc:
                 db.rollback()
-                logger.warning("Traffic collect failed for node %s: %s", node.name, exc)
+                logger.debug("Traffic collect failed for node %s: %s", node_name, exc)
     finally:
         db.close()
     logger.info(

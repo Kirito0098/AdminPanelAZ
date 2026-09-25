@@ -102,6 +102,56 @@ def test_collector_recovers_after_db_error_on_one_node(session_factory, monkeypa
         db.close()
 
 
+def test_unreachable_node_is_logged_at_debug_not_warning(session_factory, monkeypatch, caplog):
+    def _adapter(node):
+        raise ConnectionError("node agent offline")
+
+    monkeypatch.setattr(worker_mod, "SessionLocal", session_factory)
+    monkeypatch.setattr(worker_mod, "_is_vpn_node", lambda node: True)
+    monkeypatch.setattr(worker_mod, "get_adapter_for_node", _adapter)
+    monkeypatch.setattr(worker_mod, "is_awg2_enabled", lambda db: False)
+    monkeypatch.setattr(
+        worker_mod,
+        "get_settings",
+        lambda: SimpleNamespace(traffic_limit_reconcile_after_sync=False),
+    )
+
+    with caplog.at_level("DEBUG", logger=worker_mod.logger.name):
+        worker_mod._collect_all_nodes()
+
+    failures = [r for r in caplog.records if "Traffic collect failed" in r.getMessage()]
+    assert len(failures) == 2
+    assert all(r.levelname == "DEBUG" for r in failures)
+
+
+def test_db_error_on_node_is_logged_as_warning(session_factory, monkeypatch, caplog):
+    def _persist(self, status_rows):
+        self.db.add(TrafficSessionState(node_id=self.node_id, session_key=None, common_name="broken"))
+        self.db.flush()
+
+    adapter = MagicMock()
+    adapter.parse_openvpn_status.return_value = []
+    adapter.parse_wireguard_status.return_value = []
+    monkeypatch.setattr(worker_mod, "SessionLocal", session_factory)
+    monkeypatch.setattr(worker_mod, "_is_vpn_node", lambda node: True)
+    monkeypatch.setattr(worker_mod, "get_adapter_for_node", lambda node: adapter)
+    monkeypatch.setattr(worker_mod, "is_awg2_enabled", lambda db: False)
+    monkeypatch.setattr(worker_mod, "build_status_rows", lambda ovpn, wg, awg2: [])
+    monkeypatch.setattr(
+        worker_mod,
+        "get_settings",
+        lambda: SimpleNamespace(traffic_limit_reconcile_after_sync=False),
+    )
+    monkeypatch.setattr(TrafficCollectorService, "persist_snapshot", _persist)
+
+    with caplog.at_level("DEBUG", logger=worker_mod.logger.name):
+        worker_mod._collect_all_nodes()
+
+    failures = [r for r in caplog.records if "Traffic collect failed" in r.getMessage()]
+    assert [r.levelname for r in failures] == ["WARNING", "WARNING"]
+    assert "primary" in failures[0].getMessage()
+
+
 def _legacy_engine():
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
     with engine.begin() as conn:
