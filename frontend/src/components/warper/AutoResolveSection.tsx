@@ -158,12 +158,19 @@ export default function AutoResolveSection({ health, onRangesChanged }: AutoReso
             </div>
             <div className="flex flex-col gap-2 sm:flex-row">
               <Input
+                aria-label="Домен для очистки блока RESOLVED"
                 placeholder="домен (пусто — весь блок)"
                 value={cleanDomain}
                 disabled={controlsDisabled}
                 onChange={(e) => setCleanDomain(e.target.value)}
               />
-              <Button size="sm" variant="outline" disabled={controlsDisabled} onClick={handleClean}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0 text-destructive hover:text-destructive"
+                disabled={controlsDisabled}
+                onClick={handleClean}
+              >
                 <Eraser className="mr-1.5 h-4 w-4" />
                 Очистить RESOLVED
               </Button>
@@ -182,7 +189,13 @@ export default function AutoResolveSection({ health, onRangesChanged }: AutoReso
             <Button size="sm" variant="secondary" disabled={disabled || busy} onClick={() => void loadRoutes()}>
               Показать маршруты
             </Button>
-            <Button size="sm" variant="outline" disabled={disabled || busy} onClick={handleClearRoutes}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive hover:text-destructive"
+              disabled={disabled || busy}
+              onClick={handleClearRoutes}
+            >
               Снять все маршруты
             </Button>
             {routes && <Badge variant="secondary">Маршрутов: {routes.length}</Badge>}

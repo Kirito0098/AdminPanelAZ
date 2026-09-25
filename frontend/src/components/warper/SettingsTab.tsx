@@ -37,6 +37,7 @@ import {
   setWarperMtu,
   setWarperSubnet,
 } from '@/api/client'
+import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -52,6 +53,7 @@ import {
 } from '@/components/ui/select'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import type {
   WarperHealthResponse,
   WarperOvpnConfig,
@@ -96,6 +98,38 @@ function readOutbound(mode: Record<string, unknown>): Record<string, unknown> | 
   return raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
 }
 
+const MTU_MIN = 1280
+const MTU_MAX = 1500
+const CIDR_RE = /^(\d{1,3})(\.\d{1,3}){3}\/\d{1,2}$/
+
+function linkError(value: string, schemes: string[]): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const lower = trimmed.toLowerCase()
+  return schemes.some((scheme) => lower.startsWith(`${scheme}://`))
+    ? null
+    : `Ссылка должна начинаться с ${schemes.map((scheme) => `${scheme}://`).join(' или ')}`
+}
+
+function isValidPort(value: string): boolean {
+  const port = Number(value)
+  return Number.isInteger(port) && port >= 1 && port <= 65535
+}
+
+function singboxStateLabel(status: WarperSingboxStatusResponse): string {
+  if (status.active) return 'Работает'
+  const state = (status.state ?? '').toLowerCase()
+  if (state === 'failed') return 'Ошибка'
+  if (state === 'activating') return 'Запускается'
+  if (state === 'deactivating') return 'Останавливается'
+  return 'Остановлен'
+}
+
+function FieldError({ message }: { message: string | null }) {
+  if (!message) return null
+  return <p className="text-xs text-destructive">{message}</p>
+}
+
 interface SettingsTabProps {
   health: WarperHealthResponse | null
 }
@@ -103,6 +137,7 @@ interface SettingsTabProps {
 export default function SettingsTab({ health }: SettingsTabProps) {
   const { activeNode } = useNode()
   const { success, error: notifyError } = useNotifications()
+  const { confirm, dialogProps } = useConfirmDialog()
   const disabled = isWarperDisabled(health)
 
   const [mode, setMode] = useState<Record<string, unknown>>({})
@@ -136,6 +171,32 @@ export default function SettingsTab({ health }: SettingsTabProps) {
   const outboundLabel = typeof mode.outbound_label === 'string' ? mode.outbound_label : null
   const outbound = readOutbound(mode)
   const selectedOvpn = ovpnConfigs.find((item) => item.path === ovpnPath) ?? null
+
+  const savedMtu = typeof mode.mtu === 'number' ? String(mode.mtu) : null
+  const savedLogLevel = typeof mode.log_level === 'string' ? mode.log_level : null
+  const savedSubnet = typeof mode.subnet === 'string' ? mode.subnet : ''
+  const mtuNumber = Number(mtu)
+  const mtuError =
+    mtu.trim() && (!Number.isInteger(mtuNumber) || mtuNumber < MTU_MIN || mtuNumber > MTU_MAX)
+      ? `MTU должен быть целым числом от ${MTU_MIN} до ${MTU_MAX}`
+      : null
+  const subnetError = subnet.trim() && !CIDR_RE.test(subnet.trim()) ? `Укажите подсеть в формате ${DEFAULT_FAKE_SUBNET}` : null
+  const slaveLinkError = linkError(slaveLink, ['ss'])
+  const slavePortError = slavePort.trim() && !isValidPort(slavePort) ? 'Порт 1–65535' : null
+  const vlessError = linkError(vlessLink, ['vless'])
+  const hy2Error = linkError(hy2Link, ['hy2', 'hysteria2'])
+  const ovpnPasswordMissing = Boolean(ovpnUser.trim()) && !ovpnPassword
+
+  const slaveReady = slaveManual
+    ? Boolean(slaveHost.trim() && slaveKey.trim()) && isValidPort(slavePort)
+    : Boolean(slaveLink.trim()) && !slaveLinkError
+  const wgReady = Boolean(wgConfigPath.trim())
+  const vlessReady = Boolean(vlessLink.trim()) && !vlessError
+  const hy2Ready = Boolean(hy2Link.trim()) && !hy2Error
+  const ovpnReady = Boolean(ovpnPath.trim()) && !ovpnPasswordMissing
+  const mtuDirty = Boolean(mtu.trim()) && mtu !== savedMtu
+  const logLevelDirty = logLevel !== savedLogLevel
+  const subnetDirty = Boolean(subnet.trim()) && subnet.trim() !== savedSubnet
 
   const loadExtras = useCallback(async () => {
     const [singboxResult, subnetsResult] = await Promise.allSettled([getWarperSingboxStatus(), getWarperSubnets()])
@@ -205,13 +266,41 @@ export default function SettingsTab({ health }: SettingsTabProps) {
   }
 
   function runSingbox(action: 'start' | 'stop' | 'restart' | 'enable' | 'disable' | 'upgrade') {
-    return runAction(() => postWarperSingbox(action), `sing-box: ${action}`, 'Ошибка sing-box')
+    const messages = {
+      start: 'sing-box запущен',
+      stop: 'sing-box остановлен',
+      restart: 'sing-box перезапущен',
+      enable: 'Автозагрузка sing-box включена',
+      disable: 'Автозагрузка sing-box выключена',
+      upgrade: 'sing-box обновлён',
+    } as const
+    return runAction(() => postWarperSingbox(action), messages[action], 'Ошибка sing-box')
+  }
+
+  function confirmSingboxStop() {
+    confirm({
+      title: 'Остановить sing-box?',
+      description:
+        'Трафик через AZ-WARP перестанет ходить: домены и IP-подсети из списков AZ-WARP станут недоступны клиентам, пока sing-box не запустят снова.',
+      confirmLabel: 'Остановить',
+      destructive: true,
+      onConfirm: () => runSingbox('stop'),
+    })
+  }
+
+  function confirmSingboxUpgrade() {
+    confirm({
+      title: 'Обновить sing-box?',
+      description:
+        'Будет установлена версия из установщика AZ-WARP. Конфиг проверяется заранее, затем служба перезапускается — соединения клиентов через AZ-WARP кратковременно оборвутся.',
+      confirmLabel: 'Обновить',
+      onConfirm: () => runSingbox('upgrade'),
+    })
   }
 
   function saveMtu() {
-    const value = Number(mtu)
-    if (!Number.isFinite(value)) return
-    return runAction(() => setWarperMtu(value), `MTU установлен: ${value}`, 'Не удалось сохранить MTU')
+    if (mtuError || !mtuDirty) return
+    return runAction(() => setWarperMtu(mtuNumber), `MTU установлен: ${mtuNumber}`, 'Не удалось сохранить MTU')
   }
 
   function saveLogLevel() {
@@ -282,8 +371,16 @@ export default function SettingsTab({ health }: SettingsTabProps) {
   }
 
   function saveSubnet() {
-    if (!subnet.trim()) return
-    return runAction(() => setWarperSubnet(subnet.trim()), 'Подсеть обновлена', 'Не удалось сохранить подсеть')
+    const value = subnet.trim()
+    if (!value || subnetError || !subnetDirty) return
+    confirm({
+      title: `Сменить fake-подсеть на ${value}?`,
+      description:
+        'Правила AZ-WARP и DNS-патч будут переприменены. Клиентам AntiZapret нужно переподключиться, иначе домены AZ-WARP у них перестанут открываться.',
+      confirmLabel: 'Сменить подсеть',
+      destructive: true,
+      onConfirm: () => runAction(() => setWarperSubnet(value), 'Подсеть обновлена', 'Не удалось сохранить подсеть'),
+    })
   }
 
   function runResync() {
@@ -303,6 +400,7 @@ export default function SettingsTab({ health }: SettingsTabProps) {
 
   return (
     <div className="space-y-4">
+      <ConfirmDialogHost dialogProps={dialogProps} />
       <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-semibold">
@@ -334,7 +432,7 @@ export default function SettingsTab({ health }: SettingsTabProps) {
         <WarperStatTile label="MTU sing-box" value={mtu} hint="1280–1500" />
         <WarperStatTile
           label="sing-box"
-          value={singbox ? (singbox.active ? 'Работает' : singbox.state ?? 'Остановлен') : '—'}
+          value={singbox ? singboxStateLabel(singbox) : '—'}
           hint={singbox?.version ? `Версия ${singbox.version}` : `Логи: ${logLevel}`}
         />
         <WarperStatTile label="FullVPN" value={fullVpn ? 'Включён' : 'Выключен'} />
@@ -464,8 +562,10 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                     placeholder="ss://…"
                     value={slaveLink}
                     disabled={controlsDisabled}
+                    aria-invalid={Boolean(slaveLinkError)}
                     onChange={(e) => setSlaveLink(e.target.value)}
                   />
+                  <FieldError message={slaveLinkError} />
                   <p className="text-xs text-muted-foreground">
                     Выполните <code>warperslave link</code> на доноре и вставьте ссылку ss://. Для доноров на VLESS
                     или Hysteria2 выберите соответствующий режим.
@@ -491,8 +591,10 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                       placeholder="8444"
                       value={slavePort}
                       disabled={controlsDisabled}
+                      aria-invalid={Boolean(slavePortError)}
                       onChange={(e) => setSlavePort(e.target.value)}
                     />
+                    <FieldError message={slavePortError} />
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="slave-key">SS-key</Label>
@@ -510,7 +612,11 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                 <Button variant="link" size="sm" className="px-0" onClick={() => setSlaveManual((value) => !value)}>
                   {slaveManual ? 'Вставить ссылку ss://' : 'Ввести host, port и ключ вручную'}
                 </Button>
-                <Button className="w-full sm:w-auto" disabled={controlsDisabled} onClick={() => void applySlaveMode()}>
+                <Button
+                  className="w-full sm:w-auto"
+                  disabled={controlsDisabled || !slaveReady}
+                  onClick={() => void applySlaveMode()}
+                >
                   Применить Slave
                 </Button>
               </div>
@@ -548,7 +654,11 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                   Конфиги из /root/ и /root/warper/. PresharedKey необязателен, MTU и DNS берутся из файла.
                 </p>
               </div>
-              <Button className="w-full shrink-0 lg:w-auto" disabled={controlsDisabled} onClick={() => void applyWgMode()}>
+              <Button
+                className="w-full shrink-0 lg:w-auto"
+                disabled={controlsDisabled || !wgReady}
+                onClick={() => void applyWgMode()}
+              >
                 Применить WireGuard
               </Button>
             </div>
@@ -564,8 +674,10 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                   placeholder="vless://uuid@host:443?security=reality&…"
                   value={vlessLink}
                   disabled={controlsDisabled}
+                  aria-invalid={Boolean(vlessError)}
                   onChange={(e) => setVlessLink(e.target.value)}
                 />
+                <FieldError message={vlessError} />
                 <p className="text-xs text-muted-foreground">
                   Reality, транспорты ws / grpc / httpupgrade / http, flow xtls-rprx-vision. VLESS Encryption
                   (mlkem768x25519plus) в sing-box не поддерживается. Свой донор выдаёт ссылку командой{' '}
@@ -573,7 +685,11 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                 </p>
               </div>
               <div className="flex justify-end">
-                <Button className="w-full sm:w-auto" disabled={controlsDisabled} onClick={() => void applyVlessMode()}>
+                <Button
+                  className="w-full sm:w-auto"
+                  disabled={controlsDisabled || !vlessReady}
+                  onClick={() => void applyVlessMode()}
+                >
                   Применить VLESS
                 </Button>
               </div>
@@ -590,14 +706,20 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                   placeholder="hy2://password@host:443?sni=…"
                   value={hy2Link}
                   disabled={controlsDisabled}
+                  aria-invalid={Boolean(hy2Error)}
                   onChange={(e) => setHy2Link(e.target.value)}
                 />
+                <FieldError message={hy2Error} />
                 <p className="text-xs text-muted-foreground">
                   Поддерживаются obfs salamander, диапазоны портов и пиннинг сертификата (pinSHA256).
                 </p>
               </div>
               <div className="flex justify-end">
-                <Button className="w-full sm:w-auto" disabled={controlsDisabled} onClick={() => void applyHy2Mode()}>
+                <Button
+                  className="w-full sm:w-auto"
+                  disabled={controlsDisabled || !hy2Ready}
+                  onClick={() => void applyHy2Mode()}
+                >
                   Применить Hysteria2
                 </Button>
               </div>
@@ -658,8 +780,10 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                       autoComplete="new-password"
                       value={ovpnPassword}
                       disabled={controlsDisabled || !ovpnUser.trim()}
+                      aria-invalid={ovpnPasswordMissing}
                       onChange={(e) => setOvpnPassword(e.target.value)}
                     />
+                    <FieldError message={ovpnPasswordMissing ? 'Введите пароль для этого логина' : null} />
                   </div>
                   <p className="text-xs text-muted-foreground sm:col-span-2">
                     Логин и пароль запоминаются для каждого .ovpn отдельно. Оставьте поля пустыми, чтобы
@@ -676,7 +800,11 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                 ) : (
                   <span />
                 )}
-                <Button className="w-full sm:w-auto" disabled={controlsDisabled} onClick={() => void applyOpenVpnMode()}>
+                <Button
+                  className="w-full sm:w-auto"
+                  disabled={controlsDisabled || !ovpnReady}
+                  onClick={() => void applyOpenVpnMode()}
+                >
                   Применить OpenVPN
                 </Button>
               </div>
@@ -718,12 +846,14 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                   placeholder={DEFAULT_FAKE_SUBNET}
                   value={subnet}
                   disabled={controlsDisabled}
+                  aria-invalid={Boolean(subnetError)}
                   onChange={(e) => setSubnet(e.target.value)}
                 />
-                <Button disabled={controlsDisabled} onClick={() => void saveSubnet()}>
+                <Button disabled={controlsDisabled || !subnetDirty || Boolean(subnetError)} onClick={saveSubnet}>
                   Сохранить
                 </Button>
               </div>
+              <FieldError message={subnetError} />
               <p className="text-xs text-muted-foreground">
                 По умолчанию {DEFAULT_FAKE_SUBNET}. Не используйте 198.18.0.0/15 (занят AntiZapret) и 172.16.0.0/12
                 (пул Docker). После смены подсети клиентам нужно переподключиться.
@@ -740,16 +870,24 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                 <Input
                   id="warper-mtu"
                   type="number"
-                  min={1280}
-                  max={1500}
+                  min={MTU_MIN}
+                  max={MTU_MAX}
                   value={mtu}
                   disabled={controlsDisabled}
+                  aria-invalid={Boolean(mtuError)}
                   onChange={(e) => setMtu(e.target.value)}
                 />
-                <Button disabled={controlsDisabled} onClick={() => void saveMtu()}>
+                <Button disabled={controlsDisabled || !mtuDirty || Boolean(mtuError)} onClick={() => void saveMtu()}>
                   Сохранить
                 </Button>
               </div>
+              {mtuError ? (
+                <FieldError message={mtuError} />
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {MTU_MIN}–{MTU_MAX}, по умолчанию 1420. Снижайте при обрывах на мобильных сетях.
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label>Уровень логов</Label>
@@ -766,7 +904,7 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                     ))}
                   </SelectContent>
                 </Select>
-                <Button disabled={controlsDisabled} onClick={() => void saveLogLevel()}>
+                <Button disabled={controlsDisabled || !logLevelDirty} onClick={() => void saveLogLevel()}>
                   Сохранить
                 </Button>
               </div>
@@ -782,46 +920,63 @@ export default function SettingsTab({ health }: SettingsTabProps) {
       >
         <div className="space-y-4">
           {singbox && (
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <Badge variant={singbox.active ? 'success' : 'destructive'}>
-                {singbox.active ? 'active' : singbox.state ?? 'inactive'}
-              </Badge>
-              {singbox.version && <Badge variant="outline">sing-box {singbox.version}</Badge>}
-              <div className="ml-auto flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">Автозагрузка</span>
+            <div className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span
+                  className={cn(
+                    'h-2.5 w-2.5 rounded-full',
+                    singbox.active ? 'bg-emerald-500' : singbox.state === 'failed' ? 'bg-destructive' : 'bg-muted-foreground/50',
+                  )}
+                  aria-hidden
+                />
+                <span className="font-medium">{singboxStateLabel(singbox)}</span>
+                {singbox.version && <Badge variant="outline">sing-box {singbox.version}</Badge>}
+                {!singbox.active && singbox.state !== 'failed' && (
+                  <span className="text-xs text-muted-foreground">трафик через AZ-WARP не идёт</span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-muted-foreground">Запуск при загрузке узла</span>
                 <Switch
                   checked={singbox.enabled}
                   disabled={controlsDisabled}
+                  aria-label="Запуск sing-box при загрузке узла"
                   onCheckedChange={(checked) => void runSingbox(checked ? 'enable' : 'disable')}
                 />
               </div>
             </div>
           )}
           <div className="flex flex-wrap gap-2">
-            <Button size="sm" variant="secondary" disabled={controlsDisabled} onClick={() => void runSingbox('start')}>
-              <Play className="mr-1.5 h-4 w-4" />
-              Старт
-            </Button>
-            <Button size="sm" variant="secondary" disabled={controlsDisabled} onClick={() => void runSingbox('stop')}>
-              <Square className="mr-1.5 h-4 w-4" />
-              Стоп
-            </Button>
-            <Button size="sm" disabled={controlsDisabled} onClick={() => void runSingbox('restart')}>
-              <RefreshCw className="mr-1.5 h-4 w-4" />
-              Перезапуск
-            </Button>
+            {!singbox?.active && (
+              <Button size="sm" disabled={controlsDisabled} onClick={() => void runSingbox('start')}>
+                <Play className="mr-1.5 h-4 w-4" />
+                Запустить
+              </Button>
+            )}
+            {(!singbox || singbox.active) && (
+              <>
+                <Button
+                  size="sm"
+                  variant={singbox ? 'default' : 'secondary'}
+                  disabled={controlsDisabled}
+                  onClick={() => void runSingbox('restart')}
+                >
+                  <RefreshCw className="mr-1.5 h-4 w-4" />
+                  Перезапустить
+                </Button>
+                <Button size="sm" variant="outline" disabled={controlsDisabled} onClick={confirmSingboxStop}>
+                  <Square className="mr-1.5 h-4 w-4" />
+                  Остановить
+                </Button>
+              </>
+            )}
             {singbox && (
-              <Button size="sm" variant="outline" disabled={controlsDisabled} onClick={() => void runSingbox('upgrade')}>
+              <Button size="sm" variant="outline" disabled={controlsDisabled} onClick={confirmSingboxUpgrade}>
                 <ArrowUpCircle className="mr-1.5 h-4 w-4" />
                 Обновить sing-box
               </Button>
             )}
           </div>
-          {singbox && (
-            <p className="text-xs text-muted-foreground">
-              «Обновить sing-box» ставит версию из установщика AZ-WARP; конфиг проверяется до перезапуска.
-            </p>
-          )}
         </div>
       </WarperSection>
 
