@@ -83,25 +83,24 @@ def decode_access_token_username(token: str) -> str | None:
         return None
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Неверный токен авторизации",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        if payload.get("type") not in (None, "access"):
-            raise credentials_exception
-        username: str | None = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-    except jwt.PyJWTError as exc:
-        raise credentials_exception from exc
-
+def get_active_user_from_access_token(db: Session, token: str) -> User | None:
+    username = decode_access_token_username(token)
+    if not username:
+        return None
     user = db.query(User).filter(User.username == username).first()
     if user is None or not user.is_active:
-        raise credentials_exception
+        return None
+    return user
+
+
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> User:
+    user = get_active_user_from_access_token(db, token)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Неверный токен авторизации",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 
