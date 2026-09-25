@@ -369,6 +369,34 @@ def test_sync_wireguard_state_reapplies_blocked_peers_after_syncconf(db):
     assert order.mock_calls[0] == call.apply()
 
 
+def test_sync_wireguard_state_reblocks_after_profile_copy_and_survives_one_failure(db):
+    replica_node = _make_node(db, name="replica")
+    _add_wg_block_policies(db, replica_node.id)
+    primary, replica = _wg_sync_adapters()
+    order = MagicMock()
+    order.attach_mock(replica.import_wireguard_client_profiles_archive, "copy")
+    order.attach_mock(replica.block_wireguard_client_runtime, "block")
+
+    def block(name):
+        if name == "wg-temp":
+            raise RuntimeError("agent timeout")
+        return {"success": True}
+
+    replica.block_wireguard_client_runtime.side_effect = block
+
+    with pytest.raises(RuntimeError, match="wg-temp"):
+        vpn_state_sync.sync_wireguard_state_from_primary(
+            primary,
+            replica,
+            db=db,
+            replica_node=replica_node,
+        )
+
+    replica.import_wireguard_client_profiles_archive.assert_called_once()
+    _assert_wg_blocks_reapplied(replica)
+    assert order.mock_calls[0][0] == "copy"
+
+
 def test_sync_vpn_crypto_wireguard_passes_replica_context(db):
     replica_node = _make_node(db, name="replica")
     _add_wg_block_policies(db, replica_node.id)

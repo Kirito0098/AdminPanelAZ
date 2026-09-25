@@ -201,6 +201,7 @@ def run_push_full(
                     {"node_id": replica_id, "node_name": replica_name, "error": str(exc)}
                 )
 
+        reblock_attempted = False
         try:
             if isinstance(replica_adapter, LocalNodeAdapter):
                 with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
@@ -291,24 +292,22 @@ def run_push_full(
                     logger.warning("Push full: AWG2 health on primary failed: %s", exc)
             if isinstance(awg2_health, dict) and awg2_health.get("installed"):
                 progress(percent, f"Синхронизация AZ-AWG2 на {replica_name}…")
-                sync_amneziawg2_state_from_primary(
-                    primary_adapter,
-                    replica_adapter,
-                    db=db,
-                    replica_node=replica_node,
-                )
+                sync_amneziawg2_state_from_primary(primary_adapter, replica_adapter)
 
             restored.append({"node_id": replica_id, "node_name": replica_name, "result": result})
 
             if admin and replica_node and primary_node:
                 import_clients_from_disk(db, replica_node, admin.id)
                 copy_access_policies_from_node(db, primary_node, replica_node)
+            if replica_node is not None:
+                reblock_attempted = True
                 reapply_blocked_runtime_policies(
                     db,
                     replica_node,
                     replica_adapter,
                     awg2=bool(isinstance(awg2_health, dict) and awg2_health.get("installed")),
                 )
+            if admin and replica_node and primary_node:
                 try:
                     collect_traffic_snapshot_for_node(db, replica_node.id)
                 except Exception as exc:
@@ -321,6 +320,16 @@ def run_push_full(
             failed.append({"node_id": replica_id, "node_name": replica_name, "failed_step": current_step,
                         "error": str(exc)})
             logger.warning("Push full: replica sync failed on %s: %s", replica_name, exc)
+            # The HA restore already reloaded WireGuard from primary configs, lifting runtime blocks.
+            if replica_node is not None and not reblock_attempted:
+                try:
+                    reapply_blocked_runtime_policies(db, replica_node, replica_adapter, awg2=False)
+                except Exception as reblock_exc:
+                    logger.warning(
+                        "Push full: re-block after failure on %s also failed: %s",
+                        replica_name,
+                        reblock_exc,
+                    )
             if openvpn_profile_copy and openvpn_profile_copy[-1].get("node_id") == replica_id:
                 if openvpn_profile_copy[-1].get("success"):
                     openvpn_profile_copy[-1] = {

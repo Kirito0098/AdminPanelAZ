@@ -165,15 +165,16 @@ def sync_wireguard_state_from_primary(
             "HA crypto sync: wg syncconf partial failure on replica (configs copied): %s",
             detail,
         )
-    # Blocks are runtime-only (peer removed); syncconf from primary configs brings them back.
-    if db is not None and replica_node is not None:
-        _reapply_blocked_wireguard_policies(db, replica_node, replica_adapter)
 
     _copy_all_wireguard_profiles_from_primary(
         primary_adapter,
         replica_adapter,
         client_name=client_name,
     )
+
+    # Blocks are runtime-only (peer removed); syncconf from primary configs brings them back.
+    if db is not None and replica_node is not None:
+        _reapply_blocked_wireguard_policies(db, replica_node, replica_adapter)
 
 
 def copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter) -> None:
@@ -233,31 +234,45 @@ def sync_openvpn_pki_from_primary(
         raise HTTPException(status_code=500, detail=detail)
 
 
-def _reapply_blocked_awg2_policies(db: Session, replica_node: Node, replica_adapter) -> None:
-    AccessPolicyService(
+def _replica_policy_service(db: Session, replica_node: Node, replica_adapter) -> AccessPolicyService:
+    return AccessPolicyService(
         db,
         antizapret_path=get_settings().antizapret_path,
         node_id=replica_node.id,
         node_name=replica_node.name,
         adapter=replica_adapter,
-    )._reapply_all_blocked_awg2_runtime()
+    )
+
+
+def _raise_reblock_errors(results: list[dict], protocol: str, replica_node: Node) -> None:
+    failed = [f"{item['client_name']}: {item['error']}" for item in results if item.get("error")]
+    if failed:
+        raise RuntimeError(
+            f"Не удалось вернуть блокировки {protocol} на реплике {replica_node.name}: " + "; ".join(failed)
+        )
+
+
+def _reapply_blocked_awg2_policies(db: Session, replica_node: Node, replica_adapter) -> None:
+    results = _replica_policy_service(db, replica_node, replica_adapter)._reapply_all_blocked_awg2_runtime()
+    _raise_reblock_errors(results, "AWG2", replica_node)
 
 
 def _reapply_blocked_wireguard_policies(db: Session, replica_node: Node, replica_adapter) -> None:
-    AccessPolicyService(
-        db,
-        antizapret_path=get_settings().antizapret_path,
-        node_id=replica_node.id,
-        node_name=replica_node.name,
-        adapter=replica_adapter,
-    )._reapply_all_blocked_runtime()
+    results = _replica_policy_service(db, replica_node, replica_adapter)._reapply_all_blocked_runtime()
+    _raise_reblock_errors(results, "WireGuard", replica_node)
 
 
 def reapply_blocked_runtime_policies(db: Session, replica_node: Node, replica_adapter, *, awg2: bool) -> None:
     """Re-block runtime-only peers on a replica after its policy rows were replaced."""
-    _reapply_blocked_wireguard_policies(db, replica_node, replica_adapter)
+    wg_error: RuntimeError | None = None
+    try:
+        _reapply_blocked_wireguard_policies(db, replica_node, replica_adapter)
+    except RuntimeError as exc:
+        wg_error = exc
     if awg2:
         _reapply_blocked_awg2_policies(db, replica_node, replica_adapter)
+    if wg_error is not None:
+        raise wg_error
 
 
 def sync_amneziawg2_state_from_primary(

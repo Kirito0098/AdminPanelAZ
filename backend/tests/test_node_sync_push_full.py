@@ -294,6 +294,50 @@ def test_push_full_fails_replica_when_runtime_reblock_raises():
     assert "wg set peer failed" in result["failed"][0]["error"]
 
 
+def test_push_full_reblocks_wireguard_when_later_step_fails():
+    primary_adapter = MagicMock()
+    primary_adapter.create_antizapret_backup.return_value = {
+        "archive_name": "backup.tar.gz",
+        "archive_path": "/tmp/backup.tar.gz",
+    }
+    primary_adapter.download_antizapret_backup.return_value = b"archive-bytes"
+    primary_adapter.get_awg2_health.return_value = {"installed": True}
+    replica_adapter = _successful_replica_adapter()
+    reapply = MagicMock()
+
+    result = _run_single_replica_push(
+        primary_adapter=primary_adapter,
+        replica_adapter=replica_adapter,
+        awg2_sync=MagicMock(side_effect=RuntimeError("AZ-AWG2 не установлен на replica")),
+        reapply=reapply,
+    )
+
+    assert result["success"] is False
+    reapply.assert_called_once()
+    assert reapply.call_args.args[2] is replica_adapter
+    assert reapply.call_args.kwargs == {"awg2": False}
+
+
+def test_push_full_does_not_retry_failed_reblock():
+    primary_adapter = MagicMock()
+    primary_adapter.create_antizapret_backup.return_value = {
+        "archive_name": "backup.tar.gz",
+        "archive_path": "/tmp/backup.tar.gz",
+    }
+    primary_adapter.download_antizapret_backup.return_value = b"archive-bytes"
+    primary_adapter.get_awg2_health.return_value = {"installed": False}
+    reapply = MagicMock(side_effect=RuntimeError("wg set peer failed"))
+
+    result = _run_single_replica_push(
+        primary_adapter=primary_adapter,
+        replica_adapter=_successful_replica_adapter(),
+        reapply=reapply,
+    )
+
+    assert result["success"] is False
+    reapply.assert_called_once()
+
+
 def test_push_full_syncs_awg2_when_primary_has_layer():
     primary_adapter = MagicMock()
     primary_adapter.create_antizapret_backup.return_value = {

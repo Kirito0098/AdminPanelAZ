@@ -1,5 +1,6 @@
 """Client block/expiry policies for OpenVPN and WireGuard (ported from AdminAntizapret 1.9.0)."""
 
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -32,6 +33,7 @@ from app.services.traffic_limit import (
 )
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 
+logger = logging.getLogger(__name__)
 
 NODE_DEFAULT_POLICY_CLIENT = "__node_default__"
 NODE_ROUTE_MODES = frozenset({"route_all", "route_selective"})
@@ -546,13 +548,17 @@ class AccessPolicyService:
             state = self._awg2_state(row, now)
             if not state["is_blocked"]:
                 continue
-            results.append(
-                {
-                    "client_name": row.client_name,
-                    "result": self._apply_awg2_client_runtime(row.client_name, is_blocked=True),
-                }
-            )
+            results.append(self._reblock_runtime(self._apply_awg2_client_runtime, row.client_name, node_id))
         return results
+
+    @staticmethod
+    def _reblock_runtime(apply, client_name: str, node_id: int) -> dict:
+        """Block one peer; a failure must not leave the remaining blocked peers live."""
+        try:
+            return {"client_name": client_name, "result": apply(client_name, is_blocked=True)}
+        except Exception as exc:
+            logger.warning("Runtime re-block of %s on node %s failed: %s", client_name, node_id, exc)
+            return {"client_name": client_name, "error": str(exc)}
 
     def _awg2_traffic_state(self, row: AmneziaWg2AccessPolicy | None, *, client_name: str | None = None) -> dict:
         if row is None:
@@ -805,12 +811,7 @@ class AccessPolicyService:
             state = self._wg_state(row, now)
             if not state["is_blocked"]:
                 continue
-            results.append(
-                {
-                    "client_name": row.client_name,
-                    "result": self._apply_wg_client_runtime(row.client_name, is_blocked=True),
-                }
-            )
+            results.append(self._reblock_runtime(self._apply_wg_client_runtime, row.client_name, node_id))
         return results
 
     def _wg_state(self, row: WgAccessPolicy, now: datetime | None = None) -> dict:

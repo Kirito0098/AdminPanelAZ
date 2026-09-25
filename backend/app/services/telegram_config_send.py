@@ -33,11 +33,11 @@ def send_config_files_to_chat(
     *,
     bot_token: str,
     chat_id: str | int,
+    visible_policy: dict,
     path: str | None = None,
     send_all: bool = False,
     run_async: bool = False,
     install_platform: InstallPlatform | None = None,
-    visible_policy: dict | None = None,
 ) -> tuple[int, str | None]:
     """Send profile file(s) as Telegram documents. Returns (sent_count, error_message)."""
     if not bot_token:
@@ -47,8 +47,7 @@ def send_config_files_to_chat(
 
     adapter = get_active_adapter(db)
     files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
-    if visible_policy is not None:
-        files = filter_profile_files(files, visible_policy)
+    files = filter_profile_files(files, visible_policy)
     if not files:
         return 0, "Файлы конфигурации не найдены"
 
