@@ -103,6 +103,8 @@
 - **Конфиг AntiZapret** — числовые значения `ANTIZAPRET_WARP` / `VPN_WARP` (новый AntiZapret-VPN) больше не читаются как `n`.
 - **Трафик / HA-группы** — сбор трафика больше не ломается, когда один и тот же клиент WireGuard/AWG2 подключается к primary и реплике: `traffic_session_state` уникален по паре `(node_id, session_key)`, а не по `session_key` глобально (миграция при старте). Ошибка БД при сборе на одном узле откатывает транзакцию и пишется в лог как warning (недоступный узел — по-прежнему debug), поэтому следующие узлы в цикле собираются нормально (раньше каскадный `PendingRollbackError` тихо останавливал учёт трафика, лимиты и алерты).
 - **Установщик** — `install.sh` больше не может завершиться с кодом 141 (SIGPIPE) до появления меню: версия Python в `scripts/python-runtime.sh` выбирается через `sed -n '1p'` вместо `head -n1`, который при `pipefail` обрывал канал. [PR #14](https://github.com/Kirito0098/AdminPanelAZ/pull/14), спасибо @NZainchkovskiy.
+- **Nginx / восстановление** — `nginx-repair` (и переключение Cloudflare proxy-mode в настройках, которое его вызывает) удалял vhost поддоменов панели — клиентского портала `portal.<домен>` и других `*.<домен>`: поиск vhost по `server_name` совпадал с поддоменами. Теперь совпадает только точное имя; закомментированные `server_name` не учитываются.
+- **Nginx / Cloudflare-флаги** — ручной `nginx-repair` / установка брали `CLOUDFLARE_PROXY_ENABLED` и `CLOUDFLARE_ORIGIN_LOCK` только из окружения и молча выключали «Доступ только через Cloudflare», хотя в `backend/.env` он включён. Теперь значения читаются из `.env`, если не переданы явно.
 
 ### 🗑️ Removed
 
@@ -155,7 +157,8 @@
 - Backend: `test_refresh_token_rotation` — повтор заменённого токена отзывает цепочку (и все токены пользователя для записей без `family_id`), окно 30 с для параллельных вкладок не переживает выход, смену пароля и обнаруженную кражу, токен после logout или отозванный до обновления не трогает другие сессии, проигравший гонку запрос не получает новую cookie, неудачный refresh удаляет cookie, `token_version` увеличивается от значения в БД, миграция колонок и индекса. `test_password_change_token_invalidation` — middleware активных сессий игнорирует устаревший токен.
 - Backend: `test_password_change_token_invalidation` — после смены пароля старые access-, legacy- и Mini App-токены получают `401`, новый работает, остаётся одна живая refresh-сессия; сброс администратором завершает сессии только целевого пользователя; SSE-потоки AWG2/Warper, мониторинг и OpenAPI отклоняют устаревший токен.
 - Frontend: `src/api/authChangePassword.test.ts` — после смены пароля сохраняется выданный сервером access-токен.
-- Shell: `test-nginx-telegram-webhook-realip.sh` — realip во всех location'ах панели, subpath и портала, origin lock без `allow` рядом с realip, рендер `geo` из allow-списка, перегенерация и откат `geo` при ошибке `nginx -t`; при наличии nginx — живая проверка: адрес клиента доходит до backend, чужой peer получает `403`.
+- Shell: `test-nginx-telegram-webhook-realip.sh` — realip во всех location'ах панели, subpath и портала, origin lock без `allow` рядом с realip, рендер `geo` из allow-списка, перегенерация и откат `geo` при ошибке `nginx -t`; при наличии nginx — живая проверка: адрес клиента доходит до backend, чужой peer получает `403`. Флаги Cloudflare берутся из `.env`, если не экспортированы.
+- Shell: `test-nginx-portal-hardening.sh` — поиск vhost по домену не захватывает поддомены, суффиксы, `.` как любой символ и закомментированные `server_name`.
 
 ---
 

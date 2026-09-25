@@ -281,6 +281,22 @@ else
   bad "wait_tcp_port_free should die when ss unavailable"
 fi
 
+echo "[test] vhost lookup matches the exact server_name, not subdomains"
+VH="$TMP/vhosts"
+mkdir -p "$VH"
+printf 'server {\n    server_name panel.example.com;\n}\n' >"$VH/panel"
+printf 'server {\n    server_name www.example.org   panel.example.com ;\n}\n' >"$VH/multi"
+printf 'server {\n    server_name portal.panel.example.com;\n}\n' >"$VH/portal"
+printf 'server {\n    server_name panel.example.com.evil.net;\n}\n' >"$VH/suffix"
+printf 'server {\n    server_name panelXexample.com;\n}\n' >"$VH/dotwild"
+printf 'server {\n    # server_name panel.example.com;\n    server_name other.example.com;\n}\n' >"$VH/commented"
+FOUND="$(nginx_grep_vhosts_for_domain panel.example.com "$VH" | xargs -n1 basename | sort | tr '\n' ' ')"
+if [[ "$FOUND" == "multi panel " ]]; then
+  ok "vhost lookup: exact server_name only"
+else
+  bad "vhost lookup: expected 'multi panel ', got '$FOUND'"
+fi
+
 echo
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]

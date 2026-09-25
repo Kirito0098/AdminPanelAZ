@@ -596,8 +596,19 @@ nginx_snippets_dir() {
   printf '%s' "${NGINX_SNIPPETS_DIR:-/etc/nginx/snippets}"
 }
 
+# Exported value (set by the panel when it regenerates nginx) wins; manual runs read ENV_FILE.
+nginx_cloudflare_flag() {
+  local key="$1" default="$2" v
+  v="${!key:-}"
+  if [[ -z "$v" ]]; then
+    v="$(nginx_env_get "$key" | tr -d "\"'" | tr -d '[:space:]')"
+  fi
+  printf '%s' "${v:-$default}"
+}
+
 nginx_cloudflare_proxy_enabled() {
-  local v="${CLOUDFLARE_PROXY_ENABLED:-true}"
+  local v
+  v="$(nginx_cloudflare_flag CLOUDFLARE_PROXY_ENABLED true)"
   case "${v,,}" in
     true|1|yes|on) return 0 ;;
     *) return 1 ;;
@@ -606,7 +617,8 @@ nginx_cloudflare_proxy_enabled() {
 
 nginx_cloudflare_origin_lock_enabled() {
   nginx_cloudflare_proxy_enabled || return 1
-  local v="${CLOUDFLARE_ORIGIN_LOCK:-false}"
+  local v
+  v="$(nginx_cloudflare_flag CLOUDFLARE_ORIGIN_LOCK false)"
   case "${v,,}" in
     true|1|yes|on) return 0 ;;
     *) return 1 ;;
@@ -974,8 +986,11 @@ nginx_is_our_panel_vhost_file() {
 nginx_grep_vhosts_for_domain() {
   local domain="$1"
   local root="$2"
+  local escaped
   [[ -n "$domain" && -n "$root" && -d "$root" ]] || return 0
-  grep -Rsl "server_name[^;]*\\b${domain}\\b" "$root" 2>/dev/null || true
+  # Whole server_name token: \b would also match portal.<domain> and delete the portal vhost on repair.
+  escaped="$(printf '%s' "$domain" | sed 's/[][\.*^$()+?{}|]/\\&/g')"
+  grep -RslE "^[[:space:]]*server_name([[:space:]]+[^;[:space:]]+)*[[:space:]]+${escaped}([[:space:];]|$)" "$root" 2>/dev/null || true
 }
 
 # sites-enabled первым: StatusOpenVPN и др. часто кладут копию в enabled, а не symlink.
