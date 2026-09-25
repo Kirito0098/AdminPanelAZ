@@ -67,6 +67,7 @@
 | Локальная геолокация (GeoIP) | [GeoIP.md](GeoIP.md) |
 | Telegram (бот, Mini App, уведомления) | [Telegram.md](Telegram.md) |
 | Карта проекта (для разработчиков) | [PROJECT_MAP.md](PROJECT_MAP.md) |
+| Кодревью сентябрь 2026: исправлено и что осталось (для разработчиков) | [code-review-2026-09.md](code-review-2026-09.md) |
 
 ---
 
