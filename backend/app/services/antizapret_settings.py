@@ -86,6 +86,24 @@ def normalize_choice_settings(settings: Mapping[str, str]) -> dict[str, str]:
     return result
 
 
+def choice_updates_for_agent(updates: Mapping[str, Any]) -> dict[str, Any]:
+    """Send choice values that have a y/n equivalent as y/n.
+
+    Node agents before 2.26 know these keys only as flags and write ``normalize_flag(value)``,
+    so ``1`` (None) would become ``y``. Newer agents map y/n back to the numeric value.
+    """
+    result = dict(updates)
+    for p in ANTIZAPRET_PARAMS:
+        key = p["key"]
+        if p["type"] != "choice" or key not in result:
+            continue
+        try:
+            result[key] = normalize_choice(p, result[key], legacy_format=True)
+        except ValueError:
+            continue
+    return result
+
+
 def choice_write_mismatch_warnings(requested: Mapping[str, Any], actual: Mapping[str, str]) -> list[str]:
     """Warn when a node stored a different choice value than requested (old node agent: 2/3/4 → n)."""
     warnings: list[str] = []

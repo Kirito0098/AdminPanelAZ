@@ -17,7 +17,11 @@ from app.paths import get_cidr_list_dir
 from app.services.node_mtls import build_node_agent_ssl_context, node_agent_base_scheme
 from app.services.node_mtls_certs import MtlsProvisionBundle
 from app.services.antizapret import AntiZapretService
-from app.services.antizapret_settings import read_antizapret_settings, update_antizapret_settings
+from app.services.antizapret_settings import (
+    choice_updates_for_agent,
+    read_antizapret_settings,
+    update_antizapret_settings,
+)
 from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
@@ -1560,7 +1564,7 @@ class RemoteNodeAdapter(NodeAdapter):
         return data.get("settings", {})
 
     def update_antizapret_settings(self, updates: dict) -> dict:
-        return self._request("PUT", "/routing/antizapret-settings", json=updates)
+        return self._request("PUT", "/routing/antizapret-settings", json=choice_updates_for_agent(updates))
 
     def get_server_metrics(self, *, accurate_cpu: bool = False) -> dict:
         return self._request(
