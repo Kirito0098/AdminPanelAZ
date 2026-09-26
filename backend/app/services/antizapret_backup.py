@@ -11,30 +11,25 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+from app.services.path_stash import stashed
 from app.services.node_sync.fingerprints import collect_antizapret_fingerprints, collect_config_file_fingerprints, CONFIG_FINGERPRINT_EXCLUDE
 
 _HA_EASYRSA3_ROOT = Path("/etc/openvpn/easyrsa3")
 _HA_WIREGUARD_DIR = Path("/etc/wireguard")
+_KNOT_RESOLVER_DIR = Path("/etc/knot-resolver")
 _HA_OVPN_PROFILE_DIR = "openvpn"
 _HA_WG_PROFILE_DIRS = ("wireguard", "amneziawg")
 
 
-def wipe_ha_vpn_crypto_paths(*, install_dir: str | Path = "/root/antizapret") -> None:
-    """Remove VPN/crypto paths on replica before HA replace (config/ is not touched)."""
+def ha_vpn_crypto_paths(*, install_dir: str | Path = "/root/antizapret") -> list[Path]:
+    """VPN/crypto paths a replica replaces from the primary on HA Push full (config/ is not touched)."""
     base = Path(install_dir or "/root/antizapret").resolve()
-    if _HA_EASYRSA3_ROOT.is_dir():
-        shutil.rmtree(_HA_EASYRSA3_ROOT, ignore_errors=True)
+    paths = [_HA_EASYRSA3_ROOT]
     if _HA_WIREGUARD_DIR.is_dir():
-        for conf in _HA_WIREGUARD_DIR.glob("*.conf"):
-            if conf.is_file():
-                conf.unlink(missing_ok=True)
-    openvpn_root = base / "client" / _HA_OVPN_PROFILE_DIR
-    if openvpn_root.is_dir():
-        shutil.rmtree(openvpn_root, ignore_errors=True)
-    for subdir in _HA_WG_PROFILE_DIRS:
-        profile_root = base / "client" / subdir
-        if profile_root.is_dir():
-            shutil.rmtree(profile_root, ignore_errors=True)
+        paths.extend(conf for conf in sorted(_HA_WIREGUARD_DIR.glob("*.conf")) if conf.is_file())
+    paths.append(base / "client" / _HA_OVPN_PROFILE_DIR)
+    paths.extend(base / "client" / subdir for subdir in _HA_WG_PROFILE_DIRS)
+    return paths
 
 
 _BACKUP_ARCHIVE_NAME_RE = re.compile(r"backup[\w.\-]*\.tar\.gz")
@@ -116,10 +111,13 @@ class AntizapretBackupService:
         archive = Path(archive_path).resolve()
         self._verify_archive(str(archive))
 
-        wipe_ha_vpn_crypto_paths(install_dir=self.install_dir)
+        # Full extraction reads the whole archive: a damaged one fails before the replica changes.
         extract_root = self._extract_archive(archive)
         try:
-            self._copy_extracted_payload(extract_root)
+            if not (extract_root / "easyrsa3").is_dir():
+                raise RuntimeError("Архив primary не содержит easyrsa3 — реплика не изменена")
+            with stashed(ha_vpn_crypto_paths(install_dir=self.install_dir)):
+                self._copy_extracted_payload(extract_root)
         finally:
             self._cleanup_extract_artifacts(extract_root, archive.name)
 
@@ -148,10 +146,10 @@ class AntizapretBackupService:
         return extract_root
 
     def _copy_extracted_payload(self, extract_root: Path) -> None:
-        self._copy_tree(extract_root / "easyrsa3", Path("/etc/openvpn/easyrsa3"))
-        self._copy_files(extract_root / "wireguard", Path("/etc/wireguard"))
+        self._copy_tree(extract_root / "easyrsa3", _HA_EASYRSA3_ROOT)
+        self._copy_files(extract_root / "wireguard", _HA_WIREGUARD_DIR)
         self._copy_files(extract_root / "config", self.install_dir / "config")
-        self._copy_files(extract_root / "knot-resolver", Path("/etc/knot-resolver"))
+        self._copy_files(extract_root / "knot-resolver", _KNOT_RESOLVER_DIR)
         custom_src = extract_root / "custom"
         if custom_src.is_dir():
             for item in custom_src.iterdir():

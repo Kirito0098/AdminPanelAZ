@@ -1,10 +1,13 @@
 import csv
 import io
+import os
 import re
 import shutil
 import subprocess
 import tarfile
 import tempfile
+import zlib
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -15,6 +18,7 @@ from app.models import VpnType
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.services.antizapret_backup import AntizapretBackupService
 from app.services.openvpn_management import openvpn_management_service
+from app.services.path_stash import stashed
 from app.services.profile_files import iter_client_profile_paths, profile_filename_matches_client
 
 settings = get_settings()
@@ -26,6 +30,33 @@ OPENVPN_CLIENT_PROFILE_DIR = "openvpn"
 PROFILE_FILE_SUFFIXES = frozenset({".ovpn", ".conf"})
 EASYRSA3_ROOT = Path("/etc/openvpn/easyrsa3")
 EASYRSA_INDEX_PATH = EASYRSA3_ROOT / "pki" / "index.txt"
+
+
+
+def _install_staged(src: Path, dst: Path) -> None:
+    os.rename(src, dst)
+
+
+def _extract_to_staging(data: bytes, parent: Path, select: Callable[[str], bool], what: str) -> Path:
+    """Unpack the selected members next to ``parent``'s live content; any damage aborts before changes."""
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Пустой архив {what}")
+    parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".import-", dir=parent))
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+            members = [member for member in archive.getmembers() if select(member.name)]
+            archive.extractall(path=staging, members=members, filter="data")
+    except (tarfile.TarError, EOFError, zlib.error, OSError) as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Архив {what} повреждён или не распаковывается ({exc}) — текущие файлы не изменены",
+        ) from exc
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return staging
 
 
 class AntiZapretService:
@@ -170,30 +201,23 @@ class AntiZapretService:
         return buffer.getvalue()
 
     def import_easyrsa3_archive(self, data: bytes) -> None:
-        if not data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Пустой архив easyrsa3",
-            )
-        temp_path = None
+        staging = _extract_to_staging(
+            data,
+            EASYRSA3_ROOT.parent,
+            lambda name: name == "easyrsa3" or name.startswith("easyrsa3/"),
+            "easyrsa3",
+        )
         try:
-            with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
-                tmp.write(data)
-                temp_path = tmp.name
-            if EASYRSA3_ROOT.is_dir():
-                shutil.rmtree(EASYRSA3_ROOT, ignore_errors=True)
-            with tarfile.open(temp_path, "r:gz") as archive:
-                for member in archive.getmembers():
-                    if member.name == "easyrsa3" or member.name.startswith("easyrsa3/"):
-                        archive.extract(member, path="/etc/openvpn", filter="data")
-            if not EASYRSA3_ROOT.is_dir():
+            extracted = staging / "easyrsa3"
+            if not extracted.is_dir():
                 raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Архив easyrsa3 не содержит каталог easyrsa3",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Архив easyrsa3 не содержит каталог easyrsa3 — текущий PKI не изменён",
                 )
+            with stashed([EASYRSA3_ROOT]):
+                _install_staged(extracted, EASYRSA3_ROOT)
         finally:
-            if temp_path:
-                Path(temp_path).unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
 
     def create_antizapret_backup(self) -> dict[str, str]:
         return AntizapretBackupService(install_dir=self.base_path).create_backup()
@@ -312,47 +336,12 @@ class AntiZapretService:
         return buffer.getvalue()
 
     def import_wireguard_client_profiles_archive(self, data: bytes) -> None:
-        if not data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Пустой архив профилей WireGuard",
-            )
-        temp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
-                tmp.write(data)
-                temp_path = tmp.name
-            with tarfile.open(temp_path, "r:gz") as archive:
-                has_profile_file = any(
-                    member.isfile()
-                    and (
-                        member.name.startswith("client/wireguard/")
-                        or member.name.startswith("client/amneziawg/")
-                    )
-                    for member in archive.getmembers()
-                )
-                if not has_profile_file:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Архив профилей WireGuard не содержит файлов client/wireguard или client/amneziawg",
-                    )
-            for subdir in WIREGUARD_CLIENT_PROFILE_DIRS:
-                root = self.client_dir / subdir
-                if root.is_dir():
-                    shutil.rmtree(root)
-            with tarfile.open(temp_path, "r:gz") as archive:
-                for member in archive.getmembers():
-                    name = member.name
-                    if not (
-                        name.startswith("client/wireguard/")
-                        or name.startswith("client/amneziawg/")
-                        or name in {"client/wireguard", "client/amneziawg"}
-                    ):
-                        continue
-                    archive.extract(member, path=str(self.base_path), filter="data")
-        finally:
-            if temp_path:
-                Path(temp_path).unlink(missing_ok=True)
+        self._replace_client_profile_dirs(
+            data,
+            WIREGUARD_CLIENT_PROFILE_DIRS,
+            what="профилей WireGuard",
+            missing_detail="Архив профилей WireGuard не содержит файлов client/wireguard или client/amneziawg",
+        )
 
     def export_openvpn_client_profiles_archive(self) -> bytes:
         buffer = io.BytesIO()
@@ -367,41 +356,33 @@ class AntiZapretService:
         return buffer.getvalue()
 
     def import_openvpn_client_profiles_archive(self, data: bytes) -> None:
-        if not data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Пустой архив профилей OpenVPN",
-            )
-        temp_path = None
+        self._replace_client_profile_dirs(
+            data,
+            (OPENVPN_CLIENT_PROFILE_DIR,),
+            what="профилей OpenVPN",
+            missing_detail="Архив профилей OpenVPN не содержит файлов client/openvpn",
+        )
+
+    def _replace_client_profile_dirs(
+        self, data: bytes, subdirs: tuple[str, ...], *, what: str, missing_detail: str
+    ) -> None:
+        prefixes = tuple(f"client/{sub}" for sub in subdirs)
+        staging = _extract_to_staging(
+            data,
+            self.client_dir,
+            lambda name: name in prefixes or name.startswith(tuple(f"{prefix}/" for prefix in prefixes)),
+            what,
+        )
         try:
-            with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
-                tmp.write(data)
-                temp_path = tmp.name
-            with tarfile.open(temp_path, "r:gz") as archive:
-                has_profile_file = any(
-                    member.isfile() and member.name.startswith("client/openvpn/")
-                    for member in archive.getmembers()
-                )
-                if not has_profile_file:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Архив профилей OpenVPN не содержит файлов client/openvpn",
-                    )
-            openvpn_root = self.client_dir / OPENVPN_CLIENT_PROFILE_DIR
-            if openvpn_root.is_dir():
-                shutil.rmtree(openvpn_root)
-            with tarfile.open(temp_path, "r:gz") as archive:
-                for member in archive.getmembers():
-                    name = member.name
-                    if not (
-                        name.startswith("client/openvpn/")
-                        or name == "client/openvpn"
-                    ):
-                        continue
-                    archive.extract(member, path=str(self.base_path), filter="data")
+            extracted = staging / "client"
+            if not any(path.is_file() for sub in subdirs for path in (extracted / sub).rglob("*")):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=missing_detail)
+            with stashed([self.client_dir / sub for sub in subdirs]):
+                for sub in subdirs:
+                    if (extracted / sub).is_dir():
+                        _install_staged(extracted / sub, self.client_dir / sub)
         finally:
-            if temp_path:
-                Path(temp_path).unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
 
     _CONFIG_FILES = frozenset(
         {
