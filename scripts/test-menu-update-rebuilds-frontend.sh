@@ -53,13 +53,13 @@ fail() {
   exit 1
 }
 
-echo "[test] есть обновление и собранный интерфейс: npm install, затем build:all в frontend/"
+echo "[test] есть обновление и собранный интерфейс: npm ci, затем build:all в frontend/"
 setup_repos
 mkdir -p "$TMP/install/frontend/dist"
 new_upstream_commit
 : >"$NPM_LOG"
 run_update >"$TMP/out" 2>&1 || fail "обновление завершилось ошибкой: $(cat "$TMP/out")"
-[[ "$(cat "$NPM_LOG")" == "npm install @ $TMP/install/frontend"$'\n'"npm run build:all @ $TMP/install/frontend" ]] \
+[[ "$(cat "$NPM_LOG")" == "npm ci @ $TMP/install/frontend"$'\n'"npm run build:all @ $TMP/install/frontend" ]] \
   || fail "вызовы npm: $(cat "$NPM_LOG")"
 grep -q "Перезапустите панель" "$TMP/out" || fail "нет подсказки про перезапуск"
 echo "  OK"
@@ -81,7 +81,7 @@ run_update >/dev/null 2>&1 || fail "обновление завершилось 
 echo "  OK"
 
 echo "[test] сборка не удалась: ошибка с командой для ручной пересборки, без подсказки про перезапуск"
-for step in "install" "run build:all"; do
+for step in "ci" "run build:all"; do
   setup_repos
   mkdir -p "$TMP/install/frontend/dist"
   new_upstream_commit
@@ -91,7 +91,7 @@ for step in "install" "run build:all"; do
   rc=$?
   set -e
   [[ "$rc" != 0 ]] || fail "сбой npm $step не вернул ошибку"
-  grep -qF "cd $TMP/install/frontend && npm install && npm run build:all" "$TMP/out" \
+  grep -qF "cd $TMP/install/frontend && npm ci && npm run build:all" "$TMP/out" \
     || fail "нет команды для ручной пересборки: $(cat "$TMP/out")"
   ! grep -q "Перезапустите панель" "$TMP/out" || fail "после сбоя предложен перезапуск"
 done

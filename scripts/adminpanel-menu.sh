@@ -164,8 +164,8 @@ panel_update() {
       ui_fail "npm не найден — интерфейс не пересобран"
       frontend_ok=false
     else
-      ui_info "Сборка интерфейса (npm install, npm run build:all)…"
-      if (cd "$frontend_dir" && npm install && npm run build:all); then
+      ui_info "Сборка интерфейса (npm ci, npm run build:all)…"
+      if (cd "$frontend_dir" && npm ci && npm run build:all); then
         ui_ok "Интерфейс пересобран"
       else
         ui_fail "Сборка интерфейса не удалась — панель показывает старый интерфейс"
@@ -185,7 +185,7 @@ panel_update() {
   fi
 
   if [[ "$frontend_ok" != true ]]; then
-    ui_fail "Код уже обновлён, повтор --update сборку не запустит. Соберите вручную: cd $frontend_dir && npm install && npm run build:all, затем $0 --restart"
+    ui_fail "Код уже обновлён, повтор --update сборку не запустит. Соберите вручную: cd $frontend_dir && npm ci && npm run build:all, затем $0 --restart"
     return 1
   fi
   ui_info "Перезапустите панель: $0 --restart"

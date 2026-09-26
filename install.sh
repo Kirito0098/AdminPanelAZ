@@ -782,7 +782,9 @@ install_nodejs() {
   fi
 
   if [[ "$(node_apt_candidate_major)" -ge "$NODE_MIN_MAJOR" ]]; then
-    apt-get install -y nodejs npm
+    # nodejs из NodeSource уже содержит npm, и пакет npm Debian с ним конфликтует.
+    apt-get install -y nodejs
+    command -v npm >/dev/null 2>&1 || apt-get install -y npm
     major="$(node_major_version)"
     if [[ "$major" -ge "$NODE_MIN_MAJOR" ]]; then
       log "Node.js $(node -v) установлен из apt"
@@ -1555,14 +1557,14 @@ setup_frontend() {
     return 0
   fi
 
-  install_set_step "Настройка frontend (npm install / build)"
-  ui_progress_start "Настройка frontend (npm install)"
+  install_set_step "Настройка frontend (npm ci / build)"
+  ui_progress_start "Настройка frontend (npm ci)"
   if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
-    (cd "$FRONTEND_DIR" && npm install)
+    (cd "$FRONTEND_DIR" && npm ci)
   else
-    print_info "node_modules уже существует, npm install пропущен (удалите node_modules для полной переустановки)"
+    print_info "node_modules уже существует, npm ci пропущен (удалите node_modules для полной переустановки)"
   fi
-  ui_progress_done "Frontend (npm install)"
+  ui_progress_done "Frontend (npm ci)"
 
   ui_progress_start "Сборка frontend (npm run build:all)"
   (cd "$FRONTEND_DIR" && npm run build:all)

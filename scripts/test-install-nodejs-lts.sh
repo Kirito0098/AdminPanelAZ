@@ -6,7 +6,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-export LOG="$TMP/calls.log" NODE_VERSION_FILE="$TMP/node-version"
+export LOG="$TMP/calls.log" NODE_VERSION_FILE="$TMP/node-version" NPM_FILE="$TMP/npm-present"
 
 FNS="$(grep -E '^NODE_(MIN|INSTALL)_MAJOR=' "$ROOT_DIR/install.sh")"$'\n'"$(
   for fn in node_major_version node_apt_candidate_major install_nodejs; do
@@ -14,18 +14,20 @@ FNS="$(grep -E '^NODE_(MIN|INSTALL)_MAJOR=' "$ROOT_DIR/install.sh")"$'\n'"$(
   done
 )"
 
-# run_install <node до установки|none> <кандидат apt|none> <node после установки>
+# run_install <node до установки|none> <кандидат apt|none> <node после установки> [npm в пакете nodejs]
 run_install() {
-  local before="$1" candidate="$2" after="$3"
+  local before="$1" candidate="$2" after="$3" npm_bundled="${4:-true}"
   : >"$LOG"
+  rm -f "$NPM_FILE"
   if [[ "$before" == none ]]; then rm -f "$NODE_VERSION_FILE"; else echo "$before" >"$NODE_VERSION_FILE"; fi
-  CANDIDATE="$candidate" AFTER="$after" bash -c '
+  CANDIDATE="$candidate" AFTER="$after" NPM_BUNDLED="$npm_bundled" bash -c '
     set -euo pipefail
     log() { echo "LOG $*" >>"$LOG"; }
     warn() { echo "WARN $*" >>"$LOG"; }
     die() { echo "DIE $*" >>"$LOG"; exit 1; }
     command() {
       if [[ "$1" == -v && "$2" == node ]]; then [[ -f "$NODE_VERSION_FILE" ]]; return; fi
+      if [[ "$1" == -v && "$2" == npm ]]; then [[ -f "$NPM_FILE" ]]; return; fi
       builtin command "$@"
     }
     node() { cat "$NODE_VERSION_FILE"; }
@@ -35,7 +37,15 @@ run_install() {
       echo "  Installed: (none)"
       [[ "$CANDIDATE" == none ]] && echo "  Candidate: (none)" || echo "  Candidate: $CANDIDATE"
     }
-    apt-get() { echo "apt-get $*" >>"$LOG"; echo "$AFTER" >"$NODE_VERSION_FILE"; }
+    # Пакет nodejs NodeSource содержит npm, пакет Debian — нет.
+    apt-get() {
+      echo "apt-get $*" >>"$LOG"
+      if [[ " $* " == *" nodejs "* ]]; then
+        echo "$AFTER" >"$NODE_VERSION_FILE"
+        [[ "$NPM_BUNDLED" != true ]] || : >"$NPM_FILE"
+      fi
+      [[ " $* " != *" npm "* ]] || : >"$NPM_FILE"
+    }
     curl() { echo "curl $*" >>"$LOG"; echo "true"; }
     eval "$1"
     install_nodejs
@@ -67,12 +77,15 @@ run_install none none v24.4.1 || fail "установка не прошла"
 grep -q "setup_24.x" "$LOG" || fail "не NodeSource 24.x"
 echo "  OK"
 
-echo "[test] apt предлагает поддерживаемую версию — ставим из apt"
-for candidate in 22.12.0+dfsg-1 1:24.1.0-1nodesource1; do
-  run_install v20.20.2 "$candidate" v22.12.0 || fail "установка из apt ($candidate) не прошла"
-  grep -q "^apt-get install -y nodejs npm$" "$LOG" || fail "$candidate: не из apt"
-  ! grep -q "^curl" "$LOG" || fail "$candidate: лишний NodeSource"
-done
+echo "[test] apt предлагает поддерживаемую версию — ставим из apt, npm только если его нет"
+run_install v20.20.2 22.12.0+dfsg-1 v22.12.0 false || fail "установка из apt Debian не прошла"
+[[ "$(grep "^apt-get" "$LOG")" == "apt-get install -y nodejs"$'\n'"apt-get install -y npm" ]] \
+  || fail "Debian: nodejs, затем npm отдельно"
+! grep -q "^curl" "$LOG" || fail "Debian: лишний NodeSource"
+run_install v20.20.2 1:24.1.0-1nodesource1 v24.1.0 true || fail "установка из apt NodeSource не прошла"
+[[ "$(grep "^apt-get" "$LOG")" == "apt-get install -y nodejs" ]] \
+  || fail "NodeSource: npm уже в пакете nodejs, пакет npm Debian конфликтует с ним"
+! grep -q "^curl" "$LOG" || fail "NodeSource из apt: лишний setup-скрипт"
 echo "  OK"
 
 echo "[test] apt предлагает Node 20 — не годится, NodeSource"
