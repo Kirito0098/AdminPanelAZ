@@ -622,11 +622,12 @@ class UserTrafficSample(Base):
     __tablename__ = "user_traffic_sample"
     __table_args__ = (
         Index("ix_user_traffic_sample_node_created", "node_id", "created_at"),
+        Index("ix_user_traffic_sample_name_created", "common_name", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
-    common_name: Mapped[str] = mapped_column(String(128), index=True)
+    common_name: Mapped[str] = mapped_column(String(128))
     network_type: Mapped[str] = mapped_column(String(16), default="vpn")
     protocol_type: Mapped[str] = mapped_column(String(16), default="openvpn")
     delta_received: Mapped[int] = mapped_column(Integer, default=0)

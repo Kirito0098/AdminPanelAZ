@@ -116,6 +116,12 @@ def test_consumed_filters_by_transport(db):
 
 def test_consumed_period_filters_by_transport(db):
     now = datetime.utcnow()
+    for protocol_type, received, sent in (
+        (OPENVPN_PROTOCOL_UDP, 40, 10),
+        (OPENVPN_PROTOCOL_TCP, 70, 5),
+        ("wireguard", 500, 0),
+    ):
+        _add_stat(db, common_name="Bob", protocol_type=protocol_type, received=received, sent=sent)
     db.add(
         UserTrafficSample(
             node_id=NODE_ID,
