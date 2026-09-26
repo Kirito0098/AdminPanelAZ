@@ -6,6 +6,7 @@ import threading
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy import Connection, create_engine, event, inspect, text
@@ -1876,64 +1877,49 @@ def _migrate_nodes_proxy_fields() -> None:
             logger.info("DB migration: added nodes.linked_vpn_node_id")
 
 
-def _max_owned_client_access_until(conn, user_id: int) -> object | None:
-    """Max non-null deadline across owned clients' openvpn/awg2/wg policies."""
-    pairs = conn.execute(
+_POLICY_DEADLINE_BY_VPN_TYPE = {
+    "openvpn": ("openvpn_access_policy", "access_until", False),
+    "wireguard": ("wg_access_policy", "expires_at", True),
+    "amneziawg2": ("amneziawg2_access_policies", "access_until", True),
+}
+
+
+def _backfill_subscription_deadline(conn, user_id: int, now: datetime) -> object | None:
+    """Latest owned profile deadline, or None if any profile is unlimited or all have expired.
+
+    A subscription limits every owned profile (apply_user_subscription_expiry seeds missing
+    deadlines and blocks them), so adopting one while a profile is unlimited would block it.
+    """
+    configs = conn.execute(
         text(
             """
-            SELECT DISTINCT node_id, client_name
+            SELECT DISTINCT node_id, client_name, vpn_type
             FROM vpn_configs
             WHERE owner_id = :uid AND ha_primary_config_id IS NULL
             """
         ),
         {"uid": user_id},
     ).mappings().all()
-    max_deadline = None
-    for pair in pairs:
-        node_id = pair["node_id"]
-        raw_name = (pair["client_name"] or "").strip()
-        if not raw_name:
+    latest_raw = None
+    latest = None
+    for config in configs:
+        spec = _POLICY_DEADLINE_BY_VPN_TYPE.get(str(config["vpn_type"] or "").lower())
+        raw_name = (config["client_name"] or "").strip()
+        if spec is None or not raw_name:
             continue
-        lower_name = raw_name.lower()
-        candidates = []
-        ov = conn.execute(
-            text(
-                """
-                SELECT access_until FROM openvpn_access_policy
-                WHERE node_id = :nid AND client_name = :cn AND access_until IS NOT NULL
-                """
-            ),
-            {"nid": node_id, "cn": raw_name},
+        table, column, lowercase = spec
+        raw = conn.execute(
+            text(f"SELECT {column} FROM {table} WHERE node_id = :nid AND client_name = :cn"),
+            {"nid": config["node_id"], "cn": raw_name.lower() if lowercase else raw_name},
         ).scalar()
-        if ov is not None:
-            candidates.append(ov)
-        awg = conn.execute(
-            text(
-                """
-                SELECT access_until FROM amneziawg2_access_policies
-                WHERE node_id = :nid AND client_name = :cn AND access_until IS NOT NULL
-                """
-            ),
-            {"nid": node_id, "cn": lower_name},
-        ).scalar()
-        if awg is not None:
-            candidates.append(awg)
-        wg = conn.execute(
-            text(
-                """
-                SELECT expires_at FROM wg_access_policy
-                WHERE node_id = :nid AND client_name = :cn AND expires_at IS NOT NULL
-                """
-            ),
-            {"nid": node_id, "cn": lower_name},
-        ).scalar()
-        if wg is not None:
-            candidates.append(wg)
-        if candidates:
-            pair_max = max(candidates)
-            if max_deadline is None or pair_max > max_deadline:
-                max_deadline = pair_max
-    return max_deadline
+        if raw is None:
+            return None
+        value = raw if isinstance(raw, datetime) else datetime.fromisoformat(str(raw))
+        if latest is None or value > latest:
+            latest, latest_raw = value, raw
+    if latest is None or latest.replace(tzinfo=None) <= now.replace(tzinfo=None):
+        return None
+    return latest_raw
 
 
 _USER_ACCESS_UNTIL_BACKFILL_MARKER = "migration_user_access_until_backfill_done"
@@ -1973,8 +1959,9 @@ def _migrate_user_access_until_backfill() -> None:
                 """
             )
         ).scalars().all()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         for user_id in user_ids:
-            max_deadline = _max_owned_client_access_until(conn, user_id)
+            max_deadline = _backfill_subscription_deadline(conn, user_id, now)
             if max_deadline is None:
                 continue
             conn.execute(

@@ -567,6 +567,56 @@ def test_migrate_user_access_until_backfill_sets_max_of_owned_clients(db, monkey
     assert user.access_until == later.replace(tzinfo=None)
 
 
+@pytest.mark.parametrize(
+    "unlimited",
+    ["no_policy_row", "null_deadline", "other_protocol_of_limited_client"],
+)
+def test_migrate_user_access_until_backfill_skips_owner_with_unlimited_client(db, monkeypatch, unlimited):
+    from app import database
+
+    monkeypatch.setattr(database, "engine", db.get_bind())
+    node = _make_node(db)
+    later = datetime.now(timezone.utc) + timedelta(days=30)
+    user = User(username="backfill-mixed", password_hash="x", role=UserRole.user, is_active=True)
+    db.add(user)
+    db.commit()
+
+    _make_owned_client(db, node_id=node.id, owner_id=user.id, client_name="Alice", protocols=[VpnType.openvpn])
+    db.add(OpenVpnAccessPolicy(node_id=node.id, client_name="Alice", access_until=later.replace(tzinfo=None)))
+    if unlimited == "other_protocol_of_limited_client":
+        _make_owned_client(db, node_id=node.id, owner_id=user.id, client_name="Alice", protocols=[VpnType.wireguard])
+    else:
+        _make_owned_client(db, node_id=node.id, owner_id=user.id, client_name="Bob", protocols=[VpnType.openvpn])
+        if unlimited == "null_deadline":
+            db.add(OpenVpnAccessPolicy(node_id=node.id, client_name="Bob", access_until=None))
+    db.commit()
+
+    database._migrate_user_access_until_backfill()
+
+    db.refresh(user)
+    # Подписка ограничила бы и бессрочного клиента: при её окончании его блокирует apply_user_subscription_expiry.
+    assert user.access_until is None
+
+
+def test_migrate_user_access_until_backfill_skips_owner_with_only_expired_clients(db, monkeypatch):
+    from app import database
+
+    monkeypatch.setattr(database, "engine", db.get_bind())
+    node = _make_node(db)
+    user = User(username="backfill-expired", password_hash="x", role=UserRole.user, is_active=True)
+    db.add(user)
+    db.commit()
+    _make_owned_client(db, node_id=node.id, owner_id=user.id, client_name="Alice", protocols=[VpnType.openvpn])
+    past = datetime.now(timezone.utc) - timedelta(days=3)
+    db.add(OpenVpnAccessPolicy(node_id=node.id, client_name="Alice", access_until=past.replace(tzinfo=None)))
+    db.commit()
+
+    database._migrate_user_access_until_backfill()
+
+    db.refresh(user)
+    assert user.access_until is None
+
+
 def test_migrate_user_access_until_backfill_idempotent_and_skips_non_null(db, monkeypatch):
     from app import database
 
