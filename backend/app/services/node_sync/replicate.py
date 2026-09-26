@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -81,11 +81,6 @@ def get_shadow_configs(db: Session, group: NodeSyncGroup, primary_config: VpnCon
     return shadows
 
 
-def iter_replica_adapters(db: Session, group: NodeSyncGroup) -> Iterator[tuple[Node, Any]]:
-    for replica_node in get_replica_nodes(db, group):
-        yield replica_node, get_adapter_for_node(replica_node)
-
-
 def _primary_adapter(db: Session, group: NodeSyncGroup):
     primary_node = db.get(Node, group.primary_node_id)
     if primary_node is None:
@@ -130,11 +125,11 @@ def _handle_client_create(db: Session, group: NodeSyncGroup, payload: dict[str, 
     result = ReplicateResult(operation=ReplicateOperation.CLIENT_CREATE)
     primary_adapter = _primary_adapter(db, group)
 
-    for replica_node, adapter in iter_replica_adapters(db, group):
+    for replica_node in get_replica_nodes(db, group):
         try:
             sync_vpn_crypto_from_primary(
                 primary_adapter,
-                adapter,
+                get_adapter_for_node(replica_node),
                 primary_config.vpn_type,
                 db=db,
                 replica_node=replica_node,
@@ -178,11 +173,10 @@ def _handle_client_delete(db: Session, group: NodeSyncGroup, payload: dict[str, 
         if not replica_node:
             db.delete(shadow)
             continue
-        adapter = get_adapter_for_node(replica_node)
         try:
             sync_vpn_crypto_from_primary(
                 primary_adapter,
-                adapter,
+                get_adapter_for_node(replica_node),
                 shadow.vpn_type,
                 db=db,
                 replica_node=replica_node,
@@ -216,43 +210,20 @@ def _handle_client_renew_cert(db: Session, group: NodeSyncGroup, payload: dict[s
     shadow_by_node_id = {shadow.node_id: shadow for shadow in get_shadow_configs(db, group, primary_config)}
     for replica_node in get_replica_nodes(db, group):
         shadow = shadow_by_node_id.get(replica_node.id)
-        adapter = get_adapter_for_node(replica_node)
-        if shadow is None:
-            try:
-                sync_openvpn_pki_from_primary(
-                    primary_adapter,
-                    adapter,
-                    openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
-                )
-                result.successes.append(
-                    {"node_id": replica_node.id, "node_name": replica_node.name, "fallback": True}
-                )
-            except Exception as exc:
-                logger.warning(
-                    "HA auto-sync cert renew fallback failed on replica %s: %s",
-                    replica_node.name,
-                    exc,
-                )
-                result.errors.append(
-                    {
-                        "node_id": replica_node.id,
-                        "node_name": replica_node.name,
-                        "error": _error_detail(exc),
-                    }
-                )
-            continue
         try:
             sync_openvpn_pki_from_primary(
                 primary_adapter,
-                adapter,
+                get_adapter_for_node(replica_node),
                 openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
             )
-            shadow.cert_expire_days = cert_expire_days
-            shadow.cert_expires_at = primary_config.cert_expires_at
-            db.flush()
+            if shadow is not None:
+                shadow.cert_expire_days = cert_expire_days
+                shadow.cert_expires_at = primary_config.cert_expires_at
+                db.flush()
         except Exception as exc:
             logger.warning(
-                "HA auto-sync cert renew failed on replica %s: %s",
+                "HA auto-sync cert renew%s failed on replica %s: %s",
+                " fallback" if shadow is None else "",
                 replica_node.name,
                 exc,
             )
@@ -260,7 +231,10 @@ def _handle_client_renew_cert(db: Session, group: NodeSyncGroup, payload: dict[s
                 {"node_id": replica_node.id, "node_name": replica_node.name, "error": _error_detail(exc)}
             )
             continue
-        result.successes.append({"node_id": replica_node.id, "config_id": shadow.id})
+        if shadow is None:
+            result.successes.append({"node_id": replica_node.id, "node_name": replica_node.name, "fallback": True})
+        else:
+            result.successes.append({"node_id": replica_node.id, "config_id": shadow.id})
 
     return result
 

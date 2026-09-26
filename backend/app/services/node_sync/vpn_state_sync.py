@@ -373,7 +373,9 @@ def sync_all_vpn_crypto_from_primary(
 def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str, object]:
     """Copy VPN crypto state from primary to every replica (any sync_mode)."""
     from app.models import SyncStatus
-    from app.services.node_sync.replicate import _primary_adapter, iter_replica_adapters
+    from app.services.node_manager import get_adapter_for_node
+    from app.services.node_sync.groups import get_replica_nodes
+    from app.services.node_sync.replicate import _primary_adapter
 
     primary_adapter = _primary_adapter(db, group)
     successes: list[dict[str, object]] = []
@@ -384,11 +386,11 @@ def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str,
         else None
     )
 
-    for replica_node, adapter in iter_replica_adapters(db, group):
+    for replica_node in get_replica_nodes(db, group):
         try:
             sync_vpn_crypto_from_primary(
                 primary_adapter,
-                adapter,
+                get_adapter_for_node(replica_node),
                 primary_config.vpn_type,
                 db=db,
                 replica_node=replica_node,

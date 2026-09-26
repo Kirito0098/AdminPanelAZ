@@ -141,9 +141,9 @@ def apply_shared_domain_to_members(
         for index, node in enumerate(nodes):
             percent = 45 + int((index / total) * 50)
             progress(percent, f"{node.name}: doall.sh + client.sh 7…")
-            adapter = get_adapter_for_node(node)
             is_primary = node.id == group.primary_node_id
             try:
+                adapter = get_adapter_for_node(node)
                 doall_output = adapter.apply_config_changes()
                 recreate_output = adapter.recreate_profiles()
                 hosts = parse_hosts_json(node.openvpn_remote_hosts)

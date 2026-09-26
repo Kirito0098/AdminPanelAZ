@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime
 from typing import Any, Callable
 
@@ -13,7 +14,10 @@ from app.services.node_adapter import NodeAdapter
 from app.services.node_manager import check_node_health, get_adapter_for_node, update_node_from_health
 from app.services.node_sync.fingerprints import CONFIG_FP_PREFIX
 from app.services.node_sync.groups import optional_wireguard_domain, parse_replica_node_ids
+from app.services.node_sync.vpn_state_sync import _error_detail
 from app.services.openvpn_pki import profile_issues_payload, validate_all_openvpn_profiles
+
+logger = logging.getLogger(__name__)
 
 
 def _refresh_node_online(db: Session, node: Node | None) -> bool:
@@ -216,27 +220,44 @@ def verify_sync_group(
             )
             continue
 
-        adapter = get_adapter_for_node(node)
-        ovpn_diff = _client_set_diff(primary_ovpn, set(adapter.list_openvpn_clients()))
+        try:
+            adapter = get_adapter_for_node(node)
+            replica_ovpn = set(adapter.list_openvpn_clients())
+            replica_wg = set(adapter.list_wireguard_clients())
+            replica_fp = _enrich_config_fingerprints(
+                adapter.get_antizapret_fingerprints(),
+                adapter,
+            )
+            replica_profile_validation = validate_all_openvpn_profiles(adapter)
+        except Exception as exc:
+            logger.warning("Verify: replica %s unreachable: %s", node_name, exc)
+            ready = False
+            mismatches.append({"kind": "node_status", "detail": f"нет связи с узлом: {_error_detail(exc)}"})
+            replica_results.append(
+                {
+                    "node_id": replica_id,
+                    "node_name": node_name,
+                    "online": False,
+                    "mismatches": mismatches,
+                }
+            )
+            continue
+
+        ovpn_diff = _client_set_diff(primary_ovpn, replica_ovpn)
         if ovpn_diff:
             ready = False
             mismatches.append({"kind": "openvpn_clients", **ovpn_diff})
 
-        wg_diff = _client_set_diff(primary_wg, set(adapter.list_wireguard_clients()))
+        wg_diff = _client_set_diff(primary_wg, replica_wg)
         if wg_diff:
             ready = False
             mismatches.append({"kind": "wireguard_clients", **wg_diff})
 
-        replica_fp = _enrich_config_fingerprints(
-            adapter.get_antizapret_fingerprints(),
-            adapter,
-        )
         fp_mismatches = _fingerprint_mismatches(primary_fp, replica_fp)
         if fp_mismatches:
             ready = False
             mismatches.extend(fp_mismatches)
 
-        replica_profile_validation = validate_all_openvpn_profiles(adapter)
         if not replica_profile_validation.ready:
             ready = False
             profile_cert_ready = False

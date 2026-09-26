@@ -182,27 +182,28 @@ def run_push_full(
         current_step = "restore_replica"
         progress(percent, f"HA restore на {replica_name}…", current_step)
 
-        replica_adapter = get_adapter_for_node(replica_node)
-        if primary_host_settings:
-            try:
-                replica_adapter.update_antizapret_settings(dict(primary_host_settings))
-                host_copy.append(
-                    {
-                        "node_id": replica_id,
-                        "node_name": replica_name,
-                        "hosts": dict(primary_host_settings),
-                    }
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Push full: failed to copy host settings to %s: %s", replica_name, exc
-                )
-                host_copy.append(
-                    {"node_id": replica_id, "node_name": replica_name, "error": str(exc)}
-                )
-
+        replica_adapter = None
         reblock_attempted = False
         try:
+            replica_adapter = get_adapter_for_node(replica_node)
+            if primary_host_settings:
+                try:
+                    replica_adapter.update_antizapret_settings(dict(primary_host_settings))
+                    host_copy.append(
+                        {
+                            "node_id": replica_id,
+                            "node_name": replica_name,
+                            "hosts": dict(primary_host_settings),
+                        }
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Push full: failed to copy host settings to %s: %s", replica_name, exc
+                    )
+                    host_copy.append(
+                        {"node_id": replica_id, "node_name": replica_name, "error": str(exc)}
+                    )
+
             if isinstance(replica_adapter, LocalNodeAdapter):
                 with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
                     tmp.write(archive_bytes)
@@ -321,7 +322,7 @@ def run_push_full(
                         "error": str(exc)})
             logger.warning("Push full: replica sync failed on %s: %s", replica_name, exc)
             # The HA restore already reloaded WireGuard from primary configs, lifting runtime blocks.
-            if replica_node is not None and not reblock_attempted:
+            if replica_node is not None and replica_adapter is not None and not reblock_attempted:
                 try:
                     reapply_blocked_runtime_policies(db, replica_node, replica_adapter, awg2=False)
                 except Exception as reblock_exc:

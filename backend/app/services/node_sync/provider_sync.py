@@ -148,9 +148,8 @@ def replicate_provider_content(
         return result
 
     for replica_node in get_replica_nodes(db, group):
-        adapter = get_adapter_for_node(replica_node)
         try:
-            adapter.save_provider_content(filename, content)
+            get_adapter_for_node(replica_node).save_provider_content(filename, content)
         except Exception as exc:
             logger.warning(
                 "HA provider sync failed on replica %s: %s",

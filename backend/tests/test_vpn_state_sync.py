@@ -502,8 +502,12 @@ def test_handle_client_create_passes_replica_context_for_awg2_crypto_sync(monkey
         lambda _db, _group: primary_adapter,
     )
     monkeypatch.setattr(
-        "app.services.node_sync.replicate.iter_replica_adapters",
-        lambda _db, _group: iter([(replica_node, replica_adapter)]),
+        "app.services.node_sync.replicate.get_replica_nodes",
+        lambda _db, _group: [replica_node],
+    )
+    monkeypatch.setattr(
+        "app.services.node_sync.replicate.get_adapter_for_node",
+        lambda _node: replica_adapter,
     )
     sync_mock = MagicMock()
     monkeypatch.setattr("app.services.node_sync.replicate.sync_vpn_crypto_from_primary", sync_mock)
@@ -550,8 +554,12 @@ def test_handle_client_create_records_partial_failure(monkeypatch):
         lambda _db, _group: MagicMock(),
     )
     monkeypatch.setattr(
-        "app.services.node_sync.replicate.iter_replica_adapters",
-        lambda _db, _group: iter([(replica_node, replica_adapter)]),
+        "app.services.node_sync.replicate.get_replica_nodes",
+        lambda _db, _group: [replica_node],
+    )
+    monkeypatch.setattr(
+        "app.services.node_sync.replicate.get_adapter_for_node",
+        lambda _node: replica_adapter,
     )
     monkeypatch.setattr(
         "app.services.node_sync.replicate.sync_vpn_crypto_from_primary",

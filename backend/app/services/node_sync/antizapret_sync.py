@@ -41,9 +41,8 @@ def replicate_antizapret_settings(
         return result
 
     for replica_node in get_replica_nodes(db, group):
-        adapter = get_adapter_for_node(replica_node)
         try:
-            adapter.update_antizapret_settings(filtered)
+            get_adapter_for_node(replica_node).update_antizapret_settings(filtered)
         except Exception as exc:
             logger.warning(
                 "HA antizapret settings sync failed on replica %s: %s",
