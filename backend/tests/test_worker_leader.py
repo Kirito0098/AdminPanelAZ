@@ -116,3 +116,53 @@ def test_lifespan_skips_workers_while_another_worker_leads(tmp_path: Path, monke
     assert calls == ["spawn", "startup"]
     assert holder.try_acquire(), "shutdown must hand leadership to the remaining workers"
     holder.release()
+
+
+def test_failed_takeover_is_logged_and_frees_the_lock(tmp_path: Path, monkeypatch, caplog):
+    monkeypatch.setattr(lifespan_workers, "LEADER_RETRY_SECONDS", 0.01)
+    path = tmp_path / "leader.lock"
+    leader = WorkerLeaderLock(path)
+    assert leader.try_acquire()
+    follower = WorkerLeaderLock(path)
+
+    def broken_start():
+        raise RuntimeError("scheduler import failed")
+
+    async def scenario():
+        tasks = lifespan_workers.start_leader_workers(follower, start=broken_start, on_startup=lambda: None)
+        leader.release()
+        await asyncio.wait_for(tasks["leader_takeover"], 1)
+
+    with caplog.at_level("ERROR", logger=lifespan_workers.logger.name):
+        asyncio.run(scenario())
+    assert any("take over" in r.getMessage() for r in caplog.records)
+    other = WorkerLeaderLock(path)
+    assert other.try_acquire(), "another worker must be able to run the schedulers"
+    other.release()
+
+
+def test_cancel_continues_past_a_failing_task(caplog):
+    cancelled: list[str] = []
+
+    async def failing():
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            raise RuntimeError("cleanup failed") from None
+
+    async def healthy():
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            cancelled.append("healthy")
+            raise
+
+    async def scenario():
+        tasks = {"failing": asyncio.create_task(failing()), "healthy": asyncio.create_task(healthy())}
+        await asyncio.sleep(0)
+        await lifespan_workers.cancel_background_tasks(tasks)
+
+    with caplog.at_level("ERROR", logger=lifespan_workers.logger.name):
+        asyncio.run(scenario())
+    assert cancelled == ["healthy"]
+    assert any("failing" in r.getMessage() for r in caplog.records)

@@ -172,7 +172,11 @@ async def _take_over_leadership(
     while not lock.try_acquire():
         await asyncio.sleep(LEADER_RETRY_SECONDS)
     logger.info("Worker pid=%s took over background tasks", os.getpid())
-    tasks.update(start())
+    try:
+        tasks.update(start())
+    except Exception:
+        logger.exception("Worker pid=%s failed to take over background tasks", os.getpid())
+        lock.release()
 
 
 def start_leader_workers(
@@ -198,7 +202,7 @@ def start_leader_workers(
 
 
 async def cancel_background_tasks(tasks: dict[str, asyncio.Task | None]) -> None:
-    for task in tasks.values():
+    for name, task in tasks.items():
         if task is None:
             continue
         task.cancel()
@@ -206,3 +210,5 @@ async def cancel_background_tasks(tasks: dict[str, asyncio.Task | None]) -> None
             await task
         except asyncio.CancelledError:
             pass
+        except Exception:
+            logger.exception("Background task %s failed while stopping", name)
