@@ -70,6 +70,7 @@ from app.services.lifespan_workers import (
     start_leader_workers,
 )
 from app.services.background_gate import configure_background_gate
+from app.services.shared_state import configure_shared_state
 from app.services.worker_leader import WorkerLeaderLock
 from app.services.worker_lifecycle import should_start_resource_monitor
 
@@ -225,6 +226,7 @@ async def lifespan(_: FastAPI):
         return tasks
 
     configure_background_gate(db_path)
+    configure_shared_state(SessionLocal)
     leader_lock = WorkerLeaderLock(leader_lock_path(db_path))
     background_tasks = start_leader_workers(
         leader_lock, start=_start_workers, on_startup=run_leader_startup_actions
@@ -233,6 +235,7 @@ async def lifespan(_: FastAPI):
     await cancel_background_tasks(background_tasks)
     leader_lock.release()
     configure_background_gate(None)
+    configure_shared_state(None)
 
 
 app = FastAPI(
