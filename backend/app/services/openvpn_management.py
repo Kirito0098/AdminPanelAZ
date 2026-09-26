@@ -416,12 +416,14 @@ class OpenVpnManagementService:
             return {"success": False, "message": f"Сокет {profile_key} недоступен"}
         cmd = f"kill {client_name}"
         raw = self.query_openvpn_management_socket(socket_path, cmd)
-        success = "SUCCESS" in raw.upper() or "killed" in raw.lower() or bool(raw.strip())
+        lines = [line.strip() for line in raw.splitlines()]
+        success = any(line.startswith("SUCCESS:") for line in lines)
+        error = next((line for line in lines if line.startswith("ERROR:")), "")
         return {
             "success": success,
             "profile": profile_key,
             "client_name": client_name,
-            "message": "Клиент отключён" if success else (raw.strip() or "Не удалось отключить клиента"),
+            "message": "Клиент отключён" if success else (error or "Не удалось отключить клиента"),
             "raw": raw[:500],
         }
 

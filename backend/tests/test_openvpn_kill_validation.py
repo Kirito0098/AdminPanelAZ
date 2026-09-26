@@ -55,6 +55,49 @@ def test_kill_sends_valid_names(service, client_name):
     assert sent == [f"kill {client_name}"]
 
 
+BANNER = ">INFO:OpenVPN Management Interface Version 5 -- type 'help' for more info\r\n"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        BANNER + "ERROR: common name 'bob' not found\r\n",
+        BANNER,
+        "",
+    ],
+)
+def test_kill_fails_without_success_reply(tmp_path, monkeypatch, raw):
+    socket_path = tmp_path / "antizapret-udp.sock"
+    socket_path.touch()
+    svc = OpenVpnManagementService()
+    monkeypatch.setattr(svc, "openvpn_socket_path", lambda _profile: socket_path)
+    monkeypatch.setattr(svc, "query_openvpn_management_socket", lambda *_a, **_k: raw)
+
+    result = svc.kill_client("antizapret-udp", "bob")
+
+    assert result["success"] is False
+    assert result["message"] != "Клиент отключён"
+    if "ERROR:" in raw:
+        assert result["message"] == "ERROR: common name 'bob' not found"
+
+
+def test_kill_succeeds_on_success_reply_after_banner(tmp_path, monkeypatch):
+    socket_path = tmp_path / "antizapret-udp.sock"
+    socket_path.touch()
+    svc = OpenVpnManagementService()
+    monkeypatch.setattr(svc, "openvpn_socket_path", lambda _profile: socket_path)
+    monkeypatch.setattr(
+        svc,
+        "query_openvpn_management_socket",
+        lambda *_a, **_k: BANNER + "SUCCESS: common name 'bob' found, 1 client(s) killed\r\n",
+    )
+
+    result = svc.kill_client("antizapret-udp", "bob")
+
+    assert result["success"] is True
+    assert result["message"] == "Клиент отключён"
+
+
 @pytest.fixture
 def agent(monkeypatch):
     monkeypatch.setenv("NODE_AGENT_MODE", "dev")
