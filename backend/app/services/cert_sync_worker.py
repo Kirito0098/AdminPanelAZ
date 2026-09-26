@@ -111,6 +111,19 @@ def sync_cert_expiry(db) -> int:
     return updated
 
 
+def _sync_cert_expiry_once() -> None:
+    db = SessionLocal()
+    try:
+        count = sync_cert_expiry(db)
+        if count:
+            logger.info(
+                "cert_sync: refreshed cert_expires_at for %s configs total",
+                count,
+            )
+    finally:
+        db.close()
+
+
 async def run_cert_sync_loop() -> None:
     """Cert sync loop — re-checks CERT_SYNC_ENABLED / openvpn each tick."""
     await asyncio.sleep(INITIAL_DELAY_SECONDS)
@@ -123,16 +136,8 @@ async def run_cert_sync_loop() -> None:
             elif not _is_openvpn_module_enabled():
                 logger.debug("cert_sync skipped — openvpn module disabled")
             else:
-                db = SessionLocal()
-                try:
-                    count = sync_cert_expiry(db)
-                    if count:
-                        logger.info(
-                            "cert_sync: refreshed cert_expires_at for %s configs total",
-                            count,
-                        )
-                finally:
-                    db.close()
+                # Reads certificates from every OpenVPN node over the agent API.
+                await asyncio.to_thread(_sync_cert_expiry_once)
         except asyncio.CancelledError:
             raise
         except Exception:

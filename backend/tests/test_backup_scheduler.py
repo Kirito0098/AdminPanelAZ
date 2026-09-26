@@ -123,7 +123,7 @@ def test_collect_awg2_backup_archive_exports_when_installed(monkeypatch):
 
 
 def test_scheduler_and_create_include_awg2_overlay():
-    create_src = inspect.getsource(backup_scheduler.run_backup_scheduler_loop)
+    create_src = inspect.getsource(backup_scheduler._run_auto_backup_once)
     from app.routers import backups as backups_mod
 
     router_src = inspect.getsource(backups_mod._create_backup_with_optional_telegram)
@@ -153,7 +153,7 @@ def test_cli_include_awg2_exports_overlay(tmp_path: Path, monkeypatch):
 
 
 def test_backup_telegram_sends_synchronously():
-    create_src = inspect.getsource(backup_scheduler.run_backup_scheduler_loop)
+    create_src = inspect.getsource(backup_scheduler._run_auto_backup_once)
     from app.routers import backups as backups_mod
 
     router_src = inspect.getsource(backups_mod._create_backup_with_optional_telegram)

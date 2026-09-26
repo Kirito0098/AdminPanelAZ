@@ -68,6 +68,105 @@ def collect_awg2_backup_archive(db) -> bytes | None:
         return None
 
 
+def _run_auto_backup_once(
+    *,
+    app_root: Path,
+    backup_root: Path,
+    db_path: Path,
+    env_path: Path,
+    cidr_db_path: Path | None,
+) -> None:
+    if not _is_backups_enabled():
+        logger.debug("backup_scheduler skipped — backups disabled")
+        return
+    db = SessionLocal()
+    try:
+        if _get_setting(db, "backup_auto_enabled", "false") != "true":
+            return
+        days = int(_get_setting(db, "backup_auto_days", "7") or "7")
+        if not _should_run("backup_auto_last_run", days, db):
+            return
+        manager = BackupManager(
+            app_root=app_root,
+            backup_root=backup_root,
+            db_path=db_path,
+            env_path=env_path,
+            cidr_db_path=cidr_db_path,
+        )
+        retention = int(_get_setting(db, "backup_retention", "5") or "5")
+        config_contents = collect_backup_config_contents(db)
+        awg2_archive = None
+        if _get_setting(db, "backup_awg2_enabled", "true") == "true":
+            awg2_archive = collect_awg2_backup_archive(db)
+        result = manager.create_backup(
+            include_configs=bool(config_contents),
+            config_contents=config_contents,
+            retention=retention,
+            awg2_archive=awg2_archive,
+        )
+        row = db.query(AppSetting).filter(AppSetting.key == "backup_auto_last_run").first()
+        now_str = datetime.now(timezone.utc).isoformat()
+        if row:
+            row.value = now_str
+        else:
+            db.add(AppSetting(key="backup_auto_last_run", value=now_str))
+        if _get_setting(db, "backup_telegram_enabled", "false") == "true":
+            from app.services.feature_guards import get_feature_service
+
+            if get_feature_service().is_enabled("telegram"):
+                token = _get_setting(db, "telegram_bot_token")
+                chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
+                if token and chat_ids:
+                    backup_path = str(manager.get_backup_path(result["file_name"]))
+                    for chat_id in chat_ids:
+                        sent = send_tg_document(
+                            token,
+                            chat_id,
+                            backup_path,
+                            caption=f"Авто-бэкап: {result['file_name']}",
+                            run_async=False,
+                        )
+                        if not sent:
+                            logger.warning(
+                                "Auto-backup Telegram send failed: chat_id=%s file=%s",
+                                chat_id,
+                                backup_path,
+                            )
+        if _get_setting(db, "backup_az_enabled", "true") == "true":
+            try:
+                adapter = get_active_adapter(db)
+                az_result = adapter.create_antizapret_backup()
+                if _get_setting(db, "backup_telegram_enabled", "false") == "true":
+                    from app.services.feature_guards import get_feature_service
+
+                    if get_feature_service().is_enabled("telegram"):
+                        token = _get_setting(db, "telegram_bot_token")
+                        chat_ids = get_setting_chat_ids(
+                            lambda key, default="": _get_setting(db, key, default)
+                        )
+                        if token and chat_ids and az_result.get("archive_path"):
+                            for chat_id in chat_ids:
+                                sent = send_tg_document(
+                                    token,
+                                    chat_id,
+                                    az_result["archive_path"],
+                                    caption=f"Авто-бэкап AntiZapret: {az_result.get('archive_name', '')}",
+                                    run_async=False,
+                                )
+                                if not sent:
+                                    logger.warning(
+                                        "Auto AntiZapret backup Telegram send failed: chat_id=%s file=%s",
+                                        chat_id,
+                                        az_result["archive_path"],
+                                    )
+            except Exception as exc:
+                logger.warning("Auto AntiZapret backup (client.sh 8) failed: %s", exc)
+        db.commit()
+        logger.info("Auto-backup created: %s", result["file_name"])
+    finally:
+        db.close()
+
+
 async def run_backup_scheduler_loop(
     app_root: Path,
     backup_root: Path,
@@ -79,95 +178,15 @@ async def run_backup_scheduler_loop(
     while True:
         try:
             await asyncio.sleep(3600)
-            if not _is_backups_enabled():
-                logger.debug("backup_scheduler skipped — backups disabled")
-                continue
-            db = SessionLocal()
-            try:
-                if _get_setting(db, "backup_auto_enabled", "false") != "true":
-                    continue
-                days = int(_get_setting(db, "backup_auto_days", "7") or "7")
-                if not _should_run("backup_auto_last_run", days, db):
-                    continue
-                manager = BackupManager(
-                    app_root=app_root,
-                    backup_root=backup_root,
-                    db_path=db_path,
-                    env_path=env_path,
-                    cidr_db_path=cidr_db_path,
-                )
-                retention = int(_get_setting(db, "backup_retention", "5") or "5")
-                config_contents = collect_backup_config_contents(db)
-                awg2_archive = None
-                if _get_setting(db, "backup_awg2_enabled", "true") == "true":
-                    awg2_archive = collect_awg2_backup_archive(db)
-                result = manager.create_backup(
-                    include_configs=bool(config_contents),
-                    config_contents=config_contents,
-                    retention=retention,
-                    awg2_archive=awg2_archive,
-                )
-                row = db.query(AppSetting).filter(AppSetting.key == "backup_auto_last_run").first()
-                now_str = datetime.now(timezone.utc).isoformat()
-                if row:
-                    row.value = now_str
-                else:
-                    db.add(AppSetting(key="backup_auto_last_run", value=now_str))
-                if _get_setting(db, "backup_telegram_enabled", "false") == "true":
-                    from app.services.feature_guards import get_feature_service
-
-                    if get_feature_service().is_enabled("telegram"):
-                        token = _get_setting(db, "telegram_bot_token")
-                        chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
-                        if token and chat_ids:
-                            backup_path = str(manager.get_backup_path(result["file_name"]))
-                            for chat_id in chat_ids:
-                                sent = send_tg_document(
-                                    token,
-                                    chat_id,
-                                    backup_path,
-                                    caption=f"Авто-бэкап: {result['file_name']}",
-                                    run_async=False,
-                                )
-                                if not sent:
-                                    logger.warning(
-                                        "Auto-backup Telegram send failed: chat_id=%s file=%s",
-                                        chat_id,
-                                        backup_path,
-                                    )
-                if _get_setting(db, "backup_az_enabled", "true") == "true":
-                    try:
-                        adapter = get_active_adapter(db)
-                        az_result = adapter.create_antizapret_backup()
-                        if _get_setting(db, "backup_telegram_enabled", "false") == "true":
-                            from app.services.feature_guards import get_feature_service
-
-                            if get_feature_service().is_enabled("telegram"):
-                                token = _get_setting(db, "telegram_bot_token")
-                                chat_ids = get_setting_chat_ids(
-                                    lambda key, default="": _get_setting(db, key, default)
-                                )
-                                if token and chat_ids and az_result.get("archive_path"):
-                                    for chat_id in chat_ids:
-                                        sent = send_tg_document(
-                                            token,
-                                            chat_id,
-                                            az_result["archive_path"],
-                                            caption=f"Авто-бэкап AntiZapret: {az_result.get('archive_name', '')}",
-                                            run_async=False,
-                                        )
-                                        if not sent:
-                                            logger.warning(
-                                                "Auto AntiZapret backup Telegram send failed: chat_id=%s file=%s",
-                                                chat_id,
-                                                az_result["archive_path"],
-                                            )
-                    except Exception as exc:
-                        logger.warning("Auto AntiZapret backup (client.sh 8) failed: %s", exc)
-                db.commit()
-                logger.info("Auto-backup created: %s", result["file_name"])
-            finally:
-                db.close()
+            # Archiving the panel DB and uploading to Telegram take seconds to minutes.
+            await asyncio.to_thread(
+                _run_auto_backup_once,
+                app_root=app_root,
+                backup_root=backup_root,
+                db_path=db_path,
+                env_path=env_path,
+                cidr_db_path=cidr_db_path,
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:

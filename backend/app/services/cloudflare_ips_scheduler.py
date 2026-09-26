@@ -50,34 +50,39 @@ def should_refresh_cloudflare_ips(
     return should_run_interval(last_success_at or "", interval_days, now=now)
 
 
+def _refresh_cloudflare_ips_if_due() -> None:
+    db = SessionLocal()
+    try:
+        state = get_cloudflare_proxy_state(db)
+        if not should_refresh_cloudflare_ips(
+            enabled=state["enabled"],
+            auto_update=state["auto_update"],
+            interval_days=state["interval_days"],
+            last_success_at=state["last_success_at"],
+        ):
+            return
+        result = refresh_cloudflare_ips(db)
+        if result.get("success"):
+            logger.info(
+                "Cloudflare IPs auto-refresh: %s",
+                result.get("message", "ok"),
+            )
+        else:
+            logger.warning(
+                "Cloudflare IPs auto-refresh failed: %s",
+                result.get("error"),
+            )
+    finally:
+        db.close()
+
+
 async def run_cloudflare_ips_scheduler_loop() -> None:
     """Background loop: check hourly if Cloudflare IPs auto-refresh should run."""
     while True:
         try:
             await asyncio.sleep(SLEEP_SECONDS)
-            db = SessionLocal()
-            try:
-                state = get_cloudflare_proxy_state(db)
-                if not should_refresh_cloudflare_ips(
-                    enabled=state["enabled"],
-                    auto_update=state["auto_update"],
-                    interval_days=state["interval_days"],
-                    last_success_at=state["last_success_at"],
-                ):
-                    continue
-                result = refresh_cloudflare_ips(db)
-                if result.get("success"):
-                    logger.info(
-                        "Cloudflare IPs auto-refresh: %s",
-                        result.get("message", "ok"),
-                    )
-                else:
-                    logger.warning(
-                        "Cloudflare IPs auto-refresh failed: %s",
-                        result.get("error"),
-                    )
-            finally:
-                db.close()
+            # Downloads the IP lists and applies them to nginx via a script.
+            await asyncio.to_thread(_refresh_cloudflare_ips_if_due)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

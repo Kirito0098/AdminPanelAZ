@@ -17,6 +17,16 @@ def _is_user_reminder_enabled() -> bool:
     return bool(get_settings().self_service_reminder_enabled)
 
 
+def _process_user_reminders_once() -> None:
+    db = SessionLocal()
+    try:
+        count = process_user_reminders(db)
+        if count:
+            logger.info("user_reminder: sent %s notifications", count)
+    finally:
+        db.close()
+
+
 async def run_user_reminder_loop() -> None:
     """Reminder loop — re-checks SELF_SERVICE_REMINDER_ENABLED each tick."""
     while True:
@@ -29,13 +39,8 @@ async def run_user_reminder_loop() -> None:
                     "user_reminder skipped — SELF_SERVICE_REMINDER_ENABLED disabled"
                 )
                 continue
-            db = SessionLocal()
-            try:
-                count = process_user_reminders(db)
-                if count:
-                    logger.info("user_reminder: sent %s notifications", count)
-            finally:
-                db.close()
+            # Sends Telegram messages one by one.
+            await asyncio.to_thread(_process_user_reminders_once)
         except asyncio.CancelledError:
             raise
         except Exception:
