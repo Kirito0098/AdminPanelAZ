@@ -75,13 +75,10 @@ def test_rotation_records_key_age(db):
     rotated: list[str] = []
 
     class _Adapter:
-        def __init__(self, **_kwargs):
-            pass
-
         def rotate_api_key(self, new_key):
             rotated.append(new_key)
 
-    with patch.object(rotation, "RemoteNodeAdapter", _Adapter):
+    with patch.object(rotation, "get_adapter_for_node", lambda _node: _Adapter()):
         rotation.rotate_node_api_key(db, node, actor_username="system")
 
     assert rotated
@@ -95,9 +92,49 @@ def test_proxy_node_rotation_is_rejected_before_calling_agent(db):
     db.add(node)
     db.commit()
 
-    with patch.object(rotation, "RemoteNodeAdapter", side_effect=AssertionError("agent must not be called")):
+    with patch.object(rotation, "get_adapter_for_node", side_effect=AssertionError("agent must not be called")):
         with pytest.raises(ValueError):
             rotation.rotate_node_api_key(db, node)
+
+
+def _record_rotation(monkeypatch) -> list[tuple[str, str, str]]:
+    from app.services.node_adapter import RemoteNodeAdapter
+
+    calls: list[tuple[str, str, str]] = []
+
+    def fake_rotate(self, new_key):
+        calls.append((self.base_url, self.api_key, new_key))
+
+    monkeypatch.setattr(RemoteNodeAdapter, "rotate_api_key", fake_rotate)
+    return calls
+
+
+def test_rotation_of_ssh_node_goes_through_the_tunnel(db, monkeypatch):
+    node = _node("vpn-ssh", created_days_ago=90, transport="ssh", port=9100)
+    db.add(node)
+    db.commit()
+    calls = _record_rotation(monkeypatch)
+
+    class _Pool:
+        def ensure(self, _node):
+            return 45123
+
+    monkeypatch.setattr("app.services.ssh_tunnel_pool.get_ssh_tunnel_pool", lambda: _Pool())
+
+    new_key = rotation.rotate_node_api_key(db, node)
+
+    assert calls == [("http://127.0.0.1:45123", "key-vpn-ssh", new_key)]
+
+
+def test_rotation_of_http_node_talks_to_the_node_directly(db, monkeypatch):
+    node = _node("vpn-http", created_days_ago=90, port=9100)
+    db.add(node)
+    db.commit()
+    calls = _record_rotation(monkeypatch)
+
+    new_key = rotation.rotate_node_api_key(db, node)
+
+    assert calls == [("http://10.0.0.2:9100", "key-vpn-http", new_key)]
 
 
 def test_manual_key_change_resets_key_age(db, monkeypatch):

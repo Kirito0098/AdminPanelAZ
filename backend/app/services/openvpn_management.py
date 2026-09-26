@@ -13,6 +13,9 @@ from app.config import get_settings
 from app.schemas import OpenVpnClient
 
 OPENVPN_PROFILES = ("antizapret-tcp", "antizapret-udp", "vpn-tcp", "vpn-udp")
+# One whitespace-free token: a newline would start another management command.
+KILL_CLIENT_NAME_PATTERN = r"^[^\s\x00-\x1f\x7f]+$"
+KILL_CLIENT_NAME_RE = re.compile(KILL_CLIENT_NAME_PATTERN)
 
 _CLIENT_PATTERN = re.compile(
     r"CLIENT_LIST,([^,\n]+),([^,\n]+),([^,\n]*),([^,\n]*),(\d+),(\d+),([^,\n]+),(\d+),([^,\n]*),([^,\n]*),([^,\n]*),([^,\n\r ]+)"
@@ -407,6 +410,8 @@ class OpenVpnManagementService:
     def kill_client(self, profile_key: str, client_name: str) -> dict:
         """Force-disconnect an OpenVPN client via management socket kill command."""
         socket_path = self.openvpn_socket_path(profile_key)
+        if not KILL_CLIENT_NAME_RE.fullmatch(client_name or ""):
+            return {"success": False, "client_name": client_name, "message": "Недопустимое имя клиента"}
         if not socket_path.exists():
             return {"success": False, "message": f"Сокет {profile_key} недоступен"}
         cmd = f"kill {client_name}"

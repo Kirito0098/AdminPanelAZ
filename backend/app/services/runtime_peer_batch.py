@@ -6,6 +6,8 @@ import subprocess
 from collections.abc import Callable, Iterable
 
 PEERS_PER_COMMAND = 200
+# Agent-side cap of one block-batch request; the panel splits longer lists.
+CLIENTS_PER_REQUEST = 5000
 NO_PEERS_ERROR = "Пиры клиента не найдены"
 
 Peer = tuple[str, str]

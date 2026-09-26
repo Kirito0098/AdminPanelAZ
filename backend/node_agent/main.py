@@ -31,9 +31,10 @@ from app.services.node_update import (
     resolve_repo_root,
     schedule_agent_restart,
 )
-from app.services.openvpn_management import openvpn_management_service
+from app.services.openvpn_management import KILL_CLIENT_NAME_PATTERN, openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.profile_files import profile_files_batch_key
+from app.services.runtime_peer_batch import CLIENTS_PER_REQUEST
 from app.services.server_monitor import ServerMonitorService
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
 from app.services.wg_runtime import block_clients_runtime as wg_block_clients_runtime
@@ -144,7 +145,7 @@ class WireGuardClientRequest(BaseModel):
 
 
 class ClientNamesRequest(BaseModel):
-    client_names: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(max_length=5000)
+    client_names: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(max_length=CLIENTS_PER_REQUEST)
 
 
 class Awg2ClientRequest(BaseModel):
@@ -189,7 +190,7 @@ class OpenVpnJournalSampleRequest(BaseModel):
 
 class OpenVpnKillClientRequest(BaseModel):
     unit: str = Field(min_length=1, max_length=128)
-    client_name: str = Field(min_length=1, max_length=32)
+    client_name: str = Field(min_length=1, max_length=32, pattern=KILL_CLIENT_NAME_PATTERN)
 
 
 class RotateApiKeyRequest(BaseModel):

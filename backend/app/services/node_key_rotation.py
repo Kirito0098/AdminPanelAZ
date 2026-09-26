@@ -14,9 +14,13 @@ from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Node
 from app.services.action_log import log_action
-from app.services.node_adapter import RemoteNodeAdapter
-from app.services.node_manager import NODE_KIND_VPN, is_vpn_node, get_api_key_plain, store_api_key
-from app.services.node_transport import get_transport
+from app.services.node_manager import (
+    NODE_KIND_VPN,
+    get_adapter_for_node,
+    get_api_key_plain,
+    is_vpn_node,
+    store_api_key,
+)
 from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
@@ -37,13 +41,7 @@ def rotate_node_api_key(db: Session, node: Node, *, actor_username: str | None =
         raise ValueError("API-ключ узла недоступен")
 
     new_key = generate_api_key()
-    adapter = RemoteNodeAdapter(
-        host=node.host,
-        port=node.port,
-        api_key=old_key,
-        mtls_enabled=get_transport(node).is_tls,
-    )
-    adapter.rotate_api_key(new_key)
+    get_adapter_for_node(node).rotate_api_key(new_key)
 
     key_hash, key_encrypted = store_api_key("", new_key)
     node.api_key_hash = key_hash

@@ -330,6 +330,35 @@ def test_remote_adapter_posts_batch_and_unwraps_results():
     ]
 
 
+@pytest.mark.parametrize("method", ["block_wireguard_clients_runtime", "block_awg2_clients_runtime"])
+def test_remote_adapter_splits_batches_to_the_agent_limit(method):
+    from app.services.runtime_peer_batch import CLIENTS_PER_REQUEST
+
+    names = [f"c{i}" for i in range(CLIENTS_PER_REQUEST * 2 + 1)]
+    adapter = RemoteNodeAdapter(host="127.0.0.1", port=9100, api_key="k" * 32)
+    adapter._request = MagicMock(
+        side_effect=lambda *_a, json, **_k: {"results": {name: {"success": True} for name in json["client_names"]}}
+    )
+
+    results = getattr(adapter, method)(names)
+
+    sent = [c.kwargs["json"]["client_names"] for c in adapter._request.call_args_list]
+    assert [len(chunk) for chunk in sent] == [CLIENTS_PER_REQUEST, CLIENTS_PER_REQUEST, 1]
+    assert [name for chunk in sent for name in chunk] == names
+    assert results == {name: {"success": True} for name in names}
+
+
+def test_agent_batch_limit_matches_the_panel_chunk():
+    import node_agent.main as agent_main
+    from app.services.runtime_peer_batch import CLIENTS_PER_REQUEST
+
+    # Deployed agents reject more than 5000 names; a bigger panel chunk would 422 on them.
+    assert CLIENTS_PER_REQUEST <= 5000
+    agent_main.ClientNamesRequest(client_names=["a"] * CLIENTS_PER_REQUEST)
+    with pytest.raises(ValueError):
+        agent_main.ClientNamesRequest(client_names=["a"] * (CLIENTS_PER_REQUEST + 1))
+
+
 def test_local_adapter_uses_runtime_batches(monkeypatch):
     import app.services.node_adapter as node_adapter
 

@@ -11,6 +11,7 @@ from fastapi import HTTPException, status
 
 from app.models import VpnType
 from app.services.profile_files import profile_files_batch_key
+from app.services.runtime_peer_batch import CLIENTS_PER_REQUEST
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.config import get_settings
 from app.paths import get_cidr_list_dir
@@ -1612,14 +1613,21 @@ class RemoteNodeAdapter(NodeAdapter):
     def unblock_wireguard_client_runtime(self, client_name: str) -> dict:
         return self._request("POST", f"/clients/wireguard/{client_name}/unblock", timeout=30.0)
 
+    def _block_clients_runtime_batched(self, path: str, client_names: list[str]) -> dict[str, dict]:
+        names = list(client_names)
+        results: dict[str, dict] = {}
+        for start in range(0, len(names), CLIENTS_PER_REQUEST):
+            data = self._request(
+                "POST",
+                path,
+                json={"client_names": names[start : start + CLIENTS_PER_REQUEST]},
+                timeout=60.0,
+            )
+            results.update((data or {}).get("results") or {})
+        return results
+
     def block_wireguard_clients_runtime(self, client_names: list[str]) -> dict[str, dict]:
-        data = self._request(
-            "POST",
-            "/clients/wireguard/runtime/block-batch",
-            json={"client_names": list(client_names)},
-            timeout=60.0,
-        )
-        return dict((data or {}).get("results") or {})
+        return self._block_clients_runtime_batched("/clients/wireguard/runtime/block-batch", client_names)
 
     def block_awg2_client_runtime(self, client_name: str) -> dict:
         return self._request("POST", f"/clients/amneziawg2/{client_name}/block", timeout=30.0)
@@ -1628,13 +1636,7 @@ class RemoteNodeAdapter(NodeAdapter):
         return self._request("POST", f"/clients/amneziawg2/{client_name}/unblock", timeout=30.0)
 
     def block_awg2_clients_runtime(self, client_names: list[str]) -> dict[str, dict]:
-        data = self._request(
-            "POST",
-            "/clients/amneziawg2/runtime/block-batch",
-            json={"client_names": list(client_names)},
-            timeout=60.0,
-        )
-        return dict((data or {}).get("results") or {})
+        return self._block_clients_runtime_batched("/clients/amneziawg2/runtime/block-batch", client_names)
 
     def disconnect_openvpn_client(self, client_name: str) -> dict:
         return self._request(
