@@ -18,7 +18,8 @@ from app.services import cloudflare_proxy_settings as cps
 
 
 @pytest.fixture(autouse=True)
-def _reset_settings_cache(monkeypatch):
+def _reset_settings_cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(cps, "_ENV_FILE", tmp_path / ".env")
     monkeypatch.setenv(cps.ENV_CLOUDFLARE_PROXY_ENABLED, "true")
     monkeypatch.setenv(cps.ENV_CLOUDFLARE_IPS_AUTO_UPDATE, "false")
     monkeypatch.setenv(cps.ENV_CLOUDFLARE_IPS_UPDATE_INTERVAL_DAYS, "7")
