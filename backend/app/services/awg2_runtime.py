@@ -8,6 +8,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from app.services.runtime_peer_batch import block_peers_batch, group_peers_by_client
+
 AWG2_CONFIG_DIR = Path("/etc/amnezia/amneziawg")
 DEFAULT_AZ_IFACE = "antizapret-awg"
 DEFAULT_VPN_IFACE = "vpn-awg"
@@ -61,8 +63,9 @@ def _comment_client_name(line: str) -> str | None:
     return comment
 
 
-def _parse_peers(config_path: Path, interface_name: str, client_name: str) -> list[dict]:
-    normalized = _normalize_client_name(client_name)
+def _parse_peers(config_path: Path, interface_name: str, client_name: str | None) -> list[dict]:
+    """Peers of ``client_name``, or of every client when it is ``None``."""
+    normalized = None if client_name is None else _normalize_client_name(client_name)
     if not config_path.exists():
         return []
 
@@ -72,7 +75,9 @@ def _parse_peers(config_path: Path, interface_name: str, client_name: str) -> li
 
     def flush() -> None:
         nonlocal current
-        if current and current.get("peer_public_key") and _normalize_client_name(current.get("client_name", "")) == normalized:
+        if current and current.get("peer_public_key") and (
+            normalized is None or _normalize_client_name(current.get("client_name", "")) == normalized
+        ):
             rows.append({**current, "interface_name": interface_name})
         current = None
 
@@ -232,6 +237,19 @@ def block_client_runtime(client_name: str, *, config_files: dict[str, Path] | No
         "error_count": len(errors),
         "errors": errors,
     }
+
+
+def block_clients_runtime(
+    client_names: list[str], *, config_files: dict[str, Path] | None = None
+) -> dict[str, dict]:
+    """Batch ``block_client_runtime``: one config pass and one ``awg set`` per interface."""
+    specs = [
+        spec
+        for iface, path in _resolve_config_files(config_files).items()
+        for spec in _parse_peers(path, iface, None)
+    ]
+    peers = group_peers_by_client(client_names, specs, _normalize_client_name)
+    return block_peers_batch(peers, tool="awg", run=_run)
 
 
 def unblock_client_runtime(client_name: str, *, config_files: dict[str, Path] | None = None) -> dict:

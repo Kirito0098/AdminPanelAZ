@@ -28,8 +28,10 @@ from app.services.local_vpn_status_cache import (
 )
 from app.services.node_remote_cache import get_cached_monitoring_overview, monitoring_overview_cache_key
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
+from app.services.wg_runtime import block_clients_runtime as wg_block_clients_runtime
 from app.services.awg2_runtime import (
     block_client_runtime as awg2_block_client_runtime,
+    block_clients_runtime as awg2_block_clients_runtime,
     unblock_client_runtime as awg2_unblock_client_runtime,
 )
 from app.services.warper import WarperService, build_ip_ranges_text_from_items, build_user_domains_text_from_items
@@ -202,10 +204,16 @@ class NodeAdapter(ABC):
     def unblock_wireguard_client_runtime(self, client_name: str) -> dict: ...
 
     @abstractmethod
+    def block_wireguard_clients_runtime(self, client_names: list[str]) -> dict[str, dict]: ...
+
+    @abstractmethod
     def block_awg2_client_runtime(self, client_name: str) -> dict: ...
 
     @abstractmethod
     def unblock_awg2_client_runtime(self, client_name: str) -> dict: ...
+
+    @abstractmethod
+    def block_awg2_clients_runtime(self, client_names: list[str]) -> dict[str, dict]: ...
 
     @abstractmethod
     def kill_openvpn_client(self, unit: str, client_name: str) -> dict: ...
@@ -812,11 +820,17 @@ class LocalNodeAdapter(NodeAdapter):
     def unblock_wireguard_client_runtime(self, client_name: str) -> dict:
         return unblock_client_runtime(client_name)
 
+    def block_wireguard_clients_runtime(self, client_names: list[str]) -> dict[str, dict]:
+        return wg_block_clients_runtime(client_names)
+
     def block_awg2_client_runtime(self, client_name: str) -> dict:
         return awg2_block_client_runtime(client_name)
 
     def unblock_awg2_client_runtime(self, client_name: str) -> dict:
         return awg2_unblock_client_runtime(client_name)
+
+    def block_awg2_clients_runtime(self, client_names: list[str]) -> dict[str, dict]:
+        return awg2_block_clients_runtime(client_names)
 
     def kill_openvpn_client(self, unit: str, client_name: str) -> dict:
         profile_key = normalize_watch_unit(unit) or unit
@@ -1574,11 +1588,29 @@ class RemoteNodeAdapter(NodeAdapter):
     def unblock_wireguard_client_runtime(self, client_name: str) -> dict:
         return self._request("POST", f"/clients/wireguard/{client_name}/unblock", timeout=30.0)
 
+    def block_wireguard_clients_runtime(self, client_names: list[str]) -> dict[str, dict]:
+        data = self._request(
+            "POST",
+            "/clients/wireguard/runtime/block-batch",
+            json={"client_names": list(client_names)},
+            timeout=60.0,
+        )
+        return dict((data or {}).get("results") or {})
+
     def block_awg2_client_runtime(self, client_name: str) -> dict:
         return self._request("POST", f"/clients/amneziawg2/{client_name}/block", timeout=30.0)
 
     def unblock_awg2_client_runtime(self, client_name: str) -> dict:
         return self._request("POST", f"/clients/amneziawg2/{client_name}/unblock", timeout=30.0)
+
+    def block_awg2_clients_runtime(self, client_names: list[str]) -> dict[str, dict]:
+        data = self._request(
+            "POST",
+            "/clients/amneziawg2/runtime/block-batch",
+            json={"client_names": list(client_names)},
+            timeout=60.0,
+        )
+        return dict((data or {}).get("results") or {})
 
     def disconnect_openvpn_client(self, client_name: str) -> dict:
         return self._request(

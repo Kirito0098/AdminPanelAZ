@@ -8,6 +8,7 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -35,8 +36,10 @@ from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.profile_files import profile_files_batch_key
 from app.services.server_monitor import ServerMonitorService
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
+from app.services.wg_runtime import block_clients_runtime as wg_block_clients_runtime
 from app.services.awg2_runtime import (
     block_client_runtime as awg2_block_client_runtime,
+    block_clients_runtime as awg2_block_clients_runtime,
     unblock_client_runtime as awg2_unblock_client_runtime,
 )
 from app.services.warper import WarperService, run_warper_action
@@ -138,6 +141,10 @@ class OpenVpnClientRequest(BaseModel):
 
 class WireGuardClientRequest(BaseModel):
     client_name: str = Field(min_length=1, max_length=32)
+
+
+class ClientNamesRequest(BaseModel):
+    client_names: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(max_length=5000)
 
 
 class Awg2ClientRequest(BaseModel):
@@ -382,6 +389,16 @@ def add_awg2_client(payload: Awg2ClientRequest, _: None = Depends(verify_api_key
 def delete_awg2_client(client_name: str, _: None = Depends(verify_api_key)):
     output = Awg2Service().delete_client(client_name)
     return {"message": f"Клиент '{client_name}' удалён", "detail": output}
+
+
+@app.post("/clients/wireguard/runtime/block-batch")
+def block_wireguard_batch(payload: ClientNamesRequest, _: None = Depends(verify_api_key)):
+    return {"results": wg_block_clients_runtime(payload.client_names)}
+
+
+@app.post("/clients/amneziawg2/runtime/block-batch")
+def block_awg2_batch(payload: ClientNamesRequest, _: None = Depends(verify_api_key)):
+    return {"results": awg2_block_clients_runtime(payload.client_names)}
 
 
 @app.post("/clients/wireguard/{client_name}/block")

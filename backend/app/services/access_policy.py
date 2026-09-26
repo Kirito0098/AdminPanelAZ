@@ -4,11 +4,13 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, WgAccessPolicy
 from app.services.awg2_runtime import (
     block_client_runtime as awg2_block_client_runtime,
+    block_clients_runtime as awg2_block_clients_runtime,
     unblock_client_runtime as awg2_unblock_client_runtime,
 )
 from app.services.node_adapter import NodeAdapter
@@ -31,7 +33,11 @@ from app.services.traffic_limit import (
     parse_traffic_limit_period_days,
     resolve_traffic_limit_state,
 )
-from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
+from app.services.wg_runtime import (
+    block_client_runtime,
+    unblock_client_runtime,
+)
+from app.services.wg_runtime import block_clients_runtime as wg_block_clients_runtime
 
 logger = logging.getLogger(__name__)
 
@@ -541,15 +547,56 @@ class AccessPolicyService:
         now = _now()
         node_id = self._require_node_id()
         excluded = (exclude_client or "").strip().lower()
-        results: list[dict] = []
+        blocked: list[str] = []
         for row in self.db.query(AmneziaWg2AccessPolicy).filter_by(node_id=node_id).all():
             if excluded and row.client_name == excluded:
                 continue
             state = self._awg2_state(row, now)
             if not state["is_blocked"]:
                 continue
-            results.append(self._reblock_runtime(self._apply_awg2_client_runtime, row.client_name, node_id))
-        return results
+            blocked.append(row.client_name)
+        return self._reblock_runtime_batch(
+            blocked,
+            node_id=node_id,
+            apply=self._apply_awg2_client_runtime,
+            batch_method="block_awg2_clients_runtime",
+            local_batch=awg2_block_clients_runtime,
+        )
+
+    def _reblock_runtime_batch(
+        self,
+        client_names: list[str],
+        *,
+        node_id: int,
+        apply,
+        batch_method: str,
+        local_batch,
+        count_wg_calls: bool = False,
+    ) -> list[dict]:
+        """Re-block peers with one runtime call; agents without the batch route get one call per client."""
+        if not client_names:
+            return []
+        if self._adapter is None:
+            batch = local_batch
+        else:
+            batch = getattr(self._adapter, batch_method, None)
+            if not callable(batch):
+                return [self._reblock_runtime(apply, name, node_id) for name in client_names]
+        if count_wg_calls:
+            self.wg_runtime_calls += 1
+        try:
+            results = batch([name.strip().lower() for name in client_names])
+        except HTTPException as exc:
+            if exc.status_code in (404, 405):
+                return [self._reblock_runtime(apply, name, node_id) for name in client_names]
+            error = str(exc.detail)
+        except Exception as exc:
+            error = str(exc)
+        else:
+            results = results or {}
+            return [{"client_name": name, "result": results.get(name.strip().lower())} for name in client_names]
+        logger.warning("Runtime re-block of %d clients on node %s failed: %s", len(client_names), node_id, error)
+        return [{"client_name": name, "error": error} for name in client_names]
 
     @staticmethod
     def _reblock_runtime(apply, client_name: str, node_id: int) -> dict:
@@ -802,7 +849,7 @@ class AccessPolicyService:
         now = _now()
         node_id = self._require_node_id()
         excluded = (exclude_client or "").strip().lower()
-        results: list[dict] = []
+        blocked: list[str] = []
         for row in self.db.query(WgAccessPolicy).filter_by(node_id=node_id).all():
             if is_node_default_policy_client(row.client_name):
                 continue
@@ -811,8 +858,15 @@ class AccessPolicyService:
             state = self._wg_state(row, now)
             if not state["is_blocked"]:
                 continue
-            results.append(self._reblock_runtime(self._apply_wg_client_runtime, row.client_name, node_id))
-        return results
+            blocked.append(row.client_name)
+        return self._reblock_runtime_batch(
+            blocked,
+            node_id=node_id,
+            apply=self._apply_wg_client_runtime,
+            batch_method="block_wireguard_clients_runtime",
+            local_batch=wg_block_clients_runtime,
+            count_wg_calls=True,
+        )
 
     def _wg_state(self, row: WgAccessPolicy, now: datetime | None = None) -> dict:
         now = _as_utc(now) or _now()
