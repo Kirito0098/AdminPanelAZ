@@ -3,8 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   EXPECTED_NODE_HEADER,
   applyExpectedNodeHeader,
+  canReturnToShownNode,
   createActiveNodeTracker,
   decideActiveNodeRefresh,
+  deleteNodeInTab,
   getExpectedNodeId,
   isActiveNodeChangedPayload,
   notifyActiveNodeChanged,
@@ -179,5 +181,110 @@ describe('createActiveNodeTracker', () => {
     expect(getExpectedNodeId()).toBe(1)
     expect(tracker.classifyRefresh(tracker.beginRefresh(), 1)).toBe('show')
     expect(tracker.classifyRefresh(tracker.beginRefresh(), 5)).toBe('changed-elsewhere')
+  })
+})
+
+describe('deleteNodeInTab', () => {
+  const localNode = { node: { id: 1 }, ha: null }
+
+  it('moves the tab to the fallback node when it deletes the node it shows', async () => {
+    const tracker = createActiveNodeTracker()
+    tracker.show(5)
+    const beforeDeletion = tracker.beginRefresh()
+    const deleteNode = vi.fn(async () => ({}))
+
+    const outcome = await deleteNodeInTab(tracker, 5, { deleteNode, getActiveNode: async () => localNode })
+
+    expect(deleteNode).toHaveBeenCalledWith(5)
+    expect(outcome).toEqual({ moved: true, active: localNode })
+    expect(getExpectedNodeId()).toBe(1)
+    expect(tracker.classifyRefresh(beforeDeletion, 5)).toBe('stale')
+    expect(tracker.classifyRefresh(tracker.beginRefresh(), 1)).toBe('show')
+    expect(tracker.classifyRefresh(tracker.beginRefresh(), 2)).toBe('changed-elsewhere')
+  })
+
+  it('drops a poll answered while the deletion is in flight', async () => {
+    const tracker = createActiveNodeTracker()
+    tracker.show(5)
+    let duringDeletion = -1
+    await deleteNodeInTab(tracker, 5, {
+      deleteNode: async () => {
+        duringDeletion = tracker.beginRefresh()
+      },
+      getActiveNode: async () => localNode,
+    })
+
+    expect(tracker.classifyRefresh(duringDeletion, 5)).toBe('stale')
+  })
+
+  it('drops a poll that reports the fallback node before the deletion returns', async () => {
+    const tracker = createActiveNodeTracker()
+    tracker.show(5)
+    const beforeDeletion = tracker.beginRefresh()
+    let outcomeInFlight = ''
+    await deleteNodeInTab(tracker, 5, {
+      deleteNode: async () => {
+        outcomeInFlight = tracker.classifyRefresh(beforeDeletion, 1)
+      },
+      getActiveNode: async () => localNode,
+    })
+
+    expect(outcomeInFlight).toBe('stale')
+  })
+
+  it('does not name the deleted node in writes when the fallback is unknown', async () => {
+    const tracker = createActiveNodeTracker()
+    tracker.show(5)
+
+    const outcome = await deleteNodeInTab(tracker, 5, {
+      deleteNode: async () => {},
+      getActiveNode: async () => {
+        throw new Error('offline')
+      },
+    })
+
+    expect(outcome).toEqual({ moved: true, active: null })
+    expect(getExpectedNodeId()).toBeNull()
+    expect(tracker.classifyRefresh(tracker.beginRefresh(), 1)).toBe('show')
+  })
+
+  it('keeps the tab and its protection when another node is deleted', async () => {
+    const tracker = createActiveNodeTracker()
+    tracker.show(5)
+    const getActiveNode = vi.fn(async () => localNode)
+
+    const outcome = await deleteNodeInTab(tracker, 7, { deleteNode: async () => {}, getActiveNode })
+
+    expect(outcome).toEqual({ moved: false })
+    expect(getActiveNode).not.toHaveBeenCalled()
+    expect(getExpectedNodeId()).toBe(5)
+    expect(tracker.classifyRefresh(tracker.beginRefresh(), 1)).toBe('changed-elsewhere')
+  })
+
+  it('keeps the shown node when the deletion fails', async () => {
+    const tracker = createActiveNodeTracker()
+    tracker.show(5)
+
+    await expect(
+      deleteNodeInTab(tracker, 5, {
+        deleteNode: async () => {
+          throw new Error('409')
+        },
+        getActiveNode: async () => localNode,
+      }),
+    ).rejects.toThrow('409')
+
+    expect(getExpectedNodeId()).toBe(5)
+    expect(tracker.classifyRefresh(tracker.beginRefresh(), 5)).toBe('show')
+    expect(tracker.classifyRefresh(tracker.beginRefresh(), 1)).toBe('changed-elsewhere')
+  })
+})
+
+describe('canReturnToShownNode', () => {
+  it('offers to return only to a node that still exists', () => {
+    const nodes = [{ id: 1 }, { id: 5 }]
+    expect(canReturnToShownNode(5, nodes)).toBe(true)
+    expect(canReturnToShownNode(7, nodes)).toBe(false)
+    expect(canReturnToShownNode(null, nodes)).toBe(false)
   })
 })

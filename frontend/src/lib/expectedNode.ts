@@ -83,5 +83,42 @@ export function createActiveNodeTracker() {
       activationSeq += 1
       show(id)
     },
+    /** Deleting the node this tab shows is an activation from this tab: the server moves to its fallback. */
+    beginDeletion: (id: number): boolean => {
+      if (id !== shownNodeId) return false
+      activationSeq += 1
+      return true
+    },
   }
+}
+
+export type ActiveNodeTracker = ReturnType<typeof createActiveNodeTracker>
+
+export type NodeDeletionOutcome<T> = { moved: false } | { moved: true; active: T | null }
+
+/**
+ * Deletes a node from this tab. When it is the node the tab shows, the tab moves to the node the
+ * server made active instead (local or another VPN node), without the "changed elsewhere" warning.
+ * If that node is unknown, the tab names no node in writes until the next poll shows one.
+ */
+export async function deleteNodeInTab<T extends { node: { id: number } | null }>(
+  tracker: ActiveNodeTracker,
+  id: number,
+  deps: { deleteNode: (id: number) => Promise<unknown>; getActiveNode: () => Promise<T> },
+): Promise<NodeDeletionOutcome<T>> {
+  const deletingShown = tracker.beginDeletion(id)
+  await deps.deleteNode(id)
+  if (!deletingShown) return { moved: false }
+  let active: T | null = null
+  try {
+    active = await deps.getActiveNode()
+  } catch {
+    active = null
+  }
+  tracker.finishActivation(active?.node?.id ?? null)
+  return { moved: true, active }
+}
+
+export function canReturnToShownNode(shownNodeId: number | null, nodes: { id: number }[]): boolean {
+  return shownNodeId !== null && nodes.some((node) => node.id === shownNodeId)
 }

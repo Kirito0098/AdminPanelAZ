@@ -17,7 +17,6 @@ import {
   ApiError,
   checkNodeHealth,
   createNode,
-  deleteNode,
   listNodeTransports,
   patchNodeTransport,
   preflightNodeTransport,
@@ -144,6 +143,7 @@ export default function NodesPage() {
     refreshSyncGroups,
     applySyncGroups,
     activate,
+    deleteNode,
   } = useNode()
   const { features } = useFeatureModules()
   // Default-off toggle: treat missing key as disabled (isEnabled() falls back to true).

@@ -5,10 +5,11 @@ import { Button } from '@/components/ui/button'
 import { useAuth } from '@/context/AuthContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { canReturnToShownNode } from '@/lib/expectedNode'
 
 export default function ActiveNodeChangedBanner() {
   const { user } = useAuth()
-  const { activeNode, activeNodeChangedElsewhere, adoptActiveNodeChangedElsewhere, activate } = useNode()
+  const { activeNode, activeNodeChangedElsewhere, adoptActiveNodeChangedElsewhere, activate, nodes } = useNode()
   const { error: notifyError } = useNotifications()
   const [busy, setBusy] = useState(false)
 
@@ -32,7 +33,7 @@ export default function ActiveNodeChangedBanner() {
         <Button size="sm" onClick={adoptActiveNodeChangedElsewhere} disabled={busy}>
           Перейти на «{activeNodeChangedElsewhere.name}»
         </Button>
-        {user?.role === 'admin' && (
+        {user?.role === 'admin' && canReturnToShownNode(activeNode.id, nodes) && (
           <Button size="sm" variant="outline" onClick={keepShownNode} disabled={busy}>
             Вернуть «{activeNode.name}»
           </Button>

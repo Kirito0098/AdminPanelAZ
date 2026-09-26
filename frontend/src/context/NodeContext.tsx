@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import * as api from '@/api/client'
 import { useAuth } from '@/context/AuthContext'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
-import { createActiveNodeTracker, onActiveNodeChanged } from '@/lib/expectedNode'
+import { createActiveNodeTracker, deleteNodeInTab, onActiveNodeChanged } from '@/lib/expectedNode'
 import type { Node, NodeHaContext, NodeSyncGroup } from '@/types'
 
 interface ActiveNodeState {
@@ -25,6 +25,8 @@ interface NodeContextValue {
   refreshSyncGroups: () => Promise<void>
   applySyncGroups: (groups: NodeSyncGroup[]) => void
   activate: (id: number) => Promise<void>
+  /** Deleting the node this tab shows moves the tab to the node the server made active. */
+  deleteNode: (id: number) => Promise<void>
 }
 
 const NodeContext = createContext<NodeContextValue | null>(null)
@@ -115,6 +117,22 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
     [refreshNodes, refreshSyncGroups, showActiveNode],
   )
 
+  const deleteNode = useCallback(
+    async (id: number) => {
+      const outcome = await deleteNodeInTab(trackerRef.current, id, {
+        deleteNode: api.deleteNode,
+        getActiveNode: api.getActiveNode,
+      })
+      setNodes((prev) => prev.filter((node) => node.id !== id))
+      if (outcome.moved) {
+        showActiveNode({ node: outcome.active?.node ?? null, ha: outcome.active?.ha ?? null })
+      } else {
+        setChangedElsewhere((prev) => (prev?.node?.id === id ? null : prev))
+      }
+    },
+    [showActiveNode],
+  )
+
   const adoptActiveNodeChangedElsewhere = useCallback(() => {
     if (changedElsewhere) showActiveNode(changedElsewhere)
   }, [changedElsewhere, showActiveNode])
@@ -169,6 +187,7 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
       refreshSyncGroups,
       applySyncGroups,
       activate,
+      deleteNode,
     }),
     [
       activeNode,
@@ -184,6 +203,7 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
       refreshSyncGroups,
       applySyncGroups,
       activate,
+      deleteNode,
     ],
   )
 
