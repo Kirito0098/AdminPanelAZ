@@ -39,6 +39,27 @@ HOST_SETTING_KEYS = ("openvpn_host", "wireguard_host")
 
 BLOCKING_LINK_CODES = frozenset({"node_auth", "node_tls_mismatch", "node_unreachable", "node_timeout"})
 
+PUSH_FULL_STEP_LABELS = {
+    "backup_primary": "бэкап primary",
+    "restore_replica": "восстановление бэкапа на реплике",
+    "profiles": "копирование OpenVPN-профилей",
+    "prune": "очистка лишних клиентов",
+    "restart_openvpn": "перезапуск OpenVPN",
+    "apply_wireguard": "применение WireGuard",
+    "sync_awg2": "синхронизация AZ-AWG2",
+    "access_policies": "копирование клиентов и политик доступа",
+    "reblock": "возврат блокировок",
+}
+
+
+def _error_text(exc: Exception) -> str:
+    detail = getattr(exc, "detail", None)
+    if isinstance(detail, dict) and detail.get("message"):
+        return str(detail["message"])
+    if detail is not None:
+        return str(detail)
+    return str(exc)
+
 
 def preflight_push_full_links(db: Session, group: NodeSyncGroup) -> list[dict[str, Any]]:
     """Health-check primary + replicas before wipe. Returns blocking issues."""
@@ -157,11 +178,18 @@ def run_push_full(
 
     progress(10, "Создание бэкапа на primary…", "backup_primary")
     primary_node = db.get(Node, group.primary_node_id)
-    primary_adapter = get_adapter_for_node(primary_node)
-    backup_info = primary_adapter.create_antizapret_backup()
+    primary_name = primary_node.name if primary_node else str(group.primary_node_id)
+    try:
+        primary_adapter = get_adapter_for_node(primary_node)
+        backup_info = primary_adapter.create_antizapret_backup()
 
-    progress(30, "Чтение архива…", "backup_primary")
-    archive_bytes = _read_backup_bytes(primary_adapter, backup_info)
+        progress(30, "Чтение архива…", "backup_primary")
+        archive_bytes = _read_backup_bytes(primary_adapter, backup_info)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Push full: ошибка на шаге «{PUSH_FULL_STEP_LABELS['backup_primary']}» ({primary_name}): "
+            f"{_error_text(exc)}"
+        ) from exc
     archive_name = backup_info.get("archive_name") or "backup.tar.gz"
 
     primary_host_settings = read_primary_host_settings(primary_adapter)
@@ -240,7 +268,7 @@ def run_push_full(
                     or "prune failed"
                 )
 
-            current_step = "restart_apply"
+            current_step = "restart_openvpn"
             progress(percent, f"Перезапуск OpenVPN на {replica_name}…", current_step)
             if replica_node is not None and bool(getattr(replica_node, "openvpn_multihome", False)):
                 from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
@@ -271,7 +299,7 @@ def run_push_full(
                     or "OpenVPN restart failed"
                 )
 
-            current_step = "restart_apply"
+            current_step = "apply_wireguard"
             progress(percent, f"Применение WireGuard на {replica_name}…", current_step)
             wg_runtime = replica_adapter.apply_wireguard_runtime()
             if not wg_runtime.get("success"):
@@ -292,15 +320,18 @@ def run_push_full(
                 except Exception as exc:
                     logger.warning("Push full: AWG2 health on primary failed: %s", exc)
             if isinstance(awg2_health, dict) and awg2_health.get("installed"):
-                progress(percent, f"Синхронизация AZ-AWG2 на {replica_name}…")
+                current_step = "sync_awg2"
+                progress(percent, f"Синхронизация AZ-AWG2 на {replica_name}…", current_step)
                 sync_amneziawg2_state_from_primary(primary_adapter, replica_adapter)
 
             restored.append({"node_id": replica_id, "node_name": replica_name, "result": result})
 
             if admin and replica_node and primary_node:
+                current_step = "access_policies"
                 import_clients_from_disk(db, replica_node, admin.id)
                 copy_access_policies_from_node(db, primary_node, replica_node)
             if replica_node is not None:
+                current_step = "reblock"
                 reblock_attempted = True
                 reapply_blocked_runtime_policies(
                     db,
@@ -318,8 +349,15 @@ def run_push_full(
                         exc,
                     )
         except Exception as exc:
-            failed.append({"node_id": replica_id, "node_name": replica_name, "failed_step": current_step,
-                        "error": str(exc)})
+            failed.append(
+                {
+                    "node_id": replica_id,
+                    "node_name": replica_name,
+                    "failed_step": current_step,
+                    "failed_step_label": PUSH_FULL_STEP_LABELS[current_step],
+                    "error": _error_text(exc),
+                }
+            )
             logger.warning("Push full: replica sync failed on %s: %s", replica_name, exc)
             # The HA restore already reloaded WireGuard from primary configs, lifting runtime blocks.
             if replica_node is not None and replica_adapter is not None and not reblock_attempted:
@@ -360,7 +398,9 @@ def run_push_full(
 
     if failed:
         group.sync_status = SyncStatus.failed
-        error_parts = [f"{item.get('node_name')}: {item.get('error')}" for item in failed]
+        error_parts = [
+            f"{item['node_name']} (шаг «{item['failed_step_label']}»): {item['error']}" for item in failed
+        ]
         group.last_sync_error = "; ".join(error_parts)
         success = False
         message = f"Push full: ошибки на {len(failed)} из {len(replica_ids)} реплик"
