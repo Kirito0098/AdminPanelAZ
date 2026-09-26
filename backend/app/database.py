@@ -1566,6 +1566,7 @@ def _migrate_nodes_columns() -> None:
     _migrate_nodes_openvpn_remote_hosts()
     _migrate_nodes_wireguard_use_first_remote()
     _migrate_nodes_openvpn_multihome()
+    _migrate_nodes_openvpn_restart_pending()
     _migrate_nodes_proxy_fields()
 
 
@@ -1870,6 +1871,19 @@ def _migrate_nodes_openvpn_multihome() -> None:
     with _migration_transaction() as conn:
         conn.execute(text("ALTER TABLE nodes ADD COLUMN openvpn_multihome INTEGER DEFAULT 0"))
         logger.info("DB migration: added nodes.openvpn_multihome")
+
+
+def _migrate_nodes_openvpn_restart_pending() -> None:
+    """Add HA replica flag: OpenVPN restart still owed after a server identity change."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    if "openvpn_restart_pending" in cols:
+        return
+    with _migration_transaction() as conn:
+        conn.execute(text("ALTER TABLE nodes ADD COLUMN openvpn_restart_pending INTEGER DEFAULT 0"))
+        logger.info("DB migration: added nodes.openvpn_restart_pending")
 
 
 def _migrate_nodes_proxy_fields() -> None:

@@ -253,11 +253,20 @@ def _disconnect_openvpn_clients(replica_adapter, client_names: list[str]) -> Non
         raise RuntimeError("Не удалось отключить отозванных клиентов OpenVPN: " + "; ".join(failures))
 
 
+def _set_openvpn_restart_pending(db: Session | None, replica_node: Node | None, pending: bool) -> None:
+    if db is None or replica_node is None:
+        return
+    replica_node.openvpn_restart_pending = pending
+    db.commit()
+
+
 def sync_openvpn_pki_from_primary(
     primary_adapter,
     replica_adapter,
     *,
     openvpn_multihome: bool = False,
+    db: Session | None = None,
+    replica_node: Node | None = None,
 ) -> None:
     """Copy OpenVPN PKI and .ovpn profiles from primary to replica (no cert re-issue).
 
@@ -265,10 +274,19 @@ def sync_openvpn_pki_from_primary(
     connection, so servers restart only when the server identity changed; clients
     revoked since the last sync or still connected with a revoked certificate are
     disconnected instead (as ``client.sh`` does).
+
+    After the import the new identity is already on disk, so a retry of a sync that
+    failed before the restart sees no change: the owed restart is kept on the replica
+    node (``openvpn_restart_pending``) until it succeeds.
     """
     before = _replica_pki_state(replica_adapter)
     archive = primary_adapter.export_easyrsa3_archive()
     after = read_pki_state(archive)
+    restart_needed = server_identity_changed(before, after)
+    if restart_needed:
+        _set_openvpn_restart_pending(db, replica_node, True)
+    else:
+        restart_needed = getattr(replica_node, "openvpn_restart_pending", False) is True
     replica_adapter.import_easyrsa3_archive(archive)
     copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter)
 
@@ -287,7 +305,7 @@ def sync_openvpn_pki_from_primary(
             ],
         )
 
-    if not server_identity_changed(before, after):
+    if not restart_needed:
         _disconnect_openvpn_clients(replica_adapter, _revoked_clients_to_disconnect(replica_adapter, before, after))
         return
 
@@ -310,6 +328,7 @@ def sync_openvpn_pki_from_primary(
             for entry in failed
         ) or "OpenVPN restart failed after PKI sync"
         raise HTTPException(status_code=500, detail=detail)
+    _set_openvpn_restart_pending(db, replica_node, False)
 
 
 def _replica_policy_service(db: Session, replica_node: Node, replica_adapter) -> AccessPolicyService:
@@ -410,6 +429,8 @@ def sync_vpn_crypto_from_primary(
             primary_adapter,
             replica_adapter,
             openvpn_multihome=openvpn_multihome,
+            db=db,
+            replica_node=replica_node,
         )
         return
     if vpn_type == VpnType.amneziawg2:
@@ -448,6 +469,8 @@ def sync_all_vpn_crypto_from_primary(
         primary_adapter,
         replica_adapter,
         openvpn_multihome=openvpn_multihome,
+        db=db,
+        replica_node=replica_node,
     )
     try:
         if primary_adapter.get_awg2_health().get("installed"):

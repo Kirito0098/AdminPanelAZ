@@ -510,6 +510,26 @@ def test_sync_all_vpn_crypto_reapplies_wireguard_blocks(db, monkeypatch):
     _assert_wg_blocks_reapplied(replica)
 
 
+def test_openvpn_pki_sync_receives_replica_context(db, monkeypatch):
+    replica_node = _make_node(db, name="replica")
+    primary = MagicMock()
+    primary.get_awg2_health.return_value = {"installed": False}
+    replica = MagicMock()
+    sync_pki = MagicMock()
+    monkeypatch.setattr(vpn_state_sync, "sync_openvpn_pki_from_primary", sync_pki)
+    monkeypatch.setattr(vpn_state_sync, "sync_wireguard_state_from_primary", MagicMock())
+
+    vpn_state_sync.sync_vpn_crypto_from_primary(
+        primary, replica, VpnType.openvpn, db=db, replica_node=replica_node, openvpn_multihome=True
+    )
+    vpn_state_sync.sync_all_vpn_crypto_from_primary(primary, replica, db=db, replica_node=replica_node)
+
+    assert [call.kwargs for call in sync_pki.call_args_list] == [
+        {"openvpn_multihome": True, "db": db, "replica_node": replica_node},
+        {"openvpn_multihome": False, "db": db, "replica_node": replica_node},
+    ]
+
+
 def test_sync_vpn_crypto_routes_amneziawg2():
     primary = MagicMock()
     replica = MagicMock()
@@ -754,6 +774,8 @@ def test_handle_client_renew_cert_syncs_openvpn_pki(monkeypatch):
         primary_adapter,
         replica_adapter,
         openvpn_multihome=False,
+        db=db,
+        replica_node=replica_node,
     )
     assert result.operation == ReplicateOperation.CLIENT_RENEW_CERT
     assert result.successes == [{"node_id": 5, "config_id": 50}]

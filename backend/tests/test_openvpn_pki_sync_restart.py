@@ -11,7 +11,12 @@ import tarfile
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
+from app.database import Base
+from app.models import Node, NodeStatus
 from app.services.node_sync import openvpn_pki_state, vpn_state_sync
 from app.services.node_sync.openvpn_restart import OPENVPN_SERVER_UNITS
 from app.services.openvpn_pki import ProfileValidationResult
@@ -281,6 +286,115 @@ def test_retry_after_failure_past_import_disconnects_connected_revoked_client(re
 
     assert _killed(replica) == [(unit, name) for name in ("bob", "old-revoked") for unit in OPENVPN_SERVER_UNITS]
     restart.assert_not_called()
+
+
+@pytest.fixture
+def replica_db(tmp_path):
+    engine = create_engine(f"sqlite:///{tmp_path / 'panel.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    session_factory = sessionmaker(bind=engine)
+    session = session_factory()
+    try:
+        yield session_factory, session
+    finally:
+        session.close()
+        engine.dispose()
+
+
+def _replica_node(session, *, is_local: bool = False) -> Node:
+    node = Node(
+        name="replica",
+        host="10.0.0.2",
+        port=9100,
+        api_key_hash="",
+        api_key_encrypted="",
+        status=NodeStatus.online,
+        is_local=is_local,
+        node_metadata="{}",
+    )
+    session.add(node)
+    session.commit()
+    return node
+
+
+def _committed_restart_pending(session_factory, node_id: int) -> bool:
+    with session_factory() as session:
+        return session.get(Node, node_id).openvpn_restart_pending
+
+
+def _identity_change() -> tuple[bytes, bytes]:
+    return _pki_archive(rows=_BASE_ROWS), _pki_archive(ca=b"ca-2", server_crt=b"server-crt-2", rows=_BASE_ROWS)
+
+
+@pytest.mark.parametrize("is_local", [False, True], ids=["remote-replica", "local-replica"])
+def test_retry_after_failure_before_restart_restarts_once(restart, monkeypatch, replica_db, is_local):
+    session_factory, db = replica_db
+    node = _replica_node(db, is_local=is_local)
+    primary, replica = _stateful_replica(*_identity_change())
+    copy_profiles = MagicMock(side_effect=RuntimeError("no space left on device"))
+    monkeypatch.setattr(vpn_state_sync, "copy_openvpn_profiles_from_primary", copy_profiles)
+
+    with pytest.raises(RuntimeError, match="no space left"):
+        vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica, db=db, replica_node=node)
+    restart.assert_not_called()
+    assert _committed_restart_pending(session_factory, node.id) is True
+
+    copy_profiles.side_effect = None
+    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica, db=db, replica_node=node)
+    restart.assert_called_once_with(replica)
+    assert _committed_restart_pending(session_factory, node.id) is False
+
+    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica, db=db, replica_node=node)
+    restart.assert_called_once_with(replica)
+
+
+@pytest.mark.parametrize("failure", ["unsuccessful", "raises"])
+def test_failed_restart_keeps_restart_pending(restart, replica_db, failure):
+    session_factory, db = replica_db
+    node = _replica_node(db)
+    primary, replica = _stateful_replica(*_identity_change())
+    if failure == "raises":
+        restart.side_effect = RuntimeError("agent unreachable")
+    else:
+        restart.return_value = {
+            "success": False,
+            "restarted": [],
+            "skipped": [],
+            "failed": [{"unit": OPENVPN_SERVER_UNITS[0], "error": "timeout"}],
+        }
+
+    with pytest.raises((RuntimeError, HTTPException)):
+        vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica, db=db, replica_node=node)
+    assert _committed_restart_pending(session_factory, node.id) is True
+
+    restart.side_effect = None
+    restart.return_value = dict(_RESTART_OK)
+    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica, db=db, replica_node=node)
+    assert restart.call_count == 2
+    assert _committed_restart_pending(session_factory, node.id) is False
+
+    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica, db=db, replica_node=node)
+    assert restart.call_count == 2
+
+
+def test_pending_restart_goes_through_multihome(restart, monkeypatch, replica_db):
+    import app.services.openvpn_multihome as multihome
+
+    ensure = MagicMock(return_value={"restart": dict(_RESTART_OK)})
+    monkeypatch.setattr(multihome, "maybe_ensure_openvpn_multihome", ensure)
+    session_factory, db = replica_db
+    node = _replica_node(db)
+    node.openvpn_restart_pending = True
+    db.commit()
+    primary, replica = _adapters(_pki_archive(), _pki_archive())
+
+    vpn_state_sync.sync_openvpn_pki_from_primary(
+        primary, replica, openvpn_multihome=True, db=db, replica_node=node
+    )
+
+    ensure.assert_called_once_with(replica, enabled=True)
+    restart.assert_not_called()
+    assert _committed_restart_pending(session_factory, node.id) is False
 
 
 def test_status_is_not_read_without_revoked_clients(restart):

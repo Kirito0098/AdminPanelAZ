@@ -90,7 +90,9 @@ def test_upgrade_keeps_data(db_2_25_1):
 
     db = database.SessionLocal()
     try:
-        assert [n.name for n in db.query(Node).order_by(Node.id)] == ["local", "remote"]
+        nodes = db.query(Node).order_by(Node.id).all()
+        assert [n.name for n in nodes] == ["local", "remote"]
+        assert [n.openvpn_restart_pending for n in nodes] == [False, False]
         assert db.query(User).one().username == "admin"
         redemptions = db.query(UnlockCodeRedemption).order_by(UnlockCodeRedemption.id).all()
         assert [(r.client_name, r.node_id, r.user_id) for r in redemptions] == [

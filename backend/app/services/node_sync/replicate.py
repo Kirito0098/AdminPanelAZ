@@ -215,6 +215,8 @@ def _handle_client_renew_cert(db: Session, group: NodeSyncGroup, payload: dict[s
                 primary_adapter,
                 get_adapter_for_node(replica_node),
                 openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
+                db=db,
+                replica_node=replica_node,
             )
             if shadow is not None:
                 shadow.cert_expire_days = cert_expire_days
