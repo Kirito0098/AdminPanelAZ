@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import Spinner from '@/components/ui/Spinner'
 import ServerUnavailableScreen from '@/components/ServerUnavailableScreen'
+import { readLoginRedirectParams } from '@/lib/loginRedirectParams'
 import { useAuth } from '@/context/AuthContext'
 import { useNotifications } from '@/context/NotificationContext'
 
@@ -60,18 +61,15 @@ export default function LoginPage() {
   )
 
   useEffect(() => {
-    const hashToken = window.location.hash.match(/^#token=(.+)$/)?.[1]
-    const queryToken = searchParams.get('token')
-    const token = hashToken || queryToken
+    const { token, tgError } = readLoginRedirectParams(window.location.hash, searchParams)
     if (token && setToken) {
-      setToken(decodeURIComponent(token))
-      if (hashToken) {
+      setToken(token)
+      if (window.location.hash.startsWith('#token=')) {
         window.history.replaceState(null, '', window.location.pathname + window.location.search)
       }
     }
-    const tgError = searchParams.get('tg_error')
     if (tgError) {
-      notifyError(decodeURIComponent(tgError))
+      notifyError(tgError)
       const next = new URLSearchParams(searchParams)
       next.delete('tg_error')
       const qs = next.toString()
