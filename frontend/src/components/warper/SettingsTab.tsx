@@ -22,6 +22,7 @@ import {
   getWarperSettingsOptions,
   getWarperSingboxStatus,
   getWarperSubnets,
+  postWarperRestartKresd,
   postWarperResync,
   postWarperSingbox,
   setWarperAutopatch,
@@ -67,6 +68,8 @@ import WarperSection, { WarperStatTile } from './WarperSection'
 import WarperUpdatesSection from './WarperUpdatesSection'
 import {
   DEFAULT_FAKE_SUBNET,
+  donorLinkMode,
+  extractProxyLink,
   formatOutboundMode,
   isWarperDisabled,
   normalizeOutboundMode,
@@ -106,9 +109,8 @@ const MTU_MAX = 1500
 const CIDR_RE = /^(\d{1,3})(\.\d{1,3}){3}\/\d{1,2}$/
 
 function linkError(value: string, schemes: string[]): string | null {
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  const lower = trimmed.toLowerCase()
+  if (!value.trim()) return null
+  const lower = extractProxyLink(value).toLowerCase()
   return schemes.some((scheme) => lower.startsWith(`${scheme}://`))
     ? null
     : `Ссылка должна начинаться с ${schemes.map((scheme) => `${scheme}://`).join(' или ')}`
@@ -186,7 +188,8 @@ export default function SettingsTab({ health }: SettingsTabProps) {
       ? `MTU должен быть целым числом от ${MTU_MIN} до ${MTU_MAX}`
       : null
   const subnetError = subnet.trim() && !CIDR_RE.test(subnet.trim()) ? `Укажите подсеть в формате ${DEFAULT_FAKE_SUBNET}` : null
-  const slaveLinkError = linkError(slaveLink, ['ss'])
+  const slaveLinkError = linkError(slaveLink, ['ss', 'vless', 'hy2', 'hysteria2'])
+  const slaveLinkMode = slaveLinkError ? null : donorLinkMode(extractProxyLink(slaveLink))
   const slavePortError = slavePort.trim() && !isValidPort(slavePort) ? 'Порт 1–65535' : null
   const vlessError = linkError(vlessLink, ['vless'])
   const hy2Error = linkError(hy2Link, ['hy2', 'hysteria2'])
@@ -334,8 +337,13 @@ export default function SettingsTab({ health }: SettingsTabProps) {
 
   function applySlaveMode() {
     if (!slaveManual) {
-      if (!slaveLink.trim()) return
-      return runAction(() => setWarperModeSlaveLink(slaveLink.trim()), 'Режим Slave применён', 'Не удалось переключить Slave')
+      const link = extractProxyLink(slaveLink)
+      if (!link) return
+      if (slaveLinkMode === 'vless') return runAction(() => setWarperModeVless(link), 'Режим VLESS применён', 'Не удалось переключить VLESS')
+      if (slaveLinkMode === 'hy2') {
+        return runAction(() => setWarperModeHy2(link), 'Режим Hysteria2 применён', 'Не удалось переключить Hysteria2')
+      }
+      return runAction(() => setWarperModeSlaveLink(link), 'Режим Slave применён', 'Не удалось переключить Slave')
     }
     const port = Number(slavePort)
     if (!slaveHost.trim() || !slaveKey.trim() || !Number.isFinite(port)) return
@@ -353,12 +361,16 @@ export default function SettingsTab({ health }: SettingsTabProps) {
 
   function applyVlessMode() {
     if (!vlessLink.trim()) return
-    return runAction(() => setWarperModeVless(vlessLink.trim()), 'Режим VLESS применён', 'Не удалось переключить VLESS')
+    return runAction(() => setWarperModeVless(extractProxyLink(vlessLink)), 'Режим VLESS применён', 'Не удалось переключить VLESS')
   }
 
   function applyHy2Mode() {
     if (!hy2Link.trim()) return
-    return runAction(() => setWarperModeHy2(hy2Link.trim()), 'Режим Hysteria2 применён', 'Не удалось переключить Hysteria2')
+    return runAction(
+      () => setWarperModeHy2(extractProxyLink(hy2Link)),
+      'Режим Hysteria2 применён',
+      'Не удалось переключить Hysteria2',
+    )
   }
 
   async function applyOpenVpnMode() {
@@ -409,6 +421,18 @@ export default function SettingsTab({ health }: SettingsTabProps) {
 
   function runResync() {
     return runAction(() => postWarperResync(), 'Состояние AZ-WARP восстановлено', 'Не удалось выполнить resync')
+  }
+
+  function confirmRestartKresd() {
+    confirm({
+      title: 'Перезапустить kresd?',
+      description:
+        'DNS-патч AZ-WARP будет собран заново, и оба резолвера AntiZapret (kresd@1 и kresd@2) перезапустятся. Несколько секунд клиенты не смогут разрешать имена.',
+      confirmLabel: 'Перезапустить',
+      onConfirm: async () => {
+        await runAction(() => postWarperRestartKresd(), 'kresd перезапущен', 'Не удалось перезапустить kresd')
+      },
+    })
   }
 
   if (loading) {
@@ -583,7 +607,7 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                   <Input
                     id="slave-link"
                     className="font-mono text-sm"
-                    placeholder="ss://…"
+                    placeholder="ss://… · vless://… · hy2://…"
                     value={slaveLink}
                     disabled={controlsDisabled}
                     aria-invalid={Boolean(slaveLinkError)}
@@ -591,8 +615,8 @@ export default function SettingsTab({ health }: SettingsTabProps) {
                   />
                   <FieldError message={slaveLinkError} />
                   <p className="text-xs text-muted-foreground">
-                    Выполните <code>warperslave link</code> на доноре и вставьте ссылку ss://. Для доноров на VLESS
-                    или Hysteria2 выберите соответствующий режим.
+                    Выполните <code>warperslave link</code> на доноре и вставьте ссылку или всю строку вывода.
+                    Ссылка vless:// или hy2:// включит режим VLESS или Hysteria2.
                   </p>
                 </div>
               ) : (
@@ -634,14 +658,18 @@ export default function SettingsTab({ health }: SettingsTabProps) {
               )}
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <Button variant="link" size="sm" className="px-0" onClick={() => setSlaveManual((value) => !value)}>
-                  {slaveManual ? 'Вставить ссылку ss://' : 'Ввести host, port и ключ вручную'}
+                  {slaveManual ? 'Вставить ссылку донора' : 'Ввести host, port и ключ вручную'}
                 </Button>
                 <Button
                   className="w-full sm:w-auto"
                   disabled={controlsDisabled || !slaveReady}
                   onClick={() => void applySlaveMode()}
                 >
-                  Применить Slave
+                  {!slaveManual && slaveLinkMode === 'vless'
+                    ? 'Применить VLESS'
+                    : !slaveManual && slaveLinkMode === 'hy2'
+                      ? 'Применить Hysteria2'
+                      : 'Применить Slave'}
                 </Button>
               </div>
             </div>
@@ -1023,6 +1051,22 @@ export default function SettingsTab({ health }: SettingsTabProps) {
             </div>
             <Button size="sm" variant="secondary" disabled={controlsDisabled} onClick={() => void runResync()}>
               Запустить resync
+            </Button>
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <RotateCw className="h-4 w-4 text-primary" />
+                Перезапустить kresd
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Собирает DNS-патч заново и перезапускает резолверы, даже если список доменов не менялся. Помогает, если
+                домены AZ-WARP перестали открываться, а resync не помог. Нужен AZ-WARP 1.5.1.
+              </p>
+            </div>
+            <Button size="sm" variant="secondary" disabled={controlsDisabled} onClick={confirmRestartKresd}>
+              Перезапустить kresd
             </Button>
           </div>
 

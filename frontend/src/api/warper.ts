@@ -175,6 +175,10 @@ export async function postWarperResync() {
   return apiFetch<WarperActionResponse>('/warper/resync', { method: 'POST' })
 }
 
+export async function postWarperRestartKresd() {
+  return apiFetch<WarperActionResponse>('/warper/kresd/restart', { method: 'POST' })
+}
+
 export async function postWarperUpdateLists() {
   return apiFetch<WarperActionResponse>('/warper/domains/update-lists', { method: 'POST' })
 }

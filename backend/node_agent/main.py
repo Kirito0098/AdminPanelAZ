@@ -1175,6 +1175,11 @@ def warper_resync(_: None = Depends(verify_api_key)):
     return run_warper_action("resync")
 
 
+@app.post("/warper/kresd/restart")
+def warper_kresd_restart(_: None = Depends(verify_api_key)):
+    return run_warper_action("restart_kresd")
+
+
 @app.post("/warper/domains/update-lists")
 def warper_domains_update_lists(_: None = Depends(verify_api_key)):
     return run_warper_action("update_lists")

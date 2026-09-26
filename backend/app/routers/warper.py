@@ -54,7 +54,7 @@ from app.schemas import (
 from app.services.async_iter import iterate_in_thread
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.chart_timezone import resolve_chart_timezone
-from app.services.warper import SINGBOX_ACTIONS, enrich_warper_traffic_payload
+from app.services.warper import SINGBOX_ACTIONS, enrich_warper_traffic_payload, extract_proxy_link
 
 router = APIRouter(prefix="/warper", tags=["warper"])
 
@@ -322,7 +322,12 @@ def warper_settings_mode_slave(
 ):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
-    link = (payload.link or "").strip()
+    link = extract_proxy_link(payload.link)
+    # A donor on VLESS/Hysteria2 hands out its own link; AZ-WARP 1.5.1 switches mode by it as well.
+    if link.startswith("vless://"):
+        return _action_response(adapter.set_warper_mode_vless(link), node)
+    if link.startswith(("hy2://", "hysteria2://")):
+        return _action_response(adapter.set_warper_mode_hy2(link), node)
     if link:
         return _action_response(adapter.set_warper_mode_slave(link=link), node)
     return _action_response(adapter.set_warper_mode_slave(payload.host, payload.port, payload.key), node)
@@ -347,7 +352,7 @@ def warper_settings_mode_vless(
 ):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
-    return _action_response(adapter.set_warper_mode_vless(payload.link.strip()), node)
+    return _action_response(adapter.set_warper_mode_vless(extract_proxy_link(payload.link)), node)
 
 
 @router.post("/settings/mode/hy2", response_model=WarperActionResponse)
@@ -358,7 +363,7 @@ def warper_settings_mode_hy2(
 ):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
-    return _action_response(adapter.set_warper_mode_hy2(payload.link.strip()), node)
+    return _action_response(adapter.set_warper_mode_hy2(extract_proxy_link(payload.link)), node)
 
 
 @router.post("/settings/mode/openvpn", response_model=WarperActionResponse)
@@ -402,6 +407,13 @@ def warper_resync(_: User = Depends(require_admin), db: Session = Depends(get_db
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     return _action_response(adapter.warper_resync(), node)
+
+
+@router.post("/kresd/restart", response_model=WarperActionResponse)
+def warper_kresd_restart(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_restart_kresd(), node)
 
 
 @router.post("/domains/update-lists", response_model=WarperActionResponse)

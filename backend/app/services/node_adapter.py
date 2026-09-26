@@ -436,6 +436,9 @@ class NodeAdapter(ABC):
     def warper_resync(self) -> dict: ...
 
     @abstractmethod
+    def warper_restart_kresd(self) -> dict: ...
+
+    @abstractmethod
     def warper_update_lists(self) -> dict: ...
 
     @abstractmethod
@@ -1027,6 +1030,9 @@ class LocalNodeAdapter(NodeAdapter):
 
     def warper_resync(self) -> dict:
         return self._warper.resync()
+
+    def warper_restart_kresd(self) -> dict:
+        return self._warper.restart_kresd()
 
     def warper_update_lists(self) -> dict:
         return self._warper.update_lists()
@@ -2006,6 +2012,9 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def warper_resync(self) -> dict:
         return self._warper_agent_request("POST", "/warper/resync", timeout=330.0)
+
+    def warper_restart_kresd(self) -> dict:
+        return self._warper_agent_request("POST", "/warper/kresd/restart", timeout=150.0)
 
     def warper_update_lists(self) -> dict:
         return self._warper_agent_request("POST", "/warper/domains/update-lists", timeout=150.0)

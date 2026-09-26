@@ -108,6 +108,22 @@ export type WarperOutboundMode = 'warp' | 'slave' | 'wg' | 'vless' | 'hy2' | 'op
 
 export const DEFAULT_FAKE_SUBNET = '10.224.0.0/16'
 
+const PROXY_LINK_RE = /(?:ss|vless|hy2|hysteria2):\/\/[^\s"']+/
+
+/** Pulls the donor link out of pasted `warperslave link` output or a `warper mode … '<link>'` line. */
+export function extractProxyLink(text: string): string {
+  const value = text.trim()
+  return PROXY_LINK_RE.exec(value)?.[0] ?? value
+}
+
+/** Outbound mode a donor link switches to: AZ-WARP 1.5.1 turns vless:// and hy2:// from the Slave field into their modes. */
+export function donorLinkMode(link: string): Extract<WarperOutboundMode, 'slave' | 'vless' | 'hy2'> | null {
+  if (link.startsWith('ss://')) return 'slave'
+  if (link.startsWith('vless://')) return 'vless'
+  if (link.startsWith('hy2://') || link.startsWith('hysteria2://')) return 'hy2'
+  return null
+}
+
 export const WARP_KEY_SOURCES = [
   { value: 'auto', label: 'Автовыбор', description: 'WARP сам выберет доступный ключ' },
   { value: 'system', label: 'AntiZapret', description: 'Ключи встроенного WARP AntiZapret (warp-antizapret / warp-vpn)' },
@@ -131,7 +147,7 @@ export const OUTBOUND_MODE_OPTIONS: Array<{
   {
     id: 'slave',
     label: 'Slave',
-    description: 'Свой донор warperslave (ссылка ss:// или host/port/key)',
+    description: 'Свой донор warperslave (ссылка из warperslave link или host/port/key)',
   },
   {
     id: 'wg',

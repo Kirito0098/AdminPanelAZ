@@ -39,6 +39,7 @@ _DOMAIN_RE = re.compile(
     r"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$",
     re.IGNORECASE,
 )
+_PROXY_LINK_RE = re.compile(r"(?:ss|vless|hy2|hysteria2)://[^\s\"']+")
 
 
 class WarperNotInstalledError(Exception):
@@ -150,6 +151,13 @@ def _normalize_domain(domain: str) -> str:
     if not _DOMAIN_RE.match(value):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Некорректный домен: {domain}")
     return value
+
+
+def extract_proxy_link(text: str | None) -> str:
+    """Pull the donor link out of pasted `warperslave link` output or a `warper mode … '<link>'` line."""
+    value = (text or "").strip()
+    match = _PROXY_LINK_RE.search(value)
+    return match.group(0) if match else value
 
 
 _API_MODULE_STAMP: tuple[float, float] | None = None
@@ -1058,10 +1066,10 @@ class WarperService:
         *,
         link: str | None = None,
     ) -> dict[str, Any]:
-        setter = self._api_method("set_mode_slave", min_version="1.3.8")
-        link_value = (link or "").strip()
+        link_value = extract_proxy_link(link)
         if not link_value and (host or "").strip().startswith("ss://"):
             link_value = (host or "").strip()
+        setter = self._api_method("set_mode_slave", min_version="1.3.8")
         if link_value:
             if not link_value.startswith("ss://"):
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ожидается ссылка ss://")
@@ -1080,13 +1088,13 @@ class WarperService:
         return _result_or_raise(setter(host_value, int(port), key_value), default={"message": "OK"})
 
     def set_mode_vless(self, link: str) -> dict[str, Any]:
-        value = (link or "").strip()
+        value = extract_proxy_link(link)
         if not value.startswith("vless://"):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ожидается ссылка vless://")
         return _result_or_raise(self._api_method("set_mode_vless")(value), default={"message": "OK"})
 
     def set_mode_hy2(self, link: str) -> dict[str, Any]:
-        value = (link or "").strip()
+        value = extract_proxy_link(link)
         if not value.startswith(("hy2://", "hysteria2://")):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ожидается ссылка hy2:// или hysteria2://")
         return _result_or_raise(self._api_method("set_mode_hy2")(value), default={"message": "OK"})
@@ -1196,6 +1204,26 @@ class WarperService:
 
     def resync(self) -> dict[str, Any]:
         return _result_or_raise(self._api_method("resync")(), default={"message": "OK"})
+
+    def restart_kresd(self) -> dict[str, Any]:
+        """Re-patch kresd and restart it even when the domain list did not change (`warper sync --force`)."""
+        api = self._api_client()
+        # Before 1.5.1 `warper sync` ignores --force and skips the restart without saying so.
+        if _version_tuple(str(getattr(api, "version", "") or "")) < (1, 5, 1):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Перезапуск kresd поддерживается с AZ-WARP 1.5.1 — обновите AZ-WARP на узле",
+            )
+        # `warper sync` only patches kresd while AZ-WARP is active; otherwise it just syncs files.
+        if not api.is_active():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="AZ-WARP не активен (sing-box остановлен или DNS не пропатчен) — kresd не перезапускался. "
+                "Запустите sing-box или выполните resync.",
+            )
+        from warper_api._runner import run_warper  # noqa: PLC0415
+
+        return _result_or_raise(run_warper("sync", "--force", timeout=120), default={"message": "kresd перезапущен"})
 
     def update_lists(self) -> dict[str, Any]:
         return _result_or_raise(self._api_method("update_lists")(), default={"message": "OK"})
@@ -1510,6 +1538,7 @@ def run_warper_action(operation: str, **kwargs: Any) -> Any:
         "set_autopatch": lambda: service.set_autopatch(enable=kwargs["enable"]),
         "set_subnet": lambda: service.set_subnet(kwargs["subnet"]),
         "resync": lambda: service.resync(),
+        "restart_kresd": lambda: service.restart_kresd(),
         "update_lists": lambda: service.update_lists(),
         "get_auto_resolve": lambda: service.get_auto_resolve(),
         "set_auto_resolve": lambda: service.set_auto_resolve(enable=kwargs["enable"]),
