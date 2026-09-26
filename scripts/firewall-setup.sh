@@ -161,6 +161,57 @@ firewall_show_manual_instructions() {
   fi
 }
 
+# Порт, который открывал один режим публикации и закрывал другой: правило прежнего режима
+# стоит выше в цепочке и срабатывает первым, поэтому его нужно убрать, а не перекрыть.
+firewall_iptables_delete_all() {
+  while iptables -C INPUT "$@" 2>/dev/null; do
+    iptables -D INPUT "$@" || return 1
+  done
+}
+
+firewall_iptables_open_port() {
+  local port="$1"
+  firewall_iptables_delete_all -p tcp --dport "$port" ! -s 127.0.0.1 -j DROP
+  firewall_iptables_delete_all -p tcp --dport "$port" -j DROP
+  if ! iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
+    iptables -A INPUT -p tcp --dport "$port" -j ACCEPT
+  fi
+}
+
+firewall_iptables_close_port() {
+  local port="$1"
+  firewall_iptables_delete_all -p tcp --dport "$port" -j ACCEPT
+  if ! iptables -C INPUT -p tcp --dport "$port" ! -s 127.0.0.1 -j DROP 2>/dev/null; then
+    iptables -A INPUT -p tcp --dport "$port" ! -s 127.0.0.1 -j DROP
+  fi
+}
+
+# firewall_ufw_delete_port <порт> <ALLOW|DENY> — правила для порта со всех адресов (IPv4 и v6).
+firewall_ufw_delete_port() {
+  local port="$1" action="$2" nums num
+  nums="$(ufw status numbered 2>/dev/null \
+    | sed -n "s/^\[ *\([0-9]*\)\] *${port}\/tcp\( (v6)\)\{0,1\} *${action} IN *Anywhere.*/\1/p" \
+    | sort -rn || true)"
+  while IFS= read -r num; do
+    [[ -n "$num" ]] || continue
+    ufw --force delete "$num" >/dev/null 2>&1 || true
+  done <<<"$nums"
+}
+
+firewall_ufw_open_port() {
+  local port="$1" comment="$2"
+  firewall_ufw_delete_port "$port" DENY
+  ufw allow "${port}/tcp" comment "$comment" >/dev/null 2>&1 || \
+    ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+}
+
+firewall_ufw_close_port() {
+  local port="$1" comment="$2"
+  firewall_ufw_delete_port "$port" ALLOW
+  ufw deny "${port}/tcp" comment "$comment" >/dev/null 2>&1 || \
+    ufw deny "${port}/tcp" >/dev/null 2>&1 || true
+}
+
 firewall_apply_ufw_rules() {
   local backend_port="$1"
   local node_port="$2"
@@ -182,8 +233,7 @@ firewall_apply_ufw_rules() {
   fi
 
   if [[ "$backend_port" != "0" ]]; then
-    ufw deny "${backend_port}/tcp" comment "AdminPanelAZ backend" >/dev/null 2>&1 || \
-      ufw deny "${backend_port}/tcp" >/dev/null 2>&1 || true
+    firewall_ufw_close_port "$backend_port" "AdminPanelAZ backend"
   fi
 
   if [[ "$has_node" == true ]]; then
@@ -207,11 +257,9 @@ firewall_apply_ufw_rules() {
   fi
 
   if [[ "$has_nginx" == true ]]; then
-    ufw allow "${https_port}/tcp" comment "AdminPanelAZ HTTPS" >/dev/null 2>&1 || \
-      ufw allow "${https_port}/tcp" >/dev/null 2>&1 || true
+    firewall_ufw_open_port "$https_port" "AdminPanelAZ HTTPS"
     if [[ "$http_port" != "0" ]]; then
-      ufw allow "${http_port}/tcp" comment "AdminPanelAZ HTTP (ACME)" >/dev/null 2>&1 || \
-        ufw allow "${http_port}/tcp" >/dev/null 2>&1 || true
+      firewall_ufw_open_port "$http_port" "AdminPanelAZ HTTP (ACME)"
     fi
   fi
 
@@ -230,9 +278,7 @@ firewall_apply_iptables_rules() {
   local proxy_port="${9:-9101}"
 
   if [[ "$backend_port" != "0" ]]; then
-    if ! iptables -C INPUT -p tcp --dport "$backend_port" ! -s 127.0.0.1 -j DROP 2>/dev/null; then
-      iptables -A INPUT -p tcp --dport "$backend_port" ! -s 127.0.0.1 -j DROP
-    fi
+    firewall_iptables_close_port "$backend_port"
   fi
 
   if [[ "$has_node" == true ]]; then
@@ -256,11 +302,9 @@ firewall_apply_iptables_rules() {
   fi
 
   if [[ "$has_nginx" == true ]]; then
-    if ! iptables -C INPUT -p tcp --dport "$https_port" -j ACCEPT 2>/dev/null; then
-      iptables -A INPUT -p tcp --dport "$https_port" -j ACCEPT
-    fi
-    if [[ "$http_port" != "0" ]] && ! iptables -C INPUT -p tcp --dport "$http_port" -j ACCEPT 2>/dev/null; then
-      iptables -A INPUT -p tcp --dport "$http_port" -j ACCEPT
+    firewall_iptables_open_port "$https_port"
+    if [[ "$http_port" != "0" ]]; then
+      firewall_iptables_open_port "$http_port"
     fi
   fi
 
@@ -278,14 +322,11 @@ firewall_apply_direct_port() {
 
   case "$tool" in
     ufw)
-      ufw allow "${port}/tcp" comment "AdminPanelAZ direct publish" >/dev/null 2>&1 || \
-        ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+      firewall_ufw_open_port "$port" "AdminPanelAZ direct publish"
       ufw reload >/dev/null 2>&1 || true
       ;;
     iptables)
-      if ! iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
-        iptables -A INPUT -p tcp --dport "$port" -j ACCEPT
-      fi
+      firewall_iptables_open_port "$port"
       firewall_persist_iptables_rules
       ;;
     none)

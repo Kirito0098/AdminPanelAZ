@@ -134,3 +134,4 @@ jobs:
           ./scripts/test-python-runtime-pipefail.sh
           ./scripts/test-install-env-preserve-secret.sh
           ./scripts/test-agent-units-no-api-key.sh
+          ./scripts/test-firewall-publish-mode-switch.sh
