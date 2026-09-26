@@ -157,6 +157,23 @@ panel_update() {
     fi
   fi
 
+  # Интерфейс собирается только там, где его уже собирали: на сервере с одним агентом нет npm.
+  local frontend_dir="$INSTALL_DIR/frontend" frontend_ok=true
+  if [[ -f "$frontend_dir/package.json" && -d "$frontend_dir/dist" ]]; then
+    if ! command -v npm >/dev/null 2>&1; then
+      ui_fail "npm не найден — интерфейс не пересобран"
+      frontend_ok=false
+    else
+      ui_info "Сборка интерфейса (npm install, npm run build:all)…"
+      if (cd "$frontend_dir" && npm install && npm run build:all); then
+        ui_ok "Интерфейс пересобран"
+      else
+        ui_fail "Сборка интерфейса не удалась — панель показывает старый интерфейс"
+        frontend_ok=false
+      fi
+    fi
+  fi
+
   # 2.19+: старые unit’ы с start.sh ломаются после удаления скриптов — переписать из репо
   if [[ -x "$INSTALL_DIR/scripts/refresh-systemd-units.sh" ]]; then
     ui_info "Обновление systemd units…"
@@ -167,6 +184,10 @@ panel_update() {
     fi
   fi
 
+  if [[ "$frontend_ok" != true ]]; then
+    ui_fail "Код уже обновлён, повтор --update сборку не запустит. Соберите вручную: cd $frontend_dir && npm install && npm run build:all, затем $0 --restart"
+    return 1
+  fi
   ui_info "Перезапустите панель: $0 --restart"
   return 0
 }
@@ -345,7 +366,7 @@ usage() {
 
 Опции (как adminpanel.sh в AA):
   --restart              Перезапустить панель (systemctl restart adminpanelaz)
-  --update               git fetch + pull + pip (если есть обновления)
+  --update               git fetch + pull + pip + сборка интерфейса (если есть обновления)
   --backup               Создать резервную копию (scripts/backup-cli.py)
   --diagnose             Диагностика запуска (scripts/site-diagnostics.sh)
   --disable-ip-whitelist Аварийно выключить IP-whitelist панели

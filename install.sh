@@ -743,6 +743,10 @@ random_hex() {
   fi
 }
 
+# Node 20 больше не поддерживается; ставим актуальную LTS.
+NODE_MIN_MAJOR=22
+NODE_INSTALL_MAJOR=24
+
 node_major_version() {
   if ! command -v node >/dev/null 2>&1; then
     echo 0
@@ -751,35 +755,47 @@ node_major_version() {
   node -v | sed 's/^v//' | cut -d. -f1
 }
 
+# Мажорная версия nodejs, которую предлагает apt (0 — нет кандидата).
+node_apt_candidate_major() {
+  local candidate
+  candidate="$(apt-cache policy nodejs 2>/dev/null | awk '/Candidate:/ {print $2; exit}')"
+  candidate="${candidate#*:}"
+  if [[ "$candidate" =~ ^([0-9]+)\. ]]; then
+    echo "${BASH_REMATCH[1]}"
+  else
+    echo 0
+  fi
+}
+
 install_nodejs() {
   local major
   major="$(node_major_version)"
-  if [[ "$major" -ge 20 ]]; then
+  if [[ "$major" -ge "$NODE_MIN_MAJOR" ]]; then
     log "Node.js $(node -v) — OK"
     return
   fi
 
-  if [[ "$major" -ge 18 ]]; then
-    warn "Node.js $(node -v) ниже рекомендуемого минимума (20+), обновление..."
+  if [[ "$major" -gt 0 ]]; then
+    warn "Node.js $(node -v) больше не поддерживается (нужен ${NODE_MIN_MAJOR}+), обновление..."
   else
-    log "Установка Node.js 20+..."
+    log "Установка Node.js ${NODE_INSTALL_MAJOR}..."
   fi
 
-  if apt-cache show nodejs 2>/dev/null | grep -qE '^Version: (20|22)'; then
+  if [[ "$(node_apt_candidate_major)" -ge "$NODE_MIN_MAJOR" ]]; then
     apt-get install -y nodejs npm
     major="$(node_major_version)"
-    if [[ "$major" -ge 20 ]]; then
+    if [[ "$major" -ge "$NODE_MIN_MAJOR" ]]; then
       log "Node.js $(node -v) установлен из apt"
       return
     fi
   fi
 
-  log "Подключение NodeSource (Node.js 20.x)..."
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  log "Подключение NodeSource (Node.js ${NODE_INSTALL_MAJOR}.x)..."
+  curl -fsSL "https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" | bash -
   apt-get install -y nodejs
   major="$(node_major_version)"
-  if [[ "$major" -lt 20 ]]; then
-    die "Не удалось установить Node.js 20+ (текущая версия: $(node -v 2>/dev/null || echo 'нет'))"
+  if [[ "$major" -lt "$NODE_MIN_MAJOR" ]]; then
+    die "Не удалось установить Node.js ${NODE_MIN_MAJOR}+ (текущая версия: $(node -v 2>/dev/null || echo 'нет'))"
   fi
   log "Node.js $(node -v) установлен"
 }
