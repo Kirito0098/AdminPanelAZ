@@ -218,6 +218,21 @@ def _disconnect_openvpn_client(replica_adapter, client_name: str) -> str | None:
     return None
 
 
+def _revoked_clients_to_disconnect(replica_adapter, before: PkiState | None, after: PkiState | None) -> list[str]:
+    """Newly revoked clients plus revoked ones still connected: a retry after a sync that
+    failed past the import sees nothing newly revoked."""
+    names = set(newly_revoked_clients(before, after))
+    revoked = set(after.revoked.values()) - after.valid_names if after is not None else set()
+    if revoked:
+        try:
+            connected = {client.common_name for client in replica_adapter.parse_openvpn_status()}
+        except Exception as exc:
+            logger.warning("HA crypto sync: replica OpenVPN status unavailable: %s", exc)
+        else:
+            names |= revoked & connected
+    return sorted(names)
+
+
 def _disconnect_openvpn_clients(replica_adapter, client_names: list[str]) -> None:
     failures = [
         failure
@@ -238,7 +253,8 @@ def sync_openvpn_pki_from_primary(
 
     OpenVPN loads ca/cert/key only at start and re-reads ``crl-verify`` on each new
     connection, so servers restart only when the server identity changed; clients
-    revoked since the last sync are disconnected instead (as ``client.sh`` does).
+    revoked since the last sync or still connected with a revoked certificate are
+    disconnected instead (as ``client.sh`` does).
     """
     before = _replica_pki_state(replica_adapter)
     archive = primary_adapter.export_easyrsa3_archive()
@@ -262,7 +278,7 @@ def sync_openvpn_pki_from_primary(
         )
 
     if not server_identity_changed(before, after):
-        _disconnect_openvpn_clients(replica_adapter, newly_revoked_clients(before, after))
+        _disconnect_openvpn_clients(replica_adapter, _revoked_clients_to_disconnect(replica_adapter, before, after))
         return
 
     if openvpn_multihome:

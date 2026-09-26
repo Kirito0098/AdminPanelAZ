@@ -239,6 +239,90 @@ def test_successful_kill_does_not_call_disconnect(restart):
     replica.disconnect_openvpn_client.assert_not_called()
 
 
+def _connected(*names: str) -> list[MagicMock]:
+    clients = []
+    for name in names:
+        client = MagicMock()
+        client.common_name = name
+        clients.append(client)
+    return clients
+
+
+def _stateful_replica(before: bytes, after: bytes) -> tuple[MagicMock, MagicMock]:
+    primary, replica = _adapters(before, after)
+    state = {"archive": before}
+    replica.export_easyrsa3_archive.side_effect = lambda: state["archive"]
+    replica.import_easyrsa3_archive.side_effect = lambda data: state.update(archive=data)
+    return primary, replica
+
+
+@pytest.mark.parametrize("failing_step", ["profiles", "disconnect"])
+def test_retry_after_failure_past_import_disconnects_connected_revoked_client(restart, monkeypatch, failing_step):
+    primary, replica = _stateful_replica(
+        _pki_archive(rows=(*_BASE_ROWS, _row("V", "0C", "bob"))),
+        _pki_archive(rows=(*_BASE_ROWS, _row("R", "0C", "bob"))),
+    )
+    replica.parse_openvpn_status.return_value = _connected("alice", "bob", "old-revoked")
+    copy_profiles = MagicMock(side_effect=RuntimeError("no space left on device"))
+    if failing_step == "profiles":
+        monkeypatch.setattr(vpn_state_sync, "copy_openvpn_profiles_from_primary", copy_profiles)
+    else:
+        replica.kill_openvpn_client.side_effect = RuntimeError("agent timeout")
+        replica.disconnect_openvpn_client.side_effect = RuntimeError("agent timeout")
+
+    with pytest.raises(RuntimeError):
+        vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
+
+    copy_profiles.side_effect = None
+    replica.kill_openvpn_client.reset_mock(side_effect=True)
+    replica.kill_openvpn_client.return_value = {"success": True}
+    replica.disconnect_openvpn_client.side_effect = None
+    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
+
+    assert _killed(replica) == [(unit, name) for name in ("bob", "old-revoked") for unit in OPENVPN_SERVER_UNITS]
+    restart.assert_not_called()
+
+
+def test_status_is_not_read_without_revoked_clients(restart):
+    rows = (_row("V", "0A", "alice"),)
+    primary, replica = _adapters(_pki_archive(rows=rows), _pki_archive(rows=rows))
+
+    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
+
+    replica.parse_openvpn_status.assert_not_called()
+
+
+def test_revoked_clients_not_connected_are_not_disconnected(restart):
+    primary, replica = _adapters(_pki_archive(rows=_BASE_ROWS), _pki_archive(rows=_BASE_ROWS))
+    replica.parse_openvpn_status.return_value = _connected("alice")
+
+    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
+
+    assert _killed(replica) == []
+
+
+def test_revoked_client_with_new_certificate_is_not_disconnected(restart):
+    rows = (*_BASE_ROWS, _row("R", "0C", "bob"), _row("V", "0D", "bob"))
+    primary, replica = _adapters(_pki_archive(rows=rows), _pki_archive(rows=rows))
+    replica.parse_openvpn_status.return_value = _connected("bob")
+
+    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
+
+    assert _killed(replica) == []
+
+
+def test_unreadable_status_still_disconnects_newly_revoked(restart):
+    primary, replica = _adapters(
+        _pki_archive(rows=(*_BASE_ROWS, _row("V", "0C", "bob"))),
+        _pki_archive(rows=(*_BASE_ROWS, _row("R", "0C", "bob"))),
+    )
+    replica.parse_openvpn_status.side_effect = RuntimeError("monitoring unavailable")
+
+    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
+
+    assert _killed(replica) == [(unit, "bob") for unit in OPENVPN_SERVER_UNITS]
+
+
 def test_read_pki_state_accepts_dot_slash_members():
     buffer = io.BytesIO()
     with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
