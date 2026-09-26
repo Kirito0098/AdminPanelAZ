@@ -35,15 +35,34 @@
 
 | Параметр | Значения |
 |----------|----------|
-| `ANTIZAPRET_WARP` (antizapret-*) | `1` None — не использовать · `2` All — весь трафик · `3` Domain — домены AntiZapret и `config/include-warp-hosts.txt` · `4` Custom — только `include-warp-hosts.txt` (в обоих случаях минус `exclude-warp-hosts.txt`) |
+| `ANTIZAPRET_WARP` (antizapret-*) | `1` None — не использовать · `2` All — весь трафик · `3` Domain — домены AntiZapret и списка WARP · `4` Custom — только домены списка WARP (в обоих случаях минус `exclude-warp-hosts.txt`) |
 | `VPN_WARP` (vpn-*) | `1` None · `2` All |
 | `WARP_PROTECTION` | `y` — блокировать трафик AntiZapret и полного VPN, если WARP не подключился; `n` — выпускать напрямую |
+| `WARP_MTU` | MTU интерфейсов встроенного WARP, число от 576 до 1500. Пусто — 1280 (так считает сам AntiZapret-VPN). Уменьшайте, если через WARP не открываются часть сайтов или обрываются загрузки. После смены — **Применить (doall.sh)** |
+
+**Список WARP** — это ваш `config/include-warp-hosts.txt` плюс STUN/TURN-серверы Cloudflare и Google, которые AntiZapret-VPN добавляет сам (`download/include-warp-hosts.txt`). Свой список и исключения (`exclude-warp-hosts.txt`) правятся в [Редакторе файлов](edit-files.md#warp) → группа **WARP**.
+
+Старый node agent (до 1.10.0) не знает `WARP_MTU` и молча его пропустит. Если вы задали значение, отличное от 1280, панель после сохранения покажет предупреждение — обновите агент на узле и сохраните ещё раз.
 
 **Старый формат `y/n`.** Если в `setup` узла ещё `ANTIZAPRET_WARP=y|n` (AntiZapret-VPN до перехода на номера), панель показывает `y` как `2` (All), `n` как `1` (None) и при сохранении пишет обратно `y`/`n`. Режимы `3`/`4` на таком узле сохранить нельзя — панель ответит ошибкой с просьбой обновить AntiZapret-VPN. `WARP_PROTECTION` старые версии игнорируют.
 
 Старый node agent (до 1.9.0) не понимает числовые значения и запишет `n`. Панель после сохранения перечитывает setup и покажет предупреждение — обновите агент на узле и сохраните ещё раз.
 
 Встроенный WARP AntiZapret и AZ-WARP с AZ-WARP 1.5.0 работают вместе; после смены режима и doall.sh нажмите **AZ-WARP → Настройки → Обслуживание → Запустить resync**, чтобы AZ-WARP перестроил правила (подробнее — [warper.md](warper.md)).
+
+---
+
+## Очистка и исключения списков
+
+**Очистка хостов (`CLEAR_HOSTS`).** С сентября 2026 года AntiZapret-VPN при очистке удаляет не только домены казино и букмекеров, но и **все домены со словами `vpn` и `proxy`**. Фильтр применяется и к вашему `include-hosts.txt`: если нужен такой домен через AntiZapret, выключите очистку в разделе **Очистка списков**.
+
+**Исключения AntiZapret-VPN.** AntiZapret-VPN скачивает свой список исключений всегда, а не только при `ROUTE_ALL=y`: это служебные домены (проверка связи Android, уведомления Google, Sentry и т.п.), которые не нужно пускать через VPN. При `ROUTE_ALL=y` вместо него скачивается список исключений российских зон (`.ru`, `.su`, `.рф` и другие). Ваш `exclude-hosts.txt` в редакторе файлов действует в обоих случаях.
+
+---
+
+## Out IP protection
+
+Если в `setup` на узле вручную заданы `ANTIZAPRET_OUT_IP` или `VPN_OUT_IP` (отдельный IP для исходящего трафика VPN), AntiZapret-VPN с сентября 2026 года при старте блокирует **весь входящий трафик на эти адреса** (`iptables -I INPUT 1 -d <IP> -j DROP`). Панель эти параметры не показывает и не меняет. Если панель подключается к node agent узла по такому IP, после перезапуска AntiZapret узел станет недоступен — укажите в **Узлы → Изменить** основной адрес сервера. То же касается SSH и адреса в DNS для клиентов: они должны смотреть на основной IP, а не на OUT IP.
 
 ---
 
@@ -186,7 +205,7 @@ API: `GET/PUT /api/openvpn-buffer-guard/settings`, `GET /api/openvpn-buffer-guar
 
 | Реплицируется | Не реплицируется |
 |---------------|------------------|
-| Все ключи из `ANTIZAPRET_PARAMS`, включая `ANTIZAPRET_WARP`, `VPN_WARP`, `WARP_PROTECTION`, `openvpn_host` → `OPENVPN_HOST`, `wireguard_host` → `WIREGUARD_HOST` (HA: `shared_domain` / `shared_domain_wireguard`) | Сейчас пусто (`ANTIZAPRET_HA_SETTING_EXCLUDE = {}`) |
+| Все ключи из `ANTIZAPRET_PARAMS`, включая `ANTIZAPRET_WARP`, `VPN_WARP`, `WARP_PROTECTION`, `WARP_MTU`, `openvpn_host` → `OPENVPN_HOST`, `wireguard_host` → `WIREGUARD_HOST` (HA: `shared_domain` / `shared_domain_wireguard`) | Сейчас пусто (`ANTIZAPRET_HA_SETTING_EXCLUDE = {}`) |
 | Partial update: только поля из текущего PUT | Строки вне `ANTIZAPRET_PARAMS` (напр. `OPENVPN_LOG`) — panel API их не шлёт |
 
 Константа в коде: `ANTIZAPRET_HA_SETTING_EXCLUDE` (`antizapret_params.py`).
