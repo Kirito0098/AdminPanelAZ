@@ -1666,32 +1666,82 @@ nginx_update_proxy_port() {
   fi
 }
 
+PORT80_NAT_RULES=()
+
+# Правила NAT PREROUTING для порта 80 на внешнем интерфейсе перехватили бы запросы
+# Let's Encrypt к certbot standalone. Снимаются и возвращаются только они, одной транзакцией
+# iptables-restore --noflush: полный откат снимка iptables стёр бы правила, добавленные
+# за время certbot (fail2ban, VPN, docker). Элемент PORT80_NAT_RULES: "<позиция> <правило>".
 nginx_temp_clear_port80_nat() {
-  SAVE_RULES=""
-  PORT80_RULES=""
-  if ! command -v iptables-save >/dev/null 2>&1; then
+  PORT80_NAT_RULES=()
+  command -v iptables >/dev/null 2>&1 || return 0
+  local iface line entry pos=0
+  iface="$(ip route 2>/dev/null | awk '$1 == "default" {for (i = 2; i < NF; i++) if ($i == "dev") {print $(i + 1); exit}}')"
+  [[ -n "$iface" ]] || return 0
+  while IFS= read -r line; do
+    [[ "$line" == "-A PREROUTING "* ]] || continue
+    pos=$((pos + 1))
+    [[ " $line " == *" -i ${iface} "* && " $line " == *" -p tcp "* && " $line " == *" --dport 80 "* ]] || continue
+    PORT80_NAT_RULES+=("${pos} ${line#-A PREROUTING }")
+  done < <(iptables -t nat -S PREROUTING 2>/dev/null)
+  ((${#PORT80_NAT_RULES[@]} > 0)) || return 0
+  if ! {
+    echo "*nat"
+    for entry in "${PORT80_NAT_RULES[@]}"; do
+      echo "-D PREROUTING ${entry#* }"
+    done
+    echo "COMMIT"
+  } | iptables-restore --noflush; then
+    nginx_warn "Не удалось снять правила NAT для порта 80 — certbot может не пройти проверку"
+    PORT80_NAT_RULES=()
     return 0
   fi
-  SAVE_RULES=$(iptables-save)
-  local iface
-  iface=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')
-  [ -n "$iface" ] || return 0
-  PORT80_RULES=$(iptables-save | grep "PREROUTING.*-p tcp.*--dport 80" | grep "$iface" || true)
-  if [ -n "$PORT80_RULES" ]; then
-    local -a rule_parts=()
-    while read -r line; do
-      [ -n "$line" ] || continue
-      read -r -a rule_parts <<<"${line#-A }"
-      iptables -t nat -D "${rule_parts[@]}" 2>/dev/null || true
-    done <<<"$PORT80_RULES"
-    nginx_log "Временно сняты iptables-правила NAT для порта 80"
-  fi
+  nginx_log "Временно сняты правила NAT для порта 80: ${#PORT80_NAT_RULES[@]}"
 }
 
 nginx_restore_port80_nat() {
-  if [ -n "${SAVE_RULES:-}" ]; then
-    echo "$SAVE_RULES" | iptables-restore 2>/dev/null || true
+  ((${#PORT80_NAT_RULES[@]} > 0)) || return 0
+  local current entry pos rule len
+  local -a lines=()
+  current="$(iptables -t nat -S PREROUTING 2>/dev/null || true)"
+  len="$(grep -c '^-A PREROUTING ' <<<"$current" || true)"
+  for entry in "${PORT80_NAT_RULES[@]}"; do
+    pos="${entry%% *}"
+    rule="${entry#* }"
+    grep -qxF -- "-A PREROUTING ${rule}" <<<"$current" && continue
+    ((pos <= len + 1)) || pos=$((len + 1))
+    lines+=("-I PREROUTING ${pos} ${rule}")
+    len=$((len + 1))
+  done
+  if ((${#lines[@]} > 0)) && ! printf '*nat\n%s\nCOMMIT\n' "$(printf '%s\n' "${lines[@]}")" | iptables-restore --noflush; then
+    nginx_warn "Не удалось вернуть правила NAT для порта 80. Верните их вручную:"
+    for entry in "${PORT80_NAT_RULES[@]}"; do
+      nginx_warn "  iptables -t nat -A PREROUTING ${entry#* }"
+    done
+    PORT80_NAT_RULES=()
+    return 1
   fi
+  PORT80_NAT_RULES=()
+  nginx_log "Правила NAT для порта 80 возвращены"
+}
+
+# nginx_certbot_standalone <аргументы certbot> — certbot без NAT порта 80. Правила возвращаются
+# и при прерывании (bash выполняет EXIT-trap и при SIGINT/SIGTERM), иначе сервер остался бы
+# без перенаправления порта 80. Прежний EXIT-trap выполняется следом и восстанавливается.
+nginx_certbot_standalone() {
+  local prev_exit rc=0
+  local -a prev=()
+  prev_exit="$(trap -p EXIT)"
+  [[ -z "$prev_exit" ]] || eval "prev=(${prev_exit})"
+  NGINX_PREV_EXIT_TRAP="${prev[2]:-}"
+  trap 'nginx_restore_port80_nat || true; eval "$NGINX_PREV_EXIT_TRAP"' EXIT
+
+  nginx_temp_clear_port80_nat
+  certbot "$@" || rc=$?
+  nginx_restore_port80_nat || true
+
+  eval "${prev_exit:-trap - EXIT}"
+  return "$rc"
 }
 
 nginx_obtain_letsencrypt_cert() {
@@ -1731,31 +1781,18 @@ nginx_obtain_letsencrypt_cert() {
   nginx_remove_temp_acme_http_vhost "$domain"
   nginx_log "Webroot не сработал — certbot standalone (nginx будет остановлен)…"
   nginx_stop_for_standalone_acme "$http_acme_port"
-  nginx_temp_clear_port80_nat
 
-  if [[ -n "$email" ]]; then
-    certbot certonly --standalone --non-interactive --agree-tos -m "$email" -d "$domain" || {
-      nginx_restore_port80_nat
-      systemctl start nginx 2>/dev/null || true
-      if [[ "${NGINX_FAIL_SOFT:-false}" == true ]]; then
-        nginx_warn "Не удалось получить сертификат Let's Encrypt"
-        return 1
-      fi
-      nginx_die "Не удалось получить сертификат Let's Encrypt"
-    }
-  else
-    certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email -d "$domain" || {
-      nginx_restore_port80_nat
-      systemctl start nginx 2>/dev/null || true
-      if [[ "${NGINX_FAIL_SOFT:-false}" == true ]]; then
-        nginx_warn "Не удалось получить сертификат Let's Encrypt"
-        return 1
-      fi
-      nginx_die "Не удалось получить сертификат Let's Encrypt"
-    }
+  local -a email_args=(--register-unsafely-without-email)
+  [[ -z "$email" ]] || email_args=(-m "$email")
+  if ! nginx_certbot_standalone certonly --standalone --non-interactive --agree-tos "${email_args[@]}" -d "$domain"; then
+    systemctl start nginx 2>/dev/null || true
+    if [[ "${NGINX_FAIL_SOFT:-false}" == true ]]; then
+      nginx_warn "Не удалось получить сертификат Let's Encrypt"
+      return 1
+    fi
+    nginx_die "Не удалось получить сертификат Let's Encrypt"
   fi
 
-  nginx_restore_port80_nat
   systemctl start nginx 2>/dev/null || true
   [ -f "$cert_path" ] || nginx_die "Сертификат не найден после certbot: $cert_path"
 }
@@ -1892,25 +1929,15 @@ nginx_obtain_letsencrypt_cert_hosts() {
 
   nginx_log "Webroot не сработал — certbot standalone для: ${hosts[*]}"
   nginx_stop_for_standalone_acme "$http_acme_port"
-  nginx_temp_clear_port80_nat
 
-  if [[ -n "$email" ]]; then
-    certbot certonly --standalone --non-interactive --agree-tos -m "$email" \
-      "${expand_flag[@]}" "${d_args[@]}" || {
-      nginx_restore_port80_nat
-      systemctl start nginx 2>/dev/null || true
-      nginx_die "Не удалось получить сертификат Let's Encrypt для ${hosts[*]}"
-    }
-  else
-    certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email \
-      "${expand_flag[@]}" "${d_args[@]}" || {
-      nginx_restore_port80_nat
-      systemctl start nginx 2>/dev/null || true
-      nginx_die "Не удалось получить сертификат Let's Encrypt для ${hosts[*]}"
-    }
+  local -a email_args=(--register-unsafely-without-email)
+  [[ -z "$email" ]] || email_args=(-m "$email")
+  if ! nginx_certbot_standalone certonly --standalone --non-interactive --agree-tos "${email_args[@]}" \
+    "${expand_flag[@]}" "${d_args[@]}"; then
+    systemctl start nginx 2>/dev/null || true
+    nginx_die "Не удалось получить сертификат Let's Encrypt для ${hosts[*]}"
   fi
 
-  nginx_restore_port80_nat
   systemctl start nginx 2>/dev/null || true
   [[ -f "$cert_path" ]] || nginx_die "Сертификат не найден после certbot: $cert_path"
 }

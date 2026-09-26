@@ -140,3 +140,4 @@ jobs:
           ./scripts/test-install-admin-password.sh
           ./scripts/test-firewall-keeps-ssh.sh
           ./scripts/test-nginx-keep-foreign-sites.sh
+          ./scripts/test-certbot-port80-nat.sh
