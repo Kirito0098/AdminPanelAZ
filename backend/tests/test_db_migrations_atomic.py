@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app import database
 from app.database import Base
-from app.models import Node, OpenVpnAccessPolicy
+from app.models import Node, OpenVpnAccessPolicy, User, UserRole
 
 _LEGACY_OVPN_POLICY = """
     CREATE TABLE openvpn_access_policy (
@@ -63,6 +63,7 @@ def file_engine(tmp_path: Path, monkeypatch):
     session = sessionmaker(bind=engine)()
     session.add(Node(id=1, name="local", host="127.0.0.1", is_local=True))
     session.add(Node(id=2, name="remote", host="10.0.0.2", is_local=False))
+    session.add(User(id=1, username="admin", password_hash="x", role=UserRole.admin))
     session.commit()
     session.close()
     monkeypatch.setattr(database, "engine", engine)
@@ -118,6 +119,38 @@ def test_table_rebuild_ignores_leftover_from_older_crash(file_engine):
     assert "node_id" in _columns(file_engine, "openvpn_access_policy")
 
 
+def test_vpn_configs_rebuild_ignores_leftover_from_older_crash(file_engine, monkeypatch):
+    from app.services.node_adapter import LocalNodeAdapter
+
+    monkeypatch.setattr(LocalNodeAdapter, "list_openvpn_clients", lambda self: ["alice"])
+    monkeypatch.setattr(LocalNodeAdapter, "list_wireguard_clients", lambda self: [])
+    _replace_table(
+        file_engine,
+        "vpn_configs",
+        """
+        CREATE TABLE vpn_configs (
+            id INTEGER NOT NULL PRIMARY KEY,
+            client_name VARCHAR(32) NOT NULL,
+            vpn_type VARCHAR(16) NOT NULL,
+            owner_id INTEGER NOT NULL,
+            cert_expire_days INTEGER,
+            description VARCHAR(255),
+            created_at DATETIME,
+            updated_at DATETIME
+        )
+        """,
+    )
+    with file_engine.begin() as conn:
+        conn.execute(text("INSERT INTO vpn_configs (id, client_name, vpn_type, owner_id) VALUES (1, 'alice', 'openvpn', 1)"))
+        conn.execute(text("CREATE TABLE vpn_configs_new (id INTEGER PRIMARY KEY)"))
+
+    database._migrate_vpn_configs_node_scope()
+
+    assert "vpn_configs_new" not in _tables(file_engine)
+    with file_engine.connect() as conn:
+        assert conn.execute(text("SELECT client_name, node_id FROM vpn_configs")).all() == [("alice", 1)]
+
+
 def test_policy_rebuild_resumes_when_only_first_table_was_migrated(file_engine):
     session = database.SessionLocal()
     session.add(OpenVpnAccessPolicy(node_id=2, client_name="alice"))
@@ -147,24 +180,74 @@ def test_migration_transaction_rolls_back_ddl(file_engine):
     assert "scratch" in _tables(file_engine)
 
 
+def _lock_is_held_elsewhere(lock_path: Path) -> bool:
+    with lock_path.open("a") as fh:
+        try:
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(fh, fcntl.LOCK_UN)
+        return False
+
+
 def test_run_db_migrations_holds_exclusive_lock(file_engine, tmp_path: Path, monkeypatch):
     lock_path = tmp_path / "adminpanel.db.migrate.lock"
     observed: list[bool] = []
 
-    def probe() -> None:
-        with lock_path.open("a") as fh:
-            try:
-                fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                observed.append(True)
-            else:
-                fcntl.flock(fh, fcntl.LOCK_UN)
-                observed.append(False)
-
-    monkeypatch.setattr(database, "_migrate_alert_rules_table", probe)
+    monkeypatch.setattr(database, "_migrate_alert_rules_table", lambda: observed.append(_lock_is_held_elsewhere(lock_path)))
     monkeypatch.setattr(database, "_seed_client_templates_for_nodes", lambda: None)
 
     database.run_db_migrations()
 
     assert observed == [True]
     assert (lock_path.stat().st_mode & 0o777) == 0o600
+    assert _lock_is_held_elsewhere(lock_path) is False
+
+
+def test_run_db_migrations_adds_active_session_index_to_existing_db(file_engine, monkeypatch):
+    with file_engine.begin() as conn:
+        conn.execute(text("DROP INDEX ix_traffic_session_state_node_active"))
+    monkeypatch.setattr(database, "_seed_client_templates_for_nodes", lambda: None)
+
+    database.run_db_migrations()
+
+    indexes = {idx["name"] for idx in inspect(file_engine).get_indexes("traffic_session_state")}
+    assert "ix_traffic_session_state_node_active" in indexes
+
+
+def test_seed_database_runs_all_schema_steps_under_one_lock(file_engine, tmp_path: Path, monkeypatch):
+    import app.main as main
+
+    lock_path = tmp_path / "adminpanel.db.migrate.lock"
+    observed: list[tuple[str, bool]] = []
+
+    class _StopAfterSchema(Exception):
+        pass
+
+    def _stop():
+        raise _StopAfterSchema
+
+    monkeypatch.setattr(main, "engine", file_engine)
+    monkeypatch.setattr(
+        main.Base.metadata,
+        "create_all",
+        lambda bind: observed.append(("create_all", _lock_is_held_elsewhere(lock_path))),
+    )
+    monkeypatch.setattr(
+        database,
+        "_migrate_alert_rules_table",
+        lambda: observed.append(("migrations", _lock_is_held_elsewhere(lock_path))),
+    )
+    monkeypatch.setattr(database, "_seed_client_templates_for_nodes", lambda: None)
+    monkeypatch.setattr(
+        main,
+        "run_cidr_db_migrations",
+        lambda: observed.append(("cidr", _lock_is_held_elsewhere(lock_path))),
+    )
+    monkeypatch.setattr(main, "SessionLocal", _stop)
+
+    with pytest.raises(_StopAfterSchema):
+        main.seed_database()
+
+    assert observed == [("create_all", True), ("migrations", True), ("cidr", True)]
+    assert _lock_is_held_elsewhere(lock_path) is False

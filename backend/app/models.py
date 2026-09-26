@@ -305,7 +305,10 @@ class AppSetting(Base):
 
 class TrafficSessionState(Base):
     __tablename__ = "traffic_session_state"
-    __table_args__ = (Index("uq_traffic_session_state_node_session", "node_id", "session_key", unique=True),)
+    __table_args__ = (
+        Index("uq_traffic_session_state_node_session", "node_id", "session_key", unique=True),
+        Index("ix_traffic_session_state_node_active", "node_id", sqlite_where=text("is_active = 1")),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)

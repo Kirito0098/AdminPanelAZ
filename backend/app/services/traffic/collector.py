@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import time
 from threading import Lock
 
-from sqlalchemy import func, or_
+from sqlalchemy import func, true
 from sqlalchemy.orm import Session
 
 from app.models import Node, TrafficSessionState, UserTrafficSample, UserTrafficStatProtocol
@@ -184,17 +184,12 @@ _SESSION_KEY_CHUNK = 500
 def load_relevant_sessions(db: Session, node_id: int, session_keys: set[str]) -> dict[str, TrafficSessionState]:
     """Active sessions plus those in the current snapshot; finished history is not needed to persist it."""
     base = db.query(TrafficSessionState).filter(TrafficSessionState.node_id == node_id)
-    keys = sorted(session_keys)
-    if not keys:
-        rows = base.filter(TrafficSessionState.is_active.is_(True)).all()
-        return {row.session_key: row for row in rows}
-    sessions: dict[str, TrafficSessionState] = {}
+    # `= 1` (not `IS 1`) so SQLite can use the partial index ix_traffic_session_state_node_active.
+    sessions = {row.session_key: row for row in base.filter(TrafficSessionState.is_active == true()).all()}
+    keys = sorted(session_keys - sessions.keys())
     for start in range(0, len(keys), _SESSION_KEY_CHUNK):
         chunk = keys[start : start + _SESSION_KEY_CHUNK]
-        condition = TrafficSessionState.session_key.in_(chunk)
-        if start == 0:
-            condition = or_(TrafficSessionState.is_active.is_(True), condition)
-        for row in base.filter(condition).all():
+        for row in base.filter(TrafficSessionState.session_key.in_(chunk)).all():
             sessions[row.session_key] = row
     return sessions
 

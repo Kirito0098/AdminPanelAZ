@@ -317,3 +317,111 @@ def test_restore_rejects_archive_db_failing_integrity_check(tmp_path: Path):
     with pytest.raises(HTTPException) as exc:
         mgr.load_restore_payload(name)
     assert exc.value.status_code == 400
+
+
+def test_restore_rolls_back_nothing_when_first_write_fails(tmp_path: Path, monkeypatch):
+    import os
+
+    import pytest
+
+    mgr = _manager(tmp_path)
+    _db_with_row(mgr.db_path, 1)
+    created = mgr.create_backup()
+    _db_with_row(mgr.db_path, 2)
+    live_env = mgr.env_path.read_bytes()
+    real_replace = os.replace
+
+    def failing_replace(src, dst):
+        if Path(dst) == mgr.db_path:
+            raise OSError("disk full")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr("app.services.backup_manager.os.replace", failing_replace)
+
+    with pytest.raises(OSError):
+        mgr.restore_backup(created["file_name"])
+
+    assert sqlite3.connect(mgr.db_path).execute("SELECT x FROM t").fetchall() == [(2,)]
+    assert mgr.env_path.read_bytes() == live_env
+    assert not list(mgr.db_path.parent.glob(".*.tmp"))
+
+
+def test_pre_restore_copy_includes_uncheckpointed_wal_rows(tmp_path: Path):
+    mgr = _manager(tmp_path)
+    _db_with_row(mgr.db_path, 1)
+    created = mgr.create_backup()
+    live = sqlite3.connect(mgr.db_path)
+    live.execute("PRAGMA journal_mode=WAL")
+    live.execute("PRAGMA wal_autocheckpoint=0")
+    live.execute("INSERT INTO t VALUES (99)")
+    live.commit()
+    assert Path(f"{mgr.db_path}-wal").stat().st_size > 0
+    try:
+        applied = mgr.restore_backup(created["file_name"])
+    finally:
+        live.close()
+
+    snapshot_db = Path(applied["pre_restore_snapshot"]) / "adminpanel.db"
+    rows = sqlite3.connect(snapshot_db).execute("SELECT x FROM t ORDER BY x").fetchall()
+    assert rows == [(1,), (99,)]
+
+
+def test_pre_restore_copy_keeps_same_named_databases_apart(tmp_path: Path):
+    cidr_dir = tmp_path / "cidr"
+    cidr_dir.mkdir()
+    cidr = cidr_dir / "adminpanel.db"
+    _db_with_row(cidr, 7)
+    mgr = _manager(tmp_path, cidr_db_path=cidr)
+    _db_with_row(mgr.db_path, 1)
+    created = mgr.create_backup()
+
+    applied = mgr.restore_backup(created["file_name"])
+
+    snapshot = Path(applied["pre_restore_snapshot"])
+    names = sorted(p.name for p in snapshot.iterdir())
+    assert len(names) == 3
+    values = sorted(
+        sqlite3.connect(p).execute("SELECT x FROM t").fetchone()[0] for p in snapshot.iterdir() if p.name != ".env"
+    )
+    assert values == [1, 7]
+
+
+def test_archive_validation_leaves_no_temp_files(tmp_path: Path, monkeypatch):
+    import tempfile
+
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(scratch))
+    source = tmp_path / "wal.db"
+    conn = sqlite3.connect(source)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("CREATE TABLE t(x INTEGER)")
+    conn.commit()
+    conn.close()
+
+    mgr = _manager(tmp_path)
+    mgr.load_restore_payload(_archive_with_db(tmp_path, source.read_bytes(), name="adminpanelaz_wal.tar.gz"))
+
+    assert list(scratch.iterdir()) == []
+
+
+def test_restore_refused_before_side_effects_when_disk_is_too_full(tmp_path: Path, monkeypatch):
+    import shutil as shutil_mod
+
+    import pytest
+    from fastapi import HTTPException
+
+    mgr = _manager(tmp_path)
+    _db_with_row(mgr.db_path, 1)
+    created = mgr.create_backup()
+    real_usage = shutil_mod.disk_usage
+    monkeypatch.setattr(
+        "app.services.backup_manager.shutil.disk_usage",
+        lambda path: real_usage(path)._replace(free=1024),
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        mgr.load_restore_payload(created["file_name"])
+
+    assert exc.value.status_code == 507
+    assert not (tmp_path / "backups" / BackupManager.PRE_RESTORE_DIR).exists()

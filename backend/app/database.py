@@ -2,6 +2,7 @@ import fcntl
 import json
 import logging
 import os
+import threading
 
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -81,25 +82,47 @@ def _table_columns(conn: Connection, table: str) -> set[str]:
     return {row[1] for row in conn.exec_driver_sql(f'PRAGMA table_info("{table}")')}
 
 
+_migrations_lock_guard = threading.RLock()
+_migrations_lock_depth = 0
+
+
 @contextmanager
-def _migrations_lock() -> Iterator[None]:
-    """Serialize startup migrations across uvicorn workers sharing one SQLite file."""
-    db_file = engine.url.database if engine.dialect.name == "sqlite" else None
-    if not db_file or db_file == ":memory:" or db_file.startswith("file:"):
-        yield
-        return
-    lock_path = Path(f"{db_file}.migrate.lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
-    try:
-        os.fchmod(fd, 0o600)
-        fcntl.flock(fd, fcntl.LOCK_EX)
-        try:
+def migrations_lock() -> Iterator[None]:
+    """Serialize startup schema work across uvicorn workers sharing one SQLite file.
+
+    Re-entrant within a process: flock on a second descriptor of the same file would block on itself.
+    """
+    global _migrations_lock_depth
+    with _migrations_lock_guard:
+        if _migrations_lock_depth:
+            _migrations_lock_depth += 1
+            try:
+                yield
+            finally:
+                _migrations_lock_depth -= 1
+            return
+        db_file = engine.url.database if engine.dialect.name == "sqlite" else None
+        if not db_file or db_file == ":memory:" or db_file.startswith("file:"):
             yield
+            return
+        lock_path = Path(f"{db_file}.migrate.lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                logger.info("DB migration: waiting for another worker to finish migrations (%s)", lock_path)
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            _migrations_lock_depth = 1
+            try:
+                yield
+            finally:
+                _migrations_lock_depth = 0
+                fcntl.flock(fd, fcntl.LOCK_UN)
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
-    finally:
-        os.close(fd)
+            os.close(fd)
 
 
 def _migrate_vpn_configs_node_scope() -> None:
@@ -157,16 +180,15 @@ def _migrate_vpn_configs_node_scope() -> None:
                     return node_id
             return active_id
 
-        old_rows = db.execute(
-            text(
-                "SELECT id, client_name, vpn_type, owner_id, cert_expire_days, description, "
-                "created_at, updated_at FROM vpn_configs"
-            )
-        ).mappings().all()
-
         with _migration_transaction() as conn:
             if "node_id" in _table_columns(conn, "vpn_configs"):
                 return
+            old_rows = conn.execute(
+                text(
+                    "SELECT id, client_name, vpn_type, owner_id, cert_expire_days, description, "
+                    "created_at, updated_at FROM vpn_configs"
+                )
+            ).mappings().all()
             conn.execute(text("DROP TABLE IF EXISTS vpn_configs_new"))
             conn.execute(
                 text(
@@ -1374,6 +1396,19 @@ def _migrate_traffic_session_state_node_scoped_key() -> None:
         logger.info("DB migration: traffic_session_state session_key is now unique per node")
 
 
+def _migrate_traffic_session_state_active_index() -> None:
+    """Collector reads active sessions every minute; finished history must not be scanned for that."""
+    with _migration_transaction() as conn:
+        if "traffic_session_state" not in inspect(conn).get_table_names():
+            return
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_traffic_session_state_node_active "
+                "ON traffic_session_state (node_id) WHERE is_active = 1"
+            )
+        )
+
+
 def _migrate_client_portal_tokens_active_unique() -> None:
     """One active (revoked_at IS NULL) portal token per (node_id, client_name)."""
     inspector = inspect(engine)
@@ -1483,7 +1518,7 @@ def _migrate_user_portal_tokens_table() -> None:
 
 def run_db_migrations() -> None:
     """Lightweight SQLite migrations for columns added after initial deploy."""
-    with _migrations_lock():
+    with migrations_lock():
         _run_db_migrations()
 
 
@@ -1512,6 +1547,7 @@ def _run_db_migrations() -> None:
     _migrate_webhook_delivery_destination_type()
     _migrate_user_traffic_sample_node_created_index()
     _migrate_traffic_session_state_node_scoped_key()
+    _migrate_traffic_session_state_active_index()
     inspector = inspect(engine)
     migrations = {
         "wg_access_policy": [

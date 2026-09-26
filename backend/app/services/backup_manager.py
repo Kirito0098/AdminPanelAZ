@@ -1,5 +1,6 @@
 import glob
 import json
+import logging
 import os
 import shutil
 import sqlite3
@@ -9,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import HTTPException, status
+
+logger = logging.getLogger(__name__)
 
 
 def remove_sqlite_sidecars(db_path: Path) -> None:
@@ -31,20 +34,18 @@ def validate_sqlite_bytes(data: bytes, label: str) -> None:
     )
     if not data.startswith(_SQLITE_HEADER):
         raise invalid
-    fd, tmp_name = tempfile.mkstemp(prefix="adminpanelaz-restore-check-", suffix=".db")
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-        conn = sqlite3.connect(f"file:{tmp.as_posix()}?mode=ro", uri=True)
+    # A WAL-mode copy grows -wal/-shm next to itself even when opened read-only.
+    with tempfile.TemporaryDirectory(prefix="adminpanelaz-restore-check-") as tmp_dir:
+        tmp = Path(tmp_dir) / "check.db"
+        tmp.write_bytes(data)
         try:
-            result = conn.execute("PRAGMA integrity_check(1)").fetchone()
-        finally:
-            conn.close()
-    except sqlite3.DatabaseError as exc:
-        raise invalid from exc
-    finally:
-        tmp.unlink(missing_ok=True)
+            conn = sqlite3.connect(f"file:{tmp.as_posix()}?mode=ro", uri=True)
+            try:
+                result = conn.execute("PRAGMA integrity_check(1)").fetchone()
+            finally:
+                conn.close()
+        except sqlite3.DatabaseError as exc:
+            raise invalid from exc
     if not result or result[0] != "ok":
         raise invalid
 
@@ -82,6 +83,9 @@ class BackupManager:
     AWG2_ARCHIVE_MEMBER = "awg2/az-awg2-backup.tar.gz"
     PRE_RESTORE_DIR = ".pre-restore"
     PRE_RESTORE_KEEP = 3
+    PRE_RESTORE_NAMES = {"db": "adminpanel.db", "cidr_db": "cidr.db", "env": ".env"}
+    SQLITE_ROLES = frozenset({"db", "cidr_db"})
+    RESTORE_FREE_SPACE_MARGIN = 64 * 1024 * 1024
 
     def __init__(
         self,
@@ -322,6 +326,7 @@ class BackupManager:
             validate_sqlite_bytes(files["db"], "База панели")
         if "cidr_db" in files:
             validate_sqlite_bytes(files["cidr_db"], "База CIDR")
+        self._ensure_restore_space(self._restore_targets(files))
         return {
             "restored": restored,
             "file_name": file_name,
@@ -329,23 +334,46 @@ class BackupManager:
             "_files": files,
         }
 
-    def apply_restore_payload(self, payload: dict) -> dict:
-        files = payload.get("_files") or {}
-        targets: list[tuple[Path, bytes, bool]] = []
+    def _restore_targets(self, files: dict[str, bytes]) -> list[tuple[str, Path, bytes]]:
+        targets: list[tuple[str, Path, bytes]] = []
         if "db" in files:
-            targets.append((self.db_path, files["db"], True))
+            targets.append(("db", self.db_path, files["db"]))
         if "cidr_db" in files and self.cidr_db_path is not None:
-            targets.append((self.cidr_db_path, files["cidr_db"], True))
+            targets.append(("cidr_db", self.cidr_db_path, files["cidr_db"]))
         if "env" in files:
-            targets.append((self.env_path, files["env"], False))
+            targets.append(("env", self.env_path, files["env"]))
+        return targets
 
-        snapshot = self._snapshot_live_files([path for path, _data, _sqlite in targets]) if targets else None
-        replaced: list[Path] = []
+    def _ensure_restore_space(self, targets: list[tuple[str, Path, bytes]]) -> None:
+        """Refuse up front: running out of disk mid-restore would happen after node overlays were applied."""
+        required: dict[int, tuple[Path, int]] = {}
+
+        def need(directory: Path, size: int) -> None:
+            directory.mkdir(parents=True, exist_ok=True)
+            dev = directory.stat().st_dev
+            anchor, total = required.get(dev, (directory, 0))
+            required[dev] = (anchor, total + size)
+
+        for _role, path, data in targets:
+            if path.exists():
+                need(self.backup_root, path.stat().st_size)
+            need(path.parent, len(data))
+        for anchor, size in required.values():
+            if shutil.disk_usage(anchor).free < size + self.RESTORE_FREE_SPACE_MARGIN:
+                raise HTTPException(
+                    status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+                    detail=f"Недостаточно места на диске для восстановления ({anchor}) — текущие данные не изменены",
+                )
+
+    def apply_restore_payload(self, payload: dict) -> dict:
+        targets = self._restore_targets(payload.get("_files") or {})
+        snapshot = self._snapshot_live_files([(role, path) for role, path, _data in targets]) if targets else None
+        replaced: list[tuple[str, Path]] = []
         try:
-            for path, data, is_sqlite in targets:
+            for role, path, data in targets:
                 _atomic_write_bytes(path, data)
-                replaced.append(path)
-                if is_sqlite:
+                replaced.append((role, path))
+                if role in self.SQLITE_ROLES:
                     # A leftover WAL of the old database would be replayed onto the restored file.
                     remove_sqlite_sidecars(path)
         except BaseException:
@@ -361,7 +389,7 @@ class BackupManager:
             result["pre_restore_snapshot"] = str(snapshot)
         return result
 
-    def _snapshot_live_files(self, paths: list[Path]) -> Path:
+    def _snapshot_live_files(self, targets: list[tuple[str, Path]]) -> Path:
         """Copy the files a restore is about to replace, so a bad restore can be undone by hand."""
         root = self.backup_root / self.PRE_RESTORE_DIR
         root.mkdir(parents=True, exist_ok=True)
@@ -370,10 +398,10 @@ class BackupManager:
         snapshot = root / stamp
         snapshot.mkdir(mode=0o700)
         os.chmod(snapshot, 0o700)
-        for path in paths:
+        for role, path in targets:
             if not path.exists():
                 continue
-            dest = snapshot / path.name
+            dest = snapshot / self.PRE_RESTORE_NAMES[role]
             if not self._copy_sqlite_consistent(path, dest):
                 shutil.copyfile(path, dest)
             os.chmod(dest, 0o600)
@@ -401,9 +429,9 @@ class BackupManager:
             return False
         return True
 
-    def _rollback_from_snapshot(self, replaced: list[Path], snapshot: Path | None) -> None:
-        for path in replaced:
-            saved = snapshot / path.name if snapshot is not None else None
+    def _rollback_from_snapshot(self, replaced: list[tuple[str, Path]], snapshot: Path | None) -> None:
+        for role, path in replaced:
+            saved = snapshot / self.PRE_RESTORE_NAMES[role] if snapshot is not None else None
             try:
                 if saved is not None and saved.exists():
                     _atomic_write_bytes(path, saved.read_bytes())
@@ -411,7 +439,7 @@ class BackupManager:
                     path.unlink(missing_ok=True)
                 remove_sqlite_sidecars(path)
             except OSError:
-                continue
+                logger.exception("Restore rollback failed for %s (pre-restore copy: %s)", path, snapshot)
 
     def _enforce_pre_restore_retention(self, root: Path) -> None:
         snapshots = sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True)

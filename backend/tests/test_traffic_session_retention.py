@@ -198,6 +198,36 @@ def test_collector_reuses_returning_session_beyond_first_key_chunk(db):
     assert row.is_active is True
 
 
+def test_active_session_lookup_uses_partial_index(db, monkeypatch):
+    from sqlalchemy import text
+
+    from app import database
+
+    engine = db.get_bind()
+    with engine.begin() as conn:
+        conn.execute(text("DROP INDEX ix_traffic_session_state_node_active"))
+    monkeypatch.setattr(database, "engine", engine)
+
+    database._migrate_traffic_session_state_active_index()
+
+    captured: list[str] = []
+
+    def _capture(_conn, _cursor, statement, _params, _context, _many):
+        if "FROM traffic_session_state" in statement and "session_key IN" not in statement:
+            captured.append(statement)
+
+    event.listen(engine, "before_cursor_execute", _capture)
+    try:
+        TrafficCollectorService(db, 1).persist_snapshot([])
+    finally:
+        event.remove(engine, "before_cursor_execute", _capture)
+
+    assert captured
+    with engine.connect() as conn:
+        plan = conn.exec_driver_sql(f"EXPLAIN QUERY PLAN {captured[0]}", (1,)).fetchall()
+    assert any("ix_traffic_session_state_node_active" in str(row) for row in plan), plan
+
+
 def test_scope_baseline_loads_only_active_and_snapshot_sessions(db):
     status_rows = [{"profile": "antizapret-wg", "traffic_clients": [_wg_client("bob", "pk-bob")]}]
     returning_key = build_session_key("antizapret-wg", status_rows[0]["traffic_clients"][0])
@@ -225,7 +255,9 @@ def test_retention_settings_api_exposes_session_retention(db, monkeypatch, tmp_p
     env_file.write_text("", encoding="utf-8")
     monkeypatch.setattr(settings_router, "ENV_FILE", env_file)
     monkeypatch.setattr(settings_router.admin_notify_service, "send_settings_change", lambda *a, **k: None)
-    monkeypatch.delenv("TRAFFIC_SESSION_RETENTION_DAYS", raising=False)
+    # setenv first so monkeypatch restores the variable the route writes into os.environ.
+    monkeypatch.setenv("TRAFFIC_SESSION_RETENTION_DAYS", "30")
+    monkeypatch.delenv("TRAFFIC_SESSION_RETENTION_DAYS")
     load_app_config.cache_clear()
     admin = db.get(User, 1)
     request = SimpleNamespace(headers={}, cookies={}, query_params={})
