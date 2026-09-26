@@ -319,6 +319,38 @@ def test_failed_restore_resumes_background_work(monkeypatch, tmp_path):
     assert order == ["load", "pause", "overlays", "dispose", "apply", "resume"]
 
 
+@pytest.mark.parametrize(
+    "outcome, resumed",
+    [({"success": True}, False), ({"success": False, "error": "unit failed"}, True), (OSError("boom"), True)],
+)
+def test_failed_restart_after_restore_resumes_background_work(monkeypatch, outcome, resumed):
+    calls: list[str] = []
+
+    def restart(_root):
+        calls.append("restart")
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    class _ImmediateTimer:
+        def __init__(self, _delay, fn):
+            self.fn = fn
+            self.daemon = False
+
+        def start(self):
+            self.fn()
+
+    monkeypatch.setattr(backups_mod, "restart_controller", restart)
+    monkeypatch.setattr(backups_mod, "_dispose_db_engines", lambda: None)
+    monkeypatch.setattr(backups_mod, "resume_background_work", lambda: calls.append("resume"))
+    monkeypatch.setattr(backups_mod.threading, "Timer", _ImmediateTimer)
+
+    backups_mod._schedule_panel_restart_after_restore()
+
+    # Успешный перезапуск завершает процесс, пауза уходит вместе с ним.
+    assert calls == (["restart", "resume"] if resumed else ["restart"])
+
+
 def test_pre_restore_rollback_pauses_background_work(monkeypatch, tmp_path):
     order: list[str] = []
     manager = _gate_manager(tmp_path, order)

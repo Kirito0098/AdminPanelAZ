@@ -73,8 +73,17 @@ def _schedule_panel_restart_after_restore() -> None:
     project_root = _project_root()
 
     def _restart() -> None:
-        _dispose_db_engines()
-        restart_controller(project_root)
+        # Пауза держится до перезапуска процесса; если он не случился, планировщики иначе стоят до ручного рестарта.
+        try:
+            _dispose_db_engines()
+            result = restart_controller(project_root)
+        except Exception:
+            logger.exception("Restore: panel restart failed; resuming background work")
+            resume_background_work()
+            return
+        if not result.get("success"):
+            logger.error("Restore: panel restart failed (%s); resuming background work", result.get("error"))
+            resume_background_work()
 
     timer = threading.Timer(RESTART_DELAY_SECONDS, _restart)
     timer.daemon = True

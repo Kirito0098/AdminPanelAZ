@@ -90,6 +90,19 @@ def test_rollback_brings_back_files_replaced_by_the_restore(tmp_path: Path):
     assert _row(undo / "adminpanel.db") == 1, "the rollback itself can be undone"
 
 
+def test_rollback_to_oldest_kept_copy_does_not_delete_it(tmp_path: Path):
+    mgr = _manager(tmp_path)
+    ids = [_restore_over_live(mgr, archived=1, live=live, env=f"X={live}\n") for live in (2, 3, 4)]
+    assert len(ids) == BackupManager.PRE_RESTORE_KEEP
+
+    applied = mgr.apply_restore_payload(mgr.load_pre_restore_payload(ids[0]))
+
+    assert _row(mgr.db_path) == 2
+    kept = [e["snapshot_id"] for e in mgr.list_pre_restore_snapshots()]
+    assert ids[0] in kept, "the copy just rolled back to stays available"
+    assert Path(applied["pre_restore_snapshot"]).name in kept
+
+
 def test_rollback_refuses_damaged_copy_without_touching_live_files(tmp_path: Path):
     mgr = _manager(tmp_path)
     snapshot_id = _restore_over_live(mgr, archived=1, live=2, env="X=live\n")

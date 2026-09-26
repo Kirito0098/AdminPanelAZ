@@ -376,7 +376,14 @@ class BackupManager:
 
     def apply_restore_payload(self, payload: dict) -> dict:
         targets = self._restore_targets(payload.get("_files") or {})
-        snapshot = self._snapshot_live_files([(role, path) for role, path, _data in targets]) if targets else None
+        snapshot = (
+            self._snapshot_live_files(
+                [(role, path) for role, path, _data in targets],
+                keep_snapshot_id=payload.get("_pre_restore_source"),
+            )
+            if targets
+            else None
+        )
         replaced: list[tuple[str, Path]] = []
         try:
             for role, path, data in targets:
@@ -413,7 +420,7 @@ class BackupManager:
                 "a redelivered bot command may run again"
             )
 
-    def _snapshot_live_files(self, targets: list[tuple[str, Path]]) -> Path:
+    def _snapshot_live_files(self, targets: list[tuple[str, Path]], *, keep_snapshot_id: str | None = None) -> Path:
         """Copy the files a restore is about to replace, so a bad restore can be undone by hand."""
         root = self.backup_root / self.PRE_RESTORE_DIR
         root.mkdir(parents=True, exist_ok=True)
@@ -429,7 +436,7 @@ class BackupManager:
             if not self._copy_sqlite_consistent(path, dest):
                 shutil.copyfile(path, dest)
             os.chmod(dest, 0o600)
-        self._enforce_pre_restore_retention(root)
+        self._enforce_pre_restore_retention(root, keep_snapshot_id=keep_snapshot_id)
         return snapshot
 
     @staticmethod
@@ -465,9 +472,12 @@ class BackupManager:
             except OSError:
                 logger.exception("Restore rollback failed for %s (pre-restore copy: %s)", path, snapshot)
 
-    def _enforce_pre_restore_retention(self, root: Path) -> None:
+    def _enforce_pre_restore_retention(self, root: Path, *, keep_snapshot_id: str | None = None) -> None:
+        """``keep_snapshot_id`` is the copy being rolled back to: it may be the oldest, yet the admin still needs it."""
         snapshots = sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True)
         for old in snapshots[self.PRE_RESTORE_KEEP :]:
+            if old.name == keep_snapshot_id:
+                continue
             shutil.rmtree(old, ignore_errors=True)
 
     def list_pre_restore_snapshots(self) -> list[dict]:
@@ -514,7 +524,13 @@ class BackupManager:
         if "cidr_db" in files:
             validate_sqlite_bytes(files["cidr_db"], "База CIDR")
         self._ensure_restore_space(self._restore_targets(files))
-        return {"restored": list(files), "file_name": snapshot_id, "configs": {}, "_files": files}
+        return {
+            "restored": list(files),
+            "file_name": snapshot_id,
+            "configs": {},
+            "_files": files,
+            "_pre_restore_source": snapshot_id,
+        }
 
     def delete_pre_restore_snapshot(self, snapshot_id: str) -> None:
         shutil.rmtree(self._resolve_pre_restore_snapshot(snapshot_id))
