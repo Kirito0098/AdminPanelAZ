@@ -5,12 +5,16 @@ from app.auth import get_current_user, get_password_hash, require_admin, tg_mini
 from app.config import get_settings
 from app.database import get_db
 from app.models import (
+    ClientPortalToken,
     QrDownloadAuditLog,
     QrDownloadToken,
     RefreshToken,
+    UnlockCode,
+    UnlockCodeRedemption,
     User,
     UserActionLog,
     UserConfigAccess,
+    UserPortalToken,
     UserReminderLog,
     UserRole,
     VpnConfig,
@@ -51,6 +55,13 @@ def _purge_user_before_delete(db: Session, user: User, successor: User) -> None:
     db.query(UserConfigAccess).filter(UserConfigAccess.user_id == user.id).delete(synchronize_session=False)
     db.query(UserReminderLog).filter(UserReminderLog.user_id == user.id).delete(synchronize_session=False)
     db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).delete(synchronize_session=False)
+    # Обнулённый user_id сделал бы погашение клиентским и мог бы нарушить уникальность (код, клиент, узел).
+    db.query(UnlockCodeRedemption).filter(UnlockCodeRedemption.user_id == user.id).delete(synchronize_session=False)
+    for model in (ClientPortalToken, UnlockCode, UserPortalToken):
+        db.query(model).filter(model.created_by_user_id == user.id).update(
+            {model.created_by_user_id: None},
+            synchronize_session=False,
+        )
     db.query(VpnConfig).filter(VpnConfig.owner_id == user.id).update(
         {VpnConfig.owner_id: successor.id},
         synchronize_session=False,
