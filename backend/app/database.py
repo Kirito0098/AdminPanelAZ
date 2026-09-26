@@ -1602,6 +1602,12 @@ def _run_db_migrations() -> None:
         "nodes": [
             ("api_key_rotated_at", "DATETIME"),
         ],
+        "background_task": [
+            ("owner", "VARCHAR(64)"),
+        ],
+        "server_reboot_requests": [
+            ("owner", "VARCHAR(64)"),
+        ],
         "refresh_tokens": [
             ("family_id", "VARCHAR(32)"),
             ("revoked_at", "DATETIME"),

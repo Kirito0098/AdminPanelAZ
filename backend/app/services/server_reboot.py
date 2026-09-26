@@ -6,6 +6,7 @@ it; the timer and execute callback stay in the worker that scheduled the reboot.
 
 from __future__ import annotations
 
+import logging
 import threading
 import uuid
 from dataclasses import dataclass, replace
@@ -15,11 +16,14 @@ from typing import Callable
 from sqlalchemy.exc import IntegrityError
 
 from app.database import SessionLocal
-from app.models import ServerRebootRequest
+from app.models import ServerRebootRecord
+from app.services.process_identity import current_process_owner, is_owner_alive
+
+logger = logging.getLogger(__name__)
 
 DELAY_SECONDS = 15
 CONFIRM_PHRASE = "REBOOT"
-# A pending reboot this far past its time was scheduled by a worker that is gone.
+# A pending reboot this far past its time will not be run by its timer, even if the worker lives.
 ABANDONED_AFTER = timedelta(minutes=2)
 
 ACTIVE_STATUSES = ("pending", "executing")
@@ -54,7 +58,7 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _to_pending(row: ServerRebootRequest) -> PendingReboot:
+def _to_pending(row: ServerRebootRecord) -> PendingReboot:
     return PendingReboot(
         reboot_id=row.id,
         node_id=row.node_id,
@@ -70,9 +74,9 @@ def _set_status(reboot_id: str, *, expected: str, new: str) -> bool:
     db = SessionLocal()
     try:
         changed = (
-            db.query(ServerRebootRequest)
-            .filter(ServerRebootRequest.id == reboot_id, ServerRebootRequest.status == expected)
-            .update({ServerRebootRequest.status: new}, synchronize_session=False)
+            db.query(ServerRebootRecord)
+            .filter(ServerRebootRecord.id == reboot_id, ServerRebootRecord.status == expected)
+            .update({ServerRebootRecord.status: new}, synchronize_session=False)
         )
         db.commit()
         return changed == 1
@@ -80,14 +84,22 @@ def _set_status(reboot_id: str, *, expected: str, new: str) -> bool:
         db.close()
 
 
-def _interrupt_abandoned(db) -> None:
-    (
-        db.query(ServerRebootRequest)
-        .filter(
-            ServerRebootRequest.status.in_(ACTIVE_STATUSES),
-            ServerRebootRequest.execute_at < _utcnow() - ABANDONED_AFTER,
-        )
-        .update({ServerRebootRequest.status: "interrupted"}, synchronize_session=False)
+def _is_abandoned(row: ServerRebootRecord, now: datetime) -> bool:
+    if not is_owner_alive(row.owner):
+        return True
+    return row.status == "pending" and row.execute_at < now - ABANDONED_AFTER
+
+
+def _interrupt_abandoned(db) -> int:
+    now = _utcnow()
+    rows = db.query(ServerRebootRecord).filter(ServerRebootRecord.status.in_(ACTIVE_STATUSES)).all()
+    ids = [row.id for row in rows if _is_abandoned(row, now)]
+    if not ids:
+        return 0
+    return (
+        db.query(ServerRebootRecord)
+        .filter(ServerRebootRecord.id.in_(ids), ServerRebootRecord.status.in_(ACTIVE_STATUSES))
+        .update({ServerRebootRecord.status: "interrupted"}, synchronize_session=False)
     )
 
 
@@ -99,21 +111,17 @@ def clear_all_for_tests() -> None:
         _execute_fns.clear()
     db = SessionLocal()
     try:
-        db.query(ServerRebootRequest).delete()
+        db.query(ServerRebootRecord).delete()
         db.commit()
     finally:
         db.close()
 
 
-def interrupt_reboots_of_previous_process() -> int:
-    """Timers do not survive a panel restart; free the nodes for new reboots."""
+def interrupt_abandoned_reboots() -> int:
+    """Timers die with their worker; free the nodes for new reboots."""
     db = SessionLocal()
     try:
-        count = (
-            db.query(ServerRebootRequest)
-            .filter(ServerRebootRequest.status.in_(ACTIVE_STATUSES))
-            .update({ServerRebootRequest.status: "interrupted"}, synchronize_session=False)
-        )
+        count = _interrupt_abandoned(db)
         db.commit()
         return count
     finally:
@@ -123,15 +131,14 @@ def interrupt_reboots_of_previous_process() -> int:
 def list_pending() -> list[PendingReboot]:
     db = SessionLocal()
     try:
-        _interrupt_abandoned(db)
-        db.commit()
+        now = _utcnow()
         rows = (
-            db.query(ServerRebootRequest)
-            .filter(ServerRebootRequest.status == "pending")
-            .order_by(ServerRebootRequest.execute_at)
+            db.query(ServerRebootRecord)
+            .filter(ServerRebootRecord.status == "pending")
+            .order_by(ServerRebootRecord.execute_at)
             .all()
         )
-        return [_to_pending(row) for row in rows]
+        return [_to_pending(row) for row in rows if not _is_abandoned(row, now)]
     finally:
         db.close()
 
@@ -139,7 +146,7 @@ def list_pending() -> list[PendingReboot]:
 def get_pending(reboot_id: str) -> PendingReboot | None:
     db = SessionLocal()
     try:
-        row = db.get(ServerRebootRequest, reboot_id)
+        row = db.get(ServerRebootRecord, reboot_id)
         return _to_pending(row) if row else None
     finally:
         db.close()
@@ -155,7 +162,7 @@ def schedule_reboot(
 ) -> PendingReboot:
     delay = float(DELAY_SECONDS if delay_seconds is None else delay_seconds)
     now = _utcnow()
-    row = ServerRebootRequest(
+    row = ServerRebootRecord(
         id=str(uuid.uuid4()),
         node_id=node_id,
         node_name=node_name,
@@ -163,6 +170,7 @@ def schedule_reboot(
         created_at=now,
         execute_at=now + timedelta(seconds=delay),
         status="pending",
+        owner=current_process_owner(),
     )
     db = SessionLocal()
     try:
@@ -182,15 +190,19 @@ def schedule_reboot(
         with _lock:
             fn = _execute_fns.pop(reboot_id, None)
             _timers.pop(reboot_id, None)
-        if not _set_status(reboot_id, expected="pending", new="executing"):
-            return
-        status = "executed"
         try:
-            if fn is not None:
-                fn(replace(pending, status="executing"))
+            if not _set_status(reboot_id, expected="pending", new="executing"):
+                return
+            status = "executed"
+            try:
+                if fn is not None:
+                    fn(replace(pending, status="executing"))
+            except Exception:
+                logger.exception("Scheduled reboot of %s failed", pending.node_name)
+                status = "failed"
+            _set_status(reboot_id, expected="executing", new=status)
         except Exception:
-            status = "failed"
-        _set_status(reboot_id, expected="executing", new=status)
+            logger.exception("Scheduled reboot of %s: state update failed", pending.node_name)
 
     with _lock:
         if execute_fn is not None:

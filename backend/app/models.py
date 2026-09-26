@@ -747,6 +747,8 @@ class BackgroundTask(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # process_identity token of the worker running the task.
+    owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class WebAuthnCredential(Base):
@@ -859,7 +861,7 @@ class WebhookDelivery(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
-class ServerRebootRequest(Base):
+class ServerRebootRecord(Base):
     """Scheduled OS reboot, shared by uvicorn workers; the timer lives in the scheduling worker."""
 
     __tablename__ = "server_reboot_requests"
@@ -879,6 +881,8 @@ class ServerRebootRequest(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     execute_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
+    # process_identity token of the worker holding the timer.
+    owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class TelegramProcessedUpdate(Base):

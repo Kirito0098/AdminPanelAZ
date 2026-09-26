@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import BackgroundTask
+from app.services.process_identity import current_process_owner, is_owner_alive
 
 logger = logging.getLogger(__name__)
 
@@ -207,14 +208,14 @@ class BackgroundTaskService:
             db.close()
 
     def recover_stale_running_tasks(self) -> int:
-        """Mark orphaned running/queued tasks as failed after process restart."""
+        """Mark running/queued tasks of dead workers as failed; other workers may still be running theirs."""
         db = SessionLocal()
         try:
-            stale = (
-                db.query(BackgroundTask)
-                .filter(BackgroundTask.status.in_(["queued", "running"]))
-                .all()
-            )
+            stale = [
+                task
+                for task in db.query(BackgroundTask).filter(BackgroundTask.status.in_(["queued", "running"])).all()
+                if not is_owner_alive(task.owner)
+            ]
             if not stale:
                 return 0
             now = datetime.now(timezone.utc)
@@ -263,6 +264,7 @@ class BackgroundTaskService:
                 message=(message or "Задача поставлена в очередь")[:255],
                 progress_percent=0,
                 progress_stage="Ожидание запуска задачи…",
+                owner=current_process_owner(),
             )
             db.add(task)
             self._commit_with_retry(db)

@@ -154,11 +154,11 @@ def run_leader_startup_actions() -> None:
     except Exception:
         logger.exception("Failed to recover stale background tasks on startup")
     try:
-        from app.services.server_reboot import interrupt_reboots_of_previous_process
+        from app.services.server_reboot import interrupt_abandoned_reboots
 
-        interrupted = interrupt_reboots_of_previous_process()
+        interrupted = interrupt_abandoned_reboots()
         if interrupted:
-            logger.info("Marked %d scheduled reboot(s) of the previous process as interrupted", interrupted)
+            logger.info("Marked %d scheduled reboot(s) of stopped workers as interrupted", interrupted)
     except Exception:
         logger.exception("Failed to clear scheduled reboots on startup")
     try:

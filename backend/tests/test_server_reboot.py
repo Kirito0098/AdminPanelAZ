@@ -1,4 +1,7 @@
 # backend/tests/test_server_reboot.py
+import logging
+import subprocess
+import sys
 import threading
 import time
 from contextlib import contextmanager
@@ -10,8 +13,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import ServerRebootRequest
+from app.models import ServerRebootRecord
+from app.services import process_identity as pi
 from app.services import server_reboot as sr
+
+DEAD_OWNER = "999999999:1"
 
 
 @pytest.fixture(autouse=True)
@@ -23,6 +29,17 @@ def _clean(tmp_path, monkeypatch):
     yield
     sr.clear_all_for_tests()
     engine.dispose()
+
+
+@pytest.fixture()
+def live_worker():
+    """Owner token of another worker process that is still running."""
+    child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        yield pi.owner_of(child.pid)
+    finally:
+        child.kill()
+        child.wait()
 
 
 @contextmanager
@@ -62,10 +79,10 @@ def test_times_are_utc_aware():
     assert abs((stored.execute_at - pending.execute_at).total_seconds()) < 1
 
 
-def _insert_row(*, node_id: int, status: str, execute_at: datetime) -> str:
+def _insert_row(*, node_id: int, status: str, execute_at: datetime, owner: str | None = DEAD_OWNER) -> str:
     db = sr.SessionLocal()
     try:
-        row = ServerRebootRequest(
+        row = ServerRebootRecord(
             id=f"stale-{node_id}-{status}",
             node_id=node_id,
             node_name=f"n{node_id}",
@@ -73,6 +90,7 @@ def _insert_row(*, node_id: int, status: str, execute_at: datetime) -> str:
             created_at=execute_at - timedelta(seconds=15),
             execute_at=execute_at,
             status=status,
+            owner=owner,
         )
         db.add(row)
         db.commit()
@@ -81,34 +99,98 @@ def _insert_row(*, node_id: int, status: str, execute_at: datetime) -> str:
         db.close()
 
 
-def test_abandoned_reboot_does_not_block_new_one():
+def test_scheduled_reboot_is_owned_by_current_process():
+    pending = sr.schedule_reboot(node_id=14, node_name="n14", scheduled_by="a", execute_fn=Mock(), delay_seconds=5.0)
+    db = sr.SessionLocal()
+    try:
+        assert db.get(ServerRebootRecord, pending.reboot_id).owner == pi.current_process_owner()
+    finally:
+        db.close()
+
+
+def test_reboot_of_dead_worker_does_not_block_new_one():
     """Worker that scheduled it died before the timer fired."""
-    stale_id = _insert_row(
-        node_id=10, status="pending", execute_at=datetime.utcnow() - sr.ABANDONED_AFTER - timedelta(seconds=1)
-    )
+    stale_id = _insert_row(node_id=10, status="pending", execute_at=datetime.utcnow() + timedelta(seconds=10))
     fresh = sr.schedule_reboot(node_id=10, node_name="n10", scheduled_by="a", execute_fn=Mock(), delay_seconds=5.0)
     assert fresh.status == "pending"
     assert sr.get_pending(stale_id).status == "interrupted"
     assert [p.reboot_id for p in sr.list_pending()] == [fresh.reboot_id]
 
 
-def test_abandoned_reboot_is_not_listed_as_pending():
+def test_overdue_reboot_of_live_worker_does_not_block_new_one(live_worker):
+    """The worker is alive but its timer never ran the reboot."""
     stale_id = _insert_row(
-        node_id=13, status="pending", execute_at=datetime.utcnow() - sr.ABANDONED_AFTER - timedelta(seconds=1)
+        node_id=15,
+        status="pending",
+        execute_at=datetime.utcnow() - sr.ABANDONED_AFTER - timedelta(seconds=1),
+        owner=live_worker,
     )
-    assert sr.list_pending() == []
+    sr.schedule_reboot(node_id=15, node_name="n15", scheduled_by="a", execute_fn=Mock(), delay_seconds=5.0)
     assert sr.get_pending(stale_id).status == "interrupted"
 
 
-def test_startup_interrupts_reboots_of_previous_process():
+def test_listing_hides_abandoned_reboots_without_writing(live_worker):
+    dead_id = _insert_row(node_id=13, status="pending", execute_at=datetime.utcnow() + timedelta(seconds=10))
+    overdue_id = _insert_row(
+        node_id=16,
+        status="pending",
+        execute_at=datetime.utcnow() - sr.ABANDONED_AFTER - timedelta(seconds=1),
+        owner=live_worker,
+    )
+    assert sr.list_pending() == []
+    assert sr.get_pending(dead_id).status == "pending"
+    assert sr.get_pending(overdue_id).status == "pending"
+
+
+def test_pending_reboot_of_live_worker_is_listed(live_worker):
+    live_id = _insert_row(
+        node_id=17, status="pending", execute_at=datetime.utcnow() + timedelta(seconds=10), owner=live_worker
+    )
+    assert [p.reboot_id for p in sr.list_pending()] == [live_id]
+
+
+def test_long_running_reboot_of_live_worker_keeps_its_status(live_worker):
+    """The reboot callback may run for minutes; its final status must not be overwritten."""
+    executing_id = _insert_row(
+        node_id=18,
+        status="executing",
+        execute_at=datetime.utcnow() - sr.ABANDONED_AFTER - timedelta(minutes=5),
+        owner=live_worker,
+    )
+    sr.schedule_reboot(node_id=19, node_name="n19", scheduled_by="a", execute_fn=Mock(), delay_seconds=5.0)
+    assert sr.interrupt_abandoned_reboots() == 0
+    assert sr.get_pending(executing_id).status == "executing"
+
+
+def test_startup_interrupts_only_reboots_of_dead_workers(live_worker):
+    """A worker restarted by uvicorn must not cancel reboots scheduled by the workers still running."""
     pending_id = _insert_row(node_id=11, status="pending", execute_at=datetime.utcnow() + timedelta(seconds=10))
     executing_id = _insert_row(node_id=12, status="executing", execute_at=datetime.utcnow())
+    legacy_id = _insert_row(
+        node_id=20, status="pending", execute_at=datetime.utcnow() + timedelta(seconds=10), owner=None
+    )
+    live_id = _insert_row(
+        node_id=21, status="pending", execute_at=datetime.utcnow() + timedelta(seconds=10), owner=live_worker
+    )
 
-    assert sr.interrupt_reboots_of_previous_process() == 2
+    assert sr.interrupt_abandoned_reboots() == 3
 
     assert sr.get_pending(pending_id).status == "interrupted"
     assert sr.get_pending(executing_id).status == "interrupted"
+    assert sr.get_pending(legacy_id).status == "interrupted"
+    assert sr.get_pending(live_id).status == "pending"
     sr.schedule_reboot(node_id=12, node_name="n12", scheduled_by="a", execute_fn=Mock(), delay_seconds=5.0)
+
+
+def test_timer_errors_are_logged(monkeypatch, caplog):
+    def locked(*_args, **_kwargs):
+        raise RuntimeError("database is locked")
+
+    monkeypatch.setattr(sr, "_set_status", locked)
+    with caplog.at_level(logging.ERROR, logger=sr.logger.name):
+        sr.schedule_reboot(node_id=22, node_name="n22", scheduled_by="a", execute_fn=Mock(), delay_seconds=0.02)
+        time.sleep(0.15)
+    assert any("n22" in record.getMessage() for record in caplog.records)
 
 
 def test_schedule_requires_exact_confirm_via_wrapper():
