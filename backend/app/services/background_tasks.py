@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import inspect
 import json
 import logging
@@ -31,6 +32,11 @@ MAX_OUTPUT_CHARS = 50_000
 _COMMIT_RETRY_ATTEMPTS = 5
 _COMMIT_RETRY_DELAY_SEC = 0.1
 _EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="bg-task")
+
+
+def _submit_in_current_context(fn: Callable[..., Any], *args: Any) -> None:
+    # The request context carries X-Expected-Node-Id: a task must not act on a node switched after enqueue.
+    _EXECUTOR.submit(contextvars.copy_context().run, fn, *args)
 
 _PIPELINE_TASK_TYPES = {
     "cidr_db_refresh",
@@ -306,6 +312,16 @@ class BackgroundTaskService:
 
         return task_callable() or {}
 
+    @staticmethod
+    def exception_text(exc: BaseException) -> str:
+        if isinstance(exc, HTTPException):
+            detail = exc.detail
+            if isinstance(detail, str):
+                return detail
+            if isinstance(detail, dict) and isinstance(detail.get("message"), str):
+                return detail["message"]
+        return str(exc)
+
     def run_background_task(self, task_id: str, task_callable: BackgroundTaskCallable) -> None:
         db = SessionLocal()
         try:
@@ -365,7 +381,7 @@ class BackgroundTaskService:
                 status="failed",
                 finished_at=datetime.now(timezone.utc),
                 message="Задача завершилась с ошибкой",
-                error=self.trim_background_task_text(str(exc)),
+                error=self.trim_background_task_text(self.exception_text(exc)),
                 progress_percent=100,
                 progress_stage="Ошибка выполнения",
             )
@@ -383,7 +399,7 @@ class BackgroundTaskService:
             queued_message or "Задача поставлена в очередь",
             created_by_username=created_by_username,
         )
-        _EXECUTOR.submit(self.run_background_task, task_id, task_callable)
+        _submit_in_current_context(self.run_background_task, task_id, task_callable)
         task = self.get_task(task_id)
         if task is None:
             raise RuntimeError("Failed to create background task")
@@ -988,7 +1004,7 @@ class BackgroundTaskService:
                     progress_percent=100,
                     progress_stage="Операция завершилась с ошибкой",
                     message="Операция завершилась с ошибкой",
-                    error=str(exc),
+                    error=self.exception_text(exc),
                     finished_at=datetime.now(timezone.utc),
                 )
 
@@ -999,7 +1015,7 @@ class BackgroundTaskService:
             progress_stage="Запуск фоновой задачи…",
             started_at=datetime.now(timezone.utc),
         )
-        _EXECUTOR.submit(_worker)
+        _submit_in_current_context(_worker)
 
     def build_accepted_payload(self, task: BackgroundTask, message: str) -> dict[str, Any]:
         payload = self.serialize_background_task(task)

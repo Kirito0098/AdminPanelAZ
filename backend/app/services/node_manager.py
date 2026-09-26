@@ -28,6 +28,7 @@ from app.models import (
     WgAccessPolicy,
 )
 from app.services.crypto import decrypt_secret, encrypt_secret
+from app.services.expected_node import ensure_expected_node, forget_expected_node
 from app.services.antizapret import AntiZapretService
 from app.services.node_adapter import LocalNodeAdapter, NodeAdapter, RemoteNodeAdapter
 from app.services.node_health import HEALTH_METADATA_KEYS
@@ -176,14 +177,26 @@ def set_active_node_id(db: Session, node_id: int) -> None:
             detail="Прокси-узел нельзя сделать активным для VPN: у него нет OpenVPN/WireGuard.",
         )
     _set_setting(db, ACTIVE_NODE_KEY, str(node_id))
+    forget_expected_node()
 
 
 def clear_active_node_id(db: Session) -> None:
     _set_setting(db, ACTIVE_NODE_KEY, "")
+    forget_expected_node()
 
 
 def get_active_node(db: Session) -> Node:
-    """Return the active VPN node. Never returns ``node_kind=proxy``."""
+    """Return the active VPN node. Never returns ``node_kind=proxy``.
+
+    A write request that names the node shown in its UI (``X-Expected-Node-Id``) gets ``409``
+    when the active node was switched elsewhere in the meantime.
+    """
+    node = _resolve_active_node(db)
+    ensure_expected_node(node)
+    return node
+
+
+def _resolve_active_node(db: Session) -> Node:
     node_id = get_active_node_id(db)
     if node_id:
         node = db.query(Node).filter(Node.id == node_id).first()
@@ -204,7 +217,7 @@ def get_active_node(db: Session) -> Node:
             .first()
         )
         if local:
-            set_active_node_id(db, local.id)
+            _set_setting(db, ACTIVE_NODE_KEY, str(local.id))
             db.commit()
             return local
 
@@ -215,7 +228,7 @@ def get_active_node(db: Session) -> Node:
         .first()
     )
     if remote:
-        set_active_node_id(db, remote.id)
+        _set_setting(db, ACTIVE_NODE_KEY, str(remote.id))
         db.commit()
         return remote
 

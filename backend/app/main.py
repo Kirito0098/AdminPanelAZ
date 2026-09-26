@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 from app.middleware.api_rate_limit import ApiRateLimitMiddleware
 from app.middleware.http_security import HttpSecurityMiddleware, build_robots_txt, build_security_txt, get_panel_branding
 from app.middleware.active_session import ActiveSessionMiddleware
+from app.services.expected_node import EXPECTED_NODE_HEADER, ExpectedNodeMiddleware
 from app.services.security_bootstrap import (
     restrict_backup_dir_permissions,
     restrict_sensitive_file_permissions,
@@ -253,6 +254,7 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+app.add_middleware(ExpectedNodeMiddleware)
 app.add_middleware(ActiveSessionMiddleware)
 app.add_middleware(HttpSecurityMiddleware)
 app.add_middleware(
@@ -260,7 +262,14 @@ app.add_middleware(
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Captcha-Id", "X-Web-Session-Id", "Accept"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Captcha-Id",
+        "X-Web-Session-Id",
+        EXPECTED_NODE_HEADER,
+        "Accept",
+    ],
     expose_headers=["X-Qr-Content", "X-Qr-Download-Url", "Content-Disposition"],
 )
 app.add_middleware(ApiRateLimitMiddleware)

@@ -1,12 +1,21 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import * as api from '@/api/client'
 import { useAuth } from '@/context/AuthContext'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
+import { createActiveNodeTracker, onActiveNodeChanged } from '@/lib/expectedNode'
 import type { Node, NodeHaContext, NodeSyncGroup } from '@/types'
+
+interface ActiveNodeState {
+  node: Node | null
+  ha: NodeHaContext | null
+}
 
 interface NodeContextValue {
   activeNode: Node | null
   activeNodeHa: NodeHaContext | null
+  /** Active node switched elsewhere (other tab, admin, bot) while this tab still shows ``activeNode``. */
+  activeNodeChangedElsewhere: Node | null
+  adoptActiveNodeChangedElsewhere: () => void
   nodes: Node[]
   syncGroups: NodeSyncGroup[]
   syncGroupsLoaded: boolean
@@ -24,29 +33,40 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
   const [activeNode, setActiveNode] = useState<Node | null>(null)
   const [activeNodeHa, setActiveNodeHa] = useState<NodeHaContext | null>(null)
+  const [changedElsewhere, setChangedElsewhere] = useState<ActiveNodeState | null>(null)
+  const trackerRef = useRef(createActiveNodeTracker())
   const [nodes, setNodes] = useState<Node[]>([])
   const [syncGroups, setSyncGroups] = useState<NodeSyncGroup[]>([])
   const [syncGroupsLoaded, setSyncGroupsLoaded] = useState(false)
   const [loading, setLoading] = useState(true)
 
+  const showActiveNode = useCallback((state: ActiveNodeState) => {
+    trackerRef.current.show(state.node?.id ?? null)
+    setActiveNode(state.node)
+    setActiveNodeHa(state.ha)
+    setChangedElsewhere(null)
+  }, [])
+
   const refresh = useCallback(async () => {
     if (!user) {
-      setActiveNode(null)
-      setActiveNodeHa(null)
+      showActiveNode({ node: null, ha: null })
       setLoading(false)
       return
     }
+    const tracker = trackerRef.current
+    const token = tracker.beginRefresh()
     try {
       const data = await api.getActiveNode()
-      setActiveNode(data.node)
-      setActiveNodeHa(data.ha ?? null)
+      const state = { node: data.node, ha: data.ha ?? null }
+      const outcome = tracker.classifyRefresh(token, data.node?.id ?? null)
+      if (outcome === 'changed-elsewhere') setChangedElsewhere(state)
+      else if (outcome === 'show') showActiveNode(state)
     } catch {
-      setActiveNode(null)
-      setActiveNodeHa(null)
+      if (tracker.classifyRefresh(token, null) !== 'stale') showActiveNode({ node: null, ha: null })
     } finally {
       setLoading(false)
     }
-  }, [user])
+  }, [user, showActiveNode])
 
   const refreshNodes = useCallback(async () => {
     if (!user || user.role !== 'admin') {
@@ -83,20 +103,27 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
 
   const activate = useCallback(
     async (id: number) => {
+      trackerRef.current.beginActivation()
       const data = await api.activateNode(id)
-      setActiveNode(data.node)
-      setActiveNodeHa(data.ha ?? null)
+      trackerRef.current.finishActivation(data.node?.id ?? null)
+      showActiveNode({ node: data.node, ha: data.ha ?? null })
       await Promise.all([
         refreshNodes().catch(() => {}),
         refreshSyncGroups(),
       ])
     },
-    [refreshNodes, refreshSyncGroups],
+    [refreshNodes, refreshSyncGroups, showActiveNode],
   )
+
+  const adoptActiveNodeChangedElsewhere = useCallback(() => {
+    if (changedElsewhere) showActiveNode(changedElsewhere)
+  }, [changedElsewhere, showActiveNode])
 
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  useEffect(() => onActiveNodeChanged(() => void refresh()), [refresh])
 
   useEffect(() => {
     void refreshNodes().catch(() => {})
@@ -131,6 +158,8 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
     () => ({
       activeNode,
       activeNodeHa,
+      activeNodeChangedElsewhere: changedElsewhere?.node ?? null,
+      adoptActiveNodeChangedElsewhere,
       nodes,
       syncGroups,
       syncGroupsLoaded,
@@ -144,6 +173,8 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
     [
       activeNode,
       activeNodeHa,
+      changedElsewhere,
+      adoptActiveNodeChangedElsewhere,
       nodes,
       syncGroups,
       syncGroupsLoaded,

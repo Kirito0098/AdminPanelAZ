@@ -1,5 +1,6 @@
 import { getWebSessionId } from '@/lib/webSession'
 import { clearAccessToken } from '@/lib/accessToken'
+import { applyExpectedNodeHeader } from '@/lib/expectedNode'
 import {
   API_BASE,
   apiFetch,
@@ -105,6 +106,7 @@ export async function downloadAwg2Backup(retry = true): Promise<Response> {
   if (token) headers.set('Authorization', `Bearer ${token}`)
   const sessionId = getWebSessionId()
   if (sessionId) headers.set('X-Web-Session-Id', sessionId)
+  applyExpectedNodeHeader(headers, 'POST')
 
   const response = await fetch(`${API_BASE}/awg2/backup`, {
     method: 'POST',

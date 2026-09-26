@@ -2,6 +2,11 @@ import { apiBase as API_BASE } from '@/lib/panelBase'
 import { parseHttpErrorBody } from '@/lib/httpErrorMessage'
 import { clearAccessToken, getAccessToken, setAccessToken } from '@/lib/accessToken'
 import { getActiveTimeZone } from '@/lib/datetime'
+import {
+  applyExpectedNodeHeader,
+  isActiveNodeChangedPayload,
+  notifyActiveNodeChanged,
+} from '@/lib/expectedNode'
 import { getWebSessionId } from '@/lib/webSession'
 
 export class ApiError extends Error {
@@ -87,6 +92,7 @@ export async function apiFetchAtBase<T>(
   }
 
   const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base
+  if (normalizedBase === API_BASE) applyExpectedNodeHeader(headers, options.method)
   let response: Response
   try {
     response = await fetch(`${normalizedBase}${path}`, { ...options, headers, credentials: 'include' })
@@ -130,6 +136,7 @@ export async function apiFetchAtBase<T>(
         payload = undefined
       }
     }
+    if (response.status === 409 && isActiveNodeChangedPayload(payload)) notifyActiveNodeChanged()
     const detail = parseHttpErrorBody(body, response.status)
     throw new ApiError(detail, response.status, payload)
   }
