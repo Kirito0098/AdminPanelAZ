@@ -71,9 +71,11 @@ def expect():
     def _set(node_id: int | None) -> None:
         tokens.append(expected_node._expected_node_id.set(node_id))
 
+    expected_node.forget_confirmed_node()
     yield _set
     for token in reversed(tokens):
         expected_node._expected_node_id.reset(token)
+    expected_node.forget_confirmed_node()
 
 
 def test_parse_expected_node_header():
@@ -319,6 +321,139 @@ def test_background_task_failing_on_a_switched_node_reports_the_message(db, monk
     assert failed["status"] == "failed"
     assert failed["error"].startswith("Активный узел сменился на «B»")
     assert "409" not in failed["error"] and "{" not in failed["error"]
+
+
+def _switch_elsewhere(db, node: Node) -> None:
+    """Another tab, admin or the bot switches the active node while this request runs."""
+    row = db.query(AppSetting).filter(AppSetting.key == node_manager.ACTIVE_NODE_KEY).one()
+    row.value = str(node.id)
+    db.commit()
+
+
+def test_lookup_after_confirmed_check_keeps_the_confirmed_node(db, expect):
+    a, b = _node(db, "A"), _node(db, "B")
+    _activate(db, a)
+    expect(a.id)
+    assert node_manager.get_active_node(db).id == a.id
+
+    _switch_elsewhere(db, b)
+
+    assert node_manager.get_active_node(db).id == a.id
+    assert _stored_active_id(db) == str(b.id)
+
+
+def test_lookup_without_expectation_follows_the_switch(db, expect):
+    a, b = _node(db, "A"), _node(db, "B")
+    _activate(db, a)
+    expect(None)
+    assert node_manager.get_active_node(db).id == a.id
+
+    _switch_elsewhere(db, b)
+
+    assert node_manager.get_active_node(db).id == b.id
+
+
+def test_rejected_check_does_not_confirm_a_node(db, expect):
+    a, b = _node(db, "A"), _node(db, "B")
+    _activate(db, b)
+    expect(a.id)
+    with pytest.raises(HTTPException):
+        node_manager.get_active_node(db)
+
+    _switch_elsewhere(db, a)
+    assert node_manager.get_active_node(db).id == a.id
+
+
+def test_request_switching_the_node_after_a_lookup_follows_the_new_node(db, expect):
+    a, b = _node(db, "A"), _node(db, "B")
+    _activate(db, a)
+    expect(a.id)
+    assert node_manager.get_active_node(db).id == a.id
+
+    node_manager.set_active_node_id(db, b.id)
+    db.commit()
+
+    assert node_manager.get_active_node(db).id == b.id
+
+
+def test_confirmed_node_deleted_meanwhile_is_checked_again(db, expect):
+    a, b = _node(db, "A"), _node(db, "B")
+    _activate(db, a)
+    expect(a.id)
+    assert node_manager.get_active_node(db).id == a.id
+
+    _switch_elsewhere(db, b)
+    db.delete(a)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        node_manager.get_active_node(db)
+    assert exc.value.detail["active_node_id"] == b.id
+
+
+def test_background_task_checks_the_node_again(db, monkeypatch, expect):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from app.services import background_tasks
+
+    service = background_tasks.background_task_service
+    a, b = _node(db, "A"), _node(db, "B")
+    _activate(db, a)
+    expect(a.id)
+    assert node_manager.get_active_node(db).id == a.id
+    executor = ThreadPoolExecutor(max_workers=1)
+    monkeypatch.setattr(background_tasks, "_EXECUTOR", executor)
+    monkeypatch.setattr(service, "create_queued_task", lambda *a, **k: "t1")
+    monkeypatch.setattr(service, "get_task", lambda task_id: object())
+    outcome: list[object] = []
+
+    def run(task_id, fn):
+        try:
+            outcome.append(fn())
+        except HTTPException as exc:
+            outcome.append(exc.status_code)
+
+    monkeypatch.setattr(service, "run_background_task", run)
+    _switch_elsewhere(db, b)
+    service.enqueue_background_task("run_doall", lambda: node_manager.get_active_node(db).id)
+    executor.shutdown(wait=True)
+
+    assert outcome == [409]
+    assert node_manager.get_active_node(db).id == a.id
+
+
+def test_routing_settings_write_is_not_rejected_after_it_reached_the_node(db, monkeypatch, tmp_path):
+    from app.routers import routing
+
+    a, b = _node(db, "A"), _node(db, "B")
+    _activate(db, a)
+    env_file = tmp_path / ".env"
+    env_file.write_text("DOMAIN=panel.example.com\n", encoding="utf-8")
+    monkeypatch.setattr(routing, "_ENV_FILE", env_file)
+    written: list[dict] = []
+
+    class _Adapter:
+        def update_antizapret_settings(self, updates):
+            written.append(updates)
+            _switch_elsewhere(db, b)
+            return {"success": True, "message": "Настройки сохранены", "changes": 1, "needs_apply": True, "warnings": []}
+
+    monkeypatch.setattr(node_manager, "get_adapter_for_node", lambda node: _Adapter())
+    group_lookups: list[int] = []
+    monkeypatch.setattr(routing, "find_sync_group_for_primary", lambda _db, node_id: group_lookups.append(node_id))
+    app = FastAPI()
+    app.add_middleware(ExpectedNodeMiddleware)
+    app.include_router(routing.router)
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_admin] = lambda: object()
+
+    resp = TestClient(app).put(
+        "/routing/antizapret-settings", json={"route_all": "y"}, headers={EXPECTED_NODE_HEADER: str(a.id)}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert written == [{"route_all": "y"}]
+    assert group_lookups == [a.id]
 
 
 def test_background_task_error_text_for_other_errors():

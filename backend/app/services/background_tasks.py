@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import BackgroundTask
+from app.services.expected_node import forget_confirmed_node
 from app.services.process_identity import current_process_owner, is_owner_alive
 
 logger = logging.getLogger(__name__)
@@ -36,7 +37,9 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=8, thread_name_prefix="bg-task")
 
 def _submit_in_current_context(fn: Callable[..., Any], *args: Any) -> None:
     # The request context carries X-Expected-Node-Id: a task must not act on a node switched after enqueue.
-    _EXECUTOR.submit(contextvars.copy_context().run, fn, *args)
+    context = contextvars.copy_context()
+    context.run(forget_confirmed_node)
+    _EXECUTOR.submit(context.run, fn, *args)
 
 _PIPELINE_TASK_TYPES = {
     "cidr_db_refresh",

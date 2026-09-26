@@ -32,7 +32,7 @@ from app.models import (
     WgAccessPolicy,
 )
 from app.services.crypto import decrypt_secret, encrypt_secret
-from app.services.expected_node import ensure_expected_node, forget_expected_node
+from app.services.expected_node import confirmed_node_id, ensure_expected_node, forget_expected_node
 from app.services.antizapret import AntiZapretService
 from app.services.node_adapter import LocalNodeAdapter, NodeAdapter, RemoteNodeAdapter
 from app.services.node_health import HEALTH_METADATA_KEYS
@@ -193,8 +193,14 @@ def get_active_node(db: Session) -> Node:
     """Return the active VPN node. Never returns ``node_kind=proxy``.
 
     A write request that names the node shown in its UI (``X-Expected-Node-Id``) gets ``409``
-    when the active node was switched elsewhere in the meantime.
+    when the active node was switched elsewhere in the meantime. Once the check passed, later
+    lookups in the same request return that node.
     """
+    confirmed_id = confirmed_node_id()
+    if confirmed_id is not None:
+        confirmed = db.query(Node).filter(Node.id == confirmed_id).first()
+        if confirmed is not None:
+            return confirmed
     node = _resolve_active_node(db)
     ensure_expected_node(node)
     return node

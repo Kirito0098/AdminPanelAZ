@@ -20,6 +20,9 @@ _READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _MAX_ID_DIGITS = 18
 
 _expected_node_id: ContextVar[int | None] = ContextVar("expected_node_id", default=None)
+# Node that already passed the check in this request: later lookups must not act on
+# another node or raise 409 after the request has changed something.
+_confirmed_node_id: ContextVar[int | None] = ContextVar("confirmed_node_id", default=None)
 
 
 def parse_expected_node_header(raw: str | None) -> int | None:
@@ -33,11 +36,24 @@ def parse_expected_node_header(raw: str | None) -> int | None:
 def forget_expected_node() -> None:
     """The request switched the active node itself; later lookups in it follow the new node."""
     _expected_node_id.set(None)
+    _confirmed_node_id.set(None)
+
+
+def confirmed_node_id() -> int | None:
+    return _confirmed_node_id.get()
+
+
+def forget_confirmed_node() -> None:
+    """A background task checks the node again instead of inheriting the request's check."""
+    _confirmed_node_id.set(None)
 
 
 def ensure_expected_node(node: Node) -> None:
     expected = _expected_node_id.get()
-    if expected is None or expected == node.id:
+    if expected is None:
+        return
+    if expected == node.id:
+        _confirmed_node_id.set(node.id)
         return
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
