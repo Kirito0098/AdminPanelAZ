@@ -106,7 +106,17 @@ def _push_full_replica_adapter() -> MagicMock:
     return adapter
 
 
-def _run_push_full(db, group, primary: Node, primary_adapter, replica_adapter, restart: MagicMock, ensure=None):
+def _run_push_full(
+    db,
+    group,
+    primary: Node,
+    primary_adapter,
+    replica_adapter,
+    restart: MagicMock,
+    ensure=None,
+    *,
+    auto_verify: bool = False,
+):
     ensure = ensure or MagicMock(side_effect=AssertionError("multihome is off"))
     with patch.object(push_full, "preflight_push_full_links", return_value=[]), \
             patch.object(push_full, "validate_sync_group_payload", return_value=[]), \
@@ -127,8 +137,9 @@ def _run_push_full(db, group, primary: Node, primary_adapter, replica_adapter, r
             patch("app.services.openvpn_multihome.maybe_ensure_node_openvpn_multihome", ensure), \
             patch.object(push_full, "reapply_blocked_runtime_policies"), \
             patch.object(push_full, "link_primary_configs_to_group"), \
+            patch.object(push_full, "link_shadow_configs_for_group", return_value=None), \
             patch.object(push_full, "_refresh_group_node_health"):
-        return push_full.run_push_full(db, group, auto_verify=False)
+        return push_full.run_push_full(db, group, auto_verify=auto_verify)
 
 
 @pytest.mark.parametrize("multihome", [False, True], ids=["plain", "multihome"])
@@ -444,3 +455,164 @@ def test_reconcile_does_not_heal_while_background_pause_is_requested(reconcile_e
     reconcile_env["heal"].assert_not_called()
     reconcile_env["restart"].assert_not_called()
     assert _committed_pending(reconcile_env["factory"], reconcile_env["replica_id"]) is True
+
+
+# --- Auto-heal suspension after repeated failures --------------------------------
+
+
+def _set_heal_failures(env, count: int) -> None:
+    db = env["db"]
+    group = db.get(NodeSyncGroup, env["group_id"])
+    group.last_verify_result = json.dumps({"ready": False, "auto_heal_failures": count})
+    db.commit()
+
+
+def test_reconcile_skips_auto_heal_after_max_failures_but_keeps_checking(reconcile_env):
+    _mark_pending(reconcile_env)
+    _set_heal_failures(reconcile_env, 3)
+
+    result = reconcile_worker.reconcile_sync_groups_once()
+
+    reconcile_env["heal"].assert_not_called()
+    reconcile_env["restart"].assert_not_called()
+    assert result["checked"] == 1
+    assert [(item["auto_heal_failures"], item["notify"]) for item in result["drift"]] == [(3, False)]
+    status, error, verify_result = _group_state(reconcile_env)
+    assert status == SyncStatus.failed
+    assert "Автолечение приостановлено после 3 неудачных попыток подряд" in error
+    assert "«Синхронизировать»" in error
+    assert verify_result["auto_heal_failures"] == 3
+    assert _replica_mismatch_kinds(verify_result) == ["openvpn_restart_pending"]
+
+
+@pytest.mark.parametrize("prior_failures", [0, 1])
+def test_reconcile_heals_below_max_failures(reconcile_env, prior_failures):
+    _mark_pending(reconcile_env)
+    _set_heal_failures(reconcile_env, prior_failures)
+    reconcile_env["restart"].return_value = _restart_failed()
+
+    result = reconcile_worker.reconcile_sync_groups_once()
+
+    reconcile_env["heal"].assert_called_once()
+    reconcile_env["restart"].assert_called_once()
+    assert [(item["auto_heal_failures"], item["notify"]) for item in result["drift"]] == [
+        (prior_failures + 1, False)
+    ]
+    _, error, _ = _group_state(reconcile_env)
+    assert error.startswith(f"auto-heal attempt {prior_failures + 1}/3:")
+    assert "приостановлено" not in error
+
+
+def test_reconcile_attempt_reaching_max_failures_reports_suspension(reconcile_env):
+    _mark_pending(reconcile_env)
+    _set_heal_failures(reconcile_env, 2)
+    reconcile_env["restart"].return_value = _restart_failed()
+
+    result = reconcile_worker.reconcile_sync_groups_once()
+
+    reconcile_env["restart"].assert_called_once()
+    assert [(item["auto_heal_failures"], item["notify"]) for item in result["drift"]] == [(3, True)]
+    assert "приостановлено" in result["drift"][0]["hint"]
+    _, error, _ = _group_state(reconcile_env)
+    assert "Автолечение приостановлено после 3 неудачных попыток подряд" in error
+    assert "timeout" in error
+
+
+def test_successful_push_full_resets_failures_and_resumes_auto_heal(reconcile_env):
+    _mark_pending(reconcile_env)
+    _set_heal_failures(reconcile_env, 3)
+    reconcile_worker.reconcile_sync_groups_once()
+    reconcile_env["heal"].assert_not_called()
+
+    db = reconcile_env["db"]
+    db.expire_all()
+    group = db.get(NodeSyncGroup, reconcile_env["group_id"])
+    primary = db.get(Node, group.primary_node_id)
+    push_result = _run_push_full(
+        db,
+        group,
+        primary,
+        _push_full_primary_adapter(),
+        _push_full_replica_adapter(),
+        MagicMock(return_value=_restart_ok()),
+        auto_verify=True,
+    )
+
+    assert push_result["success"] is True
+    status, error, verify_result = _group_state(reconcile_env)
+    assert (status, error, verify_result["ready"]) == (SyncStatus.synced, None, True)
+    assert verify_result.get("auto_heal_failures", 0) == 0
+
+    _mark_pending(reconcile_env)
+    result = reconcile_worker.reconcile_sync_groups_once()
+
+    assert result["drift"] == []
+    reconcile_env["heal"].assert_called_once()
+    reconcile_env["restart"].assert_called_once()
+
+
+@pytest.mark.parametrize("check", ["reconcile", "manual"])
+def test_ready_check_resets_failures_and_resumes_auto_heal(reconcile_env, check):
+    _set_heal_failures(reconcile_env, 3)
+    db = reconcile_env["db"]
+
+    if check == "reconcile":
+        assert reconcile_worker.reconcile_sync_groups_once()["drift"] == []
+    else:
+        verify.verify_sync_group(db, db.get(NodeSyncGroup, reconcile_env["group_id"]))
+
+    _, _, verify_result = _group_state(reconcile_env)
+    assert verify_result["ready"] is True
+    assert verify_result.get("auto_heal_failures", 0) == 0
+
+    _mark_pending(reconcile_env)
+    reconcile_worker.reconcile_sync_groups_once()
+
+    reconcile_env["heal"].assert_called_once()
+    reconcile_env["restart"].assert_called_once()
+
+
+def test_check_with_offline_primary_keeps_failures(reconcile_env, monkeypatch):
+    _set_heal_failures(reconcile_env, 3)
+    monkeypatch.setattr(verify, "_refresh_node_online", lambda _db, _node: False)
+    db = reconcile_env["db"]
+
+    result = verify.verify_sync_group(db, db.get(NodeSyncGroup, reconcile_env["group_id"]))
+
+    assert result["ready"] is False
+    assert _group_state(reconcile_env)[2]["auto_heal_failures"] == 3
+
+
+def test_auto_heal_suspension_is_notified_once(reconcile_env, monkeypatch):
+    _mark_pending(reconcile_env)
+    reconcile_env["restart"].return_value = _restart_failed()
+    monkeypatch.setattr(reconcile_worker.settings, "node_sync_auto_heal_max_failures", 2)
+    notify = MagicMock()
+    monkeypatch.setattr(reconcile_worker, "_notify_drift", notify)
+
+    for _ in range(5):
+        reconcile_worker.reconcile_sync_groups_safe()
+
+    assert reconcile_env["restart"].call_count == 2
+    notify.assert_called_once()
+    (items,), _ = notify.call_args
+    assert [item["auto_heal_failures"] for item in items] == [2]
+    assert "приостановлено после 2" in items[0]["hint"]
+    assert _group_state(reconcile_env)[2]["auto_heal_failures"] == 2
+
+
+def test_group_warning_reports_suspended_auto_heal(reconcile_env, monkeypatch):
+    from app.config import get_settings
+    from app.services.node_sync.groups import build_group_warnings
+
+    monkeypatch.setattr(get_settings(), "node_sync_auto_heal", True)
+    monkeypatch.setattr(get_settings(), "node_sync_auto_heal_max_failures", 3)
+    group = reconcile_env["db"].get(NodeSyncGroup, reconcile_env["group_id"])
+
+    below = build_group_warnings(group, {"ready": False, "auto_heal_failures": 2})
+    suspended = build_group_warnings(group, {"ready": False, "auto_heal_failures": 3})
+
+    assert below == ["Auto-heal: 2 неудачных попыток"]
+    assert len(suspended) == 1
+    assert "Автолечение приостановлено после 3 неудачных попыток подряд" in suspended[0]
+    assert "«Синхронизировать»" in suspended[0]

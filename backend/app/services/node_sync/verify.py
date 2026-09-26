@@ -38,6 +38,19 @@ def _client_set_diff(primary: set[str], replica: set[str]) -> dict[str, list[str
     return {"only_primary": only_primary, "only_replica": only_replica}
 
 
+def _carry_auto_heal_failures(group: NodeSyncGroup, result: dict[str, Any]) -> None:
+    """Keep the auto-heal failure count while the group is out of sync; a ready check
+    (manual, reconcile or after Push full) drops it and resumes suspended auto-heal."""
+    if result.get("ready") or not group.last_verify_result:
+        return
+    try:
+        prior = json.loads(group.last_verify_result)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return
+    if isinstance(prior, dict) and "auto_heal_failures" in prior:
+        result["auto_heal_failures"] = prior["auto_heal_failures"]
+
+
 def _config_file_maps(fingerprints: dict[str, str]) -> dict[str, str]:
     prefix = f"{CONFIG_FP_PREFIX}/"
     return {
@@ -176,6 +189,7 @@ def verify_sync_group(
             "replicas": [],
             "summary": "Основной узел offline или не найден",
         }
+        _carry_auto_heal_failures(group, result)
         group.last_verify_at = datetime.utcnow()
         group.last_verify_result = json.dumps(result, ensure_ascii=False)
         db.commit()
@@ -307,13 +321,7 @@ def verify_sync_group(
         },
     }
 
-    if group.last_verify_result:
-        try:
-            prior = json.loads(group.last_verify_result)
-            if isinstance(prior, dict) and "auto_heal_failures" in prior:
-                result["auto_heal_failures"] = prior["auto_heal_failures"]
-        except (TypeError, ValueError, json.JSONDecodeError):
-            pass
+    _carry_auto_heal_failures(group, result)
 
     group.last_verify_at = datetime.utcnow()
     group.last_verify_result = json.dumps(result, ensure_ascii=False)

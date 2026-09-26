@@ -143,12 +143,12 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 - Primary **не откатывается** при ошибке на одной replica.
 - `sync_status=failed`, `last_sync_error` — детали; audit `ha_replicate_partial_failure`.
 - UI: warning-toast при `sync_status=failed` (polling auto-групп) или при `warnings` в API.
-- **Auto-heal** (opt-in, `NODE_SYNC_AUTO_HEAL=true`): reconcile worker пытается incremental heal (`crypto_sync` / `policy_sync` / `config_sync` / `antizapret_sync`); **никогда** auto Push full. После N неудач — notify + `failed`.
+- **Auto-heal** (opt-in, `NODE_SYNC_AUTO_HEAL=true`): reconcile worker пытается incremental heal (`crypto_sync` / `policy_sync` / `config_sync` / `antizapret_sync`); **никогда** auto Push full. После N неудач подряд — notify (один раз) + `failed`, и авто-лечение группы приостанавливается: проверка продолжается, `last_sync_error` сообщает о приостановке. Возобновляется после успешной «Синхронизировать» или проверки без расхождений (счётчик сбрасывается).
 
 ### Reconcile worker
 
 - Периодический Verify всех групп (`NODE_SYNC_RECONCILE_*`, default каждые 600 с).
-- Drift → `sync_status=failed` + admin notify (в `auto` + auto-heal — notify после N неудачных heal).
+- Drift → `sync_status=failed` + admin notify (в `auto` + auto-heal — notify один раз после N неудачных heal подряд, дальше heal приостановлен до ручной синхронизации или проверки без расхождений).
 - Push full остаётся для bootstrap и disaster recovery.
 
 ### Dashboard HA badge
@@ -167,7 +167,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 | `NODE_SYNC_AUTO_REPLICATE_POLICIES` | `true` | Auto: репликация политик доступа |
 | `NODE_SYNC_REPLICATE_DOALL` | `true` | Запускать `doall.sh` на replica после file sync |
 | `NODE_SYNC_AUTO_HEAL` | `false` | Opt-in incremental heal после drift |
-| `NODE_SYNC_AUTO_HEAL_MAX_FAILURES` | `3` | Notify после N неудачных heal |
+| `NODE_SYNC_AUTO_HEAL_MAX_FAILURES` | `3` | После N неудачных heal подряд: notify один раз и приостановка авто-лечения до ручной синхронизации или проверки без расхождений |
 
 ### Связанные документы
 
