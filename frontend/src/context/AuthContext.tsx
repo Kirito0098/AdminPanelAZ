@@ -3,7 +3,7 @@ import * as api from '@/api/client'
 import { refreshAccessToken } from '@/api/http'
 import { useSessionHeartbeat } from '@/hooks/useSessionHeartbeat'
 import { clearAccessToken, getAccessToken, migrateLegacyAccessToken, setAccessToken } from '@/lib/accessToken'
-import { loadSessionUser } from '@/lib/authBoot'
+import { loadSessionUser, reduceAuthSession, type AuthSessionState } from '@/lib/authBoot'
 import { onSessionLost } from '@/lib/sessionLost'
 import { setActiveTimeZone } from '@/lib/datetime'
 import { applyThemeClass, getStoredTheme } from '@/lib/theme'
@@ -28,9 +28,9 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null)
+  const [session, setSession] = useState<AuthSessionState>({ user: null, unavailable: null })
+  const { user, unavailable } = session
   const [loading, setLoading] = useState(true)
-  const [unavailable, setUnavailable] = useState<string | null>(null)
   const [sessionEnded, setSessionEnded] = useState(false)
   const userRef = useRef<User | null>(null)
   userRef.current = user
@@ -49,18 +49,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       getMe: api.getMe,
     })
     if (result.kind === 'user') {
-      setUser(result.user)
-      setUnavailable(null)
       setSessionEnded(false)
       applyTheme(result.user.theme || getStoredTheme())
       setActiveTimeZone(result.user.timezone || '')
     } else if (result.kind === 'anonymous') {
       clearAccessToken()
-      setUser(null)
-      setUnavailable(null)
-    } else {
-      setUnavailable(result.message)
     }
+    setSession((prev) => reduceAuthSession(prev, { type: 'checked', result }))
     setLoading(false)
   }, [applyTheme])
 
@@ -113,8 +108,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       /* ignore */
     }
-    setUser(null)
-    setUnavailable(null)
+    setSession((prev) => reduceAuthSession(prev, { type: 'signed-out' }))
   }, [])
 
   useEffect(
@@ -122,7 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       onSessionLost(() => {
         if (!userRef.current) return
         setSessionEnded(true)
-        setUser(null)
+        setSession((prev) => reduceAuthSession(prev, { type: 'signed-out' }))
       }),
     [],
   )

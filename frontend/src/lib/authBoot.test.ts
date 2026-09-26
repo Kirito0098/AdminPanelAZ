@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '@/api/http'
-import { SERVER_UNAVAILABLE_MESSAGE, loadSessionUser } from './authBoot'
+import { SERVER_UNAVAILABLE_MESSAGE, loadSessionUser, reduceAuthSession } from './authBoot'
 import type { User } from '@/types'
 
 const alice = { id: 1, username: 'alice' } as User
@@ -101,5 +101,35 @@ describe('loadSessionUser', () => {
     vi.useFakeTimers()
     await loadSessionUser({ getToken: () => 't', refresh: async () => 't', getMe: async () => alice })
     expect(vi.getTimerCount()).toBe(0)
+  })
+})
+
+describe('reduceAuthSession', () => {
+  const signedOut = { user: null, unavailable: null }
+
+  it('reports an unreachable server only to a tab without a user', () => {
+    const down = { kind: 'unavailable', message: 'down' } as const
+    expect(reduceAuthSession(signedOut, { type: 'checked', result: down })).toEqual({ user: null, unavailable: 'down' })
+    expect(reduceAuthSession({ user: alice, unavailable: null }, { type: 'checked', result: down })).toEqual({
+      user: alice,
+      unavailable: null,
+    })
+  })
+
+  it('shows the login page, not "unavailable", when a session ends after a failed background check', () => {
+    let state = reduceAuthSession(signedOut, { type: 'checked', result: { kind: 'user', user: alice } })
+    state = reduceAuthSession(state, { type: 'checked', result: { kind: 'unavailable', message: 'down' } })
+    state = reduceAuthSession(state, { type: 'signed-out' })
+    expect(state).toEqual(signedOut)
+  })
+
+  it('forgets an old "unavailable" once the session ends or the server answers', () => {
+    const stale = { user: alice, unavailable: 'down' }
+    expect(reduceAuthSession(stale, { type: 'signed-out' })).toEqual(signedOut)
+    expect(reduceAuthSession(stale, { type: 'checked', result: { kind: 'anonymous' } })).toEqual(signedOut)
+    expect(reduceAuthSession(stale, { type: 'checked', result: { kind: 'user', user: alice } })).toEqual({
+      user: alice,
+      unavailable: null,
+    })
   })
 })

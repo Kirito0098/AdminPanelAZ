@@ -19,6 +19,27 @@ interface SessionBootDeps {
 
 class SessionBootTimeout extends Error {}
 
+export interface AuthSessionState {
+  user: User | null
+  /** Why the session could not be checked; only a tab without a user shows it. */
+  unavailable: string | null
+}
+
+export type AuthSessionEvent = { type: 'checked'; result: SessionBootResult } | { type: 'signed-out' }
+
+/**
+ * A signed-in tab keeps working when a later check cannot reach the server, and does not remember
+ * that failure: when its session ends, the server has answered, so the login page is shown.
+ */
+export function reduceAuthSession(state: AuthSessionState, event: AuthSessionEvent): AuthSessionState {
+  if (event.type === 'signed-out') return { user: null, unavailable: null }
+  const { result } = event
+  if (result.kind === 'user') return { user: result.user, unavailable: null }
+  if (result.kind === 'anonymous') return { user: null, unavailable: null }
+  if (state.user) return { user: state.user, unavailable: null }
+  return { user: null, unavailable: result.message }
+}
+
 /** Only a refused session sends the user to the login page; a server that is down or silent does not. */
 export async function loadSessionUser({
   getToken,
