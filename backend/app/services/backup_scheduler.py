@@ -11,6 +11,7 @@ from app.services.backup_manager import BackupManager
 from app.services.cidr.pipeline.file_pipeline import _prune_runtime_backups
 from app.services.feature_guards import get_feature_service
 from app.services.feature_toggles import FeatureToggleService
+from app.services.long_task_executor import run_long_task
 from app.services.node_manager import get_active_adapter
 from app.services.telegram import send_tg_document
 from app.services.telegram_recipients import get_setting_chat_ids
@@ -179,7 +180,7 @@ async def run_backup_scheduler_loop(
         try:
             await asyncio.sleep(3600)
             # Archiving the panel DB and uploading to Telegram take seconds to minutes.
-            await asyncio.to_thread(
+            await run_long_task(
                 _run_auto_backup_once,
                 app_root=app_root,
                 backup_root=backup_root,
@@ -201,7 +202,7 @@ async def run_runtime_backup_cleanup_loop(env_path: Path):
             await asyncio.sleep(3600)
             if not toggles.is_enabled("runtime_backup_cleanup"):
                 continue
-            removed = await asyncio.to_thread(_prune_runtime_backups)
+            removed = await run_long_task(_prune_runtime_backups)
             if removed:
                 logger.info("Runtime backup cleanup removed %d director(ies)", len(removed))
         except asyncio.CancelledError:

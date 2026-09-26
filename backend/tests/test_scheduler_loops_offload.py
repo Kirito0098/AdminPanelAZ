@@ -14,6 +14,7 @@ from app.services import (
     backup_scheduler,
     cert_sync_worker,
     cloudflare_ips_scheduler,
+    retention_worker,
     user_reminder_worker,
 )
 from app.services.cidr import cidr_scheduler
@@ -51,6 +52,22 @@ def _reminder_setup(monkeypatch):
     monkeypatch.setattr(user_reminder_worker, "_is_user_reminder_enabled", lambda: True)
 
 
+def _cleanup_loop():
+    return backup_scheduler.run_runtime_backup_cleanup_loop(Path("/nonexistent/.env"))
+
+
+def _cleanup_setup(monkeypatch):
+    monkeypatch.setattr(
+        backup_scheduler, "FeatureToggleService", lambda _path: SimpleNamespace(is_enabled=lambda _name: True)
+    )
+
+
+def _retention_setup(monkeypatch):
+    monkeypatch.setattr(
+        retention_worker, "get_settings", lambda: SimpleNamespace(retention_enabled=True, retention_interval_hours=0)
+    )
+
+
 LOOPS = [
     pytest.param(backup_scheduler, _backup_loop, "_run_auto_backup_once", None, id="backup"),
     pytest.param(
@@ -63,6 +80,10 @@ LOOPS = [
         None,
         id="cloudflare_ips",
     ),
+    pytest.param(
+        backup_scheduler, _cleanup_loop, "_prune_runtime_backups", _cleanup_setup, id="runtime_backup_cleanup"
+    ),
+    pytest.param(retention_worker, retention_worker.run_retention_loop, "_purge_once", _retention_setup, id="retention"),
     pytest.param(cert_sync_worker, cert_sync_worker.run_cert_sync_loop, "_sync_cert_expiry_once", _cert_setup, id="cert_sync"),
     pytest.param(
         user_reminder_worker,
@@ -74,16 +95,24 @@ LOOPS = [
 ]
 
 
+# Minutes of archiving, downloads or batch deletes must not hold the default executor
+# that monitoring loops share.
+LONG_LOOPS = {"backup", "runtime_backup_cleanup", "cidr", "retention"}
+
+
 @pytest.mark.parametrize(("module", "loop_factory", "work_name", "setup"), LOOPS)
-def test_loop_runs_work_off_the_event_loop_thread(monkeypatch, module, loop_factory, work_name, setup):
+def test_loop_runs_work_off_the_event_loop_thread(monkeypatch, request, module, loop_factory, work_name, setup):
     if setup is not None:
         setup(monkeypatch)
 
     loop_thread: list[int] = []
     work_threads: list[int] = []
+    work_thread_names: list[str] = []
 
     def work(*_args, **_kwargs):
         work_threads.append(threading.get_ident())
+        work_thread_names.append(threading.current_thread().name)
+        return []
 
     monkeypatch.setattr(module, work_name, work)
     sleeps = 0
@@ -104,6 +133,8 @@ def test_loop_runs_work_off_the_event_loop_thread(monkeypatch, module, loop_fact
 
     assert work_threads, f"{work_name} was not called"
     assert all(ident != loop_thread[0] for ident in work_threads)
+    is_long = request.node.callspec.id in LONG_LOOPS
+    assert all(name.startswith("long-task") == is_long for name in work_thread_names), work_thread_names
 
 
 def test_backup_work_is_skipped_when_module_disabled(monkeypatch):

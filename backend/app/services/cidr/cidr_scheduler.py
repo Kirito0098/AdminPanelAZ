@@ -13,6 +13,7 @@ from app.models import AppSetting
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.cidr.pipeline.deploy import compute_artifact_stamp
 from app.services.cidr.pipeline.orchestrator import run_compile, run_ingest, run_multi_deploy
+from app.services.long_task_executor import run_long_task
 
 logger = logging.getLogger(__name__)
 
@@ -323,7 +324,7 @@ async def run_cidr_db_scheduler_loop() -> None:
                 continue
 
             # Provider downloads, compile and deploy take minutes.
-            await asyncio.to_thread(_run_scheduled_refresh, settings)
+            await run_long_task(_run_scheduled_refresh, settings)
             await asyncio.sleep(60)
         except asyncio.CancelledError:
             raise

@@ -7,6 +7,7 @@ import logging
 
 from app.config import get_settings
 from app.database import SessionLocal
+from app.services.long_task_executor import run_long_task
 from app.services.retention import run_retention_purge
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ async def run_retention_loop() -> None:
             if not settings.retention_enabled:
                 logger.debug("retention skipped — RETENTION_ENABLED disabled")
             else:
-                await asyncio.to_thread(_purge_once)
+                await run_long_task(_purge_once)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
