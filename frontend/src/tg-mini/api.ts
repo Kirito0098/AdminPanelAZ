@@ -34,18 +34,28 @@ import { apiBase } from '@/lib/panelBase'
 
 const API_BASE = `${apiBase}/tg-mini`
 const PANEL_API_BASE = apiBase
-const TOKEN_KEY = 'tg_token'
+const LEGACY_TOKEN_KEY = 'tg_token'
+
+/** Kept in memory only: Telegram re-sends initData on every launch, so a persisted JWT buys nothing. */
+let tgToken: string | null = null
+let refreshInFlight: Promise<boolean> | null = null
+
+try {
+  localStorage.removeItem(LEGACY_TOKEN_KEY)
+} catch {
+  // storage may be unavailable in the Telegram WebView
+}
 
 export function getTgToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  return tgToken
 }
 
 export function setTgToken(token: string): void {
-  localStorage.setItem(TOKEN_KEY, token)
+  tgToken = token
 }
 
 export function clearTgToken(): void {
-  localStorage.removeItem(TOKEN_KEY)
+  tgToken = null
 }
 
 async function parseApiResponse<T>(response: Response): Promise<T> {
@@ -67,12 +77,8 @@ async function tgFetch<T>(path: string, options: RequestInit = {}, retry = true)
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
   const response = await fetch(`${API_BASE}${path}`, { ...options, headers })
-  if (response.status === 401 && retry && path !== '/auth') {
-    const refreshed = await refreshTgSession()
-    if (refreshed) {
-      return tgFetch<T>(path, options, false)
-    }
-    clearTgToken()
+  if (response.status === 401 && retry && path !== '/auth' && (await renewAfterUnauthorized(token))) {
+    return tgFetch<T>(path, options, false)
   }
   return parseApiResponse<T>(response)
 }
@@ -87,32 +93,49 @@ async function panelApiFetch<T>(path: string, options: RequestInit = {}, retry =
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
   const response = await fetch(`${PANEL_API_BASE}${path}`, { ...options, headers })
-  if (response.status === 401 && retry) {
-    const refreshed = await refreshTgSession()
-    if (refreshed) {
-      return panelApiFetch<T>(path, options, false)
-    }
-    clearTgToken()
+  if (response.status === 401 && retry && (await renewAfterUnauthorized(token))) {
+    return panelApiFetch<T>(path, options, false)
   }
   return parseApiResponse<T>(response)
 }
 
 export async function refreshTgSessionFromInitData(initData: string): Promise<void> {
-  clearTgToken()
-  const auth = await tgAuth(initData)
-  setTgToken(auth.access_token)
+  try {
+    const auth = await tgAuth(initData)
+    setTgToken(auth.access_token)
+  } catch (err) {
+    clearTgToken()
+    throw err
+  }
 }
 
-/** Re-issue JWT from Telegram initData (after 401 or on cold start). */
-export async function refreshTgSession(): Promise<boolean> {
+async function renewTgSession(): Promise<boolean> {
   const tg = getTelegramWebApp()
   let initData = resolveTelegramInitData(tg)
   if (!initData) {
     initData = await waitForTelegramInitData(tg)
   }
-  if (!initData) return false
+  if (!initData) {
+    clearTgToken()
+    return false
+  }
   await refreshTgSessionFromInitData(initData)
   return true
+}
+
+/** Re-issue JWT from Telegram initData; parallel callers share one /auth round-trip. */
+export function refreshTgSession(): Promise<boolean> {
+  refreshInFlight ??= renewTgSession().finally(() => {
+    refreshInFlight = null
+  })
+  return refreshInFlight
+}
+
+/** After a 401: reuse a token another request already renewed, otherwise renew once for everyone. */
+async function renewAfterUnauthorized(sentToken: string | null): Promise<boolean> {
+  const current = getTgToken()
+  if (current && current !== sentToken) return true
+  return refreshTgSession()
 }
 
 export async function tgAuth(initData: string): Promise<TgMiniAuthResponse> {
