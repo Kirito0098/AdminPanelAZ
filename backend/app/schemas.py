@@ -934,6 +934,7 @@ class RetentionSettingsResponse(BaseModel):
     enabled: bool = True
     interval_hours: int = 24
     traffic_sample_retention_days: int = 90
+    traffic_session_retention_days: int = 30
     action_log_retention_days: int = 365
     resource_metrics_retention_days: int = 30
     panel_resource_metrics_retention_days: int = 30
@@ -943,6 +944,7 @@ class RetentionSettingsUpdate(BaseModel):
     enabled: bool | None = None
     interval_hours: int | None = Field(default=None, ge=1, le=168)
     traffic_sample_retention_days: int | None = Field(default=None, ge=1, le=3650)
+    traffic_session_retention_days: int | None = Field(default=None, ge=1, le=3650)
     action_log_retention_days: int | None = Field(default=None, ge=1, le=3650)
     resource_metrics_retention_days: int | None = Field(default=None, ge=1, le=3650)
     panel_resource_metrics_retention_days: int | None = Field(default=None, ge=1, le=3650)

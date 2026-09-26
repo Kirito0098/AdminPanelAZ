@@ -151,6 +151,7 @@ class Settings(BaseSettings):
     retention_enabled: bool = True
     retention_interval_hours: int = 24
     traffic_sample_retention_days: int = 90
+    traffic_session_retention_days: int = 30
     action_log_retention_days: int = 365
     retention_batch_size: int = 5000
     health_deep_node_ping: bool = True

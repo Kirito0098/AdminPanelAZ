@@ -605,6 +605,7 @@ export interface RetentionSettings {
   enabled: boolean
   interval_hours: number
   traffic_sample_retention_days: number
+  traffic_session_retention_days: number
   action_log_retention_days: number
   resource_metrics_retention_days: number
   panel_resource_metrics_retention_days: number

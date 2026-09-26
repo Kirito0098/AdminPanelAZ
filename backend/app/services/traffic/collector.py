@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import time
 from threading import Lock
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models import Node, TrafficSessionState, UserTrafficSample, UserTrafficStatProtocol
@@ -178,6 +178,27 @@ def build_session_key(profile: str, client: dict) -> str:
     )
 
 
+_SESSION_KEY_CHUNK = 500
+
+
+def load_relevant_sessions(db: Session, node_id: int, session_keys: set[str]) -> dict[str, TrafficSessionState]:
+    """Active sessions plus those in the current snapshot; finished history is not needed to persist it."""
+    base = db.query(TrafficSessionState).filter(TrafficSessionState.node_id == node_id)
+    keys = sorted(session_keys)
+    if not keys:
+        rows = base.filter(TrafficSessionState.is_active.is_(True)).all()
+        return {row.session_key: row for row in rows}
+    sessions: dict[str, TrafficSessionState] = {}
+    for start in range(0, len(keys), _SESSION_KEY_CHUNK):
+        chunk = keys[start : start + _SESSION_KEY_CHUNK]
+        condition = TrafficSessionState.session_key.in_(chunk)
+        if start == 0:
+            condition = or_(TrafficSessionState.is_active.is_(True), condition)
+        for row in base.filter(condition).all():
+            sessions[row.session_key] = row
+    return sessions
+
+
 class TrafficCollectorService:
     def __init__(self, db: Session, node_id: int):
         self.db = db
@@ -186,12 +207,12 @@ class TrafficCollectorService:
     def persist_snapshot(self, status_rows: list[dict]) -> dict:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
 
-        sessions = {
-            row.session_key: row
-            for row in self.db.query(TrafficSessionState).filter(
-                TrafficSessionState.node_id == self.node_id
-            ).all()
+        snapshot_keys = {
+            build_session_key(status_row.get("profile", "unknown"), client)
+            for status_row in status_rows
+            for client in status_row.get("traffic_clients", [])
         }
+        sessions = load_relevant_sessions(self.db, self.node_id, snapshot_keys)
         previously_active = {k for k, r in sessions.items() if r.is_active}
 
         stats = {

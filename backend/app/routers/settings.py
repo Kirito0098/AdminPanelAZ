@@ -337,6 +337,7 @@ def get_retention_settings(_: User = Depends(require_admin)):
         enabled=cfg.retention_enabled,
         interval_hours=cfg.retention_interval_hours,
         traffic_sample_retention_days=cfg.traffic_sample_retention_days,
+        traffic_session_retention_days=cfg.traffic_session_retention_days,
         action_log_retention_days=cfg.action_log_retention_days,
         resource_metrics_retention_days=cfg.resource_metrics_retention_days,
         panel_resource_metrics_retention_days=cfg.panel_resource_metrics_retention_days,
@@ -361,6 +362,9 @@ def update_retention_settings(
     if payload.traffic_sample_retention_days is not None:
         env_service.set_env_value("TRAFFIC_SAMPLE_RETENTION_DAYS", str(payload.traffic_sample_retention_days))
         os.environ["TRAFFIC_SAMPLE_RETENTION_DAYS"] = str(payload.traffic_sample_retention_days)
+    if payload.traffic_session_retention_days is not None:
+        env_service.set_env_value("TRAFFIC_SESSION_RETENTION_DAYS", str(payload.traffic_session_retention_days))
+        os.environ["TRAFFIC_SESSION_RETENTION_DAYS"] = str(payload.traffic_session_retention_days)
     if payload.action_log_retention_days is not None:
         env_service.set_env_value("ACTION_LOG_RETENTION_DAYS", str(payload.action_log_retention_days))
         os.environ["ACTION_LOG_RETENTION_DAYS"] = str(payload.action_log_retention_days)
@@ -386,6 +390,7 @@ def update_retention_settings(
         enabled=updated.retention_enabled,
         interval_hours=updated.retention_interval_hours,
         traffic_sample_retention_days=updated.traffic_sample_retention_days,
+        traffic_session_retention_days=updated.traffic_session_retention_days,
         action_log_retention_days=updated.action_log_retention_days,
         resource_metrics_retention_days=updated.resource_metrics_retention_days,
         panel_resource_metrics_retention_days=updated.panel_resource_metrics_retention_days,

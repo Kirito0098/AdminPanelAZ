@@ -15,6 +15,7 @@ from app.services.traffic.collector import (
     _parse_status_timestamp,
     build_session_key,
     build_status_rows,
+    load_relevant_sessions,
     protocol_type_from_profile,
 )
 
@@ -299,12 +300,13 @@ class TrafficMaintenanceService:
         scope = normalize_traffic_protocol_scope(protocol_scope)
         now = now or datetime.now(timezone.utc).replace(tzinfo=None)
 
-        sessions_by_key = {
-            row.session_key: row
-            for row in self.db.query(TrafficSessionState)
-            .filter(TrafficSessionState.node_id == self.node_id)
-            .all()
+        snapshot_keys = {
+            build_session_key(status_row.get("profile", "unknown"), client)
+            for status_row in status_rows or []
+            if _profile_matches_protocol_scope(status_row.get("profile", "unknown"), scope)
+            for client in status_row.get("traffic_clients", status_row.get("clients", []))
         }
+        sessions_by_key = load_relevant_sessions(self.db, self.node_id, snapshot_keys)
 
         seen_scope_keys: set[str] = set()
         seeded_users: set[str] = set()

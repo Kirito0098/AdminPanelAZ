@@ -1,4 +1,4 @@
-"""Batch retention purge for traffic samples, action logs, and resource metrics."""
+"""Batch retention purge for traffic samples, session history, action logs, tokens, and resource metrics."""
 
 from __future__ import annotations
 
@@ -7,26 +7,31 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import ConnectionCountSample, NodeResourceSample, PanelResourceSample, UserActionLog, UserTrafficSample
+from app.models import (
+    ConnectionCountSample,
+    NodeResourceSample,
+    PanelResourceSample,
+    RefreshToken,
+    TrafficSessionState,
+    UserActionLog,
+    UserTrafficSample,
+)
+
+# An expired refresh token is rejected on its own; the grace only keeps it around for audit.
+REFRESH_TOKEN_EXPIRED_GRACE_DAYS = 7
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def _purge_model_before(
-    db: Session,
-    model,
-    cutoff: datetime,
-    *,
-    batch_size: int,
-) -> int:
+def _purge_where(db: Session, model, *criteria, batch_size: int) -> int:
     total = 0
     while True:
         ids = [
             row[0]
             for row in db.query(model.id)
-            .filter(model.created_at < cutoff)
+            .filter(*criteria)
             .order_by(model.id.asc())
             .limit(batch_size)
             .all()
@@ -37,6 +42,16 @@ def _purge_model_before(
         db.commit()
         total += int(deleted or 0)
     return total
+
+
+def _purge_model_before(
+    db: Session,
+    model,
+    cutoff: datetime,
+    *,
+    batch_size: int,
+) -> int:
+    return _purge_where(db, model, model.created_at < cutoff, batch_size=batch_size)
 
 
 def run_retention_purge(db: Session) -> dict[str, int]:
@@ -51,6 +66,22 @@ def run_retention_purge(db: Session) -> dict[str, int]:
         db,
         UserTrafficSample,
         now - timedelta(days=traffic_days),
+        batch_size=batch_size,
+    )
+
+    session_days = max(1, int(settings.traffic_session_retention_days or 30))
+    counts["traffic_session_state"] = _purge_where(
+        db,
+        TrafficSessionState,
+        TrafficSessionState.is_active.is_(False),
+        TrafficSessionState.last_seen_at < now - timedelta(days=session_days),
+        batch_size=batch_size,
+    )
+
+    counts["refresh_tokens"] = _purge_where(
+        db,
+        RefreshToken,
+        RefreshToken.expires_at < now - timedelta(days=REFRESH_TOKEN_EXPIRED_GRACE_DAYS),
         batch_size=batch_size,
     )
 
