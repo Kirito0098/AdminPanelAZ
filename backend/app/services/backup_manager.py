@@ -67,6 +67,13 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
         raise
 
 
+def _write_private_bytes(path: Path, data: bytes) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
+
+
 def backup_meta_path(archive_path: Path) -> Path:
     """Sidecar JSON next to a .tar.gz archive (not Path.with_suffix, which yields .tar.json)."""
     name = archive_path.name
@@ -105,8 +112,13 @@ class BackupManager:
         self.env_path = env_path.resolve()
         self.cidr_db_path = cidr_db_path.resolve() if cidr_db_path is not None else None
 
+    def _ensure_backup_root(self) -> None:
+        # Archives hold the panel DB and .env.
+        self.backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        os.chmod(self.backup_root, 0o700)
+
     def list_backups(self) -> list[dict]:
-        self.backup_root.mkdir(parents=True, exist_ok=True)
+        self._ensure_backup_root()
         archives = sorted(
             self.backup_root.glob("*.tar.gz"),
             key=lambda p: p.stat().st_mtime,
@@ -137,7 +149,7 @@ class BackupManager:
         retention: int = 5,
         awg2_archive: bytes | None = None,
     ) -> dict:
-        self.backup_root.mkdir(parents=True, exist_ok=True)
+        self._ensure_backup_root()
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
         archive_name = f"adminpanelaz_{timestamp}.tar.gz"
         archive_path = self.backup_root / archive_name
@@ -145,6 +157,7 @@ class BackupManager:
         components: list[str] = []
         summary_parts: list[str] = []
 
+        _write_private_bytes(archive_path, b"")
         with tarfile.open(archive_path, "w:gz") as tar:
             if self.db_path.exists():
                 self._add_sqlite_snapshot(tar, self.db_path, "data/adminpanel.db")
@@ -167,7 +180,7 @@ class BackupManager:
                         continue
                     tmp = self.backup_root / f".tmp_{filename}"
                     try:
-                        tmp.write_text(content, encoding="utf-8")
+                        _write_private_bytes(tmp, content.encode("utf-8"))
                         tar.add(tmp, arcname=f"antizapret/config/{filename}")
                     finally:
                         if tmp.exists():
@@ -179,7 +192,7 @@ class BackupManager:
             if awg2_archive:
                 tmp = self.backup_root / ".tmp_az-awg2-backup.tar.gz"
                 try:
-                    tmp.write_bytes(awg2_archive)
+                    _write_private_bytes(tmp, awg2_archive)
                     tar.add(tmp, arcname=self.AWG2_ARCHIVE_MEMBER)
                 finally:
                     tmp.unlink(missing_ok=True)
@@ -192,7 +205,7 @@ class BackupManager:
             "summary": ",".join(summary_parts),
         }
         meta_path = backup_meta_path(archive_path)
-        meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+        _write_private_bytes(meta_path, json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8"))
 
         self._enforce_retention(max(1, int(retention)))
         return {
@@ -244,7 +257,7 @@ class BackupManager:
     def import_uploaded_backup(self, source_path: Path, *, original_name: str | None = None) -> dict:
         source = source_path.resolve()
         metadata = self.inspect_backup_archive(source)
-        self.backup_root.mkdir(parents=True, exist_ok=True)
+        self._ensure_backup_root()
 
         target_name = self._upload_target_name(original_name)
         target_path = self.backup_root / target_name
@@ -254,8 +267,10 @@ class BackupManager:
             target_path = self.backup_root / target_name
 
         shutil.move(str(source), str(target_path))
+        os.chmod(target_path, 0o600)
         meta_path = backup_meta_path(target_path)
-        meta_path.write_text(
+        _write_private_bytes(
+            meta_path,
             json.dumps(
                 {
                     "created_at": metadata["created_at"],
@@ -265,8 +280,7 @@ class BackupManager:
                 },
                 ensure_ascii=False,
                 indent=2,
-            ),
-            encoding="utf-8",
+            ).encode("utf-8"),
         )
         return {
             "file_name": target_name,

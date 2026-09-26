@@ -10,7 +10,11 @@ logger = logging.getLogger(__name__)
 from app.middleware.api_rate_limit import ApiRateLimitMiddleware
 from app.middleware.http_security import HttpSecurityMiddleware, build_robots_txt, build_security_txt, get_panel_branding
 from app.middleware.active_session import ActiveSessionMiddleware
-from app.services.security_bootstrap import restrict_sensitive_file_permissions, validate_panel_settings
+from app.services.security_bootstrap import (
+    restrict_backup_dir_permissions,
+    restrict_sensitive_file_permissions,
+    validate_panel_settings,
+)
 from app.database import Base, SessionLocal, engine, migrations_lock, run_db_migrations
 from app.cidr_database import run_cidr_db_migrations
 from app.models import User, UserRole, VpnConfig, VpnType
@@ -209,6 +213,7 @@ async def lifespan(_: FastAPI):
     from app.cidr_database import resolve_cidr_db_path
 
     restrict_sensitive_file_permissions([env_path, db_path, resolve_cidr_db_path()])
+    restrict_backup_dir_permissions(Path(settings.backup_root))
 
     def _start_workers() -> dict:
         tasks = spawn_background_tasks(app_root=app_root, db_path=db_path, env_path=env_path)

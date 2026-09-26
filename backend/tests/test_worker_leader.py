@@ -97,7 +97,11 @@ def test_lifespan_skips_workers_while_another_worker_leads(tmp_path: Path, monke
     assert holder.try_acquire()
     calls: list[str] = []
 
-    monkeypatch.setattr(main, "settings", SimpleNamespace(database_url=f"sqlite:///{db_path}"))
+    monkeypatch.setattr(
+        main,
+        "settings",
+        SimpleNamespace(database_url=f"sqlite:///{db_path}", backup_root=tmp_path / "backups"),
+    )
     monkeypatch.setattr(main, "seed_database", lambda: None)
     monkeypatch.setattr(main, "restrict_sensitive_file_permissions", lambda _paths: None)
     monkeypatch.setattr(main, "spawn_background_tasks", lambda **_kw: calls.append("spawn") or {})
