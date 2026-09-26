@@ -678,18 +678,20 @@ def extend_owned_clients_for_redeem(
     days: int,
     protocols: set[str],
     actor: str,
+    client_names: set[str] | None = None,
 ) -> tuple[datetime | None, list[tuple[int, str, str, VpnType, datetime]]]:
     """Promo redeem in the user portal: deadlines only grow.
 
     With a subscription it moves to ``max(now, subscription) + days`` and every limited client
     deadline is raised to at least it. Without one, each limited client deadline in ``protocols``
     moves to ``max(now, deadline) + days``. Unlimited clients stay unlimited, longer deadlines stay.
+    ``client_names`` (lower-case) limits the redeem to those clients and leaves the subscription alone.
     Returns the new subscription deadline and ``(node_id, protocol, config_client_name, vpn_type,
     access_until)`` for every written policy. Writes are flushed, not committed.
     """
     current = get_user_access_until(user)
     user_until: datetime | None = None
-    if current is not None:
+    if current is not None and client_names is None:
         user_until = max(now, current) + timedelta(days=days)
         user.access_until = _to_db_datetime(user_until)
         db.add(user)
@@ -698,6 +700,8 @@ def extend_owned_clients_for_redeem(
     for config in _owned_configs(db, user.id):
         protocol = _VPN_PROTOCOLS.get(config.vpn_type)
         if protocol is None or (user_until is None and protocol not in protocols):
+            continue
+        if client_names is not None and (config.client_name or "").strip().lower() not in client_names:
             continue
         row = _policy_row(db, protocol=protocol, node_id=config.node_id, client_name=config.client_name)
         deadline = _row_access_until(protocol, row)

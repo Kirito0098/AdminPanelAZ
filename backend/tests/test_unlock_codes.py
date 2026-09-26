@@ -1466,6 +1466,36 @@ def test_user_portal_redeem_with_only_unlimited_clients_keeps_code_unused(db):
     assert _ovpn_until(db, node.id, "Unlimited") is None
 
 
+def test_user_portal_client_bound_code_extends_only_allowed_clients(db):
+    node = _make_node(db)
+    owner = _make_user(db, username="carol", role=UserRole.user)
+    owner.access_until = _naive(_OWNER_NOW + timedelta(days=2))
+    db.commit()
+    _owned_client(db, node.id, owner.id, "Alice", _OWNER_NOW + timedelta(days=2))
+    _owned_client(db, node.id, owner.id, "Bob", _OWNER_NOW + timedelta(days=5))
+    _owned_client(db, node.id, owner.id, "Other", _OWNER_NOW + timedelta(days=2))
+    create_unlock_code(
+        db,
+        grant_days=30,
+        protocols=["openvpn"],
+        mode="multi",
+        max_redemptions=5,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=owner,
+        code="ONLY-ALICE-BOB",
+        allowed_client_names=["alice", "bob"],
+    )
+
+    _redeem_at_owner_now(db, code="ONLY-ALICE-BOB", client_name="Alice", node_id=node.id, user_id=owner.id)
+
+    db.refresh(owner)
+    assert owner.access_until == _naive(_OWNER_NOW + timedelta(days=2))
+    assert _ovpn_until(db, node.id, "Alice") == _naive(_OWNER_NOW + timedelta(days=32))
+    assert _ovpn_until(db, node.id, "Bob") == _naive(_OWNER_NOW + timedelta(days=35))
+    assert _ovpn_until(db, node.id, "Other") == _naive(_OWNER_NOW + timedelta(days=2))
+    assert db.query(UnlockCodeRedemption).one().user_id == owner.id
+
+
 def test_client_name_underscore_is_not_a_wildcard(db):
     from app.routers.client_access import _owner_for_client as router_owner_for_client
     from app.services.unlock_codes import _client_config_name_and_protocols

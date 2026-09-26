@@ -569,6 +569,7 @@ def redeem_unlock_code(
                 days=grant_days,
                 protocols=set(_ALLOWED_PROTOCOLS) if allowed_clients else set(code_protocols),
                 actor="unlock_codes",
+                client_names=set(allowed_clients) if allowed_clients else None,
             )
             if user_access_until is None and not user_changes:
                 raise ValueError(_REDEEM_NOTHING_TO_EXTEND_MESSAGE)
