@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from app.models import SyncStatus
 from app.services.node_sync import push_full
+from app.services.node_sync.vpn_state_sync import Awg2NotInstalledError
 from app.services.openvpn_pki import ProfileValidationResult
 
 
@@ -308,13 +309,72 @@ def test_push_full_reblocks_wireguard_when_later_step_fails():
     result = _run_single_replica_push(
         primary_adapter=primary_adapter,
         replica_adapter=replica_adapter,
-        awg2_sync=MagicMock(side_effect=RuntimeError("AZ-AWG2 не установлен на replica")),
+        awg2_sync=MagicMock(side_effect=Awg2NotInstalledError("AZ-AWG2 не установлен на replica")),
         reapply=reapply,
     )
 
     assert result["success"] is False
     reapply.assert_called_once()
     assert reapply.call_args.args[2] is replica_adapter
+    assert reapply.call_args.kwargs == {"awg2": False}
+
+
+def _awg2_primary_adapter() -> MagicMock:
+    primary_adapter = MagicMock()
+    primary_adapter.create_antizapret_backup.return_value = {
+        "archive_name": "backup.tar.gz",
+        "archive_path": "/tmp/backup.tar.gz",
+    }
+    primary_adapter.download_antizapret_backup.return_value = b"archive-bytes"
+    primary_adapter.get_awg2_health.return_value = {"installed": True}
+    return primary_adapter
+
+
+def test_push_full_reblocks_awg2_when_step_after_awg2_sync_fails():
+    replica_adapter = _successful_replica_adapter()
+    reapply = MagicMock()
+
+    result = _run_single_replica_push(
+        primary_adapter=_awg2_primary_adapter(),
+        replica_adapter=replica_adapter,
+        awg2_sync=MagicMock(),
+        copy_policies=MagicMock(side_effect=RuntimeError("database is locked")),
+        reapply=reapply,
+    )
+
+    assert result["failed"][0]["failed_step"] == "access_policies"
+    reapply.assert_called_once()
+    assert reapply.call_args.args[2] is replica_adapter
+    assert reapply.call_args.kwargs == {"awg2": True}
+
+
+def test_push_full_reblocks_awg2_when_awg2_sync_fails_after_import():
+    reapply = MagicMock()
+
+    result = _run_single_replica_push(
+        primary_adapter=_awg2_primary_adapter(),
+        replica_adapter=_successful_replica_adapter(),
+        awg2_sync=MagicMock(side_effect=RuntimeError("apply_awg2_runtime: agent timeout")),
+        reapply=reapply,
+    )
+
+    assert result["failed"][0]["failed_step"] == "sync_awg2"
+    reapply.assert_called_once()
+    assert reapply.call_args.kwargs == {"awg2": True}
+
+
+def test_push_full_without_awg2_on_primary_reblocks_only_wireguard():
+    primary_adapter = _awg2_primary_adapter()
+    primary_adapter.get_awg2_health.return_value = {"installed": False}
+    reapply = MagicMock()
+
+    _run_single_replica_push(
+        primary_adapter=primary_adapter,
+        replica_adapter=_successful_replica_adapter(),
+        copy_policies=MagicMock(side_effect=RuntimeError("database is locked")),
+        reapply=reapply,
+    )
+
     assert reapply.call_args.kwargs == {"awg2": False}
 
 

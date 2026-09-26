@@ -24,6 +24,7 @@ from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
 from app.services.node_sync.shadow_link import format_shadow_link_warning, link_shadow_configs_for_group
 from app.services.node_sync.verify import verify_sync_group
 from app.services.node_sync.vpn_state_sync import (
+    Awg2NotInstalledError,
     copy_openvpn_profiles_from_primary,
     prune_replica_vpn_clients,
     reapply_blocked_runtime_policies,
@@ -212,6 +213,7 @@ def run_push_full(
 
         replica_adapter = None
         reblock_attempted = False
+        awg2_sync_started = False
         try:
             replica_adapter = get_adapter_for_node(replica_node)
             if primary_host_settings:
@@ -322,6 +324,7 @@ def run_push_full(
             if isinstance(awg2_health, dict) and awg2_health.get("installed"):
                 current_step = "sync_awg2"
                 progress(percent, f"Синхронизация AZ-AWG2 на {replica_name}…", current_step)
+                awg2_sync_started = True
                 sync_amneziawg2_state_from_primary(primary_adapter, replica_adapter)
 
             restored.append({"node_id": replica_id, "node_name": replica_name, "result": result})
@@ -359,10 +362,12 @@ def run_push_full(
                 }
             )
             logger.warning("Push full: replica sync failed on %s: %s", replica_name, exc)
-            # The HA restore already reloaded WireGuard from primary configs, lifting runtime blocks.
+            # The HA restore already reloaded WireGuard from primary configs, lifting runtime blocks;
+            # the AWG2 state import does the same for AWG2.
             if replica_node is not None and replica_adapter is not None and not reblock_attempted:
+                awg2_reblock = awg2_sync_started and not isinstance(exc, Awg2NotInstalledError)
                 try:
-                    reapply_blocked_runtime_policies(db, replica_node, replica_adapter, awg2=False)
+                    reapply_blocked_runtime_policies(db, replica_node, replica_adapter, awg2=awg2_reblock)
                 except Exception as reblock_exc:
                     logger.warning(
                         "Push full: re-block after failure on %s also failed: %s",

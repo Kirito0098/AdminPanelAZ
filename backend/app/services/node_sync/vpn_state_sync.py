@@ -27,6 +27,10 @@ logger = logging.getLogger(__name__)
 WIREGUARD_INTERFACES = ("antizapret", "vpn")
 
 
+class Awg2NotInstalledError(RuntimeError):
+    """AZ-AWG2 is missing on the replica; its state was not touched."""
+
+
 def _error_detail(exc: Exception) -> str:
     detail = getattr(exc, "detail", None)
     if detail is not None:
@@ -158,28 +162,34 @@ def sync_wireguard_state_from_primary(
     replica_node: Node | None = None,
 ) -> None:
     """Copy WireGuard server configs and all WG/AWG profile files from primary to replica."""
-    _mirror_wireguard_server_configs(primary_adapter, replica_adapter)
-
-    runtime = replica_adapter.apply_wireguard_runtime()
-    if not runtime.get("success"):
-        errors = runtime.get("errors") or []
-        detail = "; ".join(
-            str(entry.get("stderr") or entry.get("error") or entry)
-            for entry in errors
-        ) or "WireGuard runtime apply failed"
-        logger.warning(
-            "HA crypto sync: wg syncconf partial failure on replica (configs copied): %s",
-            detail,
-        )
-
-    _copy_all_wireguard_profiles_from_primary(
-        primary_adapter,
-        replica_adapter,
-        client_name=client_name,
-    )
-
     # Blocks are runtime-only (peer removed); syncconf from primary configs brings them back.
-    if db is not None and replica_node is not None:
+    reblock = db is not None and replica_node is not None
+    try:
+        _mirror_wireguard_server_configs(primary_adapter, replica_adapter)
+
+        runtime = replica_adapter.apply_wireguard_runtime()
+        if not runtime.get("success"):
+            errors = runtime.get("errors") or []
+            detail = "; ".join(
+                str(entry.get("stderr") or entry.get("error") or entry)
+                for entry in errors
+            ) or "WireGuard runtime apply failed"
+            logger.warning(
+                "HA crypto sync: wg syncconf partial failure on replica (configs copied): %s",
+                detail,
+            )
+
+        _copy_all_wireguard_profiles_from_primary(
+            primary_adapter,
+            replica_adapter,
+            client_name=client_name,
+        )
+    except Exception:
+        if reblock:
+            _reapply_blocks_after_failure(_reapply_blocked_wireguard_policies, db, replica_node, replica_adapter)
+        raise
+
+    if reblock:
         _reapply_blocked_wireguard_policies(db, replica_node, replica_adapter)
 
 
@@ -330,6 +340,13 @@ def _reapply_blocked_wireguard_policies(db: Session, replica_node: Node, replica
     _raise_reblock_errors(results, "WireGuard", replica_node)
 
 
+def _reapply_blocks_after_failure(reapply, db: Session, replica_node: Node, replica_adapter) -> None:
+    try:
+        reapply(db, replica_node, replica_adapter)
+    except Exception as exc:
+        logger.warning("HA crypto sync: re-block after failure on %s also failed: %s", replica_node.name, exc)
+
+
 def reapply_blocked_runtime_policies(db: Session, replica_node: Node, replica_adapter, *, awg2: bool) -> None:
     """Re-block runtime-only peers on a replica after its policy rows were replaced."""
     wg_error: RuntimeError | None = None
@@ -354,20 +371,26 @@ def sync_amneziawg2_state_from_primary(
     health = replica_adapter.get_awg2_health()
     if not health.get("installed"):
         cmd = health.get("install_command") or AWG2_INSTALL_CMD
-        raise RuntimeError(f"AZ-AWG2 не установлен на replica. Установите: {cmd}")
+        raise Awg2NotInstalledError(f"AZ-AWG2 не установлен на replica. Установите: {cmd}")
 
     archive = primary_adapter.export_awg2_state_archive()
     if not archive:
         raise RuntimeError("Пустой архив состояния AZ-AWG2 с primary")
 
-    replica_adapter.import_awg2_state_archive(archive)
-    runtime = replica_adapter.apply_awg2_runtime()
+    reblock = db is not None and replica_node is not None
+    try:
+        replica_adapter.import_awg2_state_archive(archive)
+        runtime = replica_adapter.apply_awg2_runtime()
+    except Exception:
+        if reblock:
+            _reapply_blocks_after_failure(_reapply_blocked_awg2_policies, db, replica_node, replica_adapter)
+        raise
     if not runtime.get("success"):
         logger.warning(
             "HA AWG2 runtime apply partial: %s",
             runtime.get("errors") or [],
         )
-    if db is not None and replica_node is not None:
+    if reblock:
         _reapply_blocked_awg2_policies(db, replica_node, replica_adapter)
 
 
