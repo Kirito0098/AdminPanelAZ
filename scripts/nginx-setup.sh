@@ -297,7 +297,11 @@ nginx_finalize_nginx_site() {
     else
       nginx_warn "Snippet создан (${NGINX_SUBPATH_SNIPPET_INCLUDE:-}) — включите интеграцию в панели или добавьте include вручную"
     fi
-    nginx -t || nginx_die "nginx -t не прошёл после встраивания snippet"
+    if ! nginx -t; then
+      nginx_rollback_cloudflare_origin_geo
+      nginx_die "nginx -t не прошёл после встраивания snippet"
+    fi
+    nginx_cleanup_cloudflare_origin_geo_bak
     systemctl reload nginx || nginx_die "Не удалось перезагрузить nginx"
     return 0
   fi

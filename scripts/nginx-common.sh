@@ -703,7 +703,7 @@ nginx_render_cloudflare_origin_geo() {
 }
 
 nginx_ensure_cloudflare_origin_geo_conf() {
-  local allow_file dest dir bak_dir tmp
+  local allow_file dest dir bak_dir tmp pending_bak pending_new
   allow_file="$(nginx_snippets_dir)/cloudflare-origin-allow.conf"
   dir="$(nginx_conf_d_dir)"
   dest="$(nginx_cloudflare_origin_geo_dest)"
@@ -711,11 +711,32 @@ nginx_ensure_cloudflare_origin_geo_conf() {
   mkdir -p "$dir" "$bak_dir"
   tmp="${dest}.tmp.$$"
   nginx_render_cloudflare_origin_geo "$allow_file" >"$tmp"
-  if [[ -f "$dest" ]] && ! cmp -s "$tmp" "$dest"; then
+  # Пишется и из conf="$(nginx_render_template …)": состояние для отката — в файлах, не в переменных.
+  pending_bak="${dest}.apaz-install.bak.$$"
+  pending_new="${dest}.apaz-install.new.$$"
+  if [[ ! -f "$dest" ]]; then
+    : >"$pending_new"
+  elif ! cmp -s "$tmp" "$dest"; then
     cp "$dest" "${bak_dir}/adminpanelaz-cloudflare-origin.conf.$(date +%Y%m%d%H%M%S).bak"
+    [[ -e "$pending_bak" || -e "$pending_new" ]] || cp -a "$dest" "$pending_bak"
   fi
   mv -f "$tmp" "$dest"
   nginx_log "Cloudflare origin geo: ${dest}"
+}
+
+# geo подключён глобально из conf.d: после неудачного nginx -t вернуть его к виду до установки.
+nginx_rollback_cloudflare_origin_geo() {
+  local dest created=false
+  dest="$(nginx_cloudflare_origin_geo_dest)"
+  [[ -e "${dest}.apaz-install.new.$$" ]] && created=true
+  nginx_restore_file_from_backup "$dest" "${dest}.apaz-install.bak.$$" "$created"
+  rm -f "${dest}.apaz-install.new.$$"
+}
+
+nginx_cleanup_cloudflare_origin_geo_bak() {
+  local dest
+  dest="$(nginx_cloudflare_origin_geo_dest)"
+  rm -f "${dest}.apaz-install.bak.$$" "${dest}.apaz-install.new.$$"
 }
 
 nginx_ensure_cloudflare_origin_lock_snippet() {
@@ -1672,6 +1693,7 @@ nginx_rollback_site_install() {
     rm -f "$NGINX_CONF_FILE"
   fi
   nginx_rollback_server_names_hash
+  nginx_rollback_cloudflare_origin_geo
 }
 
 nginx_install_site() {
@@ -1707,6 +1729,7 @@ nginx_install_site() {
   fi
   [[ -n "$bak" && -f "$bak" ]] && rm -f "$bak"
   nginx_cleanup_server_names_hash_bak
+  nginx_cleanup_cloudflare_origin_geo_bak
   nginx_install_default_deny
 
   systemctl enable nginx >/dev/null 2>&1 || true

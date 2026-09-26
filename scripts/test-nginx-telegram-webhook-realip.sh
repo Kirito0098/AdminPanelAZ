@@ -3,13 +3,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${ENV_FILE:-$ROOT_DIR/backend/.env}"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+# Не рабочий backend/.env: библиотека пишет в ENV_FILE.
+ENV_FILE="$TMP/.env"
+: >"$ENV_FILE"
 # shellcheck source=scripts/nginx-common.sh
 source "$ROOT_DIR/scripts/nginx-common.sh"
 nginx_common_init
-
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
 
 pass=0
 fail=0

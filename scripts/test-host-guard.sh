@@ -53,4 +53,16 @@ run_guarded "$TMP/test-red.sh" && fail "упавший тест не урони�
 grep -q "HOST GUARD" "$TMP/out" && fail "ложное срабатывание охраны"
 echo "  OK"
 
+echo "[test] тесты с nginx-common.sh подключают его к временному .env, а не к рабочему backend/.env"
+checked=0
+for t in "$ROOT_DIR"/scripts/test-*.sh; do
+  grep -Eq '^[[:space:]]*source "[^"]*/nginx-common\.sh"' "$t" || continue
+  env_line="$(awk '/^[[:space:]]*(export )?ENV_FILE=/ { env = $0 } /^[[:space:]]*source "[^"]*\/nginx-common\.sh"/ { print env; exit }' "$t")"
+  [[ -n "$env_line" ]] || fail "$(basename "$t"): ENV_FILE не задан до source nginx-common.sh"
+  [[ "$env_line" != *backend/* ]] || fail "$(basename "$t"): ENV_FILE указывает на рабочий .env: $env_line"
+  checked=$((checked + 1))
+done
+((checked >= 5)) || fail "проверено слишком мало тестов с nginx-common.sh: $checked"
+echo "  OK ($checked)"
+
 echo "All host guard checks passed."

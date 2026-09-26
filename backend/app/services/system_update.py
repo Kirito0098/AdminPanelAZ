@@ -81,10 +81,10 @@ def install_frontend_requirements(repo_root: Path) -> dict[str, Any]:
     if not package_json.is_file():
         return {"skipped": True, "success": True, "output": "frontend/package.json не найден"}
     result = _run_command(
-        ["npm", "install"],
+        ["npm", "ci"],
         cwd=frontend_dir,
         timeout=NPM_INSTALL_TIMEOUT,
-        label="npm install",
+        label="npm ci",
     )
     result["skipped"] = False
     return result
@@ -255,10 +255,10 @@ def apply_controller_update(
             "detail": detail,
         }
 
-    report(50, "Обновление: npm install…")
+    report(50, "Обновление: npm ci…")
     npm_install = install_frontend_requirements(repo_root)
     detail["npm_install"] = npm_install
-    if not _require_step(label="npm install", result=npm_install, output_parts=output_parts, errors=errors):
+    if not _require_step(label="npm ci", result=npm_install, output_parts=output_parts, errors=errors):
         return {
             "success": False,
             "message": "Обновление не выполнено",
