@@ -284,3 +284,84 @@ def test_cancel_during_execute_is_not_cancellable():
     release.set()
     time.sleep(0.05)
     assert sr.get_pending(pending.reboot_id).status == "executed"
+
+
+def _hold_set_status(monkeypatch, *, hold_when, until: threading.Event):
+    """Delay the pending→X status switch matched by ``hold_when(new)`` until ``until`` is set."""
+    real = sr._set_status
+
+    def wrapped(reboot_id, *, expected, new):
+        if expected == "pending" and hold_when(new):
+            assert until.wait(2), "the other side never ran"
+        return real(reboot_id, expected=expected, new=new)
+
+    monkeypatch.setattr(sr, "_set_status", wrapped)
+
+
+def test_cancel_wins_when_timer_fired_but_not_switched_yet(monkeypatch):
+    cancelled = threading.Event()
+    _hold_set_status(monkeypatch, hold_when=lambda new: new == "executing", until=cancelled)
+    executed = Mock()
+    pending = sr.schedule_reboot(
+        node_id=8, node_name="n8", scheduled_by="a", execute_fn=executed, delay_seconds=0
+    )
+    timer = sr._timers.get(pending.reboot_id)
+
+    result = sr.cancel_reboot(pending.reboot_id)
+    cancelled.set()
+    if timer is not None:
+        timer.join(2)
+    time.sleep(0.05)
+
+    assert result.status == "cancelled"
+    executed.assert_not_called()
+    assert sr.get_pending(pending.reboot_id).status == "cancelled"
+
+
+def test_timer_wins_when_cancel_checked_before_switch(monkeypatch):
+    ran = threading.Event()
+    _hold_set_status(monkeypatch, hold_when=lambda new: new == "cancelled", until=ran)
+    calls = []
+
+    def execute(p):
+        calls.append(p.status)
+        ran.set()
+
+    pending = sr.schedule_reboot(
+        node_id=9, node_name="n9", scheduled_by="a", execute_fn=execute, delay_seconds=0.05
+    )
+
+    with pytest.raises(sr.RebootError) as ei:
+        sr.cancel_reboot(pending.reboot_id)
+    time.sleep(0.05)
+
+    assert ei.value.code == "not_cancellable"
+    assert calls == ["executing"]
+    assert sr.get_pending(pending.reboot_id).status == "executed"
+
+
+def test_simultaneous_timer_and_cancel_have_exactly_one_winner():
+    for node_id in range(100, 130):
+        calls = []
+        pending = sr.schedule_reboot(
+            node_id=node_id,
+            node_name=f"n{node_id}",
+            scheduled_by="a",
+            execute_fn=lambda p: calls.append(p.reboot_id),
+            delay_seconds=0,
+        )
+        try:
+            sr.cancel_reboot(pending.reboot_id)
+            cancelled = True
+        except sr.RebootError as exc:
+            assert exc.code == "not_cancellable"
+            cancelled = False
+        deadline = time.monotonic() + 2
+        while sr.get_pending(pending.reboot_id).status in sr.ACTIVE_STATUSES and time.monotonic() < deadline:
+            time.sleep(0.01)
+        time.sleep(0.02)
+        status = sr.get_pending(pending.reboot_id).status
+        if cancelled:
+            assert (status, calls) == ("cancelled", [])
+        else:
+            assert (status, calls) == ("executed", [pending.reboot_id])
