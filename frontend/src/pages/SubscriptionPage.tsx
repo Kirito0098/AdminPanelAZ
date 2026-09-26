@@ -39,6 +39,7 @@ import {
   unlockCodeRedeemedCount,
   unlockCodeStatusLabel,
 } from '@/lib/unlockCodeStatus'
+import { userPortalActionConfirm, type UserPortalAction } from '@/lib/userPortalConfirm'
 import { cn } from '@/lib/utils'
 import type { PortalPublishStatus, UnlockCodeRecord, User } from '@/types'
 import { getUnlockCodes, revokeUnlockCode, type UnlockCodeProtocol } from '@/api/unlockCodes'
@@ -373,6 +374,14 @@ export default function SubscriptionPage() {
     }
   }
 
+  const confirmUserPortalAction = (action: UserPortalAction, user: User) => {
+    confirm({
+      ...userPortalActionConfirm(action, user.username),
+      destructive: true,
+      onConfirm: () => (action === 'rotate' ? handleUserPortalRotate(user) : handleUserPortalRevoke(user)),
+    })
+  }
+
   if (loading && clientPortalEnabled) {
     return <Spinner label="Загрузка…" className="py-12" />
   }
@@ -648,7 +657,7 @@ export default function SubscriptionPage() {
                           variant="outline"
                           size="sm"
                           disabled={anyBusy || userPortalActionsDisabled}
-                          onClick={() => void handleUserPortalRotate(user)}
+                          onClick={() => confirmUserPortalAction('rotate', user)}
                         >
                           {busyRotate ? <Loader2 size={14} className="animate-spin" /> : null}
                           Перевыпустить
@@ -659,7 +668,7 @@ export default function SubscriptionPage() {
                           size="sm"
                           className="gap-1.5"
                           disabled={anyBusy || userPortalActionsDisabled}
-                          onClick={() => void handleUserPortalRevoke(user)}
+                          onClick={() => confirmUserPortalAction('revoke', user)}
                         >
                           {busyRevoke ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                           Отозвать
