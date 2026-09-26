@@ -78,7 +78,7 @@ def test_collect_traffic_snapshot_includes_awg2_when_enabled(monkeypatch):
     db = MagicMock()
     db.get.return_value = SimpleNamespace(id=5, name="n", node_kind="vpn")
     monkeypatch.setattr(
-        "app.services.node_manager._is_vpn_node",
+        "app.services.node_manager.is_vpn_node",
         lambda _n: True,
     )
     monkeypatch.setattr(
@@ -127,7 +127,7 @@ def test_collect_traffic_snapshot_skips_awg2_when_disabled(monkeypatch):
     fetch = MagicMock(side_effect=AssertionError("awg2 fetch must not run"))
     db = MagicMock()
     db.get.return_value = SimpleNamespace(id=5, name="n", node_kind="vpn")
-    monkeypatch.setattr("app.services.node_manager._is_vpn_node", lambda _n: True)
+    monkeypatch.setattr("app.services.node_manager.is_vpn_node", lambda _n: True)
     monkeypatch.setattr("app.services.node_manager.get_adapter_for_node", lambda _n: _Adapter())
     monkeypatch.setattr("app.services.feature_toggles.is_awg2_enabled", lambda _db: False)
     monkeypatch.setattr("app.services.awg2_noc.fetch_awg2_peers_for_adapter", fetch)

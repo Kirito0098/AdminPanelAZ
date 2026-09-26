@@ -38,7 +38,7 @@ def test_build_noc_incidents_single_collect(monkeypatch):
     monkeypatch.setattr(ni, "_collect_nodes_monitoring_data", fake_collect)
     monkeypatch.setattr(ni, "_build_node_summary", lambda _payload: summary)
     monkeypatch.setattr(ni, "get_active_node", lambda _db: node)
-    monkeypatch.setattr(ni, "_is_vpn_node", lambda _n: True)
+    monkeypatch.setattr(ni, "is_vpn_node", lambda _n: True)
 
     db = MagicMock()
     db.query.return_value.filter.return_value.order_by.return_value.all.return_value = []

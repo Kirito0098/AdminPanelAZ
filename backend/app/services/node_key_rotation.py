@@ -15,7 +15,7 @@ from app.database import SessionLocal
 from app.models import Node
 from app.services.action_log import log_action
 from app.services.node_adapter import RemoteNodeAdapter
-from app.services.node_manager import NODE_KIND_VPN, _is_vpn_node, get_api_key_plain, store_api_key
+from app.services.node_manager import NODE_KIND_VPN, is_vpn_node, get_api_key_plain, store_api_key
 from app.services.node_transport import get_transport
 
 logger = logging.getLogger(__name__)
@@ -28,7 +28,7 @@ def generate_api_key() -> str:
 def rotate_node_api_key(db: Session, node: Node, *, actor_username: str | None = None) -> str:
     if node.is_local:
         raise ValueError("Локальный узел не поддерживает ротацию API-ключа")
-    if not _is_vpn_node(node):
+    if not is_vpn_node(node):
         raise ValueError("Прокси-узел не поддерживает ротацию API-ключа")
 
     old_key = get_api_key_plain(node)

@@ -11,7 +11,7 @@ from app.database import SessionLocal
 from app.models import Node
 from app.services.awg2_noc import fetch_awg2_peers_for_adapter
 from app.services.feature_toggles import is_awg2_enabled
-from app.services.node_manager import _is_vpn_node, get_adapter_for_node
+from app.services.node_manager import is_vpn_node, get_adapter_for_node
 from app.services.traffic.collector import TrafficCollectorService, build_status_rows
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,7 @@ def _collect_all_nodes():
         nodes = db.query(Node).all()
         awg2_enabled = is_awg2_enabled(db)
         for node in nodes:
-            if not _is_vpn_node(node):
+            if not is_vpn_node(node):
                 continue
             node_name = node.name
             node_started = time.perf_counter()

@@ -12,7 +12,7 @@ from app.database import SessionLocal
 from app.models import Node, NodeStatus
 from app.services.background_tasks import background_task_service
 from app.services.node_manager import (
-    _is_vpn_node,
+    is_vpn_node,
     check_node_health,
     get_adapter_for_node,
     proxy_is_not_vpn_message,
@@ -28,7 +28,7 @@ def _update_single_node(node_id: int) -> dict[str, Any]:
         node = db.query(Node).filter(Node.id == node_id).first()
         if not node:
             return {"node_id": node_id, "ok": False, "error": "узел не найден"}
-        if not _is_vpn_node(node):
+        if not is_vpn_node(node):
             return {
                 "node_id": node_id,
                 "node_name": node.name,

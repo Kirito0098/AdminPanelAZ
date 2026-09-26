@@ -72,7 +72,7 @@ def test_reconcile_skips_nodes_without_wg_policies(monkeypatch):
     node = MagicMock()
     node.id = 7
 
-    monkeypatch.setattr(worker, "_is_vpn_node", lambda _n: True)
+    monkeypatch.setattr(worker, "is_vpn_node", lambda _n: True)
 
     node_q = MagicMock()
     node_q.all.return_value = [node]

@@ -80,7 +80,7 @@ def test_collector_recovers_after_db_error_on_one_node(session_factory, monkeypa
     adapter.parse_openvpn_status.return_value = []
     adapter.parse_wireguard_status.return_value = []
     monkeypatch.setattr(worker_mod, "SessionLocal", session_factory)
-    monkeypatch.setattr(worker_mod, "_is_vpn_node", lambda node: True)
+    monkeypatch.setattr(worker_mod, "is_vpn_node", lambda node: True)
     monkeypatch.setattr(worker_mod, "get_adapter_for_node", lambda node: adapter)
     monkeypatch.setattr(worker_mod, "is_awg2_enabled", lambda db: False)
     monkeypatch.setattr(worker_mod, "build_status_rows", lambda ovpn, wg, awg2: _wg_status_rows())
@@ -107,7 +107,7 @@ def test_unreachable_node_is_logged_at_debug_not_warning(session_factory, monkey
         raise ConnectionError("node agent offline")
 
     monkeypatch.setattr(worker_mod, "SessionLocal", session_factory)
-    monkeypatch.setattr(worker_mod, "_is_vpn_node", lambda node: True)
+    monkeypatch.setattr(worker_mod, "is_vpn_node", lambda node: True)
     monkeypatch.setattr(worker_mod, "get_adapter_for_node", _adapter)
     monkeypatch.setattr(worker_mod, "is_awg2_enabled", lambda db: False)
     monkeypatch.setattr(
@@ -133,7 +133,7 @@ def test_db_error_on_node_is_logged_as_warning(session_factory, monkeypatch, cap
     adapter.parse_openvpn_status.return_value = []
     adapter.parse_wireguard_status.return_value = []
     monkeypatch.setattr(worker_mod, "SessionLocal", session_factory)
-    monkeypatch.setattr(worker_mod, "_is_vpn_node", lambda node: True)
+    monkeypatch.setattr(worker_mod, "is_vpn_node", lambda node: True)
     monkeypatch.setattr(worker_mod, "get_adapter_for_node", lambda node: adapter)
     monkeypatch.setattr(worker_mod, "is_awg2_enabled", lambda db: False)
     monkeypatch.setattr(worker_mod, "build_status_rows", lambda ovpn, wg, awg2: [])

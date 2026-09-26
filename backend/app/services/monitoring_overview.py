@@ -25,7 +25,7 @@ from app.services.ip_geo import is_local_geoip_loaded, lookup_ips_geo, parse_cli
 from app.services.node_health_score import compute_node_health_score
 from app.services.node_manager import (
     NODE_KIND_PROXY,
-    _is_vpn_node,
+    is_vpn_node,
     get_active_node,
     get_adapter_for_node,
     get_proxy_adapter,
@@ -125,7 +125,7 @@ def _collect_nodes_monitoring_data(db: Session) -> list[dict]:
             "cidr_routes_count": None,
         }
         try:
-            if not _is_vpn_node(node):
+            if not is_vpn_node(node):
                 if not is_proxy_nodes_enabled(db):
                     # Module off: keep the card visible, do not hit proxy_agent.
                     payload["services"] = [
@@ -418,7 +418,7 @@ def enrich_wireguard_peers(
 
 
 def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOverview:
-    if not _is_vpn_node(node):
+    if not is_vpn_node(node):
         try:
             if not is_proxy_nodes_enabled(db):
                 services = [

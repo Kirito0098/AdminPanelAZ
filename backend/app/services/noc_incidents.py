@@ -10,7 +10,7 @@ from app.models import AlertRule, AlertRuleMetric, CidrDbRefreshLog, Node, NodeS
 from app.schemas import NocIncidentItem, NocIncidentsResponse
 from app.services.alert_rules import format_rule_condition
 from app.services.monitoring_overview import _build_node_summary, _collect_nodes_monitoring_data
-from app.services.node_manager import _is_vpn_node, get_active_node
+from app.services.node_manager import is_vpn_node, get_active_node
 
 _CIDR_OK_STATUSES = frozenset({"ok", "success"})
 _ALERT_WINDOW_DAYS = 7
@@ -95,7 +95,7 @@ def build_noc_incidents(db: Session, *, limit: int = 20) -> NocIncidentsResponse
                 )
             )
         if error:
-            role = "прокси-узла" if not _is_vpn_node(node) else "VPN-узла"
+            role = "прокси-узла" if not is_vpn_node(node) else "VPN-узла"
             items.append(
                 NocIncidentItem(
                     id=f"node_error:{node.id}",
@@ -111,7 +111,7 @@ def build_noc_incidents(db: Session, *, limit: int = 20) -> NocIncidentsResponse
             score = getattr(summary, "health_score", None)
             level = getattr(summary, "health_level", None)
             if level and level != "ok" and status in {NodeStatus.online.value, "online"}:
-                role_nom = "Прокси-узел" if not _is_vpn_node(node) else "VPN-узел"
+                role_nom = "Прокси-узел" if not is_vpn_node(node) else "VPN-узел"
                 items.append(
                     NocIncidentItem(
                         id=f"node_unhealthy:{node.id}",

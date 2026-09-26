@@ -624,10 +624,10 @@ def collect_traffic_snapshot_for_node(db: Session, node_id: int) -> dict:
     """Fetch live status from node adapter and persist traffic snapshot (best-effort)."""
     from app.services.awg2_noc import fetch_awg2_peers_for_adapter
     from app.services.feature_toggles import is_awg2_enabled
-    from app.services.node_manager import _is_vpn_node, get_adapter_for_node
+    from app.services.node_manager import is_vpn_node, get_adapter_for_node
 
     node = db.get(Node, node_id)
-    if node is None or not _is_vpn_node(node):
+    if node is None or not is_vpn_node(node):
         return {"samples_added": 0, "active_sessions": 0, "skipped": True}
 
     adapter = get_adapter_for_node(node)

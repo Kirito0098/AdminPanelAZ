@@ -8,7 +8,7 @@ from fastapi import HTTPException
 from fastapi.responses import JSONResponse
 
 from app.models import Node, NodeStatus
-from app.services.node_manager import _is_vpn_node
+from app.services.node_manager import is_vpn_node
 from app.routers.settings_reboot import cancel_server_reboot, schedule_server_reboot
 from app.schemas import ServerRebootRequest, ServiceRestartRequest
 from app.services import telegram_bot_i18n as i18n
@@ -94,7 +94,7 @@ def _reboot_nodes_keyboard(nodes: list[Node]) -> dict:
 
 
 async def _show_reboot_nodes(ctx: BotContext, *, message_id: int | None = None) -> None:
-    nodes = [n for n in _list_nodes(ctx.db) if _is_vpn_node(n)]
+    nodes = [n for n in _list_nodes(ctx.db) if is_vpn_node(n)]
     if not nodes:
         await send_message(ctx.bot_token, ctx.chat_id, "❌ Нет доступных узлов.")
         return

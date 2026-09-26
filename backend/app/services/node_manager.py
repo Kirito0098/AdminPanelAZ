@@ -141,13 +141,13 @@ def get_active_node_id(db: Session) -> int | None:
         return None
 
 
-def _is_vpn_node(node: Node) -> bool:
+def is_vpn_node(node: Node) -> bool:
     return (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower() == NODE_KIND_VPN
 
 
 def list_vpn_nodes(db: Session) -> list[Node]:
     """All nodes that speak node_agent (OpenVPN/WG). Excludes proxy_agent cards."""
-    return [node for node in db.query(Node).order_by(Node.id.asc()).all() if _is_vpn_node(node)]
+    return [node for node in db.query(Node).order_by(Node.id.asc()).all() if is_vpn_node(node)]
 
 
 def proxy_is_not_vpn_message(node: Node) -> str:
@@ -170,7 +170,7 @@ def vpn_is_not_proxy_message(node: Node) -> str:
 def set_active_node_id(db: Session, node_id: int) -> None:
     """Set active VPN node. Rejects ``node_kind=proxy`` for all callers (HTTP, TG, mini)."""
     node = db.query(Node).filter(Node.id == node_id).first()
-    if node is not None and not _is_vpn_node(node):
+    if node is not None and not is_vpn_node(node):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Прокси-узел нельзя сделать активным для VPN: у него нет OpenVPN/WireGuard.",
@@ -188,7 +188,7 @@ def get_active_node(db: Session) -> Node:
     if node_id:
         node = db.query(Node).filter(Node.id == node_id).first()
         if node:
-            if not _is_vpn_node(node):
+            if not is_vpn_node(node):
                 _set_setting(db, ACTIVE_NODE_KEY, "")
                 db.commit()
             elif node.is_local and not settings.local_antizapret_enabled:

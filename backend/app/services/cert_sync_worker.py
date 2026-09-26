@@ -8,7 +8,7 @@ import logging
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Node, VpnConfig, VpnType
-from app.services.node_manager import _is_vpn_node, get_adapter_for_node
+from app.services.node_manager import is_vpn_node, get_adapter_for_node
 from app.services.openvpn_cert import resolve_openvpn_cert_not_after, to_naive_utc
 from app.services.openvpn_pki import load_cert_expiry_map
 
@@ -92,7 +92,7 @@ def sync_cert_expiry(db) -> int:
     updated = 0
     for node_id in node_ids:
         node = db.get(Node, node_id)
-        if node is None or not _is_vpn_node(node):
+        if node is None or not is_vpn_node(node):
             continue
         try:
             count = _sync_node(db, node)
