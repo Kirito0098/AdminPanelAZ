@@ -223,7 +223,8 @@ remove_nginx_site_if_present() {
 
   local conf_base="${domain//./_}"
   local removed=false
-  for path in "/etc/nginx/sites-available/${conf_base}" "/etc/nginx/sites-enabled/${conf_base}"; do
+  for path in "/etc/nginx/sites-available/${conf_base}" "/etc/nginx/sites-enabled/${conf_base}" \
+    /etc/nginx/sites-available/00-adminpanelaz-default-deny /etc/nginx/sites-enabled/00-adminpanelaz-default-deny; do
     if [[ -f "$path" || -L "$path" ]]; then
       rm -f "$path"
       removed=true
@@ -243,6 +244,7 @@ remove_nginx_site_if_present() {
     rm -f /etc/ssl/certs/adminpanelaz.crt /etc/ssl/private/adminpanelaz.key
     log "Удалён самоподписанный сертификат adminpanelaz"
   fi
+  rm -f /etc/ssl/certs/adminpanelaz-default-deny.crt /etc/ssl/private/adminpanelaz-default-deny.key
 
   if [[ -f /etc/nginx/snippets/cloudflare-realip.conf ]]; then
     rm -f /etc/nginx/snippets/cloudflare-realip.conf

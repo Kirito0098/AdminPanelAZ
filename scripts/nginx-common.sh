@@ -1243,7 +1243,7 @@ nginx_count_other_enabled_sites() {
   local base=""
   [[ -n "$domain" ]] && base="$(nginx_conf_basename "$domain")"
   local path name
-  for path in /etc/nginx/sites-enabled/*; do
+  for path in "$(nginx_sites_enabled_dir)"/*; do
     [[ -e "$path" ]] || continue
     name="$(basename "$path")"
     [[ -n "$base" && "$name" == "$base" ]] && continue
@@ -1261,12 +1261,15 @@ nginx_disable_for_direct_publish() {
   if [[ -n "$domain" ]]; then
     nginx_remove_site "$domain"
   fi
+  # В режиме uvicorn панель сама слушает HTTPS-порт: сервер по умолчанию nginx занял бы его.
+  nginx_remove_default_deny
 
   command -v nginx >/dev/null 2>&1 || return 0
 
   local other
   other="$(nginx_count_other_enabled_sites "$domain")"
   if [[ "${other:-0}" -gt 0 ]]; then
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
     nginx_warn "Nginx оставлен запущенным: на сервере есть другие сайты (${other}). Панель — напрямую на своём порту."
     return 0
   fi
@@ -1458,6 +1461,123 @@ nginx_install_dedicated_panel_vhost() {
   nginx_install_site "$conf" "$domain"
 }
 
+nginx_default_deny_basename() {
+  printf '%s' "00-adminpanelaz-default-deny"
+}
+
+nginx_version_at_least() {
+  local want="$1" version_output="$2" have
+  have="$(printf '%s' "$version_output" | sed -n 's|.*nginx/\([0-9][0-9.]*\).*|\1|p' | head -1)"
+  [[ -n "$have" ]] || return 1
+  [[ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -1)" == "$want" ]]
+}
+
+# nginx_render_default_deny <HTTP listen|""> <HTTPS listen|""> <вывод nginx -v>
+nginx_render_default_deny() {
+  local http_listen="$1" https_listen="$2" version_output="$3"
+  printf '# AdminPanelAZ: запросы по IP сервера и к чужим именам не доходят до панели.\n'
+  if [[ -n "$http_listen" ]]; then
+    printf 'server {\n    listen %s default_server;\n    server_name _;\n    return 444;\n}\n' "$http_listen"
+  fi
+  if [[ -n "$https_listen" ]]; then
+    printf 'server {\n    listen %s ssl default_server;\n    server_name _;\n' "$https_listen"
+    if nginx_version_at_least 1.19.4 "$version_output"; then
+      printf '    ssl_reject_handshake on;\n'
+    else
+      printf '    ssl_certificate %s;\n    ssl_certificate_key %s;\n    return 444;\n' \
+        "$(nginx_default_deny_cert)" "$(nginx_default_deny_key)"
+    fi
+    printf '}\n'
+  fi
+}
+
+nginx_default_deny_cert() {
+  printf '%s' "${NGINX_DEFAULT_DENY_CERT:-/etc/ssl/certs/adminpanelaz-default-deny.crt}"
+}
+
+nginx_default_deny_key() {
+  printf '%s' "${NGINX_DEFAULT_DENY_KEY:-/etc/ssl/private/adminpanelaz-default-deny.key}"
+}
+
+nginx_ensure_default_deny_cert() {
+  local cert key
+  cert="$(nginx_default_deny_cert)"
+  key="$(nginx_default_deny_key)"
+  [[ -s "$cert" && -s "$key" ]] && return 0
+  mkdir -p "$(dirname "$cert")" "$(dirname "$key")"
+  (umask 077 && openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -subj "/CN=invalid" \
+    -keyout "$key" -out "$cert" >/dev/null 2>&1)
+}
+
+# Чужой default_server на порту во включённых сайтах или conf.d (свой файл не считается).
+nginx_port_has_foreign_default_server() {
+  local port="$1" own path
+  own="$(nginx_default_deny_basename)"
+  for path in "$(nginx_sites_enabled_dir)"/* "$(nginx_conf_d_dir)"/*.conf; do
+    [[ -f "$path" ]] || continue
+    [[ "$(basename "$path")" == "$own" ]] && continue
+    if grep -Eq "^[[:space:]]*listen[[:space:]]+([^;[:space:]]*:)?${port}([[:space:]]+[^;]*)?[[:space:]]default_server" "$path"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+nginx_remove_default_deny() {
+  local base
+  base="$(nginx_default_deny_basename)"
+  rm -f "$(nginx_sites_enabled_dir)/${base}" "$(nginx_sites_available_dir)/${base}"
+}
+
+# Без сервера по умолчанию nginx отдаёт запросы по голому IP первому vhost'у на порту — панели.
+# Ошибка здесь не должна ломать публикацию: default-deny откатывается, панель остаётся.
+nginx_install_default_deny() {
+  local http_port="$1" https_port="$2"
+  local base conf_file enabled_link version_output conf
+  base="$(nginx_default_deny_basename)"
+  conf_file="$(nginx_sites_available_dir)/${base}"
+  enabled_link="$(nginx_sites_enabled_dir)/${base}"
+
+  if [[ -n "$http_port" ]] && nginx_port_has_foreign_default_server "$http_port"; then
+    nginx_warn "На порту ${http_port} уже есть чужой default_server — сервер по умолчанию панели не ставится"
+    http_port=""
+  fi
+  if [[ -n "$https_port" ]] && nginx_port_has_foreign_default_server "$https_port"; then
+    nginx_warn "На порту ${https_port} уже есть чужой default_server — сервер по умолчанию панели не ставится"
+    https_port=""
+  fi
+  if [[ -z "$http_port" && -z "$https_port" ]]; then
+    nginx_remove_default_deny
+    return 0
+  fi
+
+  version_output="$(nginx -v 2>&1 || true)"
+  if [[ -n "$https_port" ]] && ! nginx_version_at_least 1.19.4 "$version_output"; then
+    if ! nginx_ensure_default_deny_cert; then
+      nginx_warn "Не удалось создать сертификат для сервера по умолчанию — HTTPS по IP не закрыт"
+      https_port=""
+    fi
+  fi
+  conf="$(nginx_render_default_deny "$http_port" "$https_port" "$version_output")"
+  printf '%s\n' "$conf" >"$conf_file"
+  ln -sf "$conf_file" "$enabled_link"
+  if ! nginx -t >/dev/null 2>&1; then
+    nginx_remove_default_deny
+    nginx_warn "Сервер по умолчанию не прошёл nginx -t — убран; панель может открываться по IP сервера"
+    return 0
+  fi
+  nginx_log "Запросы по IP сервера и к чужим именам отклоняются (${base})"
+}
+
+nginx_conf_listen_port() {
+  local conf="$1" kind="$2"
+  if [[ "$kind" == ssl ]]; then
+    printf '%s\n' "$conf" | sed -n 's/^[[:space:]]*listen[[:space:]]\+\([0-9]\+\)[[:space:]]\+ssl\b.*/\1/p' | head -1
+  else
+    printf '%s\n' "$conf" | sed -n 's/^[[:space:]]*listen[[:space:]]\+\([0-9]\+\)[[:space:]]*;.*/\1/p' | head -1
+  fi
+}
+
 # Undo a failed install: never leave a broken site enabled (would block nginx after reboot/reload).
 nginx_rollback_site_install() {
   local bak="${1:-}"
@@ -1508,6 +1628,8 @@ nginx_install_site() {
   fi
   [[ -n "$bak" && -f "$bak" ]] && rm -f "$bak"
   nginx_cleanup_server_names_hash_bak
+  nginx_install_default_deny "$(nginx_conf_listen_port "$conf_content" plain)" \
+    "$(nginx_conf_listen_port "$conf_content" ssl)"
 
   systemctl enable nginx >/dev/null 2>&1 || true
   # Config already passed nginx -t — leave it enabled even if reload/restart fails
