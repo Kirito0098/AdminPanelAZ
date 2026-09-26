@@ -17,6 +17,7 @@ from app.services.feature_guards import get_feature_service, module_disabled_mes
 from app.services.panel_publish_info import resolve_request_url_root
 from app.services.rate_limit.sliding_window import RateLimitExceeded
 from app.services.telegram_bot import telegram_bot_service
+from app.services.telegram_bot_loop import run_on_bot_loop
 from app.services.telegram_link import create_link_code
 from app.services.telegram_update_dedup import claim_telegram_update
 from app.services.telegram_webhook_security import (
@@ -99,10 +100,12 @@ async def telegram_webhook(
 
     # A non-2xx reply makes Telegram redeliver the update, re-running restore/reboot actions.
     try:
-        await telegram_bot_service.handle_update(
-            db,
-            update,
-            mini_app_url=_mini_app_url(request),
+        await run_on_bot_loop(
+            telegram_bot_service.handle_update(
+                db,
+                update,
+                mini_app_url=_mini_app_url(request),
+            )
         )
     except Exception:
         db.rollback()
