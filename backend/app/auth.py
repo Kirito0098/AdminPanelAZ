@@ -68,6 +68,13 @@ def access_token_session_id(token: str) -> str | None:
     return sid if isinstance(sid, str) and sid else None
 
 
+def bearer_session_id(request: Request) -> str | None:
+    scheme, _, token = (request.headers.get("Authorization") or "").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        return None
+    return access_token_session_id(token.strip())
+
+
 def _web_session_revoked(db: Session, session_id: object) -> bool:
     if not isinstance(session_id, str) or not session_id:
         return False

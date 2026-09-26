@@ -9,9 +9,9 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.auth import get_active_user_from_access_token
+from app.auth import access_token_session_id, get_active_user_from_access_token
 from app.database import SessionLocal
-from app.services.active_web_session import WEB_SESSION_ID_HEADER, active_web_session_service
+from app.services.active_web_session import active_web_session_service
 from app.services.notify_time import get_client_timezone_from_request, remember_client_timezone
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,8 @@ class ActiveSessionMiddleware(BaseHTTPMiddleware):
             auth_header = request.headers.get("Authorization") or ""
             if auth_header.startswith("Bearer "):
                 token = auth_header[7:].strip()
-                session_id = (request.headers.get(WEB_SESSION_ID_HEADER) or "").strip()
+                # The session is the one the token was issued for; the X-Web-Session-Id header is not trusted.
+                session_id = access_token_session_id(token) if token else None
                 client_tz = get_client_timezone_from_request(request)
                 if token and (session_id or client_tz):
                     # Runs on every authenticated API request: SQLite must not block the event loop.

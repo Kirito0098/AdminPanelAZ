@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.auth import (
     access_token_session_id,
     authenticate_user,
+    bearer_session_id,
     create_2fa_pending_token,
     create_user_access_token,
     decode_2fa_pending_token,
@@ -591,7 +592,8 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
         failed = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         _clear_refresh_cookie(failed, request)
         return failed
-    access = create_user_access_token(user, session_id=refresh_token_family(db, raw))
+    # A pre-upgrade token has no family; its successor starts one, and the access token must name it.
+    access = create_user_access_token(user, session_id=refresh_token_family(db, new_raw or raw))
     if new_raw is not None:
         _set_refresh_cookie(response, new_raw, request)
     return Token(access_token=access)
@@ -599,13 +601,14 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
 
 @router.post("/logout", response_model=MessageResponse)
 def logout(request: Request, response: Response, db: Session = Depends(get_db)):
-    session_id = active_web_session_service.get_session_id_from_request(request)
-    if session_id:
+    raw = request.cookies.get(settings.refresh_token_cookie_name)
+    # Only a session the caller holds a token for: the X-Web-Session-Id header proves nothing.
+    proven = {refresh_token_family(db, raw) if raw else None, bearer_session_id(request)} - {None}
+    for session_id in proven:
         try:
-            active_web_session_service.remove_active_web_session(db, session_id)
+            active_web_session_service.revoke_session(db, session_id)
         except Exception:
             db.rollback()
-    raw = request.cookies.get(settings.refresh_token_cookie_name)
     if raw:
         revoke_refresh_token(db, raw)
     _clear_refresh_cookie(response, request)

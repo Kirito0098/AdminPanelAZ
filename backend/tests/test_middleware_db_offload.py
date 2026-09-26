@@ -46,6 +46,7 @@ def test_active_session_touch_runs_off_the_event_loop(monkeypatch):
     touch = MagicMock()
     monkeypatch.setattr(active_session, "SessionLocal", _recording_session(db_threads))
     monkeypatch.setattr(active_session, "get_active_user_from_access_token", lambda _db, _t: SimpleNamespace(username="admin"))
+    monkeypatch.setattr(active_session, "access_token_session_id", lambda _t: "sess-1")
     monkeypatch.setattr(active_session.active_web_session_service, "touch_active_web_session", touch)
     app, loop_threads = _app_with(lambda a: a.add_middleware(active_session.ActiveSessionMiddleware))
 

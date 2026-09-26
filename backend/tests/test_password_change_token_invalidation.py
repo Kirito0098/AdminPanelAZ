@@ -235,14 +235,19 @@ def test_active_session_middleware_ignores_stale_token(db_factory, monkeypatch):
 
     with db_factory() as db:
         admin = db.query(User).filter(User.username == "admin").one()
-        stale = create_user_access_token(admin)
+        stale = create_user_access_token(admin, session_id="sess-1")
         rt.invalidate_user_sessions(db, admin, reason="password")
-        current = create_user_access_token(admin)
+        current = create_user_access_token(admin, session_id="sess-1")
+        without_sid = create_user_access_token(admin)
 
     client = TestClient(app)
     client.get("/api/ping", headers={"Authorization": f"Bearer {stale}", "X-Web-Session-Id": "sess-1"})
     assert touch.call_count == 0
 
-    client.get("/api/ping", headers={"Authorization": f"Bearer {current}", "X-Web-Session-Id": "sess-1"})
+    client.get("/api/ping", headers={"Authorization": f"Bearer {current}", "X-Web-Session-Id": "forged"})
     assert touch.call_count == 1
     assert touch.call_args.args[1] == "admin"
+    assert touch.call_args.kwargs["session_id"] == "sess-1"
+
+    client.get("/api/ping", headers={"Authorization": f"Bearer {without_sid}", "X-Web-Session-Id": "forged"})
+    assert touch.call_count == 1

@@ -52,12 +52,14 @@ def admin(db):
     return row
 
 
-def _request(*, cookie: str | None = None, bearer: str | None = None) -> Request:
+def _request(*, cookie: str | None = None, bearer: str | None = None, session_header: str | None = None) -> Request:
     headers = [(b"user-agent", b"pytest")]
     if cookie is not None:
         headers.append((b"cookie", f"{settings.refresh_token_cookie_name}={cookie}".encode()))
     if bearer is not None:
         headers.append((b"authorization", f"Bearer {bearer}".encode()))
+    if session_header is not None:
+        headers.append((b"x-web-session-id", session_header.encode()))
     return Request(
         {
             "type": "http",
@@ -207,6 +209,94 @@ def test_password_change_keeps_the_tab_bound_to_its_session(db, admin, monkeypat
     assert _family(db, new_cookie) == token.web_session_id
     security_router.revoke_active_session(token.web_session_id, db=db, _=admin)
     assert get_active_user_from_access_token(db, result.access_token) is None
+    assert _refresh(db, new_cookie)[0] == 401
+
+
+def _session_row(db, session_id: str) -> ActiveWebSession | None:
+    db.expire_all()
+    return db.query(ActiveWebSession).filter_by(session_id=session_id).one_or_none()
+
+
+def test_logout_without_tokens_does_not_lift_a_revocation(db, admin):
+    token, _ = _login(db, admin)
+    security_router.revoke_active_session(token.web_session_id, db=db, _=admin)
+
+    auth_router.logout(_request(session_header=token.web_session_id), Response(), db)
+
+    assert _session_row(db, token.web_session_id).revoked_at is not None
+    assert get_active_user_from_access_token(db, token.access_token) is None
+
+
+def test_logout_ignores_a_session_id_it_cannot_prove(db, admin):
+    victim, victim_cookie = _login(db, admin)
+    _, own_cookie = _login(db, admin)
+
+    auth_router.logout(_request(cookie=own_cookie, session_header=victim.web_session_id), Response(), db)
+
+    row = _session_row(db, victim.web_session_id)
+    assert row is not None and row.revoked_at is None
+    assert get_active_user_from_access_token(db, victim.access_token).username == "alice"
+    assert _refresh(db, victim_cookie)[0] == 200
+
+
+@pytest.mark.parametrize("proof", ["cookie", "bearer"])
+def test_logout_ends_the_proven_session_and_its_access_tokens(db, admin, proof):
+    token, cookie = _login(db, admin)
+    request = _request(cookie=cookie) if proof == "cookie" else _request(bearer=token.access_token)
+
+    auth_router.logout(request, Response(), db)
+
+    assert _session_row(db, token.web_session_id).revoked_at is not None
+    assert get_active_user_from_access_token(db, token.access_token) is None
+    assert token.web_session_id not in {r.session_id for r in active_web_session_service.list_active_sessions(db)}
+    assert _refresh(db, cookie)[0] == 401
+
+
+def test_heartbeat_tracks_the_token_session_not_the_header(db, admin):
+    from app.routers import session as session_router
+
+    token, _ = _login(db, admin)
+    forged = "e" * 32
+
+    result = session_router.session_heartbeat(
+        _request(bearer=token.access_token, session_header=forged), db=db, current_user=admin, token=token.access_token
+    )
+
+    assert result == {"success": True}
+    assert _session_row(db, forged) is None
+    assert _session_row(db, token.web_session_id) is not None
+
+
+def test_active_session_list_marks_current_by_token_session(db, admin):
+    token, _ = _login(db, admin)
+    other, _ = _login(db, admin)
+
+    rows = security_router.list_active_sessions(
+        _request(bearer=token.access_token, session_header=other.web_session_id),
+        db=db,
+        _=admin,
+        token=token.access_token,
+    )
+
+    current = {r.session_id for r in rows if r.is_current}
+    assert current == {token.web_session_id}
+
+
+def test_refresh_of_pre_upgrade_token_starts_a_revocable_session(db, admin):
+    legacy_raw, legacy_row = rt.create_refresh_token(db, admin)
+    legacy_row.family_id = None
+    db.commit()
+
+    status, access, new_cookie = _refresh(db, legacy_raw)
+
+    assert status == 200
+    sid = _claims(access).get("sid")
+    assert sid and sid == _family(db, new_cookie)
+    active_web_session_service.touch_active_web_session(
+        db, "alice", request=_request(bearer=access), session_id=sid, force=True
+    )
+    security_router.revoke_active_session(sid, db=db, _=admin)
+    assert get_active_user_from_access_token(db, access) is None
     assert _refresh(db, new_cookie)[0] == 401
 
 

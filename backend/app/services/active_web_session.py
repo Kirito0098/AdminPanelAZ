@@ -16,8 +16,6 @@ from app.models import ActiveWebSession
 from app.services.ip_restriction import ip_restriction_service
 from app.services.refresh_token import revoke_token_family
 
-WEB_SESSION_ID_HEADER = "X-Web-Session-Id"
-
 _touch_cache: dict[str, int] = {}
 _touch_cache_lock = Lock()
 
@@ -34,9 +32,6 @@ class ActiveWebSessionService:
 
     def generate_session_id(self) -> str:
         return secrets.token_hex(16)
-
-    def get_session_id_from_request(self, request: Request) -> str:
-        return (request.headers.get(WEB_SESSION_ID_HEADER) or "").strip()
 
     @staticmethod
     def _stale(cutoff: datetime, now: datetime):
@@ -146,17 +141,6 @@ class ActiveWebSessionService:
         with _touch_cache_lock:
             _touch_cache.pop(session_id, None)
         return True
-
-    def remove_active_web_session(self, db: Session, session_id: str) -> None:
-        session_id = (session_id or "").strip()
-        if not session_id:
-            return
-        db.query(ActiveWebSession).filter(ActiveWebSession.session_id == session_id).delete(
-            synchronize_session=False
-        )
-        db.commit()
-        with _touch_cache_lock:
-            _touch_cache.pop(session_id, None)
 
     def count_active_sessions(self, db: Session) -> int:
         if not self.is_enabled():

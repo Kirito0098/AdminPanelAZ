@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth import require_admin
+from app.auth import access_token_session_id, oauth2_scheme, require_admin
 from app.config import get_settings
 from app.database import get_db
 from app.models import AppSetting, User
@@ -617,10 +617,11 @@ def list_active_sessions(
     request: Request,
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
+    token: str = Depends(oauth2_scheme),
 ):
     if not active_web_session_service.is_enabled():
         return []
-    current_session_id = active_web_session_service.get_session_id_from_request(request)
+    current_session_id = access_token_session_id(token)
     rows = active_web_session_service.list_active_sessions(db)
     return [
         ActiveWebSessionResponse(
