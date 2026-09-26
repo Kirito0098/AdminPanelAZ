@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_IDLE_TIMEOUT_SECONDS = 600.0
 DEFAULT_OPERATION_TIMEOUT_SECONDS = 30.0
 DEFAULT_CLEANUP_INTERVAL_SECONDS = 30.0
+_KEEPALIVE_INTERVAL_SECONDS = 15.0
+_KEEPALIVE_COUNT_MAX = 3
+_CLOSE_TIMEOUT_SECONDS = 5.0
 _LOOP_START_TIMEOUT_SECONDS = 5.0
 _SSH_HOST_KEY_METADATA_KEY = "ssh_host_key"
 
@@ -83,8 +86,10 @@ class SshTunnelPool:
         self._operation_timeout_seconds = max(1.0, float(operation_timeout_seconds))
         self._cleanup_interval_seconds = max(1.0, float(cleanup_interval_seconds))
         self._time = time_fn
-        self._lock = threading.RLock()
+        # _lock guards the dicts only; opening or closing a tunnel holds just that node's lock.
+        self._lock = threading.Lock()
         self._sessions: dict[int, _TunnelSession] = {}
+        self._node_locks: dict[int, threading.Lock] = {}
         self._closed = False
 
         self._loop = asyncio.new_event_loop()
@@ -109,22 +114,31 @@ class SshTunnelPool:
             self._cleaner_thread.start()
 
     def ensure(self, node: Any) -> EnsureResult:
-        now = self._time()
+        node_id = int(node.id)
         signature = self._node_signature(node)
-        with self._lock:
-            self._assert_open()
-            self._expire_idle_sessions_locked(now)
-            current = self._sessions.get(int(node.id))
-            if current and current.signature == signature:
-                current.last_used = now
-                return EnsureResult(local_port=current.local_port)
+        with self._node_lock(node_id):
+            now = self._time()
+            with self._lock:
+                self._assert_open()
+                current = self._sessions.get(node_id)
+                if current and current.signature == signature and self._is_alive(current):
+                    current.last_used = now
+                    return EnsureResult(local_port=current.local_port)
+                if current:
+                    self._sessions.pop(node_id, None)
             if current:
-                self._close_session_locked(int(node.id), current)
+                self._close_session_noexcept(current)
             session, discovered_host_key_text = self._run_coroutine(
                 self._open_session(node=node, signature=signature, now=now),
                 timeout=self._operation_timeout_seconds,
             )
-            self._sessions[int(node.id)] = session
+            with self._lock:
+                closed = self._closed
+                if not closed:
+                    self._sessions[node_id] = session
+            if closed:
+                self._close_session_noexcept(session)
+                self._assert_open()
             return EnsureResult(
                 local_port=session.local_port,
                 discovered_host_key_text=discovered_host_key_text,
@@ -133,15 +147,22 @@ class SshTunnelPool:
     def drop(self, node_id: int) -> None:
         with self._lock:
             session = self._sessions.pop(int(node_id), None)
-            if session is None:
-                return
+        if session is not None:
             self._close_session_noexcept(session)
 
     def drop_all(self) -> None:
         with self._lock:
-            for node_id in list(self._sessions):
-                session = self._sessions.pop(node_id)
-                self._close_session_noexcept(session)
+            sessions = list(self._sessions.values())
+            self._sessions.clear()
+        self._close_sessions_noexcept(sessions)
+
+    def _node_lock(self, node_id: int) -> threading.Lock:
+        with self._lock:
+            return self._node_locks.setdefault(node_id, threading.Lock())
+
+    @staticmethod
+    def _is_alive(session: _TunnelSession) -> bool:
+        return not session.connection.is_closed()
 
     def shutdown(self) -> None:
         with self._lock:
@@ -176,34 +197,33 @@ class SshTunnelPool:
     def _run_cleaner(self) -> None:
         while not self._cleaner_stop.wait(self._cleanup_interval_seconds):
             try:
-                with self._lock:
-                    if self._closed:
-                        return
-                    self._expire_idle_sessions_locked(self._time())
+                if self._closed:
+                    return
+                self.expire_idle()
             except Exception:
                 logger.debug("SSH tunnel idle cleanup failed", exc_info=True)
 
-    def _expire_idle_sessions_locked(self, now: float) -> None:
-        if self._idle_timeout_seconds <= 0:
-            return
-        cutoff = now - self._idle_timeout_seconds
-        expired = [
-            (node_id, session)
-            for node_id, session in self._sessions.items()
-            if session.last_used <= cutoff
-        ]
-        for node_id, session in expired:
-            self._close_session_locked(node_id, session)
+    def expire_idle(self) -> None:
+        """Close idle sessions and sessions whose SSH connection is gone."""
+        cutoff = self._time() - self._idle_timeout_seconds if self._idle_timeout_seconds > 0 else None
+        with self._lock:
+            expired = [
+                node_id
+                for node_id, session in self._sessions.items()
+                if (cutoff is not None and session.last_used <= cutoff) or not self._is_alive(session)
+            ]
+            sessions = [self._sessions.pop(node_id) for node_id in expired]
+        self._close_sessions_noexcept(sessions)
 
-    def _close_session_locked(self, node_id: int, session: _TunnelSession) -> None:
-        self._sessions.pop(node_id, None)
-        self._close_session_noexcept(session)
+    def _close_sessions_noexcept(self, sessions: list[_TunnelSession]) -> None:
+        for session in sessions:
+            self._close_session_noexcept(session)
 
     def _close_session_noexcept(self, session: _TunnelSession) -> None:
         try:
             self._run_coroutine(
                 self._close_session_async(session),
-                timeout=self._operation_timeout_seconds,
+                timeout=_CLOSE_TIMEOUT_SECONDS,
             )
         except Exception:
             logger.debug("Failed to close SSH tunnel session cleanly", exc_info=True)
@@ -263,6 +283,9 @@ class SshTunnelPool:
                 # Pin validation is exclusively via _PinnedHostKeyClient.
                 known_hosts=([], [], []),
                 server_host_key_algs="default",
+                connect_timeout=self._operation_timeout_seconds,
+                keepalive_interval=_KEEPALIVE_INTERVAL_SECONDS,
+                keepalive_count_max=_KEEPALIVE_COUNT_MAX,
             )
             listener = await connection.forward_local("127.0.0.1", 0, remote_host, remote_port)
             local_port = int(listener.get_port())
@@ -288,6 +311,10 @@ class SshTunnelPool:
             if connection is not None:
                 await self._close_connection_only(connection)
             raise SshTunnelError(CODE_SSH_UNREACHABLE, f"SSH host is unreachable: {exc}") from exc
+        except asyncio.CancelledError:
+            if connection is not None:
+                connection.close()
+            raise
         except Exception as exc:
             if connection is not None:
                 await self._close_connection_only(connection)
