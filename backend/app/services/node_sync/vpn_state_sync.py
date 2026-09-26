@@ -260,6 +260,12 @@ def _set_openvpn_restart_pending(db: Session | None, replica_node: Node | None, 
     db.commit()
 
 
+def clear_openvpn_restart_pending(db: Session | None, replica_node: Node | None) -> None:
+    """Settle the owed restart: call only after a successful restart of the replica's
+    OpenVPN servers that started once the new server identity was already on disk."""
+    _set_openvpn_restart_pending(db, replica_node, False)
+
+
 def sync_openvpn_pki_from_primary(
     primary_adapter,
     replica_adapter,
@@ -328,7 +334,7 @@ def sync_openvpn_pki_from_primary(
             for entry in failed
         ) or "OpenVPN restart failed after PKI sync"
         raise HTTPException(status_code=500, detail=detail)
-    _set_openvpn_restart_pending(db, replica_node, False)
+    clear_openvpn_restart_pending(db, replica_node)
 
 
 def _replica_policy_service(db: Session, replica_node: Node, replica_adapter) -> AccessPolicyService:

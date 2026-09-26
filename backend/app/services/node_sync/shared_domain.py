@@ -32,7 +32,7 @@ from app.services.node_sync.groups import (
     parse_replica_node_ids,
 )
 from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
-from app.services.node_sync.vpn_state_sync import copy_openvpn_profiles_from_primary
+from app.services.node_sync.vpn_state_sync import clear_openvpn_restart_pending, copy_openvpn_profiles_from_primary
 from app.services.openvpn_remote_hosts import parse_hosts_json
 from app.services.profile_delivery import patch_openvpn_profiles_on_node
 
@@ -173,6 +173,8 @@ def apply_shared_domain_to_members(
                         }
                     )
                 progress(percent, f"{node.name}: перезапуск OpenVPN…")
+                # Read before the restart: a PKI sync marking the node meanwhile still owes its own.
+                restart_owed = not is_primary and node.openvpn_restart_pending is True
                 if bool(node.openvpn_multihome):
                     from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
 
@@ -192,6 +194,8 @@ def apply_shared_domain_to_members(
                         **restart_result,
                     }
                 )
+                if restart_owed and restart_result.get("success") and not restart_result.get("failed"):
+                    clear_openvpn_restart_pending(db, node)
                 if restart_result.get("failed"):
                     result["errors"].append(
                         {

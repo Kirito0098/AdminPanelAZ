@@ -18,7 +18,7 @@ from app.services.node_sync.groups import is_auto_sync_enabled
 from app.services.node_sync.policy_sync import heal_policy_drift
 from app.services.node_sync.vpn_state_sync import heal_crypto_drift
 from app.services.node_sync.verify import verify_sync_group
-from app.services.background_gate import run_background_step
+from app.services.background_gate import background_pause_requested, run_background_step
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -42,6 +42,10 @@ def classify_heal_actions(verify_result: dict[str, Any]) -> tuple[set[str], bool
             if kind in _CLIENT_DRIFT_KINDS:
                 actions.add("crypto_sync")
                 actions.add("policy")
+                has_healable = True
+                continue
+            if kind == "openvpn_restart_pending":
+                actions.add("crypto_sync")
                 has_healable = True
                 continue
             if kind == "fingerprint":
@@ -127,6 +131,9 @@ def reconcile_sync_groups_once() -> dict:
         recover_stuck_pending_groups(db)
         groups = db.query(NodeSyncGroup).order_by(NodeSyncGroup.id).all()
         for group in groups:
+            if background_pause_requested():
+                logger.info("Node sync reconcile stopped: backup restore in progress")
+                break
             if group.sync_status == SyncStatus.pending:
                 continue
             prior_verify: dict[str, Any] | None = None
@@ -151,6 +158,9 @@ def reconcile_sync_groups_once() -> dict:
             heal_attempted = False
             heal_errors: list[str] = []
             if settings.node_sync_auto_heal and is_auto_sync_enabled(group):
+                if background_pause_requested():
+                    logger.info("Node sync auto-heal skipped: backup restore in progress")
+                    break
                 heal_attempted = True
                 heal_ok, heal_errors = _attempt_incremental_heal(db, group, result)
                 if heal_ok:

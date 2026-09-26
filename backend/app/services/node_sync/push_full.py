@@ -25,6 +25,7 @@ from app.services.node_sync.shadow_link import format_shadow_link_warning, link_
 from app.services.node_sync.verify import verify_sync_group
 from app.services.node_sync.vpn_state_sync import (
     Awg2NotInstalledError,
+    clear_openvpn_restart_pending,
     copy_openvpn_profiles_from_primary,
     prune_replica_vpn_clients,
     reapply_blocked_runtime_policies,
@@ -272,6 +273,8 @@ def run_push_full(
 
             current_step = "restart_openvpn"
             progress(percent, f"Перезапуск OpenVPN на {replica_name}…", current_step)
+            # Read before the restart: a PKI sync marking the node meanwhile still owes its own.
+            restart_owed = replica_node is not None and replica_node.openvpn_restart_pending is True
             if replica_node is not None and bool(getattr(replica_node, "openvpn_multihome", False)):
                 from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
 
@@ -300,6 +303,8 @@ def run_push_full(
                     )
                     or "OpenVPN restart failed"
                 )
+            if restart_owed:
+                clear_openvpn_restart_pending(db, replica_node)
 
             current_step = "apply_wireguard"
             progress(percent, f"Применение WireGuard на {replica_name}…", current_step)

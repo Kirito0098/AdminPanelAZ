@@ -46,6 +46,7 @@ const VERIFY_CHECKS = [
   'список клиентов WireGuard',
   'сертификаты PKI и файлы WireGuard',
   'сертификаты в файлах .ovpn (не отозваны)',
+  'OpenVPN перезапущен после смены сертификата сервера',
   'файлы настроек AntiZapret (config/)',
 ] as const
 
@@ -167,6 +168,17 @@ function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismatchView 
         mismatch.detail || 'Панель не может связаться с репликой или узел помечен как offline.',
       ],
       hint: 'Откройте «Узлы» → проверьте статус, host, порт и API-ключ. После восстановления связи нажмите «Проверить» снова.',
+    }
+  }
+
+  if (mismatch.kind === 'openvpn_restart_pending') {
+    return {
+      title: 'OpenVPN не перезапущен после смены сертификата сервера',
+      details: [
+        mismatch.detail ||
+          'Новые CA, сертификат или ключ сервера уже на реплике, но OpenVPN работает со старыми.',
+      ],
+      hint: 'Клиенты с новыми профилями к реплике не подключатся. Авто-лечение или «Синхронизировать» перезапустит OpenVPN на реплике.',
     }
   }
 

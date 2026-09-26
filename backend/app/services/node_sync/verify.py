@@ -269,6 +269,18 @@ def verify_sync_group(
                 }
             )
 
+        if node.openvpn_restart_pending is True:
+            ready = False
+            mismatches.append(
+                {
+                    "kind": "openvpn_restart_pending",
+                    "detail": (
+                        "Новые CA, сертификат или ключ сервера OpenVPN уже на реплике, "
+                        "но OpenVPN ещё не перезапущен и работает со старыми"
+                    ),
+                }
+            )
+
         replica_results.append(
             {
                 "node_id": replica_id,
