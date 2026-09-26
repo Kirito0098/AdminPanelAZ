@@ -1405,6 +1405,31 @@ def test_user_portal_redeem_extends_subscription_without_shortening_clients(db):
     assert db.query(UnlockCodeRedemption).one().user_id == owner.id
 
 
+def test_user_portal_redeem_replicates_every_extended_client(db):
+    node = _make_node(db)
+    owner = _make_user(db, username="replicated", role=UserRole.user)
+    owner.access_until = _naive(_OWNER_NOW + timedelta(days=2))
+    db.commit()
+    _owned_client(db, node.id, owner.id, "First", _OWNER_NOW + timedelta(days=1))
+    _owned_client(db, node.id, owner.id, "Second", _OWNER_NOW + timedelta(days=2))
+    _make_configs(db, node.id, owner.id, "WgClient", [VpnType.wireguard])
+    db.add(WgAccessPolicy(node_id=node.id, client_name="wgclient", expires_at=_naive(_OWNER_NOW + timedelta(days=1))))
+    db.commit()
+    _owner_code(db, owner, "USER-CASCADE-HA", days=7)
+
+    with patch("app.services.node_sync.policy_sync.maybe_replicate_policy_op") as replicate:
+        _redeem_at_owner_now(db, code="USER-CASCADE-HA", client_name="First", node_id=node.id, user_id=owner.id)
+
+    expected = _OWNER_NOW + timedelta(days=9)
+    assert sorted(
+        (c.kwargs["client_name"], c.kwargs["vpn_type"], c.kwargs["access_until"]) for c in replicate.call_args_list
+    ) == [
+        ("First", VpnType.openvpn, expected),
+        ("Second", VpnType.openvpn, expected),
+        ("WgClient", VpnType.wireguard, expected),
+    ]
+
+
 def test_user_portal_redeem_without_subscription_extends_limited_clients(db):
     node = _make_node(db)
     owner = _make_user(db, username="novikov", role=UserRole.user)

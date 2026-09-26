@@ -180,7 +180,7 @@ def _replicate_access_until_queue(
     errors: list[dict] = []
     for node_id, protocol, client_name, vpn_type in queued_configs:
         try:
-            maybe_replicate_policy_op(
+            result = maybe_replicate_policy_op(
                 db,
                 node_id=node_id,
                 client_name=client_name,
@@ -189,6 +189,16 @@ def _replicate_access_until_queue(
                 actor=actor,
                 access_until=access_until,
             )
+            if isinstance(result, dict):
+                errors.extend(
+                    {
+                        "node_id": replica_error.get("node_id"),
+                        "protocol": protocol,
+                        "client_name": client_name,
+                        "error": replica_error.get("error"),
+                    }
+                    for replica_error in result.get("errors") or []
+                )
         except Exception as exc:
             logger.warning(
                 "HA replicate access_until after subscription cascade failed "
@@ -287,6 +297,29 @@ def apply_owner_access_until_to_config(
         "replicate_errors": replicate_errors,
         "warning": _format_cascade_warning(
             reconcile_errors=list(reconcile.get("errors") or []),
+            replicate_errors=replicate_errors,
+        ),
+    }
+
+
+def replicate_inherited_access_until(db: Session, config: VpnConfig, inherit: dict, *, actor: str) -> dict:
+    """HA: replicate the deadline stamped by ``apply_owner_access_until_to_config(replicate=False)``.
+
+    Call after the create is replicated: replica policy ops need the shadow profile.
+    """
+    if not inherit.get("applied"):
+        return inherit
+    replicate_errors = _replicate_access_until_queue(
+        db,
+        queued_configs=[(config.node_id, _VPN_PROTOCOLS[config.vpn_type], config.client_name, config.vpn_type)],
+        access_until=datetime.fromisoformat(inherit["access_until"]),
+        actor=actor,
+    )
+    return {
+        **inherit,
+        "replicate_errors": replicate_errors,
+        "warning": _format_cascade_warning(
+            reconcile_errors=list(inherit.get("reconcile_errors") or []),
             replicate_errors=replicate_errors,
         ),
     }

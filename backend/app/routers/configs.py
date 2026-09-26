@@ -23,7 +23,7 @@ from app.schemas import (
     VpnConfigUpdate,
 )
 from app.services.self_service import build_quota_payload, enforce_user_can_create_config
-from app.services.user_subscription import apply_owner_access_until_to_config
+from app.services.user_subscription import apply_owner_access_until_to_config, replicate_inherited_access_until
 from app.services.config_access import can_mutate_config, can_view_config, list_accessible_configs
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
@@ -596,7 +596,7 @@ def create_config(
         config,
         actor=current_user.username,
         commit=True,
-        replicate=True,
+        replicate=False,
     )
 
     ha_replicate_warning = None
@@ -604,6 +604,7 @@ def create_config(
     if group:
         replicate_result = maybe_replicate_create(db, node_id=node_id, primary_config=config)
         ha_replicate_warning = format_ha_replicate_errors(replicate_result)
+        inherit = replicate_inherited_access_until(db, config, inherit, actor=current_user.username)
 
     if inherit.get("warning"):
         if ha_replicate_warning:
