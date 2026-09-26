@@ -160,6 +160,14 @@ def run_leader_startup_actions() -> None:
     except Exception:
         logger.exception("Failed to recover stale background tasks on startup")
     try:
+        from app.services.node_sync.group_status import recover_stuck_pending_groups_once
+
+        stuck = recover_stuck_pending_groups_once()
+        if stuck:
+            logger.info("Marked %d HA group(s) left pending by an ended sync task as failed", stuck)
+    except Exception:
+        logger.exception("Failed to recover pending HA groups on startup")
+    try:
         from app.services.server_reboot import interrupt_abandoned_reboots
 
         interrupted = interrupt_abandoned_reboots()

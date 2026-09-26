@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Node, NodeSyncGroup, SyncStatus
 from app.services.node_manager import get_adapter_for_node
+from app.services.node_sync.group_status import fail_group_on_error
 from app.services.node_sync.groups import (
     effective_openvpn_domain,
     effective_wireguard_domain,
@@ -236,9 +237,10 @@ def make_shared_domain_callable(group_id: int) -> Callable[..., dict[str, Any]]:
             if group is None:
                 raise RuntimeError("Sync group не найдена")
 
-            result = apply_shared_domain_to_members(
-                db, group, run_apply=True, progress_callback=progress_updater
-            )
+            with fail_group_on_error(db, captured_group_id):
+                result = apply_shared_domain_to_members(
+                    db, group, run_apply=True, progress_callback=progress_updater
+                )
 
             group.last_sync_at = datetime.utcnow()
             if result.get("success"):

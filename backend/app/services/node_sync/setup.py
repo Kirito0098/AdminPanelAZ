@@ -13,6 +13,7 @@ import logging
 from typing import Any, Callable
 
 from app.models import NodeSyncGroup
+from app.services.node_sync.group_status import fail_group_on_error
 from app.services.node_sync.push_full import run_push_full
 from app.services.node_sync.shared_domain import apply_shared_domain_to_members
 
@@ -51,21 +52,22 @@ def make_group_setup_callable(group_id: int) -> Callable[..., dict[str, Any]]:
             if group is None:
                 raise RuntimeError("Sync group не найдена")
 
-            if progress_updater:
-                progress_updater(2, "Запись общего домена на узлы…")
-            domain_result = apply_shared_domain_to_members(
-                db,
-                group,
-                run_apply=True,
-                progress_callback=_scaled_progress(progress_updater, 2, 40),
-            )
+            with fail_group_on_error(db, captured_group_id):
+                if progress_updater:
+                    progress_updater(2, "Запись общего домена на узлы…")
+                domain_result = apply_shared_domain_to_members(
+                    db,
+                    group,
+                    run_apply=True,
+                    progress_callback=_scaled_progress(progress_updater, 2, 40),
+                )
 
-            push_result = run_push_full(
-                db,
-                group,
-                progress_callback=_scaled_progress(progress_updater, 40, 100),
-                auto_verify=True,
-            )
+                push_result = run_push_full(
+                    db,
+                    group,
+                    progress_callback=_scaled_progress(progress_updater, 40, 100),
+                    auto_verify=True,
+                )
 
             domain_ok = bool(domain_result.get("success"))
             push_ok = bool(push_result.get("success"))

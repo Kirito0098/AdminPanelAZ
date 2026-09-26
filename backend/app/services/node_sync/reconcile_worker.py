@@ -13,6 +13,7 @@ from app.database import SessionLocal
 from app.models import NodeSyncGroup, SyncStatus
 from app.services.node_sync.antizapret_sync import heal_antizapret_drift
 from app.services.node_sync.config_sync import heal_config_drift
+from app.services.node_sync.group_status import recover_stuck_pending_groups
 from app.services.node_sync.groups import is_auto_sync_enabled
 from app.services.node_sync.policy_sync import heal_policy_drift
 from app.services.node_sync.vpn_state_sync import heal_crypto_drift
@@ -123,6 +124,7 @@ def reconcile_sync_groups_once() -> dict:
     checked = 0
     drift_groups: list[dict] = []
     try:
+        recover_stuck_pending_groups(db)
         groups = db.query(NodeSyncGroup).order_by(NodeSyncGroup.id).all()
         for group in groups:
             if group.sync_status == SyncStatus.pending:
