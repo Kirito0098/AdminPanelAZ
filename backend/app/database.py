@@ -1584,6 +1584,9 @@ def _run_db_migrations() -> None:
             ("cert_expires_at", "DATETIME"),
             ("expires_at", "DATETIME"),
         ],
+        "nodes": [
+            ("api_key_rotated_at", "DATETIME"),
+        ],
         "refresh_tokens": [
             ("family_id", "VARCHAR(32)"),
             ("revoked_at", "DATETIME"),

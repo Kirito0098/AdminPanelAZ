@@ -291,6 +291,8 @@ class Node(Base):
     # When True, saving remotes also writes hosts[0] to WIREGUARD_HOST (GubernievS proxy.sh).
     wireguard_use_first_remote: Mapped[bool] = mapped_column(Boolean, default=False)
     openvpn_multihome: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Key age for automatic rotation; updated_at moves on every health check.
+    api_key_rotated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

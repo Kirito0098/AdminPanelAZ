@@ -593,6 +593,7 @@ def update_node(
             key_hash, key_encrypted = store_api_key("", payload.api_key)
             node.api_key_hash = key_hash
             node.api_key_encrypted = key_encrypted
+            node.api_key_rotated_at = datetime.utcnow()
 
     if "linked_vpn_node_id" in updates:
         node.linked_vpn_node_id = _validate_linked_vpn_node_id(
