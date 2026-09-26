@@ -264,7 +264,7 @@ def test_awg2_restore_route_calls_runtime_and_ha_sync():
             return_value={"attempted": True, "errors": [{"node_name": "replica-1", "error": "down"}]},
         ),
     ):
-        result = asyncio.run(awg2_router.awg2_restore(archive=upload, db=MagicMock(), _=SimpleNamespace()))
+        result = awg2_router.awg2_restore(archive=upload, db=MagicMock(), _=SimpleNamespace())
 
     assert result["message"] == "AZ-AWG2 восстановлен из бэкапа"
     assert result["runtime"]["success"] is True
@@ -290,7 +290,7 @@ def test_awg2_restore_route_raises_when_runtime_fails():
         patch.object(awg2_router, "_ha_sync_awg2_from_active", ha_mock),
     ):
         try:
-            asyncio.run(awg2_router.awg2_restore(archive=upload, db=MagicMock(), _=SimpleNamespace()))
+            awg2_router.awg2_restore(archive=upload, db=MagicMock(), _=SimpleNamespace())
             raise AssertionError("expected HTTPException")
         except HTTPException as exc:
             assert exc.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR

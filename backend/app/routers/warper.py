@@ -1,6 +1,5 @@
 """AZ-WARP (WARPER) management API."""
 
-import asyncio
 import json
 from collections.abc import Iterator
 
@@ -52,6 +51,7 @@ from app.schemas import (
     WarperTrafficResponse,
     WarperUpdatesCheckResponse,
 )
+from app.services.async_iter import iterate_in_thread
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.chart_timezone import resolve_chart_timezone
 from app.services.warper import SINGBOX_ACTIONS, enrich_warper_traffic_payload
@@ -653,11 +653,14 @@ async def warper_updates_stream(
         db = SessionLocal()
         try:
             adapter = get_active_adapter(db)
-            for chunk in _iter_warper_update_sse(adapter):
-                if await request.is_disconnected():
-                    break
-                yield chunk
-                await asyncio.sleep(0)
+            chunks = iterate_in_thread(_iter_warper_update_sse(adapter))
+            try:
+                async for chunk in chunks:
+                    if await request.is_disconnected():
+                        break
+                    yield chunk
+            finally:
+                await chunks.aclose()
         except Exception as exc:
             yield f"data: {json.dumps({'event': 'error', 'detail': str(exc)}, default=str)}\n\n"
         finally:

@@ -299,7 +299,7 @@ def create_backup(
 
 
 @router.post("/upload", response_model=BackupEntry)
-async def upload_backup(
+def upload_backup(
     request: Request,
     file: UploadFile = File(...),
     restore: bool = Form(False),
@@ -313,7 +313,7 @@ async def upload_backup(
             detail="Ожидается архив .tar.gz",
         )
 
-    content = await file.read()
+    content = file.file.read()
     if not content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пуст")
     if len(content) > MAX_BACKUP_UPLOAD_BYTES:

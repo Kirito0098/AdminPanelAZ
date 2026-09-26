@@ -475,13 +475,13 @@ def export_configs_csv(
 
 
 @router.post("/import")
-async def import_configs_csv(
+def import_configs_csv(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
     require_ha_primary_for_client_ops(db)
-    content = await file.read()
+    content = file.file.read()
     if not content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пуст")
     try:

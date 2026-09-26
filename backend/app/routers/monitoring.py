@@ -163,6 +163,21 @@ async def monitoring_stream(
     finally:
         db.close()
 
+    def _overview_payload(coalesce_ttl: float) -> dict:
+        db = SessionLocal()
+        try:
+            # Coalesce concurrent SSE clients on a dedicated key (not REST 45s TTL).
+            overview = _build_monitoring_overview(
+                db,
+                scope=scope,
+                ha_mode=ha_mode,
+                cache_ttl=coalesce_ttl,
+                cache_key_prefix="sse:",
+            )
+            return overview.model_dump(mode="json")
+        finally:
+            db.close()
+
     async def event_generator():
         while True:
             if await request.is_disconnected():
@@ -170,22 +185,12 @@ async def monitoring_stream(
             # Re-read each tick so env/settings changes apply without reconnect.
             tick_interval = _stream_interval_seconds()
             coalesce_ttl = _stream_coalesce_ttl(tick_interval)
-            db = SessionLocal()
             try:
-                # Coalesce concurrent SSE clients on a dedicated key (not REST 45s TTL).
-                overview = _build_monitoring_overview(
-                    db,
-                    scope=scope,
-                    ha_mode=ha_mode,
-                    cache_ttl=coalesce_ttl,
-                    cache_key_prefix="sse:",
-                )
-                payload = overview.model_dump(mode="json")
+                # Polls every node of the scope over the agent API.
+                payload = await asyncio.to_thread(_overview_payload, coalesce_ttl)
                 yield f"data: {json.dumps(payload, default=str)}\n\n"
             except Exception as exc:
                 yield f"event: error\ndata: {json.dumps({'detail': str(exc)}, default=str)}\n\n"
-            finally:
-                db.close()
             await asyncio.sleep(tick_interval)
 
     return StreamingResponse(

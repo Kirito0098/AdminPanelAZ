@@ -80,23 +80,29 @@ async def monitor_ws(websocket: WebSocket):
         await websocket.close(code=1008)
         return
     iface = (websocket.query_params.get("iface") or "eth0").strip() or "eth0"
+
+    def _read_metrics() -> tuple[dict, dict]:
+        db = SessionLocal()
+        try:
+            adapter = get_active_adapter(db)
+            metrics = adapter.get_server_metrics()
+            live = adapter.get_server_live_throughput(
+                interval=_WS_THROUGHPUT_INTERVAL_S,
+                max_interfaces=1,
+                interface_names=[iface],
+            )
+            return metrics, live
+        finally:
+            db.close()
+
     try:
         while True:
             if not _is_server_monitor_enabled():
                 await websocket.close(code=1008)
                 return
 
-            db = SessionLocal()
-            try:
-                adapter = get_active_adapter(db)
-                metrics = adapter.get_server_metrics()
-                live = adapter.get_server_live_throughput(
-                    interval=_WS_THROUGHPUT_INTERVAL_S,
-                    max_interfaces=1,
-                    interface_names=[iface],
-                )
-            finally:
-                db.close()
+            # Throughput is measured by sampling counters over an interval (a blocking sleep).
+            metrics, live = await asyncio.to_thread(_read_metrics)
 
             payload = {
                 "cpu_percent": metrics["cpu_percent"],
