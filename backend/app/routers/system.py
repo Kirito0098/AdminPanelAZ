@@ -29,10 +29,15 @@ def _repo_root() -> Path:
 
 
 def _git_update_status(repo_root: Path) -> dict:
+    from app.services.node_update import resolve_update_ref
+
     try:
         subprocess.run(["git", "fetch", "origin"], cwd=repo_root, capture_output=True, timeout=30, check=False)
+        ref, ref_error = resolve_update_ref(repo_root)
+        if ref is None:
+            return {"error": ref_error, "updates_available": False}
         local = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo_root, capture_output=True, text=True, check=False)
-        remote = subprocess.run(["git", "rev-parse", "origin/main"], cwd=repo_root, capture_output=True, text=True, check=False)
+        remote = subprocess.run(["git", "rev-parse", ref], cwd=repo_root, capture_output=True, text=True, check=False)
         local_hash = local.stdout.strip()
         remote_hash = remote.stdout.strip()
         behind = 0
