@@ -1255,7 +1255,7 @@ nginx_count_other_enabled_sites() {
     name="$(basename "$path")"
     [[ -n "$base" && "$name" == "$base" ]] && continue
     case "$name" in
-      default | adminpanelaz-* | 00-adminpanelaz-*) continue ;;
+      default | default.conf | adminpanelaz-* | 00-adminpanelaz-*) continue ;;
     esac
     sed 's/#.*//' "$path" | grep -Eq '(^|[[:space:];{}])server([[:space:]]*\{|[[:space:]]*$)' || continue
     count=$((count + 1))

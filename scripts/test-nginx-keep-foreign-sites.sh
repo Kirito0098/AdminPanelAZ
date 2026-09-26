@@ -52,6 +52,7 @@ reset() {
   printf 'server { listen 80 default_server; return 444; }\n' >"$ENABLED/00-adminpanelaz-default-deny"
   printf 'server { listen 80; server_name panel.example.com; }\n' >"$ENABLED/adminpanelaz-acme-panel_example_com"
   printf 'server { listen 80 default_server; root /var/www/html; }\n' >"$ENABLED/default"
+  printf 'server { listen 80; server_name localhost; }\n' >"$CONFD/default.conf"
   printf 'geo $adminpanelaz_cf { default 0; }\n' >"$CONFD/adminpanelaz-cloudflare-origin.conf"
   printf 'server_names_hash_bucket_size 128;\n' >"$CONFD/adminpanelaz-server-names-hash.conf"
 }
