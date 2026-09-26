@@ -39,6 +39,7 @@ import {
   unlockCodeRedeemedCount,
   unlockCodeStatusLabel,
 } from '@/lib/unlockCodeStatus'
+import { unlockCodeRevokeConfirm } from '@/lib/unlockCodeConfirm'
 import { userPortalActionConfirm, type UserPortalAction } from '@/lib/userPortalConfirm'
 import { cn } from '@/lib/utils'
 import type { PortalPublishStatus, UnlockCodeRecord, User } from '@/types'
@@ -325,6 +326,14 @@ export default function SubscriptionPage() {
     } finally {
       setUnlockCodesBusyId(null)
     }
+  }
+
+  const confirmRevokeUnlockCode = (code: UnlockCodeRecord) => {
+    confirm({
+      ...unlockCodeRevokeConfirm(code.code),
+      destructive: true,
+      onConfirm: () => handleRevokeUnlockCode(code),
+    })
   }
 
   const portalModeBlocked = portalStatus?.portal_mode_supported === false
@@ -791,7 +800,7 @@ export default function SubscriptionPage() {
                           size="sm"
                           className="gap-1.5"
                           disabled={isRevoked || unlockCodesBusyId === code.id}
-                          onClick={() => void handleRevokeUnlockCode(code)}
+                          onClick={() => confirmRevokeUnlockCode(code)}
                         >
                           {unlockCodesBusyId === code.id ? (
                             <Loader2 size={14} className="animate-spin" />

@@ -37,6 +37,7 @@ import {
 } from '@/api/client'
 import { setClientAccessUntil, syncClientAccessUntilFromOwner, type UnlockCodeProtocol } from '@/api/unlockCodes'
 import { dateInputToIso, isoToDateInput, parseAccessUntilConflict } from '@/lib/accessUntil'
+import { clientPortalActionConfirm, type ClientPortalAction } from '@/lib/clientPortalConfirm'
 import {
   clearProfileTrafficLimits,
   formatProfileProtocols,
@@ -45,7 +46,7 @@ import {
 } from '@/lib/profileTrafficLimit'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
-import ConfirmDialog from '@/components/shared/ConfirmDialog'
+import ConfirmDialog, { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -75,6 +76,7 @@ import { cn } from '@/lib/utils'
 import { formatDate } from '@/lib/datetime'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import type {
   ClientAccessPolicy,
@@ -237,6 +239,7 @@ export default function ClientActionsDialog({
   const wireguardFamilyEnabled = isEnabled('wireguard') || isEnabled('amneziawg')
   const awg2Enabled = isEnabled('awg2')
   const haReplicaReadonly = useHaReplicaReadonly()
+  const { confirm, dialogProps, isOpen: confirmOpen } = useConfirmDialog()
   const [promptMode, setPromptMode] = useState<PromptMode>(null)
   const [promptTitle, setPromptTitle] = useState('')
   const [promptMessage, setPromptMessage] = useState('')
@@ -549,6 +552,14 @@ export default function ClientActionsDialog({
     } finally {
       setBusyAction(null)
     }
+  }
+
+  const confirmPortalAction = (action: ClientPortalAction) => {
+    confirm({
+      ...clientPortalActionConfirm(action, config.client_name),
+      destructive: true,
+      onConfirm: () => (action === 'rotate' ? handlePortalRotate() : handlePortalRevoke()),
+    })
   }
 
   const handleFileDownload = async (key: string, path: string, filename: string) => {
@@ -1037,7 +1048,7 @@ export default function ClientActionsDialog({
   }
 
   const handleMainOpenChange = (next: boolean) => {
-    if (!next && (busyAction !== null || promptMode !== null || unlockCodeDialogOpen)) return
+    if (!next && (busyAction !== null || promptMode !== null || unlockCodeDialogOpen || confirmOpen)) return
     onOpenChange(next)
   }
 
@@ -1300,7 +1311,7 @@ export default function ClientActionsDialog({
                     size="sm"
                     className="gap-1.5"
                     disabled={busyAction !== null || haReplicaReadonly}
-                    onClick={() => void handlePortalRotate()}
+                    onClick={() => confirmPortalAction('rotate')}
                   >
                     {busyAction === 'portal-rotate' ? (
                       <Loader2 size={14} className="animate-spin" />
@@ -1315,11 +1326,7 @@ export default function ClientActionsDialog({
                     size="sm"
                     className="gap-1.5"
                     disabled={busyAction !== null || haReplicaReadonly}
-                    onClick={() =>
-                      askConfirm('Отозвать ссылку портала?', 'Старая ссылка перестанет открываться.', () =>
-                        handlePortalRevoke(),
-                      )
-                    }
+                    onClick={() => confirmPortalAction('revoke')}
                   >
                     {busyAction === 'portal-revoke' ? (
                       <Loader2 size={14} className="animate-spin" />
@@ -1736,6 +1743,8 @@ export default function ClientActionsDialog({
           ),
         }}
       />
+
+      <ConfirmDialogHost dialogProps={dialogProps} />
     </>
   )
 }
