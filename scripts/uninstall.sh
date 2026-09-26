@@ -12,6 +12,7 @@ REMOVE_FIREWALL=false
 REMOVE_ENV=false
 REMOVE_BACKUPS=false
 REMOVE_SYSTEM_CONFIG=false
+KEEP_AGENT_PKI=false
 YES=false
 SKIP_CONFIRM=false
 
@@ -35,6 +36,7 @@ usage() {
   --remove-env          Удалить backend/.env, node_agent.env и proxy_agent.env
   --remove-backups      Удалить каталог бэкапов (BACKUP_ROOT из backend/.env)
   --remove-system-config  Удалить /etc/adminpanelaz (ddns.env, mtls, node_agent.env)
+  --keep-agent-pki        С --remove-system-config: оставить /etc/adminpanelaz/mtls (переустановка)
   -y, --yes             Без интерактивных подтверждений
   --skip-confirm        Не спрашивать подтверждение (вызывается из install.sh после своего диалога)
   --help                Показать справку
@@ -72,6 +74,9 @@ parse_args() {
         ;;
       --remove-system-config)
         REMOVE_SYSTEM_CONFIG=true
+        ;;
+      --keep-agent-pki)
+        KEEP_AGENT_PKI=true
         ;;
       -y|--yes)
         YES=true
@@ -287,12 +292,14 @@ remove_system_config() {
     return 0
   fi
 
-  local config_dir="/etc/adminpanelaz"
+  local config_dir="${ADMINPANELAZ_CONFIG_DIR:-/etc/adminpanelaz}"
   if [[ -f "$config_dir/ddns.env" ]]; then
     rm -f "$config_dir/ddns.env"
     log "Удалён $config_dir/ddns.env"
   fi
-  if [[ -d "$config_dir/mtls" ]]; then
+  if [[ "$KEEP_AGENT_PKI" == true ]]; then
+    log "Сохранён $config_dir/mtls: панель уже доверяет этим сертификатам агента"
+  elif [[ -d "$config_dir/mtls" ]]; then
     rm -rf "$config_dir/mtls"
     log "Удалён $config_dir/mtls"
   fi

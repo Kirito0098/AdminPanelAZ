@@ -838,16 +838,27 @@ wizard_ask_node_agent() {
     print_info "Порт node agent: ${WIZ_NODE_AGENT_PORT} (задан на шаге сети)"
   fi
 
-  wiz_prompt_yesno "Сгенерировать NODE_AGENT_API_KEY автоматически (рекомендуется)?" "y"
+  local existing_key
+  existing_key="$(agent_env_value "$NODE_ENV_FILE" NODE_AGENT_API_KEY)"
+  REPLY="n"
+  if ! is_placeholder_secret "$existing_key"; then
+    wiz_prompt_yesno "На сервере уже есть NODE_AGENT_API_KEY — оставить его (иначе панель потеряет связь с узлом)?" "y"
+  fi
   if [[ "$REPLY" == "y" ]]; then
-    WIZ_NODE_AGENT_API_KEY="$(random_hex)"
-    echo "  Будет сгенерирован ключ (покажем в конце установки)."
+    WIZ_NODE_AGENT_API_KEY="$existing_key"
+    echo "  Ключ узла не меняется."
   else
-    wiz_prompt_secret "Введите NODE_AGENT_API_KEY (мин. 24 символа в production)" ""
-    if [[ -z "$REPLY" ]]; then
-      die "Node agent не может работать без API-ключа. Запустите мастер заново и выберите автогенерацию ключа (ответ 'y')."
+    wiz_prompt_yesno "Сгенерировать NODE_AGENT_API_KEY автоматически (рекомендуется)?" "y"
+    if [[ "$REPLY" == "y" ]]; then
+      WIZ_NODE_AGENT_API_KEY="$(random_hex)"
+      echo "  Будет сгенерирован ключ (покажем в конце установки)."
+    else
+      wiz_prompt_secret "Введите NODE_AGENT_API_KEY (мин. 24 символа в production)" ""
+      if [[ -z "$REPLY" ]]; then
+        die "Node agent не может работать без API-ключа. Запустите мастер заново и выберите автогенерацию ключа (ответ 'y')."
+      fi
+      WIZ_NODE_AGENT_API_KEY="$REPLY"
     fi
-    WIZ_NODE_AGENT_API_KEY="$REPLY"
   fi
 
   print_info "Ограничьте доступ к порту ${WIZ_NODE_AGENT_PORT} firewall: только IP панели управления."
@@ -869,16 +880,27 @@ wizard_ask_proxy_agent() {
   echo
   print_info "Порт proxy_agent: ${WIZ_PROXY_AGENT_PORT} (задан на шаге сети)"
 
-  wiz_prompt_yesno "Сгенерировать PROXY_AGENT_API_KEY автоматически (рекомендуется)?" "y"
+  local existing_key
+  existing_key="$(agent_env_value "$PROXY_ENV_FILE" PROXY_AGENT_API_KEY)"
+  REPLY="n"
+  if ! is_placeholder_secret "$existing_key"; then
+    wiz_prompt_yesno "На сервере уже есть PROXY_AGENT_API_KEY — оставить его (иначе панель потеряет связь с прокси)?" "y"
+  fi
   if [[ "$REPLY" == "y" ]]; then
-    WIZ_PROXY_AGENT_API_KEY="$(random_hex)"
-    echo "  Будет сгенерирован ключ (покажем в конце установки)."
+    WIZ_PROXY_AGENT_API_KEY="$existing_key"
+    echo "  Ключ прокси не меняется."
   else
-    wiz_prompt_secret "Введите PROXY_AGENT_API_KEY (мин. 24 символа)" ""
-    if [[ -z "$REPLY" ]]; then
-      die "proxy_agent не может работать без API-ключа. Выберите автогенерацию ключа (ответ 'y')."
+    wiz_prompt_yesno "Сгенерировать PROXY_AGENT_API_KEY автоматически (рекомендуется)?" "y"
+    if [[ "$REPLY" == "y" ]]; then
+      WIZ_PROXY_AGENT_API_KEY="$(random_hex)"
+      echo "  Будет сгенерирован ключ (покажем в конце установки)."
+    else
+      wiz_prompt_secret "Введите PROXY_AGENT_API_KEY (мин. 24 символа)" ""
+      if [[ -z "$REPLY" ]]; then
+        die "proxy_agent не может работать без API-ключа. Выберите автогенерацию ключа (ответ 'y')."
+      fi
+      WIZ_PROXY_AGENT_API_KEY="$REPLY"
     fi
-    WIZ_PROXY_AGENT_API_KEY="$REPLY"
   fi
 
   print_info "Ограничьте доступ к порту ${WIZ_PROXY_AGENT_PORT} firewall: только IP панели управления."

@@ -587,7 +587,7 @@ run_reinstall_action() {
 
   backup_env_for_reinstall
 
-  local -a uninstall_args=(--purge-state --remove-nginx --remove-firewall --remove-system-config --skip-confirm)
+  local -a uninstall_args=(--purge-state --remove-nginx --remove-firewall --remove-system-config --keep-agent-pki --skip-confirm)
   if [[ "$NON_INTERACTIVE" == true || "$ACCEPT_DEFAULTS" == true ]]; then
     uninstall_args+=(--yes)
   fi
@@ -1007,6 +1007,50 @@ proxy_env_set() {
   fi
 }
 
+agent_env_value() {
+  local file="$1" key="$2"
+  [[ -f "$file" ]] || return 0
+  sed -n "s/^${key}=//p" "$file" | tail -1
+}
+
+# Сертификат агента не истёк, подписан этим CA и соответствует ключу.
+agent_mtls_bundle_valid() {
+  local ca="$1" cert="$2" key="$3"
+  openssl verify -CAfile "$ca" "$cert" >/dev/null 2>&1 || return 1
+  [[ "$(openssl x509 -in "$cert" -noout -pubkey 2>/dev/null)" == "$(openssl pkey -in "$key" -pubout 2>/dev/null)" ]]
+}
+
+# agent_env_preserve <env-файл> <NODE|PROXY>
+# Ключ и mTLS, которые уже знает панель, переживают пересоздание env-файла из примера:
+# иначе панель теряет связь с агентом до ручной перепривязки.
+agent_env_preserve() {
+  local file="$1" prefix="$2" key ca cert pkey
+  AGENT_PRESERVED_KEY=""
+  AGENT_PRESERVED_MTLS=()
+  [[ -f "$file" ]] || return 0
+  key="$(agent_env_value "$file" "${prefix}_AGENT_API_KEY")"
+  if ! is_placeholder_secret "$key"; then
+    AGENT_PRESERVED_KEY="$key"
+  fi
+  [[ "$(agent_env_value "$file" "${prefix}_AGENT_MTLS_ENABLED")" == "true" ]] || return 0
+  ca="$(agent_env_value "$file" "${prefix}_AGENT_MTLS_CA_CERT")"
+  cert="$(agent_env_value "$file" "${prefix}_AGENT_MTLS_SERVER_CERT")"
+  pkey="$(agent_env_value "$file" "${prefix}_AGENT_MTLS_SERVER_KEY")"
+  ca="${ca:-/etc/adminpanelaz/mtls/ca.crt}"
+  cert="${cert:-/etc/adminpanelaz/mtls/agent.crt}"
+  pkey="${pkey:-/etc/adminpanelaz/mtls/agent.key}"
+  if agent_mtls_bundle_valid "$ca" "$cert" "$pkey"; then
+    AGENT_PRESERVED_MTLS=(
+      "${prefix}_AGENT_MTLS_ENABLED=true"
+      "${prefix}_AGENT_MTLS_CA_CERT=${ca}"
+      "${prefix}_AGENT_MTLS_SERVER_CERT=${cert}"
+      "${prefix}_AGENT_MTLS_SERVER_KEY=${pkey}"
+    )
+  else
+    warn "mTLS агента не перенесён: сертификаты ${cert} / ${pkey} отсутствуют, истекли или не от CA ${ca}. Перепривяжите узел в панели."
+  fi
+}
+
 is_placeholder_secret() {
   local value="$1"
   [[ -z "$value" ]] && return 0
@@ -1287,6 +1331,7 @@ setup_node_env() {
     return 0
   fi
 
+  agent_env_preserve "$NODE_ENV_FILE" NODE
   log "Создание $NODE_ENV_FILE"
   if [[ -f "$NODE_ENV_EXAMPLE" ]]; then
     cp "$NODE_ENV_EXAMPLE" "$NODE_ENV_FILE"
@@ -1296,7 +1341,11 @@ setup_node_env() {
   chmod 600 "$NODE_ENV_FILE"
 
   local api_key="${WIZ_NODE_AGENT_API_KEY:-${NODE_AGENT_API_KEY:-}}"
-  if [[ -z "$api_key" ]] || is_placeholder_secret "$api_key"; then
+  if is_placeholder_secret "$api_key" && [[ -n "$AGENT_PRESERVED_KEY" ]]; then
+    api_key="$AGENT_PRESERVED_KEY"
+    log "NODE_AGENT_API_KEY сохранён из прежнего $NODE_ENV_FILE"
+  fi
+  if is_placeholder_secret "$api_key"; then
     api_key="$(random_hex)"
     log "Сгенерирован NODE_AGENT_API_KEY"
   fi
@@ -1319,6 +1368,10 @@ setup_node_env() {
   if [[ "${WIZ_NODE_AGENT_MTLS_ENABLED:-false}" == "true" ]]; then
     node_env_set NODE_AGENT_MTLS_ENABLED "true"
   fi
+  local line
+  for line in "${AGENT_PRESERVED_MTLS[@]}"; do
+    node_env_set "${line%%=*}" "${line#*=}"
+  done
 
   GENERATED_NODE_KEY="$api_key"
   export NODE_AGENT_API_KEY="$api_key"
@@ -1329,6 +1382,7 @@ setup_proxy_env() {
     return 0
   fi
 
+  agent_env_preserve "$PROXY_ENV_FILE" PROXY
   log "Создание $PROXY_ENV_FILE"
   if [[ -f "$PROXY_ENV_EXAMPLE" ]]; then
     cp "$PROXY_ENV_EXAMPLE" "$PROXY_ENV_FILE"
@@ -1338,7 +1392,11 @@ setup_proxy_env() {
   chmod 600 "$PROXY_ENV_FILE"
 
   local api_key="${WIZ_PROXY_AGENT_API_KEY:-${PROXY_AGENT_API_KEY:-}}"
-  if [[ -z "$api_key" ]] || is_placeholder_secret "$api_key"; then
+  if is_placeholder_secret "$api_key" && [[ -n "$AGENT_PRESERVED_KEY" ]]; then
+    api_key="$AGENT_PRESERVED_KEY"
+    log "PROXY_AGENT_API_KEY сохранён из прежнего $PROXY_ENV_FILE"
+  fi
+  if is_placeholder_secret "$api_key"; then
     api_key="$(random_hex)"
     log "Сгенерирован PROXY_AGENT_API_KEY"
   fi
@@ -1359,6 +1417,10 @@ setup_proxy_env() {
   if [[ "${WIZ_PROXY_AGENT_MTLS_ENABLED:-false}" == "true" ]]; then
     proxy_env_set PROXY_AGENT_MTLS_ENABLED "true"
   fi
+  local line
+  for line in "${AGENT_PRESERVED_MTLS[@]}"; do
+    proxy_env_set "${line%%=*}" "${line#*=}"
+  done
 
   GENERATED_PROXY_KEY="$api_key"
   export PROXY_AGENT_API_KEY="$api_key"

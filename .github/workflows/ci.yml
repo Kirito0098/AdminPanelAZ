@@ -136,3 +136,4 @@ jobs:
           ./scripts/test-agent-units-no-api-key.sh
           ./scripts/test-firewall-publish-mode-switch.sh
           ./scripts/test-nginx-default-deny.sh
+          ./scripts/test-install-agent-keeps-key.sh
