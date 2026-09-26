@@ -156,6 +156,7 @@ echo "[test] temp ACME http vhost helpers"
 export NGINX_SITES_AVAILABLE_DIR="$TMP/sites-available"
 export NGINX_SITES_ENABLED_DIR="$TMP/sites-enabled"
 export NGINX_CONF_D_DIR="$TMP/conf.d2"
+export NGINX_ACME_WEBROOT="$TMP/www"
 mkdir -p "$NGINX_SITES_AVAILABLE_DIR" "$NGINX_SITES_ENABLED_DIR" "$NGINX_CONF_D_DIR"
 # nginx -t will fail in fake dirs — install helper should clean up and return 1
 set +e
@@ -167,6 +168,7 @@ if [[ "$acme_rc" -ne 0 ]]; then
 else
   bad "temp ACME should fail nginx -t in fake root"
 fi
+[[ -d "$TMP/www/.well-known/acme-challenge" ]] && ok "ACME webroot created under NGINX_ACME_WEBROOT" || bad "ACME webroot not under NGINX_ACME_WEBROOT"
 base="$(nginx_acme_temp_site_basename "portal.example.com")"
 [[ "$base" == "adminpanelaz-acme-portal_example_com" ]] && ok "acme temp basename ($base)" || bad "acme temp basename ($base)"
 
@@ -205,6 +207,8 @@ if [[ "$acme_ok_rc" -eq 0 ]]; then
 else
   bad "temp ACME install should succeed with passing nginx -t mock"
 fi
+acme_ok_conf="$NGINX_SITES_AVAILABLE_DIR/$(nginx_acme_temp_site_basename "acme-remove-restore.example.com")"
+grep -qF "root $TMP/www;" "$acme_ok_conf" && ok "temp ACME vhost serves NGINX_ACME_WEBROOT" || bad "temp ACME vhost root is not NGINX_ACME_WEBROOT"
 if [[ ! -e "$NGINX_SITES_ENABLED_DIR/default" && ! -L "$NGINX_SITES_ENABLED_DIR/default" ]]; then
   ok "default removed while temp ACME vhost active"
 else

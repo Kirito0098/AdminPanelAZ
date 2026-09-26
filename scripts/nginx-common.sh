@@ -220,6 +220,10 @@ nginx_sites_enabled_dir() {
   printf '%s' "${NGINX_SITES_ENABLED_DIR:-/etc/nginx/sites-enabled}"
 }
 
+nginx_acme_webroot() {
+  printf '%s' "${NGINX_ACME_WEBROOT:-/var/www/html}"
+}
+
 nginx_conf_d_dir() {
   printf '%s' "${NGINX_CONF_D_DIR:-/etc/nginx/conf.d}"
 }
@@ -448,7 +452,7 @@ nginx_install_temp_acme_http_vhost() {
   http_port="${http_port:-80}"
 
   nginx_ensure_server_names_hash
-  mkdir -p /var/www/html/.well-known/acme-challenge
+  mkdir -p "$(nginx_acme_webroot)/.well-known/acme-challenge"
   base="$(nginx_acme_temp_site_basename "$domain")"
   available_dir="$(nginx_sites_available_dir)"
   enabled_dir="$(nginx_sites_enabled_dir)"
@@ -464,7 +468,7 @@ server {
     server_name ${domain};
 
     location /.well-known/acme-challenge/ {
-        root /var/www/html;
+        root $(nginx_acme_webroot);
     }
 
     location / {
@@ -1828,7 +1832,7 @@ nginx_obtain_letsencrypt_cert() {
   fi
 
   nginx_ensure_certbot || nginx_die "Не удалось установить certbot"
-  mkdir -p /var/www/html/.well-known/acme-challenge
+  mkdir -p "$(nginx_acme_webroot)/.well-known/acme-challenge"
 
   local certbot_ok=false
   local http_acme_port
@@ -1839,9 +1843,9 @@ nginx_obtain_letsencrypt_cert() {
     nginx_install_temp_acme_http_vhost "$domain" "$http_acme_port" || true
     nginx_log "Пробуем certbot webroot (nginx остаётся запущенным)…"
     if [[ -n "$email" ]]; then
-      certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos -m "$email" -d "$domain" && certbot_ok=true || true
+      certbot certonly --webroot -w "$(nginx_acme_webroot)" --non-interactive --agree-tos -m "$email" -d "$domain" && certbot_ok=true || true
     else
-      certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos --register-unsafely-without-email -d "$domain" && certbot_ok=true || true
+      certbot certonly --webroot -w "$(nginx_acme_webroot)" --non-interactive --agree-tos --register-unsafely-without-email -d "$domain" && certbot_ok=true || true
     fi
   fi
 
@@ -1961,7 +1965,7 @@ nginx_obtain_letsencrypt_cert_hosts() {
   fi
 
   nginx_ensure_certbot || nginx_die "Не удалось установить certbot"
-  mkdir -p /var/www/html/.well-known/acme-challenge
+  mkdir -p "$(nginx_acme_webroot)/.well-known/acme-challenge"
 
   local certbot_ok=false
   local expand_flag=()
@@ -1978,10 +1982,10 @@ nginx_obtain_letsencrypt_cert_hosts() {
     done
     nginx_log "certbot webroot для: ${hosts[*]}"
     if [[ -n "$email" ]]; then
-      certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos -m "$email" \
+      certbot certonly --webroot -w "$(nginx_acme_webroot)" --non-interactive --agree-tos -m "$email" \
         "${expand_flag[@]}" "${d_args[@]}" && certbot_ok=true || true
     else
-      certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos --register-unsafely-without-email \
+      certbot certonly --webroot -w "$(nginx_acme_webroot)" --non-interactive --agree-tos --register-unsafely-without-email \
         "${expand_flag[@]}" "${d_args[@]}" && certbot_ok=true || true
     fi
   fi

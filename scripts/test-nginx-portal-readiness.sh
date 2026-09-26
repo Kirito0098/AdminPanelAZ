@@ -54,6 +54,11 @@ cat >"$TMP/bin/nginx" <<'EOF'
 exit 0
 EOF
 chmod +x "$TMP/bin/nginx"
+cat >"$TMP/bin/systemctl" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$TMP/systemctl.log"
+EOF
+chmod +x "$TMP/bin/systemctl"
 export PATH="$TMP/bin:$PATH"
 
 out="$(PORTAL_DOMAIN=portal.example.com bash "$ROOT_DIR/scripts/nginx-portal-readiness.sh" --check)"
@@ -105,6 +110,7 @@ if [[ ! -e "$NGINX_SITES_ENABLED_DIR/$PORTAL_BASE" && ! -f "$NGINX_SITES_AVAILAB
 else
   bad "stale site still present"
 fi
+grep -qx 'reload nginx' "$TMP/systemctl.log" 2>/dev/null && ok "nginx reload requested (stubbed)" || bad "no nginx reload after stale removal"
 
 echo "[test] unrelated broken site must not delete portal vhost"
 printf 'DOMAIN=panel.example.com\nPUBLISH_MODE=nginx_le\nPORTAL_DOMAIN=portal.example.com\n' >"$ENV_FILE"

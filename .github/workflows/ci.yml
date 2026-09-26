@@ -133,24 +133,5 @@ jobs:
         run: |
           shellcheck -S error -x install.sh scripts/*.sh
 
-      - name: Backend health-check logic
-        run: |
-          ./scripts/test-backend-health-check.sh
-          ./scripts/test-install-publish-modes.sh
-          ./scripts/test-nginx-telegram-webhook-realip.sh
-          ./scripts/test-install-reboot-check.sh
-          ./scripts/test-python-runtime-pipefail.sh
-          ./scripts/test-install-env-preserve-secret.sh
-          ./scripts/test-agent-units-no-api-key.sh
-          ./scripts/test-firewall-publish-mode-switch.sh
-          ./scripts/test-nginx-default-deny.sh
-          ./scripts/test-install-agent-keeps-key.sh
-          ./scripts/test-install-admin-password.sh
-          ./scripts/test-firewall-keeps-ssh.sh
-          ./scripts/test-firewall-ufw-lifecycle.sh
-          ./scripts/test-nginx-keep-foreign-sites.sh
-          ./scripts/test-certbot-port80-nat.sh
-          ./scripts/test-menu-update-rebuilds-frontend.sh
-          ./scripts/test-install-nodejs-lts.sh
-          ./scripts/test-nginx-portal-hardening.sh
-          ./scripts/test-nginx-portal-readiness.sh
+      - name: Shell tests (all scripts/test-*.sh, host calls blocked)
+        run: ./scripts/run-shell-tests.sh
