@@ -24,6 +24,8 @@ import {
 import { Input } from '@/components/ui/input'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useLatestRequest } from '@/hooks/useLatestRequest'
+import { runLatest } from '@/lib/latestRequest'
 import type {
   WarperCatalogItem,
   WarperCatalogShowResponse,
@@ -53,64 +55,78 @@ export default function CatalogTab({ health, onDomainsChange }: CatalogTabProps)
   const [refreshing, setRefreshing] = useState(false)
   const [preview, setPreview] = useState<WarperCatalogShowResponse | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
+  const activeNodeId = activeNode?.id ?? null
+  const loadRequests = useLatestRequest(activeNodeId)
+  const searchRequests = useLatestRequest(activeNodeId)
+  const installedRequests = useLatestRequest(activeNodeId)
+  const previewRequests = useLatestRequest(activeNodeId)
 
   const runSearch = useCallback(
     async (q: string) => {
       if (!health?.installed) return
       setSearching(true)
-      try {
-        const data = await searchWarperCatalog(q)
-        setResults(data.items ?? [])
-      } catch (err) {
-        notifyError(err instanceof Error ? err.message : 'Не удалось выполнить поиск каталога')
-        setResults([])
-      } finally {
-        setSearching(false)
-      }
+      await runLatest(searchRequests, () => searchWarperCatalog(q), {
+        apply: (data) => setResults(data.items ?? []),
+        fail: (err) => {
+          notifyError(err instanceof Error ? err.message : 'Не удалось выполнить поиск каталога')
+          setResults([])
+        },
+        settle: () => setSearching(false),
+      })
     },
-    [health?.installed, notifyError],
+    [health?.installed, notifyError, searchRequests],
   )
 
   const loadInstalled = useCallback(async () => {
     if (!health?.installed) {
+      installedRequests.begin()
       setInstalled(new Set())
       setInstalledList([])
       return
     }
-    try {
-      const data = await getWarperCatalogInstalled()
-      const items = data.items ?? []
-      setInstalledList(items)
-      setInstalled(new Set(items.map((item) => item.name)))
-    } catch {
-      setInstalled(new Set())
-      setInstalledList([])
-    }
-  }, [health?.installed])
+    await runLatest(installedRequests, getWarperCatalogInstalled, {
+      apply: (data) => {
+        const items = data.items ?? []
+        setInstalledList(items)
+        setInstalled(new Set(items.map((item) => item.name)))
+      },
+      fail: () => {
+        setInstalled(new Set())
+        setInstalledList([])
+      },
+    })
+  }, [health?.installed, installedRequests])
 
   const load = useCallback(async () => {
     if (!health?.installed) {
+      loadRequests.begin()
       setLoading(false)
       return
     }
     setLoading(true)
-    await Promise.all([runSearch(''), loadInstalled()])
-    setLoading(false)
-  }, [health?.installed, runSearch, loadInstalled])
+    await runLatest(loadRequests, () => Promise.all([runSearch(''), loadInstalled()]), {
+      apply: () => {},
+      fail: () => {},
+      settle: () => setLoading(false),
+    })
+  }, [health?.installed, loadRequests, runSearch, loadInstalled])
 
   useEffect(() => {
+    setPreview(null)
     void load()
-  }, [load, activeNode?.id])
+  }, [load, activeNodeId])
 
   async function handlePreview(name: string) {
     setPreviewLoading(true)
     setPreview({ name, count: 0, domains: [] })
     try {
-      const data = await showWarperCatalog(name)
-      setPreview(data)
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось загрузить предпросмотр')
-      setPreview(null)
+      await runLatest(previewRequests, () => showWarperCatalog(name), {
+        apply: setPreview,
+        fail: (err) => {
+          notifyError(err instanceof Error ? err.message : 'Не удалось загрузить предпросмотр')
+          setPreview(null)
+        },
+      })
     } finally {
       setPreviewLoading(false)
     }

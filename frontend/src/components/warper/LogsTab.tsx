@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useLatestRequest } from '@/hooks/useLatestRequest'
+import { runLatest } from '@/lib/latestRequest'
 import type { WarperHealthResponse } from '@/types'
 
 interface LogsTabProps {
@@ -22,24 +24,26 @@ export default function LogsTab({ health, embedded = false, hideTitle = false }:
   const [lineCount, setLineCount] = useState('200')
   const [filter, setFilter] = useState('')
   const [loading, setLoading] = useState(false)
+  const requests = useLatestRequest(activeNode?.id ?? null)
 
   const load = useCallback(async () => {
     if (!health?.installed) {
+      requests.begin()
       setLines([])
+      setLoading(false)
       return
     }
     const count = Math.min(2000, Math.max(1, Number(lineCount) || 200))
     setLoading(true)
-    try {
-      const response = await getWarperLogs(count)
-      setLines(response.lines ?? [])
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось загрузить логи')
-      setLines([])
-    } finally {
-      setLoading(false)
-    }
-  }, [health?.installed, lineCount, notifyError])
+    await runLatest(requests, () => getWarperLogs(count), {
+      apply: (response) => setLines(response.lines ?? []),
+      fail: (err) => {
+        notifyError(err instanceof Error ? err.message : 'Не удалось загрузить логи')
+        setLines([])
+      },
+      settle: () => setLoading(false),
+    })
+  }, [health?.installed, lineCount, notifyError, requests])
 
   useEffect(() => {
     void load()

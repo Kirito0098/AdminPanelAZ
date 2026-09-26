@@ -21,6 +21,8 @@ import {
 } from '@/components/ui/select'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useLatestRequest } from '@/hooks/useLatestRequest'
+import { runLatest } from '@/lib/latestRequest'
 import type { WarperHealthResponse } from '@/types'
 import AutoResolveSection from './AutoResolveSection'
 import { buildIpRangesTextFromItems, countActiveTextLines, isWarperDisabled } from './utils'
@@ -47,12 +49,15 @@ export default function IpRangesTab({ health }: IpRangesTabProps) {
   const [saving, setSaving] = useState(false)
   const [routeMode, setRouteMode] = useState('antizapret')
   const [busy, setBusy] = useState(false)
+  const requests = useLatestRequest(activeNode?.id ?? null)
+  const saveRequests = useLatestRequest(activeNode?.id ?? null)
 
   const dirty = draftText !== savedText
   const rangeCount = useMemo(() => countActiveTextLines(draftText), [draftText])
 
   const load = useCallback(async () => {
     if (!health?.installed) {
+      requests.begin()
       setSavedText('')
       setDraftText('')
       setLoading(false)
@@ -61,19 +66,25 @@ export default function IpRangesTab({ health }: IpRangesTabProps) {
     }
     setLoading(true)
     setLoadError(null)
-    try {
-      const data = await getWarperIpRanges()
-      const content = data.content?.trim() || buildIpRangesTextFromItems(data.ranges ?? [])
-      setSavedText(content)
-      setDraftText(content)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Не удалось загрузить подсети'
-      setLoadError(message)
-      notifyError(message)
-    } finally {
-      setLoading(false)
-    }
-  }, [health?.installed, notifyError])
+    await runLatest(requests, getWarperIpRanges, {
+      apply: (data) => {
+        const content = data.content?.trim() || buildIpRangesTextFromItems(data.ranges ?? [])
+        setSavedText(content)
+        setDraftText(content)
+      },
+      fail: (err) => {
+        const message = err instanceof Error ? err.message : 'Не удалось загрузить подсети'
+        setLoadError(message)
+        notifyError(message)
+      },
+      settle: () => setLoading(false),
+    })
+  }, [health?.installed, notifyError, requests])
+
+  useEffect(() => {
+    setSavedText('')
+    setDraftText('')
+  }, [activeNode?.id])
 
   useEffect(() => {
     void load()
@@ -81,11 +92,13 @@ export default function IpRangesTab({ health }: IpRangesTabProps) {
 
   async function handleSave() {
     if (!dirty) return
+    const savedDraft = draftText
+    const isCurrent = saveRequests.begin()
     setSaving(true)
     try {
-      const result = await saveWarperIpRangesText(draftText)
-      setSavedText(draftText)
+      const result = await saveWarperIpRangesText(savedDraft)
       success(result.message ?? 'Подсети сохранены')
+      if (isCurrent()) setSavedText(savedDraft)
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Не удалось сохранить подсети')
     } finally {

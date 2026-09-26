@@ -14,6 +14,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
+import { useLatestRequest } from '@/hooks/useLatestRequest'
+import { runLatest } from '@/lib/latestRequest'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import type { WarperHealthResponse } from '@/types'
@@ -36,18 +38,22 @@ export default function AutoResolveSection({ health, onRangesChanged }: AutoReso
   const [routes, setRoutes] = useState<string[] | null>(null)
   const [cleanDomain, setCleanDomain] = useState('')
   const [busy, setBusy] = useState(false)
+  const statusRequests = useLatestRequest(activeNode?.id ?? null)
+  const routesRequests = useLatestRequest(activeNode?.id ?? null)
 
   const load = useCallback(async () => {
     if (!health?.installed) return
-    try {
-      const data = await getWarperAutoResolve()
-      setEnabled(data.enabled)
-      setUnsupported(null)
-    } catch (err) {
-      setEnabled(null)
-      setUnsupported(err instanceof Error ? err.message : 'Авто-резолв недоступен')
-    }
-  }, [health?.installed])
+    await runLatest(statusRequests, getWarperAutoResolve, {
+      apply: (data) => {
+        setEnabled(data.enabled)
+        setUnsupported(null)
+      },
+      fail: (err) => {
+        setEnabled(null)
+        setUnsupported(err instanceof Error ? err.message : 'Авто-резолв недоступен')
+      },
+    })
+  }, [health?.installed, statusRequests])
 
   useEffect(() => {
     setRoutes(null)
@@ -71,9 +77,10 @@ export default function AutoResolveSection({ health, onRangesChanged }: AutoReso
   async function loadRoutes() {
     setBusy(true)
     try {
-      setRoutes((await getWarperIpRoutes()).routes)
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось получить маршруты')
+      await runLatest(routesRequests, getWarperIpRoutes, {
+        apply: (data) => setRoutes(data.routes),
+        fail: (err) => notifyError(err instanceof Error ? err.message : 'Не удалось получить маршруты'),
+      })
     } finally {
       setBusy(false)
     }

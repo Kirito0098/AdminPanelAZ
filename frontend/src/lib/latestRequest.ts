@@ -23,3 +23,32 @@ export function createLatestRequest<S>(initialScope: S) {
 }
 
 export type LatestRequest<S> = ReturnType<typeof createLatestRequest<S>>
+
+export interface LatestRequestHandlers<T> {
+  apply: (value: T) => void
+  fail: (err: unknown) => void
+  /** Clears the loading flag; a newer request set it again and clears it itself. */
+  settle?: () => void
+}
+
+/** Runs a request for the shown node and handles its answer only while it is the latest one. */
+export async function runLatest<S, T>(
+  requests: LatestRequest<S>,
+  load: () => Promise<T>,
+  { apply, fail, settle }: LatestRequestHandlers<T>,
+): Promise<void> {
+  const isCurrent = requests.begin()
+  let value: T
+  try {
+    value = await load()
+  } catch (err) {
+    if (isCurrent()) {
+      fail(err)
+      settle?.()
+    }
+    return
+  }
+  if (!isCurrent()) return
+  apply(value)
+  settle?.()
+}

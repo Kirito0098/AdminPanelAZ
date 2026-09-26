@@ -54,6 +54,8 @@ import {
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
+import { useLatestRequest } from '@/hooks/useLatestRequest'
+import { runLatest } from '@/lib/latestRequest'
 import type {
   WarperHealthResponse,
   WarperOvpnConfig,
@@ -167,6 +169,8 @@ export default function SettingsTab({ health }: SettingsTabProps) {
   const [ovpnPassword, setOvpnPassword] = useState('')
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
+  const modeRequests = useLatestRequest(activeNode?.id ?? null)
+  const extrasRequests = useLatestRequest(activeNode?.id ?? null)
 
   const currentMode = normalizeOutboundMode(mode.outbound_mode ?? mode.mode)
   const outboundLabel = typeof mode.outbound_label === 'string' ? mode.outbound_label : null
@@ -200,54 +204,59 @@ export default function SettingsTab({ health }: SettingsTabProps) {
   const subnetDirty = Boolean(subnet.trim()) && subnet.trim() !== savedSubnet
 
   const loadExtras = useCallback(async () => {
-    const [singboxResult, subnetsResult] = await Promise.allSettled([getWarperSingboxStatus(), getWarperSubnets()])
-    setSingbox(singboxResult.status === 'fulfilled' ? singboxResult.value : null)
-    setSubnets(subnetsResult.status === 'fulfilled' ? subnetsResult.value.subnets ?? {} : {})
-  }, [])
+    await runLatest(
+      extrasRequests,
+      () => Promise.allSettled([getWarperSingboxStatus(), getWarperSubnets()]),
+      {
+        apply: ([singboxResult, subnetsResult]) => {
+          setSingbox(singboxResult.status === 'fulfilled' ? singboxResult.value : null)
+          setSubnets(subnetsResult.status === 'fulfilled' ? subnetsResult.value.subnets ?? {} : {})
+        },
+        fail: () => {},
+      },
+    )
+  }, [extrasRequests])
 
   const load = useCallback(async () => {
     if (!health?.installed) {
+      modeRequests.begin()
       setMode({})
       setLoading(false)
       return
     }
     setLoading(true)
-    try {
-      const [modeResponse, optionsResponse] = await Promise.all([
-        getWarperMode(),
-        getWarperSettingsOptions(),
-      ])
-      const modeData = modeResponse.mode ?? {}
-      setMode(modeData)
-      const keyItems =
-        optionsResponse.warp_key_items && optionsResponse.warp_key_items.length > 0
-          ? optionsResponse.warp_key_items
-          : (optionsResponse.warp_keys ?? []).map((path) => ({ source: '', path, address: '', is_current: false }))
-      setWarpKeys(keyItems)
-      const configs = optionsResponse.wg_configs ?? []
-      setWgConfigs(configs)
-      const ovpn = optionsResponse.ovpn_configs ?? []
-      setOvpnConfigs(ovpn)
-      if (typeof modeData.mtu === 'number') setMtu(String(modeData.mtu))
-      if (typeof modeData.log_level === 'string') setLogLevel(modeData.log_level)
-      if (typeof modeData.subnet === 'string') setSubnet(modeData.subnet)
-      if (typeof modeData.fullvpn === 'boolean') setFullVpn(modeData.fullvpn)
-      setAutopatch(typeof modeData.autopatch === 'boolean' ? modeData.autopatch : null)
-      const active = normalizeOutboundMode(modeData.outbound_mode ?? modeData.mode)
-      if (active) setModeDraft(active)
-      if (configs.length > 0) {
-        setWgConfigPath((current) => (current && configs.includes(current) ? current : configs[0]))
-      }
-      if (ovpn.length > 0) {
-        setOvpnPath((current) => (current && ovpn.some((item) => item.path === current) ? current : ovpn[0].path))
-      }
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось загрузить настройки')
-    } finally {
-      setLoading(false)
-    }
+    await runLatest(modeRequests, () => Promise.all([getWarperMode(), getWarperSettingsOptions()]), {
+      apply: ([modeResponse, optionsResponse]) => {
+        const modeData = modeResponse.mode ?? {}
+        setMode(modeData)
+        const keyItems =
+          optionsResponse.warp_key_items && optionsResponse.warp_key_items.length > 0
+            ? optionsResponse.warp_key_items
+            : (optionsResponse.warp_keys ?? []).map((path) => ({ source: '', path, address: '', is_current: false }))
+        setWarpKeys(keyItems)
+        const configs = optionsResponse.wg_configs ?? []
+        setWgConfigs(configs)
+        const ovpn = optionsResponse.ovpn_configs ?? []
+        setOvpnConfigs(ovpn)
+        if (typeof modeData.mtu === 'number') setMtu(String(modeData.mtu))
+        if (typeof modeData.log_level === 'string') setLogLevel(modeData.log_level)
+        if (typeof modeData.subnet === 'string') setSubnet(modeData.subnet)
+        if (typeof modeData.fullvpn === 'boolean') setFullVpn(modeData.fullvpn)
+        setAutopatch(typeof modeData.autopatch === 'boolean' ? modeData.autopatch : null)
+        const active = normalizeOutboundMode(modeData.outbound_mode ?? modeData.mode)
+        if (active) setModeDraft(active)
+        if (configs.length > 0) {
+          setWgConfigPath((current) => (current && configs.includes(current) ? current : configs[0]))
+        }
+        if (ovpn.length > 0) {
+          setOvpnPath((current) => (current && ovpn.some((item) => item.path === current) ? current : ovpn[0].path))
+        }
+      },
+      fail: (err) => notifyError(err instanceof Error ? err.message : 'Не удалось загрузить настройки'),
+      settle: () => setLoading(false),
+    })
     void loadExtras()
-  }, [health?.installed, loadExtras, notifyError])
+  }, [health?.installed, loadExtras, modeRequests, notifyError])
 
   useEffect(() => {
     void load()

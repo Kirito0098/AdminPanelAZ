@@ -6,8 +6,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
+import { useLatestRequest } from '@/hooks/useLatestRequest'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { runLatest } from '@/lib/latestRequest'
 import type { WarperHealthResponse, WarperUpdatesCheckResponse } from '@/types'
 import { isWarperDisabled } from './utils'
 import WarperSection from './WarperSection'
@@ -27,6 +29,7 @@ export default function WarperUpdatesSection({ health }: WarperUpdatesSectionPro
   const [loading, setLoading] = useState(false)
   const [updating, setUpdating] = useState(false)
   const [logLines, setLogLines] = useState<string[]>([])
+  const requests = useLatestRequest(activeNode?.id ?? null)
 
   const closeStream = useCallback(() => {
     streamRef.current?.close()
@@ -37,23 +40,25 @@ export default function WarperUpdatesSection({ health }: WarperUpdatesSectionPro
 
   const load = useCallback(async (force = false) => {
     setLoading(true)
-    try {
-      setInfo(await checkWarperUpdates(force))
-    } catch (err) {
-      setInfo(null)
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка проверки обновлений AZ-WARP')
-    } finally {
-      setLoading(false)
-    }
-  }, [notifyError])
+    await runLatest(requests, () => checkWarperUpdates(force), {
+      apply: setInfo,
+      fail: (err) => {
+        setInfo(null)
+        notifyError(err instanceof ApiError ? err.message : 'Ошибка проверки обновлений AZ-WARP')
+      },
+      settle: () => setLoading(false),
+    })
+  }, [notifyError, requests])
 
   useEffect(() => {
     if (!disabled) {
       void load()
     } else {
+      requests.begin()
       setInfo(null)
+      setLoading(false)
     }
-  }, [disabled, load, activeNode?.id])
+  }, [disabled, load, requests, activeNode?.id])
 
   const pending = Boolean(info?.update_pending)
 

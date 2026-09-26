@@ -14,6 +14,8 @@ import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useNotifications } from '@/context/NotificationContext'
+import { useLatestRequest } from '@/hooks/useLatestRequest'
+import { runLatest } from '@/lib/latestRequest'
 import type { Node, WarperDoctorItem, WarperDoctorStatus, WarperHealthResponse } from '@/types'
 import { formatNodeLabel } from './utils'
 
@@ -75,27 +77,28 @@ export default function DoctorSection({ health, activeNode, embedded = false, hi
   const [summary, setSummary] = useState<Record<string, number> | null>(null)
   const [running, setRunning] = useState(false)
   const [hasRun, setHasRun] = useState(false)
+  const requests = useLatestRequest(activeNode?.id ?? null)
 
   const runDoctor = useCallback(async () => {
     setRunning(true)
-    try {
-      const data = await getWarperDoctor()
-      setItems(data.items ?? [])
-      setPassed(data.passed ?? null)
-      setSummary(data.summary ?? null)
-      setHasRun(true)
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось выполнить диагностику')
-    } finally {
-      setRunning(false)
-    }
-  }, [notifyError])
+    await runLatest(requests, getWarperDoctor, {
+      apply: (data) => {
+        setItems(data.items ?? [])
+        setPassed(data.passed ?? null)
+        setSummary(data.summary ?? null)
+        setHasRun(true)
+      },
+      fail: (err) => notifyError(err instanceof Error ? err.message : 'Не удалось выполнить диагностику'),
+      settle: () => setRunning(false),
+    })
+  }, [notifyError, requests])
 
   useEffect(() => {
     setItems([])
     setPassed(null)
     setSummary(null)
     setHasRun(false)
+    setRunning(false)
   }, [activeNode?.id])
 
   const counts = useMemo(() => {
