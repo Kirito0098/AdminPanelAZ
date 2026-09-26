@@ -3,6 +3,7 @@ import * as api from '@/api/client'
 import { refreshAccessToken } from '@/api/http'
 import { useSessionHeartbeat } from '@/hooks/useSessionHeartbeat'
 import { clearAccessToken, getAccessToken, migrateLegacyAccessToken, setAccessToken } from '@/lib/accessToken'
+import { loadSessionUser } from '@/lib/authBoot'
 import { setActiveTimeZone } from '@/lib/datetime'
 import { applyThemeClass, getStoredTheme } from '@/lib/theme'
 import { storeWebSessionId } from '@/lib/webSession'
@@ -13,6 +14,9 @@ const REFRESH_INTERVAL_MS = 25 * 60 * 1000
 interface AuthContextValue {
   user: User | null
   loading: boolean
+  /** Why the session could not be checked (server down or silent); null when it was. */
+  unavailable: string | null
+  retry: () => Promise<void>
   login: (username: string, password: string) => Promise<api.LoginResult>
   setToken: (token: string) => Promise<void>
   logout: () => void
@@ -24,6 +28,7 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [unavailable, setUnavailable] = useState<string | null>(null)
   const refreshTimer = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const applyTheme = useCallback((theme: string) => {
@@ -33,34 +38,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshUser = useCallback(async () => {
     migrateLegacyAccessToken()
-    let token = getAccessToken()
-    if (!token) {
-      token = await refreshAccessToken()
-    }
-    if (!token) {
-      setUser(null)
-      setLoading(false)
-      return
-    }
-    try {
-      const me = await api.getMe()
-      setUser(me)
-      applyTheme(me.theme || getStoredTheme())
-      setActiveTimeZone(me.timezone || '')
-    } catch {
+    const result = await loadSessionUser({
+      getToken: getAccessToken,
+      refresh: refreshAccessToken,
+      getMe: api.getMe,
+    })
+    if (result.kind === 'user') {
+      setUser(result.user)
+      setUnavailable(null)
+      applyTheme(result.user.theme || getStoredTheme())
+      setActiveTimeZone(result.user.timezone || '')
+    } else if (result.kind === 'anonymous') {
       clearAccessToken()
       setUser(null)
-    } finally {
-      setLoading(false)
+      setUnavailable(null)
+    } else {
+      setUnavailable(result.message)
     }
+    setLoading(false)
   }, [applyTheme])
+
+  const retry = useCallback(async () => {
+    setLoading(true)
+    await refreshUser()
+  }, [refreshUser])
 
   const silentRefresh = useCallback(async () => {
     if (typeof document !== 'undefined' && document.hidden) return
     try {
-      // Shared mutex with apiFetch. HTTP failure clears the access JWT inside
+      // Shared mutex with apiFetch. A refused session clears the access JWT inside
       // refreshAccessToken — drop React user too so we never stay half-logged-in.
-      // Network errors reject without clearing; keep the session for retry.
+      // Network and server errors reject without clearing; keep the session for retry.
       const token = await refreshAccessToken()
       if (!token) setUser(null)
     } catch {
@@ -102,6 +110,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       /* ignore */
     }
     setUser(null)
+    setUnavailable(null)
   }, [])
 
   useSessionHeartbeat(!!user, logout)
@@ -127,8 +136,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   )
 
   const value = useMemo(
-    () => ({ user, loading, login, setToken, logout, refreshUser }),
-    [user, loading, login, setToken, logout, refreshUser],
+    () => ({ user, loading, unavailable, retry, login, setToken, logout, refreshUser }),
+    [user, loading, unavailable, retry, login, setToken, logout, refreshUser],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

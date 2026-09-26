@@ -18,6 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import Spinner from '@/components/ui/Spinner'
+import ServerUnavailableScreen from '@/components/ServerUnavailableScreen'
 import { useAuth } from '@/context/AuthContext'
 import { useNotifications } from '@/context/NotificationContext'
 
@@ -33,7 +34,7 @@ function resolveApiBase(): string {
 }
 
 export default function LoginPage() {
-  const { user, login, loading, setToken } = useAuth()
+  const { user, login, loading, setToken, unavailable, retry } = useAuth()
   const { error: notifyError } = useNotifications()
   const [searchParams] = useSearchParams()
   const [username, setUsername] = useState('')
@@ -178,6 +179,7 @@ export default function LoginPage() {
   }
 
   if (user) return <Navigate to="/" replace />
+  if (unavailable) return <ServerUnavailableScreen message={unavailable} onRetry={() => void retry()} />
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()

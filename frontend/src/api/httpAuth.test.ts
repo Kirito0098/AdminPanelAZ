@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  REFRESH_TIMEOUT_MS,
   apiFetchAtBase,
   isNodeAgentAuthFailureDetail,
   refreshAccessToken,
@@ -137,5 +138,86 @@ describe('apiFetchAtBase session vs node-key auth', () => {
     expect(fetchMock.mock.calls.some((call) => String(call[0]).includes('/auth/refresh'))).toBe(
       false,
     )
+  })
+})
+
+describe('refreshAccessToken keeps the session when the server is unavailable', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
+
+  it('clears the session only when the server refuses it', async () => {
+    const clearSpy = vi.spyOn(accessToken, 'clearAccessToken')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"detail":"expired"}', { status: 401 })))
+
+    await expect(refreshAccessToken()).resolves.toBeNull()
+    expect(clearSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([500, 502, 503, 504, 408, 429])('throws on %i without clearing the session', async (status) => {
+    const clearSpy = vi.spyOn(accessToken, 'clearAccessToken')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>Bad Gateway</html>', { status })))
+
+    await expect(refreshAccessToken()).rejects.toMatchObject({ status })
+    expect(clearSpy).not.toHaveBeenCalled()
+  })
+
+  it('turns a network error into ApiError(0) without clearing the session', async () => {
+    const clearSpy = vi.spyOn(accessToken, 'clearAccessToken')
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')))
+
+    await expect(refreshAccessToken()).rejects.toMatchObject({ status: 0 })
+    expect(clearSpy).not.toHaveBeenCalled()
+  })
+
+  it('aborts a refresh the server never answers and frees the shared lock', async () => {
+    vi.useFakeTimers()
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+        }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const first = refreshAccessToken()
+    const assertion = expect(first).rejects.toMatchObject({ status: 0 })
+    await vi.advanceTimersByTimeAsync(REFRESH_TIMEOUT_MS)
+    await assertion
+
+    fetchMock.mockImplementation(async () =>
+      new Response(JSON.stringify({ access_token: 't2' }), { status: 200 }),
+    )
+    await expect(refreshAccessToken()).resolves.toBe('t2')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not leave the abort timer running after an answer', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ access_token: 't3' }), { status: 200 })),
+    )
+
+    await expect(refreshAccessToken()).resolves.toBe('t3')
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
+  it('apiFetch surfaces an unavailable refresh instead of a 401', async () => {
+    const clearSpy = vi.spyOn(accessToken, 'clearAccessToken')
+    vi.spyOn(accessToken, 'getAccessToken').mockReturnValue('old-jwt')
+    vi.spyOn(webSession, 'getWebSessionId').mockReturnValue(null)
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response('{"detail":"Not authenticated"}', { status: 401 }))
+        .mockResolvedValueOnce(new Response('', { status: 502 })),
+    )
+
+    await expect(apiFetchAtBase('/api', '/configs', {}, true)).rejects.toMatchObject({ status: 502 })
+    expect(clearSpy).not.toHaveBeenCalled()
   })
 })

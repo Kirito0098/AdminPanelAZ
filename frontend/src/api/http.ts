@@ -43,16 +43,37 @@ export function isNodeAgentAuthFailureDetail(detail: unknown): boolean {
   return text.includes('X-Node-Key') || text.includes('Неверный API-ключ')
 }
 
+const SERVER_UNREACHABLE_MESSAGE =
+  'Не удалось связаться с сервером. Возможен перезапуск панели — подождите и откройте новый адрес.'
+export const REFRESH_TIMEOUT_MS = 20_000
+
 let refreshPromise: Promise<string | null> | null = null
 
+function isServerUnavailableStatus(status: number): boolean {
+  return status >= 500 || status === 408 || status === 429
+}
+
+/**
+ * Resolves to null only when the server refuses the session (it is cleared then).
+ * An unreachable or failing server rejects with ApiError and keeps the session for a retry.
+ */
 export async function refreshAccessToken(): Promise<string | null> {
   if (!refreshPromise) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS)
     refreshPromise = fetch(`${API_BASE}/auth/refresh`, {
       method: 'POST',
       credentials: 'include',
+      signal: controller.signal,
     })
+      .catch(() => {
+        throw new ApiError(SERVER_UNREACHABLE_MESSAGE, 0)
+      })
       .then(async (response) => {
         if (!response.ok) {
+          if (isServerUnavailableStatus(response.status)) {
+            throw new ApiError(parseHttpErrorBody(await response.text(), response.status), response.status)
+          }
           clearAccessToken()
           return null
         }
@@ -62,6 +83,7 @@ export async function refreshAccessToken(): Promise<string | null> {
         return token
       })
       .finally(() => {
+        clearTimeout(timer)
         refreshPromise = null
       })
   }
@@ -97,10 +119,7 @@ export async function apiFetchAtBase<T>(
   try {
     response = await fetch(`${normalizedBase}${path}`, { ...options, headers, credentials: 'include' })
   } catch {
-    throw new ApiError(
-      'Не удалось связаться с сервером. Возможен перезапуск панели — подождите и откройте новый адрес.',
-      0,
-    )
+    throw new ApiError(SERVER_UNREACHABLE_MESSAGE, 0)
   }
   if (response.status === 401 && retry && !path.startsWith('/auth/') && normalizedBase === API_BASE) {
     const body = await response.text()
