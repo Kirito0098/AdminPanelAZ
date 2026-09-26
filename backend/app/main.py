@@ -59,7 +59,13 @@ from app.routers import users
 from app.services.admin_bootstrap import upsert_bootstrap_admin
 from app.services.node_manager import get_active_adapter, get_active_node, sync_local_node
 from app.services.ip_restriction import ip_restriction_service
-from app.services.lifespan_workers import cancel_background_tasks, spawn_background_tasks
+from app.services.lifespan_workers import (
+    cancel_background_tasks,
+    leader_lock_path,
+    spawn_background_tasks,
+    start_leader_workers,
+)
+from app.services.worker_leader import WorkerLeaderLock
 from app.services.worker_lifecycle import should_start_resource_monitor
 
 from app.services.panel_paths import (
@@ -138,28 +144,7 @@ def _seed_database():
         db.close()
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    from pathlib import Path
-
-    from app.services.health_checks import mark_app_started
-
-    mark_app_started()
-    seed_database()
-    app_root = Path(__file__).resolve().parents[1]
-    db_url = settings.database_url
-    db_path = Path(db_url.replace("sqlite:///", ""))
-    if not db_path.is_absolute():
-        db_path = app_root / db_path
-    env_path = app_root / ".env"
-    from app.cidr_database import resolve_cidr_db_path
-
-    restrict_sensitive_file_permissions([env_path, db_path, resolve_cidr_db_path()])
-    background_tasks = spawn_background_tasks(app_root=app_root, db_path=db_path, env_path=env_path)
-    from app.services.admin_notify import admin_notify_service
-
-    if should_start_resource_monitor():
-        admin_notify_service.start_monitor()
+def run_leader_startup_actions() -> None:
     try:
         from app.services.background_tasks import background_task_service
 
@@ -168,6 +153,14 @@ async def lifespan(_: FastAPI):
             logger.info("Recovered %d stale background task(s) after restart", recovered)
     except Exception:
         logger.exception("Failed to recover stale background tasks on startup")
+    try:
+        from app.services.server_reboot import interrupt_reboots_of_previous_process
+
+        interrupted = interrupt_reboots_of_previous_process()
+        if interrupted:
+            logger.info("Marked %d scheduled reboot(s) of the previous process as interrupted", interrupted)
+    except Exception:
+        logger.exception("Failed to clear scheduled reboots on startup")
     try:
         from app.services.cidr.pipeline.list_migration import migrate_legacy_cidr_list_dir
 
@@ -197,8 +190,41 @@ async def lifespan(_: FastAPI):
             startup_db.close()
     except Exception:
         logger.exception("Failed to sync whitelist port firewall on startup")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    from pathlib import Path
+
+    from app.services.health_checks import mark_app_started
+
+    mark_app_started()
+    seed_database()
+    app_root = Path(__file__).resolve().parents[1]
+    db_url = settings.database_url
+    db_path = Path(db_url.replace("sqlite:///", ""))
+    if not db_path.is_absolute():
+        db_path = app_root / db_path
+    env_path = app_root / ".env"
+    from app.cidr_database import resolve_cidr_db_path
+
+    restrict_sensitive_file_permissions([env_path, db_path, resolve_cidr_db_path()])
+
+    def _start_workers() -> dict:
+        tasks = spawn_background_tasks(app_root=app_root, db_path=db_path, env_path=env_path)
+        if should_start_resource_monitor():
+            from app.services.admin_notify import admin_notify_service
+
+            admin_notify_service.start_monitor()
+        return tasks
+
+    leader_lock = WorkerLeaderLock(leader_lock_path(db_path))
+    background_tasks = start_leader_workers(
+        leader_lock, start=_start_workers, on_startup=run_leader_startup_actions
+    )
     yield
     await cancel_background_tasks(background_tasks)
+    leader_lock.release()
 
 
 app = FastAPI(

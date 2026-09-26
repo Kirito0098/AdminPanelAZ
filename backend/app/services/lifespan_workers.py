@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 from pathlib import Path
 from typing import Callable
 
@@ -53,8 +55,12 @@ from app.services.worker_lifecycle import (
     should_start_cloudflare_ips_scheduler,
     should_start_openvpn_buffer_guard,
 )
+from app.services.worker_leader import WorkerLeaderLock
+
+logger = logging.getLogger(__name__)
 
 TaskFactory = Callable[[], asyncio.Task]
+LEADER_RETRY_SECONDS = 15
 
 
 def get_worker_startup_plan() -> dict[str, bool]:
@@ -151,6 +157,43 @@ def spawn_background_tasks(
 
     tasks["webhook_delivery"] = create_task(run_webhook_delivery_loop())
 
+    return tasks
+
+
+def leader_lock_path(db_path: Path) -> Path:
+    return db_path.with_name(f"{db_path.name}.leader.lock")
+
+
+async def _take_over_leadership(
+    lock: WorkerLeaderLock,
+    tasks: dict[str, asyncio.Task | None],
+    start: Callable[[], dict[str, asyncio.Task | None]],
+) -> None:
+    while not lock.try_acquire():
+        await asyncio.sleep(LEADER_RETRY_SECONDS)
+    logger.info("Worker pid=%s took over background tasks", os.getpid())
+    tasks.update(start())
+
+
+def start_leader_workers(
+    lock: WorkerLeaderLock,
+    *,
+    start: Callable[[], dict[str, asyncio.Task | None]],
+    on_startup: Callable[[], None],
+) -> dict[str, asyncio.Task | None]:
+    """Run schedulers in one worker; the others wait to take over if it exits.
+
+    ``on_startup`` covers one-shot actions of a fresh panel start (recovering
+    interrupted tasks, firewall sync). A worker that takes over later skips them:
+    the remaining workers are still running their tasks.
+    """
+    if lock.try_acquire():
+        tasks = start()
+        on_startup()
+        return tasks
+    logger.info("Worker pid=%s: background tasks run in another worker", os.getpid())
+    tasks: dict[str, asyncio.Task | None] = {}
+    tasks["leader_takeover"] = asyncio.create_task(_take_over_leadership(lock, tasks, start))
     return tasks
 
 

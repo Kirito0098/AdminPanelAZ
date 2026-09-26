@@ -858,6 +858,28 @@ class WebhookDelivery(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class ServerRebootRequest(Base):
+    """Scheduled OS reboot, shared by uvicorn workers; the timer lives in the scheduling worker."""
+
+    __tablename__ = "server_reboot_requests"
+    __table_args__ = (
+        Index(
+            "uq_server_reboot_requests_active_node",
+            "node_id",
+            unique=True,
+            sqlite_where=text("status IN ('pending', 'executing')"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    node_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    node_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    scheduled_by: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    execute_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+
+
 class TelegramProcessedUpdate(Base):
     __tablename__ = "telegram_processed_updates"
 

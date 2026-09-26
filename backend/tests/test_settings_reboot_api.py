@@ -4,19 +4,25 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from app.auth import require_admin
-from app.database import get_db
+from app.database import Base, get_db
 from app.models import NodeStatus, User
 from app.routers import settings_reboot as maintenance_router
 from app.services import server_reboot as sr
 
 
 @pytest.fixture(autouse=True)
-def _clean():
+def _clean(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'reboot.db'}", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    monkeypatch.setattr(sr, "SessionLocal", sessionmaker(bind=engine))
     sr.clear_all_for_tests()
     yield
     sr.clear_all_for_tests()
+    engine.dispose()
 
 
 def _admin():
