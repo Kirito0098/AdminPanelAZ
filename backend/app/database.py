@@ -1536,7 +1536,26 @@ def run_db_migrations() -> None:
         _run_db_migrations()
 
 
+def _migrate_nodes_columns() -> None:
+    """Bring nodes up to the model: later migrations load Node via the ORM, which selects every mapped column."""
+    inspector = inspect(engine)
+    if "nodes" in inspector.get_table_names():
+        existing = {col["name"] for col in inspector.get_columns("nodes")}
+        if "api_key_rotated_at" not in existing:
+            with _migration_transaction() as conn:
+                conn.execute(text("ALTER TABLE nodes ADD COLUMN api_key_rotated_at DATETIME"))
+            logger.info("DB migration: added nodes.api_key_rotated_at")
+    _migrate_nodes_mtls_enabled()
+    _migrate_nodes_transport()
+    _migrate_nodes_ssh_fields()
+    _migrate_nodes_openvpn_remote_hosts()
+    _migrate_nodes_wireguard_use_first_remote()
+    _migrate_nodes_openvpn_multihome()
+    _migrate_nodes_proxy_fields()
+
+
 def _run_db_migrations() -> None:
+    _migrate_nodes_columns()
     _migrate_alert_rules_table()
     _migrate_openvpn_buffer_guard_tables()
     _migrate_openvpn_buffer_guard_factory_thresholds()
@@ -1599,9 +1618,6 @@ def _run_db_migrations() -> None:
             ("cert_expires_at", "DATETIME"),
             ("expires_at", "DATETIME"),
         ],
-        "nodes": [
-            ("api_key_rotated_at", "DATETIME"),
-        ],
         "background_task": [
             ("owner", "VARCHAR(64)"),
         ],
@@ -1648,13 +1664,6 @@ def _run_db_migrations() -> None:
     _migrate_viewer_role_to_user()
     _migrate_user_telegram_backfill()
     _migrate_user_access_until_backfill()
-    _migrate_nodes_mtls_enabled()
-    _migrate_nodes_transport()
-    _migrate_nodes_ssh_fields()
-    _migrate_nodes_openvpn_remote_hosts()
-    _migrate_nodes_wireguard_use_first_remote()
-    _migrate_nodes_openvpn_multihome()
-    _migrate_nodes_proxy_fields()
     _seed_client_templates_for_nodes()
 
 
