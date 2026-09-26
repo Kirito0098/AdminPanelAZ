@@ -8,6 +8,7 @@ import logging
 from app.config import get_settings
 from app.database import SessionLocal
 from app.services.user_reminder_service import process_user_reminders
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ async def run_user_reminder_loop() -> None:
                 )
                 continue
             # Sends Telegram messages one by one.
-            await asyncio.to_thread(_process_user_reminders_once)
+            await run_background_step(_process_user_reminders_once)
         except asyncio.CancelledError:
             raise
         except Exception:

@@ -17,6 +17,7 @@ from app.services.action_log import log_action
 from app.services.node_adapter import RemoteNodeAdapter
 from app.services.node_manager import NODE_KIND_VPN, is_vpn_node, get_api_key_plain, store_api_key
 from app.services.node_transport import get_transport
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +114,7 @@ async def run_node_key_rotation_loop() -> None:
                 logger.debug("node_key_rotation skipped — FEATURE_KEY_ROTATION_ENABLED disabled or rotation days off")
                 continue
             # Agent calls are blocking HTTP with a 30 s timeout per node.
-            await asyncio.to_thread(_rotate_due_nodes_once)
+            await run_background_step(_rotate_due_nodes_once)
         except asyncio.CancelledError:
             raise
         except Exception:

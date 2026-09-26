@@ -2,7 +2,16 @@ from unittest.mock import MagicMock
 
 import sqlite3
 
+import pytest
+
 from app.routers import backups as backups_mod
+from app.services.background_gate import resume_background_work
+
+
+@pytest.fixture(autouse=True)
+def _release_background_pause():
+    yield
+    resume_background_work()
 
 
 def test_backup_entry_schema_accepts_restore_detail():
@@ -230,3 +239,101 @@ def test_pre_restore_list_and_delete_use_the_manager(monkeypatch):
     assert entry.snapshot_id == "20260926_101010_000000"
     backups_mod.delete_pre_restore_snapshot("20260926_101010_000000", MagicMock())
     assert calls == ["20260926_101010_000000"]
+
+
+def _gate_manager(tmp_path, order, *, apply_error=None):
+    db = tmp_path / "adminpanel.db"
+    env = tmp_path / ".env"
+    sqlite3.connect(db).close()
+    env.write_text("", encoding="utf-8")
+
+    class FakeManager:
+        db_path = db
+        env_path = env
+
+        def load_restore_payload(self, file_name: str) -> dict:
+            order.append("load")
+            return {"restored": ["db"], "file_name": file_name, "configs": {}, "_files": {}}
+
+        def apply_restore_payload(self, payload: dict) -> dict:
+            order.append("apply")
+            if apply_error is not None:
+                raise apply_error
+            return payload
+
+    return FakeManager()
+
+
+def _patch_restore_side_effects(monkeypatch, order):
+    monkeypatch.setattr(backups_mod, "apply_backup_overlays", lambda *a, **k: order.append("overlays"))
+    monkeypatch.setattr(backups_mod, "_dispose_db_engines", lambda: order.append("dispose"))
+    monkeypatch.setattr(backups_mod, "_schedule_panel_restart_after_restore", lambda: order.append("restart"))
+
+
+def test_restore_pauses_background_work_before_touching_nodes_and_keeps_it_until_restart(monkeypatch, tmp_path):
+    order: list[str] = []
+    manager = _gate_manager(tmp_path, order)
+    _patch_restore_side_effects(monkeypatch, order)
+    monkeypatch.setattr(
+        backups_mod, "pause_background_work", lambda db_path, timeout: order.append(f"pause:{db_path.name}")
+    )
+    monkeypatch.setattr(backups_mod, "resume_background_work", lambda: order.append("resume"))
+
+    backups_mod._restore_panel_and_restart(manager, "panel.tar.gz", MagicMock())
+
+    assert order == ["load", "pause:adminpanel.db", "overlays", "dispose", "apply", "restart"]
+
+
+def test_restore_is_refused_when_background_work_does_not_finish(monkeypatch, tmp_path):
+    from fastapi import HTTPException
+
+    order: list[str] = []
+    manager = _gate_manager(tmp_path, order)
+    _patch_restore_side_effects(monkeypatch, order)
+
+    def busy(db_path, timeout):
+        order.append("pause")
+        raise TimeoutError
+
+    monkeypatch.setattr(backups_mod, "pause_background_work", busy)
+    monkeypatch.setattr(backups_mod, "resume_background_work", lambda: order.append("resume"))
+
+    with pytest.raises(HTTPException) as exc:
+        backups_mod._restore_panel_and_restart(manager, "panel.tar.gz", MagicMock())
+
+    assert exc.value.status_code == 409
+    assert "не изменены" in exc.value.detail
+    assert order == ["load", "pause"]
+
+
+def test_failed_restore_resumes_background_work(monkeypatch, tmp_path):
+    order: list[str] = []
+    manager = _gate_manager(tmp_path, order, apply_error=OSError("disk"))
+    _patch_restore_side_effects(monkeypatch, order)
+    monkeypatch.setattr(backups_mod, "pause_background_work", lambda db_path, timeout: order.append("pause"))
+    monkeypatch.setattr(backups_mod, "resume_background_work", lambda: order.append("resume"))
+
+    with pytest.raises(OSError):
+        backups_mod._restore_panel_and_restart(manager, "panel.tar.gz", MagicMock())
+
+    assert order == ["load", "pause", "overlays", "dispose", "apply", "resume"]
+
+
+def test_pre_restore_rollback_pauses_background_work(monkeypatch, tmp_path):
+    order: list[str] = []
+    manager = _gate_manager(tmp_path, order)
+    manager.load_pre_restore_payload = lambda snapshot_id: order.append("load") or {
+        "restored": ["db"],
+        "file_name": snapshot_id,
+        "configs": {},
+        "_files": {},
+    }
+    _patch_restore_side_effects(monkeypatch, order)
+    monkeypatch.setattr(backups_mod, "pause_background_work", lambda db_path, timeout: order.append("pause"))
+    monkeypatch.setattr(backups_mod, "resume_background_work", lambda: order.append("resume"))
+    monkeypatch.setattr(backups_mod, "_get_backup_manager", lambda: manager)
+    monkeypatch.setattr(backups_mod, "_record_backup_restore_side_effects", lambda **kwargs: order.append("audit"))
+
+    backups_mod.rollback_to_pre_restore_snapshot("snap", MagicMock(), MagicMock(), MagicMock(id=1, username="a"))
+
+    assert order == ["load", "pause", "dispose", "apply", "restart", "audit"]

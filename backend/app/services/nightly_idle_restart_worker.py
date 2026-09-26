@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.database import SessionLocal
 from app.models import AppSetting
 from app.services.active_web_session import active_web_session_service
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ async def run_nightly_idle_restart_loop() -> None:
             if not _is_nightly_idle_restart_enabled():
                 logger.debug("nightly_idle_restart skipped — disabled")
                 continue
-            result = await asyncio.to_thread(run_nightly_idle_restart_once)
+            result = await run_background_step(run_nightly_idle_restart_once) or {}
             if result.get("status") == "restarted":
                 logger.info("Nightly idle restart worker: %s", result)
         except asyncio.CancelledError:

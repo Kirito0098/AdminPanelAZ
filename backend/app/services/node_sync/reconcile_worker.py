@@ -17,6 +17,7 @@ from app.services.node_sync.groups import is_auto_sync_enabled
 from app.services.node_sync.policy_sync import heal_policy_drift
 from app.services.node_sync.vpn_state_sync import heal_crypto_drift
 from app.services.node_sync.verify import verify_sync_group
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -259,7 +260,7 @@ async def run_node_sync_reconcile_loop() -> None:
                     "node_sync_reconcile skipped — NODE_SYNC_RECONCILE_ENABLED disabled"
                 )
             else:
-                await asyncio.to_thread(reconcile_sync_groups_safe)
+                await run_background_step(reconcile_sync_groups_safe)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

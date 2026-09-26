@@ -8,6 +8,7 @@ from app.database import SessionLocal
 from app.services.admin_notify import admin_notify_service
 from app.services.panel_resource_metrics import persist_sample, purge_old_samples
 from app.services.resource_alert_sustained import SustainedMetricSource
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ async def run_panel_resource_metrics_loop():
             elif not _is_resource_monitor_enabled():
                 logger.debug("panel_resource_metrics skipped — resource_monitor disabled")
             else:
-                await asyncio.to_thread(_collect_sample)
+                await run_background_step(_collect_sample)
         except Exception as exc:
             logger.warning("Panel resource metrics collector error: %s", exc)
         await asyncio.sleep(interval)

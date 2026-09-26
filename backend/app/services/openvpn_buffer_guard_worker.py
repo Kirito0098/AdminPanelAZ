@@ -22,6 +22,7 @@ from app.services.openvpn_buffer_guard import (
     process_temp_ban_expiries,
     run_guard_pass,
 )
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ async def run_openvpn_buffer_guard_loop() -> None:
     """Main asyncio loop for the buffer guard worker."""
     while True:
         try:
-            await asyncio.to_thread(_run_once)
+            await run_background_step(_run_once)
         except asyncio.CancelledError:
             raise
         except Exception:  # pragma: no cover - defensive

@@ -8,6 +8,7 @@ import logging
 from app.config import get_settings
 from app.database import SessionLocal
 from app.services.connection_history import collect_connection_samples, purge_old_connection_samples
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ async def run_connection_history_loop():
             ):
                 logger.debug("connection_history skipped — resource_monitor or FEATURE_CONNECTION_HISTORY_ENABLED disabled")
             else:
-                await asyncio.to_thread(_collect_once)
+                await run_background_step(_collect_once)
         except Exception as exc:
             logger.warning("Connection history collector error: %s", exc)
         await asyncio.sleep(interval)

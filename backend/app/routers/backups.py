@@ -2,6 +2,7 @@ import logging
 import os
 import tempfile
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -26,6 +27,7 @@ from app.schemas import (
     PreRestoreSnapshotEntry,
 )
 from app.services.admin_notify import admin_notify_service
+from app.services.background_gate import pause_background_work, resume_background_work
 from app.services.background_tasks import background_task_service
 from app.services.backup_manager import BackupManager
 from app.services.backup_overlays import apply_backup_overlays
@@ -42,6 +44,11 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 MAX_BACKUP_UPLOAD_BYTES = 200 * 1024 * 1024
 RESTORE_RESTART_MESSAGE = "Восстановление выполнено. Панель будет перезапущена через несколько секунд."
+RESTORE_PAUSE_TIMEOUT_SECONDS = 30
+RESTORE_BUSY_MESSAGE = (
+    "Идёт фоновая задача (например, автобэкап или обновление CIDR). "
+    "Повторите восстановление через несколько минут — данные не изменены."
+)
 RESTORE_APPLY_HINT = (
     "Если восстановлены списки AntiZapret, выполните Применение, "
     "иначе маршрутизация может остаться устаревшей."
@@ -368,10 +375,31 @@ def upload_backup(
     return BackupEntry(**result)
 
 
+@contextmanager
+def _background_work_paused(manager: BackupManager):
+    """Scheduled jobs stay paused until the restart; a failed restore lets them run again."""
+    try:
+        pause_background_work(manager.db_path, timeout=RESTORE_PAUSE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=RESTORE_BUSY_MESSAGE) from None
+    try:
+        yield
+    except BaseException:
+        resume_background_work()
+        raise
+
+
 def _restore_panel_and_restart(manager: BackupManager, file_name: str, db: Session) -> dict:
     payload = manager.load_restore_payload(file_name)
-    apply_backup_overlays(payload, mode="adapter", db=db)
-    return _apply_local_restore_and_restart(manager, payload)
+    with _background_work_paused(manager):
+        apply_backup_overlays(payload, mode="adapter", db=db)
+        return _apply_local_restore_and_restart(manager, payload)
+
+
+def _rollback_and_restart(manager: BackupManager, snapshot_id: str) -> dict:
+    payload = manager.load_pre_restore_payload(snapshot_id)
+    with _background_work_paused(manager):
+        return _apply_local_restore_and_restart(manager, payload)
 
 
 def _apply_local_restore_and_restart(manager: BackupManager, payload: dict) -> dict:
@@ -452,7 +480,7 @@ def rollback_to_pre_restore_snapshot(
     admin: User = Depends(require_admin),
 ):
     manager = _get_backup_manager()
-    result = _apply_local_restore_and_restart(manager, manager.load_pre_restore_payload(snapshot_id))
+    result = _rollback_and_restart(manager, snapshot_id)
     _record_backup_restore_side_effects(
         admin=admin,
         request=request,

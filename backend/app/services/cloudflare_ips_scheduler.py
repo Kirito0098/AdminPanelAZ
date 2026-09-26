@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 
 from app.database import SessionLocal
 from app.services.cloudflare_proxy_settings import get_cloudflare_proxy_state, refresh_cloudflare_ips
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ async def run_cloudflare_ips_scheduler_loop() -> None:
         try:
             await asyncio.sleep(SLEEP_SECONDS)
             # Downloads the IP lists and applies them to nginx via a script.
-            await asyncio.to_thread(_refresh_cloudflare_ips_if_due)
+            await run_background_step(_refresh_cloudflare_ips_if_due)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

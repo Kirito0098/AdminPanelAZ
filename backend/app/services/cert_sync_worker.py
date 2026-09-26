@@ -11,6 +11,7 @@ from app.models import Node, VpnConfig, VpnType
 from app.services.node_manager import is_vpn_node, get_adapter_for_node
 from app.services.openvpn_cert import resolve_openvpn_cert_not_after, to_naive_utc
 from app.services.openvpn_pki import load_cert_expiry_map
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -137,7 +138,7 @@ async def run_cert_sync_loop() -> None:
                 logger.debug("cert_sync skipped — openvpn module disabled")
             else:
                 # Reads certificates from every OpenVPN node over the agent API.
-                await asyncio.to_thread(_sync_cert_expiry_once)
+                await run_background_step(_sync_cert_expiry_once)
         except asyncio.CancelledError:
             raise
         except Exception:

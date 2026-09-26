@@ -13,6 +13,7 @@ from app.services.awg2_noc import fetch_awg2_peers_for_adapter
 from app.services.feature_toggles import is_awg2_enabled
 from app.services.node_manager import is_vpn_node, get_adapter_for_node
 from app.services.traffic.collector import TrafficCollectorService, build_status_rows
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ async def run_traffic_collector_loop():
             if not settings.traffic_sync_enabled or not _is_traffic_sync_enabled():
                 logger.debug("traffic_collector skipped — traffic_sync disabled")
             else:
-                await asyncio.to_thread(_collect_all_nodes)
+                await run_background_step(_collect_all_nodes)
         except Exception as exc:
             logger.warning("Traffic collector error: %s", exc)
         await asyncio.sleep(interval)

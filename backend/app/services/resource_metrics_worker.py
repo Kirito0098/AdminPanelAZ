@@ -9,6 +9,7 @@ from app.models import Node
 from app.services.node_manager import is_vpn_node, get_adapter_for_node
 from app.services.admin_notify import admin_notify_service
 from app.services.resource_metrics import persist_sample, purge_old_samples
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ async def run_resource_metrics_loop():
             elif not _is_resource_monitor_enabled():
                 logger.debug("resource_metrics skipped — resource_monitor disabled")
             else:
-                await asyncio.to_thread(_collect_all_nodes)
+                await run_background_step(_collect_all_nodes)
         except Exception as exc:
             logger.warning("Resource metrics collector error: %s", exc)
         await asyncio.sleep(interval)

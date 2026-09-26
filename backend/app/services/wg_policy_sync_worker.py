@@ -12,6 +12,7 @@ from app.database import SessionLocal
 from app.models import Node, WgAccessPolicy
 from app.services.access_policy import AccessPolicyService
 from app.services.node_manager import is_vpn_node, get_adapter_for_node, node_metadata_dict
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 _startup_full_sync_done = False
@@ -122,10 +123,10 @@ async def run_wg_policy_sync_loop() -> None:
                 logger.debug("wg_policy_sync skipped — wg_policy_sync disabled")
             else:
                 if not _startup_full_sync_done:
-                    await asyncio.to_thread(_reconcile_all_nodes_once, sync_all_runtime=True)
+                    await run_background_step(_reconcile_all_nodes_once, sync_all_runtime=True)
                     _startup_full_sync_done = True
                 else:
-                    await asyncio.to_thread(_reconcile_all_nodes_once, sync_all_runtime=False)
+                    await run_background_step(_reconcile_all_nodes_once, sync_all_runtime=False)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

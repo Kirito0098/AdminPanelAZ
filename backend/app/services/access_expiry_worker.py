@@ -8,6 +8,7 @@ import logging
 from app.database import SessionLocal
 from app.services.access_until import apply_due_access_blocks
 from app.services.user_subscription import apply_due_user_subscription_blocks
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 ACCESS_EXPIRY_INTERVAL_SECONDS = 60
@@ -42,7 +43,7 @@ async def run_access_expiry_loop() -> None:
                 logger.debug("access_expiry skipped — FEATURE_ACCESS_EXPIRY_ENABLED disabled")
                 await asyncio.sleep(ACCESS_EXPIRY_INTERVAL_SECONDS)
                 continue
-            result = await asyncio.to_thread(_run_once)
+            result = await run_background_step(_run_once) or {}
             if result.get("blocked") or result.get("cascaded") or result.get("errors"):
                 logger.info(
                     "access_expiry: blocked=%s openvpn=%s wireguard=%s awg2=%s users_due=%s cascaded=%s skipped=%s errors=%s rows_due=%s",
