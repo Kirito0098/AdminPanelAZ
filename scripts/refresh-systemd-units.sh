@@ -5,9 +5,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PANEL_UNIT="/etc/systemd/system/adminpanelaz.service"
-NODE_UNIT="/etc/systemd/system/adminpanelaz-node.service"
-PROXY_UNIT="/etc/systemd/system/adminpanelaz-proxy.service"
+UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
+PANEL_UNIT="$UNIT_DIR/adminpanelaz.service"
+NODE_UNIT="$UNIT_DIR/adminpanelaz-node.service"
+PROXY_UNIT="$UNIT_DIR/adminpanelaz-proxy.service"
 DO_PANEL="${REFRESH_PANEL:-1}"
 DO_NODE="${REFRESH_NODE:-1}"
 DO_PROXY="${REFRESH_PROXY:-1}"

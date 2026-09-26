@@ -13,7 +13,6 @@ EnvironmentFile=-/opt/AdminPanelAZ/backend/proxy_agent.env
 Environment=PROXY_AGENT_STATE_DIR=/var/lib/adminpanelaz-proxy
 Environment=PROXY_AGENT_HOST=0.0.0.0
 Environment=PROXY_AGENT_PORT=9101
-Environment=PROXY_AGENT_API_KEY=change-me-proxy-agent-key
 # Needs CAP_NET_ADMIN / root to read and rewrite nat table (DESTINATION).
 ExecStart=/opt/AdminPanelAZ/scripts/systemd-exec-proxy.sh
 Restart=on-failure

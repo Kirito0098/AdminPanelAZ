@@ -10,7 +10,8 @@ fi
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVICE_NAME="adminpanelaz-proxy"
 UNIT_SRC="$ROOT_DIR/systemd/${SERVICE_NAME}.service"
-UNIT_DST="/etc/systemd/system/${SERVICE_NAME}.service"
+UNIT_DST="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}/${SERVICE_NAME}.service"
+ENV_FILE="$ROOT_DIR/backend/proxy_agent.env"
 STATE_DIR="${PROXY_AGENT_STATE_DIR:-/var/lib/adminpanelaz-proxy}"
 INSTALL_USER="${INSTALL_USER:-root}"
 INSTALL_GROUP="${INSTALL_GROUP:-$(id -gn "$INSTALL_USER" 2>/dev/null || echo root)}"
@@ -34,6 +35,10 @@ chmod +x "$ROOT_DIR/scripts/systemd-exec-proxy.sh" 2>/dev/null || true
 mkdir -p "$STATE_DIR/logs" "$STATE_DIR/run"
 chown -R "$INSTALL_USER:$INSTALL_GROUP" "$STATE_DIR"
 
+# shellcheck source=lib-agent-key.sh
+source "$ROOT_DIR/scripts/lib-agent-key.sh"
+persist_agent_api_key "$ENV_FILE" PROXY_AGENT_API_KEY "${PROXY_AGENT_API_KEY:-}"
+
 log "Установка $UNIT_DST"
 sed \
   -e "s|/opt/AdminPanelAZ|$ROOT_DIR|g" \
@@ -41,7 +46,6 @@ sed \
   -e "s|^User=root|User=$INSTALL_USER|" \
   -e "s|^Group=root|Group=$INSTALL_GROUP|" \
   -e "s|Environment=PROXY_AGENT_PORT=9101|Environment=PROXY_AGENT_PORT=${PROXY_AGENT_PORT:-9101}|" \
-  -e "s|PROXY_AGENT_API_KEY=change-me-proxy-agent-key|PROXY_AGENT_API_KEY=${PROXY_AGENT_API_KEY:-change-me-proxy-agent-key}|" \
   -e "s|EnvironmentFile=-/opt/AdminPanelAZ/backend/proxy_agent.env|EnvironmentFile=-$ROOT_DIR/backend/proxy_agent.env|" \
   "$UNIT_SRC" >"$UNIT_DST"
 
