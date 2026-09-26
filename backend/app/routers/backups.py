@@ -252,25 +252,27 @@ def _create_backup_with_optional_telegram(
             az_result = adapter.create_antizapret_backup()
             if tg and az_result.get("archive_path"):
                 archive_name = az_result.get("archive_name") or Path(az_result["archive_path"]).name
-                for chat_id in tg[1]:
-                    sent = send_tg_document(
-                        tg[0],
-                        chat_id,
-                        az_result["archive_path"],
-                        caption=f"{az_caption_prefix}: {archive_name}",
-                        run_async=False,
-                    )
-                    if not sent:
-                        if send_to_telegram:
-                            raise HTTPException(
-                                status_code=status.HTTP_502_BAD_GATEWAY,
-                                detail="Не удалось отправить архив AntiZapret в Telegram",
-                            )
-                        logger.warning(
-                            "Не удалось отправить архив AntiZapret в Telegram: chat_id=%s file=%s",
+                with adapter.antizapret_backup_file(az_result) as local_archive:
+                    for chat_id in tg[1]:
+                        sent = send_tg_document(
+                            tg[0],
                             chat_id,
-                            az_result["archive_path"],
+                            str(local_archive),
+                            caption=f"{az_caption_prefix}: {archive_name}",
+                            run_async=False,
+                            filename=archive_name,
                         )
+                        if not sent:
+                            if send_to_telegram:
+                                raise HTTPException(
+                                    status_code=status.HTTP_502_BAD_GATEWAY,
+                                    detail="Не удалось отправить архив AntiZapret в Telegram",
+                                )
+                            logger.warning(
+                                "Не удалось отправить архив AntiZapret в Telegram: chat_id=%s file=%s",
+                                chat_id,
+                                archive_name,
+                            )
         except Exception as exc:
             if send_to_telegram:
                 raise

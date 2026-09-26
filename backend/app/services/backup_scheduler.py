@@ -146,20 +146,23 @@ def _run_auto_backup_once(
                             lambda key, default="": _get_setting(db, key, default)
                         )
                         if token and chat_ids and az_result.get("archive_path"):
-                            for chat_id in chat_ids:
-                                sent = send_tg_document(
-                                    token,
-                                    chat_id,
-                                    az_result["archive_path"],
-                                    caption=f"Авто-бэкап AntiZapret: {az_result.get('archive_name', '')}",
-                                    run_async=False,
-                                )
-                                if not sent:
-                                    logger.warning(
-                                        "Auto AntiZapret backup Telegram send failed: chat_id=%s file=%s",
+                            archive_name = az_result.get("archive_name") or Path(az_result["archive_path"]).name
+                            with adapter.antizapret_backup_file(az_result) as local_archive:
+                                for chat_id in chat_ids:
+                                    sent = send_tg_document(
+                                        token,
                                         chat_id,
-                                        az_result["archive_path"],
+                                        str(local_archive),
+                                        caption=f"Авто-бэкап AntiZapret: {archive_name}",
+                                        run_async=False,
+                                        filename=archive_name,
                                     )
+                                    if not sent:
+                                        logger.warning(
+                                            "Auto AntiZapret backup Telegram send failed: chat_id=%s file=%s",
+                                            chat_id,
+                                            archive_name,
+                                        )
             except Exception as exc:
                 logger.warning("Auto AntiZapret backup (client.sh 8) failed: %s", exc)
         db.commit()

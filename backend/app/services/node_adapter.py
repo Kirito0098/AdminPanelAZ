@@ -1,4 +1,7 @@
+import tempfile
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -87,6 +90,19 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def create_antizapret_backup(self) -> dict[str, str]: ...
+
+    @contextmanager
+    def antizapret_backup_file(self, backup: dict[str, str]) -> Iterator[Path]:
+        """The archive from ``create_antizapret_backup`` as a file on the panel host.
+
+        ``archive_path`` is a path on the node, so it is fetched through the agent into a temp file.
+        """
+        archive_name = backup.get("archive_name") or Path(backup.get("archive_path") or "").name
+        data = self.download_antizapret_backup(archive_name)
+        with tempfile.TemporaryDirectory(prefix="az-backup-") as tmp:
+            path = Path(tmp) / "archive.tar.gz"
+            path.write_bytes(data)
+            yield path
 
     @abstractmethod
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]: ...
@@ -563,6 +579,10 @@ class LocalNodeAdapter(NodeAdapter):
 
     def create_antizapret_backup(self) -> dict[str, str]:
         return self._service.create_antizapret_backup()
+
+    @contextmanager
+    def antizapret_backup_file(self, backup: dict[str, str]) -> Iterator[Path]:
+        yield Path(backup["archive_path"])
 
     def download_antizapret_backup(self, archive_name: str) -> bytes:
         from app.services.antizapret_backup import resolve_backup_archive
