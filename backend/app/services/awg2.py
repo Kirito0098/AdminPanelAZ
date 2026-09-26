@@ -166,6 +166,18 @@ def _resolve_awg2_profile_path(path: str) -> Path:
     return file_path
 
 
+AWG2_PROFILE_FILE_ENDINGS = ("-am.conf", ".vpn", "-vpnuri.txt")
+
+
+def _resolve_writable_awg2_profile_path(path: str) -> Path:
+    """Only the client profiles listed by ``get_profile_files``, never expiry.tsv or other overlay files."""
+    file_path = Path(path).resolve()
+    tunnel_dirs = {(AWG2_CLIENT_DIR / tunnel).resolve() for tunnel in AWG2_TUNNELS}
+    if file_path.parent not in tunnel_dirs or not file_path.name.endswith(AWG2_PROFILE_FILE_ENDINGS):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ к файлу запрещён")
+    return file_path
+
+
 def is_awg2_profile_path(path: str) -> bool:
     try:
         _resolve_awg2_profile_path(path)
@@ -967,7 +979,7 @@ class Awg2Service:
         return file_path.read_text(encoding="utf-8", errors="replace")
 
     def write_profile_file(self, path: str, content: str) -> None:
-        file_path = _resolve_awg2_profile_path(path)
+        file_path = _resolve_writable_awg2_profile_path(path)
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content or "", encoding="utf-8")
 
