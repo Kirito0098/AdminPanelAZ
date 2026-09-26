@@ -23,6 +23,7 @@ from app.schemas import (
     BackupSettingsUpdate,
     BackupTestTelegramRequest,
     MessageResponse,
+    PreRestoreSnapshotEntry,
 )
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
@@ -368,10 +369,14 @@ def upload_backup(
 
 
 def _restore_panel_and_restart(manager: BackupManager, file_name: str, db: Session) -> dict:
-    from app.services.client_portal import sync_portal_domain_after_restore
-
     payload = manager.load_restore_payload(file_name)
     apply_backup_overlays(payload, mode="adapter", db=db)
+    return _apply_local_restore_and_restart(manager, payload)
+
+
+def _apply_local_restore_and_restart(manager: BackupManager, payload: dict) -> dict:
+    from app.services.client_portal import sync_portal_domain_after_restore
+
     _dispose_db_engines()
     result = manager.apply_restore_payload(payload)
     result.update(
@@ -432,6 +437,36 @@ def restore_backup(
     )
     result.pop("configs", None)
     return _restore_response(result)
+
+
+@router.get("/pre-restore", response_model=list[PreRestoreSnapshotEntry])
+def list_pre_restore_snapshots(_: User = Depends(require_admin)):
+    return [PreRestoreSnapshotEntry(**entry) for entry in _get_backup_manager().list_pre_restore_snapshots()]
+
+
+@router.post("/pre-restore/{snapshot_id}/restore", response_model=MessageResponse)
+def rollback_to_pre_restore_snapshot(
+    snapshot_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    manager = _get_backup_manager()
+    result = _apply_local_restore_and_restart(manager, manager.load_pre_restore_payload(snapshot_id))
+    _record_backup_restore_side_effects(
+        admin=admin,
+        request=request,
+        file_name=f"копия перед восстановлением {snapshot_id}",
+        details=f"pre-restore:{snapshot_id}",
+    )
+    result.pop("configs", None)
+    return _restore_response(result)
+
+
+@router.delete("/pre-restore/{snapshot_id}", response_model=MessageResponse)
+def delete_pre_restore_snapshot(snapshot_id: str, _: User = Depends(require_admin)):
+    _get_backup_manager().delete_pre_restore_snapshot(snapshot_id)
+    return MessageResponse(message="Копия перед восстановлением удалена")
 
 
 @router.delete("/{file_name}", response_model=MessageResponse)

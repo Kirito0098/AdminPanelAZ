@@ -2,6 +2,7 @@ import glob
 import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
 import tarfile
@@ -24,6 +25,8 @@ def remove_sqlite_sidecars(db_path: Path) -> None:
 
 
 _SQLITE_HEADER = b"SQLite format 3\x00"
+_PRE_RESTORE_STAMP = "%Y%m%d_%H%M%S_%f"
+_PRE_RESTORE_ID = re.compile(r"\d{8}_\d{6}_\d{6}")
 
 
 def validate_sqlite_bytes(data: bytes, label: str) -> None:
@@ -394,7 +397,7 @@ class BackupManager:
         root = self.backup_root / self.PRE_RESTORE_DIR
         root.mkdir(parents=True, exist_ok=True)
         os.chmod(root, 0o700)
-        stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        stamp = datetime.now(timezone.utc).strftime(_PRE_RESTORE_STAMP)
         snapshot = root / stamp
         snapshot.mkdir(mode=0o700)
         os.chmod(snapshot, 0o700)
@@ -445,6 +448,55 @@ class BackupManager:
         snapshots = sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True)
         for old in snapshots[self.PRE_RESTORE_KEEP :]:
             shutil.rmtree(old, ignore_errors=True)
+
+    def list_pre_restore_snapshots(self) -> list[dict]:
+        root = self.backup_root / self.PRE_RESTORE_DIR
+        if not root.is_dir():
+            return []
+        result = []
+        snapshots = (p for p in root.iterdir() if p.is_dir() and _PRE_RESTORE_ID.fullmatch(p.name))
+        for snapshot in sorted(snapshots, key=lambda p: p.name, reverse=True):
+            files = {
+                role: snapshot / name
+                for role, name in self.PRE_RESTORE_NAMES.items()
+                if (snapshot / name).is_file()
+            }
+            created_at = datetime.strptime(snapshot.name, _PRE_RESTORE_STAMP).replace(tzinfo=timezone.utc)
+            result.append({
+                "snapshot_id": snapshot.name,
+                "created_at": created_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "size_bytes": sum(path.stat().st_size for path in files.values()),
+                "components": list(files),
+            })
+        return result
+
+    def _resolve_pre_restore_snapshot(self, snapshot_id: str) -> Path:
+        snapshot = self.backup_root / self.PRE_RESTORE_DIR / snapshot_id
+        if not _PRE_RESTORE_ID.fullmatch(snapshot_id) or not snapshot.is_dir():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Копия перед восстановлением не найдена")
+        return snapshot
+
+    def load_pre_restore_payload(self, snapshot_id: str) -> dict:
+        """Roll back a restore: the copy holds only the DB, CIDR DB and .env it replaced."""
+        snapshot = self._resolve_pre_restore_snapshot(snapshot_id)
+        files: dict[str, bytes] = {}
+        for role, name in self.PRE_RESTORE_NAMES.items():
+            if role == "cidr_db" and self.cidr_db_path is None:
+                continue
+            path = snapshot / name
+            if path.is_file():
+                files[role] = path.read_bytes()
+        if not files:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Копия перед восстановлением пуста")
+        if "db" in files:
+            validate_sqlite_bytes(files["db"], "База панели")
+        if "cidr_db" in files:
+            validate_sqlite_bytes(files["cidr_db"], "База CIDR")
+        self._ensure_restore_space(self._restore_targets(files))
+        return {"restored": list(files), "file_name": snapshot_id, "configs": {}, "_files": files}
+
+    def delete_pre_restore_snapshot(self, snapshot_id: str) -> None:
+        shutil.rmtree(self._resolve_pre_restore_snapshot(snapshot_id))
 
     def restore_backup(self, file_name: str) -> dict:
         return self.apply_restore_payload(self.load_restore_payload(file_name))

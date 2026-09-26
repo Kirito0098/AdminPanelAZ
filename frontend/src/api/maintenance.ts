@@ -6,6 +6,7 @@ import {
 import type {
   BackupEntry,
   BackupSettings,
+  PreRestoreSnapshot,
   VpnNetworkSettings,
   VpnNetworkDomainSslStatus,
   VpnNetworkPortRole,
@@ -73,6 +74,21 @@ export async function uploadBackup(file: File, restore = false) {
 
 export async function deleteBackup(fileName: string) {
   return apiFetch(`/backups/${encodeURIComponent(fileName)}`, { method: 'DELETE' })
+}
+
+export async function getPreRestoreSnapshots() {
+  return apiFetch<PreRestoreSnapshot[]>('/backups/pre-restore')
+}
+
+export async function rollbackToPreRestoreSnapshot(snapshotId: string) {
+  return apiFetch<{ message: string; detail?: Record<string, unknown> }>(
+    `/backups/pre-restore/${encodeURIComponent(snapshotId)}/restore`,
+    { method: 'POST' },
+  )
+}
+
+export async function deletePreRestoreSnapshot(snapshotId: string) {
+  return apiFetch(`/backups/pre-restore/${encodeURIComponent(snapshotId)}`, { method: 'DELETE' })
 }
 
 export async function getBackupSettings() {

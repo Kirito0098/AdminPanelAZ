@@ -160,3 +160,73 @@ def test_record_backup_restore_side_effects_uses_fresh_session(monkeypatch):
 
     assert calls == ["log:upload:panel.tar.gz", "notify:panel.tar.gz"]
     assert closed == [True]
+
+
+def test_pre_restore_rollback_skips_overlays_and_restarts(monkeypatch, tmp_path):
+    """A copy holds only DB, CIDR and .env: node overlays must not be re-applied."""
+    order: list[str] = []
+    db = tmp_path / "adminpanel.db"
+    env = tmp_path / ".env"
+    sqlite3.connect(db).close()
+    env.write_text("", encoding="utf-8")
+
+    class FakeManager:
+        db_path = db
+        env_path = env
+
+        def load_pre_restore_payload(self, snapshot_id: str) -> dict:
+            order.append(f"load:{snapshot_id}")
+            return {"restored": ["db", "env"], "file_name": snapshot_id, "configs": {}, "_files": {}}
+
+        def apply_restore_payload(self, payload: dict) -> dict:
+            order.append("apply")
+            return payload
+
+    monkeypatch.setattr(backups_mod, "_get_backup_manager", lambda: FakeManager())
+    monkeypatch.setattr(backups_mod, "apply_backup_overlays", lambda *a, **k: order.append("overlays"))
+    monkeypatch.setattr(backups_mod, "_dispose_db_engines", lambda: order.append("dispose"))
+    monkeypatch.setattr(backups_mod, "_schedule_panel_restart_after_restore", lambda: order.append("restart"))
+    monkeypatch.setattr(
+        backups_mod,
+        "_record_backup_restore_side_effects",
+        lambda **kwargs: order.append(f"audit:{kwargs['details']}"),
+    )
+
+    response = backups_mod.rollback_to_pre_restore_snapshot(
+        "20260926_101010_000000", MagicMock(), MagicMock(), MagicMock(id=1, username="admin")
+    )
+
+    assert order == [
+        "load:20260926_101010_000000",
+        "dispose",
+        "apply",
+        "restart",
+        "audit:pre-restore:20260926_101010_000000",
+    ]
+    assert response.message == backups_mod.RESTORE_RESTART_MESSAGE
+    assert response.detail["restart_scheduled"] is True
+
+
+def test_pre_restore_list_and_delete_use_the_manager(monkeypatch):
+    calls: list[str] = []
+
+    class FakeManager:
+        def list_pre_restore_snapshots(self):
+            return [
+                {
+                    "snapshot_id": "20260926_101010_000000",
+                    "created_at": "2026-09-26T10:10:10Z",
+                    "size_bytes": 5,
+                    "components": ["db"],
+                }
+            ]
+
+        def delete_pre_restore_snapshot(self, snapshot_id: str) -> None:
+            calls.append(snapshot_id)
+
+    monkeypatch.setattr(backups_mod, "_get_backup_manager", lambda: FakeManager())
+
+    [entry] = backups_mod.list_pre_restore_snapshots(MagicMock())
+    assert entry.snapshot_id == "20260926_101010_000000"
+    backups_mod.delete_pre_restore_snapshot("20260926_101010_000000", MagicMock())
+    assert calls == ["20260926_101010_000000"]

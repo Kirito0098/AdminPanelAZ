@@ -554,6 +554,13 @@ export interface BackupEntry {
   restore_detail?: Record<string, unknown> | null
 }
 
+export interface PreRestoreSnapshot {
+  snapshot_id: string
+  created_at: string
+  size_bytes: number
+  components: string[]
+}
+
 export interface BackupSettings {
   auto_backup_enabled: boolean
   auto_backup_days: number

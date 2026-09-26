@@ -767,6 +767,13 @@ class BackupEntry(BaseModel):
     restore_detail: dict[str, Any] | None = None
 
 
+class PreRestoreSnapshotEntry(BaseModel):
+    snapshot_id: str
+    created_at: str
+    size_bytes: int
+    components: list[str] = []
+
+
 class BackupCreateRequest(BaseModel):
     include_configs: bool = False
     include_antizapret_backup: bool = False

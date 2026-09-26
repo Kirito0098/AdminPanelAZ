@@ -7,6 +7,7 @@ import {
   CalendarClock,
   Check,
   Download,
+  History,
   LayoutDashboard,
   ListTree,
   RotateCcw,
@@ -22,10 +23,13 @@ import {
   ApiError,
   createBackup,
   deleteBackup,
+  deletePreRestoreSnapshot,
   downloadBackup,
   getBackupSettings,
   getBackups,
+  getPreRestoreSnapshots,
   restoreBackup,
+  rollbackToPreRestoreSnapshot,
   updateBackupSettings,
   uploadBackup,
 } from '@/api/client'
@@ -50,12 +54,13 @@ import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useProgress } from '@/context/ProgressContext'
 import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
-import type { BackupEntry, BackupSettings } from '@/types'
+import type { BackupEntry, BackupSettings, PreRestoreSnapshot } from '@/types'
 
 function formatSize(bytes: number) {
   if (bytes < 1024) return `${bytes} Б`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} КБ`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} МБ`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} ГБ`
 }
 
 const COMPONENT_LABELS: Record<string, string> = {
@@ -71,6 +76,9 @@ const COMPONENT_LABELS: Record<string, string> = {
 
 const RESTORE_WARNING =
   'Текущие настройки и данные панели будут перезаписаны. Если в архиве есть слой AZ-AWG2, он тоже будет восстановлен на VPN-узле. После восстановления панель будет автоматически перезапущена — страница станет недоступна на несколько секунд. Данные портала и unlock восстанавливаются из БД; HTTPS/nginx портала нужно заново применить в Подписка.'
+
+const ROLLBACK_WARNING =
+  'Текущие база, CIDR и .env панели будут заменены этой копией. Списки AntiZapret и слой AZ-AWG2 на VPN-узле не меняются. Текущее состояние перед откатом тоже сохранится как копия, так что откат можно отменить. После отката панель перезапустится — страница станет недоступна на несколько секунд.'
 
 const RESTORE_SUCCESS_MESSAGE =
   'Восстановление выполнено. Панель будет перезапущена через несколько секунд.'
@@ -219,6 +227,7 @@ export default function BackupTab() {
   const { isEnabled } = useFeatureModules()
   const awg2Enabled = isEnabled('awg2')
   const [backups, setBackups] = useState<BackupEntry[]>([])
+  const [snapshots, setSnapshots] = useState<PreRestoreSnapshot[]>([])
   const [settings, setSettings] = useState<BackupSettings | null>(null)
   const [settingsDraft, setSettingsDraft] = useState<BackupSettings | null>(null)
   const [includeConfigs, setIncludeConfigs] = useState(false)
@@ -232,8 +241,9 @@ export default function BackupTab() {
   const pendingRestoreRef = useRef(false)
 
   const load = async () => {
-    const [list, cfg] = await Promise.all([getBackups(), getBackupSettings()])
+    const [list, cfg, preRestore] = await Promise.all([getBackups(), getBackupSettings(), getPreRestoreSnapshots()])
     setBackups(list)
+    setSnapshots(preRestore)
     setSettings(cfg)
     setSettingsDraft(cfg)
   }
@@ -293,6 +303,11 @@ export default function BackupTab() {
       retention: cfg ? String(cfg.retention_count) : '—',
     }
   }, [backups, settings, settingsDraft])
+
+  const snapshotsTotalBytes = useMemo(
+    () => snapshots.reduce((sum, snapshot) => sum + snapshot.size_bytes, 0),
+    [snapshots],
+  )
 
   const telegramDeliveryPlan = useMemo(() => {
     const files = [
@@ -359,6 +374,54 @@ export default function BackupTab() {
           success(`${resp.message || RESTORE_SUCCESS_MESSAGE}${hint}`)
         } catch (err) {
           notifyError(err instanceof ApiError ? err.message : 'Ошибка восстановления')
+        }
+      },
+    })
+  }
+
+  const handleRollback = (snapshot: PreRestoreSnapshot) => {
+    confirm({
+      title: 'Откатить восстановление?',
+      description: <>Данные панели вернутся к состоянию до восстановления {formatDateTime(snapshot.created_at)}.</>,
+      alert: {
+        variant: 'danger',
+        title: 'Внимание',
+        children: ROLLBACK_WARNING,
+      },
+      confirmLabel: 'Откатить и перезапустить',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const resp = await withInline(async () => {
+            const result = await rollbackToPreRestoreSnapshot(snapshot.snapshot_id)
+            await load()
+            return result
+          }, 'Откат и перезапуск...')
+          success(resp.message || RESTORE_SUCCESS_MESSAGE)
+        } catch (err) {
+          notifyError(err instanceof ApiError ? err.message : 'Ошибка отката')
+        }
+      },
+    })
+  }
+
+  const handleDeleteSnapshot = (snapshot: PreRestoreSnapshot) => {
+    confirm({
+      title: 'Удалить копию?',
+      description: (
+        <>
+          Копия от {formatDateTime(snapshot.created_at)} будет удалена — откатиться к ней станет невозможно.
+        </>
+      ),
+      confirmLabel: 'Удалить',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await deletePreRestoreSnapshot(snapshot.snapshot_id)
+          await load()
+          success('Копия удалена')
+        } catch (err) {
+          notifyError(err instanceof ApiError ? err.message : 'Ошибка удаления')
         }
       },
     })
@@ -720,6 +783,81 @@ export default function BackupTab() {
                         size="sm"
                         className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
                         onClick={() => handleDelete(b.file_name)}
+                      >
+                        <Trash2 size={14} />
+                        Удалить
+                      </Button>
+                    </div>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="shadow-sm">
+        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
+          <div>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <History size={16} />
+              Копии перед восстановлением
+            </CardTitle>
+            <CardDescription className="mt-1.5">
+              Перед каждым восстановлением панель сохраняет базу, CIDR и .env, которые будут заменены, — через них
+              можно откатить неудачное восстановление. Хранятся последние 3. Списки AntiZapret и слой AZ-AWG2 в эти
+              копии не входят.
+            </CardDescription>
+          </div>
+          {snapshots.length > 0 && (
+            <Badge variant="secondary" className="shrink-0">
+              {formatSize(snapshotsTotalBytes)}
+            </Badge>
+          )}
+        </CardHeader>
+        <CardContent>
+          {snapshots.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-muted-foreground/20 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
+              Копии появятся после первого восстановления
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {snapshots.map((snapshot) => (
+                <li
+                  key={snapshot.snapshot_id}
+                  className="rounded-xl border bg-card/50 p-3 transition-colors hover:bg-muted/30"
+                >
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-medium">До восстановления {formatDateTime(snapshot.created_at)}</p>
+                        <Badge variant="outline" className="text-[10px]">
+                          {formatSize(snapshot.size_bytes)}
+                        </Badge>
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {snapshot.components.map((c) => (
+                          <Badge key={c} variant="secondary" className="text-[10px]">
+                            {COMPONENT_LABELS[c] ?? c}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 lg:shrink-0">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => handleRollback(snapshot)}
+                      >
+                        <RotateCcw size={14} />
+                        Откатить
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-1.5 border-destructive/30 text-destructive hover:bg-destructive/10"
+                        onClick={() => handleDeleteSnapshot(snapshot)}
                       >
                         <Trash2 size={14} />
                         Удалить
