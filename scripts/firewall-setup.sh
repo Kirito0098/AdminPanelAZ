@@ -65,7 +65,8 @@ firewall_validate_ports() {
   return 0
 }
 
-# Порты sshd: текущей SSH-сессии, из sshd -T и слушающих сокетов; без данных — 22.
+# Порты sshd: текущей SSH-сессии, из sshd -T, слушающих сокетов и ssh.socket; без данных — 22.
+# При socket-активации порт слушает systemd, и в ss процесса sshd не видно.
 firewall_ssh_ports() {
   local ports
   ports="$(
@@ -73,6 +74,10 @@ firewall_ssh_ports() {
       [[ -z "${SSH_CONNECTION:-}" ]] || awk '{print $4}' <<<"$SSH_CONNECTION"
       sshd -T 2>/dev/null | awk '$1 == "port" {print $2}'
       ss -Htlnp 2>/dev/null | awk '/"sshd"/ {n = split($4, a, ":"); print a[n]}'
+      if systemctl is-active --quiet ssh.socket 2>/dev/null; then
+        systemctl show -p Listen --value ssh.socket 2>/dev/null \
+          | awk '/\(Stream\)/ {n = split($1, a, ":"); print a[n]}'
+      fi
     } | grep -E '^[0-9]+$' | sort -un
   )" || true
   printf '%s\n' "${ports:-22}"

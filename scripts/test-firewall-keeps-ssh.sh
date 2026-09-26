@@ -21,6 +21,8 @@ TOOL=ufw
 UFW_STATE=inactive
 SSHD_PORTS=""
 SS_SSHD_PORTS=""
+SOCKET_PORTS=""
+SOCKET_ACTIVE=true
 firewall_detect_tool() { echo "$TOOL"; }
 ufw() {
   echo "ufw $*" >>"$LOG"
@@ -40,6 +42,20 @@ iptables() {
 }
 netfilter-persistent() { return 0; }
 firewall_persist_iptables_rules() { :; }
+# Socket-активация (Ubuntu 22.10+): порт слушает systemd, в ss процесса sshd не видно.
+systemctl() {
+  local p
+  case "$*" in
+    "is-active --quiet ssh.socket") [[ "$SOCKET_ACTIVE" == true ]] ;;
+    "show -p Listen --value ssh.socket")
+      for p in $SOCKET_PORTS; do
+        echo "0.0.0.0:$p (Stream)"
+        echo "[::]:$p (Stream)"
+      done
+      ;;
+    *) return 0 ;;
+  esac
+}
 sshd() {
   [[ "$1" == -T && -n "$SSHD_PORTS" ]] || return 1
   local p
@@ -58,7 +74,7 @@ ss() {
 reset() {
   : >"$LOG"
   : >"$ADDED"
-  TOOL=ufw UFW_STATE=inactive SSHD_PORTS="" SS_SSHD_PORTS=""
+  TOOL=ufw UFW_STATE=inactive SSHD_PORTS="" SS_SSHD_PORTS="" SOCKET_PORTS="" SOCKET_ACTIVE=true
   unset SSH_CONNECTION FIREWALL_ENABLE_UFW
 }
 
@@ -81,6 +97,12 @@ SSH_CONNECTION="203.0.113.5 50000 198.51.100.1 2022"
 reset
 SS_SSHD_PORTS="2200"
 [[ "$(firewall_ssh_ports | tr '\n' ' ')" == "2200 " ]] || fail "порт из ss: [$(firewall_ssh_ports | tr '\n' ' ')]"
+reset
+SOCKET_PORTS="2345"
+[[ "$(firewall_ssh_ports | tr '\n' ' ')" == "2345 " ]] || fail "порт из ssh.socket: [$(firewall_ssh_ports | tr '\n' ' ')]"
+reset
+SOCKET_PORTS="22" SOCKET_ACTIVE=false SS_SSHD_PORTS="2200"
+[[ "$(firewall_ssh_ports | tr '\n' ' ')" == "2200 " ]] || fail "выключенный ssh.socket учтён: [$(firewall_ssh_ports | tr '\n' ' ')]"
 reset
 [[ "$(firewall_ssh_ports)" == 22 ]] || fail "по умолчанию 22: [$(firewall_ssh_ports)]"
 echo "  OK"

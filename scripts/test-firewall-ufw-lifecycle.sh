@@ -95,6 +95,7 @@ ufw() {
   esac
 }
 sshd() { return 1; }
+systemctl() { return 1; }
 ss() { return 0; }
 netfilter-persistent() { return 0; }
 
