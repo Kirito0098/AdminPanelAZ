@@ -21,13 +21,23 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useNotifications } from '@/context/NotificationContext'
-import { bufferGuardSavePayload, normalizeBufferGuardSettings, sortUnits } from '@/lib/bufferGuardDraft'
+import {
+  applyBufferGuardNumberInputs,
+  BUFFER_GUARD_NUMBER_LIMITS,
+  bufferGuardNumberError,
+  bufferGuardSavePayload,
+  commitBufferGuardNumber,
+  normalizeBufferGuardSettings,
+  sortUnits,
+  type BufferGuardNumberField,
+  type BufferGuardNumberInputs,
+} from '@/lib/bufferGuardDraft'
 import { formatDateTime } from '@/lib/datetime'
 import { createLatestRequest } from '@/lib/latestRequest'
 import { cn } from '@/lib/utils'
 import type { OpenVpnBufferGuardMode, OpenVpnBufferGuardSettings, OpenVpnBufferGuardEvent } from '@/types'
 import { AlertTriangle, CheckCircle2, ShieldAlert, Timer, Zap } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react'
 
 const MODE_LABELS: Record<OpenVpnBufferGuardMode, string> = {
   notify: 'Только уведомлять (без действий)',
@@ -119,6 +129,7 @@ export default function OpenVpnBufferGuardCard({
 
   const [settings, setSettings] = useState<OpenVpnBufferGuardSettings | null>(null)
   const [draft, setDraft] = useState<OpenVpnBufferGuardSettings | null>(null)
+  const [numberInputs, setNumberInputs] = useState<BufferGuardNumberInputs>({})
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [scanBusy, setScanBusy] = useState(false)
@@ -132,8 +143,13 @@ export default function OpenVpnBufferGuardCard({
   const busy = loading || saving || scanBusy
   const controlsDisabled = disabled || busy || activeNodeId == null || loadError != null
 
+  const effectiveDraft = useMemo(
+    () => (draft ? applyBufferGuardNumberInputs(draft, numberInputs) : null),
+    [draft, numberInputs],
+  )
+
   const dirty = useMemo(() => {
-    if (!settings || !draft) return false
+    if (!settings || !effectiveDraft) return false
     const simpleFields: (keyof OpenVpnBufferGuardSettings)[] = [
       'enabled',
       'mode',
@@ -144,16 +160,52 @@ export default function OpenVpnBufferGuardCard({
       'temp_ban_minutes',
     ]
     for (const key of simpleFields) {
-      if (settings[key] !== draft[key]) return true
+      if (settings[key] !== effectiveDraft[key]) return true
     }
-    if (sortUnits(settings.watch_units).join(',') !== sortUnits(draft.watch_units).join(',')) {
+    if (sortUnits(settings.watch_units).join(',') !== sortUnits(effectiveDraft.watch_units).join(',')) {
       return true
     }
     return false
-  }, [settings, draft])
+  }, [settings, effectiveDraft])
 
   const patchDraft = (patch: Partial<OpenVpnBufferGuardSettings>) => {
     setDraft((prev) => (prev ? { ...prev, ...patch } : prev))
+  }
+
+  const replaceDraft = (next: OpenVpnBufferGuardSettings | null) => {
+    setDraft(next)
+    setNumberInputs({})
+  }
+
+  const commitNumberInput = (field: BufferGuardNumberField) => {
+    const text = numberInputs[field]
+    if (text === undefined || !draft) return
+    patchDraft({ [field]: commitBufferGuardNumber(field, text, draft[field]) })
+    setNumberInputs(({ [field]: _committed, ...rest }) => rest)
+  }
+
+  const numberInputProps = (field: BufferGuardNumberField) => {
+    const { min, max } = BUFFER_GUARD_NUMBER_LIMITS[field]
+    const text = numberInputs[field]
+    return {
+      type: 'number',
+      inputMode: 'numeric' as const,
+      min,
+      max,
+      value: text ?? (draft ? String(draft[field]) : ''),
+      'aria-invalid': text !== undefined && bufferGuardNumberError(field, text) !== null,
+      onChange: (e: ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value
+        setNumberInputs((prev) => ({ ...prev, [field]: value }))
+      },
+      onBlur: () => commitNumberInput(field),
+    }
+  }
+
+  const numberInputHint = (field: BufferGuardNumberField) => {
+    const text = numberInputs[field]
+    const message = text === undefined ? null : bufferGuardNumberError(field, text)
+    return message ? <p className="text-[11px] text-destructive">{message}</p> : null
   }
 
   const loadEvents = useCallback(
@@ -190,6 +242,7 @@ export default function OpenVpnBufferGuardCard({
         const normalized = normalizeBufferGuardSettings(nodeId, data)
         setSettings(normalized)
         setDraft(normalized)
+        setNumberInputs({})
       } catch (err) {
         if (!isCurrent()) return
         const message =
@@ -218,6 +271,7 @@ export default function OpenVpnBufferGuardCard({
     eventsRequests.reset(activeNodeId)
     setSettings(null)
     setDraft(null)
+    setNumberInputs({})
     setEvents([])
     setLoadError(null)
     setEventsError(null)
@@ -227,9 +281,10 @@ export default function OpenVpnBufferGuardCard({
   }, [activeNodeId, eventsRequests, reloadAll, settingsRequests])
 
   const handleSave = async () => {
-    if (!draft || controlsDisabled) return
-    const payload = bufferGuardSavePayload(draft, activeNodeId)
+    if (!effectiveDraft || controlsDisabled) return
+    const payload = bufferGuardSavePayload(effectiveDraft, activeNodeId)
     if (!payload) return
+    replaceDraft(effectiveDraft)
     const isCurrent = settingsRequests.begin(payload.node_id)
     setSaving(true)
     try {
@@ -238,7 +293,7 @@ export default function OpenVpnBufferGuardCard({
       if (!isCurrent()) return
       const normalized = normalizeBufferGuardSettings(payload.node_id, updated)
       setSettings(normalized)
-      setDraft(normalized)
+      replaceDraft(normalized)
     } catch (err) {
       notifyError(
         err instanceof ApiError
@@ -443,29 +498,19 @@ export default function OpenVpnBufferGuardCard({
                       <div className="flex items-center gap-2">
                         <Input
                           id="buffer-guard-threshold"
-                          type="number"
-                          min={10}
-                          max={1_000_000}
                           className="h-9 w-32"
-                          value={draft.threshold_count}
                           disabled={controlsDisabled}
-                          onChange={(e) =>
-                            patchDraft({
-                              threshold_count: Math.max(
-                                10,
-                                Math.min(1_000_000, Number(e.target.value) || 10),
-                              ),
-                            })
-                          }
+                          {...numberInputProps('threshold_count')}
                         />
                         <span className="text-xs text-muted-foreground">ENOBUFS за окно</span>
                       </div>
+                      {numberInputHint('threshold_count')}
                       {(() => {
                         const rec =
                           draft.recommended_by_mode?.[draft.mode] ??
                           draft.recommended_threshold ??
                           40
-                        const already = draft.threshold_count === rec
+                        const already = effectiveDraft?.threshold_count === rec
                         return (
                           <div className="space-y-2">
                             <p className="text-xs text-muted-foreground">
@@ -478,7 +523,10 @@ export default function OpenVpnBufferGuardCard({
                               variant="outline"
                               size="sm"
                               disabled={controlsDisabled || already}
-                              onClick={() => patchDraft({ threshold_count: rec })}
+                              onClick={() => {
+                                patchDraft({ threshold_count: rec })
+                                setNumberInputs(({ threshold_count: _typed, ...rest }) => rest)
+                              }}
                             >
                               Применить рекомендацию
                             </Button>
@@ -493,23 +541,13 @@ export default function OpenVpnBufferGuardCard({
                       <div className="flex items-center gap-2">
                         <Input
                           id="buffer-guard-window"
-                          type="number"
-                          min={10}
-                          max={600}
                           className="h-9 w-24"
-                          value={draft.window_seconds}
                           disabled={controlsDisabled}
-                          onChange={(e) =>
-                            patchDraft({
-                              window_seconds: Math.max(
-                                10,
-                                Math.min(600, Number(e.target.value) || 10),
-                              ),
-                            })
-                          }
+                          {...numberInputProps('window_seconds')}
                         />
                         <span className="text-xs text-muted-foreground">секунд</span>
                       </div>
+                      {numberInputHint('window_seconds')}
                     </div>
                     <div className="space-y-2">
                       <Label
@@ -521,25 +559,15 @@ export default function OpenVpnBufferGuardCard({
                       <div className="flex items-center gap-2">
                         <Input
                           id="buffer-guard-escalate"
-                          type="number"
-                          min={5}
-                          max={300}
                           className="h-9 w-24"
-                          value={draft.escalate_after_seconds}
                           disabled={controlsDisabled}
-                          onChange={(e) =>
-                            patchDraft({
-                              escalate_after_seconds: Math.max(
-                                5,
-                                Math.min(300, Number(e.target.value) || 5),
-                              ),
-                            })
-                          }
+                          {...numberInputProps('escalate_after_seconds')}
                         />
                         <span className="text-xs text-muted-foreground">
                           сек до повтора проверки перед restart
                         </span>
                       </div>
+                      {numberInputHint('escalate_after_seconds')}
                     </div>
                     <div className="space-y-2">
                       <Label
@@ -551,23 +579,13 @@ export default function OpenVpnBufferGuardCard({
                       <div className="flex items-center gap-2">
                         <Input
                           id="buffer-guard-cooldown"
-                          type="number"
-                          min={1}
-                          max={1440}
                           className="h-9 w-24"
-                          value={draft.cooldown_minutes}
                           disabled={controlsDisabled}
-                          onChange={(e) =>
-                            patchDraft({
-                              cooldown_minutes: Math.max(
-                                1,
-                                Math.min(1440, Number(e.target.value) || 1),
-                              ),
-                            })
-                          }
+                          {...numberInputProps('cooldown_minutes')}
                         />
                         <span className="text-xs text-muted-foreground">минут после события</span>
                       </div>
+                      {numberInputHint('cooldown_minutes')}
                     </div>
                     <div className="space-y-2">
                       <Label
@@ -579,23 +597,13 @@ export default function OpenVpnBufferGuardCard({
                       <div className="flex items-center gap-2">
                         <Input
                           id="buffer-guard-temp-ban"
-                          type="number"
-                          min={5}
-                          max={10_080}
                           className="h-9 w-24"
-                          value={draft.temp_ban_minutes}
                           disabled={controlsDisabled || draft.mode !== 'kill_restart_temp_ban'}
-                          onChange={(e) =>
-                            patchDraft({
-                              temp_ban_minutes: Math.max(
-                                5,
-                                Math.min(10_080, Number(e.target.value) || 5),
-                              ),
-                            })
-                          }
+                          {...numberInputProps('temp_ban_minutes')}
                         />
                         <span className="text-xs text-muted-foreground">минут блокировки</span>
                       </div>
+                      {numberInputHint('temp_ban_minutes')}
                       <p className="text-[11px] leading-snug text-muted-foreground">
                         Используется только в режиме временного бана; клиенты заносятся в
                         banned_clients и автоматически разбаниваются после истечения времени.
