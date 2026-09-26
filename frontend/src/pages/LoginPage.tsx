@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import Spinner from '@/components/ui/Spinner'
 import ServerUnavailableScreen from '@/components/ServerUnavailableScreen'
+import SettingsAlert from '@/components/settings/SettingsAlert'
 import { readLoginRedirectParams } from '@/lib/loginRedirectParams'
 import { useAuth } from '@/context/AuthContext'
 import { useNotifications } from '@/context/NotificationContext'
@@ -35,7 +36,7 @@ function resolveApiBase(): string {
 }
 
 export default function LoginPage() {
-  const { user, login, loading, setToken, unavailable, retry } = useAuth()
+  const { user, login, loading, setToken, unavailable, retry, sessionEnded } = useAuth()
   const { error: notifyError } = useNotifications()
   const [searchParams] = useSearchParams()
   const [username, setUsername] = useState('')
@@ -250,6 +251,11 @@ export default function LoginPage() {
           <CardDescription>Панель администрирования</CardDescription>
         </CardHeader>
         <CardContent className="min-w-0">
+          {sessionEnded && (
+            <SettingsAlert variant="info" className="mb-4">
+              Сессия завершена: срок входа истёк или сессию отозвали. Войдите снова.
+            </SettingsAlert>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="username">Логин</Label>

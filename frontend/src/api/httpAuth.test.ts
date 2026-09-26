@@ -7,6 +7,7 @@ import {
   refreshAccessToken,
 } from './http'
 import * as accessToken from '@/lib/accessToken'
+import { onSessionLost } from '@/lib/sessionLost'
 import * as webSession from '@/lib/webSession'
 
 describe('isNodeAgentAuthFailureDetail', () => {
@@ -219,5 +220,69 @@ describe('refreshAccessToken keeps the session when the server is unavailable', 
 
     await expect(apiFetchAtBase('/api', '/configs', {}, true)).rejects.toMatchObject({ status: 502 })
     expect(clearSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('final session loss is reported once for every caller', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('reports a refused refresh', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"detail":"expired"}', { status: 401 })))
+    const listener = vi.fn()
+    const unsubscribe = onSessionLost(listener)
+
+    await expect(Promise.all([refreshAccessToken(), refreshAccessToken()])).resolves.toEqual([null, null])
+    unsubscribe()
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not report an unavailable server or a successful refresh', async () => {
+    const listener = vi.fn()
+    const unsubscribe = onSessionLost(listener)
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(new Response('', { status: 502 })))
+    await expect(refreshAccessToken()).rejects.toMatchObject({ status: 502 })
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new TypeError('Failed to fetch')))
+    await expect(refreshAccessToken()).rejects.toMatchObject({ status: 0 })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 't' }), { status: 200 })),
+    )
+    await expect(refreshAccessToken()).resolves.toBe('t')
+    unsubscribe()
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('apiFetch reports the loss when the session cannot be renewed', async () => {
+    vi.spyOn(accessToken, 'getAccessToken').mockReturnValue('old-jwt')
+    vi.spyOn(webSession, 'getWebSessionId').mockReturnValue(null)
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response('{"detail":"Not authenticated"}', { status: 401 }))
+        .mockResolvedValueOnce(new Response('{"detail":"expired"}', { status: 401 })),
+    )
+    const listener = vi.fn()
+    const unsubscribe = onSessionLost(listener)
+
+    await expect(apiFetchAtBase('/api', '/configs', {}, true)).rejects.toMatchObject({ status: 401 })
+    unsubscribe()
+
+    expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops notifying after unsubscribe', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })))
+    const listener = vi.fn()
+    onSessionLost(listener)()
+
+    await refreshAccessToken()
+
+    expect(listener).not.toHaveBeenCalled()
   })
 })

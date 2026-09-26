@@ -7,6 +7,7 @@ import {
   isActiveNodeChangedPayload,
   notifyActiveNodeChanged,
 } from '@/lib/expectedNode'
+import { notifySessionLost } from '@/lib/sessionLost'
 import { getWebSessionId } from '@/lib/webSession'
 
 export class ApiError extends Error {
@@ -75,6 +76,7 @@ export async function refreshAccessToken(): Promise<string | null> {
             throw new ApiError(parseHttpErrorBody(await response.text(), response.status), response.status)
           }
           clearAccessToken()
+          notifySessionLost()
           return null
         }
         const data = await response.json()
