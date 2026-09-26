@@ -29,6 +29,8 @@ import {
 import DiffPanel from '@/components/edit-files/DiffPanel'
 import TransferFilesDialog from '@/components/edit-files/TransferFilesDialog'
 import { formatBytes } from '@/lib/trafficFormat'
+import { editorMatchesTarget, loadEditFile, type LoadedEditFile } from '@/lib/editFileTarget'
+import { useLatestRequest } from '@/hooks/useLatestRequest'
 import { NodeBadge } from '@/components/NodeSelector'
 import { SettingsCollapsible } from '@/components/settings/SettingsChrome'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -208,6 +210,12 @@ export default function EditFilesPage() {
   const [transferOpen, setTransferOpen] = useState(false)
   const [transferLoading, setTransferLoading] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [loadedFile, setLoadedFile] = useState<LoadedEditFile | null>(null)
+
+  const activeNodeId = activeNode?.id ?? null
+  const listRequests = useLatestRequest(activeNodeId)
+  const fileRequests = useLatestRequest(activeNodeId)
+  const editorInSync = editorMatchesTarget(loadedFile, activeKey, activeNodeId)
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeReadonly = nodeOffline || haReplicaReadonly
@@ -269,8 +277,10 @@ export default function EditFilesPage() {
     setLoading(true)
     setLoadError(null)
     startGlobal()
+    const isCurrent = listRequests.begin()
     try {
       const list = await getEditFiles()
+      if (!isCurrent()) return
       setFiles(list)
       const fileParam = searchParams.get('file')
       const validParam = fileParam && list.some((f) => f.key === fileParam) ? fileParam : null
@@ -280,36 +290,40 @@ export default function EditFilesPage() {
         return list[0]?.key ?? null
       })
     } catch (err) {
+      if (!isCurrent()) return
       const message = err instanceof ApiError ? err.message : 'Ошибка загрузки списка файлов'
       setLoadError(message)
       notifyError(message)
     } finally {
-      setLoading(false)
+      if (isCurrent()) setLoading(false)
       doneGlobal()
     }
-  }, [doneGlobal, notifyError, searchParams, startGlobal])
+  }, [doneGlobal, listRequests, notifyError, searchParams, startGlobal])
 
   const loadFileContent = useCallback(
-    async (key: string) => {
+    (key: string) => {
       setFileLoading(true)
       setFileError(null)
-      try {
-        const result = await getEditFileContent(key)
-        setContent(result.content)
-        setSavedContent(result.content)
-        setDiffOpen(false)
-        resetDiffBaseline()
-      } catch (err) {
-        const message = err instanceof ApiError ? err.message : 'Ошибка чтения файла'
-        setFileError(message)
-        setContent('')
-        setSavedContent('')
-        notifyError(message)
-      } finally {
-        setFileLoading(false)
-      }
+      return loadEditFile(fileRequests, key, activeNodeId, getEditFileContent, {
+        apply: (loaded, text) => {
+          setContent(text)
+          setSavedContent(text)
+          setLoadedFile(loaded)
+          setDiffOpen(false)
+          resetDiffBaseline()
+        },
+        fail: (err) => {
+          const message = err instanceof ApiError ? err.message : 'Ошибка чтения файла'
+          setFileError(message)
+          setContent('')
+          setSavedContent('')
+          setLoadedFile(null)
+          notifyError(message)
+        },
+        settle: () => setFileLoading(false),
+      })
     },
-    [notifyError, resetDiffBaseline],
+    [activeNodeId, fileRequests, notifyError, resetDiffBaseline],
   )
 
   useEffect(() => {
@@ -358,7 +372,7 @@ export default function EditFilesPage() {
   }
 
   const handleSaveOnly = async () => {
-    if (!activeKey || !isAdmin) return
+    if (!activeKey || !isAdmin || !editorInSync) return
     setSaving(true)
     try {
       await withInline(
@@ -376,7 +390,7 @@ export default function EditFilesPage() {
   }
 
   const handleSaveApply = async () => {
-    if (!activeKey || !isAdmin) return
+    if (!activeKey || !isAdmin || !editorInSync) return
     setConfirmApply(false)
     setSaving(true)
     try {
@@ -400,13 +414,15 @@ export default function EditFilesPage() {
   const handleCompareWithDisk = async () => {
     if (!activeKey || nodeOffline || fileLoading) return
     setDiskCompareLoading(true)
+    const isCurrent = fileRequests.begin()
     try {
       const result = await getEditFileContent(activeKey)
+      if (!isCurrent()) return
       setDiskContent(result.content)
       setDiffBaseline('disk')
       setDiffOpen(true)
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка чтения файла с узла')
+      if (isCurrent()) notifyError(err instanceof ApiError ? err.message : 'Ошибка чтения файла с узла')
     } finally {
       setDiskCompareLoading(false)
     }
@@ -787,7 +803,7 @@ export default function EditFilesPage() {
                       size="sm"
                       className="w-full sm:w-auto"
                       onClick={handleSaveOnly}
-                      disabled={!hasUnsavedChanges || saving || nodeReadonly}
+                      disabled={!hasUnsavedChanges || saving || nodeReadonly || !editorInSync}
                       title="Записать на сервер без обновления VPN"
                       aria-label="Сохранить"
                     >
@@ -798,7 +814,7 @@ export default function EditFilesPage() {
                       size="sm"
                       className="w-full sm:w-auto"
                       onClick={() => setConfirmApply(true)}
-                      disabled={!hasUnsavedChanges || saving || nodeReadonly}
+                      disabled={!hasUnsavedChanges || saving || nodeReadonly || !editorInSync}
                       title="Записать и обновить правила VPN"
                     >
                       {saving ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
@@ -862,7 +878,7 @@ export default function EditFilesPage() {
         files={files}
         activeFileKey={activeKey}
         editorContent={content}
-        hasUnsavedChanges={hasUnsavedChanges}
+        hasUnsavedChanges={hasUnsavedChanges && editorInSync}
         loading={transferLoading}
         onTransfer={handleTransfer}
       />
