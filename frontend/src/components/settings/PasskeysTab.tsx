@@ -9,7 +9,9 @@ import {
   verifyPasskeyRegister,
 } from '@/api/client'
 import { formatDateTime } from '@/lib/datetime'
+import { passkeyDeleteConfirm } from '@/lib/passkeyConfirm'
 import { registerPasskey } from '@/lib/passkeys'
+import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -17,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { useNotifications } from '@/context/NotificationContext'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { cn } from '@/lib/utils'
 import type { PasskeyCredential } from '@/api/client'
 
@@ -31,6 +34,7 @@ function ListRow({ children, action }: { children: ReactNode; action?: ReactNode
 
 export default function PasskeysTab({ className }: { className?: string }) {
   const { success, error: notifyError } = useNotifications()
+  const { confirm, dialogProps } = useConfirmDialog()
   const [credentials, setCredentials] = useState<PasskeyCredential[]>([])
   const [loading, setLoading] = useState(false)
   const [nickname, setNickname] = useState('')
@@ -76,6 +80,14 @@ export default function PasskeysTab({ className }: { className?: string }) {
     } finally {
       setLoading(false)
     }
+  }
+
+  const confirmDelete = (item: PasskeyCredential) => {
+    confirm({
+      ...passkeyDeleteConfirm(item.nickname),
+      destructive: true,
+      onConfirm: () => handleDelete(item.id),
+    })
   }
 
   const handleRename = async (id: number, current: string) => {
@@ -154,7 +166,7 @@ export default function PasskeysTab({ className }: { className?: string }) {
                       variant="outline"
                       size="icon"
                       className="h-8 w-8 border-destructive/30 text-destructive hover:bg-destructive/10"
-                      onClick={() => void handleDelete(item.id)}
+                      onClick={() => confirmDelete(item)}
                       disabled={loading}
                       title="Удалить"
                     >
@@ -184,6 +196,7 @@ export default function PasskeysTab({ className }: { className?: string }) {
           </p>
         )}
       </CardContent>
+      <ConfirmDialogHost dialogProps={dialogProps} />
     </Card>
   )
 }

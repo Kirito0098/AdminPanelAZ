@@ -36,6 +36,7 @@ import {
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import SecretsRotationWizard from '@/components/settings/SecretsRotationWizard'
 import { SettingsCollapsible, SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
+import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -52,9 +53,11 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { useNotifications } from '@/context/NotificationContext'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { formatDateTime } from '@/lib/datetime'
 import { LABEL_LAST_SEEN } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
+import { webSessionRevokeConfirm } from '@/lib/webSessionConfirm'
 import type { ActiveWebSession, AuditStreamSettings, EventWebhookSettings, ScannerBan, SecuritySettings } from '@/types'
 
 function ToggleRow({
@@ -137,6 +140,7 @@ const TEMP_HOURS = [1, 12, 24] as const
 
 export default function SecurityTab() {
   const { success, error: notifyError } = useNotifications()
+  const { confirm, dialogProps } = useConfirmDialog()
   const [settings, setSettings] = useState<SecuritySettings | null>(null)
   const [allowedIps, setAllowedIps] = useState('')
   const [bans, setBans] = useState<ScannerBan[]>([])
@@ -254,6 +258,27 @@ export default function SecurityTab() {
     } finally {
       setClearingBans(false)
     }
+  }
+
+  const handleRevokeSession = async (sessionId: string) => {
+    setRevokingSession(sessionId)
+    try {
+      await revokeActiveWebSession(sessionId)
+      success('Сессия отозвана')
+      await load()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка отзыва сессии')
+    } finally {
+      setRevokingSession(null)
+    }
+  }
+
+  const confirmRevokeSession = (session: ActiveWebSession) => {
+    confirm({
+      ...webSessionRevokeConfirm(session),
+      destructive: true,
+      onConfirm: () => handleRevokeSession(session.session_id),
+    })
   }
 
   const handleAddTempWhitelist = async (ip?: string) => {
@@ -644,18 +669,7 @@ export default function SecurityTab() {
                         variant="outline"
                         className="gap-1.5"
                         disabled={revokingSession === s.session_id}
-                        onClick={async () => {
-                          setRevokingSession(s.session_id)
-                          try {
-                            await revokeActiveWebSession(s.session_id)
-                            success('Сессия отозвана')
-                            await load()
-                          } catch (err) {
-                            notifyError(err instanceof ApiError ? err.message : 'Ошибка отзыва сессии')
-                          } finally {
-                            setRevokingSession(null)
-                          }
-                        }}
+                        onClick={() => confirmRevokeSession(s)}
                       >
                         <LogOut size={14} />
                         {revokingSession === s.session_id ? '…' : 'Отозвать'}
@@ -1019,6 +1033,8 @@ export default function SecurityTab() {
       </SettingsCollapsible>
 
       <SecretsRotationWizard />
+
+      <ConfirmDialogHost dialogProps={dialogProps} />
     </div>
   )
 }

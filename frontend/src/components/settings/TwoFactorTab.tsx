@@ -8,6 +8,7 @@ import {
   regenerate2FABackupCodes,
   setup2FA,
 } from '@/api/client'
+import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,6 +16,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { useNotifications } from '@/context/NotificationContext'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
+import { twoFactorBackupCodesConfirm } from '@/lib/twoFactorConfirm'
 import { cn } from '@/lib/utils'
 
 function formatSecretForDisplay(secret: string): string {
@@ -23,12 +26,15 @@ function formatSecretForDisplay(secret: string): string {
 
 export default function TwoFactorTab({ className }: { className?: string }) {
   const { success, error: notifyError } = useNotifications()
+  const { confirm, dialogProps } = useConfirmDialog()
   const [enabled, setEnabled] = useState(false)
   const [backupRemaining, setBackupRemaining] = useState(0)
   const [setupData, setSetupData] = useState<{ secret: string; qr_data_url: string } | null>(null)
   const [verifyCode, setVerifyCode] = useState('')
   const [backupCodes, setBackupCodes] = useState<string[]>([])
+  const [regenerateArmed, setRegenerateArmed] = useState(false)
   const [loading, setLoading] = useState(false)
+  const backupCodesConfirm = twoFactorBackupCodesConfirm(backupRemaining)
 
   const load = async () => {
     try {
@@ -95,6 +101,7 @@ export default function TwoFactorTab({ className }: { className?: string }) {
       const res = await regenerate2FABackupCodes(verifyCode)
       setBackupCodes(res.backup_codes)
       setVerifyCode('')
+      setRegenerateArmed(false)
       success('Резервные коды обновлены')
       await load()
     } catch (err) {
@@ -102,6 +109,22 @@ export default function TwoFactorTab({ className }: { className?: string }) {
     } finally {
       setLoading(false)
     }
+  }
+
+  const confirmRegenerate = () => {
+    confirm({
+      ...backupCodesConfirm,
+      destructive: true,
+      onConfirm: () => {
+        setVerifyCode('')
+        setRegenerateArmed(true)
+      },
+    })
+  }
+
+  const cancelRegenerate = () => {
+    setVerifyCode('')
+    setRegenerateArmed(false)
   }
 
   const handleCopySecret = async () => {
@@ -191,15 +214,27 @@ export default function TwoFactorTab({ className }: { className?: string }) {
                 placeholder="123456 или резервный код"
                 className="font-mono"
               />
+              {regenerateArmed && <p className="text-xs text-muted-foreground">{backupCodesConfirm.codeHint}</p>}
             </div>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="destructive" onClick={handleDisable} disabled={loading}>
-                Отключить защиту входа
-              </Button>
-              <Button variant="outline" onClick={handleRegenerate} disabled={loading}>
-                Новые резервные коды
-              </Button>
-            </div>
+            {regenerateArmed ? (
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={handleRegenerate} disabled={loading || !verifyCode}>
+                  {backupCodesConfirm.submitLabel}
+                </Button>
+                <Button variant="outline" onClick={cancelRegenerate} disabled={loading}>
+                  Отмена
+                </Button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                <Button variant="destructive" onClick={handleDisable} disabled={loading}>
+                  Отключить защиту входа
+                </Button>
+                <Button variant="outline" onClick={confirmRegenerate} disabled={loading}>
+                  Новые резервные коды
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
@@ -216,6 +251,7 @@ export default function TwoFactorTab({ className }: { className?: string }) {
           </div>
         )}
       </CardContent>
+      <ConfirmDialogHost dialogProps={dialogProps} />
     </Card>
   )
 }
