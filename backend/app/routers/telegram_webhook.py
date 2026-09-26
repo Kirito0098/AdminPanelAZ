@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.config import get_settings
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import User
 from app.services.app_setting_store import _get_setting
 from app.schemas import TelegramBotInfoResponse, TelegramLinkCodeResponse
@@ -100,17 +100,22 @@ async def telegram_webhook(
 
     # A non-2xx reply makes Telegram redeliver the update, re-running restore/reboot actions.
     try:
-        await run_on_bot_loop(
-            telegram_bot_service.handle_update(
-                db,
-                update,
-                mini_app_url=_mini_app_url(request),
-            )
-        )
+        await run_on_bot_loop(_handle_update(update, mini_app_url=_mini_app_url(request)))
     except Exception:
-        db.rollback()
         logger.exception("Telegram update %s handling failed", update_id)
     return {"ok": True}
+
+
+async def _handle_update(update: dict, *, mini_app_url: str) -> None:
+    # Runs on the bot thread and may outlive the webhook request, so it cannot share the request session.
+    db = SessionLocal()
+    try:
+        await telegram_bot_service.handle_update(db, update, mini_app_url=mini_app_url)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 @router.get("/bot-info", response_model=TelegramBotInfoResponse)

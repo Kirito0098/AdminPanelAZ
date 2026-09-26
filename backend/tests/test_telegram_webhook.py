@@ -57,6 +57,7 @@ def test_webhook_allows_missing_secret_header_legacy(monkeypatch):
         lambda request, behind_nginx: "https://panel.example",
     )
 
+    monkeypatch.setattr(tw, "SessionLocal", MagicMock)
     handle = AsyncMock()
     monkeypatch.setattr(tw.telegram_bot_service, "handle_update", handle)
 
@@ -146,6 +147,7 @@ def test_webhook_happy_path_skips_full_settings_dto(monkeypatch):
         lambda request, behind_nginx: "https://panel.example",
     )
 
+    monkeypatch.setattr(tw, "SessionLocal", MagicMock)
     handle = AsyncMock()
     monkeypatch.setattr(tw.telegram_bot_service, "handle_update", handle)
 

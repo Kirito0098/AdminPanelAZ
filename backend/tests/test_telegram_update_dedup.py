@@ -48,6 +48,7 @@ def webhook(monkeypatch):
     monkeypatch.setattr(tw, "consume_webhook_rate_limit", lambda _ip: None)
     monkeypatch.setattr(tw, "get_settings", lambda: SimpleNamespace(behind_nginx=True))
     monkeypatch.setattr(tw, "resolve_request_url_root", lambda request, behind_nginx: "https://panel.example")
+    monkeypatch.setattr(tw, "SessionLocal", MagicMock)
     handle = AsyncMock()
     monkeypatch.setattr(tw.telegram_bot_service, "handle_update", handle)
     return handle

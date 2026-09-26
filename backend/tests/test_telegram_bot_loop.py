@@ -82,7 +82,19 @@ def test_started_action_survives_caller_cancellation():
     assert finished.wait(1), "a restore or reboot must not be cut off when Telegram drops the request"
 
 
-def test_webhook_handles_update_on_bot_loop(monkeypatch):
+class _FakeSession:
+    def __init__(self):
+        self.closed = threading.Event()
+        self.rolled_back = False
+
+    def rollback(self):
+        self.rolled_back = True
+
+    def close(self):
+        self.closed.set()
+
+
+def _allow_webhook(monkeypatch):
     monkeypatch.setattr(tw, "_ensure_telegram_module", lambda: None)
     monkeypatch.setattr(
         tw,
@@ -98,15 +110,76 @@ def test_webhook_handles_update_on_bot_loop(monkeypatch):
     monkeypatch.setattr(tw, "claim_telegram_update", lambda _db, _id: True)
     monkeypatch.setattr(tw, "get_settings", lambda: SimpleNamespace(behind_nginx=True))
     monkeypatch.setattr(tw, "resolve_request_url_root", lambda request, behind_nginx: "https://panel.example")
+    request = MagicMock()
+    request.headers.get = MagicMock(return_value=SECRET)
+    request.json = AsyncMock(return_value={"update_id": 1, "message": {}})
+    return request
+
+
+def test_webhook_handles_update_on_bot_loop(monkeypatch):
+    request = _allow_webhook(monkeypatch)
+    monkeypatch.setattr(tw, "SessionLocal", _FakeSession)
     threads: list[str] = []
 
     async def handle_update(_db, _update, *, mini_app_url):
         threads.append(threading.current_thread().name)
 
     monkeypatch.setattr(tw.telegram_bot_service, "handle_update", handle_update)
-    request = MagicMock()
-    request.headers.get = MagicMock(return_value=SECRET)
-    request.json = AsyncMock(return_value={"update_id": 1, "message": {}})
 
     assert asyncio.run(tw.telegram_webhook(SECRET, request, MagicMock())) == {"ok": True}
     assert threads == [BOT_THREAD_NAME]
+
+
+def test_bot_uses_own_session_that_outlives_a_dropped_request(monkeypatch):
+    """The request session is closed when the request ends; the bot may still be working."""
+    request = _allow_webhook(monkeypatch)
+    sessions: list[_FakeSession] = []
+
+    def session_factory():
+        sessions.append(_FakeSession())
+        return sessions[-1]
+
+    monkeypatch.setattr(tw, "SessionLocal", session_factory)
+    request_db = MagicMock()
+    started = threading.Event()
+    handled_with: list[object] = []
+
+    async def handle_update(db, _update, *, mini_app_url):
+        started.set()
+        await asyncio.sleep(0.1)
+        handled_with.append(db)
+        assert not db.closed.is_set()
+
+    monkeypatch.setattr(tw.telegram_bot_service, "handle_update", handle_update)
+
+    async def scenario():
+        caller = asyncio.create_task(tw.telegram_webhook(SECRET, request, request_db))
+        await asyncio.to_thread(started.wait, 1)
+        caller.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+
+    asyncio.run(scenario())
+    assert len(sessions) == 1
+    assert sessions[0].closed.wait(1), "the bot closes its own session when the update is done"
+    assert handled_with == [sessions[0]]
+
+
+def test_bot_session_rolled_back_and_closed_on_handler_error(monkeypatch):
+    request = _allow_webhook(monkeypatch)
+    sessions: list[_FakeSession] = []
+
+    def session_factory():
+        sessions.append(_FakeSession())
+        return sessions[-1]
+
+    monkeypatch.setattr(tw, "SessionLocal", session_factory)
+
+    async def handle_update(_db, _update, *, mini_app_url):
+        raise RuntimeError("node unreachable")
+
+    monkeypatch.setattr(tw.telegram_bot_service, "handle_update", handle_update)
+
+    assert asyncio.run(tw.telegram_webhook(SECRET, request, MagicMock())) == {"ok": True}
+    assert sessions[0].rolled_back
+    assert sessions[0].closed.is_set()
