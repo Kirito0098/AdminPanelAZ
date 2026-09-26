@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, BarChart3 } from 'lucide-react'
 import { getWarperTraffic } from '@/api/client'
 import StatusPanel from '@/components/noc/StatusPanel'
@@ -9,7 +9,9 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { formatDate, formatTime } from '@/lib/datetime'
 import type { WarperHealthResponse } from '@/types'
-import WarperTrafficChart, { type WarperTrafficChartPoint } from './WarperTrafficChart'
+import type { WarperTrafficChartPoint } from './WarperTrafficChart'
+
+const WarperTrafficChart = lazy(() => import('./WarperTrafficChart'))
 import { WarperStatTile } from './WarperSection'
 import { formatBytes } from './utils'
 
@@ -239,7 +241,9 @@ export default function TrafficTab({ health, embedded = false, hideTitle = false
                 </p>
               </div>
             </div>
-            <WarperTrafficChart points={chartPoints} embedded={embedded} />
+            <Suspense fallback={<Spinner />}>
+              <WarperTrafficChart points={chartPoints} embedded={embedded} />
+            </Suspense>
           </div>
 
           {summary && (

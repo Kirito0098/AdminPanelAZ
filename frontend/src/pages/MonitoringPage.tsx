@@ -26,7 +26,8 @@ import {
   restartService,
 } from '@/api/client'
 import GeoRoutingHintBanner from '@/components/dashboard/GeoRoutingHintBanner'
-import MonitoringCharts, { formatBytes, totalTraffic } from '@/components/monitoring/MonitoringCharts'
+import MonitoringCharts from '@/components/monitoring/MonitoringCharts'
+import { formatBytes, totalTraffic } from '@/lib/trafficFormat'
 import MonitoringConnectionsList, {
   buildMonitoringConnectionRows,
 } from '@/components/monitoring/MonitoringConnectionsList'

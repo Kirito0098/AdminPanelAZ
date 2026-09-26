@@ -23,7 +23,7 @@ import {
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import { MONITORING_PROTOCOL_COLORS } from '@/components/monitoring/monitoringChartTheme'
 import { getTrafficClientSessions } from '@/api/client'
-import { formatBytes } from '@/components/monitoring/MonitoringCharts'
+import { formatBytes } from '@/lib/trafficFormat'
 import TrafficPeriodControls, {
   CHART_PERIOD_PRESETS,
   type TrafficPeriodPreset,

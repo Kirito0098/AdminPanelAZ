@@ -28,7 +28,7 @@ import {
 } from '@/api/client'
 import DiffPanel from '@/components/edit-files/DiffPanel'
 import TransferFilesDialog from '@/components/edit-files/TransferFilesDialog'
-import { formatBytes } from '@/components/monitoring/MonitoringCharts'
+import { formatBytes } from '@/lib/trafficFormat'
 import { NodeBadge } from '@/components/NodeSelector'
 import { SettingsCollapsible } from '@/components/settings/SettingsChrome'
 import SettingsAlert from '@/components/settings/SettingsAlert'

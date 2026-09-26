@@ -9,6 +9,7 @@
     "build": "vite build",
     "build:tg-mini": "vite build --mode tg-mini && mv ../backend/app/static/tg_mini/tg-mini.html ../backend/app/static/tg_mini/index.html && sed -i 's/ crossorigin//g' ../backend/app/static/tg_mini/index.html && sed -i 's/type=\"module\" //g' ../backend/app/static/tg_mini/index.html",
     "build:all": "npm run build && npm run build:tg-mini",
+    "check:bundle": "node scripts/check-entry-chunks.mjs dist",
     "preview": "vite preview",
     "lint": "eslint . --quiet",
     "typecheck": "tsc --noEmit",

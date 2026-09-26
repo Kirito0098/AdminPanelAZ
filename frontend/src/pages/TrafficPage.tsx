@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import {
   Activity,
@@ -33,8 +33,7 @@ import {
 } from '@/api/client'
 import { getRetentionSettings } from '@/api/settings'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
-import { formatBytes } from '@/components/monitoring/MonitoringCharts'
-import TrafficClientDetails from '@/components/traffic/TrafficClientDetails'
+import { formatBytes } from '@/lib/trafficFormat'
 import TrafficPeriodControls, {
   type TrafficPeriodPreset,
 } from '@/components/traffic/TrafficPeriodControls'
@@ -83,6 +82,7 @@ import {
   validateCustomRange,
 } from '@/lib/trafficPeriod'
 import { cn } from '@/lib/utils'
+import type { TrafficClientDetailsProps } from '@/components/traffic/TrafficClientDetails'
 import type {
   ClientAccessPolicy,
   TrafficChartData,
@@ -92,6 +92,16 @@ import type {
 } from '@/types'
 
 const REFRESH_INTERVAL = 60
+
+const LazyTrafficClientDetails = lazy(() => import('@/components/traffic/TrafficClientDetails'))
+
+function TrafficClientDetails(props: TrafficClientDetailsProps) {
+  return (
+    <Suspense fallback={<Spinner label="Загрузка графика..." className="py-8" />}>
+      <LazyTrafficClientDetails {...props} />
+    </Suspense>
+  )
+}
 
 function isPageReload() {
   const nav = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined

@@ -105,6 +105,10 @@ jobs:
         working-directory: frontend
         run: npm run build:all
 
+      - name: Charts stay out of the initial bundle
+        working-directory: frontend
+        run: npm run check:bundle
+
       - name: npm audit
         working-directory: frontend
         run: npm audit --audit-level=high
