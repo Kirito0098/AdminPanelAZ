@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -635,6 +635,78 @@ def clear_access_expired_for_user(db: Session, user: User, *, actor: str, commit
             replicate_errors=replicate_errors,
         ),
     }
+
+
+def extend_owned_clients_for_redeem(
+    db: Session,
+    user: User,
+    *,
+    now: datetime,
+    days: int,
+    protocols: set[str],
+    actor: str,
+) -> tuple[datetime | None, list[tuple[int, str, str, VpnType, datetime]]]:
+    """Promo redeem in the user portal: deadlines only grow.
+
+    With a subscription it moves to ``max(now, subscription) + days`` and every limited client
+    deadline is raised to at least it. Without one, each limited client deadline in ``protocols``
+    moves to ``max(now, deadline) + days``. Unlimited clients stay unlimited, longer deadlines stay.
+    Returns the new subscription deadline and ``(node_id, protocol, config_client_name, vpn_type,
+    access_until)`` for every written policy. Writes are flushed, not committed.
+    """
+    current = get_user_access_until(user)
+    user_until: datetime | None = None
+    if current is not None:
+        user_until = max(now, current) + timedelta(days=days)
+        user.access_until = _to_db_datetime(user_until)
+        db.add(user)
+
+    changed: list[tuple[int, str, str, VpnType, datetime]] = []
+    for config in _owned_configs(db, user.id):
+        protocol = _VPN_PROTOCOLS.get(config.vpn_type)
+        if protocol is None or (user_until is None and protocol not in protocols):
+            continue
+        row = _policy_row(db, protocol=protocol, node_id=config.node_id, client_name=config.client_name)
+        deadline = _row_access_until(protocol, row)
+        if deadline is None:
+            continue
+        if user_until is not None:
+            new_until = max(deadline, user_until)
+        else:
+            new_until = max(now, deadline) + timedelta(days=days)
+        if new_until == deadline:
+            continue
+        set_access_until(
+            db,
+            protocol,
+            config.node_id,
+            _policy_client_name(protocol, config.client_name),
+            new_until,
+            actor=actor,
+            commit=False,
+        )
+        changed.append((config.node_id, protocol, config.client_name, config.vpn_type, new_until))
+    db.flush()
+    return user_until, changed
+
+
+def replicate_access_until_changes(
+    db: Session,
+    changes: list[tuple[int, str, str, VpnType, datetime]],
+    *,
+    actor: str,
+) -> list[dict]:
+    errors: list[dict] = []
+    for node_id, protocol, client_name, vpn_type, access_until in changes:
+        errors.extend(
+            _replicate_access_until_queue(
+                db,
+                queued_configs=[(node_id, protocol, client_name, vpn_type)],
+                access_until=access_until,
+                actor=actor,
+            )
+        )
+    return errors
 
 
 def set_user_access_until(

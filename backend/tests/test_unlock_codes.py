@@ -518,12 +518,9 @@ def test_redeem_unlock_code_same_client_name_on_different_nodes_ok(db):
     assert first["grant_days"] == 5
     assert second["grant_days"] == 5
     assert db.query(UnlockCodeRedemption).filter_by(client_name="alice").count() == 2
-    assert (
-        db.query(UnlockCodeRedemption).filter_by(client_name="alice", node_id=node_a.id, user_id=owner_a.id).count() == 1
-    )
-    assert (
-        db.query(UnlockCodeRedemption).filter_by(client_name="alice", node_id=node_b.id, user_id=owner_b.id).count() == 1
-    )
+    # Погашение из портала клиента записывается на клиента, а не на владельца.
+    assert db.query(UnlockCodeRedemption).filter_by(client_name="alice", node_id=node_a.id, user_id=None).count() == 1
+    assert db.query(UnlockCodeRedemption).filter_by(client_name="alice", node_id=node_b.id, user_id=None).count() == 1
 
 
 def test_redeem_unlock_code_rolls_back_on_protocol_failure(db):
@@ -1036,7 +1033,7 @@ def test_redeem_owner_extends_user_and_all_owned_clients(db):
         patch("app.services.unlock_codes._now", return_value=fixed_now),
         patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()),
     ):
-        result = redeem_unlock_code(db, code="OWNER-LVL-01", client_name="Alice", node_id=node.id)
+        result = redeem_unlock_code(db, code="OWNER-LVL-01", client_name="Alice", node_id=node.id, user_id=owner.id)
 
     expected_until = fixed_now + timedelta(days=9)
     db.refresh(owner)
@@ -1113,7 +1110,7 @@ def test_redeem_owner_rollback_defers_reconcile_until_commit(db):
             patch("app.services.user_subscription._reconcile_access_until") as reconcile,
         ):
             with pytest.raises(ValueError, match="Не удалось активировать unlock-ключ"):
-                redeem_unlock_code(db, code="OWNER-ROLLBACK", client_name="Alice", node_id=node.id)
+                redeem_unlock_code(db, code="OWNER-ROLLBACK", client_name="Alice", node_id=node.id, user_id=owner.id)
     finally:
         db.commit = orig_commit  # type: ignore[method-assign]
 
@@ -1311,3 +1308,149 @@ def test_unlock_codes_admin_routes_rejects_short_custom_code():
 
     db.close()
     engine.dispose()
+
+
+_OWNER_NOW = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
+
+
+def _naive(value: datetime | None) -> datetime | None:
+    return value.replace(tzinfo=None) if value is not None else None
+
+
+def _owned_client(db, node_id: int, owner_id: int, name: str, until: datetime | None, **block) -> None:
+    _make_configs(db, node_id, owner_id, name, [VpnType.openvpn])
+    db.add(OpenVpnAccessPolicy(node_id=node_id, client_name=name, access_until=_naive(until), **block))
+    db.commit()
+
+
+def _ovpn_until(db, node_id: int, name: str) -> datetime | None:
+    return db.query(OpenVpnAccessPolicy).filter_by(node_id=node_id, client_name=name).one().access_until
+
+
+def _owner_code(db, creator, code: str, *, days: int = 30, max_redemptions: int = 5) -> UnlockCode:
+    return create_unlock_code(
+        db,
+        grant_days=days,
+        protocols=["openvpn"],
+        mode="multi",
+        max_redemptions=max_redemptions,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=creator,
+        code=code,
+    )
+
+
+def _redeem_at_owner_now(db, **kwargs):
+    with (
+        patch("app.services.unlock_codes._now", return_value=_OWNER_NOW),
+        patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()),
+    ):
+        return redeem_unlock_code(db, **kwargs)
+
+
+def test_client_portal_redeem_extends_only_that_client_of_an_owner(db):
+    node = _make_node(db)
+    owner = _make_user(db, username="claymore")
+    owner.access_until = _naive(_OWNER_NOW + timedelta(days=100))
+    db.commit()
+    _owned_client(db, node.id, owner.id, "Alina", _OWNER_NOW + timedelta(days=2))
+    _owned_client(db, node.id, owner.id, "Unlimited", None)
+    _owned_client(db, node.id, owner.id, "Longer", _OWNER_NOW + timedelta(days=200))
+    code = _owner_code(db, owner, "CLIENT-ONLY-01")
+
+    _redeem_at_owner_now(db, code="CLIENT-ONLY-01", client_name="Alina", node_id=node.id)
+
+    db.refresh(owner)
+    assert owner.access_until == _naive(_OWNER_NOW + timedelta(days=100))
+    assert _ovpn_until(db, node.id, "Alina") == _naive(_OWNER_NOW + timedelta(days=32))
+    assert _ovpn_until(db, node.id, "Unlimited") is None
+    assert _ovpn_until(db, node.id, "Longer") == _naive(_OWNER_NOW + timedelta(days=200))
+    redemption = db.query(UnlockCodeRedemption).filter_by(code_id=code.id).one()
+    assert (redemption.user_id, redemption.client_name) == (None, "alina")
+
+    # Другой клиент того же владельца погашает тот же многоразовый код.
+    _redeem_at_owner_now(db, code="CLIENT-ONLY-01", client_name="Longer", node_id=node.id)
+    assert _ovpn_until(db, node.id, "Longer") == _naive(_OWNER_NOW + timedelta(days=230))
+
+
+def test_user_portal_redeem_extends_subscription_without_shortening_clients(db):
+    node = _make_node(db)
+    owner = _make_user(db, username="novikov", role=UserRole.user)
+    owner.access_until = _naive(_OWNER_NOW + timedelta(days=2))
+    db.commit()
+    _owned_client(
+        db, node.id, owner.id, "Expired", _OWNER_NOW - timedelta(days=1), is_temp_blocked=True,
+        block_reason="access_expired",
+    )
+    _owned_client(db, node.id, owner.id, "Unlimited", None)
+    _owned_client(db, node.id, owner.id, "Longer", _OWNER_NOW + timedelta(days=200))
+    _owner_code(db, owner, "USER-SUB-01", days=7)
+
+    with patch("app.services.node_sync.policy_sync.maybe_replicate_policy_op") as replicate:
+        result = _redeem_at_owner_now(
+            db, code="USER-SUB-01", client_name="Expired", node_id=node.id, user_id=owner.id
+        )
+
+    expected = _OWNER_NOW + timedelta(days=9)
+    assert [(c.kwargs["client_name"], c.kwargs["access_until"]) for c in replicate.call_args_list] == [
+        ("Expired", expected)
+    ]
+    db.refresh(owner)
+    assert owner.access_until == _naive(expected)
+    assert result["access_until_by_protocol"] == {"openvpn": expected.isoformat()}
+    expired_row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Expired").one()
+    assert (expired_row.access_until, expired_row.block_reason) == (_naive(expected), None)
+    assert _ovpn_until(db, node.id, "Unlimited") is None
+    assert _ovpn_until(db, node.id, "Longer") == _naive(_OWNER_NOW + timedelta(days=200))
+    assert db.query(UnlockCodeRedemption).one().user_id == owner.id
+
+
+def test_user_portal_redeem_without_subscription_extends_limited_clients(db):
+    node = _make_node(db)
+    owner = _make_user(db, username="novikov", role=UserRole.user)
+    _owned_client(db, node.id, owner.id, "Limited", _OWNER_NOW + timedelta(days=10))
+    _owned_client(db, node.id, owner.id, "Unlimited", None)
+    _make_configs(db, node.id, owner.id, "WgOnly", [VpnType.wireguard])
+    db.add(WgAccessPolicy(node_id=node.id, client_name="wgonly", expires_at=_naive(_OWNER_NOW + timedelta(days=10))))
+    db.commit()
+    _owner_code(db, owner, "USER-NOSUB-01", days=7)
+
+    _redeem_at_owner_now(db, code="USER-NOSUB-01", client_name="Unlimited", node_id=node.id, user_id=owner.id)
+
+    db.refresh(owner)
+    assert owner.access_until is None
+    assert _ovpn_until(db, node.id, "Limited") == _naive(_OWNER_NOW + timedelta(days=17))
+    assert _ovpn_until(db, node.id, "Unlimited") is None
+    # Код только на OpenVPN: срок WireGuard без подписки не трогается.
+    wg_row = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="wgonly").one()
+    assert wg_row.expires_at == _naive(_OWNER_NOW + timedelta(days=10))
+
+
+def test_user_portal_redeem_with_only_unlimited_clients_keeps_code_unused(db):
+    node = _make_node(db)
+    owner = _make_user(db, username="andrew", role=UserRole.user)
+    _owned_client(db, node.id, owner.id, "Unlimited", None)
+    code = _owner_code(db, owner, "USER-NOTHING-01")
+
+    with pytest.raises(ValueError, match="не ограничен"):
+        _redeem_at_owner_now(db, code="USER-NOTHING-01", client_name="Unlimited", node_id=node.id, user_id=owner.id)
+
+    db.refresh(code)
+    assert code.redemption_count == 0
+    assert db.query(UnlockCodeRedemption).count() == 0
+    assert _ovpn_until(db, node.id, "Unlimited") is None
+
+
+def test_client_name_underscore_is_not_a_wildcard(db):
+    from app.routers.client_access import _owner_for_client as router_owner_for_client
+    from app.services.unlock_codes import _client_config_name_and_protocols
+
+    node = _make_node(db)
+    owner = _make_user(db, username="owner-x", role=UserRole.user)
+    _make_configs(db, node.id, owner.id, "axb", [VpnType.openvpn])
+    db.add(WgAccessPolicy(node_id=node.id, client_name="a%b", expires_at=None))
+    db.commit()
+
+    assert _client_config_name_and_protocols(db, node.id, "a_b") == ("a_b", set())
+    assert router_owner_for_client(db, node_id=node.id, client_name="a_b") is None
+    assert router_owner_for_client(db, node_id=node.id, client_name="AXB").id == owner.id

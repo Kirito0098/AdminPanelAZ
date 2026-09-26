@@ -1130,6 +1130,7 @@ def redeem_public_portal_code(db: Session, resolution: PortalTokenResolution, *,
                 code=code,
                 client_name=client_name,
                 node_id=node_id,
+                user_id=resolution.user_row.user_id,
             )
         except ValueError as exc:
             if str(exc) in retryable_messages:

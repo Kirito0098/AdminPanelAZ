@@ -9,7 +9,7 @@ import secrets
 import string
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -48,6 +48,7 @@ _REDEEM_MANUAL_BLOCK_MESSAGE = (
     "Данный пользователь заблокирован администратором вручную. Обратитесь к администратору."
 )
 _REDEEM_GENERIC_ERROR_MESSAGE = "Не удалось активировать unlock-ключ"
+_REDEEM_NOTHING_TO_EXTEND_MESSAGE = "Срок ваших профилей не ограничен — продлевать нечего"
 
 
 def _now() -> datetime:
@@ -292,7 +293,7 @@ def _client_config_name_and_protocols(db: Session, node_id: int, client_name: st
         db.query(VpnConfig.client_name, VpnConfig.vpn_type)
         .filter(
             VpnConfig.node_id == node_id,
-            VpnConfig.client_name.ilike(client_key),
+            func.lower(VpnConfig.client_name) == client_key,
             VpnConfig.ha_primary_config_id.is_(None),
         )
         .all()
@@ -302,7 +303,7 @@ def _client_config_name_and_protocols(db: Session, node_id: int, client_name: st
         protocols: set[str] = set()
         openvpn_row = (
             db.query(OpenVpnAccessPolicy.client_name)
-            .filter(OpenVpnAccessPolicy.node_id == node_id, OpenVpnAccessPolicy.client_name.ilike(client_key))
+            .filter(OpenVpnAccessPolicy.node_id == node_id, func.lower(OpenVpnAccessPolicy.client_name) == client_key)
             .first()
         )
         if openvpn_row is not None:
@@ -310,14 +311,14 @@ def _client_config_name_and_protocols(db: Session, node_id: int, client_name: st
             protocols.add("openvpn")
         if (
             db.query(WgAccessPolicy.client_name)
-            .filter(WgAccessPolicy.node_id == node_id, WgAccessPolicy.client_name.ilike(client_key))
+            .filter(WgAccessPolicy.node_id == node_id, func.lower(WgAccessPolicy.client_name) == client_key)
             .first()
             is not None
         ):
             protocols.add("wireguard")
         if (
             db.query(AmneziaWg2AccessPolicy.client_name)
-            .filter(AmneziaWg2AccessPolicy.node_id == node_id, AmneziaWg2AccessPolicy.client_name.ilike(client_key))
+            .filter(AmneziaWg2AccessPolicy.node_id == node_id, func.lower(AmneziaWg2AccessPolicy.client_name) == client_key)
             .first()
             is not None
         ):
@@ -329,21 +330,6 @@ def _client_config_name_and_protocols(db: Session, node_id: int, client_name: st
         for (_name, vpn_type) in rows
     }
     return canonical_name, protocols
-
-
-def _owner_for_client(db: Session, node_id: int, client_name: str) -> User | None:
-    client_key = _normalize_client_name(client_name)
-    return (
-        db.query(User)
-        .join(VpnConfig, VpnConfig.owner_id == User.id)
-        .filter(
-            VpnConfig.node_id == node_id,
-            VpnConfig.client_name.ilike(client_key),
-            VpnConfig.ha_primary_config_id.is_(None),
-        )
-        .order_by(User.id.asc())
-        .first()
-    )
 
 
 def _vpn_config_client_name_for_protocol(
@@ -362,7 +348,7 @@ def _vpn_config_client_name_for_protocol(
             VpnConfig.node_id == node_id,
             VpnConfig.vpn_type == vpn_type,
             VpnConfig.ha_primary_config_id.is_(None),
-            VpnConfig.client_name.ilike(client_key),
+            func.lower(VpnConfig.client_name) == client_key,
         )
         .first()
     )
@@ -476,7 +462,12 @@ def redeem_unlock_code(
     code: str,
     client_name: str,
     node_id: int,
+    user_id: int | None = None,
 ) -> dict:
+    """Redeem ``code`` for one client (client portal) or for the user ``user_id`` (user portal).
+
+    Without ``user_id`` only this client is extended, even if it has an owner.
+    """
     _require_unlock_codes_enabled()
     normalized_code = _normalize_code(code)
     client_key = _normalize_client_name(client_name)
@@ -488,12 +479,13 @@ def redeem_unlock_code(
 
     policy_service = _policy_service_for_node(db, node)
     canonical_client_name = client_key
-    access_until_by_protocol: dict[str, str] = {}
+    access_until_by_protocol: dict[str, str | None] = {}
     protocols_applied: list[str] = []
     grant_days = 0
     granted_until_by_protocol: dict[str, datetime] = {}
     owner_user: User | None = None
     user_subscription = None
+    user_changes: list = []
     try:
         row = db.query(UnlockCode).filter(UnlockCode.code == normalized_code).first()
         if row is None:
@@ -508,7 +500,10 @@ def redeem_unlock_code(
             raise ValueError(_REDEEM_CLIENT_NOT_ALLOWED_MESSAGE)
 
         canonical_client_name, client_protocols = _client_config_name_and_protocols(db, node_id, client_key)
-        owner_user = _owner_for_client(db, node_id, client_key)
+        if user_id is not None:
+            owner_user = db.get(User, user_id)
+            if owner_user is None:
+                raise ValueError(_REDEEM_GENERIC_ERROR_MESSAGE)
         duplicate_query = db.query(UnlockCodeRedemption.id).filter(UnlockCodeRedemption.code_id == row.id)
         if owner_user is not None:
             duplicate_query = duplicate_query.filter(UnlockCodeRedemption.user_id == owner_user.id)
@@ -567,28 +562,20 @@ def redeem_unlock_code(
         if owner_user is not None:
             from app.services import user_subscription as user_subscription
 
-            current_access_until = user_subscription.get_user_access_until(owner_user)
-            grant_until = max(grant_until_base, current_access_until or grant_until_base) + timedelta(
-                days=grant_days
-            )
-            owner_user, _cascade = user_subscription.set_user_access_until(
+            user_access_until, user_changes = user_subscription.extend_owned_clients_for_redeem(
                 db,
                 owner_user,
-                grant_until,
+                now=grant_until_base,
+                days=grant_days,
+                protocols=set(_ALLOWED_PROTOCOLS) if allowed_clients else set(code_protocols),
                 actor="unlock_codes",
-                sync_clients=True,
-                commit=False,
             )
-            user_subscription.clear_access_expired_for_user(
-                db,
-                owner_user,
-                actor="unlock_codes",
-                commit=False,
-            )
-            user_access_until = user_subscription.get_user_access_until(owner_user) or grant_until
+            if user_access_until is None and not user_changes:
+                raise ValueError(_REDEEM_NOTHING_TO_EXTEND_MESSAGE)
             for protocol in protocols_applied:
-                granted_until_by_protocol[protocol] = user_access_until
-                access_until_by_protocol[protocol] = user_access_until.isoformat()
+                policy_client_name = canonical_client_name if protocol == "openvpn" else canonical_client_name.lower()
+                client_until = _as_utc(get_access_until(db, protocol, node_id, policy_client_name))
+                access_until_by_protocol[protocol] = client_until.isoformat() if client_until else None
         else:
             profile_grant_until: datetime | None = None
             if allowed_clients:
@@ -647,6 +634,7 @@ def redeem_unlock_code(
 
     if owner_user is not None and user_subscription is not None:
         user_subscription.reconcile_owned_clients_access_until(db, owner_user)
+        user_subscription.replicate_access_until_changes(db, user_changes, actor="unlock_codes")
 
     if owner_user is None:
         for protocol in protocols_applied:

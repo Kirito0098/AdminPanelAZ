@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin, tg_mini_token_allowed
@@ -81,7 +82,7 @@ def _owner_for_client(db: Session, *, node_id: int, client_name: str) -> User | 
         .filter(
             VpnConfig.node_id == node_id,
             VpnConfig.ha_primary_config_id.is_(None),
-            VpnConfig.client_name.ilike(client_key),
+            func.lower(VpnConfig.client_name) == client_key.lower(),
         )
         .order_by(User.id.asc())
         .first()

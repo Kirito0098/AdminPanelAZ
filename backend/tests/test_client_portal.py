@@ -713,6 +713,7 @@ def test_redeem_public_portal_code_user_retries_next_owned_client():
         )
 
     assert redeem.call_count == 2
+    assert [call.kwargs["user_id"] for call in redeem.call_args_list] == [7, 7]
     assert result["access_until"] == fixed_until.isoformat()
     assert result["protocols_applied"] == ["openvpn"]
 
