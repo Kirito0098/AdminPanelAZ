@@ -125,14 +125,14 @@ def test_purge_matches_name_case_insensitively(db):
 
 def test_purge_leaves_other_clients_and_nodes_untouched(db):
     _seed_traffic(db, "Chernov")
-    _seed_traffic(db, "Alina")
+    _seed_traffic(db, "Mira")
     _seed_traffic(db, "Chernov", node_id=2)
 
     purge_traffic_history_for_reused_name(db, node_id=NODE_ID, client_name="Chernov")
     db.commit()
 
     remaining = {(row.node_id, row.common_name) for row in db.query(UserTrafficStatProtocol).all()}
-    assert remaining == {(NODE_ID, "Alina"), (2, "Chernov")}
+    assert remaining == {(NODE_ID, "Mira"), (2, "Chernov")}
 
 
 def test_purge_ignores_blank_name(db):

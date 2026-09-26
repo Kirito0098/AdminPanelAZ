@@ -1350,23 +1350,23 @@ def _redeem_at_owner_now(db, **kwargs):
 
 def test_client_portal_redeem_extends_only_that_client_of_an_owner(db):
     node = _make_node(db)
-    owner = _make_user(db, username="claymore")
+    owner = _make_user(db, username="owner_admin")
     owner.access_until = _naive(_OWNER_NOW + timedelta(days=100))
     db.commit()
-    _owned_client(db, node.id, owner.id, "Alina", _OWNER_NOW + timedelta(days=2))
+    _owned_client(db, node.id, owner.id, "Mira", _OWNER_NOW + timedelta(days=2))
     _owned_client(db, node.id, owner.id, "Unlimited", None)
     _owned_client(db, node.id, owner.id, "Longer", _OWNER_NOW + timedelta(days=200))
     code = _owner_code(db, owner, "CLIENT-ONLY-01")
 
-    _redeem_at_owner_now(db, code="CLIENT-ONLY-01", client_name="Alina", node_id=node.id)
+    _redeem_at_owner_now(db, code="CLIENT-ONLY-01", client_name="Mira", node_id=node.id)
 
     db.refresh(owner)
     assert owner.access_until == _naive(_OWNER_NOW + timedelta(days=100))
-    assert _ovpn_until(db, node.id, "Alina") == _naive(_OWNER_NOW + timedelta(days=32))
+    assert _ovpn_until(db, node.id, "Mira") == _naive(_OWNER_NOW + timedelta(days=32))
     assert _ovpn_until(db, node.id, "Unlimited") is None
     assert _ovpn_until(db, node.id, "Longer") == _naive(_OWNER_NOW + timedelta(days=200))
     redemption = db.query(UnlockCodeRedemption).filter_by(code_id=code.id).one()
-    assert (redemption.user_id, redemption.client_name) == (None, "alina")
+    assert (redemption.user_id, redemption.client_name) == (None, "mira")
 
     # Другой клиент того же владельца погашает тот же многоразовый код.
     _redeem_at_owner_now(db, code="CLIENT-ONLY-01", client_name="Longer", node_id=node.id)
@@ -1375,7 +1375,7 @@ def test_client_portal_redeem_extends_only_that_client_of_an_owner(db):
 
 def test_user_portal_redeem_extends_subscription_without_shortening_clients(db):
     node = _make_node(db)
-    owner = _make_user(db, username="novikov", role=UserRole.user)
+    owner = _make_user(db, username="bob", role=UserRole.user)
     owner.access_until = _naive(_OWNER_NOW + timedelta(days=2))
     db.commit()
     _owned_client(
@@ -1432,7 +1432,7 @@ def test_user_portal_redeem_replicates_every_extended_client(db):
 
 def test_user_portal_redeem_without_subscription_extends_limited_clients(db):
     node = _make_node(db)
-    owner = _make_user(db, username="novikov", role=UserRole.user)
+    owner = _make_user(db, username="bob", role=UserRole.user)
     _owned_client(db, node.id, owner.id, "Limited", _OWNER_NOW + timedelta(days=10))
     _owned_client(db, node.id, owner.id, "Unlimited", None)
     _make_configs(db, node.id, owner.id, "WgOnly", [VpnType.wireguard])

@@ -53,7 +53,7 @@ def _node(db) -> Node:
 
 
 def _owner(db, *, access_until: datetime | None = _DEADLINE) -> User:
-    user = User(username="claymore", password_hash="x", role=UserRole.user, access_until=access_until)
+    user = User(username="owner_admin", password_hash="x", role=UserRole.user, access_until=access_until)
     db.add(user)
     db.commit()
     return user
@@ -107,7 +107,7 @@ def _create_via_route(db, node: Node, owner: User, timeline: _Timeline, **overri
         **overrides,
     }
     admin = SimpleNamespace(id=999, username="admin", role=UserRole.admin)
-    payload = VpnConfigCreate(client_name="alina", vpn_type=VpnType.openvpn, owner_id=owner.id)
+    payload = VpnConfigCreate(client_name="mira", vpn_type=VpnType.openvpn, owner_id=owner.id)
     with (
         patch.multiple(configs_router, **patches),
         patch.object(configs_router.admin_notify_service, "send_config_create"),
@@ -125,9 +125,9 @@ def test_route_replicates_inherited_deadline_after_the_replica_profile_exists(db
     response_kwargs = _create_via_route(db, node, owner, timeline)
 
     expected = _DEADLINE.replace(tzinfo=timezone.utc)
-    assert timeline.events == [("create", "alina"), ("policy", "set_access_until", "alina", expected)]
+    assert timeline.events == [("create", "mira"), ("policy", "set_access_until", "mira", expected)]
     assert response_kwargs["ha_replicate_warning"] is None
-    row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="alina").one()
+    row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="mira").one()
     assert row.access_until == _DEADLINE
 
 
@@ -165,7 +165,7 @@ def test_route_without_owner_deadline_replicates_nothing(db):
 
     _create_via_route(db, node, owner, timeline)
 
-    assert timeline.events == [("create", "alina")]
+    assert timeline.events == [("create", "mira")]
 
 
 def test_csv_import_replicates_inherited_deadline_after_create(db):
@@ -183,7 +183,7 @@ def test_csv_import_replicates_inherited_deadline_after_create(db):
     ):
         result = config_csv_ops._import_single_row(
             db,
-            row={"client_name": "alina", "vpn_type": "openvpn", "_line": "2"},
+            row={"client_name": "mira", "vpn_type": "openvpn", "_line": "2"},
             node_id=node.id,
             default_owner_id=owner.id,
             owner_by_username={},
@@ -192,12 +192,12 @@ def test_csv_import_replicates_inherited_deadline_after_create(db):
 
     assert result["ok"] is True
     expected = _DEADLINE.replace(tzinfo=timezone.utc)
-    assert timeline.events == [("create", "alina"), ("policy", "set_access_until", "alina", expected)]
+    assert timeline.events == [("create", "mira"), ("policy", "set_access_until", "mira", expected)]
 
 
 def test_cascade_reports_errors_returned_by_policy_replication(db):
     node, owner = _node(db), _owner(db)
-    db.add(VpnConfig(node_id=node.id, client_name="alina", vpn_type=VpnType.openvpn, owner_id=owner.id))
+    db.add(VpnConfig(node_id=node.id, client_name="mira", vpn_type=VpnType.openvpn, owner_id=owner.id))
     db.commit()
     timeline = _Timeline()
 
@@ -208,6 +208,6 @@ def test_cascade_reports_errors_returned_by_policy_replication(db):
         _, cascade = usub.set_user_access_until(db, owner, _DEADLINE + timedelta(days=5), actor="admin")
 
     assert [(e["client_name"], e["node_id"], e["error"]) for e in cascade["replicate_errors"]] == [
-        ("alina", 2, "shadow VpnConfig not found")
+        ("mira", 2, "shadow VpnConfig not found")
     ]
     assert "HA: 1 сбой" in cascade["warning"]

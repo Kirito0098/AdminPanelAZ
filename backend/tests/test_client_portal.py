@@ -823,32 +823,32 @@ _AZ_ONLY_POLICY = {
     "openvpn_groups": ["udp_tcp", "udp", "tcp"],
 }
 
-_AZ_TOPTINKER_PATH = "/client/openvpn/antizapret/AZ-TopTinker.ovpn"
-_VPN_TOPTINKER_PATH = "/client/openvpn/vpn/VPN-TopTinker.ovpn"
+_AZ_OPENBOX_PATH = "/client/openvpn/antizapret/AZ-OpenBox.ovpn"
+_VPN_OPENBOX_PATH = "/client/openvpn/vpn/VPN-OpenBox.ovpn"
 
 
-def _toptinker_openvpn_files() -> list[dict]:
+def _openbox_openvpn_files() -> list[dict]:
     return [
         {
             "protocol": "openvpn",
             "variant": "antizapret",
-            "path": _AZ_TOPTINKER_PATH,
-            "filename": "AZ-TopTinker.ovpn",
+            "path": _AZ_OPENBOX_PATH,
+            "filename": "AZ-OpenBox.ovpn",
         },
         {
             "protocol": "openvpn",
             "variant": "vpn",
-            "path": _VPN_TOPTINKER_PATH,
-            "filename": "VPN-TopTinker.ovpn",
+            "path": _VPN_OPENBOX_PATH,
+            "filename": "VPN-OpenBox.ovpn",
         },
     ]
 
 
-def _toptinker_cfg(*, owner_id: int | None) -> MagicMock:
+def _openbox_cfg(*, owner_id: int | None) -> MagicMock:
     cfg = MagicMock()
     cfg.id = 7
     cfg.node_id = 3
-    cfg.client_name = "TopTinker"
+    cfg.client_name = "OpenBox"
     cfg.vpn_type = VpnType.openvpn
     cfg.owner_id = owner_id
     return cfg
@@ -885,15 +885,15 @@ def test_list_files_hides_vpn_route_when_owner_visibility_az_only():
 
     owner = User(
         id=5,
-        username="novikov",
+        username="bob",
         password_hash="x",
         role=UserRole.user,
         is_active=True,
         visible_vpn_profiles=policy_to_json(_AZ_ONLY_POLICY),
     )
-    cfg = _toptinker_cfg(owner_id=5)
+    cfg = _openbox_cfg(owner_id=5)
     adapter = MagicMock()
-    adapter.get_profile_files.return_value = _toptinker_openvpn_files()
+    adapter.get_profile_files.return_value = _openbox_openvpn_files()
     node = MagicMock()
     db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=owner)
 
@@ -905,14 +905,14 @@ def test_list_files_hides_vpn_route_when_owner_visibility_az_only():
         files = portal._list_files_for_configs(db, [cfg])
 
     paths = [f["path"] for f in files]
-    assert _AZ_TOPTINKER_PATH in paths
-    assert _VPN_TOPTINKER_PATH not in paths
+    assert _AZ_OPENBOX_PATH in paths
+    assert _VPN_OPENBOX_PATH not in paths
 
 
 def test_list_files_orphan_uses_restrictive_default_visibility():
-    cfg = _toptinker_cfg(owner_id=None)
+    cfg = _openbox_cfg(owner_id=None)
     adapter = MagicMock()
-    adapter.get_profile_files.return_value = _toptinker_openvpn_files()
+    adapter.get_profile_files.return_value = _openbox_openvpn_files()
     node = MagicMock()
     db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=None)
 
@@ -929,8 +929,8 @@ def test_list_files_orphan_uses_restrictive_default_visibility():
         files = portal._list_files_for_configs(db, [cfg])
 
     paths = [f["path"] for f in files]
-    assert _AZ_TOPTINKER_PATH in paths
-    assert _VPN_TOPTINKER_PATH not in paths
+    assert _AZ_OPENBOX_PATH in paths
+    assert _VPN_OPENBOX_PATH not in paths
 
 
 def test_read_client_portal_profile_rejects_vpn_via_owner_visibility():
@@ -940,15 +940,15 @@ def test_read_client_portal_profile_rejects_vpn_via_owner_visibility():
 
     owner = User(
         id=5,
-        username="novikov",
+        username="bob",
         password_hash="x",
         role=UserRole.user,
         is_active=True,
         visible_vpn_profiles=policy_to_json(_AZ_ONLY_POLICY),
     )
-    cfg = _toptinker_cfg(owner_id=5)
+    cfg = _openbox_cfg(owner_id=5)
     adapter = MagicMock()
-    adapter.get_profile_files.return_value = _toptinker_openvpn_files()
+    adapter.get_profile_files.return_value = _openbox_openvpn_files()
     node = MagicMock()
     db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=owner)
 
@@ -966,8 +966,8 @@ def test_read_client_portal_profile_rejects_vpn_via_owner_visibility():
             portal._read_client_portal_profile(
                 db,
                 node_id=3,
-                client_name="TopTinker",
-                path=_VPN_TOPTINKER_PATH,
+                client_name="OpenBox",
+                path=_VPN_OPENBOX_PATH,
             )
         assert hidden.value.status_code == 404
         read_file.assert_not_called()
@@ -975,17 +975,17 @@ def test_read_client_portal_profile_rejects_vpn_via_owner_visibility():
         filename, content = portal._read_client_portal_profile(
             db,
             node_id=3,
-            client_name="TopTinker",
-            path=_AZ_TOPTINKER_PATH,
+            client_name="OpenBox",
+            path=_AZ_OPENBOX_PATH,
         )
     assert content == b"client\n"
     assert "AZ" in filename or filename.endswith(".ovpn")
 
 
 def test_read_client_portal_profile_rejects_vpn_for_orphan_default_az_only():
-    cfg = _toptinker_cfg(owner_id=None)
+    cfg = _openbox_cfg(owner_id=None)
     adapter = MagicMock()
-    adapter.get_profile_files.return_value = _toptinker_openvpn_files()
+    adapter.get_profile_files.return_value = _openbox_openvpn_files()
     node = MagicMock()
     db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=None)
 
@@ -1003,8 +1003,8 @@ def test_read_client_portal_profile_rejects_vpn_for_orphan_default_az_only():
             portal._read_client_portal_profile(
                 db,
                 node_id=3,
-                client_name="TopTinker",
-                path=_VPN_TOPTINKER_PATH,
+                client_name="OpenBox",
+                path=_VPN_OPENBOX_PATH,
             )
     assert hidden.value.status_code == 404
 
@@ -1015,15 +1015,15 @@ def test_build_user_portal_payload_hides_vpn_for_restricted_owner():
 
     owner = User(
         id=5,
-        username="novikov",
+        username="bob",
         password_hash="x",
         role=UserRole.user,
         is_active=True,
         visible_vpn_profiles=policy_to_json(_AZ_ONLY_POLICY),
     )
-    cfg = _toptinker_cfg(owner_id=5)
+    cfg = _openbox_cfg(owner_id=5)
     adapter = MagicMock()
-    adapter.get_profile_files.return_value = _toptinker_openvpn_files()
+    adapter.get_profile_files.return_value = _openbox_openvpn_files()
     node = MagicMock()
     db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=owner)
     token_row = MagicMock(token="u_tok", user_id=5)
@@ -1031,7 +1031,7 @@ def test_build_user_portal_payload_hides_vpn_for_restricted_owner():
     with (
         patch("app.services.client_portal.resolve_portal_base_url", return_value="https://portal.example.com"),
         patch("app.services.client_portal.ensure_portal_user", return_value=owner),
-        patch("app.services.client_portal._owned_portal_targets", return_value=[(3, "TopTinker")]),
+        patch("app.services.client_portal._owned_portal_targets", return_value=[(3, "OpenBox")]),
         patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
         patch("app.services.client_portal.build_portal_status", return_value={"state": "active"}),
         patch("app.services.client_portal._apply_user_subscription_status", side_effect=lambda status, _u: status),
@@ -1044,8 +1044,8 @@ def test_build_user_portal_payload_hides_vpn_for_restricted_owner():
     assert payload["kind"] == "user"
     assert len(payload["clients"]) == 1
     paths = [f["path"] for f in payload["clients"][0]["files"]]
-    assert _AZ_TOPTINKER_PATH in paths
-    assert _VPN_TOPTINKER_PATH not in paths
+    assert _AZ_OPENBOX_PATH in paths
+    assert _VPN_OPENBOX_PATH not in paths
 
 
 def test_list_files_hides_wireguard_when_feature_disabled():

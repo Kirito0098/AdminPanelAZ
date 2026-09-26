@@ -29,7 +29,7 @@ def test_recreate_openvpn_profiles_after_admin_change_does_not_reissue(monkeypat
             ready=False,
             issues=(
                 ProfileCertIssue(
-                    client_name="AN_Claymore",
+                    client_name="AN_Office",
                     path="/root/antizapret/client/openvpn/antizapret-udp/x.ovpn",
                     filename="x.ovpn",
                     serial_hex="F401806F35A8048BA0941A9F085EF9C2",
@@ -39,7 +39,7 @@ def test_recreate_openvpn_profiles_after_admin_change_does_not_reissue(monkeypat
         ),
     )
 
-    result = recreate_openvpn_profiles_after_admin_change(adapter, client_names=["AN_Claymore"])
+    result = recreate_openvpn_profiles_after_admin_change(adapter, client_names=["AN_Office"])
 
     adapter.recreate_profiles.assert_called_once()
     adapter.add_openvpn_client.assert_not_called()

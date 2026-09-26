@@ -3,13 +3,13 @@ from app.services.openvpn_buffer_guard_parse import parse_enobufs_line, summariz
 
 def test_parse_client_write_line():
     line = (
-        "Beketova_Julija/udp4:109.124.227.213:59106 write UDPv4 []: "
+        "Sample_Client/udp4:203.0.113.10:59106 write UDPv4 []: "
         "No buffer space available (fd=6,code=105)"
     )
     hit = parse_enobufs_line(line)
     assert hit is not None
-    assert hit.common_name == "Beketova_Julija"
-    assert hit.real_address == "109.124.227.213:59106"
+    assert hit.common_name == "Sample_Client"
+    assert hit.real_address == "203.0.113.10:59106"
 
 
 def test_parse_connection_attempt_line_no_cn():

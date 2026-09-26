@@ -516,12 +516,12 @@ def test_client_access_until_allows_deadline_when_owner_has_none():
         node = _make_node(db)
         requested_until = datetime(2026, 12, 31, 23, 59, 59, 999000, tzinfo=timezone.utc)
         admin = _make_user(db, username="admin", role=UserRole.admin)
-        owner = _make_user(db, username="Novikov", role=UserRole.user, access_until=None)
+        owner = _make_user(db, username="Bob", role=UserRole.user, access_until=None)
         _make_owned_client(
             db,
             node_id=node.id,
             owner_id=owner.id,
-            client_name="TopTinker",
+            client_name="OpenBox",
             protocols=[VpnType.openvpn],
         )
         client = _client_access_api(db, admin=admin)
@@ -536,7 +536,7 @@ def test_client_access_until_allows_deadline_when_owner_has_none():
             patch.object(client_access, "_replicate_policy_after_success"),
         ):
             response = client.patch(
-                "/api/client-access/openvpn/TopTinker/access-until",
+                "/api/client-access/openvpn/OpenBox/access-until",
                 json={"access_until": requested_until.isoformat()},
             )
 
