@@ -15,7 +15,8 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base
 from app.models import TelegramProcessedUpdate
 from app.routers import telegram_webhook as tw
-from app.services.telegram_update_dedup import claim_telegram_update
+from app.services import retention
+from app.services.telegram_update_dedup import PROCESSED_UPDATE_RETENTION, claim_telegram_update
 
 SECRET = "secret-value-32chars___________"
 
@@ -73,11 +74,42 @@ def test_claim_telegram_update_without_id_is_processed(db):
     assert db.query(TelegramProcessedUpdate).count() == 0
 
 
-def test_claim_telegram_update_prunes_old_rows(db):
+def test_claim_telegram_update_does_not_purge_on_every_update(db):
     db.add(TelegramProcessedUpdate(update_id=5, received_at=datetime.utcnow() - timedelta(days=30)))
     db.commit()
     assert claim_telegram_update(db, 6) is True
-    assert {row.update_id for row in db.query(TelegramProcessedUpdate).all()} == {6}
+    assert {row.update_id for row in db.query(TelegramProcessedUpdate).all()} == {5, 6}
+
+
+def test_retention_purges_processed_updates_older_than_the_window(db, monkeypatch):
+    monkeypatch.setattr(
+        retention,
+        "get_settings",
+        lambda: SimpleNamespace(
+            retention_batch_size=100,
+            traffic_sample_retention_days=90,
+            action_log_retention_days=365,
+            resource_metrics_retention_days=30,
+            panel_resource_metrics_retention_days=30,
+            traffic_session_retention_days=30,
+        ),
+    )
+    now = retention._utcnow()
+    window = PROCESSED_UPDATE_RETENTION
+    db.add_all(
+        [
+            TelegramProcessedUpdate(update_id=1, received_at=now - window - timedelta(minutes=1)),
+            TelegramProcessedUpdate(update_id=2, received_at=now - window + timedelta(minutes=5)),
+            TelegramProcessedUpdate(update_id=3, received_at=now),
+        ]
+    )
+    db.commit()
+
+    counts = retention.run_retention_purge(db)
+
+    assert counts["telegram_processed_updates"] == 1
+    assert {row.update_id for row in db.query(TelegramProcessedUpdate).all()} == {2, 3}
+    assert claim_telegram_update(db, 2) is False
 
 
 def test_webhook_redelivered_update_handled_once(db, webhook):

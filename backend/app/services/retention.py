@@ -1,4 +1,4 @@
-"""Batch retention purge for traffic samples, session history, action logs, tokens, reboots, and resource metrics."""
+"""Batch retention purge for traffic samples, session history, action logs, tokens, reboots, Telegram update ids, and resource metrics."""
 
 from __future__ import annotations
 
@@ -13,12 +13,14 @@ from app.models import (
     PanelResourceSample,
     RefreshToken,
     ServerRebootRecord,
+    TelegramProcessedUpdate,
     TrafficSessionState,
     UserActionLog,
     UserTrafficSample,
 )
 
 from app.services.server_reboot import ACTIVE_STATUSES as REBOOT_ACTIVE_STATUSES
+from app.services.telegram_update_dedup import PROCESSED_UPDATE_RETENTION
 
 # An expired refresh token is rejected on its own; the grace only keeps it around for audit.
 REFRESH_TOKEN_EXPIRED_GRACE_DAYS = 7
@@ -96,6 +98,14 @@ def run_retention_purge(db: Session) -> dict[str, int]:
         ServerRebootRecord.created_at < now - timedelta(days=REBOOT_REQUEST_RETENTION_DAYS),
         batch_size=batch_size,
     )
+
+    counts["telegram_processed_updates"] = int(
+        db.query(TelegramProcessedUpdate)
+        .filter(TelegramProcessedUpdate.received_at < now - PROCESSED_UPDATE_RETENTION)
+        .delete(synchronize_session=False)
+        or 0
+    )
+    db.commit()
 
     log_days = max(1, int(settings.action_log_retention_days or 365))
     counts["user_action_log"] = _purge_model_before(
