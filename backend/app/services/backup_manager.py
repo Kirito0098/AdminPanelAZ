@@ -20,6 +20,49 @@ def remove_sqlite_sidecars(db_path: Path) -> None:
             pass
 
 
+_SQLITE_HEADER = b"SQLite format 3\x00"
+
+
+def validate_sqlite_bytes(data: bytes, label: str) -> None:
+    """Reject a restore before any live file is touched if the archived database is damaged."""
+    invalid = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"{label} в архиве повреждена — восстановление отменено, текущие данные не изменены",
+    )
+    if not data.startswith(_SQLITE_HEADER):
+        raise invalid
+    fd, tmp_name = tempfile.mkstemp(prefix="adminpanelaz-restore-check-", suffix=".db")
+    tmp = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        conn = sqlite3.connect(f"file:{tmp.as_posix()}?mode=ro", uri=True)
+        try:
+            result = conn.execute("PRAGMA integrity_check(1)").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.DatabaseError as exc:
+        raise invalid from exc
+    finally:
+        tmp.unlink(missing_ok=True)
+    if not result or result[0] != "ok":
+        raise invalid
+
+
+def _atomic_write_bytes(path: Path, data: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
+
+
 def backup_meta_path(archive_path: Path) -> Path:
     """Sidecar JSON next to a .tar.gz archive (not Path.with_suffix, which yields .tar.json)."""
     name = archive_path.name
@@ -37,6 +80,8 @@ class BackupManager:
         "allow-ips.txt",
     )
     AWG2_ARCHIVE_MEMBER = "awg2/az-awg2-backup.tar.gz"
+    PRE_RESTORE_DIR = ".pre-restore"
+    PRE_RESTORE_KEEP = 3
 
     def __init__(
         self,
@@ -273,6 +318,10 @@ class BackupManager:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Архив не содержит данных для восстановления",
             )
+        if "db" in files:
+            validate_sqlite_bytes(files["db"], "База панели")
+        if "cidr_db" in files:
+            validate_sqlite_bytes(files["cidr_db"], "База CIDR")
         return {
             "restored": restored,
             "file_name": file_name,
@@ -282,22 +331,92 @@ class BackupManager:
 
     def apply_restore_payload(self, payload: dict) -> dict:
         files = payload.get("_files") or {}
+        targets: list[tuple[Path, bytes, bool]] = []
         if "db" in files:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.db_path.write_bytes(files["db"])
-            remove_sqlite_sidecars(self.db_path)
+            targets.append((self.db_path, files["db"], True))
         if "cidr_db" in files and self.cidr_db_path is not None:
-            self.cidr_db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.cidr_db_path.write_bytes(files["cidr_db"])
-            remove_sqlite_sidecars(self.cidr_db_path)
+            targets.append((self.cidr_db_path, files["cidr_db"], True))
         if "env" in files:
-            self.env_path.parent.mkdir(parents=True, exist_ok=True)
-            self.env_path.write_bytes(files["env"])
-        return {
+            targets.append((self.env_path, files["env"], False))
+
+        snapshot = self._snapshot_live_files([path for path, _data, _sqlite in targets]) if targets else None
+        replaced: list[Path] = []
+        try:
+            for path, data, is_sqlite in targets:
+                _atomic_write_bytes(path, data)
+                replaced.append(path)
+                if is_sqlite:
+                    # A leftover WAL of the old database would be replayed onto the restored file.
+                    remove_sqlite_sidecars(path)
+        except BaseException:
+            self._rollback_from_snapshot(replaced, snapshot)
+            raise
+
+        result = {
             "restored": list(payload.get("restored") or []),
             "file_name": payload.get("file_name"),
             "configs": dict(payload.get("configs") or {}),
         }
+        if snapshot is not None:
+            result["pre_restore_snapshot"] = str(snapshot)
+        return result
+
+    def _snapshot_live_files(self, paths: list[Path]) -> Path:
+        """Copy the files a restore is about to replace, so a bad restore can be undone by hand."""
+        root = self.backup_root / self.PRE_RESTORE_DIR
+        root.mkdir(parents=True, exist_ok=True)
+        os.chmod(root, 0o700)
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        snapshot = root / stamp
+        snapshot.mkdir(mode=0o700)
+        os.chmod(snapshot, 0o700)
+        for path in paths:
+            if not path.exists():
+                continue
+            dest = snapshot / path.name
+            if not self._copy_sqlite_consistent(path, dest):
+                shutil.copyfile(path, dest)
+            os.chmod(dest, 0o600)
+        self._enforce_pre_restore_retention(root)
+        return snapshot
+
+    @staticmethod
+    def _copy_sqlite_consistent(src: Path, dest: Path) -> bool:
+        """Online-backup copy (includes committed WAL frames); False if ``src`` is not a readable database."""
+        with src.open("rb") as fh:
+            if fh.read(len(_SQLITE_HEADER)) != _SQLITE_HEADER:
+                return False
+        try:
+            source = sqlite3.connect(f"file:{src.resolve().as_posix()}?mode=ro", uri=True)
+            try:
+                target = sqlite3.connect(str(dest))
+                try:
+                    source.backup(target)
+                finally:
+                    target.close()
+            finally:
+                source.close()
+        except sqlite3.DatabaseError:
+            dest.unlink(missing_ok=True)
+            return False
+        return True
+
+    def _rollback_from_snapshot(self, replaced: list[Path], snapshot: Path | None) -> None:
+        for path in replaced:
+            saved = snapshot / path.name if snapshot is not None else None
+            try:
+                if saved is not None and saved.exists():
+                    _atomic_write_bytes(path, saved.read_bytes())
+                else:
+                    path.unlink(missing_ok=True)
+                remove_sqlite_sidecars(path)
+            except OSError:
+                continue
+
+    def _enforce_pre_restore_retention(self, root: Path) -> None:
+        snapshots = sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True)
+        for old in snapshots[self.PRE_RESTORE_KEEP :]:
+            shutil.rmtree(old, ignore_errors=True)
 
     def restore_backup(self, file_name: str) -> dict:
         return self.apply_restore_payload(self.load_restore_payload(file_name))
