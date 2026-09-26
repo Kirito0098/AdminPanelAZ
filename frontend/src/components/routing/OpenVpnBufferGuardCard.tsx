@@ -21,7 +21,9 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { useNotifications } from '@/context/NotificationContext'
+import { bufferGuardSavePayload, normalizeBufferGuardSettings, sortUnits } from '@/lib/bufferGuardDraft'
 import { formatDateTime } from '@/lib/datetime'
+import { createLatestRequest } from '@/lib/latestRequest'
 import { cn } from '@/lib/utils'
 import type { OpenVpnBufferGuardMode, OpenVpnBufferGuardSettings, OpenVpnBufferGuardEvent } from '@/types'
 import { AlertTriangle, CheckCircle2, ShieldAlert, Timer, Zap } from 'lucide-react'
@@ -51,8 +53,6 @@ const WATCH_UNIT_LABELS: Record<string, string> = {
   'vpn-tcp': 'vpn-tcp (основной TCP-сервер)',
 }
 
-const DEFAULT_WATCH_UNITS: string[] = ['antizapret-udp', 'vpn-udp']
-
 /** Recommended thresholds are calibrated for this window only (not scaled). */
 const RECOMMENDED_THRESHOLD_WINDOW_SECONDS = 60
 
@@ -60,24 +60,6 @@ export type OpenVpnBufferGuardCardProps = {
   activeNodeId: number | null
   nodeName?: string | null
   disabled?: boolean
-}
-
-function sortUnits(units: string[]): string[] {
-  return [...units].sort()
-}
-
-function normalizeSettingsForNode(
-  nodeId: number,
-  settings: OpenVpnBufferGuardSettings,
-): OpenVpnBufferGuardSettings {
-  return {
-    ...settings,
-    node_id: nodeId,
-    watch_units:
-      settings.watch_units && settings.watch_units.length > 0
-        ? sortUnits(settings.watch_units)
-        : [...DEFAULT_WATCH_UNITS],
-  }
 }
 
 function lastEventSummary(event: OpenVpnBufferGuardEvent | null): { title: string; detail: string } | null {
@@ -144,6 +126,8 @@ export default function OpenVpnBufferGuardCard({
   const [events, setEvents] = useState<OpenVpnBufferGuardEvent[]>([])
   const [eventsError, setEventsError] = useState<string | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [settingsRequests] = useState(() => createLatestRequest<number | null>(null))
+  const [eventsRequests] = useState(() => createLatestRequest<number | null>(null))
 
   const busy = loading || saving || scanBusy
   const controlsDisabled = disabled || busy || activeNodeId == null || loadError != null
@@ -174,11 +158,15 @@ export default function OpenVpnBufferGuardCard({
 
   const loadEvents = useCallback(
     async (nodeId: number) => {
+      const isCurrent = eventsRequests.begin(nodeId)
+      if (!isCurrent()) return
       try {
         const data = await getBufferGuardEvents(nodeId)
+        if (!isCurrent()) return
         setEvents(data)
         setEventsError(null)
       } catch (err) {
+        if (!isCurrent()) return
         const message =
           err instanceof ApiError
             ? err.message
@@ -187,19 +175,23 @@ export default function OpenVpnBufferGuardCard({
         notifyError(message)
       }
     },
-    [notifyError],
+    [eventsRequests, notifyError],
   )
 
   const loadSettings = useCallback(
     async (nodeId: number) => {
+      const isCurrent = settingsRequests.begin(nodeId)
+      if (!isCurrent()) return
       setLoading(true)
       setLoadError(null)
       try {
         const data = await getBufferGuardSettings(nodeId)
-        const normalized = normalizeSettingsForNode(nodeId, data)
+        if (!isCurrent()) return
+        const normalized = normalizeBufferGuardSettings(nodeId, data)
         setSettings(normalized)
         setDraft(normalized)
       } catch (err) {
+        if (!isCurrent()) return
         const message =
           err instanceof ApiError
             ? err.message
@@ -207,10 +199,10 @@ export default function OpenVpnBufferGuardCard({
         setLoadError(message)
         notifyError(message)
       } finally {
-        setLoading(false)
+        if (isCurrent()) setLoading(false)
       }
     },
-    [notifyError],
+    [notifyError, settingsRequests],
   )
 
   const reloadAll = useCallback(
@@ -222,35 +214,31 @@ export default function OpenVpnBufferGuardCard({
   )
 
   useEffect(() => {
-    if (activeNodeId == null) {
-      setSettings(null)
-      setDraft(null)
-      setEvents([])
-      setLoadError(null)
-      setEventsError(null)
-      return
-    }
+    settingsRequests.reset(activeNodeId)
+    eventsRequests.reset(activeNodeId)
+    setSettings(null)
+    setDraft(null)
+    setEvents([])
+    setLoadError(null)
+    setEventsError(null)
+    setLoading(false)
+    if (activeNodeId == null) return
     void reloadAll(activeNodeId)
-  }, [activeNodeId, reloadAll])
+  }, [activeNodeId, eventsRequests, reloadAll, settingsRequests])
 
   const handleSave = async () => {
-    if (!draft || activeNodeId == null) return
-    if (controlsDisabled) return
+    if (!draft || controlsDisabled) return
+    const payload = bufferGuardSavePayload(draft, activeNodeId)
+    if (!payload) return
+    const isCurrent = settingsRequests.begin(payload.node_id)
     setSaving(true)
     try {
-      const payload: OpenVpnBufferGuardSettings = {
-        ...draft,
-        node_id: activeNodeId,
-        watch_units:
-          draft.watch_units && draft.watch_units.length > 0
-            ? sortUnits(draft.watch_units)
-            : [...DEFAULT_WATCH_UNITS],
-      }
       const updated = await putBufferGuardSettings(payload)
-      const normalized = normalizeSettingsForNode(activeNodeId, updated)
+      success('Настройки OpenVPN Buffer Guard сохранены')
+      if (!isCurrent()) return
+      const normalized = normalizeBufferGuardSettings(payload.node_id, updated)
       setSettings(normalized)
       setDraft(normalized)
-      success('Настройки OpenVPN Buffer Guard сохранены')
     } catch (err) {
       notifyError(
         err instanceof ApiError
