@@ -74,8 +74,42 @@ _menu_python() {
   return 1
 }
 
+# Интерфейс проверяется только там, где его уже собирали. Сборка устарела, если отслеживаемый файл frontend
+# новее собранного index.html: git pull ставит изменённым файлам текущее время.
+frontend_build_stale() {
+  local index="$INSTALL_DIR/frontend/dist/index.html" path
+  [[ -d "$INSTALL_DIR/frontend/dist" ]] || return 1
+  [[ -f "$index" ]] || return 0
+  while IFS= read -r -d '' path; do
+    [[ "$INSTALL_DIR/$path" -nt "$index" ]] && return 0
+  done < <(git -C "$INSTALL_DIR" ls-files -z -- frontend 2>/dev/null)
+  return 1
+}
+
+panel_build_frontend() {
+  local frontend_dir="$INSTALL_DIR/frontend"
+  if ! command -v npm >/dev/null 2>&1; then
+    ui_fail "npm не найден — интерфейс не пересобран"
+    return 1
+  fi
+  ui_info "Сборка интерфейса (npm ci, npm run build:all)…"
+  if (cd "$frontend_dir" && npm ci && npm run build:all); then
+    ui_ok "Интерфейс пересобран"
+    return 0
+  fi
+  ui_fail "Сборка интерфейса не удалась — панель показывает старый интерфейс"
+  return 1
+}
+
+panel_frontend_manual_hint() {
+  ui_fail "Соберите интерфейс вручную: cd $INSTALL_DIR/frontend && npm ci && npm run build:all, затем $0 --restart"
+}
+
 panel_restart() {
   require_root
+  if frontend_build_stale; then
+    ui_warn "Интерфейс собран до последнего обновления кода — пересоберите его: $0 --update"
+  fi
   ui_info "Перезапуск панели…"
   if panel_uses_systemd; then
     systemctl restart "$SERVICE_NAME"
@@ -137,6 +171,15 @@ panel_update() {
 
   if [[ "$local_rev" == "$remote_rev" ]]; then
     ui_ok "Репозиторий актуален ($(git -C "$INSTALL_DIR" rev-parse --short HEAD))"
+    # Так досборка доходит до обновившихся меню 2.25.1: оно делало git pull без сборки интерфейса.
+    if frontend_build_stale; then
+      ui_warn "Интерфейс собран до последнего обновления кода"
+      if ! panel_build_frontend; then
+        panel_frontend_manual_hint
+        return 1
+      fi
+      ui_info "Перезапустите панель: $0 --restart"
+    fi
     return 0
   fi
 
@@ -148,6 +191,14 @@ panel_update() {
   fi
   ui_ok "Код обновлён"
 
+  # bash выполняет версию меню, прочитанную до git pull: остальные шаги — уже обновлённым скриптом.
+  local menu="$INSTALL_DIR/scripts/adminpanel-menu.sh"
+  INSTALL_DIR="$INSTALL_DIR" SERVICE_NAME="$SERVICE_NAME" VENV_PATH="$VENV_PATH" \
+    "${BASH:-bash}" "$menu" --after-pull
+}
+
+# Шаги после git pull; вызывается из panel_update уже обновлённым скриптом.
+panel_after_pull() {
   if [[ -x "$VENV_PATH/bin/pip" && -f "$ROOT_DIR/backend/requirements.txt" ]]; then
     ui_info "Обновление Python-зависимостей…"
     if "$VENV_PATH/bin/pip" install -q -r "$ROOT_DIR/backend/requirements.txt"; then
@@ -160,18 +211,7 @@ panel_update() {
   # Интерфейс собирается только там, где его уже собирали: на сервере с одним агентом нет npm.
   local frontend_dir="$INSTALL_DIR/frontend" frontend_ok=true
   if [[ -f "$frontend_dir/package.json" && -d "$frontend_dir/dist" ]]; then
-    if ! command -v npm >/dev/null 2>&1; then
-      ui_fail "npm не найден — интерфейс не пересобран"
-      frontend_ok=false
-    else
-      ui_info "Сборка интерфейса (npm ci, npm run build:all)…"
-      if (cd "$frontend_dir" && npm ci && npm run build:all); then
-        ui_ok "Интерфейс пересобран"
-      else
-        ui_fail "Сборка интерфейса не удалась — панель показывает старый интерфейс"
-        frontend_ok=false
-      fi
-    fi
+    panel_build_frontend || frontend_ok=false
   fi
 
   # 2.19+: старые unit’ы с start.sh ломаются после удаления скриптов — переписать из репо
@@ -185,7 +225,8 @@ panel_update() {
   fi
 
   if [[ "$frontend_ok" != true ]]; then
-    ui_fail "Код уже обновлён, повтор --update сборку не запустит. Соберите вручную: cd $frontend_dir && npm ci && npm run build:all, затем $0 --restart"
+    ui_fail "Код уже обновлён, интерфейс — нет. Повторный $0 --update попробует собрать его снова."
+    panel_frontend_manual_hint
     return 1
   fi
   ui_info "Перезапустите панель: $0 --restart"
@@ -366,7 +407,8 @@ usage() {
 
 Опции (как adminpanel.sh в AA):
   --restart              Перезапустить панель (systemctl restart adminpanelaz)
-  --update               git fetch + pull + pip + сборка интерфейса (если есть обновления)
+  --update               git fetch + pull + pip + сборка интерфейса (если есть обновления
+                         или интерфейс собран до последнего обновления кода)
   --backup               Создать резервную копию (scripts/backup-cli.py)
   --diagnose             Диагностика запуска (scripts/site-diagnostics.sh)
   --disable-ip-whitelist Аварийно выключить IP-whitelist панели
@@ -384,6 +426,9 @@ main() {
       ;;
     --update)
       panel_update
+      ;;
+    --after-pull)
+      panel_after_pull
       ;;
     --backup)
       panel_backup
