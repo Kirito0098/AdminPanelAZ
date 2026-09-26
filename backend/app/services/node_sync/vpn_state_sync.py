@@ -13,7 +13,13 @@ from app.config import get_settings
 from app.models import Node, VpnType
 from app.services.awg2 import AWG2_INSTALL_CMD
 from app.services.access_policy import AccessPolicyService
-from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
+from app.services.node_sync.openvpn_pki_state import (
+    PkiState,
+    newly_revoked_clients,
+    read_pki_state,
+    server_identity_changed,
+)
+from app.services.node_sync.openvpn_restart import OPENVPN_SERVER_UNITS, restart_all_openvpn_servers
 from app.services.openvpn_pki import validate_all_openvpn_profiles
 
 logger = logging.getLogger(__name__)
@@ -187,14 +193,56 @@ def copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter) -> None
     replica_adapter.import_openvpn_client_profiles_archive(archive)
 
 
+def _replica_pki_state(replica_adapter) -> PkiState | None:
+    try:
+        return read_pki_state(replica_adapter.export_easyrsa3_archive())
+    except Exception as exc:
+        logger.warning("HA crypto sync: replica PKI state unavailable, OpenVPN will restart: %s", exc)
+        return None
+
+
+def _disconnect_openvpn_client(replica_adapter, client_name: str) -> str | None:
+    """Kill the client on every server; agents before 2.26 lack per-unit kill, so fall back to disconnect."""
+    kill_errors: list[str] = []
+    for unit in OPENVPN_SERVER_UNITS:
+        try:
+            replica_adapter.kill_openvpn_client(unit, client_name)
+        except Exception as exc:
+            kill_errors.append(f"{unit}: {_error_detail(exc)}")
+    if not kill_errors:
+        return None
+    try:
+        replica_adapter.disconnect_openvpn_client(client_name)
+    except Exception as exc:
+        return f"{client_name}: {'; '.join(kill_errors)}; disconnect: {_error_detail(exc)}"
+    return None
+
+
+def _disconnect_openvpn_clients(replica_adapter, client_names: list[str]) -> None:
+    failures = [
+        failure
+        for failure in (_disconnect_openvpn_client(replica_adapter, name) for name in client_names)
+        if failure
+    ]
+    if failures:
+        raise RuntimeError("Не удалось отключить отозванных клиентов OpenVPN: " + "; ".join(failures))
+
+
 def sync_openvpn_pki_from_primary(
     primary_adapter,
     replica_adapter,
     *,
     openvpn_multihome: bool = False,
 ) -> None:
-    """Copy OpenVPN PKI and .ovpn profiles from primary to replica (no cert re-issue)."""
+    """Copy OpenVPN PKI and .ovpn profiles from primary to replica (no cert re-issue).
+
+    OpenVPN loads ca/cert/key only at start and re-reads ``crl-verify`` on each new
+    connection, so servers restart only when the server identity changed; clients
+    revoked since the last sync are disconnected instead (as ``client.sh`` does).
+    """
+    before = _replica_pki_state(replica_adapter)
     archive = primary_adapter.export_easyrsa3_archive()
+    after = read_pki_state(archive)
     replica_adapter.import_easyrsa3_archive(archive)
     copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter)
 
@@ -212,6 +260,10 @@ def sync_openvpn_pki_from_primary(
                 for issue in replica_validation.issues
             ],
         )
+
+    if not server_identity_changed(before, after):
+        _disconnect_openvpn_clients(replica_adapter, newly_revoked_clients(before, after))
+        return
 
     if openvpn_multihome:
         from app.services.openvpn_multihome import maybe_ensure_openvpn_multihome
