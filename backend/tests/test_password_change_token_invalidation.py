@@ -16,6 +16,7 @@ from app.auth import (
     create_user_access_token,
     get_active_user_from_access_token,
     get_password_hash,
+    verify_password,
 )
 from app.database import Base, get_db
 from app.models import RefreshToken, User, UserRole
@@ -150,6 +151,41 @@ def test_admin_password_reset_ends_target_sessions_only(client, db_factory):
     assert response.status_code == 200
     assert _me(client, carol_token) == 401
     assert _me(client, admin_token) == 200
+
+
+@pytest.mark.parametrize("username", ["admin", "carol"])
+def test_own_password_cannot_be_changed_through_the_user_card(client, db_factory, username):
+    token = _token_for(db_factory, username)
+    db, user = _user(db_factory, username)
+    user_id, theme = user.id, user.theme
+    db.close()
+
+    response = client.patch(
+        f"/api/users/{user_id}",
+        json={"password": NEW_PASSWORD, "theme": "light"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 400
+    assert "текущ" in response.json()["detail"]
+    assert _me(client, token) == 200
+    db, user = _user(db_factory, username)
+    assert verify_password(OLD_PASSWORD, user.password_hash)
+    assert user.theme == theme
+    db.close()
+
+
+def test_own_card_without_password_still_saves(client, db_factory):
+    token = _token_for(db_factory, "carol")
+    db, carol = _user(db_factory, "carol")
+    carol_id = carol.id
+    db.close()
+
+    response = client.patch(f"/api/users/{carol_id}", json={"theme": "light"}, headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert response.json()["theme"] == "light"
+    assert _me(client, token) == 200
 
 
 def test_legacy_token_without_version_valid_until_first_change(db_factory):

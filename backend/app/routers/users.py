@@ -129,6 +129,11 @@ def update_user(
     is_admin = current_user.role == UserRole.admin
     if not is_admin and current_user.id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+    if payload.password and current_user.id == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Свой пароль меняется в настройках профиля с вводом текущего пароля",
+        )
 
     access_until_updated = False
     pending_access_until = None
@@ -163,8 +168,6 @@ def update_user(
         access_until_updated = True
         pending_access_until = payload.access_until
     if payload.password:
-        if not is_admin and current_user.id != user_id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
         validate_password(payload.password, username=user.username)
         user.password_hash = get_password_hash(payload.password)
         invalidate_user_sessions(db, user, reason="password", commit=False)
