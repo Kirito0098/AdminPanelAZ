@@ -20,6 +20,23 @@ R6='-i eth0 -p udp -m udp --dport 80 -j DNAT --to-destination 10.0.0.2'
 CONCURRENT='-i wg0 -j ACCEPT'
 export R1 R2 R3 R4 R5 R6 CONCURRENT
 
+# Обёртка останавливает nginx перед certbot: без этих подмен тест остановил бы nginx сервера.
+# shellcheck disable=SC2016
+NGINX_STOP_FAKES='
+systemctl() {
+  echo "systemctl $*" >>"$LOG"
+  [[ "$1" != is-active ]] || [[ "${NGINX_ACTIVE:-1}" == 1 ]]
+}
+nginx_assert_config_ok_before_stop() { :; }
+nginx_assert_ss_for_tcp_port_check() { :; }
+nginx_tcp_port_is_listening() { return 1; }
+nginx_wait_tcp_port_free() {
+  [[ "${WAIT_KILL:-0}" == 1 ]] && kill -TERM "$BASHPID"
+  return 0
+}
+'
+export NGINX_STOP_FAKES
+
 # Подмена iptables, iptables-restore, ip и certbot: тест не трогает файрвол сервера.
 # shellcheck disable=SC2016
 FAKES='
@@ -75,6 +92,7 @@ run() {
     set -euo pipefail
     ENV_FILE=/dev/null
     source "$1/scripts/nginx-common.sh"
+    eval "$NGINX_STOP_FAKES"
     eval "$FAKES"
     eval "$2"
   ' bash "$ROOT_DIR" "$1"
@@ -99,7 +117,7 @@ original() { printf '%s\n' "$R1" "$R2" "$R3" "$R4" "$R5" "$R6"; }
 
 echo "[test] на время certbot снимаются только правила порта 80 внешнего интерфейса"
 reset
-run 'nginx_certbot_standalone certonly --standalone -d panel.example.com' >/dev/null 2>&1 || fail "certbot не прошёл"
+run 'nginx_certbot_standalone 80 certonly --standalone -d panel.example.com' >/dev/null 2>&1 || fail "certbot не прошёл"
 [[ "$(cat "$STATE.during")" == "$(printf '%s\n' "$R2" "$R3" "$R4" "$R6")" ]] || fail "во время certbot: $(tr '\n' '|' <"$STATE.during")"
 [[ "$(cat "$STATE")" == "$(original)" ]] || fail "правила не вернулись на свои места"
 grep -q "^certbot certonly --standalone -d panel.example.com$" "$LOG" || fail "certbot вызван не с теми аргументами"
@@ -107,27 +125,27 @@ echo "  OK"
 
 echo "[test] правила, добавленные во время certbot, сохраняются"
 reset
-CONCURRENT_ADD=1 run 'nginx_certbot_standalone certonly' >/dev/null 2>&1 || fail "certbot не прошёл"
+CONCURRENT_ADD=1 run 'nginx_certbot_standalone 80 certonly' >/dev/null 2>&1 || fail "certbot не прошёл"
 [[ "$(cat "$STATE")" == "$(original; echo "$CONCURRENT")" ]] || fail "новое правило потеряно или порядок нарушен"
 echo "  OK"
 
 echo "[test] правило, заново добавленное во время certbot, не дублируется"
 reset
-CONCURRENT_READD=1 run 'nginx_certbot_standalone certonly' >/dev/null 2>&1 || fail "certbot не прошёл"
+CONCURRENT_READD=1 run 'nginx_certbot_standalone 80 certonly' >/dev/null 2>&1 || fail "certbot не прошёл"
 [[ "$(grep -cxF -- "$R1" "$STATE")" == 1 ]] || fail "правило задублировано"
 [[ "$(grep -cxF -- "$R5" "$STATE")" == 1 ]] || fail "снятое правило не вернулось"
 echo "  OK"
 
 echo "[test] цепочка укоротилась во время certbot: правила всё равно возвращаются"
 reset
-CONCURRENT_FLUSH=1 run 'nginx_certbot_standalone certonly' >/dev/null 2>&1 || fail "certbot не прошёл"
+CONCURRENT_FLUSH=1 run 'nginx_certbot_standalone 80 certonly' >/dev/null 2>&1 || fail "certbot не прошёл"
 [[ "$(cat "$STATE")" == "$(printf '%s\n' "$R1" "$R5")" ]] || fail "правила не вернулись в пустую цепочку"
 echo "  OK"
 
 echo "[test] сбой certbot: правила возвращаются, код ошибки передаётся"
 reset
 set +e
-CERTBOT_RC=3 run 'nginx_certbot_standalone certonly' >/dev/null 2>&1
+CERTBOT_RC=3 run 'nginx_certbot_standalone 80 certonly' >/dev/null 2>&1
 rc=$?
 set -e
 [[ "$rc" == 3 ]] || fail "код certbot потерян: $rc"
@@ -137,24 +155,59 @@ echo "  OK"
 echo "[test] прерывание во время certbot: правила возвращаются, прежний EXIT-trap выполняется"
 reset
 set +e
-CERTBOT_KILL=1 run 'trap "echo prev-exit >>\"$LOG\"" EXIT; nginx_certbot_standalone certonly; echo after >>"$LOG"' >/dev/null 2>&1
+CERTBOT_KILL=1 run 'trap "echo prev-exit >>\"$LOG\"" EXIT; nginx_certbot_standalone 80 certonly; echo after >>"$LOG"' >/dev/null 2>&1
 set -e
 [[ "$(cat "$STATE")" == "$(original)" ]] || fail "после прерывания правила не вернулись"
 grep -qx "prev-exit" "$LOG" || fail "прежний EXIT-trap не выполнен"
 ! grep -qx "after" "$LOG" || fail "скрипт продолжился после SIGTERM"
 echo "  OK"
 
+echo "[test] nginx останавливается до снятия NAT и certbot"
+reset
+run 'nginx_certbot_standalone 80 certonly' >/dev/null 2>&1 || fail "certbot не прошёл"
+stop_line="$(grep -n "^systemctl stop nginx$" "$LOG" | cut -d: -f1)"
+certbot_line="$(grep -n "^certbot " "$LOG" | cut -d: -f1)"
+[[ -n "$stop_line" && "$stop_line" -lt "$certbot_line" ]] || fail "nginx не остановлен до certbot"
+! grep -q "^systemctl start nginx$" "$LOG" || fail "обёртка сама запускает nginx: это делает вызывающий код"
+echo "  OK"
+
+echo "[test] прерывание во время certbot или ожидания порта: nginx запускается обратно"
+for kill_var in CERTBOT_KILL WAIT_KILL; do
+  reset
+  set +e
+  (export "$kill_var=1"; run 'nginx_certbot_standalone 80 certonly') >/dev/null 2>&1
+  set -e
+  grep -q "^systemctl start nginx$" "$LOG" || fail "$kill_var: nginx остался остановлен"
+done
+echo "  OK"
+
+echo "[test] nginx не работал до certbot: прерывание его не запускает"
+reset
+set +e
+NGINX_ACTIVE=0 CERTBOT_KILL=1 run 'nginx_certbot_standalone 80 certonly' >/dev/null 2>&1
+set -e
+! grep -q "^systemctl st" "$LOG" || fail "nginx остановлен или запущен, хотя не работал"
+echo "  OK"
+
+echo "[test] второй certbot в том же процессе: nginx не работал — прерывание его не запускает"
+reset
+set +e
+run 'nginx_certbot_standalone 80 certonly >/dev/null 2>&1; : >"$LOG"; NGINX_ACTIVE=0 CERTBOT_KILL=1; nginx_certbot_standalone 80 certonly' >/dev/null 2>&1
+set -e
+! grep -q "^systemctl start nginx$" "$LOG" || fail "запущен nginx, остановленный прошлым вызовом"
+echo "  OK"
+
 echo "[test] после certbot прежний EXIT-trap на месте"
 reset
-out="$(run 'trap "echo mine" EXIT; nginx_certbot_standalone certonly >/dev/null 2>&1; trap -p EXIT' 2>/dev/null)"
+out="$(run 'trap "echo mine" EXIT; nginx_certbot_standalone 80 certonly >/dev/null 2>&1; trap -p EXIT' 2>/dev/null)"
 grep -q "echo mine" <<<"$out" || fail "EXIT-trap не восстановлен: $out"
-out="$(run 'nginx_certbot_standalone certonly >/dev/null 2>&1; trap -p EXIT' 2>/dev/null)"
+out="$(run 'nginx_certbot_standalone 80 certonly >/dev/null 2>&1; trap -p EXIT' 2>/dev/null)"
 [[ -z "$out" ]] || fail "после certbot остался EXIT-trap: $out"
 echo "  OK"
 
 echo "[test] повторное восстановление не дублирует правила"
 reset
-run 'nginx_certbot_standalone certonly >/dev/null 2>&1; nginx_restore_port80_nat' >/dev/null 2>&1 || fail "сбой"
+run 'nginx_certbot_standalone 80 certonly >/dev/null 2>&1; nginx_restore_port80_nat' >/dev/null 2>&1 || fail "сбой"
 [[ "$(cat "$STATE")" == "$(original)" ]] || fail "правила задублированы"
 echo "  OK"
 
@@ -168,7 +221,7 @@ echo "  OK"
 echo "[test] нет правил порта 80 — iptables-restore не вызывается"
 printf '%s\n' "$R2" "$R4" >"$STATE"
 : >"$LOG"
-run 'nginx_certbot_standalone certonly' >/dev/null 2>&1 || fail "certbot не прошёл"
+run 'nginx_certbot_standalone 80 certonly' >/dev/null 2>&1 || fail "certbot не прошёл"
 ! grep -q "^iptables-restore" "$LOG" || fail "лишний вызов iptables-restore"
 echo "  OK"
 
@@ -185,12 +238,14 @@ if command -v iptables >/dev/null 2>&1 && unshare --net true 2>/dev/null; then
     iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -m comment --comment "az \"redirect\"" -j REDIRECT --to-ports 3128
     before="$(iptables -t nat -S PREROUTING)"
     ENV_FILE=/dev/null
+    LOG=/dev/null
     source "$1/scripts/nginx-common.sh"
+    eval "$NGINX_STOP_FAKES"
     certbot() {
       ! iptables -t nat -S PREROUTING | grep -q -- "--dport 80 " || exit 1
       iptables -t nat -A PREROUTING -i wg0 -j ACCEPT
     }
-    nginx_certbot_standalone certonly >/dev/null 2>&1
+    nginx_certbot_standalone 80 certonly >/dev/null 2>&1
     [[ "$(iptables -t nat -S PREROUTING)" == "$before"$'"'"'\n-A PREROUTING -i wg0 -j ACCEPT'"'"' ]]
   ' bash "$ROOT_DIR" || fail "настоящий iptables: правила не вернулись в прежнем порядке"
   echo "  OK"

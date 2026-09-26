@@ -368,6 +368,7 @@ nginx_stop_for_standalone_acme() {
   nginx_assert_ss_for_tcp_port_check
   if systemctl is-active --quiet nginx 2>/dev/null || nginx_tcp_port_is_listening "$http_port"; then
     nginx_log "Останавливаем nginx, чтобы освободить порт ${http_port} для certbot standalone…"
+    NGINX_STOPPED_FOR_ACME=true
     if ! systemctl stop nginx; then
       nginx_die "Не удалось остановить nginx перед certbot standalone (порт ${http_port}). Исправьте unit/nginx и повторите."
     fi
@@ -1790,17 +1791,24 @@ nginx_restore_port80_nat() {
   nginx_log "Правила NAT для порта 80 возвращены"
 }
 
-# nginx_certbot_standalone <аргументы certbot> — certbot без NAT порта 80. Правила возвращаются
-# и при прерывании (bash выполняет EXIT-trap и при SIGINT/SIGTERM), иначе сервер остался бы
-# без перенаправления порта 80. Прежний EXIT-trap выполняется следом и восстанавливается.
+# nginx_certbot_standalone <HTTP-порт ACME> <аргументы certbot> — остановить nginx и выполнить
+# certbot без NAT порта 80. При прерывании (bash выполняет EXIT-trap и при SIGINT/SIGTERM)
+# правила возвращаются, а остановленный здесь nginx запускается, иначе сервер остался бы без
+# сайтов и перенаправления порта 80. Прежний EXIT-trap выполняется следом и восстанавливается.
+# После certbot nginx запускает вызывающий код.
 nginx_certbot_standalone() {
-  local prev_exit rc=0
+  local http_port="$1" prev_exit rc=0
   local -a prev=()
+  shift
   prev_exit="$(trap -p EXIT)"
   [[ -z "$prev_exit" ]] || eval "prev=(${prev_exit})"
   NGINX_PREV_EXIT_TRAP="${prev[2]:-}"
-  trap 'nginx_restore_port80_nat || true; eval "$NGINX_PREV_EXIT_TRAP"' EXIT
+  NGINX_STOPPED_FOR_ACME=false
+  trap 'nginx_restore_port80_nat || true
+    [[ "$NGINX_STOPPED_FOR_ACME" != true ]] || systemctl start nginx >/dev/null 2>&1 || true
+    eval "$NGINX_PREV_EXIT_TRAP"' EXIT
 
+  nginx_stop_for_standalone_acme "$http_port"
   nginx_temp_clear_port80_nat
   certbot "$@" || rc=$?
   nginx_restore_port80_nat || true
@@ -1845,11 +1853,9 @@ nginx_obtain_letsencrypt_cert() {
 
   nginx_remove_temp_acme_http_vhost "$domain"
   nginx_log "Webroot не сработал — certbot standalone (nginx будет остановлен)…"
-  nginx_stop_for_standalone_acme "$http_acme_port"
-
   local -a email_args=(--register-unsafely-without-email)
   [[ -z "$email" ]] || email_args=(-m "$email")
-  if ! nginx_certbot_standalone certonly --standalone --non-interactive --agree-tos "${email_args[@]}" -d "$domain"; then
+  if ! nginx_certbot_standalone "$http_acme_port" certonly --standalone --non-interactive --agree-tos "${email_args[@]}" -d "$domain"; then
     systemctl start nginx 2>/dev/null || true
     if [[ "${NGINX_FAIL_SOFT:-false}" == true ]]; then
       nginx_warn "Не удалось получить сертификат Let's Encrypt"
@@ -1993,11 +1999,9 @@ nginx_obtain_letsencrypt_cert_hosts() {
   done
 
   nginx_log "Webroot не сработал — certbot standalone для: ${hosts[*]}"
-  nginx_stop_for_standalone_acme "$http_acme_port"
-
   local -a email_args=(--register-unsafely-without-email)
   [[ -z "$email" ]] || email_args=(-m "$email")
-  if ! nginx_certbot_standalone certonly --standalone --non-interactive --agree-tos "${email_args[@]}" \
+  if ! nginx_certbot_standalone "$http_acme_port" certonly --standalone --non-interactive --agree-tos "${email_args[@]}" \
     "${expand_flag[@]}" "${d_args[@]}"; then
     systemctl start nginx 2>/dev/null || true
     nginx_die "Не удалось получить сертификат Let's Encrypt для ${hosts[*]}"
