@@ -3,6 +3,8 @@
 import os
 from pathlib import Path
 
+from app.services.atomic_file import atomic_write_text
+
 
 class EnvFileService:
     def __init__(self, env_file_path: Path | str):
@@ -26,8 +28,7 @@ class EnvFileService:
         if not updated:
             new_lines.append(f"{key}={value}\n")
 
-        env_path.parent.mkdir(parents=True, exist_ok=True)
-        env_path.write_text("".join(new_lines), encoding="utf-8")
+        atomic_write_text(env_path, "".join(new_lines))
 
     def remove_env_key(self, key: str) -> None:
         """Drop ``KEY=…`` lines from ``.env`` (no-op if file/key missing)."""
@@ -38,7 +39,7 @@ class EnvFileService:
         new_lines = [line for line in lines if not line.startswith(f"{key}=")]
         if len(new_lines) == len(lines):
             return
-        env_path.write_text("".join(new_lines), encoding="utf-8")
+        atomic_write_text(env_path, "".join(new_lines))
 
     def get_env_value(self, key: str, default: str = "") -> str:
         env_path = self.env_file_path

@@ -17,6 +17,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.models import VpnType
 from app.paths import get_cidr_list_dir
 from app.services.antizapret import AntiZapretService
+from app.services.atomic_file import atomic_write_text
 from app.services.antizapret_backup import resolve_backup_archive
 from app.services.antizapret_settings import build_schema, filter_known_keys, is_openvpn_verbose_log_enabled, read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
@@ -210,7 +211,7 @@ def _persist_api_key(new_key: str) -> None:
             lines.append(line)
     if not replaced:
         lines.append(f"NODE_AGENT_API_KEY={new_key}")
-    NODE_AGENT_ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(NODE_AGENT_ENV_FILE, "\n".join(lines) + "\n")
 
 
 @app.get("/health")

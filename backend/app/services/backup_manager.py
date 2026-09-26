@@ -12,6 +12,8 @@ from pathlib import Path
 
 from fastapi import HTTPException, status
 
+from app.services.atomic_file import atomic_write_bytes
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,20 +53,6 @@ def validate_sqlite_bytes(data: bytes, label: str) -> None:
             raise invalid from exc
     if not result or result[0] != "ok":
         raise invalid
-
-
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp_name, path)
-    except BaseException:
-        Path(tmp_name).unlink(missing_ok=True)
-        raise
 
 
 def _write_private_bytes(path: Path, data: bytes) -> None:
@@ -388,7 +376,7 @@ class BackupManager:
         replaced: list[tuple[str, Path]] = []
         try:
             for role, path, data in targets:
-                _atomic_write_bytes(path, data)
+                atomic_write_bytes(path, data)
                 replaced.append((role, path))
                 if role in self.SQLITE_ROLES:
                     # A leftover WAL of the old database would be replayed onto the restored file.
@@ -451,7 +439,7 @@ class BackupManager:
             saved = snapshot / self.PRE_RESTORE_NAMES[role] if snapshot is not None else None
             try:
                 if saved is not None and saved.exists():
-                    _atomic_write_bytes(path, saved.read_bytes())
+                    atomic_write_bytes(path, saved.read_bytes())
                 else:
                     path.unlink(missing_ok=True)
                 remove_sqlite_sidecars(path)
