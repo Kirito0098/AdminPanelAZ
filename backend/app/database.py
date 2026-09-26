@@ -1,10 +1,15 @@
+import fcntl
 import json
 import logging
+import os
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, inspect, text
+from sqlalchemy import Connection, create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.pool import SingletonThreadPool, StaticPool
 
 from app.config import get_settings
 from app.paths import BACKEND_ROOT
@@ -45,6 +50,56 @@ def resolve_main_db_path() -> Path:
             db_path = BACKEND_ROOT / db_path
         return db_path.resolve()
     return (BACKEND_ROOT / "data" / "adminpanel.db").resolve()
+
+
+@contextmanager
+def _migration_transaction() -> Iterator[Connection]:
+    """One real transaction per migration step, DDL included.
+
+    pysqlite never emits BEGIN before DDL, so under ``engine.begin()`` a CREATE TABLE commits
+    on its own and a crash mid table-rebuild leaves ``<table>_new`` behind for the next start.
+    """
+    # Shared-connection pools (in-memory SQLite) would roll the transaction back as soon as
+    # a nested inspect(engine) returns that same connection.
+    if engine.dialect.name != "sqlite" or isinstance(engine.pool, (SingletonThreadPool, StaticPool)):
+        with engine.begin() as conn:
+            yield conn
+        return
+    with engine.connect() as conn:
+        conn.execution_options(isolation_level="AUTOCOMMIT")
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
+        try:
+            yield conn
+        except BaseException:
+            if conn.connection.dbapi_connection.in_transaction:
+                conn.exec_driver_sql("ROLLBACK")
+            raise
+        conn.exec_driver_sql("COMMIT")
+
+
+def _table_columns(conn: Connection, table: str) -> set[str]:
+    return {row[1] for row in conn.exec_driver_sql(f'PRAGMA table_info("{table}")')}
+
+
+@contextmanager
+def _migrations_lock() -> Iterator[None]:
+    """Serialize startup migrations across uvicorn workers sharing one SQLite file."""
+    db_file = engine.url.database if engine.dialect.name == "sqlite" else None
+    if not db_file or db_file == ":memory:" or db_file.startswith("file:"):
+        yield
+        return
+    lock_path = Path(f"{db_file}.migrate.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 def _migrate_vpn_configs_node_scope() -> None:
@@ -109,7 +164,10 @@ def _migrate_vpn_configs_node_scope() -> None:
             )
         ).mappings().all()
 
-        with engine.begin() as conn:
+        with _migration_transaction() as conn:
+            if "node_id" in _table_columns(conn, "vpn_configs"):
+                return
+            conn.execute(text("DROP TABLE IF EXISTS vpn_configs_new"))
             conn.execute(
                 text(
                     """
@@ -163,8 +221,7 @@ def _migrate_access_policy_node_scope() -> None:
     tables = ("openvpn_access_policy", "wg_access_policy")
     if not all(t in inspector.get_table_names() for t in tables):
         return
-    ovpn_cols = {col["name"] for col in inspector.get_columns("openvpn_access_policy")}
-    if "node_id" in ovpn_cols:
+    if all("node_id" in {col["name"] for col in inspector.get_columns(t)} for t in tables):
         return
 
     from app.models import Node
@@ -180,8 +237,11 @@ def _migrate_access_policy_node_scope() -> None:
         default_node_id = local.id
 
         def _recreate_policy_table(table: str, columns: str) -> None:
-            old_rows = db.execute(text(f"SELECT {columns} FROM {table}")).mappings().all()
-            with engine.begin() as conn:
+            with _migration_transaction() as conn:
+                if "node_id" in _table_columns(conn, table):
+                    return
+                old_rows = conn.execute(text(f"SELECT {columns} FROM {table}")).mappings().all()
+                conn.execute(text(f"DROP TABLE IF EXISTS {table}_new"))
                 conn.execute(
                     text(
                         f"""
@@ -274,11 +334,11 @@ def _migrate_awg2_access_policy_table() -> None:
     if "amneziawg2_access_policies" in inspector.get_table_names():
         cols = {col["name"] for col in inspector.get_columns("amneziawg2_access_policies")}
         if "access_until" not in cols:
-            with engine.begin() as conn:
+            with _migration_transaction() as conn:
                 conn.execute(text("ALTER TABLE amneziawg2_access_policies ADD COLUMN access_until DATETIME"))
             logger.info("DB migration: added amneziawg2_access_policies.access_until")
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 """
@@ -323,7 +383,7 @@ def _migrate_unlock_codes_tables() -> None:
     tables = set(inspector.get_table_names())
 
     if "unlock_codes" not in tables:
-        with engine.begin() as conn:
+        with _migration_transaction() as conn:
             conn.execute(
                 text(
                     """
@@ -353,7 +413,7 @@ def _migrate_unlock_codes_tables() -> None:
     else:
         unlock_cols = {col["name"] for col in inspector.get_columns("unlock_codes")}
         if "redemption_count" not in unlock_cols:
-            with engine.begin() as conn:
+            with _migration_transaction() as conn:
                 conn.execute(
                     text(
                         "ALTER TABLE unlock_codes "
@@ -378,7 +438,7 @@ def _migrate_unlock_codes_tables() -> None:
         inspector = inspect(engine)
         unlock_cols = {col["name"] for col in inspector.get_columns("unlock_codes")}
         if "allowed_client_names" not in unlock_cols:
-            with engine.begin() as conn:
+            with _migration_transaction() as conn:
                 conn.execute(
                     text(
                         "ALTER TABLE unlock_codes "
@@ -391,7 +451,7 @@ def _migrate_unlock_codes_tables() -> None:
     tables = set(inspector.get_table_names())
 
     if "unlock_code_redemptions" not in tables:
-        with engine.begin() as conn:
+        with _migration_transaction() as conn:
             conn.execute(
                 text(
                     """
@@ -479,7 +539,6 @@ def _migrate_unlock_redemptions_user_scope() -> None:
         return
     if _unlock_redemptions_user_scope_ready(inspector):
         return
-    cols = {col["name"] for col in inspector.get_columns("unlock_code_redemptions")}
 
     from app.models import Node
 
@@ -492,7 +551,11 @@ def _migrate_unlock_redemptions_user_scope() -> None:
     finally:
         db.close()
 
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
+        if _unlock_redemptions_user_scope_ready(inspect(conn)):
+            return
+        cols = _table_columns(conn, "unlock_code_redemptions")
+        conn.execute(text("DROP TABLE IF EXISTS unlock_code_redemptions_new"))
         if fallback_node_id is not None:
             conn.execute(
                 text(
@@ -629,7 +692,7 @@ def _migrate_node_resource_sample_table() -> None:
     inspector = inspect(engine)
     if "node_resource_sample" in inspector.get_table_names():
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 """
@@ -669,7 +732,7 @@ def _migrate_connection_count_samples_table() -> None:
     inspector = inspect(engine)
     if "connection_count_samples" in inspector.get_table_names():
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 """
@@ -713,7 +776,7 @@ def _migrate_connection_count_samples_awg2_column() -> None:
     existing = {c["name"] for c in inspector.get_columns("connection_count_samples")}
     if "amneziawg2_count" in existing:
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(text(
             "ALTER TABLE connection_count_samples ADD COLUMN amneziawg2_count INTEGER DEFAULT 0"
         ))
@@ -724,7 +787,7 @@ def _migrate_active_web_session_table() -> None:
     inspector = inspect(engine)
     if "active_web_session" in inspector.get_table_names():
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 """
@@ -757,7 +820,7 @@ def _migrate_panel_resource_sample_table() -> None:
     inspector = inspect(engine)
     if "panel_resource_sample" in inspector.get_table_names():
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 """
@@ -788,7 +851,7 @@ def _migrate_stage2_admin_productivity() -> None:
     tables = set(inspector.get_table_names())
 
     if "config_tags" not in tables:
-        with engine.begin() as conn:
+        with _migration_transaction() as conn:
             conn.execute(
                 text(
                     """
@@ -809,7 +872,7 @@ def _migrate_stage2_admin_productivity() -> None:
         logger.info("DB migration: created config_tags table")
 
     if "vpn_config_tag_links" not in tables:
-        with engine.begin() as conn:
+        with _migration_transaction() as conn:
             conn.execute(
                 text(
                     """
@@ -836,7 +899,7 @@ def _migrate_stage2_admin_productivity() -> None:
         logger.info("DB migration: created vpn_config_tag_links table")
 
     if "client_templates" not in tables:
-        with engine.begin() as conn:
+        with _migration_transaction() as conn:
             conn.execute(
                 text(
                     """
@@ -868,7 +931,7 @@ def _migrate_stage2_admin_productivity() -> None:
     if "active_web_session" in inspector.get_table_names():
         cols = {col["name"] for col in inspector.get_columns("active_web_session")}
         if "revoked_at" not in cols:
-            with engine.begin() as conn:
+            with _migration_transaction() as conn:
                 conn.execute(text("ALTER TABLE active_web_session ADD COLUMN revoked_at DATETIME"))
             logger.info("DB migration: added active_web_session.revoked_at")
 
@@ -877,7 +940,7 @@ def _migrate_user_reminder_logs_table() -> None:
     inspector = inspect(engine)
     if "user_reminder_logs" in inspector.get_table_names():
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 """
@@ -965,7 +1028,7 @@ def _migrate_node_sync_groups_table() -> None:
     inspector = inspect(engine)
     if "node_sync_groups" in inspector.get_table_names():
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 """
@@ -1001,7 +1064,7 @@ def _migrate_node_sync_groups_wireguard_domain() -> None:
     cols = {col["name"] for col in inspector.get_columns("node_sync_groups")}
     if "shared_domain_wireguard" in cols:
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(text("ALTER TABLE node_sync_groups ADD COLUMN shared_domain_wireguard VARCHAR(255)"))
         # Existing groups used one domain for both protocols — keep that behaviour.
         conn.execute(
@@ -1018,7 +1081,7 @@ def _migrate_vpn_configs_ha_links() -> None:
     if "vpn_configs" not in inspector.get_table_names():
         return
     cols = {col["name"] for col in inspector.get_columns("vpn_configs")}
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         if "sync_group_id" not in cols:
             conn.execute(
                 text("ALTER TABLE vpn_configs ADD COLUMN sync_group_id INTEGER REFERENCES node_sync_groups(id)")
@@ -1037,7 +1100,7 @@ def _migrate_webhook_delivery_table() -> None:
     inspector = inspect(engine)
     if "webhook_delivery" in inspector.get_table_names():
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 """
@@ -1069,7 +1132,7 @@ def _migrate_webauthn_credentials_table() -> None:
     inspector = inspect(engine)
     if "webauthn_credentials" in inspector.get_table_names():
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 """
@@ -1103,7 +1166,7 @@ def _migrate_webhook_delivery_destination_type() -> None:
     existing = {col["name"] for col in inspector.get_columns("webhook_delivery")}
     if "destination_type" in existing:
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 "ALTER TABLE webhook_delivery ADD COLUMN destination_type VARCHAR(16) NOT NULL DEFAULT 'http'"
@@ -1117,7 +1180,7 @@ def _migrate_alert_rules_table() -> None:
     inspector = inspect(engine)
     if "alert_rules" in inspector.get_table_names():
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 """
@@ -1147,7 +1210,7 @@ def _migrate_openvpn_buffer_guard_tables() -> None:
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
     created: list[str] = []
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         if "openvpn_buffer_guard_settings" not in table_names:
             conn.execute(
                 text(
@@ -1245,7 +1308,7 @@ def _migrate_openvpn_buffer_guard_factory_thresholds() -> None:
     inspector = inspect(engine)
     if "openvpn_buffer_guard_settings" not in set(inspector.get_table_names()):
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         updated = migrate_factory_buffer_guard_thresholds(conn)
     if updated:
         logger.info(
@@ -1261,7 +1324,7 @@ def _migrate_user_traffic_sample_node_created_index() -> None:
     existing = {idx["name"] for idx in inspector.get_indexes("user_traffic_sample")}
     if "ix_user_traffic_sample_node_created" in existing:
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 "CREATE INDEX IF NOT EXISTS ix_user_traffic_sample_node_created "
@@ -1272,7 +1335,7 @@ def _migrate_user_traffic_sample_node_created_index() -> None:
 
 
 def _migrate_refresh_tokens_family_index() -> None:
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text("CREATE INDEX IF NOT EXISTS ix_refresh_tokens_family_id ON refresh_tokens (family_id)")
         )
@@ -1305,7 +1368,7 @@ def migrate_traffic_session_state_node_scoped_key(conn) -> bool:
 
 
 def _migrate_traffic_session_state_node_scoped_key() -> None:
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         migrated = migrate_traffic_session_state_node_scoped_key(conn)
     if migrated:
         logger.info("DB migration: traffic_session_state session_key is now unique per node")
@@ -1320,7 +1383,7 @@ def _migrate_client_portal_tokens_active_unique() -> None:
     if "uq_client_portal_tokens_active_node_client" in index_names:
         return
 
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         # Keep newest active row per client; revoke older duplicates.
         conn.execute(
             text(
@@ -1354,7 +1417,7 @@ def _migrate_user_portal_tokens_table() -> None:
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
     if "user_portal_tokens" not in tables:
-        with engine.begin() as conn:
+        with _migration_transaction() as conn:
             conn.execute(
                 text(
                     """
@@ -1390,7 +1453,7 @@ def _migrate_user_portal_tokens_table() -> None:
     if "uq_user_portal_tokens_active_user" in index_names:
         return
 
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 """
@@ -1420,6 +1483,11 @@ def _migrate_user_portal_tokens_table() -> None:
 
 def run_db_migrations() -> None:
     """Lightweight SQLite migrations for columns added after initial deploy."""
+    with _migrations_lock():
+        _run_db_migrations()
+
+
+def _run_db_migrations() -> None:
     _migrate_alert_rules_table()
     _migrate_openvpn_buffer_guard_tables()
     _migrate_openvpn_buffer_guard_factory_thresholds()
@@ -1503,7 +1571,7 @@ def run_db_migrations() -> None:
             ("token_version", "INTEGER DEFAULT 0"),
         ],
     }
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         for table, columns in migrations.items():
             if table not in inspector.get_table_names():
                 continue
@@ -1538,7 +1606,7 @@ def _migrate_user_config_access_table() -> None:
         return
     if "viewer_config_access" not in tables:
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(text("ALTER TABLE viewer_config_access RENAME TO user_config_access"))
         logger.info("DB migration: renamed viewer_config_access → user_config_access")
 
@@ -1549,7 +1617,7 @@ def _migrate_viewer_role_to_user() -> None:
     if "users" not in inspector.get_table_names():
         return
     cols = {col["name"] for col in inspector.get_columns("users")}
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         if "can_create_configs" in cols:
             result = conn.execute(
                 text(
@@ -1569,7 +1637,7 @@ def _migrate_nodes_mtls_enabled() -> None:
     if "nodes" not in inspector.get_table_names():
         return
     cols = {col["name"] for col in inspector.get_columns("nodes")}
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         if "mtls_enabled" not in cols:
             conn.execute(text("ALTER TABLE nodes ADD COLUMN mtls_enabled INTEGER DEFAULT 0"))
             logger.info("DB migration: added nodes.mtls_enabled")
@@ -1590,7 +1658,7 @@ def _migrate_nodes_transport() -> None:
         return
     cols = {col["name"] for col in inspector.get_columns("nodes")}
     if "transport" not in cols:
-        with engine.begin() as conn:
+        with _migration_transaction() as conn:
             conn.execute(text("ALTER TABLE nodes ADD COLUMN transport VARCHAR(16) DEFAULT 'http'"))
             conn.execute(
                 text(
@@ -1607,7 +1675,7 @@ def _migrate_nodes_ssh_fields() -> None:
     if "nodes" not in inspector.get_table_names():
         return
     cols = {col["name"] for col in inspector.get_columns("nodes")}
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         if "ssh_host" not in cols:
             conn.execute(text("ALTER TABLE nodes ADD COLUMN ssh_host VARCHAR(255)"))
             logger.info("DB migration: added nodes.ssh_host")
@@ -1666,7 +1734,7 @@ def _sync_nodes_transport_flags() -> None:
     cols = {col["name"] for col in inspector.get_columns("nodes")}
     if "transport" not in cols or "mtls_enabled" not in cols:
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(
             text(
                 "UPDATE nodes SET transport = CASE WHEN mtls_enabled = 1 THEN 'mtls' ELSE 'http' END "
@@ -1689,7 +1757,7 @@ def _migrate_nodes_openvpn_remote_hosts() -> None:
     cols = {col["name"] for col in inspector.get_columns("nodes")}
     if "openvpn_remote_hosts" in cols:
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(text("ALTER TABLE nodes ADD COLUMN openvpn_remote_hosts TEXT"))
         logger.info("DB migration: added nodes.openvpn_remote_hosts")
 
@@ -1702,7 +1770,7 @@ def _migrate_nodes_wireguard_use_first_remote() -> None:
     cols = {col["name"] for col in inspector.get_columns("nodes")}
     if "wireguard_use_first_remote" in cols:
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(text("ALTER TABLE nodes ADD COLUMN wireguard_use_first_remote INTEGER DEFAULT 0"))
         logger.info("DB migration: added nodes.wireguard_use_first_remote")
 
@@ -1715,7 +1783,7 @@ def _migrate_nodes_openvpn_multihome() -> None:
     cols = {col["name"] for col in inspector.get_columns("nodes")}
     if "openvpn_multihome" in cols:
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         conn.execute(text("ALTER TABLE nodes ADD COLUMN openvpn_multihome INTEGER DEFAULT 0"))
         logger.info("DB migration: added nodes.openvpn_multihome")
 
@@ -1726,7 +1794,7 @@ def _migrate_nodes_proxy_fields() -> None:
     if "nodes" not in inspector.get_table_names():
         return
     cols = {col["name"] for col in inspector.get_columns("nodes")}
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         if "node_kind" not in cols:
             conn.execute(text("ALTER TABLE nodes ADD COLUMN node_kind VARCHAR(16) DEFAULT 'vpn'"))
             conn.execute(text("UPDATE nodes SET node_kind = 'vpn' WHERE node_kind IS NULL OR node_kind = ''"))
@@ -1819,7 +1887,7 @@ def _migrate_user_access_until_backfill() -> None:
         return
     if "vpn_configs" not in tables or "app_settings" not in tables:
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         already_done = conn.execute(
             text("SELECT value FROM app_settings WHERE key = :key"),
             {"key": _USER_ACCESS_UNTIL_BACKFILL_MARKER},
@@ -1859,7 +1927,7 @@ def _migrate_user_telegram_backfill() -> None:
     cols = {col["name"] for col in inspector.get_columns("users")}
     if "telegram_id" not in cols:
         return
-    with engine.begin() as conn:
+    with _migration_transaction() as conn:
         rows = conn.execute(
             text("SELECT id, username, telegram_id FROM users WHERE username LIKE 'tg_%'")
         ).mappings().all()
