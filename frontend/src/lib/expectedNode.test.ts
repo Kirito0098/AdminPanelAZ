@@ -11,6 +11,7 @@ import {
   isActiveNodeChangedPayload,
   notifyActiveNodeChanged,
   onActiveNodeChanged,
+  refreshActiveNode,
   setExpectedNodeId,
 } from './expectedNode'
 import { apiFetchAtBase } from '@/api/http'
@@ -181,6 +182,46 @@ describe('createActiveNodeTracker', () => {
     expect(getExpectedNodeId()).toBe(1)
     expect(tracker.classifyRefresh(tracker.beginRefresh(), 1)).toBe('show')
     expect(tracker.classifyRefresh(tracker.beginRefresh(), 5)).toBe('changed-elsewhere')
+  })
+})
+
+describe('refreshActiveNode', () => {
+  it('shows the server node or reports a switch made elsewhere', async () => {
+    const tracker = createActiveNodeTracker()
+    tracker.show(5)
+    const same = { node: { id: 5 }, ha: null }
+    const other = { node: { id: 6 }, ha: null }
+
+    expect(await refreshActiveNode(tracker, async () => same)).toEqual({ outcome: 'show', active: same })
+    expect(await refreshActiveNode(tracker, async () => other)).toEqual({ outcome: 'changed-elsewhere', active: other })
+  })
+
+  it('keeps the shown node after a failed poll, so the next poll cannot switch the tab silently', async () => {
+    const tracker = createActiveNodeTracker()
+    tracker.show(5)
+
+    const failed = await refreshActiveNode(tracker, async () => {
+      throw new Error('offline')
+    })
+
+    expect(failed).toEqual({ outcome: 'failed' })
+    expect(getExpectedNodeId()).toBe(5)
+    expect(await refreshActiveNode(tracker, async () => ({ node: { id: 6 }, ha: null }))).toMatchObject({
+      outcome: 'changed-elsewhere',
+    })
+  })
+
+  it('drops a poll that overlaps an activation from this tab', async () => {
+    const tracker = createActiveNodeTracker()
+    tracker.show(5)
+
+    const result = await refreshActiveNode(tracker, async () => {
+      tracker.beginActivation()
+      tracker.finishActivation(6)
+      return { node: { id: 5 }, ha: null }
+    })
+
+    expect(result).toEqual({ outcome: 'stale' })
   })
 })
 

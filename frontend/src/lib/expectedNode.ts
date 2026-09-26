@@ -94,6 +94,26 @@ export function createActiveNodeTracker() {
 
 export type ActiveNodeTracker = ReturnType<typeof createActiveNodeTracker>
 
+export type ActiveNodeRefresh<T> =
+  | { outcome: 'show' | 'changed-elsewhere'; active: T }
+  | { outcome: 'stale' | 'failed' }
+
+/** A failed poll changes nothing: forgetting the shown node would let the next poll switch the tab silently. */
+export async function refreshActiveNode<T extends { node: { id: number } | null }>(
+  tracker: ActiveNodeTracker,
+  getActiveNode: () => Promise<T>,
+): Promise<ActiveNodeRefresh<T>> {
+  const token = tracker.beginRefresh()
+  let active: T
+  try {
+    active = await getActiveNode()
+  } catch {
+    return { outcome: 'failed' }
+  }
+  const outcome = tracker.classifyRefresh(token, active.node?.id ?? null)
+  return outcome === 'stale' ? { outcome } : { outcome, active }
+}
+
 export type NodeDeletionOutcome<T> = { moved: false } | { moved: true; active: T | null }
 
 /**

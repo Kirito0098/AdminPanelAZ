@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import * as api from '@/api/client'
 import { useAuth } from '@/context/AuthContext'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
-import { createActiveNodeTracker, deleteNodeInTab, onActiveNodeChanged } from '@/lib/expectedNode'
+import { createActiveNodeTracker, deleteNodeInTab, onActiveNodeChanged, refreshActiveNode } from '@/lib/expectedNode'
 import type { Node, NodeHaContext, NodeSyncGroup } from '@/types'
 
 interface ActiveNodeState {
@@ -55,16 +55,12 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
       setLoading(false)
       return
     }
-    const tracker = trackerRef.current
-    const token = tracker.beginRefresh()
     try {
-      const data = await api.getActiveNode()
-      const state = { node: data.node, ha: data.ha ?? null }
-      const outcome = tracker.classifyRefresh(token, data.node?.id ?? null)
-      if (outcome === 'changed-elsewhere') setChangedElsewhere(state)
-      else if (outcome === 'show') showActiveNode(state)
-    } catch {
-      if (tracker.classifyRefresh(token, null) !== 'stale') showActiveNode({ node: null, ha: null })
+      const result = await refreshActiveNode(trackerRef.current, api.getActiveNode)
+      if (result.outcome !== 'show' && result.outcome !== 'changed-elsewhere') return
+      const state = { node: result.active.node, ha: result.active.ha ?? null }
+      if (result.outcome === 'changed-elsewhere') setChangedElsewhere(state)
+      else showActiveNode(state)
     } finally {
       setLoading(false)
     }
