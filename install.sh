@@ -1794,7 +1794,8 @@ setup_nginx_if_selected() {
     fi
     conf="$(nginx_render_template \
       "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-      "$site_domain" "$site_backend" "$site_cert" "$site_key" "$site_https" "$site_http")"
+      "$site_domain" "$site_backend" "$site_cert" "$site_key" "$site_https" "$site_http")" \
+      || die "Не удалось сформировать конфигурацию nginx"
     nginx_install_site "$conf" "$site_domain"
     nginx_apply_behind_proxy_env "$site_domain" "$site_backend" "https" "$site_https" "$site_http"
   }

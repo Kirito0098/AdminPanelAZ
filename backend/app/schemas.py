@@ -8,6 +8,65 @@ from app.models import NodeStatus, SyncStatus, UserRole, VpnType
 
 DATE_ONLY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
+# Значения публикации пишутся в .env и подставляются в конфиг nginx скриптами (sed): перевод строки
+# добавил бы ключ в .env, а `;` и `{` — директивы в vhost.
+_PUBLISH_HOSTNAME_RE = re.compile(
+    r"(?=.{1,253}\Z)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*"
+)
+_PUBLISH_IPV4_RE = re.compile(r"(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}")
+_PUBLISH_FILE_PATH_RE = re.compile(r"/[A-Za-z0-9._/@+-]+")
+_PUBLISH_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_PUBLISH_PORTAL_HOST_RE = re.compile(r"[A-Za-z0-9.:/-]+")
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _publish_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if _CONTROL_CHARS_RE.search(text):
+        raise ValueError("Недопустимые символы")
+    return text.strip() or None
+
+
+def validate_publish_domain(value: Any) -> str | None:
+    text = _publish_text(value)
+    if text is None:
+        return None
+    host, sep, port = text.partition(":")
+    if sep and not (port.isdigit() and 1 <= int(port) <= 65535):
+        raise ValueError("Некорректный порт в домене")
+    if not (_PUBLISH_HOSTNAME_RE.fullmatch(host) or _PUBLISH_IPV4_RE.fullmatch(host)):
+        raise ValueError("Некорректный домен: ожидается имя вида panel.example.com или IPv4")
+    return text
+
+
+def validate_publish_portal_domain(value: Any) -> str | None:
+    text = _publish_text(value)
+    if text is None:
+        return None
+    if not _PUBLISH_PORTAL_HOST_RE.fullmatch(text):
+        raise ValueError("Некорректный хост портала")
+    return text
+
+
+def validate_publish_email(value: Any) -> str | None:
+    text = _publish_text(value)
+    if text is None:
+        return None
+    if not _PUBLISH_EMAIL_RE.fullmatch(text):
+        raise ValueError("Некорректный email")
+    return text
+
+
+def validate_publish_file_path(value: Any) -> str | None:
+    text = _publish_text(value)
+    if text is None:
+        return None
+    if not _PUBLISH_FILE_PATH_RE.fullmatch(text):
+        raise ValueError("Путь должен быть абсолютным и без пробелов и спецсимволов")
+    return text
+
 
 class Token(BaseModel):
     access_token: str
@@ -1189,10 +1248,18 @@ class VpnNetworkPublishRequest(BaseModel):
     configure_portal: bool = False
     portal_domain: str | None = Field(default=None, max_length=255)
 
+    _domain = field_validator("domain", mode="before")(validate_publish_domain)
+    _email = field_validator("email", mode="before")(validate_publish_email)
+    _ssl_paths = field_validator("ssl_cert", "ssl_key", mode="before")(validate_publish_file_path)
+    _portal_domain = field_validator("portal_domain", mode="before")(validate_publish_portal_domain)
+
 
 class PortalPublishRequest(BaseModel):
     portal_domain: str = Field(min_length=1, max_length=255)
     email: str | None = Field(default=None, max_length=255)
+
+    _portal_domain = field_validator("portal_domain", mode="before")(validate_publish_portal_domain)
+    _email = field_validator("email", mode="before")(validate_publish_email)
     save_domain: bool = True
 
 

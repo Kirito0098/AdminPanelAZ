@@ -187,13 +187,24 @@ nginx_resolve_existing_ssl_paths() {
   return 1
 }
 
+# Домен или IPv4 для server_name, CN сертификата и .env: только буквы, цифры, точки и дефисы.
+nginx_is_safe_host() {
+  [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]]
+}
+
+# Путь к сертификату или ключу, который подставляется в vhost и .env.
+nginx_is_safe_file_path() {
+  [[ "$1" =~ ^/[A-Za-z0-9._/@+-]+$ ]]
+}
+
 nginx_env_set() {
   local key="$1"
   local value="$2"
   local escaped
+  [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || nginx_die "${key}: перевод строки в значении недопустим"
   mkdir -p "$(dirname "$ENV_FILE")"
   touch "$ENV_FILE"
-  escaped=$(printf '%s' "$value" | sed 's/[&|]/\\&/g')
+  escaped=$(printf '%s' "$value" | sed 's/[\\&|]/\\&/g')
   if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
     sed -i "s|^${key}=.*|${key}=${escaped}|" "$ENV_FILE"
   else
@@ -1327,6 +1338,21 @@ nginx_finalize_nginx_site() {
   return 1
 }
 
+nginx_check_render_inputs() {
+  local domain="$1" ssl_cert="${2:-}" ssl_key="${3:-}"
+  if ! nginx_is_safe_host "$domain"; then
+    nginx_warn "Недопустимый домен для vhost: ${domain//$'\n'/\\n}"
+    return 1
+  fi
+  local path
+  for path in "$ssl_cert" "$ssl_key"; do
+    if [[ -n "$path" ]] && ! nginx_is_safe_file_path "$path"; then
+      nginx_warn "Недопустимый путь сертификата для vhost: ${path//$'\n'/\\n}"
+      return 1
+    fi
+  done
+}
+
 nginx_render_template() {
   local template="$1"
   local domain="$2"
@@ -1336,6 +1362,7 @@ nginx_render_template() {
   local https_port="${6:-443}"
   local http_port="${7:-80}"
   local https_redirect_suffix access_path panel_blocks rendered
+  nginx_check_render_inputs "$domain" "$ssl_cert" "$ssl_key" || return 1
   nginx_ensure_cloudflare_realip_snippet
   nginx_ensure_cloudflare_origin_snippets
   https_redirect_suffix="$(nginx_https_redirect_suffix "$https_port")"
@@ -1350,7 +1377,8 @@ nginx_render_template() {
     -e "s|__SSL_CERT__|${ssl_cert}|g" \
     -e "s|__SSL_KEY__|${ssl_key}|g" \
     -e "s|__UVICORN_PORT__|${backend_port}|g" \
-    "$template")"
+    "$template")" || { nginx_warn "Не удалось сформировать vhost из $template"; return 1; }
+  [[ -n "$rendered" ]] || { nginx_warn "Пустой vhost из $template"; return 1; }
   ACCESS_PATH="$access_path" PANEL_BLOCKS="$panel_blocks" RENDERED="$rendered" python3 - <<'PY'
 import os
 print(os.environ["RENDERED"].replace("__PANEL_LOCATION_BLOCKS__", os.environ["PANEL_BLOCKS"]), end="")
@@ -1590,7 +1618,7 @@ nginx_install_dedicated_panel_vhost() {
   nginx_ensure_cloudflare_origin_snippets
   conf="$(nginx_render_template \
     "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-    "$domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port")"
+    "$domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port")" || return 1
   nginx_install_site "$conf" "$domain"
 }
 
@@ -1801,6 +1829,10 @@ nginx_install_site() {
   local created_enabled=false
   local enabled_dir available_dir
 
+  if [[ -z "${conf_content//[[:space:]]/}" ]]; then
+    nginx_warn "Пустая конфигурация vhost для ${domain}: установка отменена"
+    return 1
+  fi
   nginx_ensure_server_names_hash
   nginx_conf_paths "$domain"
   available_dir="$(nginx_sites_available_dir)"
@@ -2183,6 +2215,7 @@ nginx_render_portal_template() {
   local template https_redirect_suffix portal_blocks rendered
   # Portal subdomain always serves at root (not panel ACCESS_PATH); allowlist only.
   template="$NGINX_TEMPLATE_DIR/adminpanelaz-portal.conf.template"
+  nginx_check_render_inputs "$portal_domain" "$ssl_cert" "$ssl_key" || return 1
   nginx_ensure_cloudflare_realip_snippet
   nginx_ensure_cloudflare_origin_snippets
   https_redirect_suffix="$(nginx_https_redirect_suffix "$https_port")"
@@ -2196,7 +2229,8 @@ nginx_render_portal_template() {
     -e "s|__SSL_CERT__|${ssl_cert}|g" \
     -e "s|__SSL_KEY__|${ssl_key}|g" \
     -e "s|__UVICORN_PORT__|${backend_port}|g" \
-    "$template")"
+    "$template")" || { nginx_warn "Не удалось сформировать vhost портала"; return 1; }
+  [[ -n "$rendered" ]] || { nginx_warn "Пустой vhost портала"; return 1; }
   PANEL_BLOCKS="$portal_blocks" RENDERED="$rendered" python3 - <<'PY'
 import os
 print(os.environ["RENDERED"].replace("__PANEL_LOCATION_BLOCKS__", os.environ["PANEL_BLOCKS"]), end="")
@@ -2211,7 +2245,8 @@ nginx_install_portal_vhost() {
   local https_port="${5:-443}"
   local http_port="${6:-80}"
   local conf
-  conf="$(nginx_render_portal_template "$portal_domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port")"
+  conf="$(nginx_render_portal_template "$portal_domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port")" \
+    || return 1
   nginx_install_site "$conf" "$portal_domain" "true"
 }
 

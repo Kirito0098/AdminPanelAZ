@@ -62,6 +62,17 @@ validate_domain() {
   nginx_assert_domain_not_az_vpn_host "$value"
 }
 
+require_safe_domain() {
+  nginx_is_safe_host "$1" || nginx_die "Неверный формат домена: ${1//$'\n'/\\n}"
+}
+
+require_safe_ssl_paths() {
+  local path
+  for path in "$@"; do
+    nginx_is_safe_file_path "$path" || nginx_die "Недопустимый путь сертификата: ${path//$'\n'/\\n}"
+  done
+}
+
 require_root() {
   if [[ "$(id -u)" -ne 0 ]]; then
     nginx_die "Запустите от root: sudo $0"
@@ -295,7 +306,8 @@ setup_nginx_letsencrypt() {
   else
     conf="$(nginx_render_template \
       "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-      "$domain" "$BACKEND_PORT" "$cert" "$key" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")"
+      "$domain" "$BACKEND_PORT" "$cert" "$key" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")" \
+      || nginx_die "Не удалось сформировать конфигурацию nginx"
     nginx_install_site "$conf" "$domain"
     nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
   fi
@@ -316,6 +328,7 @@ setup_nginx_selfsigned() {
   local domain
   domain="$(nginx_resolve_selfsigned_cn)"
   [[ -n "$domain" ]] || nginx_die "Не удалось определить CN для самоподписанного сертификата"
+  require_safe_domain "$domain"
   resolve_backend_port
   resolve_public_ports
   resolve_access_path
@@ -336,7 +349,8 @@ setup_nginx_selfsigned() {
     conf="$(nginx_render_template \
       "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
       "$domain" "$BACKEND_PORT" "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" \
-      "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")"
+      "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")" \
+      || nginx_die "Не удалось сформировать конфигурацию nginx"
     nginx_install_site "$conf" "$domain"
     nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
   fi
@@ -358,6 +372,7 @@ setup_nginx_custom_certs() {
     resolve_domain true
     domain="$DOMAIN"
   fi
+  require_safe_domain "$domain"
   if [[ -z "$cert_path" ]]; then
     if nginx_resolve_existing_ssl_paths "$domain"; then
       cert_path="$SSL_CERT"
@@ -378,6 +393,7 @@ setup_nginx_custom_certs() {
       read -r -p "Путь к приватному ключу (.key): " key_path
     fi
   fi
+  require_safe_ssl_paths "$cert_path" "$key_path"
   [[ -f "$cert_path" && -f "$key_path" ]] || nginx_die "Файлы сертификата не найдены"
   resolve_backend_port
   resolve_public_ports
@@ -391,7 +407,8 @@ setup_nginx_custom_certs() {
     conf="$(nginx_render_template \
       "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
       "$domain" "$BACKEND_PORT" "$cert_path" "$key_path" \
-      "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")"
+      "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT")" \
+      || nginx_die "Не удалось сформировать конфигурацию nginx"
     nginx_install_site "$conf" "$domain"
     nginx_apply_behind_proxy_env "$domain" "$BACKEND_PORT" "https" "$HTTPS_PUBLIC_PORT" "$HTTP_ACME_PORT"
   fi
@@ -433,6 +450,7 @@ setup_uvicorn_selfsigned() {
   local domain
   domain="$(nginx_resolve_selfsigned_cn)"
   [[ -n "$domain" ]] || nginx_die "Не удалось определить CN для самоподписанного сертификата"
+  require_safe_domain "$domain"
   resolve_backend_port
 
   mkdir -p /etc/ssl/private
@@ -470,6 +488,7 @@ setup_uvicorn_custom_certs() {
     resolve_domain true
     domain="$DOMAIN"
   fi
+  require_safe_domain "$domain"
   if [[ -z "$cert_path" ]]; then
     if nginx_resolve_existing_ssl_paths "$domain"; then
       cert_path="$SSL_CERT"
@@ -490,6 +509,7 @@ setup_uvicorn_custom_certs() {
       read -r -p "Путь к приватному ключу (.key): " key_path
     fi
   fi
+  require_safe_ssl_paths "$cert_path" "$key_path"
   [[ -f "$cert_path" && -f "$key_path" ]] || nginx_die "Файлы сертификата не найдены"
   resolve_backend_port
   nginx_remove_site "$(nginx_env_get DOMAIN)"
