@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -57,6 +58,7 @@ def test_iterate_in_thread_steps_off_loop_and_closes_early():
                 steps.append(_on_event_loop())
                 yield item
         finally:
+            time.sleep(0.05)
             closed.append(_on_event_loop())
 
     async def scenario():
@@ -67,11 +69,52 @@ def test_iterate_in_thread_steps_off_loop_and_closes_early():
             if item == "b":
                 break
         await stream.aclose()
-        return received
+        return received, list(closed)
 
-    assert asyncio.run(scenario()) == ["a", "b"]
+    assert asyncio.run(scenario()) == (["a", "b"], [False])
     assert steps == [False, False]
-    assert closed == [False]
+
+
+def test_iterate_in_thread_closes_source_when_cancelled_while_waiting():
+    """A browser disconnect usually lands while the agent has not sent the next line yet."""
+    import threading
+
+    from app.services.async_iter import iterate_in_thread
+
+    waiting = threading.Event()
+    next_line = threading.Event()
+    closed = threading.Event()
+
+    def source():
+        try:
+            yield "first"
+            waiting.set()
+            next_line.wait(2)
+            yield "second"
+        finally:
+            closed.set()
+
+    # Held here so garbage collection cannot close the source in place of iterate_in_thread.
+    held_source = source()
+
+    async def consume():
+        async for _item in iterate_in_thread(held_source):
+            pass
+
+    async def scenario():
+        consumer = asyncio.create_task(consume())
+        await asyncio.to_thread(waiting.wait, 2)
+        consumer.cancel()
+        try:
+            # The agent's next line is 2 s away; the disconnect must not wait for it.
+            await asyncio.wait_for(consumer, 1)
+        except asyncio.CancelledError:
+            return "cancelled"
+        return "finished"
+
+    assert asyncio.run(scenario()) == "cancelled"
+    next_line.set()
+    assert closed.wait(2), "the agent stream must be closed once the pending read returns"
 
 
 def test_awg2_install_stream_reads_agent_off_loop(monkeypatch):
