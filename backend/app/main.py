@@ -367,26 +367,38 @@ async def ip_restriction_middleware(request, call_next):
     if exempt:
         return await call_next(request)
 
-    from app.database import SessionLocal
     from fastapi.responses import JSONResponse, RedirectResponse
+    from starlette.concurrency import run_in_threadpool
+
+    client_ip = ip_restriction_service.get_client_ip(request)
+    # Runs on every non-exempt request: SQLite must not block the event loop.
+    verdict = await run_in_threadpool(_ip_restriction_verdict, client_ip, path)
+    if verdict == "hard_deny":
+        return JSONResponse(status_code=403, content={"detail": "Доступ заблокирован на уровне сервера"})
+    if verdict == "deny":
+        accept = request.headers.get("accept", "")
+        if is_api_path(path, settings) or "application/json" in accept:
+            return JSONResponse(status_code=403, content={"detail": "Доступ запрещён с вашего IP"})
+        return RedirectResponse(url=with_access_path(settings, "/ip-blocked"), status_code=302)
+    return await call_next(request)
+
+
+def _ip_restriction_verdict(client_ip: str, path: str) -> str | None:
+    """``hard_deny``, ``deny`` (attempt recorded) or ``None`` when the IP may pass."""
+    from app.database import SessionLocal
 
     db = SessionLocal()
     try:
-        client_ip = ip_restriction_service.get_client_ip(request)
         if ip_restriction_service.should_hard_deny(db, client_ip):
-            return JSONResponse(status_code=403, content={"detail": "Доступ заблокирован на уровне сервера"})
-
+            return "hard_deny"
         ip_settings = ip_restriction_service.get_settings(db)
         if ip_settings.get("ip_restriction_enabled") and not ip_restriction_service.is_ip_allowed(db, client_ip):
             if ip_restriction_service.should_count_denied_access(path):
                 ip_restriction_service.record_denied_access(db, client_ip)
-            accept = request.headers.get("accept", "")
-            if is_api_path(path, settings) or "application/json" in accept:
-                return JSONResponse(status_code=403, content={"detail": "Доступ запрещён с вашего IP"})
-            return RedirectResponse(url=with_access_path(settings, "/ip-blocked"), status_code=302)
+            return "deny"
+        return None
     finally:
         db.close()
-    return await call_next(request)
 
 
 def _register_openapi_docs_routes() -> None:
