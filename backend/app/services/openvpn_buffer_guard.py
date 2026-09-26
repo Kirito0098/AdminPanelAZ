@@ -265,6 +265,25 @@ def _apply_temp_ban(
     return _now_utc() + timedelta(minutes=max(1, int(minutes)))
 
 
+def _recent_auto_event(db: Session, node_id: int, since: datetime, *criteria) -> bool:
+    last_event = (
+        db.query(OpenVpnBufferGuardEvent)
+        .filter(
+            OpenVpnBufferGuardEvent.node_id == node_id,
+            OpenVpnBufferGuardEvent.manual.is_(False),
+            *criteria,
+        )
+        .order_by(OpenVpnBufferGuardEvent.created_at.desc())
+        .first()
+    )
+    if last_event is None or last_event.created_at is None:
+        return False
+    last_ts = last_event.created_at
+    if last_ts.tzinfo is None:
+        last_ts = last_ts.replace(tzinfo=timezone.utc)
+    return last_ts > since
+
+
 def run_guard_pass(
     db: Session,
     adapter,
@@ -278,22 +297,12 @@ def run_guard_pass(
     """
     settings_row = get_settings(db, node_id)
     now = _now_utc()
+    cooldown = timedelta(minutes=max(0, int(settings_row.cooldown_minutes)))
 
-    # Cooldown: skip automatic runs if we have a recent event.
-    if not manual and settings_row.cooldown_minutes > 0:
-        last_event = (
-            db.query(OpenVpnBufferGuardEvent)
-            .filter(OpenVpnBufferGuardEvent.node_id == node_id)
-            .order_by(OpenVpnBufferGuardEvent.created_at.desc())
-            .first()
-        )
-        if last_event and last_event.created_at:
-            last_ts = last_event.created_at
-            if last_ts.tzinfo is None:
-                last_ts = last_ts.replace(tzinfo=timezone.utc)
-            delta = now - last_ts
-            if delta < timedelta(minutes=settings_row.cooldown_minutes):
-                return []
+    # Cooldown: skip automatic runs after a recent automatic threshold event.
+    # Manual scans and journal sample failures (error_count == 0) do not pause the guard.
+    if not manual and _recent_auto_event(db, node_id, now - cooldown, OpenVpnBufferGuardEvent.error_count > 0):
+        return []
 
     node = _node_for_id(db, node_id)
     try:
@@ -312,47 +321,56 @@ def run_guard_pass(
 
         # Journal sample failure must not be treated as "0 ENOBUFS".
         # Record a failed event, notify, and skip kill/restart for this unit.
+        # A failure that keeps repeating is reported once per cooldown window.
         if not bool(sample.get("ok", True)):
             error_message = str(sample.get("error") or "journal sample failed")
             actions: list[dict] = []
             ban_expires_at: datetime | None = None
             event_result_label = "failed"
-
-            try:
-                admin_notify_service.send(
-                    db,
-                    "openvpn_buffer_guard",
-                    target_name="",
-                    target_type="openvpn",
-                    details=f"journal sample failed for {unit}: {error_message}",
-                    node_id=node.id if node else None,
-                    node_name=node.name if node else None,
-                )
-            except Exception:
-                # Notifications are best-effort; failure must not break the guard.
-                pass
-
-            event_detail = {
-                "sample_ok": False,
-                "error": error_message,
-            }
-            event = OpenVpnBufferGuardEvent(
-                node_id=node_id,
-                created_at=now,
-                unit=unit,
-                common_name=None,
-                real_address=None,
-                error_count=0,
-                window_seconds=int(settings_row.window_seconds),
-                mode=mode_enum.value,
-                actions_json=json.dumps(actions, ensure_ascii=False),
-                result=event_result_label,
-                detail=json.dumps(event_detail, ensure_ascii=False),
-                manual=manual,
-                ban_expires_at=ban_expires_at,
+            already_reported = not manual and _recent_auto_event(
+                db,
+                node_id,
+                now - cooldown,
+                OpenVpnBufferGuardEvent.unit == unit,
+                OpenVpnBufferGuardEvent.error_count == 0,
             )
-            db.add(event)
-            db.commit()
+
+            if not already_reported:
+                try:
+                    admin_notify_service.send(
+                        db,
+                        "openvpn_buffer_guard",
+                        target_name="",
+                        target_type="openvpn",
+                        details=f"journal sample failed for {unit}: {error_message}",
+                        node_id=node.id if node else None,
+                        node_name=node.name if node else None,
+                    )
+                except Exception:
+                    # Notifications are best-effort; failure must not break the guard.
+                    pass
+
+                event_detail = {
+                    "sample_ok": False,
+                    "error": error_message,
+                }
+                event = OpenVpnBufferGuardEvent(
+                    node_id=node_id,
+                    created_at=now,
+                    unit=unit,
+                    common_name=None,
+                    real_address=None,
+                    error_count=0,
+                    window_seconds=int(settings_row.window_seconds),
+                    mode=mode_enum.value,
+                    actions_json=json.dumps(actions, ensure_ascii=False),
+                    result=event_result_label,
+                    detail=json.dumps(event_detail, ensure_ascii=False),
+                    manual=manual,
+                    ban_expires_at=ban_expires_at,
+                )
+                db.add(event)
+                db.commit()
 
             results.append(
                 {
