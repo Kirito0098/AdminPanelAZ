@@ -289,19 +289,16 @@ nginx_finalize_nginx_site() {
     if nginx_subpath_integrate_enabled; then
       if nginx_has_status_openvpn_vhost_for_domain "$domain"; then
         nginx_integrate_subpath_snippet_status_openvpn "$domain" "${NGINX_SUBPATH_SNIPPET_INCLUDE:-}" || \
-          nginx_die "Не удалось встроить snippet в StatusOpenVPN vhost ${domain}"
+          nginx_install_txn_abort "Не удалось встроить snippet в StatusOpenVPN vhost ${domain}"
       else
         nginx_integrate_subpath_snippet "$domain" "${NGINX_SUBPATH_SNIPPET_INCLUDE:-}" || \
-          nginx_die "Не удалось встроить snippet панели в vhost ${domain}"
+          nginx_install_txn_abort "Не удалось встроить snippet панели в vhost ${domain}"
       fi
     else
       nginx_warn "Snippet создан (${NGINX_SUBPATH_SNIPPET_INCLUDE:-}) — включите интеграцию в панели или добавьте include вручную"
     fi
-    if ! nginx -t; then
-      nginx_rollback_cloudflare_origin_geo
-      nginx_die "nginx -t не прошёл после встраивания snippet"
-    fi
-    nginx_cleanup_cloudflare_origin_geo_bak
+    nginx -t || nginx_install_txn_abort "nginx -t не прошёл после встраивания snippet (vhost ${domain}, snippet панели, snippets Cloudflare)"
+    nginx_install_txn_commit
     systemctl reload nginx || nginx_die "Не удалось перезагрузить nginx"
     return 0
   fi

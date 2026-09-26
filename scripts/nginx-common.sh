@@ -228,6 +228,72 @@ nginx_conf_d_dir() {
   printf '%s' "${NGINX_CONF_D_DIR:-/etc/nginx/conf.d}"
 }
 
+nginx_backups_dir() {
+  printf '%s' "${NGINX_BACKUPS_DIR:-/etc/nginx/backups}"
+}
+
+# Откат установки сайта при неудачном nginx -t. Первое изменение файла за запуск запоминает его
+# исходный вид (копия cp -a или отметка «файла не было»); откат возвращает все запомненные файлы,
+# фиксация удаляет копии. Состояние — в файлах, а не в переменных: часть файлов пишется из
+# подоболочек conf="$(nginx_render_template …)". Каталог — в backups: копия чужого vhost в
+# sites-enabled попала бы под include sites-enabled/*. Идентификатор не только PID: каталог,
+# оставшийся после аварийного выхода, не должен подхватиться запуском с тем же PID.
+: "${NGINX_INSTALL_TXN_ID:=$$.$(date +%s%N)}"
+
+nginx_install_txn_dir() {
+  printf '%s/.apaz-install.%s' "$(nginx_backups_dir)" "$NGINX_INSTALL_TXN_ID"
+}
+
+# Путь запоминается как есть: симлинк — как симлинк (для rm/mv по этому пути).
+nginx_install_txn_remember() {
+  local path="$1" dir n
+  dir="$(nginx_install_txn_dir)"
+  mkdir -p "$dir"
+  touch "$dir/manifest"
+  grep -Fxq -- "$path" "$dir/manifest" && return 0
+  n="$(wc -l <"$dir/manifest")"
+  if [[ -e "$path" || -L "$path" ]]; then
+    cp -a -- "$path" "$dir/${n}.orig"
+  fi
+  printf '%s\n' "$path" >>"$dir/manifest"
+}
+
+# Для записи содержимого через симлинк (cp, >, sed --follow-symlinks): запоминается цель.
+nginx_install_txn_remember_contents() {
+  local path="$1" real
+  real="$(readlink -f -- "$path" 2>/dev/null || true)"
+  nginx_install_txn_remember "${real:-$path}"
+}
+
+nginx_install_txn_rollback() {
+  local dir path n=0
+  dir="$(nginx_install_txn_dir)"
+  [[ -d "$dir" ]] || return 0
+  if [[ -f "$dir/manifest" ]]; then
+    while IFS= read -r path; do
+      if [[ -e "$dir/${n}.orig" || -L "$dir/${n}.orig" ]]; then
+        mv -f -- "$dir/${n}.orig" "$path"
+      else
+        rm -f -- "$path"
+      fi
+      n=$((n + 1))
+    done <"$dir/manifest"
+  fi
+  rm -rf -- "$dir"
+}
+
+nginx_install_txn_commit() {
+  local dir
+  dir="$(nginx_install_txn_dir)"
+  [[ -d "$dir" ]] || return 0
+  rm -rf -- "$dir"
+}
+
+nginx_install_txn_abort() {
+  nginx_install_txn_rollback
+  nginx_die "$1 — изменения файлов nginx откатаны, nginx не перезагружался"
+}
+
 nginx_conf_paths() {
   local domain="$1"
   local base
@@ -657,6 +723,7 @@ nginx_ensure_cloudflare_realip_snippet() {
   if [[ -f "$dest" ]] && ! cmp -s "$src" "$dest"; then
     cp "$dest" "${bak_dir}/cloudflare-realip.conf.$(date +%Y%m%d%H%M%S).bak"
   fi
+  cmp -s "$src" "$dest" || nginx_install_txn_remember_contents "$dest"
   cp "$src" "$dest"
   nginx_log "Snippet Cloudflare realip: ${dest}"
 }
@@ -672,6 +739,7 @@ nginx_ensure_cloudflare_origin_allow_snippet() {
   if [[ -f "$dest" ]] && ! cmp -s "$src" "$dest"; then
     cp "$dest" "${bak_dir}/cloudflare-origin-allow.conf.$(date +%Y%m%d%H%M%S).bak"
   fi
+  cmp -s "$src" "$dest" || nginx_install_txn_remember_contents "$dest"
   cp "$src" "$dest"
   nginx_log "Snippet Cloudflare origin allow: ${dest}"
 }
@@ -703,7 +771,7 @@ nginx_render_cloudflare_origin_geo() {
 }
 
 nginx_ensure_cloudflare_origin_geo_conf() {
-  local allow_file dest dir bak_dir tmp pending_bak pending_new
+  local allow_file dest dir bak_dir tmp
   allow_file="$(nginx_snippets_dir)/cloudflare-origin-allow.conf"
   dir="$(nginx_conf_d_dir)"
   dest="$(nginx_cloudflare_origin_geo_dest)"
@@ -711,32 +779,14 @@ nginx_ensure_cloudflare_origin_geo_conf() {
   mkdir -p "$dir" "$bak_dir"
   tmp="${dest}.tmp.$$"
   nginx_render_cloudflare_origin_geo "$allow_file" >"$tmp"
-  # Пишется и из conf="$(nginx_render_template …)": состояние для отката — в файлах, не в переменных.
-  pending_bak="${dest}.apaz-install.bak.$$"
-  pending_new="${dest}.apaz-install.new.$$"
   if [[ ! -f "$dest" ]]; then
-    : >"$pending_new"
+    nginx_install_txn_remember "$dest"
   elif ! cmp -s "$tmp" "$dest"; then
     cp "$dest" "${bak_dir}/adminpanelaz-cloudflare-origin.conf.$(date +%Y%m%d%H%M%S).bak"
-    [[ -e "$pending_bak" || -e "$pending_new" ]] || cp -a "$dest" "$pending_bak"
+    nginx_install_txn_remember "$dest"
   fi
   mv -f "$tmp" "$dest"
   nginx_log "Cloudflare origin geo: ${dest}"
-}
-
-# geo подключён глобально из conf.d: после неудачного nginx -t вернуть его к виду до установки.
-nginx_rollback_cloudflare_origin_geo() {
-  local dest created=false
-  dest="$(nginx_cloudflare_origin_geo_dest)"
-  [[ -e "${dest}.apaz-install.new.$$" ]] && created=true
-  nginx_restore_file_from_backup "$dest" "${dest}.apaz-install.bak.$$" "$created"
-  rm -f "${dest}.apaz-install.new.$$"
-}
-
-nginx_cleanup_cloudflare_origin_geo_bak() {
-  local dest
-  dest="$(nginx_cloudflare_origin_geo_dest)"
-  rm -f "${dest}.apaz-install.bak.$$" "${dest}.apaz-install.new.$$"
 }
 
 nginx_ensure_cloudflare_origin_lock_snippet() {
@@ -746,6 +796,7 @@ nginx_ensure_cloudflare_origin_lock_snippet() {
   dest="${dir}/cloudflare-origin-lock.conf"
   [[ -f "$src" ]] || nginx_die "Нет шаблона Cloudflare origin lock: ${src}"
   mkdir -p "$dir"
+  cmp -s "$src" "$dest" || nginx_install_txn_remember_contents "$dest"
   cp "$src" "$dest"
 }
 
@@ -996,8 +1047,8 @@ nginx_has_vhost_for_domain() {
   [[ -n "$domain" ]] || return 1
   local base path
   base="$(nginx_conf_basename "$domain")"
-  [[ -f "/etc/nginx/sites-enabled/${base}" || -f "/etc/nginx/sites-available/${base}" ]] && return 0
-  if grep -Rsl "server_name[^;]*\b${domain}\b" /etc/nginx/sites-enabled /etc/nginx/sites-available 2>/dev/null | grep -q .; then
+  [[ -f "$(nginx_sites_enabled_dir)/${base}" || -f "$(nginx_sites_available_dir)/${base}" ]] && return 0
+  if grep -Rsl "server_name[^;]*\b${domain}\b" "$(nginx_sites_enabled_dir)" "$(nginx_sites_available_dir)" 2>/dev/null | grep -q .; then
     return 0
   fi
   return 1
@@ -1024,8 +1075,8 @@ nginx_list_vhosts_for_domain() {
   local domain="$1"
   [[ -n "$domain" ]] || return 0
   {
-    nginx_grep_vhosts_for_domain "$domain" /etc/nginx/sites-enabled
-    nginx_grep_vhosts_for_domain "$domain" /etc/nginx/sites-available
+    nginx_grep_vhosts_for_domain "$domain" "$(nginx_sites_enabled_dir)"
+    nginx_grep_vhosts_for_domain "$domain" "$(nginx_sites_available_dir)"
   } | awk '!seen[$0]++'
 }
 
@@ -1045,7 +1096,7 @@ nginx_list_status_openvpn_vhosts_for_domain() {
     [[ -n "$path" && -f "$path" ]] || continue
     nginx_is_status_openvpn_vhost_file "$path" || continue
     printf '%s\n' "$path"
-  done < <(nginx_grep_vhosts_for_domain "$domain" /etc/nginx/sites-enabled)
+  done < <(nginx_grep_vhosts_for_domain "$domain" "$(nginx_sites_enabled_dir)")
 }
 
 nginx_has_status_openvpn_vhost_for_domain() {
@@ -1095,7 +1146,9 @@ nginx_remove_our_dedicated_sites_for_domain() {
       continue
     fi
     base="$(basename "$path")"
-    rm -f "/etc/nginx/sites-enabled/${base}"
+    nginx_install_txn_remember "$(nginx_sites_enabled_dir)/${base}"
+    nginx_install_txn_remember "$path"
+    rm -f "$(nginx_sites_enabled_dir)/${base}"
     rm -f "$path"
     nginx_log "Удалён выделенный vhost панели: ${path}"
   done < <(nginx_list_vhosts_for_domain "$domain")
@@ -1117,11 +1170,12 @@ nginx_install_subpath_snippet() {
   local domain="$3"
   local snippet_name snippet_path content
   snippet_name="$(nginx_subpath_snippet_basename "$domain" "$access_path")"
-  snippet_path="/etc/nginx/snippets/${snippet_name}.conf"
+  snippet_path="$(nginx_snippets_dir)/${snippet_name}.conf"
   nginx_ensure_cloudflare_realip_snippet
   nginx_ensure_cloudflare_origin_snippets
-  mkdir -p /etc/nginx/snippets /etc/nginx/backups
+  mkdir -p "$(nginx_snippets_dir)" "$(nginx_backups_dir)"
   content="$(nginx_render_subpath_template "$access_path" "$backend_port")"
+  nginx_install_txn_remember_contents "$snippet_path"
   printf '%s\n' "$content" >"$snippet_path"
   nginx_log "Snippet subpath: ${snippet_path}"
   nginx_log "Добавьте в server { } для ${domain}: include snippets/${snippet_name}.conf;"
@@ -1139,8 +1193,9 @@ _nginx_integrate_subpath_into_vhost_file() {
     return 0
   fi
   stamp="$(date +%Y%m%d%H%M%S)"
-  backup="/etc/nginx/backups/$(basename "$target").${stamp}.bak"
+  backup="$(nginx_backups_dir)/$(basename "$target").${stamp}.bak"
   cp "$target" "$backup"
+  nginx_install_txn_remember_contents "$target"
   INCLUDE_LINE="$include_line" TARGET_FILE="$target" python3 - <<'PY'
 import os
 import re
@@ -1175,7 +1230,7 @@ nginx_integrate_subpath_snippet_status_openvpn() {
     [[ -n "$target" && -f "$target" ]] || continue
     _nginx_integrate_subpath_into_vhost_file "$target" "$include_line" || continue
     if ! _nginx_assert_status_openvpn_vhost_intact "$target"; then
-      nginx_die "Интеграция нарушила конфиг StatusOpenVPN (${target}) — восстановите из /etc/nginx/backups/"
+      nginx_install_txn_abort "Интеграция нарушила конфиг StatusOpenVPN (${target})"
     fi
     nginx_log "StatusOpenVPN: блок /status/ сохранён в ${target}"
     integrated=1
@@ -1206,7 +1261,7 @@ nginx_cleanup_subpath_snippets_for_domain() {
   local domain="$1"
   [[ -n "$domain" ]] || return 0
 
-  mkdir -p /etc/nginx/backups
+  mkdir -p "$(nginx_backups_dir)"
   local target stamp backup
   while IFS= read -r target; do
     [[ -n "$target" && -f "$target" ]] || continue
@@ -1217,16 +1272,19 @@ nginx_cleanup_subpath_snippets_for_domain() {
       continue
     fi
     stamp="$(date +%Y%m%d%H%M%S)"
-    backup="/etc/nginx/backups/$(basename "$target").${stamp}.bak"
+    backup="$(nginx_backups_dir)/$(basename "$target").${stamp}.bak"
     cp "$target" "$backup"
-    sed -i '\|include snippets/adminpanelaz-|d' "$target"
+    nginx_install_txn_remember_contents "$target"
+    # Без --follow-symlinks sed -i заменил бы симлинк sites-enabled → sites-available копией файла.
+    sed -i --follow-symlinks '\|include snippets/adminpanelaz-|d' "$target"
     nginx_log "Удалён subpath include из ${target} (бэкап: ${backup})"
-  done < <(grep -Rsl "server_name" /etc/nginx/sites-enabled /etc/nginx/sites-available 2>/dev/null || true)
+  done < <(grep -Rsl "server_name" "$(nginx_sites_enabled_dir)" "$(nginx_sites_available_dir)" 2>/dev/null || true)
 
   local domain_slug snippet
   domain_slug="$(nginx_conf_basename "$domain")"
   shopt -s nullglob
-  for snippet in /etc/nginx/snippets/adminpanelaz-"${domain_slug}"-*.conf; do
+  for snippet in "$(nginx_snippets_dir)"/adminpanelaz-"${domain_slug}"-*.conf; do
+    nginx_install_txn_remember "$snippet"
     rm -f "$snippet"
     nginx_log "Удалён snippet: ${snippet}"
   done
@@ -1434,7 +1492,7 @@ nginx_remove_all_vhosts_for_domain() {
   local domain="$1"
   [[ -n "$domain" ]] || return 0
 
-  mkdir -p /etc/nginx/backups
+  mkdir -p "$(nginx_backups_dir)"
   local path stamp backup base
   declare -A seen=()
   while IFS= read -r path; do
@@ -1442,11 +1500,14 @@ nginx_remove_all_vhosts_for_domain() {
     [[ -n "${seen[$path]:-}" ]] && continue
     seen[$path]=1
     stamp="$(date +%Y%m%d%H%M%S)"
-    backup="/etc/nginx/backups/$(basename "$path").repair.${stamp}.bak"
+    backup="$(nginx_backups_dir)/$(basename "$path").repair.${stamp}.bak"
     cp "$path" "$backup"
     nginx_log "Бэкап vhost: ${backup}"
     base="$(basename "$path")"
-    rm -f "$path" "/etc/nginx/sites-enabled/${base}" "/etc/nginx/sites-available/${base}"
+    nginx_install_txn_remember "$path"
+    nginx_install_txn_remember "$(nginx_sites_enabled_dir)/${base}"
+    nginx_install_txn_remember "$(nginx_sites_available_dir)/${base}"
+    rm -f "$path" "$(nginx_sites_enabled_dir)/${base}" "$(nginx_sites_available_dir)/${base}"
     nginx_log "Удалён vhost: ${path}"
   done < <(nginx_list_vhosts_for_domain "$domain")
 }
@@ -1693,7 +1754,7 @@ nginx_rollback_site_install() {
     rm -f "$NGINX_CONF_FILE"
   fi
   nginx_rollback_server_names_hash
-  nginx_rollback_cloudflare_origin_geo
+  nginx_install_txn_rollback
 }
 
 nginx_install_site() {
@@ -1729,7 +1790,7 @@ nginx_install_site() {
   fi
   [[ -n "$bak" && -f "$bak" ]] && rm -f "$bak"
   nginx_cleanup_server_names_hash_bak
-  nginx_cleanup_cloudflare_origin_geo_bak
+  nginx_install_txn_commit
   nginx_install_default_deny
 
   systemctl enable nginx >/dev/null 2>&1 || true

@@ -68,7 +68,7 @@ assert_new_geo() {
 
 assert_no_pending() {
   local left
-  left="$(find "$NGINX_CONF_D_DIR" -name '*.apaz-install.*' -o -name '*.tmp.*')"
+  left="$(find "$NGINX_CONF_D_DIR" "$NGINX_BACKUPS_DIR" -name '*apaz-install*' -o -name '*.tmp.*')"
   if [[ -z "$left" ]]; then
     ok "$1"
   else
@@ -151,7 +151,7 @@ run_quiet nginx_ensure_cloudflare_origin_geo_conf
 printf 'allow 198.51.100.0/24;\n' >>"$NGINX_SNIPPETS_DIR/cloudflare-origin-allow.conf"
 run_quiet nginx_ensure_cloudflare_origin_geo_conf
 grep -qF '198.51.100.0/24 1;' "$GEO" && ok "второе изменение записано" || bad "второе изменение не записано"
-run_quiet nginx_rollback_cloudflare_origin_geo
+run_quiet nginx_install_txn_rollback
 assert_old_geo "geo как до первого изменения"
 assert_no_pending "в conf.d не осталось временных копий"
 reset_tree
@@ -159,7 +159,7 @@ run_quiet nginx_ensure_cloudflare_origin_allow_snippet
 run_quiet nginx_ensure_cloudflare_origin_geo_conf
 printf 'allow 198.51.100.0/24;\n' >>"$NGINX_SNIPPETS_DIR/cloudflare-origin-allow.conf"
 run_quiet nginx_ensure_cloudflare_origin_geo_conf
-run_quiet nginx_rollback_cloudflare_origin_geo
+run_quiet nginx_install_txn_rollback
 [[ ! -e "$GEO" ]] && ok "geo создан и изменён — после отката его нет" || bad "geo остался: $(cat "$GEO")"
 assert_no_pending "в conf.d не осталось временных копий"
 
