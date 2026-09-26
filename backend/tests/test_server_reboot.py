@@ -92,6 +92,14 @@ def test_abandoned_reboot_does_not_block_new_one():
     assert [p.reboot_id for p in sr.list_pending()] == [fresh.reboot_id]
 
 
+def test_abandoned_reboot_is_not_listed_as_pending():
+    stale_id = _insert_row(
+        node_id=13, status="pending", execute_at=datetime.utcnow() - sr.ABANDONED_AFTER - timedelta(seconds=1)
+    )
+    assert sr.list_pending() == []
+    assert sr.get_pending(stale_id).status == "interrupted"
+
+
 def test_startup_interrupts_reboots_of_previous_process():
     pending_id = _insert_row(node_id=11, status="pending", execute_at=datetime.utcnow() + timedelta(seconds=10))
     executing_id = _insert_row(node_id=12, status="executing", execute_at=datetime.utcnow())
