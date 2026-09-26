@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import Node, RefreshToken, TrafficSessionState, User, UserRole
+from app.models import Node, RefreshToken, ServerRebootRecord, TrafficSessionState, User, UserRole
 from app.services import retention
 from app.services.traffic.collector import TrafficCollectorService, build_session_key
 from app.services.traffic.maintenance import TrafficMaintenanceService
@@ -274,3 +274,39 @@ def test_retention_settings_api_exposes_session_retention(db, monkeypatch, tmp_p
             RetentionSettingsUpdate(traffic_session_retention_days=0)
     finally:
         load_app_config.cache_clear()
+
+
+def _reboot(reboot_id: str, *, status: str, created: datetime, node_id: int = 1) -> ServerRebootRecord:
+    return ServerRebootRecord(
+        id=reboot_id,
+        node_id=node_id,
+        node_name="local",
+        scheduled_by="admin",
+        created_at=created,
+        execute_at=created + timedelta(seconds=15),
+        status=status,
+    )
+
+
+def test_purge_drops_only_old_finished_reboot_requests(db, monkeypatch):
+    monkeypatch.setattr(retention, "get_settings", lambda: _settings())
+    now = _now()
+    old = now - timedelta(days=retention.REBOOT_REQUEST_RETENTION_DAYS + 1)
+    db.add_all(
+        [
+            _reboot("old-executed", status="executed", created=old),
+            _reboot("old-cancelled", status="cancelled", created=old),
+            _reboot("old-interrupted", status="interrupted", created=old),
+            _reboot("old-failed", status="failed", created=old),
+            _reboot("recent-executed", status="executed", created=now - timedelta(days=1)),
+            _reboot("old-pending", status="pending", created=old),
+            _reboot("old-executing", status="executing", created=old, node_id=2),
+        ]
+    )
+    db.commit()
+
+    counts = retention.run_retention_purge(db)
+
+    ids = {row.id for row in db.query(ServerRebootRecord).all()}
+    assert ids == {"recent-executed", "old-pending", "old-executing"}
+    assert counts["server_reboot_requests"] == 4

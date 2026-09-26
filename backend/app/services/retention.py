@@ -1,4 +1,4 @@
-"""Batch retention purge for traffic samples, session history, action logs, tokens, and resource metrics."""
+"""Batch retention purge for traffic samples, session history, action logs, tokens, reboots, and resource metrics."""
 
 from __future__ import annotations
 
@@ -12,13 +12,17 @@ from app.models import (
     NodeResourceSample,
     PanelResourceSample,
     RefreshToken,
+    ServerRebootRecord,
     TrafficSessionState,
     UserActionLog,
     UserTrafficSample,
 )
 
+from app.services.server_reboot import ACTIVE_STATUSES as REBOOT_ACTIVE_STATUSES
+
 # An expired refresh token is rejected on its own; the grace only keeps it around for audit.
 REFRESH_TOKEN_EXPIRED_GRACE_DAYS = 7
+REBOOT_REQUEST_RETENTION_DAYS = 30
 
 
 def _utcnow() -> datetime:
@@ -82,6 +86,14 @@ def run_retention_purge(db: Session) -> dict[str, int]:
         db,
         RefreshToken,
         RefreshToken.expires_at < now - timedelta(days=REFRESH_TOKEN_EXPIRED_GRACE_DAYS),
+        batch_size=batch_size,
+    )
+
+    counts["server_reboot_requests"] = _purge_where(
+        db,
+        ServerRebootRecord,
+        ServerRebootRecord.status.not_in(REBOOT_ACTIVE_STATUSES),
+        ServerRebootRecord.created_at < now - timedelta(days=REBOOT_REQUEST_RETENTION_DAYS),
         batch_size=batch_size,
     )
 
