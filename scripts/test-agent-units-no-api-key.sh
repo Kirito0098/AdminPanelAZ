@@ -50,6 +50,17 @@ PROXY_ENV="$FAKE_ROOT/backend/proxy_agent.env"
 NODE_UNIT="$UNIT_DIR/adminpanelaz-node.service"
 PROXY_UNIT="$UNIT_DIR/adminpanelaz-proxy.service"
 
+# refresh-systemd-units.sh берёт пользователя и каталог состояния из установленного unit'а:
+# «старый» unit должен указывать на текущего пользователя и временный каталог, а не на root и /var/lib.
+legacy_unit() {
+  sed -e "s|/opt/AdminPanelAZ|$FAKE_ROOT|g" \
+    -e "s|^User=root|User=$(id -un)|" \
+    -e "s|^Group=root|Group=$(id -gn)|" \
+    -e "s|/var/lib/adminpanelaz-node|$TMP_DIR/node-state|g" \
+    -e "s|/var/lib/adminpanelaz-proxy|$TMP_DIR/proxy-state|g" \
+    "$ROOT_DIR/systemd/$1"
+}
+
 echo "[test] установка unit'а node agent: ключ только в node_agent.env с правами 600"
 run env NODE_AGENT_API_KEY=node-key-0123456789abcdef0123 "$FAKE_ROOT/scripts/install-node-systemd.sh"
 grep -q 'node-key-0123456789abcdef0123' "$NODE_UNIT" && fail "ключ попал в unit"
@@ -92,11 +103,12 @@ echo "  OK"
 
 echo "[test] обновление старых unit'ов переносит ключ из unit в env-файл и убирает его из unit"
 rm -f "$NODE_ENV" "$PROXY_ENV"
-sed "s|/opt/AdminPanelAZ|$FAKE_ROOT|g" "$ROOT_DIR/systemd/adminpanelaz-node.service" >"$NODE_UNIT"
+legacy_unit adminpanelaz-node.service >"$NODE_UNIT"
 printf 'Environment=NODE_AGENT_API_KEY=legacy-node-key-0123456789abcd\n' >>"$NODE_UNIT"
-sed "s|/opt/AdminPanelAZ|$FAKE_ROOT|g" "$ROOT_DIR/systemd/adminpanelaz-proxy.service" >"$PROXY_UNIT"
+legacy_unit adminpanelaz-proxy.service >"$PROXY_UNIT"
 printf 'Environment=PROXY_AGENT_API_KEY=legacy-proxy-key-0123456789ab\n' >>"$PROXY_UNIT"
 run env REFRESH_PANEL=0 "$FAKE_ROOT/scripts/refresh-systemd-units.sh"
+grep -q '/var/lib/' "$NODE_UNIT" "$PROXY_UNIT" && fail "обновлённый unit смотрит в /var/lib вместо каталога состояния из старого unit'а"
 grep -q 'AGENT_API_KEY' "$NODE_UNIT" "$PROXY_UNIT" && fail "ключ остался в unit после обновления"
 grep -qx 'NODE_AGENT_API_KEY=legacy-node-key-0123456789abcd' "$NODE_ENV" || fail "ключ node не перенесён"
 grep -qx 'PROXY_AGENT_API_KEY=legacy-proxy-key-0123456789ab' "$PROXY_ENV" || fail "ключ proxy не перенесён"
@@ -104,7 +116,7 @@ grep -qx 'PROXY_AGENT_API_KEY=legacy-proxy-key-0123456789ab' "$PROXY_ENV" || fai
 echo "  OK"
 
 echo "[test] обновление: ключ в env-файле (им пользуется агент) важнее ключа из старого unit'а"
-sed "s|/opt/AdminPanelAZ|$FAKE_ROOT|g" "$ROOT_DIR/systemd/adminpanelaz-node.service" >"$NODE_UNIT"
+legacy_unit adminpanelaz-node.service >"$NODE_UNIT"
 printf 'Environment=NODE_AGENT_API_KEY=stale-unit-key-0123456789abcd\n' >>"$NODE_UNIT"
 printf 'NODE_AGENT_API_KEY=live-env-key-0123456789abcdef\n' >"$NODE_ENV"
 run env REFRESH_PANEL=0 REFRESH_PROXY=0 "$FAKE_ROOT/scripts/refresh-systemd-units.sh"
