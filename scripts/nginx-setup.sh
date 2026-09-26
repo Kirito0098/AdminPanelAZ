@@ -273,38 +273,6 @@ resolve_access_path() {
   ACCESS_PATH="$(nginx_normalize_access_path "$reply")"
 }
 
-nginx_subpath_integrate_enabled() {
-  [[ "${NGINX_SUBPATH_INTEGRATE:-}" == "true" || "${NGINX_SUBPATH_INTEGRATE:-}" == "1" ]]
-}
-
-nginx_finalize_nginx_site() {
-  local domain="$1"
-  local backend_port="$2"
-  local access_path
-  access_path="$(nginx_normalize_access_path "${ACCESS_PATH:-}")"
-  nginx_cleanup_subpath_snippets_for_domain "$domain"
-  if [[ -n "$access_path" ]] && nginx_has_foreign_vhost_for_domain "$domain"; then
-    nginx_remove_our_dedicated_sites_for_domain "$domain"
-    nginx_install_subpath_snippet "$access_path" "$backend_port" "$domain"
-    if nginx_subpath_integrate_enabled; then
-      if nginx_has_status_openvpn_vhost_for_domain "$domain"; then
-        nginx_integrate_subpath_snippet_status_openvpn "$domain" "${NGINX_SUBPATH_SNIPPET_INCLUDE:-}" || \
-          nginx_install_txn_abort "Не удалось встроить snippet в StatusOpenVPN vhost ${domain}"
-      else
-        nginx_integrate_subpath_snippet "$domain" "${NGINX_SUBPATH_SNIPPET_INCLUDE:-}" || \
-          nginx_install_txn_abort "Не удалось встроить snippet панели в vhost ${domain}"
-      fi
-    else
-      nginx_warn "Snippet создан (${NGINX_SUBPATH_SNIPPET_INCLUDE:-}) — включите интеграцию в панели или добавьте include вручную"
-    fi
-    nginx -t || nginx_install_txn_abort "nginx -t не прошёл после встраивания snippet (vhost ${domain}, snippet панели, snippets Cloudflare)"
-    nginx_install_txn_commit
-    systemctl reload nginx || nginx_die "Не удалось перезагрузить nginx"
-    return 0
-  fi
-  return 1
-}
-
 setup_nginx_letsencrypt() {
   resolve_domain true
   local domain="$DOMAIN"

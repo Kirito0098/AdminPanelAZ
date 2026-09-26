@@ -163,8 +163,7 @@ run_quiet nginx_install_txn_rollback
 [[ ! -e "$GEO" ]] && ok "geo создан и изменён — после отката его нет" || bad "geo остался: $(cat "$GEO")"
 assert_no_pending "в conf.d не осталось временных копий"
 
-echo "[test] subpath (nginx-setup.sh): geo откатывается при неудачном nginx -t и чистится при успехе"
-eval "$(sed -n '/^nginx_finalize_nginx_site() {/,/^}/p' "$ROOT_DIR/scripts/nginx-setup.sh")"
+echo "[test] subpath (nginx-setup.sh, install.sh): geo откатывается при неудачном nginx -t и чистится при успехе"
 declare -F nginx_finalize_nginx_site >/dev/null || bad "nginx_finalize_nginx_site не найдена"
 nginx_cleanup_subpath_snippets_for_domain() { :; }
 nginx_has_foreign_vhost_for_domain() { return 0; }

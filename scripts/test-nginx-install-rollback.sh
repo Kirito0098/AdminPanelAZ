@@ -52,8 +52,6 @@ EOF
 chmod +x "$TMP/bin/nginx" "$TMP/bin/systemctl"
 export PATH="$TMP/bin:$PATH"
 
-eval "$(sed -n '/^nginx_subpath_integrate_enabled() {/,/^}/p;/^nginx_finalize_nginx_site() {/,/^}/p' \
-  "$ROOT_DIR/scripts/nginx-setup.sh")"
 eval "$(sed -n '/^repair_nginx_for_panel() {/,/^}/p' "$ROOT_DIR/scripts/nginx-repair.sh")"
 for f in nginx_finalize_nginx_site repair_nginx_for_panel; do
   declare -F "$f" >/dev/null || bad "$f не найдена"
