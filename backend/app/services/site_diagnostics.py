@@ -884,6 +884,7 @@ def _check_firewall_tools(report: DiagnosticsReport, runner: RunCmd) -> None:
             report,
             CheckResult("ok", "iptables и ipset", detail=fw.operational_detail),
         )
+        _check_scanner_firewall(report, runner)
         return
 
     parts: list[str] = []
@@ -901,6 +902,29 @@ def _check_firewall_tools(report: DiagnosticsReport, runner: RunCmd) -> None:
             "iptables и ipset (бан сканеров, whitelist порта панели)",
             detail="; ".join(parts) or fw.operational_detail,
             hint_ru=apt_install_hint(hint_pkgs),
+        ),
+    )
+
+
+def _check_scanner_firewall(report: DiagnosticsReport, runner: RunCmd) -> None:
+    from app.services.scanner_firewall_store import check_scanner_firewall, scanner_firewall_store
+
+    if not scanner_firewall_store.firewall_enabled or scanner_firewall_store.dry_run:
+        return
+    issues = check_scanner_firewall(run_cmd=runner)
+    if not issues:
+        _append_result(
+            report,
+            CheckResult("ok", "Баны сканеров в firewall", detail="наборы ipset и правила DROP на месте"),
+        )
+        return
+    _append_result(
+        report,
+        CheckResult(
+            "warn",
+            "Баны сканеров в firewall",
+            detail="; ".join(issues),
+            hint_ru="Перезапустите панель (systemctl restart adminpanelaz): наборы и правила создаются при старте.",
         ),
     )
 

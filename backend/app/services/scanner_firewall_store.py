@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +23,62 @@ DEFAULT_YEAR_BAN_SECONDS = 365 * 24 * 3600
 DEFAULT_UNBAN_GRACE_SECONDS = 1800
 IPSET_V4 = "aa_scanner_v4"
 IPSET_V6 = "aa_scanner_v6"
+# (ipset name, ipset family, iptables tool)
+FIREWALL_FAMILIES = ((IPSET_V4, "inet", "iptables"), (IPSET_V6, "inet6", "ip6tables"))
+# ``timeout 0`` lets each entry carry its own timeout; without it ``ipset add ... timeout`` fails.
+_SET_OPTIONS = ("hashsize", "4096", "maxelem", "65536", "timeout", "0")
+
+Runner = Callable[[list[str], float], subprocess.CompletedProcess]
+Network = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+
+def _default_runner(args: list[str], timeout: float) -> subprocess.CompletedProcess:
+    return subprocess.run(args, capture_output=True, text=True, timeout=timeout, check=False)
+
+
+def _drop_rule(tool: str, action: str, ipset_name: str) -> list[str]:
+    return [tool, action, "INPUT", "-m", "set", "--match-set", ipset_name, "src", "-j", "DROP"]
+
+
+def _header_has_timeout(listing: str) -> bool:
+    return re.search(r"\btimeout\b", listing) is not None
+
+
+def cloudflare_networks() -> list[Network]:
+    """Cloudflare edge ranges from the nginx realip snippet the panel maintains."""
+    path = Path(os.environ.get("NGINX_SNIPPETS_DIR", "/etc/nginx/snippets")) / "cloudflare-realip.conf"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    networks: list[Network] = []
+    for match in re.finditer(r"^\s*set_real_ip_from\s+([^;\s]+)\s*;", text, re.MULTILINE):
+        try:
+            networks.append(ipaddress.ip_network(match.group(1), strict=False))
+        except ValueError:
+            continue
+    return networks
+
+
+def _trusted_proxy_ips() -> set[str]:
+    from app.config import get_settings
+
+    return set(get_settings().trusted_proxy_ip_list)
+
+
+def check_scanner_firewall(*, run_cmd: Runner | None = None) -> list[str]:
+    """Problems that keep scanner bans out of the firewall; empty when bans can be applied."""
+    run = run_cmd or _default_runner
+    issues: list[str] = []
+    for ipset_name, _family, tool in FIREWALL_FAMILIES:
+        listing = run(["ipset", "list", "-t", ipset_name], 10.0)
+        if listing.returncode != 0:
+            issues.append(f"набор {ipset_name} не создан")
+        elif not _header_has_timeout(listing.stdout or ""):
+            issues.append(f"набор {ipset_name} создан без поддержки timeout — баны в него не добавляются")
+        if run(_drop_rule(tool, "-C", ipset_name), 10.0).returncode != 0:
+            issues.append(f"нет правила {tool} INPUT DROP для {ipset_name}")
+    return issues
 
 
 def _env_bool(name: str, default: bool = False) -> bool:
@@ -49,6 +108,8 @@ class ScannerFirewallStore:
         year_ban_seconds: int | None = None,
         firewall_enabled: bool | None = None,
         dry_run: bool | None = None,
+        runner: Runner | None = None,
+        excluded_networks: Callable[[], list[Network]] | None = None,
     ) -> None:
         root = Path(__file__).resolve().parents[2]
         default_path = root / "data" / "scanner_blocks.json"
@@ -66,6 +127,8 @@ class ScannerFirewallStore:
         self.unban_grace_seconds = _env_int(
             "IP_SCANNER_UNBAN_GRACE_SECONDS", DEFAULT_UNBAN_GRACE_SECONDS, minimum=60, maximum=86400
         )
+        self._runner = runner or _default_runner
+        self._excluded_networks = excluded_networks or cloudflare_networks
         self._lock = threading.RLock()
         self._data: dict[str, Any] = {"version": DEFAULT_DATA_VERSION, "entries": {}}
         self._load()
@@ -139,16 +202,15 @@ class ScannerFirewallStore:
     def _can_apply_firewall_ban(self, ip: str, *, now: float | None = None) -> bool:
         return not self.is_in_unban_grace(ip, now=now)
 
-    @staticmethod
-    def _run_command(args: list[str]) -> tuple[bool, str]:
+    def _run_command(self, args: list[str]) -> tuple[bool, str]:
+        """``(ok, stdout)`` on success, ``(False, error)`` otherwise."""
         try:
-            result = subprocess.run(args, capture_output=True, text=True, timeout=15, check=False)
-            if result.returncode == 0:
-                return True, ""
-            stderr = (result.stderr or result.stdout or "").strip()
-            return False, stderr
+            result = self._runner(args, 15.0)
         except (OSError, subprocess.SubprocessError) as exc:
             return False, str(exc)
+        if result.returncode == 0:
+            return True, result.stdout or ""
+        return False, (result.stderr or result.stdout or "").strip()
 
     def _ip_version(self, ip: str) -> int:
         return 6 if ":" in ip else 4
@@ -159,24 +221,49 @@ class ScannerFirewallStore:
     def ensure_firewall_infrastructure(self) -> bool:
         if not self.firewall_enabled or self.dry_run:
             return True
-        ok_v4, err_v4 = self._run_command(
-            ["ipset", "create", IPSET_V4, "hash:ip", "family", "inet", "hashsize", "4096", "maxelem", "65536", "-exist"]
-        )
-        ok_v6, err_v6 = self._run_command(
-            ["ipset", "create", IPSET_V6, "hash:ip", "family", "inet6", "hashsize", "4096", "maxelem", "65536", "-exist"]
-        )
-        for ipset_name in (IPSET_V4, IPSET_V6):
-            exists, _ = self._run_command(
-                ["iptables", "-C", "INPUT", "-m", "set", "--match-set", ipset_name, "src", "-j", "DROP"]
-            )
-            if not exists:
-                self._run_command(["iptables", "-I", "INPUT", "-m", "set", "--match-set", ipset_name, "src", "-j", "DROP"])
-        if not ok_v4 or not ok_v6:
-            logger.warning("ipset init: v4=%s v6=%s (%s / %s)", ok_v4, ok_v6, err_v4, err_v6)
-        return ok_v4 or ok_v6
+        ready = False
+        for ipset_name, family, tool in FIREWALL_FAMILIES:
+            ok, err = self._ensure_set(ipset_name, family)
+            if ok:
+                ok, err = self._ensure_drop_rule(tool, ipset_name)
+            if not ok:
+                logger.warning("scanner firewall %s: %s", ipset_name, err)
+            ready = ready or ok
+        return ready
+
+    def _ensure_set(self, ipset_name: str, family: str) -> tuple[bool, str]:
+        listed, listing = self._run_command(["ipset", "list", "-t", ipset_name])
+        if listed and _header_has_timeout(listing):
+            return True, ""
+        create = ["ipset", "create", ipset_name, "hash:ip", "family", family, *_SET_OPTIONS]
+        if not listed:
+            return self._run_command([*create, "-exist"])
+        # Sets from older panel versions lack timeout support; swap keeps the iptables rule attached.
+        staging = f"{ipset_name}_tmp"
+        self._run_command(["ipset", "destroy", staging])
+        ok, err = self._run_command(["ipset", "create", staging, *create[3:]])
+        if ok:
+            ok, err = self._run_command(["ipset", "swap", staging, ipset_name])
+        self._run_command(["ipset", "destroy", staging])
+        return ok, err
+
+    def _ensure_drop_rule(self, tool: str, ipset_name: str) -> tuple[bool, str]:
+        if self._run_command(_drop_rule(tool, "-C", ipset_name))[0]:
+            return True, ""
+        return self._run_command(_drop_rule(tool, "-I", ipset_name))
+
+    def _firewall_eligible(self, ip: str) -> bool:
+        """Only public peers are dropped; proxies, VPN and local addresses stay banned in the panel only."""
+        try:
+            address = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        if not address.is_global or address.is_multicast or ip in _trusted_proxy_ips():
+            return False
+        return not any(address.version == net.version and address in net for net in self._excluded_networks())
 
     def _firewall_add(self, ip: str, timeout_seconds: int) -> bool:
-        if not self.firewall_enabled:
+        if not self.firewall_enabled or not self._firewall_eligible(ip):
             return False
         if self.dry_run:
             logger.info("scanner firewall dry-run add %s timeout=%s", ip, timeout_seconds)
@@ -300,14 +387,14 @@ class ScannerFirewallStore:
             )
             record["events"] = events[-50:]
             self._save_unlocked()
-        self._firewall_add(ip, ban_seconds)
+        firewall_applied = self._firewall_add(ip, ban_seconds)
         return {
             "ip": ip,
             "strikes": strikes,
             "ban_until": ban_until,
             "remaining_seconds": int(ban_until - now),
             "long_term": long_term,
-            "firewall": self.firewall_enabled,
+            "firewall": firewall_applied,
         }
 
     def get_active_bans(self, *, now: float | None = None) -> list[dict[str, Any]]:
