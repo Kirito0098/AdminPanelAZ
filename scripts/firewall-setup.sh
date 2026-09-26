@@ -65,6 +65,50 @@ firewall_validate_ports() {
   return 0
 }
 
+# Порты sshd: текущей SSH-сессии, из sshd -T и слушающих сокетов; без данных — 22.
+firewall_ssh_ports() {
+  local ports
+  ports="$(
+    {
+      [[ -z "${SSH_CONNECTION:-}" ]] || awk '{print $4}' <<<"$SSH_CONNECTION"
+      sshd -T 2>/dev/null | awk '$1 == "port" {print $2}'
+      ss -Htlnp 2>/dev/null | awk '/"sshd"/ {n = split($4, a, ":"); print a[n]}'
+    } | grep -E '^[0-9]+$' | sort -un
+  )" || true
+  printf '%s\n' "${ports:-22}"
+}
+
+# firewall_check_ssh_not_closed <порт>... — порты, которые правила закроют.
+firewall_check_ssh_not_closed() {
+  local ssh_ports closed port
+  ssh_ports="$(firewall_ssh_ports)"
+  for closed in "$@"; do
+    [[ "$closed" != "0" ]] || continue
+    while IFS= read -r port; do
+      if [[ "$closed" == "$port" ]]; then
+        firewall_warn "Порт ${closed}/tcp занят SSH — правило firewall закрыло бы доступ к серверу. Выберите для панели или агента другой порт."
+        return 1
+      fi
+    done <<<"$ssh_ports"
+  done
+  return 0
+}
+
+# ufw включается с политикой deny для входящих: без разрешения SSH на сервер больше не войти.
+# Правило SSH, заведённое пользователем (например, только со своего IP), не расширяем.
+firewall_ufw_allow_ssh() {
+  local added port
+  added="$(ufw show added 2>/dev/null || true)"
+  while IFS= read -r port; do
+    if grep -Eq "^ufw (allow|limit) (.* )?(port ${port}|${port}(/tcp)?|OpenSSH|ssh)( |$)" <<<"$added"; then
+      continue
+    fi
+    firewall_log "Разрешаю SSH (${port}/tcp) в ufw"
+    ufw allow "${port}/tcp" comment "SSH (AdminPanelAZ)" >/dev/null 2>&1 || \
+      ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+  done <<<"$(firewall_ssh_ports)"
+}
+
 firewall_show_rules_summary() {
   local backend_port="$1"
   local node_port="$2"
@@ -139,6 +183,7 @@ firewall_show_manual_instructions() {
     echo "  sudo ufw allow ${https_port}/tcp comment 'AdminPanelAZ HTTPS'"
     echo "  sudo ufw allow ${http_port}/tcp comment 'AdminPanelAZ HTTP (ACME)'"
   fi
+  echo "  sudo ufw allow OpenSSH   # до включения ufw, иначе SSH будет закрыт"
   echo "  sudo ufw enable   # если ufw ещё не активен"
   echo
   echo "Пример для iptables:"
@@ -223,13 +268,11 @@ firewall_apply_ufw_rules() {
   local has_proxy="${8:-false}"
   local proxy_port="${9:-9101}"
 
+  local ufw_active=false
   if ufw status 2>/dev/null | grep -q "Status: active"; then
-    :
-  elif [[ "${FIREWALL_ENABLE_UFW:-}" == "true" ]]; then
-    firewall_log "Включение ufw..."
-    ufw --force enable
+    ufw_active=true
   else
-    firewall_warn "ufw установлен, но не активен. Правила будут добавлены; включите: sudo ufw enable"
+    firewall_ufw_allow_ssh
   fi
 
   if [[ "$backend_port" != "0" ]]; then
@@ -261,6 +304,15 @@ firewall_apply_ufw_rules() {
     if [[ "$http_port" != "0" ]]; then
       firewall_ufw_open_port "$http_port" "AdminPanelAZ HTTP (ACME)"
     fi
+  fi
+
+  if [[ "$ufw_active" == true ]]; then
+    :
+  elif [[ "${FIREWALL_ENABLE_UFW:-}" == "true" ]]; then
+    firewall_log "Включение ufw..."
+    ufw --force enable
+  else
+    firewall_warn "ufw установлен, но не активен. Правила (включая SSH) добавлены; включите: sudo ufw enable"
   fi
 
   ufw reload >/dev/null 2>&1 || true
@@ -372,6 +424,11 @@ firewall_apply_rules() {
     "$has_node" "$has_nginx" "$has_proxy" "$proxy_port"; then
     return 1
   fi
+
+  local -a closed_ports=("$backend_port")
+  [[ "$has_node" != true ]] || closed_ports+=("$node_port")
+  [[ "$has_proxy" != true ]] || closed_ports+=("$proxy_port")
+  firewall_check_ssh_not_closed "${closed_ports[@]}" || return 1
 
   local tool
   tool="$(firewall_detect_tool)"

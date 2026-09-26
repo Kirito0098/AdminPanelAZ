@@ -1237,17 +1237,27 @@ print(os.environ["RENDERED"].replace("__PANEL_LOCATION_BLOCKS__", os.environ["PA
 PY
 }
 
+# Файлы с блоком server, кроме файлов панели и стандартной заглушки default. Список берётся
+# из nginx -T: сайты бывают и в conf.d, и в любых include, а не только в sites-enabled.
 nginx_count_other_enabled_sites() {
   local domain="$1"
   local count=0
   local base=""
   [[ -n "$domain" ]] && base="$(nginx_conf_basename "$domain")"
+  local -a files=()
+  mapfile -t files < <(nginx -T 2>/dev/null | sed -n 's/^# configuration file \(.*\):$/\1/p')
+  if ((${#files[@]} == 0)); then
+    files=("$(nginx_sites_enabled_dir)"/* "$(nginx_conf_d_dir)"/*.conf)
+  fi
   local path name
-  for path in "$(nginx_sites_enabled_dir)"/*; do
-    [[ -e "$path" ]] || continue
+  for path in "${files[@]}"; do
+    [[ -f "$path" ]] || continue
     name="$(basename "$path")"
     [[ -n "$base" && "$name" == "$base" ]] && continue
-    [[ "$name" == "default" ]] && continue
+    case "$name" in
+      default | adminpanelaz-* | 00-adminpanelaz-*) continue ;;
+    esac
+    sed 's/#.*//' "$path" | grep -Eq '(^|[[:space:];{}])server([[:space:]]*\{|[[:space:]]*$)' || continue
     count=$((count + 1))
   done
   printf '%s' "$count"
