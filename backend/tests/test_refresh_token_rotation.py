@@ -114,9 +114,64 @@ def test_lost_rotation_race_issues_no_second_token(db, user, monkeypatch):
 
     new_raw, got_user = rt.rotate_refresh_token(db, raw)
 
+    assert not db.in_transaction(), "the lost claim must not keep the write transaction open"
     assert new_raw is None
     assert got_user.id == user.id
     assert db.query(RefreshToken).count() == 1
+
+
+def test_session_revoked_during_rotation_leaves_no_live_token_in_family(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    from sqlalchemy import event
+
+    from app.database import apply_sqlite_connection_pragmas
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'rt.db'}", connect_args={"check_same_thread": False})
+
+    @event.listens_for(engine, "connect")
+    def _pragmas(dbapi_connection, _record):
+        cursor = dbapi_connection.cursor()
+        apply_sqlite_connection_pragmas(cursor)
+        cursor.close()
+
+    Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    rotating, revoking = factory(), factory()
+    try:
+        owner = User(username="alice", password_hash="x", role=UserRole.admin, is_active=True)
+        rotating.add(owner)
+        rotating.commit()
+        raw, first = rt.create_refresh_token(rotating, owner)
+        family = first.family_id
+
+        claimed, revoker_started = threading.Event(), threading.Event()
+        real_create = rt.create_refresh_token
+
+        def create_after_revoke_attempt(session, user, *, family_id=None):
+            claimed.set()
+            revoker_started.wait(5)
+            time.sleep(0.3)
+            return real_create(session, user, family_id=family_id)
+
+        monkeypatch.setattr(rt, "create_refresh_token", create_after_revoke_attempt)
+        result: dict = {}
+        worker = threading.Thread(target=lambda: result.update(new=rt.rotate_refresh_token(rotating, raw)[0]))
+        worker.start()
+        assert claimed.wait(5)
+        revoker_started.set()
+        rt.revoke_token_family(revoking, family, reason="session")
+        worker.join(10)
+
+        assert result["new"]
+        revoking.expire_all()
+        live = revoking.query(RefreshToken).filter_by(family_id=family, revoked=False).count()
+        assert live == 0, "a token issued while the session was being revoked must not survive"
+    finally:
+        rotating.close()
+        revoking.close()
+        engine.dispose()
 
 
 def _legacy_token(db, user, raw: str, **fields) -> None:

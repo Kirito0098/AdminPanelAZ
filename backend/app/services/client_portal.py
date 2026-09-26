@@ -572,6 +572,9 @@ def get_valid_portal_token(db: Session, token: str) -> PortalTokenResolution:
 
     if kind == "client":
         return PortalTokenResolution(kind="client", client_row=row)
+    owner = db.get(User, row.user_id)
+    if owner is None or not owner.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Портал пользователя отключён")
     return PortalTokenResolution(kind="user", user_row=row)
 
 
@@ -1005,7 +1008,6 @@ def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
         clients.append(entry)
     return {
         "kind": "user",
-        "user_id": user.id,
         "brand_title": _portal_brand_title(db),
         "unlock_codes_enabled": get_feature_service().is_enabled("unlock_codes"),
         "clients": clients,

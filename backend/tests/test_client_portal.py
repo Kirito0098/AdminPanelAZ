@@ -681,7 +681,6 @@ def test_build_user_portal_payload_lists_clients_and_marks_expired_subscription(
         )
 
     assert payload["kind"] == "user"
-    assert payload["user_id"] == 7
     assert len(payload["clients"]) == 2
     assert payload["clients"][0]["client_name"] == "alice"
     assert payload["clients"][0]["status"]["status"] == "expired"

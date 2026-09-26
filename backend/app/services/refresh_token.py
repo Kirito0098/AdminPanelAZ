@@ -113,9 +113,11 @@ def rotate_refresh_token(db: Session, raw_token: str) -> tuple[str | None, User]
             synchronize_session=False,
         )
     )
-    db.commit()
     if not claimed:
+        db.commit()
         return None, user
+    # Claim and successor commit together: a concurrent family revocation waits for the write lock
+    # and then revokes the successor too, instead of leaving it alive in a revoked session.
     raw, _ = create_refresh_token(db, user, family_id=row.family_id)
     return raw, user
 

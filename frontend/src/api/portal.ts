@@ -36,7 +36,6 @@ export interface ClientPortalMetaResponse extends PortalClientEntry {
 
 export interface UserPortalMetaResponse {
   kind: 'user'
-  user_id: number
   brand_title: string
   unlock_codes_enabled: boolean
   clients: PortalClientEntry[]
