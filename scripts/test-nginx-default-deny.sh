@@ -158,6 +158,17 @@ site zzz 'server { listen 8080; listen 8443 ssl; server_name z.example; }'
 install_panel
 check 'grep -q "listen 8080 default_server;" "$DENY" && grep -q "listen 8443 ssl default_server;" "$DENY"' "оба порта закрыты"
 
+echo "[test] чужой HTTPS-сайт по IP после панели: его HTTPS-порт не закрывается"
+reset
+site zzz 'server { listen 8080; listen 8443 ssl; server_name z.example 203.0.113.20; }'
+install_panel
+check '! grep -q "8443" "$DENY"' "HTTPS-порт чужого сайта по IP не закрыт (без SNI он попал бы в отказ)"
+check 'grep -q "listen 8080 default_server;" "$DENY"' "HTTP-порт закрыт: Host с IP совпадает с server_name чужого сайта"
+reset
+site zzz 'server { listen 9443 ssl; server_name 2001:db8::20; }'
+install_panel
+check 'grep -q "listen 8443 ssl default_server;" "$DENY"' "сайт по IP на другом порту не мешает закрыть HTTPS-порт панели"
+
 echo "[test] чужой default_server после панели тоже отвечает по IP — порт не трогаем"
 reset
 site zzz '# old: server { listen 8443 ssl default_server; }

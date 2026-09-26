@@ -1592,7 +1592,7 @@ nginx_remove_default_deny() {
 nginx_install_default_deny() {
   local base conf_file enabled_link version_output conf path owned has_ip
   local port kind def addr http_listens="" https_listens=""
-  local -A first=() has_default=() our_kind=() our_ip=() listens=() seen=()
+  local -A first=() has_default=() our_kind=() ip_name=() listens=() seen=()
   base="$(nginx_default_deny_basename)"
   conf_file="$(nginx_sites_available_dir)/${base}"
   enabled_link="$(nginx_sites_enabled_dir)/${base}"
@@ -1601,16 +1601,14 @@ nginx_install_default_deny() {
     [[ "$(basename "$path")" == "$base" ]] && continue
     owned=false
     has_ip=false
-    if nginx_conf_is_panel_owned "$path"; then
-      owned=true
-      nginx_conf_has_ip_server_name "$path" && has_ip=true
-    fi
+    nginx_conf_is_panel_owned "$path" && owned=true
+    nginx_conf_has_ip_server_name "$path" && has_ip=true
     while read -r port kind def addr; do
       [[ -n "${first[$port]:-}" ]] || first[$port]="$owned"
       [[ "$def" == default ]] && has_default[$port]=1
+      [[ "$has_ip" == true ]] && ip_name[$port]=1
       [[ "$owned" == true ]] || continue
       our_kind[$port]="$kind"
-      [[ "$has_ip" == true ]] && our_ip[$port]=1
       if [[ -z "${seen[$addr]:-}" ]]; then
         seen[$addr]=1
         listens[$port]+="${listens[$port]:+ }${addr}"
@@ -1624,8 +1622,8 @@ nginx_install_default_deny() {
       nginx_warn "На порту ${port} уже есть default_server — сервер по умолчанию панели не ставится"
     elif [[ "${first[$port]}" != true ]]; then
       nginx_log "Порт ${port}: первым объявлен чужой сайт — он отвечает по IP, сервер по умолчанию не ставится"
-    elif [[ "${our_kind[$port]}" == ssl && -n "${our_ip[$port]:-}" ]]; then
-      nginx_log "Порт ${port}: панель открывается по IP — HTTPS-сервер по умолчанию не ставится"
+    elif [[ "${our_kind[$port]}" == ssl && -n "${ip_name[$port]:-}" ]]; then
+      nginx_log "Порт ${port}: панель или другой сайт открывается по IP — HTTPS-сервер по умолчанию не ставится"
     elif [[ "${our_kind[$port]}" == ssl ]]; then
       https_listens+="${https_listens:+ }${listens[$port]}"
     else
