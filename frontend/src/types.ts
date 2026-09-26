@@ -1909,12 +1909,15 @@ export interface AntizapretSettingOption {
 export interface AntizapretSettingField {
   key: string
   html_id: string
-  type: 'flag' | 'string' | 'choice'
+  type: 'flag' | 'string' | 'choice' | 'number'
   env: string
   param_label: string
   title: string
   description: string
   options?: AntizapretSettingOption[] | null
+  min?: number | null
+  max?: number | null
+  placeholder?: string | null
 }
 
 export interface NodeRemoteHostsResponse {

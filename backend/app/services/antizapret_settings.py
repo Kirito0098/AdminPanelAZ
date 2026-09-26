@@ -77,6 +77,17 @@ def normalize_choice(param: Mapping[str, Any], value: Any, *, legacy_format: boo
     return s
 
 
+def normalize_number(param: Mapping[str, Any], value: Any) -> str:
+    """Validate a number param for writing; an empty value leaves AntiZapret's own default."""
+    s = "" if value is None else str(value).strip()
+    if not s:
+        return ""
+    low, high = int(param["min"]), int(param["max"])
+    if not s.isdigit() or not low <= int(s) <= high:
+        raise ValueError(f"{param['env']}: ожидается целое число от {low} до {high} или пустое значение")
+    return str(int(s))
+
+
 def normalize_choice_settings(settings: Mapping[str, str]) -> dict[str, str]:
     """Map legacy y/n of choice params (e.g. from an old node agent) to numeric values."""
     result = dict(settings)
@@ -104,13 +115,29 @@ def choice_updates_for_agent(updates: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
-def choice_write_mismatch_warnings(requested: Mapping[str, Any], actual: Mapping[str, str]) -> list[str]:
-    """Warn when a node stored a different choice value than requested (old node agent: 2/3/4 → n)."""
+VERIFIED_WRITE_TYPES = frozenset({"choice", "number"})
+
+
+def setting_write_mismatch_warnings(requested: Mapping[str, Any], actual: Mapping[str, str]) -> list[str]:
+    """Warn when an old node agent stored a choice differently (2/3/4 → n) or skipped a number param."""
     warnings: list[str] = []
     actual = normalize_choice_settings(actual)
     for p in ANTIZAPRET_PARAMS:
         key = p["key"]
-        if p["type"] != "choice" or key not in requested:
+        if p["type"] not in VERIFIED_WRITE_TYPES or key not in requested:
+            continue
+        env = p["env"]
+        if p["type"] == "number":
+            try:
+                wanted = normalize_number(p, requested[key])
+            except ValueError:
+                continue
+            # A node that does not know the key still runs with AntiZapret's default.
+            if key not in actual and wanted not in ("", p.get("placeholder")):
+                warnings.append(
+                    f"{env}: node agent на узле не знает этот параметр, значение «{wanted}» не записано. "
+                    "Обновите node agent панели на узле и сохраните ещё раз."
+                )
             continue
         try:
             wanted = normalize_choice(p, requested[key])
@@ -119,7 +146,7 @@ def choice_write_mismatch_warnings(requested: Mapping[str, Any], actual: Mapping
         got = actual.get(key)
         if got is not None and got != wanted:
             warnings.append(
-                f"{p['env']}: на узле записано «{got}» вместо «{wanted}». "
+                f"{env}: на узле записано «{got}» вместо «{wanted}». "
                 "Обновите node agent панели на узле и сохраните ещё раз."
             )
     return warnings
@@ -139,6 +166,10 @@ def build_schema() -> list[dict[str, Any]]:
         }
         if p["type"] == "choice":
             item["options"] = [dict(opt) for opt in p.get("options", [])]
+        elif p["type"] == "number":
+            item["min"] = p["min"]
+            item["max"] = p["max"]
+            item["placeholder"] = p.get("placeholder", "")
         schema.append(item)
     return schema
 
@@ -220,6 +251,9 @@ def read_antizapret_settings(setup_path: Path) -> dict[str, str]:
         elif typ == "choice":
             m = re.search(rf"^{re.escape(env)}=([^\s#]*)", content, re.M | re.I)
             settings[key] = read_choice_value(p, m.group(1) if m else None)
+        elif typ == "number":
+            m = re.search(rf"^{re.escape(env)}=([^\s#]*)", content, re.M | re.I)
+            settings[key] = m.group(1) if m else default
         else:
             m = re.search(rf"^{re.escape(env)}=([yn])$", content, re.M | re.I)
             settings[key] = m.group(1).lower() if m else default
@@ -250,6 +284,8 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
         content = ""
 
     desired: dict[str, str] = {}
+    # An absent number line already means AntiZapret's default; do not append an empty one.
+    optional_envs = {p["env"] for p in ANTIZAPRET_PARAMS if p["type"] == "number"}
     for p in ANTIZAPRET_PARAMS:
         key = p["key"]
         if key not in new_settings:
@@ -261,6 +297,8 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
         elif p["type"] == "choice":
             legacy = re.search(rf"^{re.escape(env)}=[yn]\s*(#.*)?$", content, re.M | re.I) is not None
             desired[env] = normalize_choice(p, v, legacy_format=legacy)
+        elif p["type"] == "number":
+            desired[env] = normalize_number(p, v)
         else:
             desired[env] = str(v).strip()
 
@@ -305,7 +343,7 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
             new_lines.append(line)
 
     for env, val in desired.items():
-        if env not in found:
+        if env not in found and (val or env not in optional_envs):
             new_lines.append(f"{env}={val}\n")
             changes += 1
 

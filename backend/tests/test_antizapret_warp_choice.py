@@ -4,7 +4,7 @@ import pytest
 
 from app.services.antizapret_settings import (
     build_schema,
-    choice_write_mismatch_warnings,
+    setting_write_mismatch_warnings,
     normalize_choice_settings,
     read_antizapret_settings,
     update_antizapret_settings,
@@ -93,7 +93,7 @@ def test_normalize_choice_settings_maps_old_agent_values():
 
 
 def test_mismatch_warning_for_old_agent():
-    warnings = choice_write_mismatch_warnings({"ANTIZAPRET_WARP": "3"}, {"ANTIZAPRET_WARP": "n"})
+    warnings = setting_write_mismatch_warnings({"ANTIZAPRET_WARP": "3"}, {"ANTIZAPRET_WARP": "n"})
     assert len(warnings) == 1
     assert "node agent" in warnings[0]
-    assert choice_write_mismatch_warnings({"ANTIZAPRET_WARP": "2"}, {"ANTIZAPRET_WARP": "y"}) == []
+    assert setting_write_mismatch_warnings({"ANTIZAPRET_WARP": "2"}, {"ANTIZAPRET_WARP": "y"}) == []

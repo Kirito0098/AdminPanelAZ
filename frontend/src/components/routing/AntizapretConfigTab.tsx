@@ -121,9 +121,9 @@ const FIELD_SECTIONS: {
   {
     title: 'Cloudflare WARP',
     description:
-      'Встроенный WARP AntiZapret-VPN (не AZ-WARP). Старый формат y/n в setup поддерживает только None / All.',
+      'Встроенный WARP AntiZapret-VPN (не AZ-WARP). Старый формат y/n в setup поддерживает только None / All. Списки доменов WARP — в «Редакторе файлов».',
     icon: Cloud,
-    keys: ['ANTIZAPRET_WARP', 'VPN_WARP', 'WARP_PROTECTION'],
+    keys: ['ANTIZAPRET_WARP', 'VPN_WARP', 'WARP_PROTECTION', 'WARP_MTU'],
   },
   {
     title: 'AdBlock',
@@ -308,13 +308,27 @@ function StringSettingRow({
           {field.param_label || field.env}
         </p>
       </div>
-      <Input
-        id={id}
-        value={value}
-        disabled={disabled}
-        placeholder={field.env}
-        onChange={(e) => onChange(e.target.value)}
-      />
+      {field.type === 'number' ? (
+        <Input
+          id={id}
+          type="number"
+          inputMode="numeric"
+          min={field.min ?? undefined}
+          max={field.max ?? undefined}
+          value={value}
+          disabled={disabled}
+          placeholder={field.placeholder ? `По умолчанию ${field.placeholder}` : field.env}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      ) : (
+        <Input
+          id={id}
+          value={value}
+          disabled={disabled}
+          placeholder={field.env}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )}
     </div>
   )
 }

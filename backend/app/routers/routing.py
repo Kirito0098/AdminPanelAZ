@@ -17,12 +17,13 @@ from app.schemas import (
     RoutingOverview,
 )
 from app.services.antizapret_settings import (
+    VERIFIED_WRITE_TYPES,
     az_host_updates_conflict_with_panel_domain,
     build_schema,
-    choice_write_mismatch_warnings,
     filter_known_keys,
     normalize_choice_settings,
     openvpn_backup_tcp_conflict_warnings,
+    setting_write_mismatch_warnings,
 )
 from app.services.background_tasks import background_task_service
 from app.services.env_file import EnvFileService
@@ -219,9 +220,9 @@ def put_antizapret_settings(
 
     https_public_port = env.get_env_value("HTTPS_PUBLIC_PORT", "443") or "443"
     warnings = list(result.get("warnings") or [])
-    if any(field["type"] == "choice" and field["key"] in filtered for field in build_schema()):
+    if any(field["type"] in VERIFIED_WRITE_TYPES and field["key"] in filtered for field in build_schema()):
         try:
-            warnings.extend(choice_write_mismatch_warnings(filtered, adapter.get_antizapret_settings()))
+            warnings.extend(setting_write_mismatch_warnings(filtered, adapter.get_antizapret_settings()))
         except Exception:  # noqa: BLE001 — best-effort verification
             pass
     for warning in openvpn_backup_tcp_conflict_warnings(filtered, https_public_port=https_public_port):

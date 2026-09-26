@@ -1718,12 +1718,15 @@ class AntizapretSettingOption(BaseModel):
 class AntizapretSettingFieldSchema(BaseModel):
     key: str
     html_id: str
-    type: Literal["flag", "string", "choice"]
+    type: Literal["flag", "string", "choice", "number"]
     env: str
     param_label: str = ""
     title: str = ""
     description: str = ""
     options: list[AntizapretSettingOption] | None = None
+    min: int | None = None
+    max: int | None = None
+    placeholder: str | None = None
 
 
 class AntizapretSettingsResponse(BaseModel):

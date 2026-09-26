@@ -76,6 +76,7 @@ def replicate_config_files(
     *,
     run_doall: bool = False,
     content_overrides: dict[str, str] | None = None,
+    skip_unsupported: bool = False,
 ) -> dict[str, Any]:
     """Replicate config file writes from primary to HA group replicas only."""
     replicable_keys, excluded_keys = _filter_replicable_file_keys(file_keys)
@@ -132,6 +133,7 @@ def replicate_config_files(
         source_node_id=group.primary_node_id,
         run_doall=run_doall,
         content_overrides=filtered_overrides,
+        skip_unsupported=skip_unsupported,
     )
     result = _transfer_result_to_replicate_result(transfer)
     finalize_replicate_outcome(
@@ -156,7 +158,7 @@ def heal_config_drift(db: Session, group: NodeSyncGroup) -> dict[str, Any]:
     """Incremental reconcile heal: replicate all editable config files primary → replicas."""
     file_keys = list(EDITABLE_FILES.keys())
     run_doall = get_settings().node_sync_replicate_doall
-    return replicate_config_files(db, group, file_keys, run_doall=run_doall)
+    return replicate_config_files(db, group, file_keys, run_doall=run_doall, skip_unsupported=True)
 
 
 def maybe_replicate_config_files(

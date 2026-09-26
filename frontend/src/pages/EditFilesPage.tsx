@@ -3,6 +3,9 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Ban,
   ArrowRightLeft,
+  Cloud,
+  CloudOff,
+  FileCode,
   FileEdit,
   GitCompare,
   Globe,
@@ -11,6 +14,7 @@ import {
   Network,
   RefreshCw,
   RotateCcw,
+  Route,
   Save,
   ShieldBan,
   ShieldCheck,
@@ -71,7 +75,10 @@ import type { EditFileEntry } from '@/types'
 const EDITOR_TEXTAREA_CLASS =
   'min-h-[16rem] resize-y border-zinc-800 bg-zinc-950 font-mono text-sm leading-relaxed text-zinc-200 placeholder:text-zinc-500 focus-visible:ring-zinc-700 sm:min-h-[22rem] lg:min-h-[28rem]'
 
-type FileGroup = 'hosts' | 'ips' | 'adblock'
+type FileGroup = 'hosts' | 'ips' | 'adblock' | 'warp' | 'dns'
+
+/** custom.lua / custom2.lua: сохранение перезапускает kresd, doall.sh не нужен. */
+const KRESD_CUSTOM_KEYS = new Set(['kresd_custom', 'kresd_custom2'])
 
 type FileMeta = {
   description: string
@@ -159,12 +166,70 @@ const FILE_META: Record<string, FileMeta> = {
     icon: ShieldCheck,
     group: 'adblock',
   },
+  include_warp_hosts: {
+    description: 'Сайты, трафик к которым выходит через встроенный WARP',
+    hint: 'Для режимов WARP Domain и Custom · «.» — все сайты',
+    placeholder: 'example.com\n\nОдин сайт — одна строка',
+    icon: Cloud,
+    group: 'warp',
+  },
+  exclude_warp_hosts: {
+    description: 'Сайты, которые не пускать через WARP',
+    hint: 'Действует на любые сайты, не только из списка WARP',
+    placeholder: 'bank.example\n\nОдин сайт — одна строка',
+    icon: CloudOff,
+    group: 'warp',
+  },
+  deny_rpz: {
+    description: 'Заблокировать сайты в DNS AntiZapret VPN',
+    hint: 'Формат RPZ: example.com CNAME . — ответ 0.0.0.0',
+    placeholder: 'example.com CNAME .\n*.example.com CNAME .',
+    icon: ShieldBan,
+    group: 'dns',
+  },
+  deny2_rpz: {
+    description: 'Заблокировать сайты в DNS полного VPN',
+    hint: 'Формат RPZ: example.com CNAME . — ответ 0.0.0.0',
+    placeholder: 'example.com CNAME .\n*.example.com CNAME .',
+    icon: ShieldBan,
+    group: 'dns',
+  },
+  warp_rpz: {
+    description: 'Направить сайты через WARP правилом RPZ',
+    hint: 'Формат RPZ: example.com CNAME .',
+    placeholder: 'example.com CNAME .\n*.example.com CNAME .',
+    icon: Cloud,
+    group: 'dns',
+  },
+  proxy_rpz: {
+    description: 'Направить сайты через AntiZapret правилом RPZ',
+    hint: 'Формат RPZ: example.com CNAME .',
+    placeholder: 'example.com CNAME .\n*.example.com CNAME .',
+    icon: Route,
+    group: 'dns',
+  },
+  kresd_custom: {
+    description: 'Свои правила Knot Resolver для AntiZapret VPN (Lua)',
+    hint: 'Например, свой DNS для отдельных доменов · сохранение перезапускает kresd@1',
+    placeholder: "policy.add(policy.suffix(policy.STUB({'8.8.8.8'}), {todname('example.com')}))",
+    icon: FileCode,
+    group: 'dns',
+  },
+  kresd_custom2: {
+    description: 'Свои правила Knot Resolver для полного VPN (Lua)',
+    hint: 'Например, свой DNS для отдельных доменов · сохранение перезапускает kresd@2',
+    placeholder: "policy.add(policy.suffix(policy.STUB({'8.8.8.8'}), {todname('example.com')}))",
+    icon: FileCode,
+    group: 'dns',
+  },
 }
 
 const GROUP_LABELS: Record<FileGroup, string> = {
   hosts: 'Сайты',
   ips: 'IP-адреса',
   adblock: 'Блокировка рекламы',
+  warp: 'WARP',
+  dns: 'DNS (Knot Resolver)',
 }
 
 const DEFAULT_FILE_META: FileMeta = {
@@ -229,10 +294,11 @@ export default function EditFilesPage() {
 
   const active = files.find((f) => f.key === activeKey)
   const activeMeta = activeKey ? getFileMeta(activeKey) : null
+  const activeIsKresd = activeKey != null && KRESD_CUSTOM_KEYS.has(activeKey)
   const ActiveIcon = activeMeta?.icon ?? FileEdit
 
   const groupedFiles = useMemo(() => {
-    const groups: Record<FileGroup, EditFileEntry[]> = { hosts: [], ips: [], adblock: [] }
+    const groups: Record<FileGroup, EditFileEntry[]> = { hosts: [], ips: [], adblock: [], warp: [], dns: [] }
     for (const file of files) {
       const group = getFileMeta(file.key).group
       groups[group].push(file)
@@ -394,10 +460,17 @@ export default function EditFilesPage() {
     setConfirmApply(false)
     setSaving(true)
     try {
-      await withInline(() => saveEditFile(activeKey, content), 'Сохранение и doall.sh...')
+      await withInline(
+        () => saveEditFile(activeKey, content),
+        activeIsKresd ? 'Сохранение и перезапуск DNS...' : 'Сохранение и doall.sh...',
+      )
       setSavedContent(content)
       resetDiffBaseline()
-      success('Изменения применены — VPN обновил правила маршрутизации')
+      success(
+        activeIsKresd
+          ? 'Сохранено — DNS-резолвер перезапущен с новыми правилами'
+          : 'Изменения применены — VPN обновил правила маршрутизации',
+      )
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
     } finally {
@@ -527,7 +600,8 @@ export default function EditFilesPage() {
       >
         <ol className="space-y-2 text-sm text-muted-foreground">
           <li>
-            <strong className="text-foreground">1.</strong> Выберите список слева — сайты, IP или рекламу.
+            <strong className="text-foreground">1.</strong> Выберите список слева — сайты, IP, рекламу, WARP или
+            DNS.
           </li>
           <li>
             <strong className="text-foreground">2.</strong> Правьте по одной записи на строку, без запятых.
@@ -535,6 +609,11 @@ export default function EditFilesPage() {
           <li>
             <strong className="text-foreground">3.</strong> «Сохранить» — только запись на диск; «Сохранить и
             применить» — ещё и обновление маршрутов VPN (может занять несколько минут).
+          </li>
+          <li>
+            <strong className="text-foreground">4.</strong> DNS-политики (Lua) применяются сразу: сохранение
+            перезапускает DNS-резолвер, а если он не запустится с новым файлом, прежняя версия вернётся
+            автоматически.
           </li>
         </ol>
         <p className="text-xs text-muted-foreground">
@@ -782,9 +861,18 @@ export default function EditFilesPage() {
               {isAdmin && !fileLoading && !fileError ? (
                 <div className="sticky bottom-0 z-10 -mx-3 flex flex-col gap-2 border-t bg-card/95 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80 sm:-mx-4 sm:flex-row sm:items-center sm:justify-between sm:px-4">
                   <p className="max-w-xl text-[11px] leading-snug text-muted-foreground">
-                    <strong className="text-foreground">Сохранить</strong> — на диск без VPN.{' '}
-                    <strong className="text-foreground">Применить</strong> — ещё и маршруты
-                    {isHaAutoPrimary ? '; на резерв уйдёт автоматически' : ''}.
+                    {activeIsKresd ? (
+                      <>
+                        Сохранение сразу перезапускает DNS-резолвер; при ошибке в файле вернётся прежняя
+                        версия{isHaAutoPrimary ? '; на резерв уйдёт автоматически' : ''}.
+                      </>
+                    ) : (
+                      <>
+                        <strong className="text-foreground">Сохранить</strong> — на диск без VPN.{' '}
+                        <strong className="text-foreground">Применить</strong> — ещё и маршруты
+                        {isHaAutoPrimary ? '; на резерв уйдёт автоматически' : ''}.
+                      </>
+                    )}
                   </p>
                   <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
                     <Button
@@ -798,27 +886,29 @@ export default function EditFilesPage() {
                       <RotateCcw size={15} />
                       Отменить
                     </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="w-full sm:w-auto"
-                      onClick={handleSaveOnly}
-                      disabled={!hasUnsavedChanges || saving || nodeReadonly || !editorInSync}
-                      title="Записать на сервер без обновления VPN"
-                      aria-label="Сохранить"
-                    >
-                      {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-                      Сохранить
-                    </Button>
+                    {activeIsKresd ? null : (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        className="w-full sm:w-auto"
+                        onClick={handleSaveOnly}
+                        disabled={!hasUnsavedChanges || saving || nodeReadonly || !editorInSync}
+                        title="Записать на сервер без обновления VPN"
+                        aria-label="Сохранить"
+                      >
+                        {saving ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                        Сохранить
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       className="w-full sm:w-auto"
                       onClick={() => setConfirmApply(true)}
                       disabled={!hasUnsavedChanges || saving || nodeReadonly || !editorInSync}
-                      title="Записать и обновить правила VPN"
+                      title={activeIsKresd ? 'Записать и перезапустить DNS-резолвер' : 'Записать и обновить правила VPN'}
                     >
                       {saving ? <Loader2 size={15} className="animate-spin" /> : <Zap size={15} />}
-                      Сохранить и применить
+                      {activeIsKresd ? 'Сохранить и перезапустить DNS' : 'Сохранить и применить'}
                     </Button>
                   </div>
                 </div>
@@ -840,11 +930,21 @@ export default function EditFilesPage() {
         onOpenChange={(open) => {
           if (!open && !saving) setConfirmApply(false)
         }}
-        title="Применить изменения к VPN?"
+        title={activeIsKresd ? 'Перезапустить DNS-резолвер?' : 'Применить изменения к VPN?'}
         description={
           <>
-            Список <strong>{active?.title ?? active?.filename}</strong> будет записан на сервер{' '}
-            <strong>{activeNode?.name ?? 'активный'}</strong>, затем VPN обновит правила маршрутизации.
+            {activeIsKresd ? (
+              <>
+                Файл <strong>{active?.filename}</strong> будет записан на сервер{' '}
+                <strong>{activeNode?.name ?? 'активный'}</strong>, затем перезапустится DNS-резолвер Knot
+                Resolver.
+              </>
+            ) : (
+              <>
+                Список <strong>{active?.title ?? active?.filename}</strong> будет записан на сервер{' '}
+                <strong>{activeNode?.name ?? 'активный'}</strong>, затем VPN обновит правила маршрутизации.
+              </>
+            )}
             {liveDiffCounts.added > 0 || liveDiffCounts.removed > 0 ? (
               <>
                 {' '}
@@ -853,13 +953,24 @@ export default function EditFilesPage() {
             ) : null}
           </>
         }
-        alert={{
-          variant: 'warning',
-          title: 'Это может занять несколько минут',
-          children:
-            'Во время обновления правил VPN у клиентов возможны кратковременные перебои в работе.',
-        }}
-        confirmLabel={saving ? 'Применение...' : 'Сохранить и применить'}
+        alert={
+          activeIsKresd
+            ? {
+                variant: 'warning',
+                title: 'DNS у клиентов прервётся на пару секунд',
+                children:
+                  'Если резолвер не запустится с новым файлом (например, из-за ошибки в Lua), панель вернёт прежнюю версию и покажет ошибку.',
+              }
+            : {
+                variant: 'warning',
+                title: 'Это может занять несколько минут',
+                children:
+                  'Во время обновления правил VPN у клиентов возможны кратковременные перебои в работе.',
+              }
+        }
+        confirmLabel={
+          saving ? 'Применение...' : activeIsKresd ? 'Сохранить и перезапустить' : 'Сохранить и применить'
+        }
         destructive
         loading={saving}
         onConfirm={handleSaveApply}

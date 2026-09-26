@@ -24,6 +24,7 @@ from app.services.antizapret_settings import (
     update_antizapret_settings,
 )
 from app.services.cidr.service import CidrRoutingService
+from app.services.file_editor import FILES_SINCE_AGENT_1_10, KRESD_CUSTOM_UNITS, ConfigFileUnsupportedError
 from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
@@ -1449,12 +1450,25 @@ class RemoteNodeAdapter(NodeAdapter):
             timeout=120.0,
         )
 
+    @contextmanager
+    def _config_file_request(self, filename: str) -> Iterator[None]:
+        try:
+            yield
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_400_BAD_REQUEST and filename in FILES_SINCE_AGENT_1_10:
+                raise ConfigFileUnsupportedError(filename) from exc
+            raise
+
     def read_config_file(self, filename: str) -> str:
-        data = self._request("GET", f"/configs/files/{filename}")
+        with self._config_file_request(filename):
+            data = self._request("GET", f"/configs/files/{filename}")
         return data.get("content", "")
 
     def write_config_file(self, filename: str, content: str) -> None:
-        self._request("PUT", f"/configs/files/{filename}", json={"content": content})
+        # Restarting kresd after custom.lua (plus a rollback) can outlast the default timeout.
+        timeout = 180.0 if filename in KRESD_CUSTOM_UNITS else HTTP_TIMEOUT
+        with self._config_file_request(filename):
+            self._request("PUT", f"/configs/files/{filename}", json={"content": content}, timeout=timeout)
 
     def apply_config_changes(self) -> str:
         data = self._request("POST", "/configs/apply", timeout=300.0)

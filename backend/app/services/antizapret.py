@@ -17,6 +17,7 @@ from app.config import get_settings
 from app.models import VpnType
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.services.antizapret_backup import AntizapretBackupService
+from app.services.file_editor import EDITABLE_FILES, KRESD_CUSTOM_UNITS
 from app.services.openvpn_management import openvpn_management_service
 from app.services.path_stash import stashed
 from app.services.profile_files import iter_client_profile_paths, profile_filename_matches_client
@@ -65,6 +66,7 @@ class AntiZapretService:
         self.client_script = self.base_path / "client.sh"
         self.client_dir = self.base_path / "client"
         self.config_dir = self.base_path / "config"
+        self.knot_resolver_dir = Path("/etc/knot-resolver")
         self.openvpn_logs = Path("/etc/openvpn/server/logs")
 
     def _run_client_script(self, *args: str, timeout: int = 120) -> str:
@@ -384,38 +386,78 @@ class AntiZapretService:
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
-    _CONFIG_FILES = frozenset(
-        {
-            "include-hosts.txt",
-            "exclude-hosts.txt",
-            "include-ips.txt",
-            "exclude-ips.txt",
-            "allow-ips.txt",
-            "drop-ips.txt",
-            "forward-ips.txt",
-            "include-adblock-hosts.txt",
-            "exclude-adblock-hosts.txt",
-            "remove-hosts.txt",
-            "deny-ips.txt",
-            "banned_clients",
-        }
-    )
+    _CONFIG_FILES = (frozenset(EDITABLE_FILES.values()) - frozenset(KRESD_CUSTOM_UNITS)) | {"banned_clients"}
+
+    def _config_file_path(self, filename: str) -> Path | None:
+        if filename in KRESD_CUSTOM_UNITS:
+            return self.knot_resolver_dir / filename
+        if filename in self._CONFIG_FILES:
+            return self.config_dir / filename
+        return None
 
     def read_config_file(self, filename: str) -> str:
-        allowed = self._CONFIG_FILES
-        if filename not in allowed:
+        path = self._config_file_path(filename)
+        if path is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимый конфигурационный файл")
-        path = self.config_dir / filename
         if not path.exists():
             return ""
         return path.read_text(encoding="utf-8", errors="replace")
 
     def write_config_file(self, filename: str, content: str) -> None:
-        allowed = self._CONFIG_FILES
-        if filename not in allowed:
+        path = self._config_file_path(filename)
+        if path is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл недоступен для записи")
-        path = self.config_dir / filename
+        if filename in KRESD_CUSTOM_UNITS:
+            self._write_kresd_custom(path, content)
+            return
         path.write_text(content, encoding="utf-8")
+
+    def _write_kresd_custom(self, path: Path, content: str) -> None:
+        """Write custom.lua / custom2.lua and restart its kresd; restore the old file if kresd fails."""
+        previous = path.read_text(encoding="utf-8", errors="replace") if path.exists() else None
+        if previous == content:
+            return
+        unit = KRESD_CUSTOM_UNITS[path.name]
+        path.write_text(content, encoding="utf-8")
+        error = self._restart_kresd(unit)
+        if error is None:
+            return
+        # kresd.conf dofile()s this path unconditionally: an empty file keeps kresd bootable.
+        path.write_text(previous or "", encoding="utf-8")
+        rollback_error = self._restart_kresd(unit)
+        detail = f"{unit} не запустился с новым {path.name}, прежний файл восстановлен. Ошибка: {error}"
+        if rollback_error:
+            detail += f". После отката {unit} тоже не запустился: {rollback_error}"
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+    @staticmethod
+    def _restart_kresd(unit: str) -> str | None:
+        """Restart a kresd instance; return an error text when it did not come back up."""
+        try:
+            result = subprocess.run(
+                ["systemctl", "restart", unit],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            return str(exc)
+        if result.returncode == 0:
+            return None
+        error = ((result.stdout or "") + (result.stderr or "")).strip() or f"exit {result.returncode}"
+        try:
+            journal = subprocess.run(
+                ["journalctl", "-u", unit, "-n", "5", "--no-pager", "-o", "cat"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return error
+        tail = (journal.stdout or "").strip()
+        return f"{error}\n{tail}" if tail else error
 
     def restart_service(self, service_name: str) -> str:
         allowed = {

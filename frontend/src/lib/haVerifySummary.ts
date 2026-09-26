@@ -80,6 +80,12 @@ const CONFIG_FILE_TITLES: Record<string, string> = {
   'exclude-adblock-hosts.txt': 'Adblock — исключить',
   'remove-hosts.txt': 'Удалить домены',
   'deny-ips.txt': 'Запретить входящие IP',
+  'include-warp-hosts.txt': 'WARP — включить домены',
+  'exclude-warp-hosts.txt': 'WARP — исключить домены',
+  'deny-rpz.txt': 'RPZ — блокировка (AntiZapret)',
+  'deny2-rpz.txt': 'RPZ — блокировка (полный VPN)',
+  'warp-rpz.txt': 'RPZ — через WARP',
+  'proxy-rpz.txt': 'RPZ — через AntiZapret',
 }
 
 function formatConfigFileEntry(filename: string): HaVerifyFileEntry {
