@@ -36,7 +36,7 @@ WIZ_NGINX_EMAIL="${WIZ_NGINX_EMAIL:-}"
 WIZ_ACCESS_PATH="${WIZ_ACCESS_PATH:-}"
 WIZ_NGINX_SUBPATH_INTEGRATE="${WIZ_NGINX_SUBPATH_INTEGRATE:-false}"
 WIZ_ADMIN_USERNAME="${WIZ_ADMIN_USERNAME:-admin}"
-WIZ_ADMIN_PASSWORD="${WIZ_ADMIN_PASSWORD:-admin}"
+WIZ_ADMIN_PASSWORD="${WIZ_ADMIN_PASSWORD:-}"
 WIZ_ADMIN_MUST_CHANGE_PASSWORD="${WIZ_ADMIN_MUST_CHANGE_PASSWORD:-true}"
 WIZ_NODE_AGENT_PORT="${WIZ_NODE_AGENT_PORT:-9100}"
 WIZ_NODE_AGENT_API_KEY="${WIZ_NODE_AGENT_API_KEY:-}"
@@ -791,17 +791,29 @@ wizard_ask_admin() {
   echo "Пароль администратора (Enter — сгенерировать случайный):"
   echo "  Политика (production): минимум 8 символов, буквы и цифры; не используйте admin/admin."
   if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
-    WIZ_ADMIN_PASSWORD="${WIZ_ADMIN_PASSWORD:-admin}"
-    echo "  [используется значение по умолчанию]"
+    if admin_password_is_weak "$WIZ_ADMIN_PASSWORD" "$WIZ_ADMIN_USERNAME"; then
+      if [[ -n "$WIZ_ADMIN_PASSWORD" ]]; then
+        print_warn "Заданный WIZ_ADMIN_PASSWORD не проходит политику паролей — будет сгенерирован случайный."
+      fi
+      WIZ_ADMIN_PASSWORD="$(generate_admin_password)"
+      echo "  Сгенерирован случайный пароль: $WIZ_ADMIN_PASSWORD"
+      echo "  Запишите его — он также будет показан в конце установки."
+    else
+      echo "  [используется заданный пароль]"
+    fi
   else
     while true; do
       read -r -s -p "Пароль (пусто = сгенерировать случайный): " _admin_pw
       echo
       if [[ -z "$_admin_pw" ]]; then
-        WIZ_ADMIN_PASSWORD="$(random_hex | cut -c1-16)"
+        WIZ_ADMIN_PASSWORD="$(generate_admin_password)"
         echo "  Сгенерирован случайный пароль: $WIZ_ADMIN_PASSWORD"
         echo "  Запишите его — он также будет показан в конце установки."
         break
+      fi
+      if admin_password_is_weak "$_admin_pw" "$WIZ_ADMIN_USERNAME"; then
+        print_warn "Пароль не проходит политику: минимум 8 символов, буквы и цифры, не admin и не имя пользователя."
+        continue
       fi
       read -r -s -p "Повторите пароль для подтверждения: " _admin_pw2
       echo

@@ -1062,6 +1062,28 @@ is_placeholder_secret() {
   return 1
 }
 
+# Правила панели в production (password_policy.py, security_bootstrap.py): слабый
+# DEFAULT_ADMIN_PASSWORD не даёт панели стартовать. Словарь слабых паролей панели
+# целиком отсекается длиной и требованием букв и цифр.
+admin_password_is_weak() {
+  local pw="$1" user="${2:-}" lowered
+  is_placeholder_secret "$pw" && return 0
+  lowered="${pw,,}"
+  [[ -n "$user" && "$lowered" == "${user,,}" ]] && return 0
+  (( ${#pw} >= 8 )) || return 0
+  [[ "$pw" =~ [A-Za-z] && "$pw" =~ [0-9] ]] || return 0
+  return 1
+}
+
+generate_admin_password() {
+  local pw
+  while true; do
+    pw="$(random_hex | cut -c1-16)"
+    [[ "$pw" =~ [a-f] && "$pw" =~ [0-9] ]] && break
+  done
+  printf '%s\n' "$pw"
+}
+
 install_controller_selected() {
   if [[ "$NODE_ONLY" == true || "$PROXY_ONLY" == true ]] \
     || [[ "${WIZ_INSTALL_TYPE:-controller}" == "node" || "${WIZ_INSTALL_TYPE:-}" == "proxy" ]]; then
@@ -1144,7 +1166,9 @@ apply_wiz_env_settings() {
   fi
   if _wiz_should_apply WIZ_ADMIN_USERNAME; then
     env_set DEFAULT_ADMIN_USERNAME "$WIZ_ADMIN_USERNAME"
-    env_set DEFAULT_ADMIN_PASSWORD "$WIZ_ADMIN_PASSWORD"
+    if [[ -n "$WIZ_ADMIN_PASSWORD" ]]; then
+      env_set DEFAULT_ADMIN_PASSWORD "$WIZ_ADMIN_PASSWORD"
+    fi
     env_set DEFAULT_ADMIN_MUST_CHANGE_PASSWORD "$WIZ_ADMIN_MUST_CHANGE_PASSWORD"
   fi
   if _wiz_should_apply WIZ_BACKEND_HOST; then
@@ -1298,7 +1322,7 @@ setup_env() {
       admin_pw="$(env_get DEFAULT_ADMIN_PASSWORD)"
       [[ -n "$admin_user" ]] || admin_user="admin"
       if is_placeholder_secret "$admin_pw" || [[ -z "$admin_pw" ]]; then
-        admin_pw="$(random_hex | cut -c1-16)"
+        admin_pw="$(generate_admin_password)"
         log "Non-interactive: сгенерирован пароль администратора"
       fi
       env_set DEFAULT_ADMIN_USERNAME "$admin_user"
@@ -1992,7 +2016,7 @@ print_post_install() {
   local node_key="${1:-${GENERATED_NODE_KEY:-}}"
   local proxy_key="${GENERATED_PROXY_KEY:-}"
   local admin_user="${WIZ_ADMIN_USERNAME:-admin}"
-  local admin_pass="${WIZ_ADMIN_PASSWORD:-admin}"
+  local admin_pass="${WIZ_ADMIN_PASSWORD:-}"
 
   echo
   if [[ "$UI_USE_COLOR" == true ]]; then
@@ -2009,7 +2033,11 @@ print_post_install() {
     ui_bold "Учётные данные"
     echo
     ui_summary_row "Логин" "$admin_user"
-    ui_summary_row "Пароль" "$admin_pass"
+    if [[ -n "$admin_pass" ]]; then
+      ui_summary_row "Пароль" "$admin_pass"
+    else
+      print_info "Пароль администратора не менялся (задан при прошлой установке)"
+    fi
     print_info "Смените пароль при первом входе, если включена принудительная смена"
     echo
     ui_separator
