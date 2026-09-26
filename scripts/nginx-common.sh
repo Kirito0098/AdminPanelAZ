@@ -1482,15 +1482,23 @@ nginx_version_at_least() {
   [[ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -1)" == "$want" ]]
 }
 
-# nginx_render_default_deny <HTTP listen|""> <HTTPS listen|""> <вывод nginx -v>
+# nginx_render_default_deny <HTTP listen через пробел|""> <HTTPS listen через пробел|""> <вывод nginx -v>
 nginx_render_default_deny() {
-  local http_listen="$1" https_listen="$2" version_output="$3"
+  local http_listens="$1" https_listens="$2" version_output="$3" listen
   printf '# AdminPanelAZ: запросы по IP сервера и к чужим именам не доходят до панели.\n'
-  if [[ -n "$http_listen" ]]; then
-    printf 'server {\n    listen %s default_server;\n    server_name _;\n    return 444;\n}\n' "$http_listen"
+  if [[ -n "$http_listens" ]]; then
+    printf 'server {\n'
+    for listen in $http_listens; do
+      printf '    listen %s default_server;\n' "$listen"
+    done
+    printf '    server_name _;\n    return 444;\n}\n'
   fi
-  if [[ -n "$https_listen" ]]; then
-    printf 'server {\n    listen %s ssl default_server;\n    server_name _;\n' "$https_listen"
+  if [[ -n "$https_listens" ]]; then
+    printf 'server {\n'
+    for listen in $https_listens; do
+      printf '    listen %s ssl default_server;\n' "$listen"
+    done
+    printf '    server_name _;\n'
     if nginx_version_at_least 1.19.4 "$version_output"; then
       printf '    ssl_reject_handshake on;\n'
     else
@@ -1519,18 +1527,51 @@ nginx_ensure_default_deny_cert() {
     -keyout "$key" -out "$cert" >/dev/null 2>&1)
 }
 
-# Чужой default_server на порту во включённых сайтах или conf.d (свой файл не считается).
-nginx_port_has_foreign_default_server() {
-  local port="$1" own path
-  own="$(nginx_default_deny_basename)"
-  for path in "$(nginx_sites_enabled_dir)"/* "$(nginx_conf_d_dir)"/*.conf; do
-    [[ -f "$path" ]] || continue
-    [[ "$(basename "$path")" == "$own" ]] && continue
-    if grep -Eq "^[[:space:]]*listen[[:space:]]+([^;[:space:]]*:)?${port}([[:space:]]+[^;]*)?[[:space:]]default_server" "$path"; then
-      return 0
-    fi
-  done
-  return 1
+# Файлы конфигурации в порядке загрузки: по nginx -T, иначе как в nginx.conf Debian — conf.d, затем sites-enabled.
+nginx_loaded_conf_files() {
+  local files path
+  files="$(nginx -T 2>/dev/null | sed -n 's/^# configuration file \(.*\):$/\1/p' || true)"
+  if [[ -z "$files" ]]; then
+    files="$(printf '%s\n' "$(nginx_conf_d_dir)"/*.conf "$(nginx_sites_enabled_dir)"/*)"
+  fi
+  while IFS= read -r path; do
+    [[ -f "$path" ]] && printf '%s\n' "$path"
+  done <<<"$files"
+  return 0
+}
+
+# nginx_conf_listens <файл> → «порт ssl|plain default|- адрес» на каждую директиву listen.
+nginx_conf_listens() {
+  sed 's/#.*//' "$1" | tr ';{}' '\n\n\n' | awk '
+    $1 == "listen" {
+      addr = $2
+      port = addr
+      sub(/.*:/, "", port)
+      if (port !~ /^[0-9]+$/) next
+      ssl = "plain"; def = "-"
+      for (i = 3; i <= NF; i++) {
+        if ($i == "ssl") ssl = "ssl"
+        if ($i == "default_server" || $i == "default") def = "default"
+      }
+      print port, ssl, def, addr
+    }'
+}
+
+# IP в server_name: клиент по IP не шлёт SNI, TLS-рукопожатие достаётся серверу по умолчанию.
+nginx_conf_has_ip_server_name() {
+  sed 's/#.*//' "$1" | tr ';{}' '\n\n\n' | awk '
+    $1 == "server_name" {
+      for (i = 2; i <= NF; i++)
+        if ($i ~ /^[0-9]+(\.[0-9]+)+$/ || $i ~ /^\[?[0-9a-fA-F]*:[0-9a-fA-F:.]*\]?$/) found = 1
+    }
+    END { exit !found }'
+}
+
+# Файл панели или портала: шаблоны начинаются с «# AdminPanelAZ»; только что записанный vhost — тоже свой.
+nginx_conf_is_panel_owned() {
+  local path="$1"
+  [[ -n "${NGINX_CONF_FILE:-}" && "$(basename "$path")" == "$(basename "$NGINX_CONF_FILE")" ]] && return 0
+  head -n 1 "$path" 2>/dev/null | grep -q '^#.*AdminPanelAZ'
 }
 
 nginx_remove_default_deny() {
@@ -1539,53 +1580,78 @@ nginx_remove_default_deny() {
   rm -f "$(nginx_sites_enabled_dir)/${base}" "$(nginx_sites_available_dir)/${base}"
 }
 
-# Без сервера по умолчанию nginx отдаёт запросы по голому IP первому vhost'у на порту — панели.
+# Без сервера по умолчанию nginx отдаёт запросы по голому IP первому vhost'у на порту.
+# Сервер по умолчанию ставится только на порты, где этот первый vhost — панель или портал:
+# иначе по IP и так отвечает чужой сайт, и менять его поведение нельзя.
 # Ошибка здесь не должна ломать публикацию: default-deny откатывается, панель остаётся.
 nginx_install_default_deny() {
-  local http_port="$1" https_port="$2"
-  local base conf_file enabled_link version_output conf
+  local base conf_file enabled_link version_output conf path owned has_ip
+  local port kind def addr http_listens="" https_listens=""
+  local -A first=() has_default=() our_kind=() our_ip=() listens=() seen=()
   base="$(nginx_default_deny_basename)"
   conf_file="$(nginx_sites_available_dir)/${base}"
   enabled_link="$(nginx_sites_enabled_dir)/${base}"
 
-  if [[ -n "$http_port" ]] && nginx_port_has_foreign_default_server "$http_port"; then
-    nginx_warn "На порту ${http_port} уже есть чужой default_server — сервер по умолчанию панели не ставится"
-    http_port=""
-  fi
-  if [[ -n "$https_port" ]] && nginx_port_has_foreign_default_server "$https_port"; then
-    nginx_warn "На порту ${https_port} уже есть чужой default_server — сервер по умолчанию панели не ставится"
-    https_port=""
-  fi
-  if [[ -z "$http_port" && -z "$https_port" ]]; then
+  while IFS= read -r path; do
+    [[ "$(basename "$path")" == "$base" ]] && continue
+    owned=false
+    has_ip=false
+    if nginx_conf_is_panel_owned "$path"; then
+      owned=true
+      nginx_conf_has_ip_server_name "$path" && has_ip=true
+    fi
+    while read -r port kind def addr; do
+      [[ -n "${first[$port]:-}" ]] || first[$port]="$owned"
+      [[ "$def" == default ]] && has_default[$port]=1
+      [[ "$owned" == true ]] || continue
+      our_kind[$port]="$kind"
+      [[ "$has_ip" == true ]] && our_ip[$port]=1
+      if [[ -z "${seen[$addr]:-}" ]]; then
+        seen[$addr]=1
+        listens[$port]+="${listens[$port]:+ }${addr}"
+      fi
+    done < <(nginx_conf_listens "$path")
+  done < <(nginx_loaded_conf_files)
+
+  while read -r port; do
+    [[ -n "$port" ]] || continue
+    if [[ -n "${has_default[$port]:-}" ]]; then
+      nginx_warn "На порту ${port} уже есть default_server — сервер по умолчанию панели не ставится"
+    elif [[ "${first[$port]}" != true ]]; then
+      nginx_log "Порт ${port}: первым объявлен чужой сайт — он отвечает по IP, сервер по умолчанию не ставится"
+    elif [[ "${our_kind[$port]}" == ssl && -n "${our_ip[$port]:-}" ]]; then
+      nginx_log "Порт ${port}: панель открывается по IP — HTTPS-сервер по умолчанию не ставится"
+    elif [[ "${our_kind[$port]}" == ssl ]]; then
+      https_listens+="${https_listens:+ }${listens[$port]}"
+    else
+      http_listens+="${http_listens:+ }${listens[$port]}"
+    fi
+  done < <(printf '%s\n' "${!our_kind[@]}" | sort -n)
+
+  if [[ -z "$http_listens" && -z "$https_listens" ]]; then
     nginx_remove_default_deny
     return 0
   fi
 
   version_output="$(nginx -v 2>&1 || true)"
-  if [[ -n "$https_port" ]] && ! nginx_version_at_least 1.19.4 "$version_output"; then
+  if [[ -n "$https_listens" ]] && ! nginx_version_at_least 1.19.4 "$version_output"; then
     if ! nginx_ensure_default_deny_cert; then
       nginx_warn "Не удалось создать сертификат для сервера по умолчанию — HTTPS по IP не закрыт"
-      https_port=""
+      https_listens=""
     fi
   fi
-  conf="$(nginx_render_default_deny "$http_port" "$https_port" "$version_output")"
-  printf '%s\n' "$conf" >"$conf_file"
-  ln -sf "$conf_file" "$enabled_link"
+  conf="$(nginx_render_default_deny "$http_listens" "$https_listens" "$version_output")"
+  if ! printf '%s\n' "$conf" 2>/dev/null >"$conf_file" || ! ln -sf "$conf_file" "$enabled_link"; then
+    nginx_remove_default_deny
+    nginx_warn "Не удалось записать ${conf_file} — панель может открываться по IP сервера"
+    return 0
+  fi
   if ! nginx -t >/dev/null 2>&1; then
     nginx_remove_default_deny
     nginx_warn "Сервер по умолчанию не прошёл nginx -t — убран; панель может открываться по IP сервера"
     return 0
   fi
   nginx_log "Запросы по IP сервера и к чужим именам отклоняются (${base})"
-}
-
-nginx_conf_listen_port() {
-  local conf="$1" kind="$2"
-  if [[ "$kind" == ssl ]]; then
-    printf '%s\n' "$conf" | sed -n 's/^[[:space:]]*listen[[:space:]]\+\([0-9]\+\)[[:space:]]\+ssl\b.*/\1/p' | head -1
-  else
-    printf '%s\n' "$conf" | sed -n 's/^[[:space:]]*listen[[:space:]]\+\([0-9]\+\)[[:space:]]*;.*/\1/p' | head -1
-  fi
 }
 
 # Undo a failed install: never leave a broken site enabled (would block nginx after reboot/reload).
@@ -1638,8 +1704,7 @@ nginx_install_site() {
   fi
   [[ -n "$bak" && -f "$bak" ]] && rm -f "$bak"
   nginx_cleanup_server_names_hash_bak
-  nginx_install_default_deny "$(nginx_conf_listen_port "$conf_content" plain)" \
-    "$(nginx_conf_listen_port "$conf_content" ssl)"
+  nginx_install_default_deny
 
   systemctl enable nginx >/dev/null 2>&1 || true
   # Config already passed nginx -t — leave it enabled even if reload/restart fails
