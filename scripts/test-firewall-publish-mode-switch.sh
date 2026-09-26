@@ -62,7 +62,15 @@ ufw() {
       ;;
     --force)
       [[ "$2" == delete ]] || return 2
-      sed -i "${3}d" "$RULES"
+      if [[ "$#" == 3 ]]; then
+        sed -i "${3}d" "$RULES"
+      else
+        # Удаление по описанию снимает обе версии правила.
+        local want="${4}"$'\t'"${3^^}" want6="${4} (v6)"$'\t'"${3^^}"
+        grep -qxF "$want" "$RULES" || return 1
+        grep -vxF -e "$want" -e "$want6" "$RULES" >"$RULES.new"
+        mv "$RULES.new" "$RULES"
+      fi
       ;;
     reload | enable) return 0 ;;
     *) return 0 ;;

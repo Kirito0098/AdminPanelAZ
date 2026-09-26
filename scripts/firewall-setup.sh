@@ -94,6 +94,9 @@ firewall_check_ssh_not_closed() {
   return 0
 }
 
+# Правило SSH остаётся и после удаления панели: ufw уже активен, и повторная установка SSH не добавит.
+FIREWALL_UFW_SSH_COMMENT="SSH (AdminPanelAZ)"
+
 # ufw включается с политикой deny для входящих: без разрешения SSH на сервер больше не войти.
 # Правило SSH, заведённое пользователем (например, только со своего IP), не расширяем.
 firewall_ufw_allow_ssh() {
@@ -104,7 +107,7 @@ firewall_ufw_allow_ssh() {
       continue
     fi
     firewall_log "Разрешаю SSH (${port}/tcp) в ufw"
-    ufw allow "${port}/tcp" comment "SSH (AdminPanelAZ)" >/dev/null 2>&1 || \
+    ufw allow "${port}/tcp" comment "$FIREWALL_UFW_SSH_COMMENT" >/dev/null 2>&1 || \
       ufw allow "${port}/tcp" >/dev/null 2>&1 || true
   done <<<"$(firewall_ssh_ports)"
 }
@@ -231,16 +234,11 @@ firewall_iptables_close_port() {
   fi
 }
 
-# firewall_ufw_delete_port <порт> <ALLOW|DENY> — правила для порта со всех адресов (IPv4 и v6).
+# firewall_ufw_delete_port <порт> <ALLOW|DENY> — правило для порта со всех адресов.
+# Удаление по описанию снимает IPv4 и (v6) и работает на неактивном ufw, где status numbered пуст.
 firewall_ufw_delete_port() {
-  local port="$1" action="$2" nums num
-  nums="$(ufw status numbered 2>/dev/null \
-    | sed -n "s/^\[ *\([0-9]*\)\] *${port}\/tcp\( (v6)\)\{0,1\} *${action} IN *Anywhere.*/\1/p" \
-    | sort -rn || true)"
-  while IFS= read -r num; do
-    [[ -n "$num" ]] || continue
-    ufw --force delete "$num" >/dev/null 2>&1 || true
-  done <<<"$nums"
+  local port="$1" action="${2,,}"
+  ufw --force delete "$action" "${port}/tcp" >/dev/null 2>&1 || true
 }
 
 firewall_ufw_open_port() {
@@ -623,17 +621,26 @@ firewall_remove_ufw_rules() {
   fi
 
   firewall_log "Удаление правил ufw AdminPanelAZ..."
-  local nums
-  nums=$(ufw status numbered 2>/dev/null | grep -i 'AdminPanelAZ' | sed -n 's/^\[\([0-9]*\)\].*/\1/p' | sort -rn || true)
-  if [[ -n "$nums" ]]; then
-    while IFS= read -r num; do
-      [[ -n "$num" ]] || continue
-      ufw --force delete "$num" >/dev/null 2>&1 || true
-    done <<<"$nums"
+  # ufw show added видит правила и на неактивном ufw; удаление по описанию снимает IPv4 и (v6).
+  local added rules rule removed=false
+  local -a words
+  added="$(ufw show added 2>/dev/null || true)"
+  rules="$(grep "comment '[^']*AdminPanelAZ" <<<"$added" \
+    | grep -vF "comment '${FIREWALL_UFW_SSH_COMMENT}'" \
+    | sed -n "s/^ufw \(.*\) comment '[^']*'\$/\1/p" || true)"
+  while IFS= read -r rule; do
+    [[ -n "$rule" ]] || continue
+    read -ra words <<<"$rule"
+    ufw --force delete "${words[@]}" >/dev/null 2>&1 && removed=true
+  done <<<"$rules"
+  if [[ "$removed" == true ]]; then
     ufw reload >/dev/null 2>&1 || true
     firewall_log "Правила ufw AdminPanelAZ удалены."
   else
     firewall_log "Правила ufw AdminPanelAZ не найдены."
+  fi
+  if grep -qF "comment '${FIREWALL_UFW_SSH_COMMENT}'" <<<"$added"; then
+    firewall_log "Правило SSH в ufw оставлено: без него ufw закрыл бы доступ к серверу."
   fi
 }
 
