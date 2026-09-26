@@ -261,7 +261,7 @@ def _notify_drift(drift_groups: list[dict]) -> None:
                     db,
                     actor_username="system",
                     settings_key="node_sync_drift",
-                    detail=json.dumps(item, ensure_ascii=False),
+                    details=json.dumps(item, ensure_ascii=False),
                 )
         finally:
             db.close()

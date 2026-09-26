@@ -123,6 +123,7 @@ SETTINGS_TG_TITLES = {
     "settings_backup_upload": "Бэкапы",
     "settings_backup_delete": "Бэкапы",
     "settings_backup_auto_failed": "Ошибка авто-бэкапа",
+    "node_sync_drift": "HA: расхождение",
     "settings_restart_service": "Перезапуск сервиса",
     "settings_user_password_update": "Пароль пользователя",
     "settings_user_role_update": "Роль пользователя",
