@@ -391,14 +391,16 @@ def test_temp_ban_expiry_uses_per_node_adapter(db_session, monkeypatch):
             assert isinstance(adapter, DummyAdapter)
             access_policy_calls.append((node_id, adapter.label))
             self.node_id = node_id
+            self.banned = {"local-client", "remote-client"}
 
         def read_banned_clients(self) -> set[str]:
-            return {"local-client", "remote-client"}
+            return set(self.banned)
 
-        def write_banned_clients(self, clients: set[str]) -> None:
+        def reconcile_openvpn(self, client_name: str) -> None:
             # Simulate write failure for remote node to ensure we don't clear bans.
             if self.node_id == node_remote.id:
                 raise RuntimeError("write failed")
+            self.banned.discard(client_name)
 
     import app.services.access_policy as access_policy_mod
 

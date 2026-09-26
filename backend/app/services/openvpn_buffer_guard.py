@@ -510,6 +510,8 @@ def run_guard_pass(
 def process_temp_ban_expiries(db: Session) -> list[dict]:
     """Lift temporary guard bans whose ban_expires_at has passed.
 
+    The client leaves banned_clients only if its access policy (admin block, expiry,
+    traffic limit) and newer guard bans do not keep it there.
     Returns a summary per processed client.
     """
     try:
@@ -575,13 +577,8 @@ def process_temp_ban_expiries(db: Session) -> list[dict]:
                 node_name=node.name,
                 adapter=adapter_for_node,
             )
-            banned = svc.read_banned_clients()
-            changed = False
-            if client_name in banned:
-                banned.discard(client_name)
-                changed = True
-            if changed:
-                svc.write_banned_clients(banned)
+            svc.reconcile_openvpn(client_name)
+            unbanned = client_name not in svc.read_banned_clients()
             for ev in events:
                 ev.ban_expires_at = None
             db.commit()
@@ -589,7 +586,7 @@ def process_temp_ban_expiries(db: Session) -> list[dict]:
                 {
                     "node_id": node_id,
                     "client_name": client_name,
-                    "unbanned": changed,
+                    "unbanned": unbanned,
                 }
             )
         except Exception:

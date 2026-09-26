@@ -7,7 +7,13 @@ from datetime import datetime, timedelta, timezone
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, WgAccessPolicy
+from app.models import (
+    AmneziaWg2AccessPolicy,
+    Node,
+    OpenVpnAccessPolicy,
+    OpenVpnBufferGuardEvent,
+    WgAccessPolicy,
+)
 from app.services.awg2_runtime import (
     block_client_runtime as awg2_block_client_runtime,
     block_clients_runtime as awg2_block_clients_runtime,
@@ -321,6 +327,21 @@ class AccessPolicyService:
             changed = True
         return changed
 
+    def _openvpn_runtime_ban_active(self, node_id: int, client_name: str) -> bool:
+        """Bans outside the policy row: the disconnect cooldown and a Buffer Guard temporary ban."""
+        if is_cooldown_ban_active(node_id, client_name):
+            return True
+        guard_ban = (
+            self.db.query(OpenVpnBufferGuardEvent.id)
+            .filter(
+                OpenVpnBufferGuardEvent.node_id == node_id,
+                OpenVpnBufferGuardEvent.common_name == client_name,
+                OpenVpnBufferGuardEvent.ban_expires_at > _now(),
+            )
+            .first()
+        )
+        return guard_ban is not None
+
     def reconcile_openvpn(self, client_name: str, *, traffic_limit_changed: bool = False) -> None:
         node_id = self._require_node_id()
         row = (
@@ -330,7 +351,7 @@ class AccessPolicyService:
         )
         banned = self.read_banned_clients()
         if row is None:
-            want_ban = is_cooldown_ban_active(node_id, client_name)
+            want_ban = self._openvpn_runtime_ban_active(node_id, client_name)
             has_ban = client_name in banned
             if want_ban and not has_ban:
                 banned.add(client_name)
@@ -356,7 +377,7 @@ class AccessPolicyService:
             banned.add(client_name)
         else:
             banned.discard(client_name)
-        if is_cooldown_ban_active(node_id, client_name):
+        if self._openvpn_runtime_ban_active(node_id, client_name):
             banned.add(client_name)
         if changed:
             self.db.commit()
