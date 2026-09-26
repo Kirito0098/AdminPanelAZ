@@ -15,10 +15,9 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import Node, NodeStatus
+from app.models import Node, NodeStatus, OpenVpnBufferGuardSettings
 from app.services.node_manager import get_adapter_for_node
 from app.services.openvpn_buffer_guard import (
-    get_settings as get_guard_settings,
     process_temp_ban_expiries,
     run_guard_pass,
 )
@@ -30,22 +29,14 @@ WORKER_INTERVAL_SECONDS = 20
 
 
 def _online_nodes_with_enabled_settings(db: Session) -> list[Node]:
-    nodes = (
+    # Только чтение: строка настроек без явного включения охраны не нужна.
+    return (
         db.query(Node)
-        .filter(Node.status == NodeStatus.online)
+        .join(OpenVpnBufferGuardSettings, OpenVpnBufferGuardSettings.node_id == Node.id)
+        .filter(Node.status == NodeStatus.online, OpenVpnBufferGuardSettings.enabled.is_(True))
         .order_by(Node.id.asc())
         .all()
     )
-    enabled: list[Node] = []
-    for node in nodes:
-        try:
-            settings_row = get_guard_settings(db, node.id)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.debug("openvpn_buffer_guard: failed to load settings for node %s: %s", node.id, exc)
-            continue
-        if settings_row.enabled:
-            enabled.append(node)
-    return enabled
 
 
 def _run_once() -> None:

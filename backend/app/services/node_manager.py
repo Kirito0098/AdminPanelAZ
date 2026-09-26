@@ -14,6 +14,7 @@ from app.models import (
     AmneziaWg2AccessPolicy,
     AlertRule,
     AppSetting,
+    ClientPortalToken,
     ClientTemplate,
     ConfigTag,
     ConnectionCountSample,
@@ -21,7 +22,10 @@ from app.models import (
     NodeResourceSample,
     NodeStatus,
     OpenVpnAccessPolicy,
+    OpenVpnBufferGuardEvent,
+    OpenVpnBufferGuardSettings,
     TrafficSessionState,
+    UnlockCodeRedemption,
     UserTrafficSample,
     UserTrafficStatProtocol,
     VpnConfig,
@@ -344,7 +348,26 @@ def purge_node_related(db: Session, node_id: int) -> None:
             synchronize_session=False,
         )
 
+    # «Уже погашен» для владельца проверяется по (код, пользователь): запись переносится, а не удаляется,
+    # иначе после удаления узла тот же код можно погасить снова.
+    fallback = (
+        db.query(Node.id)
+        .filter(Node.id != node_id)
+        .order_by(Node.is_local.desc(), Node.id)
+        .first()
+    )
+    owner_redemptions = db.query(UnlockCodeRedemption).filter(
+        UnlockCodeRedemption.node_id == node_id,
+        UnlockCodeRedemption.user_id.isnot(None),
+    )
+    if fallback is not None:
+        owner_redemptions.update({UnlockCodeRedemption.node_id: fallback[0]}, synchronize_session=False)
+
     for model in (
+        UnlockCodeRedemption,
+        ClientPortalToken,
+        OpenVpnBufferGuardEvent,
+        OpenVpnBufferGuardSettings,
         VpnConfig,
         TrafficSessionState,
         UserTrafficStatProtocol,
