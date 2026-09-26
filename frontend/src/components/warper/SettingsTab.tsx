@@ -69,6 +69,7 @@ import {
   isWarperDisabled,
   normalizeOutboundMode,
   OUTBOUND_MODE_OPTIONS,
+  saveSwitch,
   WARP_KEY_SOURCES,
   type WarperOutboundMode,
   type WarperWarpKeySource,
@@ -252,14 +253,20 @@ export default function SettingsTab({ health }: SettingsTabProps) {
     void load()
   }, [load, activeNode?.id])
 
-  async function runAction(action: () => Promise<{ message?: string | null }>, okMessage: string, failMessage: string) {
+  async function runAction(
+    action: () => Promise<{ message?: string | null }>,
+    okMessage: string,
+    failMessage: string,
+  ): Promise<boolean> {
     setBusy(true)
     try {
       const result = await action()
       success(result.message || okMessage)
       await load()
+      return true
     } catch (err) {
       notifyError(err instanceof Error ? err.message : failMessage)
+      return false
     } finally {
       setBusy(false)
     }
@@ -284,7 +291,9 @@ export default function SettingsTab({ health }: SettingsTabProps) {
         'Трафик через AZ-WARP перестанет ходить: домены и IP-подсети из списков AZ-WARP станут недоступны клиентам, пока sing-box не запустят снова.',
       confirmLabel: 'Остановить',
       destructive: true,
-      onConfirm: () => runSingbox('stop'),
+      onConfirm: async () => {
+        await runSingbox('stop')
+      },
     })
   }
 
@@ -294,7 +303,9 @@ export default function SettingsTab({ health }: SettingsTabProps) {
       description:
         'Будет установлена версия из установщика AZ-WARP. Конфиг проверяется заранее, затем служба перезапускается — соединения клиентов через AZ-WARP кратковременно оборвутся.',
       confirmLabel: 'Обновить',
-      onConfirm: () => runSingbox('upgrade'),
+      onConfirm: async () => {
+        await runSingbox('upgrade')
+      },
     })
   }
 
@@ -357,16 +368,18 @@ export default function SettingsTab({ health }: SettingsTabProps) {
   }
 
   async function saveFullVpn(enable: boolean) {
-    setFullVpn(enable)
-    await runAction(() => setWarperFullVpn(enable), `FullVPN ${enable ? 'включён' : 'выключен'}`, 'Не удалось изменить FullVPN')
+    await saveSwitch(fullVpn, enable, setFullVpn, () =>
+      runAction(() => setWarperFullVpn(enable), `FullVPN ${enable ? 'включён' : 'выключен'}`, 'Не удалось изменить FullVPN'),
+    )
   }
 
   async function saveAutopatch(enable: boolean) {
-    setAutopatch(enable)
-    await runAction(
-      () => setWarperAutopatch(enable),
-      `Автопатч DNS ${enable ? 'включён' : 'выключен'}`,
-      'Не удалось изменить автопатч',
+    await saveSwitch(autopatch, enable, setAutopatch, () =>
+      runAction(
+        () => setWarperAutopatch(enable),
+        `Автопатч DNS ${enable ? 'включён' : 'выключен'}`,
+        'Не удалось изменить автопатч',
+      ),
     )
   }
 
@@ -379,7 +392,9 @@ export default function SettingsTab({ health }: SettingsTabProps) {
         'Правила AZ-WARP и DNS-патч будут переприменены. Клиентам AntiZapret нужно переподключиться, иначе домены AZ-WARP у них перестанут открываться.',
       confirmLabel: 'Сменить подсеть',
       destructive: true,
-      onConfirm: () => runAction(() => setWarperSubnet(value), 'Подсеть обновлена', 'Не удалось сохранить подсеть'),
+      onConfirm: async () => {
+        await runAction(() => setWarperSubnet(value), 'Подсеть обновлена', 'Не удалось сохранить подсеть')
+      },
     })
   }
 

@@ -16,6 +16,23 @@ export function isWarperDisabled(health: WarperHealthResponse | null): boolean {
   return !health?.installed || Boolean(health?.conflict_antizapret_warp)
 }
 
+/** Shows the new switch position while saving and puts the previous one back if the save failed. */
+export async function saveSwitch<T>(
+  previous: T,
+  next: T,
+  show: (value: T) => void,
+  save: () => Promise<boolean>,
+): Promise<boolean> {
+  show(next)
+  let saved = false
+  try {
+    saved = await save()
+    return saved
+  } finally {
+    if (!saved) show(previous)
+  }
+}
+
 export function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value < 0) return '—'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
