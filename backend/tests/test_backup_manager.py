@@ -425,3 +425,47 @@ def test_restore_refused_before_side_effects_when_disk_is_too_full(tmp_path: Pat
 
     assert exc.value.status_code == 507
     assert not (tmp_path / "backups" / BackupManager.PRE_RESTORE_DIR).exists()
+
+
+def test_failed_backup_leaves_no_partial_archive_and_keeps_good_ones(tmp_path: Path, monkeypatch):
+    import pytest
+
+    mgr = _manager(tmp_path)
+    good = {mgr.create_backup(retention=2)["file_name"] for _ in range(2)}
+
+    def disk_full(*_args, **_kwargs):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(mgr, "_add_sqlite_snapshot", disk_full)
+    with pytest.raises(OSError):
+        mgr.create_backup(retention=2)
+
+    root = tmp_path / "backups"
+    assert {p.name for p in root.glob("*.tar.gz")} == good
+    assert sorted(p.name for p in root.iterdir()) == sorted(
+        [*good, *(backup_meta_path(root / name).name for name in good)]
+    )
+
+
+def test_retention_counts_only_archives_with_metadata(tmp_path: Path):
+    import os
+
+    mgr = _manager(tmp_path)
+    root = tmp_path / "backups"
+    first = mgr.create_backup(retention=5)["file_name"]
+    second = mgr.create_backup(retention=5)["file_name"]
+    os.utime(root / first, (1000, 1000))
+    os.utime(root / second, (3000, 3000))
+    stale_partial = root / "adminpanelaz_00000000_000000_000000.tar.gz"
+    stale_partial.write_bytes(b"")
+    os.utime(stale_partial, (500, 500))
+    newer_partial = root / "adminpanelaz_00000000_000000_000001.tar.gz"
+    newer_partial.write_bytes(b"")
+    os.utime(newer_partial, (4000, 4000))
+
+    third = mgr.create_backup(retention=2)["file_name"]
+
+    left = {p.name for p in root.glob("*.tar.gz")}
+    assert {second, third} <= left
+    assert first not in left
+    assert stale_partial.name not in left

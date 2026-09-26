@@ -153,6 +153,11 @@ def user_action_tg_action_line(
             return f"Удалён бэкап «{target_value}»"
         return "Удалён файл бэкапа"
 
+    if key == "settings_backup_auto_failed":
+        if details_value:
+            return f"Авто-бэкап не создан, повтор через час: {details_value}"
+        return "Авто-бэкап не создан, повтор через час"
+
     if key == "settings_restart_service":
         svc = target_value or "сервис"
         return f"Перезапущена служба {svc}"

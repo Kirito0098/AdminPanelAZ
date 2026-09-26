@@ -7,6 +7,7 @@ import shutil
 import sqlite3
 import tarfile
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -84,6 +85,8 @@ class BackupManager:
     PRE_RESTORE_NAMES = {"db": "adminpanel.db", "cidr_db": "cidr.db", "env": ".env"}
     SQLITE_ROLES = frozenset({"db", "cidr_db"})
     RESTORE_FREE_SPACE_MARGIN = 64 * 1024 * 1024
+    PARTIAL_SUFFIX = ".partial"
+    STALE_PARTIAL_SECONDS = 24 * 3600
 
     def __init__(
         self,
@@ -149,7 +152,52 @@ class BackupManager:
         components: list[str] = []
         summary_parts: list[str] = []
 
-        _write_private_bytes(archive_path, b"")
+        partial_path = self.backup_root / f".{archive_name}{self.PARTIAL_SUFFIX}"
+        try:
+            _write_private_bytes(partial_path, b"")
+            self._write_archive(
+                partial_path,
+                components=components,
+                summary_parts=summary_parts,
+                include_configs=include_configs,
+                config_contents=config_contents,
+                awg2_archive=awg2_archive,
+            )
+            os.replace(partial_path, archive_path)
+        except BaseException:
+            partial_path.unlink(missing_ok=True)
+            raise
+
+        metadata = {
+            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "components": components,
+            "summary": ",".join(summary_parts),
+        }
+        meta_path = backup_meta_path(archive_path)
+        try:
+            atomic_write_bytes(meta_path, json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8"))
+        except BaseException:
+            archive_path.unlink(missing_ok=True)
+            raise
+
+        self._enforce_retention(max(1, int(retention)))
+        return {
+            "file_name": archive_name,
+            "file_path": str(archive_path),
+            "size_bytes": archive_path.stat().st_size,
+            **metadata,
+        }
+
+    def _write_archive(
+        self,
+        archive_path: Path,
+        *,
+        components: list[str],
+        summary_parts: list[str],
+        include_configs: bool,
+        config_contents: dict[str, str] | None,
+        awg2_archive: bytes | None,
+    ) -> None:
         with tarfile.open(archive_path, "w:gz") as tar:
             if self.db_path.exists():
                 self._add_sqlite_snapshot(tar, self.db_path, "data/adminpanel.db")
@@ -190,22 +238,6 @@ class BackupManager:
                     tmp.unlink(missing_ok=True)
                 components.append("awg2")
                 summary_parts.append("AWG2:1")
-
-        metadata = {
-            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "components": components,
-            "summary": ",".join(summary_parts),
-        }
-        meta_path = backup_meta_path(archive_path)
-        atomic_write_bytes(meta_path, json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8"))
-
-        self._enforce_retention(max(1, int(retention)))
-        return {
-            "file_name": archive_name,
-            "file_path": str(archive_path),
-            "size_bytes": archive_path.stat().st_size,
-            **metadata,
-        }
 
     def inspect_backup_archive(self, archive_path: Path) -> dict:
         path = archive_path.resolve()
@@ -609,13 +641,39 @@ class BackupManager:
                     continue
         return {}
 
+    def _has_metadata(self, archive_path: Path) -> bool:
+        return backup_meta_path(archive_path).exists() or archive_path.with_suffix(".json").exists()
+
     def _enforce_retention(self, count: int) -> None:
-        archives = sorted(
-            glob.glob(str(self.backup_root / "*.tar.gz")),
-            key=os.path.getmtime,
-            reverse=True,
-        )
-        for old in archives[count:]:
+        """Keep the ``count`` newest archives that have metadata.
+
+        Archives without metadata (interrupted writes of older versions) never push complete
+        ones out; they go only when older than the oldest kept complete archive.
+        """
+        stale_before = time.time() - self.STALE_PARTIAL_SECONDS
+        for partial in self.backup_root.glob(f".adminpanelaz_*.tar.gz{self.PARTIAL_SUFFIX}"):
+            try:
+                if partial.stat().st_mtime < stale_before:
+                    partial.unlink()
+            except OSError:
+                pass
+
+        dated: list[tuple[float, str]] = []
+        for name in glob.glob(str(self.backup_root / "*.tar.gz")):
+            try:
+                dated.append((os.path.getmtime(name), name))
+            except OSError:
+                continue
+        dated.sort(reverse=True)
+        complete = [(mtime, name) for mtime, name in dated if self._has_metadata(Path(name))]
+        if len(complete) <= count:
+            return
+        oldest_kept = complete[count - 1][0]
+        doomed = [name for _, name in complete[count:]]
+        doomed += [
+            name for mtime, name in dated if mtime < oldest_kept and not self._has_metadata(Path(name))
+        ]
+        for old in doomed:
             try:
                 os.remove(old)
                 old_path = Path(old)

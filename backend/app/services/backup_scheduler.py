@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.database import SessionLocal
 from app.models import AppSetting
+from app.services.admin_notify import admin_notify_service
 from app.services.backup_manager import BackupManager
 from app.services.cidr.pipeline.file_pipeline import _prune_runtime_backups
 from app.services.feature_guards import get_feature_service
@@ -29,6 +30,37 @@ def _is_backups_enabled() -> bool:
 def _get_setting(db, key: str, default: str = "") -> str:
     row = db.query(AppSetting).filter(AppSetting.key == key).first()
     return row.value if row else default
+
+
+def _set_setting(db, key: str, value: str) -> None:
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    if row:
+        row.value = value
+    else:
+        db.add(AppSetting(key=key, value=value))
+
+
+_LAST_ERROR_KEY = "backup_auto_last_error"
+
+
+def _record_auto_backup_failure(db, exc: Exception) -> None:
+    """Keep the schedule due (retry next tick) and tell the admin once per failure streak."""
+    logger.warning("Auto-backup failed: %s", exc, exc_info=True)
+    error = f"{type(exc).__name__}: {exc}"[:300]
+    first_failure = not _get_setting(db, _LAST_ERROR_KEY, "")
+    _set_setting(db, _LAST_ERROR_KEY, error)
+    db.commit()
+    if not first_failure:
+        return
+    try:
+        admin_notify_service.send_settings_change(
+            db,
+            actor_username="system",
+            settings_key="settings_backup_auto_failed",
+            details=error,
+        )
+    except Exception as notify_exc:
+        logger.warning("Auto-backup failure notify failed: %s", notify_exc)
 
 
 def _should_run(last_run_key: str, interval_days: int, db) -> bool:
@@ -99,18 +131,19 @@ def _run_auto_backup_once(
         awg2_archive = None
         if _get_setting(db, "backup_awg2_enabled", "true") == "true":
             awg2_archive = collect_awg2_backup_archive(db)
-        result = manager.create_backup(
-            include_configs=bool(config_contents),
-            config_contents=config_contents,
-            retention=retention,
-            awg2_archive=awg2_archive,
-        )
-        row = db.query(AppSetting).filter(AppSetting.key == "backup_auto_last_run").first()
+        try:
+            result = manager.create_backup(
+                include_configs=bool(config_contents),
+                config_contents=config_contents,
+                retention=retention,
+                awg2_archive=awg2_archive,
+            )
+        except Exception as exc:
+            _record_auto_backup_failure(db, exc)
+            return
         now_str = datetime.now(timezone.utc).isoformat()
-        if row:
-            row.value = now_str
-        else:
-            db.add(AppSetting(key="backup_auto_last_run", value=now_str))
+        _set_setting(db, "backup_auto_last_run", now_str)
+        _set_setting(db, _LAST_ERROR_KEY, "")
         if _get_setting(db, "backup_telegram_enabled", "false") == "true":
             from app.services.feature_guards import get_feature_service
 
