@@ -62,3 +62,31 @@ def test_migrate_factory_500_by_mode():
     finally:
         db.close()
         engine.dispose()
+
+
+def test_factory_threshold_migration_runs_once(monkeypatch):
+    from app import database
+
+    engine, db = _session()
+    monkeypatch.setattr(database, "engine", engine)
+    try:
+        node = Node(name="a", host="127.0.0.1", is_local=True)
+        db.add(node)
+        db.commit()
+        row = OpenVpnBufferGuardSettings(node_id=node.id, mode="notify", threshold_count=500, window_seconds=60)
+        db.add(row)
+        db.commit()
+
+        database._migrate_openvpn_buffer_guard_factory_thresholds()
+        db.refresh(row)
+        assert row.threshold_count == 40
+
+        # Администратор сам выставил 500/60 — следующий запуск панели их не трогает.
+        row.threshold_count = 500
+        db.commit()
+        database._migrate_openvpn_buffer_guard_factory_thresholds()
+        db.refresh(row)
+        assert row.threshold_count == 500
+    finally:
+        db.close()
+        engine.dispose()

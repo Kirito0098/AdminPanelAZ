@@ -1327,12 +1327,26 @@ def migrate_factory_buffer_guard_thresholds(conn) -> int:
     return updated
 
 
+_BUFFER_GUARD_THRESHOLDS_MARKER = "migration_openvpn_buffer_guard_factory_thresholds_done"
+
+
 def _migrate_openvpn_buffer_guard_factory_thresholds() -> None:
+    """One-shot: 500/60 was the old factory default; later the admin may pick it on purpose."""
     inspector = inspect(engine)
-    if "openvpn_buffer_guard_settings" not in set(inspector.get_table_names()):
+    tables = set(inspector.get_table_names())
+    if "openvpn_buffer_guard_settings" not in tables or "app_settings" not in tables:
         return
     with _migration_transaction() as conn:
+        if conn.execute(
+            text("SELECT value FROM app_settings WHERE key = :key"),
+            {"key": _BUFFER_GUARD_THRESHOLDS_MARKER},
+        ).scalar():
+            return
         updated = migrate_factory_buffer_guard_thresholds(conn)
+        conn.execute(
+            text("INSERT INTO app_settings (key, value) VALUES (:key, '1')"),
+            {"key": _BUFFER_GUARD_THRESHOLDS_MARKER},
+        )
     if updated:
         logger.info(
             "DB migration: openvpn_buffer_guard factory thresholds updated rows=%s",
