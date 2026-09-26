@@ -388,6 +388,8 @@ class BackupManager:
         except BaseException:
             self._rollback_from_snapshot(replaced, snapshot)
             raise
+        if snapshot is not None:
+            self._carry_over_telegram_updates(snapshot / self.PRE_RESTORE_NAMES["db"])
 
         result = {
             "restored": list(payload.get("restored") or []),
@@ -397,6 +399,19 @@ class BackupManager:
         if snapshot is not None:
             result["pre_restore_snapshot"] = str(snapshot)
         return result
+
+    def _carry_over_telegram_updates(self, live_copy: Path) -> None:
+        if not live_copy.is_file():
+            return
+        from app.services import telegram_update_dedup
+
+        try:
+            telegram_update_dedup.carry_over_processed_updates(live_copy, self.db_path)
+        except Exception:
+            logger.exception(
+                "Restore: Telegram update ids were not carried over to the restored DB; "
+                "a redelivered bot command may run again"
+            )
 
     def _snapshot_live_files(self, targets: list[tuple[str, Path]]) -> Path:
         """Copy the files a restore is about to replace, so a bad restore can be undone by hand."""
