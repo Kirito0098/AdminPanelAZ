@@ -133,6 +133,71 @@ def test_process_user_reminders_sends_access_expiry_once_per_deadline(db, monkey
     assert len(admin_calls) == 1
 
 
+def test_process_user_reminders_skips_already_expired_access(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    admin = _make_user(db, username="admin-expired", access_until=now - timedelta(days=2), role=UserRole.admin)
+    user = _make_user(db, username="user-expired", access_until=now - timedelta(minutes=1), telegram_id="101")
+    owner_messages, admin_calls = _patch_reminder_runtime(monkeypatch)
+
+    assert reminders.process_user_reminders(db) == 0
+    assert owner_messages == []
+    assert admin_calls == []
+    assert db.query(UserReminderLog).filter(UserReminderLog.user_id.in_([admin.id, user.id])).count() == 0
+
+
+def test_process_user_reminders_sends_access_expiring_within_last_day(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    owner = _make_user(db, username="owner-hours", access_until=now + timedelta(hours=3))
+    owner_messages, admin_calls = _patch_reminder_runtime(monkeypatch)
+
+    assert reminders.process_user_reminders(db) == 1
+    assert len(owner_messages) == 1
+    assert "осталось <b>0</b> дн." in admin_calls[0]["details"]
+
+
+def test_process_user_reminders_skips_already_expired_cert(db, monkeypatch):
+    now = datetime.now(timezone.utc)
+    owner = _make_user(db, username="owner-cert-expired")
+    node = _make_node(db)
+    db.add_all(
+        [
+            VpnConfig(
+                node_id=node.id,
+                client_name="expired-ovpn",
+                vpn_type=VpnType.openvpn,
+                owner_id=owner.id,
+                cert_expires_at=(now - timedelta(days=3)).replace(tzinfo=None),
+            ),
+            VpnConfig(
+                node_id=node.id,
+                client_name="expiring-ovpn",
+                vpn_type=VpnType.openvpn,
+                owner_id=owner.id,
+                cert_expires_at=(now + timedelta(hours=5)).replace(tzinfo=None),
+            ),
+        ]
+    )
+    db.commit()
+    owner_messages, admin_calls = _patch_reminder_runtime(monkeypatch)
+    monkeypatch.setattr(reminders, "get_adapter_for_node", lambda _node: MagicMock())
+
+    class DummyPolicyService:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def get_openvpn_policy(self, _client_name: str) -> dict:
+            return {}
+
+        def get_wg_policy(self, _client_name: str) -> dict:
+            return {}
+
+    monkeypatch.setattr(reminders, "AccessPolicyService", DummyPolicyService)
+
+    assert reminders.process_user_reminders(db) == 1
+    assert [call["target_name"] for call in admin_calls] == ["expiring-ovpn"]
+    assert len(owner_messages) == 1
+
+
 def test_process_user_reminders_keeps_access_and_cert_paths_independent(db, monkeypatch):
     now = datetime.now(timezone.utc)
     owner = _make_user(db, username="owner-both", access_until=now + timedelta(days=3))

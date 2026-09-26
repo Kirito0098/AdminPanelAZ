@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from datetime import datetime, timezone
 from pathlib import Path
 from sqlalchemy.orm import Session
 
@@ -46,6 +47,12 @@ def _cert_threshold() -> int:
 
 def _access_threshold() -> int:
     return max(1, int(get_settings().self_service_reminder_access_days_threshold))
+
+
+def _already_expired(value: datetime) -> bool:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value <= datetime.now(timezone.utc)
 
 
 def _traffic_warning_percent() -> int:
@@ -155,7 +162,7 @@ def process_user_reminders(db: Session) -> int:
         if days_left is None or days_left > access_threshold:
             continue
         access_until = user.access_until
-        if access_until is None:
+        if access_until is None or _already_expired(access_until):
             continue
         dedup_key = f"user:{user.id}:access:{access_until.date().isoformat()}"
         details = f"Доступ до <code>{access_until.date().isoformat()}</code>, осталось <b>{days_left}</b> дн."
@@ -199,7 +206,11 @@ def process_user_reminders(db: Session) -> int:
 
             if config.vpn_type == VpnType.openvpn:
                 days_left = days_remaining_until(config.cert_expires_at)
-                if days_left is not None and days_left <= threshold:
+                if (
+                    days_left is not None
+                    and days_left <= threshold
+                    and not _already_expired(config.cert_expires_at)
+                ):
                     dedup_key = f"config:{config.id}"
                     details = f"Осталось <b>{days_left}</b> дн."
                     if _send_owner_reminder(db, owner, REMINDER_CERT, details, dedup_key, config=config):
