@@ -1100,6 +1100,39 @@ generate_admin_password() {
   printf '%s\n' "$pw"
 }
 
+# Файл SQLite панели из DATABASE_URL; для другой СУБД — код 1.
+panel_db_file() {
+  local url path
+  url="$(env_get DATABASE_URL)"
+  url="${url:-sqlite:///./data/adminpanel.db}"
+  [[ "$url" == sqlite:///* ]] || return 1
+  path="${url#sqlite:///}"
+  [[ "$path" == /* ]] || path="${BACKEND_DIR}/${path#./}"
+  printf '%s\n' "$path"
+}
+
+# Пароль администратора, когда WIZ_* пришли из окружения без мастера. Слабый пароль
+# (из WIZ_ADMIN_PASSWORD или .env) заменяется: с ним панель в production не стартует.
+# Пустой генерируется только для новой БД: seed-admin-user.py --bootstrap при пустом
+# пароле оставляет прежний пароль существующего администратора, а нового создать не может.
+resolve_wiz_admin_password() {
+  local pw="${WIZ_ADMIN_PASSWORD:-}" origin=WIZ_ADMIN_PASSWORD db
+  if [[ -z "$pw" ]]; then
+    pw="$(env_get DEFAULT_ADMIN_PASSWORD)"
+    origin=DEFAULT_ADMIN_PASSWORD
+  fi
+  if [[ -n "$pw" ]]; then
+    if admin_password_is_weak "$pw" "${WIZ_ADMIN_USERNAME:-}"; then
+      warn "${origin} не проходит политику паролей — сгенерирован случайный пароль администратора"
+      pw="$(generate_admin_password)"
+    fi
+  elif db="$(panel_db_file)" && [[ ! -f "$db" ]]; then
+    pw="$(generate_admin_password)"
+    log "Сгенерирован пароль администратора"
+  fi
+  WIZ_ADMIN_PASSWORD="$pw"
+}
+
 install_controller_selected() {
   if [[ "$NODE_ONLY" == true || "$PROXY_ONLY" == true ]] \
     || [[ "${WIZ_INSTALL_TYPE:-controller}" == "node" || "${WIZ_INSTALL_TYPE:-}" == "proxy" ]]; then
@@ -1182,6 +1215,7 @@ apply_wiz_env_settings() {
   fi
   if _wiz_should_apply WIZ_ADMIN_USERNAME; then
     env_set DEFAULT_ADMIN_USERNAME "$WIZ_ADMIN_USERNAME"
+    resolve_wiz_admin_password
     if [[ -n "$WIZ_ADMIN_PASSWORD" ]]; then
       env_set DEFAULT_ADMIN_PASSWORD "$WIZ_ADMIN_PASSWORD"
     fi

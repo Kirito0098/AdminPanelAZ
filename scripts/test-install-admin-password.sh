@@ -125,6 +125,64 @@ grep -q "^SET DEFAULT_ADMIN_USERNAME=admin$" <<<"$out" || fail "логин не 
 ! grep -q "^SET DEFAULT_ADMIN_PASSWORD=" <<<"$out" || fail "пустой пароль записан в .env"
 echo "  OK"
 
+# run_env_apply <DEFAULT_ADMIN_PASSWORD в .env> <есть БД: true|false>; WIZ_* из окружения, без мастера.
+# Печатает записи в .env и итоговый WIZ_ADMIN_PASSWORD; set -u как в install.sh.
+ENV_APPLY_FNS="$(extract "$ROOT_DIR/install.sh" is_placeholder_secret admin_password_is_weak \
+  generate_admin_password panel_db_file resolve_wiz_admin_password _wiz_should_apply apply_wiz_env_settings)"
+run_env_apply() {
+  local env_pw="$1" has_db="$2" backend="$TMP_DIR/backend"
+  rm -rf "$backend"
+  mkdir -p "$backend/data"
+  [[ "$has_db" == true ]] && : >"$backend/data/adminpanel.db"
+  ENV_PW="$env_pw" BACKEND_DIR="$backend" bash -c '
+    set -euo pipefail
+    command_not_found_handle() { return 0; }
+    env_set() { echo "SET $1=$2"; }
+    env_get() { [[ "$1" == DEFAULT_ADMIN_PASSWORD ]] && printf "%s" "$ENV_PW"; return 0; }
+    log() { :; }
+    warn() { echo "WARN $*" >&2; }
+    random_hex() { od -An -N16 -tx1 /dev/urandom | tr -d " \n"; echo; }
+    WIZARD_RAN=false
+    WIZ_ADMIN_USERNAME=admin
+    WIZ_ADMIN_MUST_CHANGE_PASSWORD=true
+    eval "$1"
+    apply_wiz_env_settings
+    echo "WIZ=${WIZ_ADMIN_PASSWORD:-}"
+  ' bash "$ENV_APPLY_FNS" 2>"$TMP_DIR/stderr"
+}
+env_pw_of() { sed -n 's/^SET DEFAULT_ADMIN_PASSWORD=//p' <<<"$1"; }
+
+echo "[test] WIZ_* из окружения без пароля, новая установка: пароль генерируется"
+out="$(unset WIZ_ADMIN_PASSWORD; run_env_apply "" false)" || fail "apply_wiz_env_settings упал: $(cat "$TMP_DIR/stderr")"
+pw="$(env_pw_of "$out")"
+strong "$pw" || fail "пароль не сгенерирован: [$pw]"
+grep -qx "WIZ=$pw" <<<"$out" || fail "сгенерированный пароль не попадёт в итог установки"
+echo "  OK"
+
+echo "[test] WIZ_* из окружения без пароля, БД уже есть: пароль администратора не меняется"
+out="$(unset WIZ_ADMIN_PASSWORD; run_env_apply "" true)" || fail "apply_wiz_env_settings упал: $(cat "$TMP_DIR/stderr")"
+! grep -q "^SET DEFAULT_ADMIN_PASSWORD=" <<<"$out" || fail "пароль записан при существующей БД"
+grep -qx "WIZ=" <<<"$out" || fail "итог покажет пароль, которого нет"
+echo "  OK"
+
+echo "[test] слабый пароль из WIZ_ADMIN_PASSWORD или .env заменяется с предупреждением"
+out="$(WIZ_ADMIN_PASSWORD="admin" run_env_apply "" true)"
+pw="$(env_pw_of "$out")"
+strong "$pw" || fail "слабый WIZ_ADMIN_PASSWORD не заменён: [$pw]"
+grep -q WARN "$TMP_DIR/stderr" || fail "нет предупреждения"
+out="$(unset WIZ_ADMIN_PASSWORD; run_env_apply admin true)"
+pw="$(env_pw_of "$out")"
+strong "$pw" || fail "слабый DEFAULT_ADMIN_PASSWORD из .env не заменён: [$pw]"
+echo "  OK"
+
+echo "[test] надёжный пароль из окружения или .env сохраняется"
+out="$(WIZ_ADMIN_PASSWORD=Strong-pass-42 run_env_apply "" false)"
+[[ "$(env_pw_of "$out")" == Strong-pass-42 ]] || fail "WIZ_ADMIN_PASSWORD заменён"
+out="$(unset WIZ_ADMIN_PASSWORD; run_env_apply Env-pass-777 false)"
+[[ "$(env_pw_of "$out")" == Env-pass-777 ]] || fail "пароль из .env заменён"
+grep -qx "WIZ=Env-pass-777" <<<"$out" || fail "пароль из .env не попадёт в итог"
+echo "  OK"
+
 echo "[test] итог установки не показывает admin, если пароль не менялся"
 out="$(bash -c '
   set -o pipefail
