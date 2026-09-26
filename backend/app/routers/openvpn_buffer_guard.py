@@ -17,6 +17,7 @@ from app.schemas import (
 )
 from app.services.node_manager import get_adapter_for_node
 from app.services.openvpn_buffer_guard import (
+    BufferGuardAgentOutdated,
     _parse_watch_units,
     get_settings as get_guard_settings,
     list_events as list_guard_events,
@@ -146,7 +147,10 @@ def scan_openvpn_buffer_guard(
 ):
     node = _get_node_or_404(db, payload.node_id)
     adapter = get_adapter_for_node(node)
-    results = run_guard_pass(db, adapter, node.id, manual=True)
+    try:
+        results = run_guard_pass(db, adapter, node.id, manual=True)
+    except BufferGuardAgentOutdated as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return results
 
 

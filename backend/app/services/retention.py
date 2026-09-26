@@ -1,4 +1,4 @@
-"""Batch retention purge for traffic samples, session history, action logs, tokens, reboots, Telegram update ids, and resource metrics."""
+"""Batch retention purge for traffic samples, session history, action logs, tokens, reboots, Buffer Guard events, Telegram update ids, and resource metrics."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.models import (
     ConnectionCountSample,
     NodeResourceSample,
+    OpenVpnBufferGuardEvent,
     PanelResourceSample,
     RefreshToken,
     ServerRebootRecord,
@@ -25,6 +26,7 @@ from app.services.telegram_update_dedup import PROCESSED_UPDATE_RETENTION
 # An expired refresh token is rejected on its own; the grace only keeps it around for audit.
 REFRESH_TOKEN_EXPIRED_GRACE_DAYS = 7
 REBOOT_REQUEST_RETENTION_DAYS = 30
+BUFFER_GUARD_EVENT_RETENTION_DAYS = 30
 
 
 def _utcnow() -> datetime:
@@ -96,6 +98,15 @@ def run_retention_purge(db: Session) -> dict[str, int]:
         ServerRebootRecord,
         ServerRebootRecord.status.not_in(REBOOT_ACTIVE_STATUSES),
         ServerRebootRecord.created_at < now - timedelta(days=REBOOT_REQUEST_RETENTION_DAYS),
+        batch_size=batch_size,
+    )
+
+    # A set ban_expires_at means the temporary ban has not been lifted yet.
+    counts["openvpn_buffer_guard_events"] = _purge_where(
+        db,
+        OpenVpnBufferGuardEvent,
+        OpenVpnBufferGuardEvent.ban_expires_at.is_(None),
+        OpenVpnBufferGuardEvent.created_at < now - timedelta(days=BUFFER_GUARD_EVENT_RETENTION_DAYS),
         batch_size=batch_size,
     )
 

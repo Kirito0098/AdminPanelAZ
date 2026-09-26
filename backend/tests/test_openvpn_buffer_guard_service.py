@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.models import Node, OpenVpnBufferGuardEvent, OpenVpnBufferGuardMode
+from app.services import background_gate
 from app.services import openvpn_buffer_guard as guard
 
 
@@ -150,7 +151,7 @@ def test_kill_restart_escalates(db_session, monkeypatch):
     def fake_sleep(seconds: float) -> None:
         slept.append(seconds)
 
-    monkeypatch.setattr(guard.time, "sleep", fake_sleep)
+    monkeypatch.setattr(background_gate.time, "sleep", fake_sleep)
 
     results = guard.run_guard_pass(db_session, adapter, node.id, manual=False)
 
@@ -200,7 +201,7 @@ def test_manual_scan_with_disabled_settings_runs_findings_only(db_session, monke
     def fake_sleep(seconds: float) -> None:
         slept.append(seconds)
 
-    monkeypatch.setattr(guard.time, "sleep", fake_sleep)
+    monkeypatch.setattr(background_gate.time, "sleep", fake_sleep)
 
     results = guard.run_guard_pass(db_session, adapter, node.id, manual=True)
 
@@ -318,7 +319,7 @@ def test_escalation_uses_short_second_window(db_session, monkeypatch):
         lambda profile_key, client_name: {"success": True, "profile": profile_key, "client_name": client_name},
     )
 
-    monkeypatch.setattr(guard.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(background_gate.time, "sleep", lambda seconds: None)
 
     results = guard.run_guard_pass(db_session, adapter, node.id, manual=False)
 

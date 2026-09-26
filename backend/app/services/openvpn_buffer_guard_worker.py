@@ -18,14 +18,18 @@ from app.database import SessionLocal
 from app.models import Node, NodeStatus, OpenVpnBufferGuardSettings
 from app.services.node_manager import get_adapter_for_node
 from app.services.openvpn_buffer_guard import (
+    BufferGuardAgentOutdated,
     process_temp_ban_expiries,
     run_guard_pass,
 )
-from app.services.background_gate import run_background_step
+from app.services.background_gate import background_pause_requested, run_background_step
 
 logger = logging.getLogger(__name__)
 
 WORKER_INTERVAL_SECONDS = 20
+
+# Nodes already reported as running an agent without Buffer Guard (warn once per process).
+_outdated_agent_nodes: set[int] = set()
 
 
 def _online_nodes_with_enabled_settings(db: Session) -> list[Node]:
@@ -52,6 +56,8 @@ def _run_once() -> None:
             return
 
         for node in nodes:
+            if background_pause_requested():
+                break
             try:
                 adapter = get_adapter_for_node(node)
             except Exception as exc:  # pragma: no cover - defensive
@@ -60,6 +66,7 @@ def _run_once() -> None:
 
             try:
                 results = run_guard_pass(db, adapter, node.id, manual=False)
+                _outdated_agent_nodes.discard(node.id)
                 if results:
                     triggered = sum(1 for item in results if item.get("threshold_exceeded"))
                     if triggered:
@@ -69,6 +76,10 @@ def _run_once() -> None:
                             len(results),
                             triggered,
                         )
+            except BufferGuardAgentOutdated as exc:
+                if node.id not in _outdated_agent_nodes:
+                    _outdated_agent_nodes.add(node.id)
+                    logger.warning("openvpn_buffer_guard: node %s (%s): %s", node.id, node.name, exc)
             except Exception:  # pragma: no cover - defensive
                 logger.exception("openvpn_buffer_guard: guard pass failed for node %s", node.id)
 

@@ -10,6 +10,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.models import Node, OpenVpnBufferGuardMode
+from app.services import background_gate
 from app.services import openvpn_buffer_guard as guard
 
 
@@ -52,7 +53,7 @@ def db():
 @pytest.fixture()
 def calls(monkeypatch) -> list[str]:
     log: list[str] = []
-    monkeypatch.setattr(guard.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(background_gate.time, "sleep", lambda seconds: None)
     return log
 
 

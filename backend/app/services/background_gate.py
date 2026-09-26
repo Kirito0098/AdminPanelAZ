@@ -25,6 +25,7 @@ T = TypeVar("T")
 logger = logging.getLogger(__name__)
 
 POLL_SECONDS = 0.05
+PAUSE_CHECK_SECONDS = 0.5
 
 _gate_db_path: Path | None = None
 _pause_fds: list[int] = []
@@ -79,6 +80,33 @@ def _run_gated(fn: Callable[..., T], args: tuple, kwargs: dict) -> T | None:
         return fn(*args, **kwargs)
     finally:
         _unlock(gate_fd)
+
+
+def background_pause_requested() -> bool:
+    """True while a restore waits for running steps; a long step should stop early."""
+    db_path = _gate_db_path
+    if db_path is None:
+        return False
+    intent_fd = _try_flock(_lock_paths(db_path)[0], fcntl.LOCK_SH)
+    if intent_fd is None:
+        return True
+    _unlock(intent_fd)
+    return False
+
+
+def sleep_unless_paused(seconds: float) -> bool:
+    """Sleep inside a background step; ``False`` as soon as a restore waits for the step."""
+    if _gate_db_path is None:
+        time.sleep(seconds)
+        return True
+    remaining = float(seconds)
+    while remaining > 0:
+        if background_pause_requested():
+            return False
+        chunk = min(PAUSE_CHECK_SECONDS, remaining)
+        time.sleep(chunk)
+        remaining -= chunk
+    return True
 
 
 async def run_background_step(fn: Callable[..., T], /, *args, **kwargs) -> T | None:

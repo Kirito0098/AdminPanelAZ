@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import subprocess
-import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.config import get_settings as get_app_settings
@@ -16,10 +16,17 @@ from app.models import (
     OpenVpnBufferGuardSettings,
 )
 from app.services.admin_notify import admin_notify_service
+from app.services.background_gate import sleep_unless_paused
 from app.services.openvpn_buffer_guard_parse import summarize_enobufs
 from app.services.openvpn_management import openvpn_management_service
 
 ALLOWED_UNITS = frozenset({"antizapret-udp", "antizapret-tcp", "vpn-udp", "vpn-tcp"})
+
+AGENT_OUTDATED_MESSAGE = "Агент узла не поддерживает Buffer Guard: обновите агент узла"
+
+
+class BufferGuardAgentOutdated(RuntimeError):
+    """The node agent predates Buffer Guard: it has no journal sample route."""
 
 
 def normalize_watch_unit(unit: str) -> str | None:
@@ -246,7 +253,7 @@ def _action_outcome(action: dict) -> str:
     if kind == "kill":
         return "клиент отключён" if ok else f"отключить клиента не удалось: {message}"
     if kind == "escalation_check":
-        return f"журнал после отключения не прочитан, перезапуск не проверялся: {message}"
+        return f"перезапуск не проверялся: {message}"
     if kind == "restart":
         return "сервер перезапущен" if ok else f"перезапуск не удался: {message}"
     if kind == "temp_ban":
@@ -331,7 +338,7 @@ def run_guard_pass(
     try:
         mode_enum = OpenVpnBufferGuardMode(settings_row.mode)
     except ValueError:
-        mode_enum = OpenVpnBufferGuardMode.kill_restart
+        mode_enum = OpenVpnBufferGuardMode.notify
 
     watch_units = _parse_watch_units(settings_row.watch_units_json)
     apply_actions = bool(settings_row.enabled) and not manual
@@ -340,7 +347,12 @@ def run_guard_pass(
     results: list[dict] = []
 
     for unit in watch_units:
-        sample = adapter.sample_openvpn_journal(unit, int(settings_row.window_seconds))
+        try:
+            sample = adapter.sample_openvpn_journal(unit, int(settings_row.window_seconds))
+        except HTTPException as exc:
+            if exc.status_code in (404, 405):
+                raise BufferGuardAgentOutdated(AGENT_OUTDATED_MESSAGE) from exc
+            raise
 
         # Journal sample failure must not be treated as "0 ENOBUFS".
         # Record a failed event, notify, and skip kill/restart for this unit.
@@ -446,16 +458,17 @@ def run_guard_pass(
 
             if mode_enum in (OpenVpnBufferGuardMode.kill_restart, OpenVpnBufferGuardMode.kill_restart_temp_ban) and apply_actions:
                 delay = max(0, int(settings_row.escalate_after_seconds))
-                if delay:
-                    time.sleep(float(delay))
 
                 # Use a short post-kill window close to the escalation delay
                 # so that pre-kill ENOBUFS do not force a restart.
                 second_window = max(5, int(settings_row.escalate_after_seconds or settings_row.window_seconds))
-                try:
-                    second = adapter.sample_openvpn_journal(unit, int(second_window))
-                except Exception as exc:
-                    second = {"ok": False, "error": _error_text(exc)}
+                if delay and not sleep_unless_paused(float(delay)):
+                    second = {"ok": False, "error": "идёт восстановление бэкапа, эскалация отменена"}
+                else:
+                    try:
+                        second = adapter.sample_openvpn_journal(unit, int(second_window))
+                    except Exception as exc:
+                        second = {"ok": False, "error": _error_text(exc)}
                 if not bool(second.get("ok", True)):
                     actions.append(
                         {
