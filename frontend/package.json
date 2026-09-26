@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "vite",
     "dev:tg-mini": "vite --mode tg-mini --open /tg-mini.html",
-    "build": "vite build",
-    "build:tg-mini": "vite build --mode tg-mini && mv ../backend/app/static/tg_mini/tg-mini.html ../backend/app/static/tg_mini/index.html && sed -i 's/ crossorigin//g' ../backend/app/static/tg_mini/index.html && sed -i 's/type=\"module\" //g' ../backend/app/static/tg_mini/index.html",
+    "build": "vite build --outDir dist.next --emptyOutDir && node scripts/swap-build.mjs dist.next dist",
+    "build:tg-mini": "vite build --mode tg-mini --outDir ../backend/app/static/tg_mini.next --emptyOutDir && mv ../backend/app/static/tg_mini.next/tg-mini.html ../backend/app/static/tg_mini.next/index.html && sed -i 's/ crossorigin//g' ../backend/app/static/tg_mini.next/index.html && sed -i 's/type=\"module\" //g' ../backend/app/static/tg_mini.next/index.html && node scripts/swap-build.mjs ../backend/app/static/tg_mini.next ../backend/app/static/tg_mini",
     "build:all": "npm run build && npm run build:tg-mini",
     "check:bundle": "node scripts/check-entry-chunks.mjs dist",
     "preview": "vite preview",

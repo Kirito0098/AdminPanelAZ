@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.responses import HTMLResponse
 
 from app.config import get_settings
@@ -78,7 +78,14 @@ def serve_html_with_nonce(
 
         nonce = generate_csp_nonce()
     settings = get_settings()
-    html = index_file.read_text(encoding="utf-8")
+    try:
+        html = index_file.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=503,
+            detail="Интерфейс пересобирается, повторите через несколько секунд",
+            headers={"Retry-After": "5"},
+        ) from None
     html = rewrite_relative_asset_urls(html, settings, force_root=portal_root)
     # Portal pages on a dedicated host must call /api and /assets at root, even
     # when the admin panel is published under ACCESS_PATH (e.g. /panel).
