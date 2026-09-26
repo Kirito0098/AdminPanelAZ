@@ -8,7 +8,26 @@ function read(hash: string, query: string) {
 
 describe('readLoginRedirectParams', () => {
   it('reads nothing from a plain login page', () => {
-    expect(read('', '')).toEqual({ token: null, tgError: null })
+    expect(read('', '')).toEqual({ token: null, webSessionId: null, tgError: null })
+  })
+
+  it('reads the web session id the Telegram login passes next to the token', () => {
+    expect(read('#token=a.b.c&session=0123abcdef', '')).toEqual({
+      token: 'a.b.c',
+      webSessionId: '0123abcdef',
+      tgError: null,
+    })
+    expect(read('#token=a.b.c', '').webSessionId).toBeNull()
+    expect(read('#token=a.b.c&session=', '').webSessionId).toBeNull()
+  })
+
+  it('accepts a session id only as a header-safe value next to a hash token', () => {
+    expect(read('#token=t&session=a%0Ab', '').webSessionId).toBeNull()
+    expect(read('#token=t&session=a%20b', '').webSessionId).toBeNull()
+    expect(read(`#token=t&session=${'a'.repeat(65)}`, '').webSessionId).toBeNull()
+    expect(read(`#token=t&session=${'a'.repeat(64)}`, '').webSessionId).toBe('a'.repeat(64))
+    expect(read('#session=abc', '').webSessionId).toBeNull()
+    expect(read('', 'token=t&session=abc').webSessionId).toBeNull()
   })
 
   it('does not decode the Telegram error twice', () => {
@@ -30,6 +49,7 @@ describe('readLoginRedirectParams', () => {
     expect(read('', 'token=a.b.c').token).toBe('a.b.c')
     expect(read('', 'token=a%252Eb').token).toBe('a%2Eb')
     expect(read('#token=h', 'token=q').token).toBe('h')
+    expect(read('#token=&session=abc', 'token=q')).toEqual({ token: 'q', webSessionId: null, tgError: null })
   })
 
   it('ignores an empty error and caps a long one', () => {

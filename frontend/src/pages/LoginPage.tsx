@@ -20,6 +20,7 @@ import Spinner from '@/components/ui/Spinner'
 import ServerUnavailableScreen from '@/components/ServerUnavailableScreen'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { readLoginRedirectParams } from '@/lib/loginRedirectParams'
+import { clearWebSessionId, storeWebSessionId } from '@/lib/webSession'
 import { useAuth } from '@/context/AuthContext'
 import { useNotifications } from '@/context/NotificationContext'
 
@@ -61,8 +62,10 @@ export default function LoginPage() {
   )
 
   useEffect(() => {
-    const { token, tgError } = readLoginRedirectParams(window.location.hash, searchParams)
+    const { token, webSessionId, tgError } = readLoginRedirectParams(window.location.hash, searchParams)
     if (token && setToken) {
+      if (webSessionId) storeWebSessionId(webSessionId)
+      else clearWebSessionId()
       setToken(token)
       if (window.location.hash.startsWith('#token=')) {
         window.history.replaceState(null, '', window.location.pathname + window.location.search)

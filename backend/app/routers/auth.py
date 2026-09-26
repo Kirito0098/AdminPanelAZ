@@ -5,7 +5,7 @@ import os
 import secrets
 import time
 from datetime import timedelta
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -142,9 +142,12 @@ def _resolve_user_by_telegram_id(db: Session, tg_id: str) -> User | None:
     return user
 
 
-def _telegram_login_redirect(user: User) -> RedirectResponse:
-    access_token = create_user_access_token(user)
-    return RedirectResponse(url=f"{with_access_path(settings, '/login')}#token={access_token}", status_code=302)
+def _telegram_login_redirect(user: User, db: Session, request: Request) -> RedirectResponse:
+    response = RedirectResponse(url=with_access_path(settings, "/login"), status_code=302)
+    token = _issue_token_pair(user, db, response, request)
+    fragment = urlencode({"token": token.access_token, "session": token.web_session_id})
+    response.headers["location"] = f"{with_access_path(settings, '/login')}#{fragment}"
+    return response
 
 
 def _complete_telegram_login(
@@ -480,14 +483,19 @@ def telegram_oidc_callback(request: Request, db: Session = Depends(get_db)):
 
     try:
         user = _complete_telegram_login(db, request, tg_id, mini=False)
-        return _telegram_login_redirect(user)
+        return _telegram_login_redirect(user, db, request)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else "Ошибка входа через Telegram"
         return _oidc_login_error_redirect(detail)
 
 
-@router.post("/telegram/oidc/token")
-def telegram_oidc_token(payload: TelegramOidcTokenRequest, request: Request, db: Session = Depends(get_db)):
+@router.post("/telegram/oidc/token", response_model=Token)
+def telegram_oidc_token(
+    payload: TelegramOidcTokenRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
     from app.services.feature_guards import get_feature_service
 
     if not get_feature_service().is_enabled("telegram"):
@@ -504,8 +512,7 @@ def telegram_oidc_token(payload: TelegramOidcTokenRequest, request: Request, db:
         user = _complete_telegram_login(db, request, tg_id, mini=False)
     except HTTPException:
         raise
-    access_token = create_user_access_token(user)
-    return {"access_token": access_token, "token_type": "bearer"}
+    return _issue_token_pair(user, db, response, request)
 
 
 @router.get("/telegram")
@@ -522,7 +529,7 @@ def telegram_login_callback(request: Request, db: Session = Depends(get_db)):
     tg_id = str(payload.get("id", ""))
     try:
         user = _complete_telegram_login(db, request, tg_id, mini=False)
-        return _telegram_login_redirect(user)
+        return _telegram_login_redirect(user, db, request)
     except HTTPException as exc:
         raise exc
 
