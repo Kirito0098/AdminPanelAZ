@@ -177,7 +177,7 @@ def run_leader_startup_actions() -> None:
         from app.services.node_update import resolve_repo_root
         from app.services.systemd_refresh import migrate_stale_systemd_units_on_startup
 
-        migrate_stale_systemd_units_on_startup(resolve_repo_root(), panel=True, node=True)
+        migrate_stale_systemd_units_on_startup(resolve_repo_root(), panel=True, node=True, proxy=True)
     except Exception:
         logger.debug("Systemd unit migration skipped", exc_info=True)
     try:

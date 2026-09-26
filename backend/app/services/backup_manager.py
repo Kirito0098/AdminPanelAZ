@@ -103,7 +103,11 @@ class BackupManager:
     def _ensure_backup_root(self) -> None:
         # Archives hold the panel DB and .env.
         self.backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(self.backup_root, 0o700)
+        try:
+            if self.backup_root.stat().st_mode & 0o077:
+                os.chmod(self.backup_root, 0o700)
+        except OSError as exc:
+            logger.warning("Could not restrict permissions on %s: %s", self.backup_root, exc)
 
     def list_backups(self) -> list[dict]:
         self._ensure_backup_root()
@@ -193,7 +197,7 @@ class BackupManager:
             "summary": ",".join(summary_parts),
         }
         meta_path = backup_meta_path(archive_path)
-        _write_private_bytes(meta_path, json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8"))
+        atomic_write_bytes(meta_path, json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8"))
 
         self._enforce_retention(max(1, int(retention)))
         return {
@@ -257,7 +261,7 @@ class BackupManager:
         shutil.move(str(source), str(target_path))
         os.chmod(target_path, 0o600)
         meta_path = backup_meta_path(target_path)
-        _write_private_bytes(
+        atomic_write_bytes(
             meta_path,
             json.dumps(
                 {

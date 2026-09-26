@@ -9,6 +9,7 @@ import ipaddress
 import os
 import secrets
 import subprocess
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -62,7 +63,19 @@ def _validate_api_key_or_exit() -> None:
 
 _validate_api_key_or_exit()
 
-app = FastAPI(title="AntiZapret Proxy Agent", version=PROXY_AGENT_VERSION)
+@asynccontextmanager
+async def _proxy_agent_lifespan(_: FastAPI):
+    try:
+        from app.services.node_update import resolve_repo_root
+        from app.services.systemd_refresh import migrate_stale_systemd_units_on_startup
+
+        migrate_stale_systemd_units_on_startup(resolve_repo_root(), panel=False, node=False, proxy=True)
+    except Exception:
+        pass
+    yield
+
+
+app = FastAPI(title="AntiZapret Proxy Agent", version=PROXY_AGENT_VERSION, lifespan=_proxy_agent_lifespan)
 
 
 class ProxyAgentIpAllowlistMiddleware(BaseHTTPMiddleware):

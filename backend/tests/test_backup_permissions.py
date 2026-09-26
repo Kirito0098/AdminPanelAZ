@@ -138,3 +138,30 @@ def test_lifespan_tightens_backup_dir(tmp_path: Path, monkeypatch):
     asyncio.run(scenario())
     assert _mode(root) == 0o700
     assert _mode(archive) == 0o600
+
+
+def test_backup_root_chmod_failure_is_not_fatal(tmp_path: Path, monkeypatch, caplog):
+    mgr = _manager(tmp_path)
+    (tmp_path / "backups").mkdir(mode=0o755)
+    (tmp_path / "backups").chmod(0o755)
+
+    def deny(path, mode, *args, **kwargs):
+        raise PermissionError("EPERM")
+
+    monkeypatch.setattr("app.services.backup_manager.os.chmod", deny)
+    assert mgr.list_backups() == []
+    assert "backups" in caplog.text
+
+
+def test_metadata_write_failure_leaves_no_partial_json(tmp_path: Path, monkeypatch):
+    mgr = _manager(tmp_path)
+
+    def boom(src, dst):
+        raise OSError("disk full")
+
+    monkeypatch.setattr("app.services.atomic_file.os.replace", boom)
+    with pytest.raises(OSError):
+        mgr.create_backup()
+    root = tmp_path / "backups"
+    assert not list(root.glob("*.json"))
+    assert not [p for p in root.iterdir() if p.name.startswith(".tmp_")]

@@ -1,6 +1,9 @@
 """Read/write .env values (ported from AdminAntizapret env_file.py)."""
 
+import fcntl
 import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from app.services.atomic_file import atomic_write_text
@@ -10,7 +13,23 @@ class EnvFileService:
     def __init__(self, env_file_path: Path | str):
         self.env_file_path = Path(env_file_path)
 
+    @contextmanager
+    def _exclusive(self) -> Iterator[None]:
+        """Serialize read-modify-write across workers so concurrent saves don't drop each other's keys."""
+        target = self.env_file_path.resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(target.with_name(f"{target.name}.lock"), os.O_RDWR | os.O_CREAT, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
+
     def set_env_value(self, key: str, value: str) -> None:
+        with self._exclusive():
+            self._set_env_value(key, value)
+
+    def _set_env_value(self, key: str, value: str) -> None:
         env_path = self.env_file_path
         lines: list[str] = []
         if env_path.exists():
@@ -32,6 +51,10 @@ class EnvFileService:
 
     def remove_env_key(self, key: str) -> None:
         """Drop ``KEY=…`` lines from ``.env`` (no-op if file/key missing)."""
+        with self._exclusive():
+            self._remove_env_key(key)
+
+    def _remove_env_key(self, key: str) -> None:
         env_path = self.env_file_path
         if not env_path.exists():
             return

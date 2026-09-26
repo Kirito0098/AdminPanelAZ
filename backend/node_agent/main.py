@@ -79,7 +79,7 @@ async def _node_agent_lifespan(_: FastAPI):
     try:
         from app.services.systemd_refresh import migrate_stale_systemd_units_on_startup
 
-        migrate_stale_systemd_units_on_startup(resolve_repo_root(), panel=False, node=True)
+        migrate_stale_systemd_units_on_startup(resolve_repo_root(), panel=False, node=True, proxy=True)
     except Exception:
         pass
     yield
@@ -199,11 +199,11 @@ class ProvisionMtlsRequest(BaseModel):
 def _persist_api_key(new_key: str) -> None:
     global NODE_AGENT_API_KEY
     NODE_AGENT_API_KEY = new_key
-    if not NODE_AGENT_ENV_FILE.is_file():
-        return
+    # The unit no longer carries the key: without the file a restart would lose the rotated key.
+    existing = NODE_AGENT_ENV_FILE.read_text(encoding="utf-8") if NODE_AGENT_ENV_FILE.is_file() else ""
     lines: list[str] = []
     replaced = False
-    for line in NODE_AGENT_ENV_FILE.read_text(encoding="utf-8").splitlines():
+    for line in existing.splitlines():
         if line.startswith("NODE_AGENT_API_KEY="):
             lines.append(f"NODE_AGENT_API_KEY={new_key}")
             replaced = True

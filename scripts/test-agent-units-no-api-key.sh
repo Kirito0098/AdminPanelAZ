@@ -25,6 +25,8 @@ cat >"$TMP_DIR/bin/id" <<'EOF'
 if [[ "$#" -eq 1 && "$1" == "-u" ]]; then echo 0; else exec /usr/bin/id "$@"; fi
 EOF
 printf '#!/usr/bin/env bash\nexit 0\n' >"$TMP_DIR/bin/systemctl"
+printf '#!/usr/bin/env bash\necho "$*" >>"%s/mktemp.log"\nexec /usr/bin/mktemp "$@"\n' "$TMP_DIR" >"$TMP_DIR/bin/mktemp"
+chmod +x "$TMP_DIR/bin/mktemp"
 chmod +x "$TMP_DIR/bin/id" "$TMP_DIR/bin/systemctl"
 
 run() {
@@ -72,6 +74,15 @@ grep -qxF 'NODE_AGENT_API_KEY=k3y|with&sed/chars-0123456789ab' "$NODE_ENV" || fa
 [[ "$(grep -c '^NODE_AGENT_API_KEY=' "$NODE_ENV")" == 1 ]] || fail "ключ продублирован"
 echo "  OK"
 
+echo "[test] временный файл с ключом назван так, что git его игнорирует"
+template="$(grep -F "$FAKE_ROOT/backend/" "$TMP_DIR/mktemp.log" | tail -1)"
+[[ -n "$template" ]] || fail "временный файл создаётся не в каталоге env-файла"
+if git -C "$ROOT_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  sample="${template#"$FAKE_ROOT"/}"
+  git -C "$ROOT_DIR" check-ignore -q --no-index "${sample//X/a}" || fail "git не игнорирует $sample"
+fi
+echo "  OK"
+
 echo "[test] установка unit'а proxy agent: ключ только в proxy_agent.env с правами 600"
 run env PROXY_AGENT_API_KEY=proxy-key-0123456789abcdef012 "$FAKE_ROOT/scripts/install-proxy-systemd.sh"
 grep -q 'PROXY_AGENT_API_KEY' "$PROXY_UNIT" && fail "в unit осталась переменная ключа"
@@ -90,6 +101,43 @@ grep -q 'AGENT_API_KEY' "$NODE_UNIT" "$PROXY_UNIT" && fail "ключ остал�
 grep -qx 'NODE_AGENT_API_KEY=legacy-node-key-0123456789abcd' "$NODE_ENV" || fail "ключ node не перенесён"
 grep -qx 'PROXY_AGENT_API_KEY=legacy-proxy-key-0123456789ab' "$PROXY_ENV" || fail "ключ proxy не перенесён"
 [[ "$(stat -c %a "$NODE_ENV")" == 600 && "$(stat -c %a "$PROXY_ENV")" == 600 ]] || fail "env-файлы должны быть 600"
+echo "  OK"
+
+echo "[test] обновление: ключ в env-файле (им пользуется агент) важнее ключа из старого unit'а"
+sed "s|/opt/AdminPanelAZ|$FAKE_ROOT|g" "$ROOT_DIR/systemd/adminpanelaz-node.service" >"$NODE_UNIT"
+printf 'Environment=NODE_AGENT_API_KEY=stale-unit-key-0123456789abcd\n' >>"$NODE_UNIT"
+printf 'NODE_AGENT_API_KEY=live-env-key-0123456789abcdef\n' >"$NODE_ENV"
+run env REFRESH_PANEL=0 REFRESH_PROXY=0 "$FAKE_ROOT/scripts/refresh-systemd-units.sh"
+grep -qx 'NODE_AGENT_API_KEY=live-env-key-0123456789abcdef' "$NODE_ENV" || fail "ключ из env-файла затёрт ключом из unit'а"
+grep -q 'AGENT_API_KEY' "$NODE_UNIT" && fail "ключ остался в unit после обновления"
+echo "  OK"
+
+echo "[test] symlink на env-файл сохраняется, плейсхолдер CHANGE-ME заменяется, временных файлов не остаётся"
+real_env="$TMP_DIR/real-node.env"
+printf 'NODE_AGENT_API_KEY=CHANGE-ME\nANTIZAPRET_PATH=/root/antizapret\n' >"$real_env"
+rm -f "$NODE_ENV"
+ln -s "$real_env" "$NODE_ENV"
+run env NODE_AGENT_API_KEY=node-key-0123456789abcdef0123 "$FAKE_ROOT/scripts/install-node-systemd.sh"
+[[ -L "$NODE_ENV" ]] || fail "symlink заменён обычным файлом"
+grep -qx 'NODE_AGENT_API_KEY=node-key-0123456789abcdef0123' "$real_env" || fail "плейсхолдер CHANGE-ME не заменён"
+grep -qx 'ANTIZAPRET_PATH=/root/antizapret' "$real_env" || fail "остальные значения потеряны"
+leftover="$(find "$FAKE_ROOT/backend" "$TMP_DIR" -maxdepth 1 -name '*.env.*' ! -name '*.example')"
+[[ -z "$leftover" ]] || fail "остались временные файлы: $leftover"
+echo "  OK"
+
+echo "[test] ошибка чтения env-файла не превращает его в одну строку с ключом"
+printf 'NODE_AGENT_API_KEY=change-me-node-agent-key\nANTIZAPRET_PATH=/root/antizapret\n' >"$real_env"
+cat >"$TMP_DIR/bin/grep" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "-v" ]]; then exit 2; fi
+exec /usr/bin/grep "$@"
+EOF
+chmod +x "$TMP_DIR/bin/grep"
+if run env NODE_AGENT_API_KEY=node-key-0123456789abcdef0123 "$FAKE_ROOT/scripts/install-node-systemd.sh" 2>/dev/null; then
+  fail "ошибка grep проигнорирована"
+fi
+rm -f "$TMP_DIR/bin/grep"
+grep -qx 'ANTIZAPRET_PATH=/root/antizapret' "$real_env" || fail "env-файл перезаписан после ошибки чтения"
 echo "  OK"
 
 echo "All agent unit key checks passed."
