@@ -12,7 +12,6 @@ import {
   verifyPasskeyLogin,
 } from '@/api/client'
 import { authenticatePasskey } from '@/lib/passkeys'
-import { storeWebSessionId } from '@/lib/webSession'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -186,7 +185,6 @@ export default function LoginPage() {
     try {
       if (needs2FA && tempToken) {
         const res = await login2FA(tempToken, totpCode)
-        if (res.web_session_id) storeWebSessionId(res.web_session_id)
         if (setToken) await setToken(res.access_token)
         return
       }
@@ -231,7 +229,6 @@ export default function LoginPage() {
       const { options } = await getPasskeyLoginOptions(tempToken)
       const { sessionKey, credential } = await authenticatePasskey(options)
       const res = await verifyPasskeyLogin(tempToken, sessionKey, credential)
-      if (res.web_session_id) storeWebSessionId(res.web_session_id)
       if (setToken) await setToken(res.access_token)
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Passkey вход не выполнен')

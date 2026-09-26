@@ -7,7 +7,6 @@ import { loadSessionUser } from '@/lib/authBoot'
 import { onSessionLost } from '@/lib/sessionLost'
 import { setActiveTimeZone } from '@/lib/datetime'
 import { applyThemeClass, getStoredTheme } from '@/lib/theme'
-import { storeWebSessionId } from '@/lib/webSession'
 import type { User } from '@/types'
 
 const REFRESH_INTERVAL_MS = 25 * 60 * 1000
@@ -139,9 +138,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const result = await api.login(username, password)
     if ('access_token' in result && result.access_token) {
       setAccessToken(result.access_token)
-      if (result.web_session_id) {
-        storeWebSessionId(result.web_session_id)
-      }
       await refreshUser()
     }
     return result
