@@ -130,6 +130,23 @@ def revoke_refresh_token(db: Session, raw_token: str) -> None:
         db.commit()
 
 
+def refresh_token_family(db: Session, raw_token: str) -> str | None:
+    row = db.query(RefreshToken.family_id).filter(RefreshToken.token_hash == _hash_token(raw_token)).first()
+    return row.family_id if row else None
+
+
+def revoke_token_family(db: Session, family_id: str, *, reason: str, commit: bool = True) -> None:
+    db.query(RefreshToken).filter(
+        RefreshToken.family_id == family_id,
+        RefreshToken.revoked.is_(False),
+    ).update(
+        {"revoked": True, "revoked_at": datetime.utcnow(), "revoke_reason": reason},
+        synchronize_session=False,
+    )
+    if commit:
+        db.commit()
+
+
 def invalidate_user_sessions(db: Session, user: User, *, reason: str, commit: bool = True) -> None:
     """End every issued session: bump ``token_version`` (access / Mini App JWTs) and revoke refresh tokens."""
     user.token_version = func.coalesce(User.token_version, 0) + 1

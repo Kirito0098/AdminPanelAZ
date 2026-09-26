@@ -8,11 +8,13 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 
 from fastapi import Request
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import ActiveWebSession
 from app.services.ip_restriction import ip_restriction_service
+from app.services.refresh_token import revoke_token_family
 
 WEB_SESSION_ID_HEADER = "X-Web-Session-Id"
 
@@ -36,13 +38,20 @@ class ActiveWebSessionService:
     def get_session_id_from_request(self, request: Request) -> str:
         return (request.headers.get(WEB_SESSION_ID_HEADER) or "").strip()
 
+    @staticmethod
+    def _stale(cutoff: datetime, now: datetime):
+        """A revoked row is what rejects the session's access tokens, so it must outlive them."""
+        tokens_expired = now - timedelta(minutes=get_settings().access_token_expire_minutes)
+        return and_(
+            ActiveWebSession.last_seen_at < cutoff,
+            or_(ActiveWebSession.revoked_at.is_(None), ActiveWebSession.revoked_at < tokens_expired),
+        )
+
     def cleanup_stale_active_web_sessions(self, db: Session, now: datetime | None = None) -> None:
         now = now or datetime.now(timezone.utc).replace(tzinfo=None)
         ttl_seconds, _ = self.get_ttl_and_touch_interval()
         cutoff = now - timedelta(seconds=max(int(ttl_seconds) * 2, 300))
-        db.query(ActiveWebSession).filter(ActiveWebSession.last_seen_at < cutoff).delete(
-            synchronize_session=False
-        )
+        db.query(ActiveWebSession).filter(self._stale(cutoff, now)).delete(synchronize_session=False)
 
     def touch_active_web_session(
         self,
@@ -124,6 +133,7 @@ class ActiveWebSessionService:
         )
 
     def revoke_session(self, db: Session, session_id: str) -> bool:
+        """Also revokes the session's refresh tokens: the web session id is their family id."""
         session_id = (session_id or "").strip()
         if not session_id:
             return False
@@ -131,6 +141,7 @@ class ActiveWebSessionService:
         if row is None:
             return False
         row.revoked_at = datetime.utcnow()
+        revoke_token_family(db, session_id, reason="session", commit=False)
         db.commit()
         with _touch_cache_lock:
             _touch_cache.pop(session_id, None)
@@ -164,10 +175,9 @@ class ActiveWebSessionService:
     def cleanup_stale_for_nightly(self, db: Session) -> None:
         ttl_seconds, _ = self.get_ttl_and_touch_interval()
         stale_seconds = max(ttl_seconds * 8, 86400)
-        cutoff = datetime.utcnow() - timedelta(seconds=stale_seconds)
-        db.query(ActiveWebSession).filter(ActiveWebSession.last_seen_at < cutoff).delete(
-            synchronize_session=False
-        )
+        now = datetime.utcnow()
+        cutoff = now - timedelta(seconds=stale_seconds)
+        db.query(ActiveWebSession).filter(self._stale(cutoff, now)).delete(synchronize_session=False)
         db.commit()
 
 

@@ -13,12 +13,14 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.auth import (
+    access_token_session_id,
     authenticate_user,
     create_2fa_pending_token,
     create_user_access_token,
     decode_2fa_pending_token,
     get_current_user,
     get_password_hash,
+    oauth2_scheme,
     verify_password,
 )
 from app.config import get_settings
@@ -59,6 +61,7 @@ from app.services.password_policy import validate_password
 from app.services.refresh_token import (
     create_refresh_token,
     invalidate_user_sessions,
+    refresh_token_family,
     revoke_refresh_token,
     rotate_refresh_token,
 )
@@ -219,9 +222,10 @@ def _issue_token_pair(
     response: Response | None = None,
     request: Request | None = None,
 ) -> Token:
-    access = create_user_access_token(user)
-    raw_refresh, _ = create_refresh_token(db, user)
+    # One login = one web session = one refresh-token family, so revoking the session ends all of it.
     web_session_id = active_web_session_service.generate_session_id()
+    access = create_user_access_token(user, session_id=web_session_id)
+    raw_refresh, _ = create_refresh_token(db, user, family_id=web_session_id)
     if response is not None:
         _set_refresh_cookie(response, raw_refresh, request)
     if request is not None:
@@ -580,7 +584,7 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
         failed = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         _clear_refresh_cookie(failed, request)
         return failed
-    access = create_user_access_token(user)
+    access = create_user_access_token(user, session_id=refresh_token_family(db, raw))
     if new_raw is not None:
         _set_refresh_cookie(response, new_raw, request)
     return Token(access_token=access)
@@ -613,6 +617,7 @@ def change_password(
     response: Response,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    token: str = Depends(oauth2_scheme),
 ):
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный текущий пароль")
@@ -620,8 +625,9 @@ def change_password(
     current_user.password_hash = get_password_hash(payload.new_password)
     current_user.must_change_password = False
     invalidate_user_sessions(db, current_user, reason="password")
-    access = create_user_access_token(current_user)
-    raw_refresh, _ = create_refresh_token(db, current_user)
+    session_id = access_token_session_id(token)
+    access = create_user_access_token(current_user, session_id=session_id)
+    raw_refresh, _ = create_refresh_token(db, current_user, family_id=session_id)
     _set_refresh_cookie(response, raw_refresh, request)
     if should_scrub_env_after_password_change(current_user.username):
         scrub_admin_bootstrap_secret_from_env()

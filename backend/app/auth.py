@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
-from app.models import User, UserRole
+from app.models import ActiveWebSession, User, UserRole
 
 # bcrypt accepts at most 72 bytes; passlib historically truncated — keep that behaviour
 # so existing hashes and long passwords remain verifiable under bcrypt 5.x.
@@ -42,10 +42,40 @@ def create_access_token(data: dict, expires_delta: timedelta | None = None) -> s
     return jwt.encode(to_encode, settings.secret_key, algorithm=settings.algorithm)
 
 
-def create_user_access_token(user: User) -> str:
+def create_user_access_token(user: User, *, session_id: str | None = None) -> str:
+    data: dict[str, Any] = {"sub": user.username, "role": user.role.value, "tv": user.token_version or 0}
+    if session_id:
+        data["sid"] = session_id
     return create_access_token(
-        data={"sub": user.username, "role": user.role.value, "tv": user.token_version or 0},
+        data=data,
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
+    )
+
+
+def _decode_access_payload(token: str) -> dict | None:
+    try:
+        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
+    except jwt.PyJWTError:
+        return None
+    if payload.get("type") not in (None, "access"):
+        return None
+    return payload
+
+
+def access_token_session_id(token: str) -> str | None:
+    payload = _decode_access_payload(token)
+    sid = payload.get("sid") if payload else None
+    return sid if isinstance(sid, str) and sid else None
+
+
+def _web_session_revoked(db: Session, session_id: object) -> bool:
+    if not isinstance(session_id, str) or not session_id:
+        return False
+    return (
+        db.query(ActiveWebSession.id)
+        .filter(ActiveWebSession.session_id == session_id, ActiveWebSession.revoked_at.isnot(None))
+        .first()
+        is not None
     )
 
 
@@ -125,17 +155,16 @@ def authenticate_user(db: Session, username: str, password: str) -> User | None:
 
 
 def get_active_user_from_access_token(db: Session, token: str) -> User | None:
-    try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-    except jwt.PyJWTError:
-        return None
-    if payload.get("type") not in (None, "access"):
+    payload = _decode_access_payload(token)
+    if payload is None:
         return None
     username = payload.get("sub")
     if not username:
         return None
     user = db.query(User).filter(User.username == username).first()
     if user is None or not user.is_active or not _token_version_current(payload, user):
+        return None
+    if _web_session_revoked(db, payload.get("sid")):
         return None
     return user
 
