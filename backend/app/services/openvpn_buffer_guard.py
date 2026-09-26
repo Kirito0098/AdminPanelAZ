@@ -231,6 +231,29 @@ def _kill_client(node: Node | None, adapter, unit: str, common_name: str) -> dic
     return openvpn_management_service.kill_client(unit, common_name)
 
 
+def _error_text(exc: Exception) -> str:
+    detail = getattr(exc, "detail", None)
+    if isinstance(detail, dict):
+        detail = detail.get("message") or detail
+    return str(detail or exc)
+
+
+def _action_outcome(action: dict) -> str:
+    kind = action.get("type")
+    ok = bool(action.get("success", True))
+    result = action.get("result")
+    message = str(result.get("message") or "") if isinstance(result, dict) else str(result or "")
+    if kind == "kill":
+        return "клиент отключён" if ok else f"отключить клиента не удалось: {message}"
+    if kind == "escalation_check":
+        return f"журнал после отключения не прочитан, перезапуск не проверялся: {message}"
+    if kind == "restart":
+        return "сервер перезапущен" if ok else f"перезапуск не удался: {message}"
+    if kind == "temp_ban":
+        return f"бан до {action.get('ban_expires_at')}"
+    return str(kind)
+
+
 def _apply_temp_ban(
     db: Session,
     node: Node | None,
@@ -401,27 +424,22 @@ def run_guard_pass(
 
         if exceeded:
             # Notify admins — label wiring will be finalized in a later task.
-            try:
-                admin_notify_service.send(
-                    db,
-                    "openvpn_buffer_guard",
-                    target_name=top_cn or "",
-                    target_type="openvpn",
-                    details=f"{total} ENOBUFS in {unit}",
-                    node_id=node.id if node else None,
-                    node_name=node.name if node else None,
-                )
-            except Exception:
-                pass
-
             # Mode-specific actions (manual runs are always findings-only).
+            # Agent errors are recorded as failed actions: the event must be written
+            # so that the cooldown starts and the admin sees what failed.
             if mode_enum != OpenVpnBufferGuardMode.notify and apply_actions and top_cn:
-                kill_result = _kill_client(node, adapter, unit, top_cn)
+                try:
+                    kill_result = _kill_client(node, adapter, unit, top_cn)
+                    kill_ok = bool(kill_result.get("success"))
+                except Exception as exc:
+                    kill_result = {"success": False, "message": _error_text(exc)}
+                    kill_ok = False
                 actions.append(
                     {
                         "type": "kill",
                         "unit": unit,
                         "client_name": top_cn,
+                        "success": kill_ok,
                         "result": kill_result,
                     }
                 )
@@ -434,7 +452,19 @@ def run_guard_pass(
                 # Use a short post-kill window close to the escalation delay
                 # so that pre-kill ENOBUFS do not force a restart.
                 second_window = max(5, int(settings_row.escalate_after_seconds or settings_row.window_seconds))
-                second = adapter.sample_openvpn_journal(unit, int(second_window))
+                try:
+                    second = adapter.sample_openvpn_journal(unit, int(second_window))
+                except Exception as exc:
+                    second = {"ok": False, "error": _error_text(exc)}
+                if not bool(second.get("ok", True)):
+                    actions.append(
+                        {
+                            "type": "escalation_check",
+                            "unit": unit,
+                            "success": False,
+                            "result": str(second.get("error") or "journal sample failed"),
+                        }
+                    )
                 second_summary = summarize_enobufs(str(second.get("text") or ""))
                 second_total = int(second_summary.get("total") or 0)
                 if second_total >= max(1, threshold // 2):
@@ -444,12 +474,15 @@ def run_guard_pass(
                         service_name = f"openvpn-server@{short_name}"
                         try:
                             restart_result = adapter.restart_service(service_name)
-                        except Exception as exc:  # pragma: no cover - defensive
-                            restart_result = str(exc)
+                            restart_ok = True
+                        except Exception as exc:
+                            restart_result = _error_text(exc)
+                            restart_ok = False
                         actions.append(
                             {
                                 "type": "restart",
                                 "service": service_name,
+                                "success": restart_ok,
                                 "result": restart_result,
                             }
                         )
@@ -471,22 +504,32 @@ def run_guard_pass(
                         }
                     )
 
-            # Derive high-level result label from actions performed.
-            if actions:
-                kinds = {str(a.get("type") or "") for a in actions}
-            else:
-                kinds = set()
+            # Derive high-level result label from actions that succeeded.
+            kinds = {str(a.get("type") or "") for a in actions if a.get("success", True)}
             if "temp_ban" in kinds:
                 event_result_label = "banned"
             elif "restart" in kinds:
                 event_result_label = "restarted"
             elif "kill" in kinds:
                 event_result_label = "killed"
-            elif kinds:
+            elif actions:
                 event_result_label = "failed"
             else:
                 # Threshold exceeded but no actions (notify / manual-only).
                 event_result_label = "notified"
+
+            try:
+                admin_notify_service.send(
+                    db,
+                    "openvpn_buffer_guard",
+                    target_name=top_cn or "",
+                    target_type="openvpn",
+                    details="; ".join([f"{total} ENOBUFS in {unit}", *(_action_outcome(a) for a in actions)]),
+                    node_id=node.id if node else None,
+                    node_name=node.name if node else None,
+                )
+            except Exception:
+                pass
 
             event = OpenVpnBufferGuardEvent(
                 node_id=node_id,
