@@ -15,7 +15,7 @@ Mode = Literal["--check", "--apply"]
 SCRIPT_NAME = "nginx-default-deny.sh"
 CHECK_TIMEOUT = 10.0
 APPLY_TIMEOUT = 60.0  # до 20 с ожидания flock параллельного --apply плюс nginx -t и reload
-STATUSES = frozenset({"installed", "needed", "outdated", "own_default", "not_applicable"})
+STATUSES = frozenset({"installed", "needed", "outdated", "own_default", "not_applicable", "disabled"})
 _LOG_PREFIXES = ("[nginx-setup] ОШИБКА: ", "[nginx-setup] ВНИМАНИЕ: ", "[nginx-setup] ")
 
 

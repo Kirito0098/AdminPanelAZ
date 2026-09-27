@@ -829,6 +829,7 @@ def _check_nginx(
 
 IP_ACCESS_CHECK_ID = "ip_access"
 IP_ACCESS_TITLE = "Доступ к панели по IP сервера"
+_DEFAULT_DENY_FILE = "00-adminpanelaz-default-deny"
 CLOSE_IP_ACCESS_ACTION = {"id": "close_ip_access", "label": "Закрыть доступ по IP"}
 _IP_ACCESS_FIREWALL_HINT = (
     "Если панель не должна открываться у всех — разрешите вход только с ваших адресов "
@@ -885,6 +886,30 @@ def ip_access_check_result(result: DefaultDenyResult, ctx: DiagnosticsContext) -
             ),
             check_id=IP_ACCESS_CHECK_ID,
         )
+    if result.status == "disabled" and result.installed:
+        return CheckResult(
+            "warn",
+            f"{IP_ACCESS_TITLE}: отключено, но сервер по умолчанию ещё стоит",
+            detail=(
+                f"В backend/.env задано NGINX_DEFAULT_DENY=0, а файл {_DEFAULT_DENY_FILE} остался в nginx "
+                "и по-прежнему отклоняет запросы по IP сервера и без имени домена."
+            ),
+            hint_ru=f"Уберите его в консоли: {apply_cmd}",
+            check_id=IP_ACCESS_CHECK_ID,
+        )
+    if result.status == "disabled":
+        return CheckResult(
+            "ok",
+            f"{IP_ACCESS_TITLE}: закрытие отключено (NGINX_DEFAULT_DENY=0)",
+            detail=(
+                "В backend/.env задано NGINX_DEFAULT_DENY=0: панель не ставит сервер по умолчанию nginx, "
+                "и по IP сервера она открывается. Так нужно, если перед сервером стоит свой reverse proxy, "
+                "который подключается по IP. Чтобы закрыть доступ, настройте в прокси передачу домена "
+                "(proxy_ssl_server_name on, proxy_ssl_name и Host — домен панели), уберите флаг и выполните "
+                f"{apply_cmd}"
+            ),
+            check_id=IP_ACCESS_CHECK_ID,
+        )
     if result.status == "installed" and any(p.get("reason") == "no_cert" for p in result.ports):
         return CheckResult(
             "warn",
@@ -909,6 +934,7 @@ def ip_access_check_result(result: DefaultDenyResult, ctx: DiagnosticsContext) -
                 f"Сервер по умолчанию nginx (00-adminpanelaz-default-deny) отклоняет запросы по IP сервера "
                 f"и к чужим именам на портах: {install_ports}. Панель открывается только по своему домену.",
                 skipped,
+                f"Вернуть доступ по IP: добавьте NGINX_DEFAULT_DENY=0 в backend/.env и выполните {apply_cmd}",
             ),
             check_id=IP_ACCESS_CHECK_ID,
         )
@@ -942,7 +968,12 @@ def ip_access_check_result(result: DefaultDenyResult, ctx: DiagnosticsContext) -
             detail=_join_paragraphs(lead, skipped),
             hint_ru=(
                 "Нажмите «Закрыть доступ по IP»: nginx получит сервер по умолчанию и перечитает "
-                f"конфигурацию без перезапуска. Из консоли: {apply_cmd}"
+                f"конфигурацию без перезапуска. Из консоли: {apply_cmd}\n\n"
+                "После этого панель открывается только по своему домену. Если перед сервером стоит ещё "
+                "один reverse proxy, сначала включите в нём передачу домена (proxy_ssl_server_name on, "
+                "proxy_ssl_name и Host — домен панели), иначе он потеряет связь с панелью. "
+                "Если прокси настраивать не хотите, оставьте доступ по IP открытым: "
+                "NGINX_DEFAULT_DENY=0 в backend/.env."
             ),
             check_id=IP_ACCESS_CHECK_ID,
             action=dict(CLOSE_IP_ACCESS_ACTION),
