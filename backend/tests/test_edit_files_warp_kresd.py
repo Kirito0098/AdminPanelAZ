@@ -139,7 +139,7 @@ def test_old_agent_rejection_of_new_file_becomes_update_hint(filename: str):
         adapter.write_config_file(filename, "x")
 
     assert read_exc.value.status_code == 503
-    assert "1.10.0" in write_exc.value.detail
+    assert "1.11.0" in write_exc.value.detail
     assert filename in write_exc.value.detail
 
 

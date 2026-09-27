@@ -4,7 +4,7 @@
 
 [![GitHub](https://img.shields.io/badge/GitHub-Kirito0098%2FAdminPanelAZ-181717?style=for-the-badge&logo=github)](https://github.com/Kirito0098/AdminPanelAZ)
 [![Version](https://img.shields.io/badge/Панель-2.25.1-blue?style=for-the-badge)](CHANGELOG.md)
-[![Node agent](https://img.shields.io/badge/Node_agent-1.8.0-555?style=for-the-badge)](CHANGELOG.md)
+[![Node agent](https://img.shields.io/badge/Node_agent-1.11.0-555?style=for-the-badge)](CHANGELOG.md)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](backend/)
 [![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=black)](frontend/)
 
@@ -208,7 +208,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
 6. На **Конфигурации** нажмите **Синхронизировать** — [инструкция](docs/konfiguracii.md)
 7. **Подписка** — unlock-коды и **клиентский портал** (поддомен + «Настроить под текущую публикацию»)
 8. **Telegram** — раздел уже в меню; укажите bot token в UI — [инструкция](docs/Telegram.md)
-9. Для **HA** (два сервера на один домен): создайте группу синхронизации на **Узлах**, выполните **Настройку** (домен → Push full → verify) — [Node Sync](docs/NodeSync.md). После обновления панели перезапустите **node agent** на VPN-узлах (`systemctl restart adminpanelaz-node`), чтобы в «Узлах» отображалась версия **1.8.0**
+9. Для **HA** (два сервера на один домен): создайте группу синхронизации на **Узлах**, выполните **Настройку** (домен → Push full → verify) — [Node Sync](docs/NodeSync.md). После обновления панели перезапустите **node agent** на VPN-узлах (`systemctl restart adminpanelaz-node`), чтобы в «Узлах» отображалась версия **1.11.0**
 
 > [!NOTE]
 > **Вход по умолчанию** (если не задавали в мастере): `admin` / `admin` — смените сразу.
@@ -282,7 +282,7 @@ CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|
 
 - **Health** — `GET /api/health`, `GET /api/health/deep`
 - **Метрики** — `GET /metrics` (Prometheus)
-- **Node agent** — **1.8.0** (для HA: ≥ 1.3.0; byte-copy `.ovpn` при Push full: ≥ 1.5.0; сроки сертификатов: ≥ 1.6.0; AZ-AWG2 / reboot: ≥ 1.7.0; uptime / `listen_tls` в `/health`: ≥ 1.8.0)
+- **Node agent** — **1.11.0** (для HA: ≥ 1.3.0; byte-copy `.ovpn` при Push full: ≥ 1.5.0; сроки сертификатов: ≥ 1.6.0; AZ-AWG2 / reboot: ≥ 1.7.0; uptime / `listen_tls` в `/health`: ≥ 1.8.0; AZ-WARP 1.5, файлы WARP/RPZ/Lua, OpenVPN Buffer Guard, `block-batch`: ≥ 1.11.0)
 
 ## 🔐 Безопасность
 

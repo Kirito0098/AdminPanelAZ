@@ -58,8 +58,8 @@ KRESD_CUSTOM_UNITS: dict[str, str] = {
     "custom2.lua": "kresd@2",
 }
 
-# Node agents before 1.10.0 reject these names: their allowlist predates the files.
-FILES_SINCE_AGENT_1_10: frozenset[str] = frozenset(
+# Node agents before 1.11.0 reject these names: their allowlist predates the files.
+FILES_SINCE_AGENT_1_11: frozenset[str] = frozenset(
     {
         "include-warp-hosts.txt",
         "exclude-warp-hosts.txt",
@@ -78,7 +78,7 @@ class ConfigFileUnsupportedError(HTTPException):
     def __init__(self, filename: str):
         super().__init__(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Обновите node agent панели на узле — файл {filename} поддерживается с node agent 1.10.0",
+            detail=f"Обновите node agent панели на узле — файл {filename} поддерживается с node agent 1.11.0",
         )
         self.filename = filename
 

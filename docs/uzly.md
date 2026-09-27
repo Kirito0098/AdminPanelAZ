@@ -153,7 +153,7 @@ ALLOW_INTERNAL_NODES=true
 Проверьте, не указан ли в адресе узла IP из `ANTIZAPRET_OUT_IP` / `VPN_OUT_IP` в `setup`. Свежий AntiZapret-VPN блокирует весь входящий трафик на эти адреса (Out IP protection) — укажите основной IP сервера. Подробнее: [antizapret-config.md](antizapret-config.md#out-ip-protection).
 
 **Редактор файлов просит обновить node agent**  
-Файлы WARP, RPZ и DNS-политик (`custom.lua`) поддерживаются начиная с node agent 1.10.0. Обновите панель на узле — см. [edit-files.md](edit-files.md#узлы-со-старым-node-agent).
+Файлы WARP, RPZ и DNS-политик (`custom.lua`) поддерживаются начиная с node agent 1.11.0. Обновите панель на узле — см. [edit-files.md](edit-files.md#узлы-со-старым-node-agent).
 
 **Можно ли один профиль на двух серверах?**  
 В обычном режиме — нет, это разные записи. В режиме HA клиенты синхронизируются между серверами группы, но это отдельная настройка.

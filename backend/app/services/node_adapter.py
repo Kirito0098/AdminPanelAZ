@@ -24,7 +24,7 @@ from app.services.antizapret_settings import (
     update_antizapret_settings,
 )
 from app.services.cidr.service import CidrRoutingService
-from app.services.file_editor import FILES_SINCE_AGENT_1_10, KRESD_CUSTOM_UNITS, ConfigFileUnsupportedError
+from app.services.file_editor import FILES_SINCE_AGENT_1_11, KRESD_CUSTOM_UNITS, ConfigFileUnsupportedError
 from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
@@ -1461,7 +1461,7 @@ class RemoteNodeAdapter(NodeAdapter):
         try:
             yield
         except HTTPException as exc:
-            if exc.status_code == status.HTTP_400_BAD_REQUEST and filename in FILES_SINCE_AGENT_1_10:
+            if exc.status_code == status.HTTP_400_BAD_REQUEST and filename in FILES_SINCE_AGENT_1_11:
                 raise ConfigFileUnsupportedError(filename) from exc
             raise
 
