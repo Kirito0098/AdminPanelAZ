@@ -18,7 +18,7 @@ import type { WarperDomainsResponse, WarperHealthResponse, WarperStatusResponse 
 import { formatNodeLabel, type WarperTab } from '@/components/warper/utils'
 
 export default function WarperPage() {
-  const { activeNode } = useNode()
+  const { activeNode, loading: nodeLoading } = useNode()
   const [tab, setTab] = useState<WarperTab>('domains')
   const [health, setHealth] = useState<WarperHealthResponse | null>(null)
   const [status, setStatus] = useState<WarperStatusResponse | null>(null)
@@ -71,8 +71,9 @@ export default function WarperPage() {
   }, [activeNodeId, requests])
 
   useEffect(() => {
+    if (nodeLoading) return
     void load()
-  }, [load])
+  }, [load, nodeLoading])
 
   const nodeLabel = formatNodeLabel(health, activeNode)
   const warperReady = Boolean(health?.installed)

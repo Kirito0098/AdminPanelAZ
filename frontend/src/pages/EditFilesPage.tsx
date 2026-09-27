@@ -251,7 +251,7 @@ function getFileMeta(key: string): FileMeta {
 
 export default function EditFilesPage() {
   const { user } = useAuth()
-  const { activeNode, activeNodeHa, nodes } = useNode()
+  const { activeNode, activeNodeHa, nodes, loading: nodeLoading } = useNode()
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
@@ -393,9 +393,9 @@ export default function EditFilesPage() {
   )
 
   useEffect(() => {
-    if (user?.role !== 'admin') return
+    if (user?.role !== 'admin' || nodeLoading) return
     loadFileList()
-  }, [user?.role, loadFileList, activeNode?.id])
+  }, [user?.role, nodeLoading, loadFileList, activeNode?.id])
 
   useEffect(() => {
     if (!activeKey) return

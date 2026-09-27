@@ -49,7 +49,7 @@ export type ConfirmAction =
   | null
 
 export function useRoutingPage() {
-  const { activeNode, activeNodeHa } = useNode()
+  const { activeNode, activeNodeHa, loading: nodeLoading } = useNode()
   const haReplicaReadonly = activeNodeHa?.role === 'replica'
   const { success, error: notifyError } = useNotifications()
   const {
@@ -273,10 +273,11 @@ export function useRoutingPage() {
   )
 
   useEffect(() => {
+    if (nodeLoading) return
     void load({ initial: true })
     // Reload only when active node changes, not when load callback identity changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeNode?.id])
+  }, [nodeLoading, activeNode?.id])
 
   useIntervalWhenVisible(
     () => {
