@@ -13,12 +13,22 @@ from app.config import get_settings
 from app.models import Node, VpnType
 from app.services.awg2 import AWG2_INSTALL_CMD
 from app.services.access_policy import AccessPolicyService
-from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
+from app.services.node_sync.openvpn_pki_state import (
+    PkiState,
+    newly_revoked_clients,
+    read_pki_state,
+    server_identity_changed,
+)
+from app.services.node_sync.openvpn_restart import OPENVPN_SERVER_UNITS, restart_all_openvpn_servers
 from app.services.openvpn_pki import validate_all_openvpn_profiles
 
 logger = logging.getLogger(__name__)
 
 WIREGUARD_INTERFACES = ("antizapret", "vpn")
+
+
+class Awg2NotInstalledError(RuntimeError):
+    """AZ-AWG2 is missing on the replica; its state was not touched."""
 
 
 def _error_detail(exc: Exception) -> str:
@@ -148,27 +158,39 @@ def sync_wireguard_state_from_primary(
     replica_adapter,
     *,
     client_name: str | None = None,
+    db: Session | None = None,
+    replica_node: Node | None = None,
 ) -> None:
     """Copy WireGuard server configs and all WG/AWG profile files from primary to replica."""
-    _mirror_wireguard_server_configs(primary_adapter, replica_adapter)
+    # Blocks are runtime-only (peer removed); syncconf from primary configs brings them back.
+    reblock = db is not None and replica_node is not None
+    try:
+        _mirror_wireguard_server_configs(primary_adapter, replica_adapter)
 
-    runtime = replica_adapter.apply_wireguard_runtime()
-    if not runtime.get("success"):
-        errors = runtime.get("errors") or []
-        detail = "; ".join(
-            str(entry.get("stderr") or entry.get("error") or entry)
-            for entry in errors
-        ) or "WireGuard runtime apply failed"
-        logger.warning(
-            "HA crypto sync: wg syncconf partial failure on replica (configs copied): %s",
-            detail,
+        runtime = replica_adapter.apply_wireguard_runtime()
+        if not runtime.get("success"):
+            errors = runtime.get("errors") or []
+            detail = "; ".join(
+                str(entry.get("stderr") or entry.get("error") or entry)
+                for entry in errors
+            ) or "WireGuard runtime apply failed"
+            logger.warning(
+                "HA crypto sync: wg syncconf partial failure on replica (configs copied): %s",
+                detail,
+            )
+
+        _copy_all_wireguard_profiles_from_primary(
+            primary_adapter,
+            replica_adapter,
+            client_name=client_name,
         )
+    except Exception:
+        if reblock:
+            _reapply_blocks_after_failure(_reapply_blocked_wireguard_policies, db, replica_node, replica_adapter)
+        raise
 
-    _copy_all_wireguard_profiles_from_primary(
-        primary_adapter,
-        replica_adapter,
-        client_name=client_name,
-    )
+    if reblock:
+        _reapply_blocked_wireguard_policies(db, replica_node, replica_adapter)
 
 
 def copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter) -> None:
@@ -181,14 +203,96 @@ def copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter) -> None
     replica_adapter.import_openvpn_client_profiles_archive(archive)
 
 
+def _replica_pki_state(replica_adapter) -> PkiState | None:
+    try:
+        return read_pki_state(replica_adapter.export_easyrsa3_archive())
+    except Exception as exc:
+        logger.warning("HA crypto sync: replica PKI state unavailable, OpenVPN will restart: %s", exc)
+        return None
+
+
+def _disconnect_openvpn_client(replica_adapter, client_name: str) -> str | None:
+    """Kill the client on every server; agents before 2.26 lack per-unit kill, so fall back to disconnect."""
+    kill_errors: list[str] = []
+    for unit in OPENVPN_SERVER_UNITS:
+        try:
+            replica_adapter.kill_openvpn_client(unit, client_name)
+        except Exception as exc:
+            kill_errors.append(f"{unit}: {_error_detail(exc)}")
+    if not kill_errors:
+        return None
+    try:
+        replica_adapter.disconnect_openvpn_client(client_name)
+    except Exception as exc:
+        return f"{client_name}: {'; '.join(kill_errors)}; disconnect: {_error_detail(exc)}"
+    return None
+
+
+def _revoked_clients_to_disconnect(replica_adapter, before: PkiState | None, after: PkiState | None) -> list[str]:
+    """Newly revoked clients plus revoked ones still connected: a retry after a sync that
+    failed past the import sees nothing newly revoked."""
+    names = set(newly_revoked_clients(before, after))
+    revoked = set(after.revoked.values()) - after.valid_names if after is not None else set()
+    if revoked:
+        try:
+            connected = {client.common_name for client in replica_adapter.parse_openvpn_status()}
+        except Exception as exc:
+            logger.warning("HA crypto sync: replica OpenVPN status unavailable: %s", exc)
+        else:
+            names |= revoked & connected
+    return sorted(names)
+
+
+def _disconnect_openvpn_clients(replica_adapter, client_names: list[str]) -> None:
+    failures = [
+        failure
+        for failure in (_disconnect_openvpn_client(replica_adapter, name) for name in client_names)
+        if failure
+    ]
+    if failures:
+        raise RuntimeError("Не удалось отключить отозванных клиентов OpenVPN: " + "; ".join(failures))
+
+
+def _set_openvpn_restart_pending(db: Session | None, replica_node: Node | None, pending: bool) -> None:
+    if db is None or replica_node is None:
+        return
+    replica_node.openvpn_restart_pending = pending
+    db.commit()
+
+
+def clear_openvpn_restart_pending(db: Session | None, replica_node: Node | None) -> None:
+    """Settle the owed restart: call only after a successful restart of the replica's
+    OpenVPN servers that started once the new server identity was already on disk."""
+    _set_openvpn_restart_pending(db, replica_node, False)
+
+
 def sync_openvpn_pki_from_primary(
     primary_adapter,
     replica_adapter,
     *,
     openvpn_multihome: bool = False,
+    db: Session | None = None,
+    replica_node: Node | None = None,
 ) -> None:
-    """Copy OpenVPN PKI and .ovpn profiles from primary to replica (no cert re-issue)."""
+    """Copy OpenVPN PKI and .ovpn profiles from primary to replica (no cert re-issue).
+
+    OpenVPN loads ca/cert/key only at start and re-reads ``crl-verify`` on each new
+    connection, so servers restart only when the server identity changed; clients
+    revoked since the last sync or still connected with a revoked certificate are
+    disconnected instead (as ``client.sh`` does).
+
+    After the import the new identity is already on disk, so a retry of a sync that
+    failed before the restart sees no change: the owed restart is kept on the replica
+    node (``openvpn_restart_pending``) until it succeeds.
+    """
+    before = _replica_pki_state(replica_adapter)
     archive = primary_adapter.export_easyrsa3_archive()
+    after = read_pki_state(archive)
+    restart_needed = server_identity_changed(before, after)
+    if restart_needed:
+        _set_openvpn_restart_pending(db, replica_node, True)
+    else:
+        restart_needed = getattr(replica_node, "openvpn_restart_pending", False) is True
     replica_adapter.import_easyrsa3_archive(archive)
     copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter)
 
@@ -206,6 +310,10 @@ def sync_openvpn_pki_from_primary(
                 for issue in replica_validation.issues
             ],
         )
+
+    if not restart_needed:
+        _disconnect_openvpn_clients(replica_adapter, _revoked_clients_to_disconnect(replica_adapter, before, after))
+        return
 
     if openvpn_multihome:
         from app.services.openvpn_multihome import maybe_ensure_openvpn_multihome
@@ -226,16 +334,55 @@ def sync_openvpn_pki_from_primary(
             for entry in failed
         ) or "OpenVPN restart failed after PKI sync"
         raise HTTPException(status_code=500, detail=detail)
+    clear_openvpn_restart_pending(db, replica_node)
 
 
-def _reapply_blocked_awg2_policies(db: Session, replica_node: Node, replica_adapter) -> None:
-    AccessPolicyService(
+def _replica_policy_service(db: Session, replica_node: Node, replica_adapter) -> AccessPolicyService:
+    return AccessPolicyService(
         db,
         antizapret_path=get_settings().antizapret_path,
         node_id=replica_node.id,
         node_name=replica_node.name,
         adapter=replica_adapter,
-    )._reapply_all_blocked_awg2_runtime()
+    )
+
+
+def _raise_reblock_errors(results: list[dict], protocol: str, replica_node: Node) -> None:
+    failed = [f"{item['client_name']}: {item['error']}" for item in results if item.get("error")]
+    if failed:
+        raise RuntimeError(
+            f"Не удалось вернуть блокировки {protocol} на реплике {replica_node.name}: " + "; ".join(failed)
+        )
+
+
+def _reapply_blocked_awg2_policies(db: Session, replica_node: Node, replica_adapter) -> None:
+    results = _replica_policy_service(db, replica_node, replica_adapter)._reapply_all_blocked_awg2_runtime()
+    _raise_reblock_errors(results, "AWG2", replica_node)
+
+
+def _reapply_blocked_wireguard_policies(db: Session, replica_node: Node, replica_adapter) -> None:
+    results = _replica_policy_service(db, replica_node, replica_adapter)._reapply_all_blocked_runtime()
+    _raise_reblock_errors(results, "WireGuard", replica_node)
+
+
+def _reapply_blocks_after_failure(reapply, db: Session, replica_node: Node, replica_adapter) -> None:
+    try:
+        reapply(db, replica_node, replica_adapter)
+    except Exception as exc:
+        logger.warning("HA crypto sync: re-block after failure on %s also failed: %s", replica_node.name, exc)
+
+
+def reapply_blocked_runtime_policies(db: Session, replica_node: Node, replica_adapter, *, awg2: bool) -> None:
+    """Re-block runtime-only peers on a replica after its policy rows were replaced."""
+    wg_error: RuntimeError | None = None
+    try:
+        _reapply_blocked_wireguard_policies(db, replica_node, replica_adapter)
+    except RuntimeError as exc:
+        wg_error = exc
+    if awg2:
+        _reapply_blocked_awg2_policies(db, replica_node, replica_adapter)
+    if wg_error is not None:
+        raise wg_error
 
 
 def sync_amneziawg2_state_from_primary(
@@ -249,20 +396,26 @@ def sync_amneziawg2_state_from_primary(
     health = replica_adapter.get_awg2_health()
     if not health.get("installed"):
         cmd = health.get("install_command") or AWG2_INSTALL_CMD
-        raise RuntimeError(f"AZ-AWG2 не установлен на replica. Установите: {cmd}")
+        raise Awg2NotInstalledError(f"AZ-AWG2 не установлен на replica. Установите: {cmd}")
 
     archive = primary_adapter.export_awg2_state_archive()
     if not archive:
         raise RuntimeError("Пустой архив состояния AZ-AWG2 с primary")
 
-    replica_adapter.import_awg2_state_archive(archive)
-    runtime = replica_adapter.apply_awg2_runtime()
+    reblock = db is not None and replica_node is not None
+    try:
+        replica_adapter.import_awg2_state_archive(archive)
+        runtime = replica_adapter.apply_awg2_runtime()
+    except Exception:
+        if reblock:
+            _reapply_blocks_after_failure(_reapply_blocked_awg2_policies, db, replica_node, replica_adapter)
+        raise
     if not runtime.get("success"):
         logger.warning(
             "HA AWG2 runtime apply partial: %s",
             runtime.get("errors") or [],
         )
-    if db is not None and replica_node is not None:
+    if reblock:
         _reapply_blocked_awg2_policies(db, replica_node, replica_adapter)
 
 
@@ -282,6 +435,8 @@ def sync_vpn_crypto_from_primary(
             primary_adapter,
             replica_adapter,
             openvpn_multihome=openvpn_multihome,
+            db=db,
+            replica_node=replica_node,
         )
         return
     if vpn_type == VpnType.amneziawg2:
@@ -296,6 +451,8 @@ def sync_vpn_crypto_from_primary(
         primary_adapter,
         replica_adapter,
         client_name=client_name,
+        db=db,
+        replica_node=replica_node,
     )
 
 
@@ -308,11 +465,18 @@ def sync_all_vpn_crypto_from_primary(
     openvpn_multihome: bool = False,
 ) -> None:
     """Copy both WireGuard and OpenVPN crypto state from primary to replica."""
-    sync_wireguard_state_from_primary(primary_adapter, replica_adapter)
+    sync_wireguard_state_from_primary(
+        primary_adapter,
+        replica_adapter,
+        db=db,
+        replica_node=replica_node,
+    )
     sync_openvpn_pki_from_primary(
         primary_adapter,
         replica_adapter,
         openvpn_multihome=openvpn_multihome,
+        db=db,
+        replica_node=replica_node,
     )
     try:
         if primary_adapter.get_awg2_health().get("installed"):
@@ -329,7 +493,9 @@ def sync_all_vpn_crypto_from_primary(
 def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str, object]:
     """Copy VPN crypto state from primary to every replica (any sync_mode)."""
     from app.models import SyncStatus
-    from app.services.node_sync.replicate import _primary_adapter, iter_replica_adapters
+    from app.services.node_manager import get_adapter_for_node
+    from app.services.node_sync.groups import get_replica_nodes
+    from app.services.node_sync.replicate import _primary_adapter
 
     primary_adapter = _primary_adapter(db, group)
     successes: list[dict[str, object]] = []
@@ -340,11 +506,11 @@ def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str,
         else None
     )
 
-    for replica_node, adapter in iter_replica_adapters(db, group):
+    for replica_node in get_replica_nodes(db, group):
         try:
             sync_vpn_crypto_from_primary(
                 primary_adapter,
-                adapter,
+                get_adapter_for_node(replica_node),
                 primary_config.vpn_type,
                 db=db,
                 replica_node=replica_node,

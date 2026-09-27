@@ -195,8 +195,8 @@ def replicate_policy_op(
             )
             continue
 
-        adapter = get_adapter_for_node(replica_node)
         try:
+            adapter = get_adapter_for_node(replica_node)
             if op in _COPY_OPS:
                 copy_single_client_policy(
                     db,

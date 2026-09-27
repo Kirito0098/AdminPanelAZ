@@ -32,6 +32,7 @@ import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import DocsLink from '@/components/shared/DocsLink'
+import { parseTimestamp } from '@/lib/datetime'
 import { DOCS } from '@/lib/docsUrls'
 import {
   DropdownMenu,
@@ -71,7 +72,7 @@ import { HA_PRIMARY, HA_PUSH_FULL, HA_REPLICA, nodeStatusRu } from '@/lib/uiLabe
 import HaSyncResultDialog from '@/components/nodes/HaSyncResultDialog'
 import HaVerifyResultDialog from '@/components/nodes/HaVerifyResultDialog'
 import { effectiveHaWireguardDomain, formatHaSharedDomains } from '@/lib/haBadgeLabel'
-import { parseHaSyncTaskResult, type HaSyncResultView } from '@/lib/haSyncSummary'
+import { isHaSyncTaskFailed, parseHaSyncTaskResult, type HaSyncResultView } from '@/lib/haSyncSummary'
 import { parseHaVerifyResult, type HaVerifyResultView } from '@/lib/haVerifySummary'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import type { BackgroundTask, Node, NodeSyncGroup, NodeSyncVerifyResult, SyncStatus } from '@/types'
@@ -98,9 +99,8 @@ const AUTO_SYNC_OPERATIONS = [
 ] as const
 
 function formatTimestamp(value?: string | null): string | null {
-  if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
+  const date = parseTimestamp(value)
+  if (!date) return null
   return date.toLocaleString()
 }
 
@@ -626,7 +626,7 @@ export default function NodeSyncGroupSection({
     if (!result) return
 
     const withVerify =
-      verifyReady === false
+      verifyReady === false && result.variant !== 'error'
         ? {
             ...result,
             variant: 'warning' as const,
@@ -695,13 +695,15 @@ export default function NodeSyncGroupSection({
           showVerifyResult(group, updated.last_verify_result)
         }
         showSyncResult(task, updated?.ready)
-        if (updated?.ready) {
+        if (isHaSyncTaskFailed(task)) {
+          notifyError(`${task.message || 'Синхронизация завершилась с ошибками'} — см. отчёт`)
+        } else if (updated?.ready) {
           success('HA-группа синхронизирована и готова к DNS-переключению')
         } else {
           notifyWarning('Синхронизация завершена с расхождениями — см. отчёт')
         }
       } catch (err) {
-        notifyError(err instanceof ApiError ? err.message : 'Ошибка синхронизации HA-группы')
+        notifyError(err instanceof Error && err.message ? err.message : 'Ошибка синхронизации HA-группы')
         await load()
       } finally {
         setSetupStage(null)
@@ -720,9 +722,13 @@ export default function NodeSyncGroupSection({
         const accepted = await applyNodeSyncGroupSharedDomain(group.id)
         const task = await pollToCompletion(accepted.task_id)
         showSyncResult(task)
-        success(`Домен ${formatHaSharedDomains(group)} применён на узлах`)
+        if (isHaSyncTaskFailed(task)) {
+          notifyError(`${task.message || 'Применение домена завершилось с ошибками'} — см. отчёт`)
+        } else {
+          success(`Домен ${formatHaSharedDomains(group)} применён на узлах`)
+        }
       } catch (err) {
-        notifyError(err instanceof ApiError ? err.message : 'Ошибка применения домена')
+        notifyError(err instanceof Error && err.message ? err.message : 'Ошибка применения домена')
       } finally {
         setSetupStage(null)
         setActionLoading(null)

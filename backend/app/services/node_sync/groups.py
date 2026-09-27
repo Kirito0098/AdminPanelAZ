@@ -9,6 +9,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus, VpnConfig
 from app.services.node_manager import node_metadata_dict
 
@@ -271,6 +272,23 @@ def require_ha_primary_for_config_ops(db: Session, *, node: Node | None = None) 
     )
 
 
+AUTO_HEAL_SUSPENDED_PREFIX = "Автолечение приостановлено"
+
+
+def auto_heal_max_failures(app_settings=None) -> int:
+    """NODE_SYNC_AUTO_HEAL_MAX_FAILURES; at least 1, so 0 cannot suspend auto-heal before any attempt."""
+    app_settings = app_settings or get_settings()
+    return max(1, int(app_settings.node_sync_auto_heal_max_failures))
+
+
+def auto_heal_suspended_text(failures: int) -> str:
+    return (
+        f"{AUTO_HEAL_SUSPENDED_PREFIX} после {failures} неудачных попыток подряд: "
+        "нужна ручная синхронизация («Синхронизировать»). Проверка группы продолжается, "
+        "автолечение возобновится после успешной синхронизации или проверки без расхождений"
+    )
+
+
 def build_group_warnings(group: NodeSyncGroup, verify_result: dict[str, Any] | None) -> list[str]:
     """Surface partial replication / shadow / auto-heal issues for the UI."""
     warnings: list[str] = []
@@ -278,7 +296,14 @@ def build_group_warnings(group: NodeSyncGroup, verify_result: dict[str, Any] | N
         failures = verify_result.get("auto_heal_failures")
         try:
             if failures is not None and int(failures) > 0:
-                warnings.append(f"Auto-heal: {int(failures)} неудачных попыток")
+                if (
+                    get_settings().node_sync_auto_heal
+                    and is_auto_sync_enabled(group)
+                    and int(failures) >= auto_heal_max_failures()
+                ):
+                    warnings.append(auto_heal_suspended_text(int(failures)))
+                else:
+                    warnings.append(f"Auto-heal: {int(failures)} неудачных попыток")
         except (TypeError, ValueError):
             pass
         if group.sync_status == SyncStatus.failed and verify_result.get("ready"):

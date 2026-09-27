@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import threading
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ SYSTEMD_UNIT = "adminpanelaz-node"
 
 DEFAULT_GIT_BRANCH = "main"
 GIT_TIMEOUT = 120.0
+_OID_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
 def resolve_repo_root(start: Path | None = None) -> Path | None:
@@ -34,7 +36,33 @@ def _git_run(args: list[str], cwd: Path, *, timeout: float = GIT_TIMEOUT) -> sub
     )
 
 
-def check_git_updates(repo_path: Path, *, branch: str = DEFAULT_GIT_BRANCH) -> dict[str, Any]:
+def resolve_update_ref(repo_path: Path) -> tuple[str | None, str | None]:
+    """Remote-tracking ref the checked-out branch updates from, or why there is none.
+
+    The upstream of the current branch; ``origin/main`` for ``main`` without one. A release branch
+    must never be moved to another branch's history.
+    """
+    head = _git_run(["symbolic-ref", "--quiet", "--short", "HEAD"], repo_path, timeout=10.0)
+    branch = head.stdout.strip() if head.returncode == 0 else ""
+    if not branch:
+        return None, "Рабочая копия не на ветке (detached HEAD): обновите вручную"
+    upstream = _git_run(
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"],
+        repo_path,
+        timeout=10.0,
+    )
+    ref = upstream.stdout.strip() if upstream.returncode == 0 else ""
+    if ref:
+        return ref, None
+    if branch == DEFAULT_GIT_BRANCH:
+        return f"origin/{DEFAULT_GIT_BRANCH}", None
+    return None, (
+        f"У ветки {branch} нет upstream: обновите вручную "
+        f"или привяжите её (git branch -u origin/{branch})"
+    )
+
+
+def check_git_updates(repo_path: Path) -> dict[str, Any]:
     if not repo_path.is_dir():
         return {"path": str(repo_path), "error": "Каталог не найден", "updates_available": False}
     if not (repo_path / ".git").is_dir():
@@ -49,8 +77,11 @@ def check_git_updates(repo_path: Path, *, branch: str = DEFAULT_GIT_BRANCH) -> d
                 "updates_available": False,
             }
 
+        ref, ref_error = resolve_update_ref(repo_path)
+        if ref is None:
+            return {"path": str(repo_path), "error": ref_error, "updates_available": False}
         local = _git_run(["rev-parse", "HEAD"], repo_path, timeout=10.0)
-        remote = _git_run(["rev-parse", f"origin/{branch}"], repo_path, timeout=10.0)
+        remote = _git_run(["rev-parse", ref], repo_path, timeout=10.0)
         local_hash = local.stdout.strip()
         remote_hash = remote.stdout.strip()
 
@@ -99,7 +130,50 @@ def _working_tree_clean(repo_path: Path) -> bool:
     return status.returncode == 0 and not status.stdout.strip()
 
 
-def git_pull(repo_path: Path, *, branch: str = DEFAULT_GIT_BRANCH) -> dict[str, Any]:
+def _seen_upstream_tips(repo_path: Path, ref: str) -> list[str]:
+    """Every tip of ``refs/remotes/<ref>`` recorded in its reflog, old values included.
+
+    A fresh clone has no reflog for the ref; the first fetch after a force-push records the
+    pre-rewrite tip only as the old value of its entry.
+    """
+    log_path = _git_run(["rev-parse", "--git-path", f"logs/refs/remotes/{ref}"], repo_path, timeout=10.0)
+    if log_path.returncode != 0 or not log_path.stdout.strip():
+        return []
+    try:
+        lines = (repo_path / log_path.stdout.strip()).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    tips: set[str] = set()
+    for line in lines:
+        for oid in line.split()[:2]:
+            if _OID_RE.fullmatch(oid) and oid.strip("0"):
+                tips.add(oid)
+    return sorted(tips)
+
+
+def _unpushed_commit_count(repo_path: Path, ref: str) -> int | None:
+    """Commits of HEAD that are on no remote branch and were never on ``ref`` (None if git failed).
+
+    Commits dropped from ``ref`` by a force-push were on the server, so they do not count.
+    """
+    seen_tips = _seen_upstream_tips(repo_path, ref)
+    count = _git_run(["rev-list", "--count", "HEAD", "--not", "--remotes", *seen_tips], repo_path, timeout=15.0)
+    if count.returncode != 0:
+        return None
+    try:
+        return int(count.stdout.strip())
+    except ValueError:
+        return None
+
+
+def _unpushed_commits_error(count: int | None, ref: str) -> str:
+    return (
+        f"В локальной ветке есть коммиты, которых нет на сервере git: {count if count is not None else '?'} "
+        f"(история расходится с {ref}) — синхронизируйте вручную"
+    )
+
+
+def git_pull(repo_path: Path) -> dict[str, Any]:
     if not repo_path.is_dir() or not (repo_path / ".git").is_dir():
         return {"success": False, "output": "", "error": "Не git-репозиторий"}
 
@@ -109,18 +183,30 @@ def git_pull(repo_path: Path, *, branch: str = DEFAULT_GIT_BRANCH) -> dict[str, 
             output = ((fetch.stdout or "") + (fetch.stderr or "")).strip()
             return {"success": False, "output": output, "error": output or "git fetch failed"}
 
-        result = _git_run(["pull", "--ff-only", "origin", branch], repo_path)
+        ref, ref_error = resolve_update_ref(repo_path)
+        if ref is None:
+            return {"success": False, "output": "", "error": ref_error}
+
+        result = _git_run(["merge", "--ff-only", ref], repo_path)
         output = ((result.stdout or "") + (result.stderr or "")).strip()
         if result.returncode == 0:
             return {"success": True, "output": output, "error": None, "method": "fast-forward"}
 
         # After force-push on origin the node copy may diverge while the tree is still clean.
         if _working_tree_clean(repo_path):
-            reset = _git_run(["reset", "--hard", f"origin/{branch}"], repo_path)
+            unpushed = _unpushed_commit_count(repo_path, ref)
+            if unpushed != 0:
+                return {
+                    "success": False,
+                    "output": output,
+                    "error": _unpushed_commits_error(unpushed, ref),
+                    "method": "fast-forward",
+                }
+            reset = _git_run(["reset", "--hard", ref], repo_path)
             reset_output = ((reset.stdout or "") + (reset.stderr or "")).strip()
             if reset.returncode == 0:
                 combined = "\n".join(
-                    part for part in (output, f"История переписана: reset --hard origin/{branch}", reset_output) if part
+                    part for part in (output, f"История переписана: reset --hard {ref}", reset_output) if part
                 )
                 return {
                     "success": True,

@@ -1,0 +1,707 @@
+import {
+  ApiError,
+  getBufferGuardEvents,
+  getBufferGuardSettings,
+  putBufferGuardSettings,
+  scanBufferGuard,
+} from '@/api/client'
+import type { OpenVpnBufferGuardScanResult } from '@/api/openvpnBufferGuard'
+import SettingsAlert from '@/components/settings/SettingsAlert'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import { Switch } from '@/components/ui/switch'
+import { useNotifications } from '@/context/NotificationContext'
+import {
+  applyBufferGuardNumberInputs,
+  BUFFER_GUARD_NUMBER_LIMITS,
+  bufferGuardNumberError,
+  bufferGuardSavePayload,
+  commitBufferGuardNumber,
+  normalizeBufferGuardSettings,
+  sortUnits,
+  type BufferGuardNumberField,
+  type BufferGuardNumberInputs,
+} from '@/lib/bufferGuardDraft'
+import { formatDateTime } from '@/lib/datetime'
+import { createLatestRequest } from '@/lib/latestRequest'
+import { cn } from '@/lib/utils'
+import type { OpenVpnBufferGuardMode, OpenVpnBufferGuardSettings, OpenVpnBufferGuardEvent } from '@/types'
+import { AlertTriangle, CheckCircle2, ShieldAlert, Timer, Zap } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent } from 'react'
+
+const MODE_LABELS: Record<OpenVpnBufferGuardMode, string> = {
+  notify: 'Только уведомлять (без действий)',
+  kill: 'Отключать клиента',
+  kill_restart: 'Отключать + перезапускать OpenVPN',
+  kill_restart_temp_ban: 'Отключать, перезапускать и временно банить',
+}
+
+const MODE_HINTS: Record<OpenVpnBufferGuardMode, string> = {
+  notify:
+    'Только уведомления. Рекомендуемый порог: 40 ENOBUFS / 60 с (типичный VPS 1GB/1CPU).',
+  kill: 'Отключает самого шумного клиента. Рекомендуемый порог: 80 / 60 с.',
+  kill_restart:
+    'Кик, затем при продолжении шторма — restart юнита. Рекомендуемый порог: 120 / 60 с.',
+  kill_restart_temp_ban:
+    'Как kill_restart + временный бан. Рекомендуемый порог: 150 / 60 с.',
+}
+
+const WATCH_UNIT_LABELS: Record<string, string> = {
+  'antizapret-udp': 'antizapret-udp (legacy UDP)',
+  'antizapret-tcp': 'antizapret-tcp (legacy TCP)',
+  'vpn-udp': 'vpn-udp (основной UDP-сервер)',
+  'vpn-tcp': 'vpn-tcp (основной TCP-сервер)',
+}
+
+/** Recommended thresholds are calibrated for this window only (not scaled). */
+const RECOMMENDED_THRESHOLD_WINDOW_SECONDS = 60
+
+export type OpenVpnBufferGuardCardProps = {
+  activeNodeId: number | null
+  nodeName?: string | null
+  disabled?: boolean
+}
+
+function lastEventSummary(event: OpenVpnBufferGuardEvent | null): { title: string; detail: string } | null {
+  if (!event) return null
+
+  const when = formatDateTime(event.created_at)
+  const unit = event.unit || 'unit?'
+  const total = event.error_count
+  const window = event.window_seconds
+
+  const baseTitle = `Последнее событие: ${total} ENOBUFS за ${window} с в ${unit}`
+
+  const parts: string[] = []
+  if (event.common_name) {
+    parts.push(`клиент ${event.common_name}${event.real_address ? ` (${event.real_address})` : ''}`)
+  }
+
+  const modeRu: Record<OpenVpnBufferGuardMode, string> = {
+    notify: 'режим notify (только уведомление)',
+    kill: 'режим kill (отключение клиента)',
+    kill_restart: 'режим kill_restart (отключение + перезапуск)',
+    kill_restart_temp_ban: 'режим kill_restart_temp_ban (отключение + перезапуск + бан)',
+  }
+
+  parts.push(modeRu[event.mode])
+
+  const resultRu: Record<string, string> = {
+    banned: 'клиент заблокирован временно',
+    restarted: 'сервер перезапущен',
+    killed: 'клиент отключён',
+    notified: 'порог превышен, действия не применялись',
+    failed: 'автоматические действия не удались',
+  }
+
+  if (event.result && resultRu[event.result]) {
+    parts.push(resultRu[event.result])
+  }
+
+  if (event.manual) {
+    parts.push('ручной запуск')
+  }
+
+  if (event.ban_expires_at) {
+    parts.push(`бан до ${formatDateTime(event.ban_expires_at)}`)
+  }
+
+  const detail = `${when} · ${parts.join(' · ')}`
+  return { title: baseTitle, detail }
+}
+
+export default function OpenVpnBufferGuardCard({
+  activeNodeId,
+  nodeName,
+  disabled = false,
+}: OpenVpnBufferGuardCardProps) {
+  const { success, warning: notifyWarning, error: notifyError } = useNotifications()
+
+  const [settings, setSettings] = useState<OpenVpnBufferGuardSettings | null>(null)
+  const [draft, setDraft] = useState<OpenVpnBufferGuardSettings | null>(null)
+  const [numberInputs, setNumberInputs] = useState<BufferGuardNumberInputs>({})
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [scanBusy, setScanBusy] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [events, setEvents] = useState<OpenVpnBufferGuardEvent[]>([])
+  const [eventsError, setEventsError] = useState<string | null>(null)
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [settingsRequests] = useState(() => createLatestRequest<number | null>(null))
+  const [eventsRequests] = useState(() => createLatestRequest<number | null>(null))
+
+  const busy = loading || saving || scanBusy
+  const controlsDisabled = disabled || busy || activeNodeId == null || loadError != null
+
+  const effectiveDraft = useMemo(
+    () => (draft ? applyBufferGuardNumberInputs(draft, numberInputs) : null),
+    [draft, numberInputs],
+  )
+
+  const dirty = useMemo(() => {
+    if (!settings || !effectiveDraft) return false
+    const simpleFields: (keyof OpenVpnBufferGuardSettings)[] = [
+      'enabled',
+      'mode',
+      'threshold_count',
+      'window_seconds',
+      'escalate_after_seconds',
+      'cooldown_minutes',
+      'temp_ban_minutes',
+    ]
+    for (const key of simpleFields) {
+      if (settings[key] !== effectiveDraft[key]) return true
+    }
+    if (sortUnits(settings.watch_units).join(',') !== sortUnits(effectiveDraft.watch_units).join(',')) {
+      return true
+    }
+    return false
+  }, [settings, effectiveDraft])
+
+  const patchDraft = (patch: Partial<OpenVpnBufferGuardSettings>) => {
+    setDraft((prev) => (prev ? { ...prev, ...patch } : prev))
+  }
+
+  const replaceDraft = (next: OpenVpnBufferGuardSettings | null) => {
+    setDraft(next)
+    setNumberInputs({})
+  }
+
+  const commitNumberInput = (field: BufferGuardNumberField) => {
+    const text = numberInputs[field]
+    if (text === undefined || !draft) return
+    patchDraft({ [field]: commitBufferGuardNumber(field, text, draft[field]) })
+    setNumberInputs(({ [field]: _committed, ...rest }) => rest)
+  }
+
+  const numberInputProps = (field: BufferGuardNumberField) => {
+    const { min, max } = BUFFER_GUARD_NUMBER_LIMITS[field]
+    const text = numberInputs[field]
+    return {
+      type: 'number',
+      inputMode: 'numeric' as const,
+      min,
+      max,
+      value: text ?? (draft ? String(draft[field]) : ''),
+      'aria-invalid': text !== undefined && bufferGuardNumberError(field, text) !== null,
+      onChange: (e: ChangeEvent<HTMLInputElement>) => {
+        const value = e.target.value
+        setNumberInputs((prev) => ({ ...prev, [field]: value }))
+      },
+      onBlur: () => commitNumberInput(field),
+    }
+  }
+
+  const numberInputHint = (field: BufferGuardNumberField) => {
+    const text = numberInputs[field]
+    const message = text === undefined ? null : bufferGuardNumberError(field, text)
+    return message ? <p className="text-[11px] text-destructive">{message}</p> : null
+  }
+
+  const loadEvents = useCallback(
+    async (nodeId: number) => {
+      const isCurrent = eventsRequests.begin(nodeId)
+      if (!isCurrent()) return
+      try {
+        const data = await getBufferGuardEvents(nodeId)
+        if (!isCurrent()) return
+        setEvents(data)
+        setEventsError(null)
+      } catch (err) {
+        if (!isCurrent()) return
+        const message =
+          err instanceof ApiError
+            ? err.message
+            : 'Не удалось загрузить последние события Buffer Guard'
+        setEventsError(message)
+        notifyError(message)
+      }
+    },
+    [eventsRequests, notifyError],
+  )
+
+  const loadSettings = useCallback(
+    async (nodeId: number) => {
+      const isCurrent = settingsRequests.begin(nodeId)
+      if (!isCurrent()) return
+      setLoading(true)
+      setLoadError(null)
+      try {
+        const data = await getBufferGuardSettings(nodeId)
+        if (!isCurrent()) return
+        const normalized = normalizeBufferGuardSettings(nodeId, data)
+        setSettings(normalized)
+        setDraft(normalized)
+        setNumberInputs({})
+      } catch (err) {
+        if (!isCurrent()) return
+        const message =
+          err instanceof ApiError
+            ? err.message
+            : 'Не удалось загрузить настройки OpenVPN Buffer Guard'
+        setLoadError(message)
+        notifyError(message)
+      } finally {
+        if (isCurrent()) setLoading(false)
+      }
+    },
+    [notifyError, settingsRequests],
+  )
+
+  const reloadAll = useCallback(
+    async (nodeId: number) => {
+      await loadSettings(nodeId)
+      await loadEvents(nodeId)
+    },
+    [loadEvents, loadSettings],
+  )
+
+  useEffect(() => {
+    settingsRequests.reset(activeNodeId)
+    eventsRequests.reset(activeNodeId)
+    setSettings(null)
+    setDraft(null)
+    setNumberInputs({})
+    setEvents([])
+    setLoadError(null)
+    setEventsError(null)
+    setLoading(false)
+    if (activeNodeId == null) return
+    void reloadAll(activeNodeId)
+  }, [activeNodeId, eventsRequests, reloadAll, settingsRequests])
+
+  const handleSave = async () => {
+    if (!effectiveDraft || controlsDisabled) return
+    const payload = bufferGuardSavePayload(effectiveDraft, activeNodeId)
+    if (!payload) return
+    replaceDraft(effectiveDraft)
+    const isCurrent = settingsRequests.begin(payload.node_id)
+    setSaving(true)
+    try {
+      const updated = await putBufferGuardSettings(payload)
+      success('Настройки OpenVPN Buffer Guard сохранены')
+      if (!isCurrent()) return
+      const normalized = normalizeBufferGuardSettings(payload.node_id, updated)
+      setSettings(normalized)
+      replaceDraft(normalized)
+    } catch (err) {
+      notifyError(
+        err instanceof ApiError
+          ? err.message
+          : 'Не удалось сохранить настройки OpenVPN Buffer Guard',
+      )
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleScan = async () => {
+    if (activeNodeId == null || disabled) return
+    setScanBusy(true)
+    try {
+      const results = (await scanBufferGuard(activeNodeId)) as OpenVpnBufferGuardScanResult[]
+      const list = Array.isArray(results)
+        ? results.filter(
+            (r): r is OpenVpnBufferGuardScanResult =>
+              r != null && typeof r === 'object' && typeof r.result === 'string',
+          )
+        : []
+      const journalFailed = list.some((r) => r.result === 'failed')
+      const triggered = list.some((r) => r.threshold_exceeded)
+      if (journalFailed) {
+        notifyWarning(
+          'Проверка Buffer Guard: не удалось прочитать журнал OpenVPN на одном или нескольких юнитах. Превышение порога не подтверждено.',
+        )
+      } else if (triggered) {
+        notifyWarning(
+          'Порог ENOBUFS превышен — проверьте последний блок ниже и логи OpenVPN. Ручной запуск не применяет действия.',
+        )
+      } else if (list.length > 0) {
+        success('Проверка Buffer Guard выполнена: превышений порога не найдено')
+      }
+      await loadEvents(activeNodeId)
+    } catch (err) {
+      notifyError(
+        err instanceof ApiError ? err.message : 'Не удалось выполнить проверку Buffer Guard',
+      )
+    } finally {
+      setScanBusy(false)
+    }
+  }
+
+  const handleToggleUnit = (unit: string, checked: boolean | 'indeterminate') => {
+    if (!draft) return
+    const nextChecked = checked === 'indeterminate' ? false : checked
+    const current = sortUnits(draft.watch_units)
+    let next: string[]
+    if (nextChecked) {
+      if (!current.includes(unit)) next = sortUnits([...current, unit])
+      else next = current
+    } else {
+      next = current.filter((u) => u !== unit)
+      if (next.length === 0) {
+        notifyError('Нужно выбрать хотя бы один unit для наблюдения')
+        return
+      }
+    }
+    patchDraft({ watch_units: next })
+  }
+
+  const currentEvent = events.length > 0 ? events[0] : null
+  const eventSummary = lastEventSummary(currentEvent)
+
+  const cardDisabled = activeNodeId == null
+
+  return (
+    <Card className="overflow-hidden">
+      <CardHeader className="pb-3">
+        <div className="flex gap-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <ShieldAlert className="h-4 w-4" />
+          </div>
+          <div className="min-w-0 space-y-1">
+            <CardTitle className="text-base">OpenVPN Buffer Guard</CardTitle>
+            <CardDescription className="mt-1">
+              Защита общего UDP-сокета OpenVPN от лавины ошибок ENOBUFS при shared UDP / DCO и
+              шумных клиентах. Сканирует журналы OpenVPN и по порогу реагирует на «засоряющие»
+              подключения.
+            </CardDescription>
+            {nodeName && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Активный узел: <span className="font-medium text-foreground">{nodeName}</span>
+              </p>
+            )}
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4 border-t px-4 py-4 sm:px-5">
+        <SettingsAlert variant="warning">
+          <p className="text-xs leading-relaxed">
+            Buffer Guard не чинит саму причину ENOBUFS (лимиты ядра, DCO, шумные клиенты), а только
+            помогает не уронить общий UDP-сокет. Настраивайте пороги аккуратно и сначала используйте
+            режим «Только уведомлять». По умолчанию режим — только уведомления; для автокика смените
+            режим и при желании нажмите «Применить рекомендацию».
+          </p>
+        </SettingsAlert>
+
+        {cardDisabled && (
+          <p className="text-xs text-muted-foreground">
+            Выберите VPN-узел вверху, чтобы настроить Buffer Guard.
+          </p>
+        )}
+
+        {loadError && !cardDisabled && (
+          <div className="space-y-3">
+            <SettingsAlert variant="danger" title="Не удалось загрузить настройки Buffer Guard">
+              {loadError}
+            </SettingsAlert>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => activeNodeId != null && void reloadAll(activeNodeId)}
+            >
+              Повторить загрузку
+            </Button>
+          </div>
+        )}
+
+        {!cardDisabled && !loadError && draft && (
+          <>
+            <div
+              className={cn(
+                'flex items-start justify-between gap-4 rounded-xl border bg-card/50 p-4 transition-colors',
+                draft.enabled && 'border-emerald-500/40 bg-emerald-500/5',
+              )}
+            >
+              <div className="min-w-0 space-y-1">
+                <Label htmlFor="openvpn-buffer-guard-enabled" className="cursor-pointer font-medium">
+                  Включить Buffer Guard
+                </Label>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  При включении автоматические действия (kill / restart / временный бан) применяются
+                  только при фоновых проходах. Ручная проверка ниже всегда &mdash; только анализ.
+                </p>
+              </div>
+              <div className="flex flex-col items-end gap-1">
+                <Switch
+                  id="openvpn-buffer-guard-enabled"
+                  checked={draft.enabled}
+                  onCheckedChange={(checked) => patchDraft({ enabled: checked })}
+                  disabled={controlsDisabled}
+                  aria-label={
+                    draft.enabled ? 'Buffer Guard включён' : 'Buffer Guard выключен'
+                  }
+                />
+                <span className="text-[11px] text-muted-foreground">
+                  {draft.enabled ? 'Вкл.' : 'Выкл.'}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2 rounded-xl border bg-muted/20 p-4">
+              <Label className="text-xs text-muted-foreground">Режим действий</Label>
+              <div className="grid gap-3 md:grid-cols-[minmax(0,240px),minmax(0,1fr)]">
+                <Select
+                  value={draft.mode}
+                  onValueChange={(value) => patchDraft({ mode: value as OpenVpnBufferGuardMode })}
+                  disabled={controlsDisabled}
+                >
+                  <SelectTrigger className="h-9 w-full md:w-60">
+                    <SelectValue placeholder="Выберите режим" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(MODE_LABELS) as OpenVpnBufferGuardMode[]).map((mode) => (
+                      <SelectItem key={mode} value={mode}>
+                        {MODE_LABELS[mode]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  {MODE_HINTS[draft.mode]}
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-2 rounded-xl border bg-muted/10 p-3">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-2 text-left text-sm font-medium"
+                onClick={() => setAdvancedOpen((v) => !v)}
+              >
+                <span className="flex items-center gap-2">
+                  <Zap className="h-4 w-4 text-primary" />
+                  Дополнительно
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {advancedOpen ? 'Скрыть параметры' : 'Показать параметры'}
+                </span>
+              </button>
+              {advancedOpen && (
+                <div className="mt-3 space-y-4 border-t pt-3">
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="buffer-guard-threshold" className="text-xs text-muted-foreground">
+                        Порог ENOBUFS за окно
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id="buffer-guard-threshold"
+                          className="h-9 w-32"
+                          disabled={controlsDisabled}
+                          {...numberInputProps('threshold_count')}
+                        />
+                        <span className="text-xs text-muted-foreground">ENOBUFS за окно</span>
+                      </div>
+                      {numberInputHint('threshold_count')}
+                      {(() => {
+                        const rec =
+                          draft.recommended_by_mode?.[draft.mode] ??
+                          draft.recommended_threshold ??
+                          40
+                        const already = effectiveDraft?.threshold_count === rec
+                        return (
+                          <div className="space-y-2">
+                            <p className="text-xs text-muted-foreground">
+                              Для режима «{MODE_LABELS[draft.mode]}» рекомендуем{' '}
+                              <span className="font-medium text-foreground">{rec}</span> за окно{' '}
+                              {RECOMMENDED_THRESHOLD_WINDOW_SECONDS} с (типичный VPS 1GB/1CPU).
+                            </p>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              disabled={controlsDisabled || already}
+                              onClick={() => {
+                                patchDraft({ threshold_count: rec })
+                                setNumberInputs(({ threshold_count: _typed, ...rest }) => rest)
+                              }}
+                            >
+                              Применить рекомендацию
+                            </Button>
+                          </div>
+                        )
+                      })()}
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="buffer-guard-window" className="text-xs text-muted-foreground">
+                        Длина окна в секундах
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id="buffer-guard-window"
+                          className="h-9 w-24"
+                          disabled={controlsDisabled}
+                          {...numberInputProps('window_seconds')}
+                        />
+                        <span className="text-xs text-muted-foreground">секунд</span>
+                      </div>
+                      {numberInputHint('window_seconds')}
+                    </div>
+                    <div className="space-y-2">
+                      <Label
+                        htmlFor="buffer-guard-escalate"
+                        className="text-xs text-muted-foreground"
+                      >
+                        Задержка перед эскалацией
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id="buffer-guard-escalate"
+                          className="h-9 w-24"
+                          disabled={controlsDisabled}
+                          {...numberInputProps('escalate_after_seconds')}
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          сек до повтора проверки перед restart
+                        </span>
+                      </div>
+                      {numberInputHint('escalate_after_seconds')}
+                    </div>
+                    <div className="space-y-2">
+                      <Label
+                        htmlFor="buffer-guard-cooldown"
+                        className="text-xs text-muted-foreground"
+                      >
+                        Пауза между автоматическими срабатываниями
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id="buffer-guard-cooldown"
+                          className="h-9 w-24"
+                          disabled={controlsDisabled}
+                          {...numberInputProps('cooldown_minutes')}
+                        />
+                        <span className="text-xs text-muted-foreground">минут после события</span>
+                      </div>
+                      {numberInputHint('cooldown_minutes')}
+                    </div>
+                    <div className="space-y-2">
+                      <Label
+                        htmlFor="buffer-guard-temp-ban"
+                        className="text-xs text-muted-foreground"
+                      >
+                        Временный бан клиента
+                      </Label>
+                      <div className="flex items-center gap-2">
+                        <Input
+                          id="buffer-guard-temp-ban"
+                          className="h-9 w-24"
+                          disabled={controlsDisabled || draft.mode !== 'kill_restart_temp_ban'}
+                          {...numberInputProps('temp_ban_minutes')}
+                        />
+                        <span className="text-xs text-muted-foreground">минут блокировки</span>
+                      </div>
+                      {numberInputHint('temp_ban_minutes')}
+                      <p className="text-[11px] leading-snug text-muted-foreground">
+                        Используется только в режиме временного бана; клиенты заносятся в
+                        banned_clients и автоматически разбаниваются после истечения времени.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs text-muted-foreground">Какие юниты смотреть</Label>
+                    <div className="grid gap-2 md:grid-cols-2">
+                      {Object.keys(WATCH_UNIT_LABELS).map((unit) => (
+                        <label
+                          key={unit}
+                          className="flex items-start gap-2 rounded-lg border bg-background px-3 py-2 text-xs"
+                        >
+                          <Checkbox
+                            className="mt-0.5"
+                            checked={draft.watch_units.includes(unit)}
+                            disabled={controlsDisabled}
+                            onCheckedChange={(checked) => handleToggleUnit(unit, checked)}
+                            aria-label={`Следить за юнитом ${unit}`}
+                          />
+                          <span className="leading-snug">
+                            <span className="font-medium">{WATCH_UNIT_LABELS[unit]}</span>
+                            <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                              Смотрим journalctl этого OpenVPN-сервиса на ENOBUFS в последнем окне.
+                            </span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-xs text-muted-foreground">
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-1.5">
+                  <Timer className="h-3.5 w-3.5" />
+                  <span>
+                    Последнее обновление настроек:{' '}
+                    <span className="text-foreground">
+                      {settings?.updated_at ? formatDateTime(settings.updated_at) : 'ещё не было'}
+                    </span>
+                  </span>
+                </div>
+                {eventSummary && (
+                  <div className="flex items-start gap-1.5">
+                    {currentEvent?.result === 'banned' ? (
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 text-amber-500" />
+                    ) : (
+                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 text-emerald-500" />
+                    )}
+                    <div className="space-y-0.5">
+                      <p className="font-medium text-foreground">{eventSummary.title}</p>
+                      <p className="text-[11px] text-muted-foreground">{eventSummary.detail}</p>
+                    </div>
+                  </div>
+                )}
+                {eventsError && !eventSummary && (
+                  <p className="text-[11px] text-destructive">
+                    Не удалось загрузить последние события: {eventsError}
+                  </p>
+                )}
+                {!eventSummary && !eventsError && (
+                  <p className="text-[11px] text-muted-foreground">
+                    Ещё не было срабатываний Buffer Guard для этого узла.
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={() => void handleScan()}
+                  disabled={disabled || activeNodeId == null || scanBusy}
+                >
+                  <Zap className={cn('h-4 w-4', scanBusy && 'animate-pulse')} />
+                  {scanBusy ? 'Проверка…' : 'Проверить сейчас'}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={!dirty || controlsDisabled}
+                  onClick={() => void handleSave()}
+                >
+                  Сохранить
+                </Button>
+              </div>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  )
+}
+

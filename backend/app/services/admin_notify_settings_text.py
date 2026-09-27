@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 SETTINGS_CHANGE_LABELS: dict[str, str] = {
@@ -103,6 +104,24 @@ def _humanize_raw_details_for_tg(details: str | None) -> str | None:
     return None
 
 
+def _format_node_sync_drift(details: str) -> str:
+    try:
+        item = json.loads(details) if details else {}
+    except ValueError:
+        item = {}
+    if not isinstance(item, dict):
+        item = {}
+    name = str(item.get("name") or item.get("group_id") or "").strip()
+    line = f"Расхождение в HA-группе «{name}»" if name else "Расхождение в HA-группе"
+    summary = str(item.get("summary") or "").strip()
+    if summary:
+        line += f": {summary}"
+    hint = str(item.get("hint") or "").strip()
+    if hint:
+        line += f". {hint}"
+    return line
+
+
 def user_action_tg_action_line(
     event_key: str,
     *,
@@ -152,6 +171,14 @@ def user_action_tg_action_line(
         if target_value:
             return f"Удалён бэкап «{target_value}»"
         return "Удалён файл бэкапа"
+
+    if key == "node_sync_drift":
+        return _format_node_sync_drift(details_value)
+
+    if key == "settings_backup_auto_failed":
+        if details_value:
+            return f"Авто-бэкап не создан, повтор через час: {details_value}"
+        return "Авто-бэкап не создан, повтор через час"
 
     if key == "settings_restart_service":
         svc = target_value or "сервис"

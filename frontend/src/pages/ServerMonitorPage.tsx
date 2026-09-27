@@ -232,7 +232,7 @@ function LiveMetricCard({ label, value, icon: Icon, direction }: LiveMetricProps
 
 export default function ServerMonitorPage() {
   const { user } = useAuth()
-  const { activeNode } = useNode()
+  const { activeNode, loading: nodeLoading } = useNode()
   const { error: notifyError, success } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
   const [metrics, setMetrics] = useState<ServerMetrics | null>(null)
@@ -309,14 +309,14 @@ export default function ServerMonitorPage() {
   )
 
   useEffect(() => {
-    if (user?.role !== 'admin') return
+    if (user?.role !== 'admin' || nodeLoading) return
     startGlobal()
     loadMetrics()
       .finally(() => {
         setLoading(false)
         doneGlobal()
       })
-  }, [user?.role, loadMetrics, activeNode?.id, startGlobal, doneGlobal])
+  }, [user?.role, nodeLoading, loadMetrics, activeNode?.id, startGlobal, doneGlobal])
 
   useEffect(() => {
     if (user?.role !== 'admin' || !iface) return
@@ -324,9 +324,9 @@ export default function ServerMonitorPage() {
   }, [user?.role, iface, range, loadBandwidth, activeNode?.id])
 
   useEffect(() => {
-    if (user?.role !== 'admin') return
+    if (user?.role !== 'admin' || nodeLoading) return
     loadResourceHistory(resourcePeriod)
-  }, [user?.role, loadResourceHistory, resourcePeriod, activeNode?.id])
+  }, [user?.role, nodeLoading, loadResourceHistory, resourcePeriod, activeNode?.id])
 
   useEffect(() => {
     if (user?.role !== 'admin' || !iface) return

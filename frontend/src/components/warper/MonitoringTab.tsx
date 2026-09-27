@@ -12,7 +12,7 @@ import LogsTab from './LogsTab'
 import StatusSection from './StatusSection'
 import TrafficTab from './TrafficTab'
 import WarperSection from './WarperSection'
-import { formatOutboundMode, isWarperDisabled } from './utils'
+import { formatOutboundMode, isWarperDisabled, warperToggleLabel } from './utils'
 
 interface MonitoringTabProps {
   health: WarperHealthResponse | null
@@ -67,7 +67,11 @@ export default function MonitoringTab({
         <div className="flex flex-wrap items-center gap-2">
           {health?.installed && (
             <Badge variant={health.active ? 'success' : 'secondary'}>
-              {health.active ? 'AZ-WARP активен' : 'AZ-WARP выключен'}
+              {health.active
+                ? 'AZ-WARP активен'
+                : health.dns_patch_orphaned
+                  ? 'AZ-WARP выключен не полностью'
+                  : 'AZ-WARP выключен'}
             </Badge>
           )}
           {outboundMode && <Badge variant="outline">Режим: {formatOutboundMode(outboundMode)}</Badge>}
@@ -91,7 +95,7 @@ export default function MonitoringTab({
             disabled={loading || disabled}
           >
             <Power className="mr-1.5 h-4 w-4" />
-            {health?.active ? 'Выключить' : 'Включить'}
+            {warperToggleLabel(health)}
           </Button>
         </div>
       </div>

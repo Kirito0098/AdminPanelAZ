@@ -10,7 +10,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
-from app.models import AmneziaWg2AccessPolicy, Node, NodeStatus, VpnType
+from app.models import AmneziaWg2AccessPolicy, Node, NodeStatus, VpnType, WgAccessPolicy
 from app.services.antizapret import AntiZapretService
 from app.services import awg2
 from app.services.node_sync import vpn_state_sync
@@ -299,11 +299,235 @@ def test_post_import_reapply_blocked_awg2_peers(db):
         replica_node=replica_node,
     )
 
-    replica.block_awg2_client_runtime.assert_has_calls(
-        [call("blocked-temp"), call("blocked-perm")],
-        any_order=True,
+    replica.block_awg2_clients_runtime.assert_called_once()
+    assert sorted(replica.block_awg2_clients_runtime.call_args.args[0]) == ["blocked-perm", "blocked-temp"]
+    replica.block_awg2_client_runtime.assert_not_called()
+
+
+def _add_wg_block_policies(db, node_id: int) -> None:
+    db.add_all(
+        [
+            WgAccessPolicy(
+                node_id=node_id,
+                client_name="wg-temp",
+                is_temp_blocked=True,
+                block_reason="manual_temp",
+                block_started_at=datetime.utcnow(),
+                block_days=2,
+                block_until=datetime.utcnow() + timedelta(days=2),
+            ),
+            WgAccessPolicy(
+                node_id=node_id,
+                client_name="wg-perm",
+                is_permanent_blocked=True,
+                block_reason="manual_permanent",
+                block_started_at=datetime.utcnow(),
+            ),
+            WgAccessPolicy(node_id=node_id, client_name="wg-open"),
+        ]
     )
-    assert replica.block_awg2_client_runtime.call_count == 2
+    db.commit()
+
+
+def _wg_sync_adapters():
+    primary = MagicMock()
+    replica = MagicMock()
+    primary.list_wireguard_server_config_files.return_value = ["vpn.conf"]
+    replica.list_wireguard_server_config_files.return_value = ["vpn.conf"]
+    primary.read_wireguard_server_config.return_value = "conf"
+    primary.export_wireguard_client_profiles_archive.return_value = _sample_profile_archive()
+    replica.apply_wireguard_runtime.return_value = {"success": True}
+    return primary, replica
+
+
+def _assert_wg_blocks_reapplied(replica) -> None:
+    replica.block_wireguard_clients_runtime.assert_called_once()
+    assert sorted(replica.block_wireguard_clients_runtime.call_args.args[0]) == ["wg-perm", "wg-temp"]
+    replica.block_wireguard_client_runtime.assert_not_called()
+
+
+def test_sync_wireguard_state_reapplies_blocked_peers_after_syncconf(db):
+    replica_node = _make_node(db, name="replica")
+    _add_wg_block_policies(db, replica_node.id)
+    primary, replica = _wg_sync_adapters()
+    order = MagicMock()
+    order.attach_mock(replica.apply_wireguard_runtime, "apply")
+    order.attach_mock(replica.block_wireguard_clients_runtime, "block")
+
+    vpn_state_sync.sync_wireguard_state_from_primary(
+        primary,
+        replica,
+        db=db,
+        replica_node=replica_node,
+    )
+
+    _assert_wg_blocks_reapplied(replica)
+    assert order.mock_calls[0] == call.apply()
+
+
+def test_sync_wireguard_state_reblocks_after_profile_copy_and_reports_failed_batch(db):
+    replica_node = _make_node(db, name="replica")
+    _add_wg_block_policies(db, replica_node.id)
+    primary, replica = _wg_sync_adapters()
+    order = MagicMock()
+    order.attach_mock(replica.import_wireguard_client_profiles_archive, "copy")
+    order.attach_mock(replica.block_wireguard_clients_runtime, "block")
+    replica.block_wireguard_clients_runtime.side_effect = RuntimeError("agent timeout")
+
+    with pytest.raises(RuntimeError, match="wg-temp: agent timeout.*wg-perm: agent timeout"):
+        vpn_state_sync.sync_wireguard_state_from_primary(
+            primary,
+            replica,
+            db=db,
+            replica_node=replica_node,
+        )
+
+    replica.import_wireguard_client_profiles_archive.assert_called_once()
+    _assert_wg_blocks_reapplied(replica)
+    assert order.mock_calls[0][0] == "copy"
+
+
+def test_sync_wireguard_state_reblocks_when_profile_copy_fails(db):
+    replica_node = _make_node(db, name="replica")
+    _add_wg_block_policies(db, replica_node.id)
+    primary, replica = _wg_sync_adapters()
+    replica.import_wireguard_client_profiles_archive.side_effect = RuntimeError("no space left on device")
+
+    with pytest.raises(RuntimeError, match="no space left on device"):
+        vpn_state_sync.sync_wireguard_state_from_primary(primary, replica, db=db, replica_node=replica_node)
+
+    _assert_wg_blocks_reapplied(replica)
+
+
+def test_sync_wireguard_state_reports_copy_error_when_reblock_also_fails(db):
+    replica_node = _make_node(db, name="replica")
+    _add_wg_block_policies(db, replica_node.id)
+    primary, replica = _wg_sync_adapters()
+    replica.import_wireguard_client_profiles_archive.side_effect = RuntimeError("no space left on device")
+    replica.block_wireguard_clients_runtime.side_effect = RuntimeError("agent timeout")
+
+    with pytest.raises(RuntimeError, match="no space left on device"):
+        vpn_state_sync.sync_wireguard_state_from_primary(primary, replica, db=db, replica_node=replica_node)
+
+    _assert_wg_blocks_reapplied(replica)
+
+
+def test_sync_wireguard_state_without_replica_node_skips_reblock_on_failure(db):
+    primary, replica = _wg_sync_adapters()
+    replica.import_wireguard_client_profiles_archive.side_effect = RuntimeError("no space left on device")
+
+    with pytest.raises(RuntimeError, match="no space left on device"):
+        vpn_state_sync.sync_wireguard_state_from_primary(primary, replica, db=db)
+
+    replica.block_wireguard_clients_runtime.assert_not_called()
+
+
+def test_sync_wireguard_state_reblocks_when_runtime_apply_raises(db):
+    replica_node = _make_node(db, name="replica")
+    _add_wg_block_policies(db, replica_node.id)
+    primary, replica = _wg_sync_adapters()
+    replica.apply_wireguard_runtime.side_effect = RuntimeError("agent timeout after syncconf")
+
+    with pytest.raises(RuntimeError, match="agent timeout after syncconf"):
+        vpn_state_sync.sync_wireguard_state_from_primary(primary, replica, db=db, replica_node=replica_node)
+
+    _assert_wg_blocks_reapplied(replica)
+
+
+def _add_awg2_block_policy(db, node_id: int) -> None:
+    db.add(
+        AmneziaWg2AccessPolicy(
+            node_id=node_id,
+            client_name="awg-perm",
+            is_permanent_blocked=True,
+            block_reason="manual_permanent",
+            block_started_at=datetime.utcnow(),
+        )
+    )
+    db.commit()
+
+
+def test_sync_amneziawg2_reblocks_when_runtime_apply_raises(db):
+    replica_node = _make_node(db, name="replica")
+    _add_awg2_block_policy(db, replica_node.id)
+    primary = MagicMock()
+    replica = MagicMock()
+    replica.get_awg2_health.return_value = {"installed": True}
+    primary.export_awg2_state_archive.return_value = b"fake-tar"
+    replica.apply_awg2_runtime.side_effect = RuntimeError("agent timeout after apply")
+
+    with pytest.raises(RuntimeError, match="agent timeout after apply"):
+        vpn_state_sync.sync_amneziawg2_state_from_primary(primary, replica, db=db, replica_node=replica_node)
+
+    replica.block_awg2_clients_runtime.assert_called_once()
+    assert replica.block_awg2_clients_runtime.call_args.args[0] == ["awg-perm"]
+
+
+def test_sync_amneziawg2_not_installed_raises_without_reblock(db):
+    replica_node = _make_node(db, name="replica")
+    _add_awg2_block_policy(db, replica_node.id)
+    replica = MagicMock()
+    replica.get_awg2_health.return_value = {"installed": False, "install_command": "install-awg2"}
+
+    with pytest.raises(vpn_state_sync.Awg2NotInstalledError, match="install-awg2"):
+        vpn_state_sync.sync_amneziawg2_state_from_primary(MagicMock(), replica, db=db, replica_node=replica_node)
+
+    replica.import_awg2_state_archive.assert_not_called()
+    replica.block_awg2_clients_runtime.assert_not_called()
+
+
+def test_sync_vpn_crypto_wireguard_passes_replica_context(db):
+    replica_node = _make_node(db, name="replica")
+    _add_wg_block_policies(db, replica_node.id)
+    primary, replica = _wg_sync_adapters()
+
+    vpn_state_sync.sync_vpn_crypto_from_primary(
+        primary,
+        replica,
+        VpnType.wireguard,
+        db=db,
+        replica_node=replica_node,
+        client_name="wg-open",
+    )
+
+    _assert_wg_blocks_reapplied(replica)
+
+
+def test_sync_all_vpn_crypto_reapplies_wireguard_blocks(db, monkeypatch):
+    replica_node = _make_node(db, name="replica")
+    _add_wg_block_policies(db, replica_node.id)
+    primary, replica = _wg_sync_adapters()
+    primary.get_awg2_health.return_value = {"installed": False}
+    monkeypatch.setattr(vpn_state_sync, "sync_openvpn_pki_from_primary", MagicMock())
+
+    vpn_state_sync.sync_all_vpn_crypto_from_primary(
+        primary,
+        replica,
+        db=db,
+        replica_node=replica_node,
+    )
+
+    _assert_wg_blocks_reapplied(replica)
+
+
+def test_openvpn_pki_sync_receives_replica_context(db, monkeypatch):
+    replica_node = _make_node(db, name="replica")
+    primary = MagicMock()
+    primary.get_awg2_health.return_value = {"installed": False}
+    replica = MagicMock()
+    sync_pki = MagicMock()
+    monkeypatch.setattr(vpn_state_sync, "sync_openvpn_pki_from_primary", sync_pki)
+    monkeypatch.setattr(vpn_state_sync, "sync_wireguard_state_from_primary", MagicMock())
+
+    vpn_state_sync.sync_vpn_crypto_from_primary(
+        primary, replica, VpnType.openvpn, db=db, replica_node=replica_node, openvpn_multihome=True
+    )
+    vpn_state_sync.sync_all_vpn_crypto_from_primary(primary, replica, db=db, replica_node=replica_node)
+
+    assert [call.kwargs for call in sync_pki.call_args_list] == [
+        {"openvpn_multihome": True, "db": db, "replica_node": replica_node},
+        {"openvpn_multihome": False, "db": db, "replica_node": replica_node},
+    ]
 
 
 def test_sync_vpn_crypto_routes_amneziawg2():
@@ -377,8 +601,12 @@ def test_handle_client_create_passes_replica_context_for_awg2_crypto_sync(monkey
         lambda _db, _group: primary_adapter,
     )
     monkeypatch.setattr(
-        "app.services.node_sync.replicate.iter_replica_adapters",
-        lambda _db, _group: iter([(replica_node, replica_adapter)]),
+        "app.services.node_sync.replicate.get_replica_nodes",
+        lambda _db, _group: [replica_node],
+    )
+    monkeypatch.setattr(
+        "app.services.node_sync.replicate.get_adapter_for_node",
+        lambda _node: replica_adapter,
     )
     sync_mock = MagicMock()
     monkeypatch.setattr("app.services.node_sync.replicate.sync_vpn_crypto_from_primary", sync_mock)
@@ -425,8 +653,12 @@ def test_handle_client_create_records_partial_failure(monkeypatch):
         lambda _db, _group: MagicMock(),
     )
     monkeypatch.setattr(
-        "app.services.node_sync.replicate.iter_replica_adapters",
-        lambda _db, _group: iter([(replica_node, replica_adapter)]),
+        "app.services.node_sync.replicate.get_replica_nodes",
+        lambda _db, _group: [replica_node],
+    )
+    monkeypatch.setattr(
+        "app.services.node_sync.replicate.get_adapter_for_node",
+        lambda _node: replica_adapter,
     )
     monkeypatch.setattr(
         "app.services.node_sync.replicate.sync_vpn_crypto_from_primary",
@@ -542,6 +774,8 @@ def test_handle_client_renew_cert_syncs_openvpn_pki(monkeypatch):
         primary_adapter,
         replica_adapter,
         openvpn_multihome=False,
+        db=db,
+        replica_node=replica_node,
     )
     assert result.operation == ReplicateOperation.CLIENT_RENEW_CERT
     assert result.successes == [{"node_id": 5, "config_id": 50}]

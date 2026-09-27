@@ -1,9 +1,71 @@
+import re
 from datetime import datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.models import NodeStatus, SyncStatus, UserRole, VpnType
+
+DATE_ONLY_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+# Значения публикации пишутся в .env и подставляются в конфиг nginx скриптами (sed): перевод строки
+# добавил бы ключ в .env, а `;` и `{` — директивы в vhost.
+_PUBLISH_HOSTNAME_RE = re.compile(
+    r"(?=.{1,253}\Z)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*"
+)
+_PUBLISH_IPV4_RE = re.compile(r"(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}")
+_PUBLISH_FILE_PATH_RE = re.compile(r"/[A-Za-z0-9._/@+-]+")
+_PUBLISH_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+_PUBLISH_PORTAL_HOST_RE = re.compile(r"[A-Za-z0-9.:/-]+")
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _publish_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    if _CONTROL_CHARS_RE.search(text):
+        raise ValueError("Недопустимые символы")
+    return text.strip() or None
+
+
+def validate_publish_domain(value: Any) -> str | None:
+    text = _publish_text(value)
+    if text is None:
+        return None
+    host, sep, port = text.partition(":")
+    if sep and not (port.isdigit() and 1 <= int(port) <= 65535):
+        raise ValueError("Некорректный порт в домене")
+    if not (_PUBLISH_HOSTNAME_RE.fullmatch(host) or _PUBLISH_IPV4_RE.fullmatch(host)):
+        raise ValueError("Некорректный домен: ожидается имя вида panel.example.com или IPv4")
+    return text
+
+
+def validate_publish_portal_domain(value: Any) -> str | None:
+    text = _publish_text(value)
+    if text is None:
+        return None
+    if not _PUBLISH_PORTAL_HOST_RE.fullmatch(text):
+        raise ValueError("Некорректный хост портала")
+    return text
+
+
+def validate_publish_email(value: Any) -> str | None:
+    text = _publish_text(value)
+    if text is None:
+        return None
+    if not _PUBLISH_EMAIL_RE.fullmatch(text):
+        raise ValueError("Некорректный email")
+    return text
+
+
+def validate_publish_file_path(value: Any) -> str | None:
+    text = _publish_text(value)
+    if text is None:
+        return None
+    if not _PUBLISH_FILE_PATH_RE.fullmatch(text):
+        raise ValueError("Путь должен быть абсолютным и без пробелов и спецсимволов")
+    return text
 
 
 class Token(BaseModel):
@@ -212,17 +274,31 @@ class UserUpdate(BaseModel):
     role: UserRole | None = None
     theme: str | None = None
     is_active: bool | None = None
+    access_until: datetime | None = None
     password: str | None = Field(default=None, min_length=4)
     telegram_id: str | None = None
     config_quota: int | None = Field(default=None, ge=0, le=1000)
     can_create_configs: bool | None = None
     visible_vpn_profiles: dict | None = None
 
+    @field_validator("access_until", mode="before")
+    @classmethod
+    def _access_until_end_of_day(cls, value: Any) -> Any:
+        """A bare `YYYY-MM-DD` means the end of that day, as on the client level.
+
+        Without this, "доступ до 1 окт" would cut access at 00:00 on Oct 1.
+        """
+        if isinstance(value, str) and DATE_ONLY_RE.fullmatch(value.strip()):
+            return f"{value.strip()}T23:59:59.999999+00:00"
+        return value
+
 
 class UserResponse(UserBase):
     id: int
     must_change_password: bool
     totp_enabled: bool = False
+    access_until: datetime | None = None
+    access_cascade_warning: str | None = None
     telegram_id: str | None = None
     config_quota: int | None = None
     can_create_configs: bool = True
@@ -294,6 +370,11 @@ class EffectiveVisibleVpnProfilesResponse(BaseModel):
 class PasswordChangeRequest(BaseModel):
     current_password: str
     new_password: str = Field(min_length=4)
+
+
+class PasswordChangeResponse(BaseModel):
+    message: str
+    access_token: str
 
 
 class VpnConfigCreate(BaseModel):
@@ -745,6 +826,13 @@ class BackupEntry(BaseModel):
     restore_detail: dict[str, Any] | None = None
 
 
+class PreRestoreSnapshotEntry(BaseModel):
+    snapshot_id: str
+    created_at: str
+    size_bytes: int
+    components: list[str] = []
+
+
 class BackupCreateRequest(BaseModel):
     include_configs: bool = False
     include_antizapret_backup: bool = False
@@ -855,6 +943,60 @@ class AlertRuleEvaluateResponse(BaseModel):
     results: list[AlertRuleEvaluateResult]
 
 
+class OpenVpnBufferGuardSettingsOut(BaseModel):
+    node_id: int
+    enabled: bool
+    mode: str
+    threshold_count: int
+    window_seconds: int
+    escalate_after_seconds: int
+    cooldown_minutes: int
+    temp_ban_minutes: int
+    watch_units: list[str]
+    recommended_threshold: int
+    recommended_by_mode: dict[str, int]
+    updated_at: datetime | None = None
+
+
+class OpenVpnBufferGuardSettingsUpdate(BaseModel):
+    node_id: int
+    enabled: bool
+    mode: str
+    threshold_count: int = Field(ge=10, le=1_000_000)
+    window_seconds: int = Field(ge=10, le=600)
+    escalate_after_seconds: int = Field(ge=5, le=300)
+    cooldown_minutes: int = Field(ge=1, le=1440)
+    temp_ban_minutes: int = Field(ge=5, le=10_080)
+    watch_units: list[str]
+
+
+class OpenVpnBufferGuardEventOut(BaseModel):
+    id: int
+    node_id: int
+    created_at: datetime
+    unit: str
+    common_name: str | None
+    real_address: str | None
+    error_count: int
+    window_seconds: int
+    mode: str
+    actions: list[str]
+    result: str
+    detail: str | None
+    manual: bool
+    ban_expires_at: datetime | None
+
+
+class DnsAaaaStateOut(BaseModel):
+    antizapret: Literal["zero", "nodata", "custom"]
+    vpn: Literal["zero", "nodata", "custom"]
+
+
+class DnsAaaaUpdate(BaseModel):
+    target: Literal["antizapret", "vpn"]
+    nodata: bool
+
+
 class GeoIpStatusResponse(BaseModel):
     loaded: bool
     source: Literal["local", "ip-api"]
@@ -868,6 +1010,7 @@ class RetentionSettingsResponse(BaseModel):
     enabled: bool = True
     interval_hours: int = 24
     traffic_sample_retention_days: int = 90
+    traffic_session_retention_days: int = 30
     action_log_retention_days: int = 365
     resource_metrics_retention_days: int = 30
     panel_resource_metrics_retention_days: int = 30
@@ -877,6 +1020,7 @@ class RetentionSettingsUpdate(BaseModel):
     enabled: bool | None = None
     interval_hours: int | None = Field(default=None, ge=1, le=168)
     traffic_sample_retention_days: int | None = Field(default=None, ge=1, le=3650)
+    traffic_session_retention_days: int | None = Field(default=None, ge=1, le=3650)
     action_log_retention_days: int | None = Field(default=None, ge=1, le=3650)
     resource_metrics_retention_days: int | None = Field(default=None, ge=1, le=3650)
     panel_resource_metrics_retention_days: int | None = Field(default=None, ge=1, le=3650)
@@ -1114,10 +1258,18 @@ class VpnNetworkPublishRequest(BaseModel):
     configure_portal: bool = False
     portal_domain: str | None = Field(default=None, max_length=255)
 
+    _domain = field_validator("domain", mode="before")(validate_publish_domain)
+    _email = field_validator("email", mode="before")(validate_publish_email)
+    _ssl_paths = field_validator("ssl_cert", "ssl_key", mode="before")(validate_publish_file_path)
+    _portal_domain = field_validator("portal_domain", mode="before")(validate_publish_portal_domain)
+
 
 class PortalPublishRequest(BaseModel):
     portal_domain: str = Field(min_length=1, max_length=255)
     email: str | None = Field(default=None, max_length=255)
+
+    _portal_domain = field_validator("portal_domain", mode="before")(validate_publish_portal_domain)
+    _email = field_validator("email", mode="before")(validate_publish_email)
     save_domain: bool = True
 
 
@@ -1187,6 +1339,7 @@ class VpnNetworkPortStatusResponse(BaseModel):
 
 class CloudflareProxySettingsResponse(BaseModel):
     enabled: bool = False
+    origin_lock_enabled: bool = False
     auto_update: bool = False
     interval_days: int = 7
     last_success_at: str | None = None
@@ -1196,6 +1349,7 @@ class CloudflareProxySettingsResponse(BaseModel):
 
 class CloudflareProxySettingsUpdate(BaseModel):
     enabled: bool | None = None
+    origin_lock_enabled: bool | None = None
     auto_update: bool | None = None
     interval_days: int | None = Field(default=None, ge=1, le=90)
 
@@ -1566,14 +1720,23 @@ class RoutingOverview(BaseModel):
     node_name: str | None = None
 
 
+class AntizapretSettingOption(BaseModel):
+    value: str
+    label: str
+
+
 class AntizapretSettingFieldSchema(BaseModel):
     key: str
     html_id: str
-    type: Literal["flag", "string"]
+    type: Literal["flag", "string", "choice", "number"]
     env: str
     param_label: str = ""
     title: str = ""
     description: str = ""
+    options: list[AntizapretSettingOption] | None = None
+    min: int | None = None
+    max: int | None = None
+    placeholder: str | None = None
 
 
 class AntizapretSettingsResponse(BaseModel):
@@ -1598,6 +1761,10 @@ class WarperHealthResponse(BaseModel):
     active: bool = False
     version: str | None = None
     conflict_antizapret_warp: bool = False
+    antizapret_warp_mode: str | None = None
+    vpn_warp_mode: str | None = None
+    update_pending: bool = False
+    dns_patch_orphaned: bool = False
     health_error: str | None = None
     warper_bin: bool | None = None
     warper_script: bool | None = None
@@ -1720,7 +1887,9 @@ class WarperTextSaveRequest(BaseModel):
 
 class WarperSettingsOptionsResponse(BaseModel):
     warp_keys: list[str] = Field(default_factory=list)
+    warp_key_items: list[dict] = Field(default_factory=list)
     wg_configs: list[str] = Field(default_factory=list)
+    ovpn_configs: list[dict] = Field(default_factory=list)
     node_id: int | None = None
     node_name: str | None = None
 
@@ -1730,17 +1899,79 @@ class WarperModeWarpUpdate(BaseModel):
 
 
 class WarperModeSlaveUpdate(BaseModel):
-    host: str = Field(..., min_length=1)
-    port: int = Field(..., ge=1, le=65535)
-    key: str = Field(..., min_length=1)
+    host: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    key: str | None = None
+    link: str | None = None
+
+    @model_validator(mode="after")
+    def _link_or_host(self) -> "WarperModeSlaveUpdate":
+        if (self.link or "").strip():
+            return self
+        if not (self.host or "").strip() or not (self.key or "").strip() or self.port is None:
+            raise ValueError("Укажите ссылку ss:// или host, port и key")
+        return self
 
 
 class WarperModeWgUpdate(BaseModel):
     config_path: str = Field(..., min_length=1)
 
 
+class WarperModeLinkUpdate(BaseModel):
+    link: str = Field(..., min_length=1, max_length=4096)
+
+
+class WarperModeOpenVpnUpdate(BaseModel):
+    config_path: str = Field(..., min_length=1)
+    username: str | None = None
+    password: str | None = None
+
+
+class WarperOvpnConfigRequest(BaseModel):
+    config_path: str = Field(..., min_length=1)
+
+
 class WarperFullVpnUpdate(BaseModel):
     enable: bool
+
+
+class WarperEnableUpdate(BaseModel):
+    enable: bool
+
+
+class WarperResolveCleanRequest(BaseModel):
+    domain: str | None = None
+
+
+class WarperAutoResolveResponse(BaseModel):
+    enabled: bool = False
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperIpRoutesResponse(BaseModel):
+    routes: list[str] = Field(default_factory=list)
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperSubnetsResponse(BaseModel):
+    subnets: dict[str, str] = Field(default_factory=dict)
+    node_id: int | None = None
+    node_name: str | None = None
+
+
+class WarperSingboxStatusResponse(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    active: bool = False
+    enabled: bool = False
+    state: str | None = None
+    version: str | None = None
+    log_level: str | None = None
+    mtu: int | None = None
+    node_id: int | None = None
+    node_name: str | None = None
 
 
 class WarperSubnetUpdate(BaseModel):
@@ -1777,6 +2008,7 @@ class WarperUpdatesCheckResponse(BaseModel):
     current: str | None = None
     remote: str | None = None
     update_available: bool = False
+    update_pending: bool = False
     error: str | None = None
     message: str | None = None
     node_id: int | None = None

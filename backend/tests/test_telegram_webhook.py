@@ -10,6 +10,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.routers import telegram_webhook as tw
+from app.services import telegram_webhook_security as webhook_security
 from app.services.telegram_webhook_security import (
     TELEGRAM_SECRET_TOKEN_HEADER,
     secrets_match,
@@ -56,6 +57,7 @@ def test_webhook_allows_missing_secret_header_legacy(monkeypatch):
         lambda request, behind_nginx: "https://panel.example",
     )
 
+    monkeypatch.setattr(tw, "SessionLocal", MagicMock)
     handle = AsyncMock()
     monkeypatch.setattr(tw.telegram_bot_service, "handle_update", handle)
 
@@ -68,6 +70,34 @@ def test_webhook_allows_missing_secret_header_legacy(monkeypatch):
 
     assert result == {"ok": True}
     handle.assert_awaited_once()
+
+
+def _ip_request(peer: str, real_ip: str | None):
+    headers = {"x-real-ip": real_ip} if real_ip else {}
+    return SimpleNamespace(client=SimpleNamespace(host=peer), headers=headers)
+
+
+@pytest.fixture
+def trusted_proxies(monkeypatch):
+    monkeypatch.setattr(
+        "app.config.get_settings",
+        lambda: SimpleNamespace(trusted_proxy_ip_list=["127.0.0.1"]),
+    )
+
+
+def test_webhook_client_ip_ignores_x_real_ip_from_untrusted_peer(trusted_proxies):
+    request = _ip_request("203.0.113.9", "149.154.160.1")
+    assert webhook_security.get_telegram_webhook_client_ip(request) == "203.0.113.9"
+
+
+@pytest.mark.parametrize("peer", ["127.0.0.1", "::ffff:127.0.0.1"])
+def test_webhook_client_ip_uses_x_real_ip_from_trusted_proxy(trusted_proxies, peer):
+    request = _ip_request(peer, "149.154.160.1")
+    assert webhook_security.get_telegram_webhook_client_ip(request) == "149.154.160.1"
+
+
+def test_webhook_client_ip_falls_back_to_peer_without_header(trusted_proxies):
+    assert webhook_security.get_telegram_webhook_client_ip(_ip_request("127.0.0.1", None)) == "127.0.0.1"
 
 
 def test_webhook_rejects_wrong_secret_header(monkeypatch):
@@ -117,6 +147,7 @@ def test_webhook_happy_path_skips_full_settings_dto(monkeypatch):
         lambda request, behind_nginx: "https://panel.example",
     )
 
+    monkeypatch.setattr(tw, "SessionLocal", MagicMock)
     handle = AsyncMock()
     monkeypatch.setattr(tw.telegram_bot_service, "handle_update", handle)
 

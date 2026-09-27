@@ -33,7 +33,7 @@ import type { ChangelogBlock, LatestChangelog } from '@/types'
 
 const UPDATE_STEPS = [
   { icon: GitCommit, label: 'Загрузка кода', detail: 'git fetch и pull с GitHub' },
-  { icon: Package, label: 'Зависимости', detail: 'pip install и npm install' },
+  { icon: Package, label: 'Зависимости', detail: 'pip install и npm ci' },
   { icon: Rocket, label: 'Сборка UI', detail: 'npm run build:all' },
   { icon: Server, label: 'Перезапуск', detail: 'adminpanelaz через systemd' },
 ] as const

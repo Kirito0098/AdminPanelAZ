@@ -4,13 +4,16 @@ import asyncio
 import logging
 import time
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Node
 from app.services.awg2_noc import fetch_awg2_peers_for_adapter
 from app.services.feature_toggles import is_awg2_enabled
-from app.services.node_manager import _is_vpn_node, get_adapter_for_node
+from app.services.node_manager import is_vpn_node, get_adapter_for_node
 from app.services.traffic.collector import TrafficCollectorService, build_status_rows
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +33,7 @@ async def run_traffic_collector_loop():
             if not settings.traffic_sync_enabled or not _is_traffic_sync_enabled():
                 logger.debug("traffic_collector skipped — traffic_sync disabled")
             else:
-                await asyncio.to_thread(_collect_all_nodes)
+                await run_background_step(_collect_all_nodes)
         except Exception as exc:
             logger.warning("Traffic collector error: %s", exc)
         await asyncio.sleep(interval)
@@ -46,8 +49,9 @@ def _collect_all_nodes():
         nodes = db.query(Node).all()
         awg2_enabled = is_awg2_enabled(db)
         for node in nodes:
-            if not _is_vpn_node(node):
+            if not is_vpn_node(node):
                 continue
+            node_name = node.name
             node_started = time.perf_counter()
             wg_runtime_calls = 0
             clients_changed = 0
@@ -75,8 +79,12 @@ def _collect_all_nodes():
                     wg_runtime_calls,
                     clients_changed,
                 )
+            except SQLAlchemyError as exc:
+                db.rollback()
+                logger.warning("Traffic collect failed for node %s: %s", node_name, exc)
             except Exception as exc:
-                logger.debug("Traffic collect failed for node %s: %s", node.name, exc)
+                db.rollback()
+                logger.debug("Traffic collect failed for node %s: %s", node_name, exc)
     finally:
         db.close()
     logger.info(

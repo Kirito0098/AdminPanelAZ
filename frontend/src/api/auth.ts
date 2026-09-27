@@ -1,15 +1,26 @@
-import { clearWebSessionId } from '@/lib/webSession'
+import { setAccessToken } from '@/lib/accessToken'
+import { clearWebSessionId, storeWebSessionId } from '@/lib/webSession'
 import { apiFetch } from './http'
+import type { User, ActiveWebSession } from '../types'
 
 export type LoginResult =
   | { access_token: string; web_session_id?: string; requires_2fa?: false }
   | { requires_2fa: true; temp_token: string; passkey_available?: boolean }
 
+/** Without the id the tab sends no heartbeat, so revoking its session in the list has no effect. */
+function rememberWebSession<T extends object>(result: T): T {
+  const id = (result as { web_session_id?: unknown }).web_session_id
+  if (typeof id === 'string' && id) storeWebSessionId(id)
+  return result
+}
+
 export async function login(username: string, password: string): Promise<LoginResult> {
-  return apiFetch<LoginResult>('/auth/login/json', {
-    method: 'POST',
-    body: JSON.stringify({ username, password }),
-  })
+  return rememberWebSession(
+    await apiFetch<LoginResult>('/auth/login/json', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+  )
 }
 
 export async function loginWithCaptcha(
@@ -18,17 +29,21 @@ export async function loginWithCaptcha(
   captchaId: string,
   captchaText: string,
 ): Promise<LoginResult> {
-  return apiFetch<LoginResult>('/auth/login/json', {
-    method: 'POST',
-    body: JSON.stringify({ username, password, captcha_id: captchaId, captcha_text: captchaText }),
-  })
+  return rememberWebSession(
+    await apiFetch<LoginResult>('/auth/login/json', {
+      method: 'POST',
+      body: JSON.stringify({ username, password, captcha_id: captchaId, captcha_text: captchaText }),
+    }),
+  )
 }
 
 export async function login2FA(tempToken: string, code: string) {
-  return apiFetch<{ access_token: string; web_session_id?: string }>('/auth/login/2fa', {
-    method: 'POST',
-    body: JSON.stringify({ temp_token: tempToken, code }),
-  })
+  return rememberWebSession(
+    await apiFetch<{ access_token: string; web_session_id?: string }>('/auth/login/2fa', {
+      method: 'POST',
+      body: JSON.stringify({ temp_token: tempToken, code }),
+    }),
+  )
 }
 
 export async function logoutApi() {
@@ -121,10 +136,12 @@ export async function getPasskeyLoginOptions(tempToken: string) {
 }
 
 export async function verifyPasskeyLogin(tempToken: string, sessionKey: string, credential: unknown) {
-  return apiFetch<{ access_token: string; web_session_id?: string }>('/auth/login/passkey/verify', {
-    method: 'POST',
-    body: JSON.stringify({ temp_token: tempToken, session_key: sessionKey, credential }),
-  })
+  return rememberWebSession(
+    await apiFetch<{ access_token: string; web_session_id?: string }>('/auth/login/passkey/verify', {
+      method: 'POST',
+      body: JSON.stringify({ temp_token: tempToken, session_key: sessionKey, credential }),
+    }),
+  )
 }
 
 export async function getCaptchaRequired() {
@@ -145,18 +162,21 @@ export async function getTelegramLoginConfig() {
 }
 
 export async function getMe() {
-  return apiFetch<import('../types').User>('/auth/me')
+  return apiFetch<User>('/auth/me')
 }
 
 export async function changePassword(current: string, newPassword: string) {
-  return apiFetch('/auth/change-password', {
+  const result = await apiFetch<{ message: string; access_token?: string }>('/auth/change-password', {
     method: 'POST',
     body: JSON.stringify({ current_password: current, new_password: newPassword }),
   })
+  // The server ends all sessions issued before the change; keep this tab signed in with the new one.
+  if (result.access_token) setAccessToken(result.access_token)
+  return result
 }
 
 export async function getActiveWebSessions() {
-  return apiFetch<import('../types').ActiveWebSession[]>('/security/active-sessions')
+  return apiFetch<ActiveWebSession[]>('/security/active-sessions')
 }
 
 export async function revokeActiveWebSession(sessionId: string) {

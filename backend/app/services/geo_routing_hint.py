@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.models import Node, NodeStatus
 from app.schemas import GeoRoutingHintResponse, GeoRoutingNodeHint
 from app.services.ip_geo import lookup_ip_geo, lookup_ips_geo
-from app.services.node_manager import _is_vpn_node, get_adapter_for_node
+from app.services.node_manager import is_vpn_node, get_adapter_for_node, node_metadata_dict
 
 
 def _normalize_client_ip(raw: str | None) -> str | None:
@@ -42,15 +42,19 @@ def build_geo_routing_hint(db: Session, *, client_ip: str | None = None) -> GeoR
     node_payloads: list[dict] = []
 
     for node in nodes:
-        if not _is_vpn_node(node):
+        if not is_vpn_node(node):
             continue
         server_ip = None
         if node.status == NodeStatus.online:
-            try:
-                adapter = get_adapter_for_node(node)
-                server_ip = adapter.get_server_ip()
-            except Exception:
-                server_ip = None
+            # Node health sync refreshes metadata.server_ip every minute; a live
+            # get_server_ip() on a remote node pulls the whole /monitoring/overview.
+            server_ip = node_metadata_dict(node).get("server_ip") or None
+            if server_ip is None:
+                try:
+                    adapter = get_adapter_for_node(node)
+                    server_ip = adapter.get_server_ip()
+                except Exception:
+                    server_ip = None
         lookup_ip = _server_lookup_ip(server_ip)
         server_ips.append(lookup_ip)
         node_payloads.append({"node": node, "server_ip": server_ip, "lookup_ip": lookup_ip})

@@ -19,12 +19,11 @@ from app.services.access_policy import (
     register_cooldown_ban,
 )
 from app.services.node_manager import get_adapter_for_node, node_metadata_dict
-from app.services.node_sync.groups import find_sync_group_for_primary, is_auto_sync_enabled
+from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes, is_auto_sync_enabled
 from app.services.node_sync.replicate import (
     ReplicateOperation,
     ReplicateResult,
     finalize_replicate_outcome,
-    iter_replica_adapters,
 )
 
 logger = logging.getLogger(__name__)
@@ -155,7 +154,7 @@ def replicate_openvpn_disconnect(
         return result
 
     client_name = client_name.strip()
-    for replica_node, _adapter in iter_replica_adapters(db, group):
+    for replica_node in get_replica_nodes(db, group):
         try:
             disconnect_result = apply_openvpn_disconnect_on_node(
                 db,

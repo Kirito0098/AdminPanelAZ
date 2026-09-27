@@ -200,6 +200,8 @@ export interface User {
   role: UserRole
   theme: string
   is_active: boolean
+  access_until?: string | null
+  access_cascade_warning?: string | null
   must_change_password: boolean
   totp_enabled?: boolean
   telegram_id?: string | null
@@ -211,6 +213,36 @@ export interface User {
   noc_weekly_dow?: string
   noc_weekly_time?: string
   created_at: string
+}
+
+export interface UserUpdatePayload {
+  role?: UserRole
+  theme?: string
+  is_active?: boolean
+  access_until?: string | null
+  password?: string
+  telegram_id?: string | null
+  config_quota?: number | null
+  can_create_configs?: boolean
+  visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
+}
+
+export interface ClientAccessUntilResponse {
+  access_until: string | null
+}
+
+export interface ClientAccessUntilConflictPayload {
+  code: 'access_until_conflict' | string
+  user_access_until: string | null
+  client_access_until: string | null
+}
+
+export interface SyncClientAccessUntilResponse {
+  client_name: string
+  targets: number
+  protocols: string[]
+  synced: number
+  access_until: string | null
 }
 
 export interface VisibleVpnProfilesPolicy {
@@ -522,6 +554,13 @@ export interface BackupEntry {
   restore_detail?: Record<string, unknown> | null
 }
 
+export interface PreRestoreSnapshot {
+  snapshot_id: string
+  created_at: string
+  size_bytes: number
+  components: string[]
+}
+
 export interface BackupSettings {
   auto_backup_enabled: boolean
   auto_backup_days: number
@@ -573,6 +612,7 @@ export interface RetentionSettings {
   enabled: boolean
   interval_hours: number
   traffic_sample_retention_days: number
+  traffic_session_retention_days: number
   action_log_retention_days: number
   resource_metrics_retention_days: number
   panel_resource_metrics_retention_days: number
@@ -925,6 +965,25 @@ export interface PortalPublishStatus {
   portal_access_url: string
 }
 
+export interface ClientPortalLinkResponse {
+  kind?: 'client'
+  token: string
+  node_id?: number
+  client_name: string
+  url: string
+  revoked: boolean
+}
+
+export interface UserPortalLinkResponse {
+  kind: 'user'
+  token: string
+  user_id: number
+  url: string
+  revoked: boolean
+}
+
+export type PortalLinkResponse = ClientPortalLinkResponse | UserPortalLinkResponse
+
 export type VpnNetworkPublishModeKey =
   | 'http_direct'
   | 'nginx_le'
@@ -987,6 +1046,7 @@ export interface DdnsActionResponse {
 
 export interface CloudflareProxySettings {
   enabled: boolean
+  origin_lock_enabled: boolean
   auto_update: boolean
   interval_days: number
   last_success_at: string | null
@@ -996,6 +1056,7 @@ export interface CloudflareProxySettings {
 
 export interface CloudflareProxySettingsUpdatePayload {
   enabled?: boolean
+  origin_lock_enabled?: boolean
   auto_update?: boolean
   interval_days?: number
 }
@@ -1840,14 +1901,23 @@ export interface TrafficClientSessions {
   nodes?: TrafficSessionNodeSummary[] | null
 }
 
+export interface AntizapretSettingOption {
+  value: string
+  label: string
+}
+
 export interface AntizapretSettingField {
   key: string
   html_id: string
-  type: 'flag' | 'string'
+  type: 'flag' | 'string' | 'choice' | 'number'
   env: string
   param_label: string
   title: string
   description: string
+  options?: AntizapretSettingOption[] | null
+  min?: number | null
+  max?: number | null
+  placeholder?: string | null
 }
 
 export interface NodeRemoteHostsResponse {
@@ -1860,6 +1930,50 @@ export interface NodeOpenVpnMultihomeResponse {
   enabled: boolean
   on_disk?: boolean | null
   warnings?: string[]
+}
+
+export type OpenVpnBufferGuardMode =
+  | 'notify'
+  | 'kill'
+  | 'kill_restart'
+  | 'kill_restart_temp_ban'
+
+export interface OpenVpnBufferGuardSettings {
+  node_id: number
+  enabled: boolean
+  mode: OpenVpnBufferGuardMode
+  threshold_count: number
+  window_seconds: number
+  escalate_after_seconds: number
+  cooldown_minutes: number
+  temp_ban_minutes: number
+  watch_units: string[]
+  recommended_threshold: number
+  recommended_by_mode: Record<OpenVpnBufferGuardMode, number>
+  updated_at?: string | null
+}
+
+export type DnsAaaaMode = 'zero' | 'nodata' | 'custom'
+
+export type DnsAaaaTarget = 'antizapret' | 'vpn'
+
+export type DnsAaaaState = Record<DnsAaaaTarget, DnsAaaaMode>
+
+export interface OpenVpnBufferGuardEvent {
+  id: number
+  node_id: number
+  created_at: string
+  unit: string
+  common_name?: string | null
+  real_address?: string | null
+  error_count: number
+  window_seconds: number
+  mode: OpenVpnBufferGuardMode
+  actions: string[]
+  result: string
+  detail?: string | null
+  manual: boolean
+  ban_expires_at?: string | null
 }
 
 export interface AntizapretSettingsResponse {
@@ -1882,6 +1996,10 @@ export interface WarperHealthResponse {
   active: boolean
   version?: string | null
   conflict_antizapret_warp: boolean
+  antizapret_warp_mode?: WarperAzWarpMode | null
+  vpn_warp_mode?: WarperAzWarpMode | null
+  update_pending?: boolean
+  dns_patch_orphaned?: boolean
   health_error?: string | null
   warper_bin?: boolean | null
   warper_script?: boolean | null
@@ -2079,6 +2197,7 @@ export interface WarperUpdatesCheckResponse {
   current?: string | null
   remote?: string | null
   update_available: boolean
+  update_pending?: boolean
   error?: string | null
   message?: string | null
   node_id?: number | null
@@ -2088,8 +2207,53 @@ export interface WarperUpdatesCheckResponse {
 
 export type WarperUpdateStreamEvent =
   | { event: 'log'; line: string }
-  | { event: 'done'; return_code?: number; success?: boolean }
+  | { event: 'done'; return_code?: number; success?: boolean; update_pending?: boolean }
   | { event: 'error'; detail?: string }
+
+export type WarperAzWarpMode = 'off' | 'all' | 'selective'
+
+export interface WarperWarpKeyItem {
+  source: string
+  path: string
+  address: string
+  is_current: boolean
+}
+
+export interface WarperOvpnConfig {
+  path: string
+  server: string
+  needs_auth: boolean
+  saved_user: string
+}
+
+export interface WarperAutoResolveResponse {
+  enabled: boolean
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperIpRoutesResponse {
+  routes: string[]
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperSubnetsResponse {
+  subnets: Record<string, string>
+  node_id?: number | null
+  node_name?: string | null
+}
+
+export interface WarperSingboxStatusResponse {
+  active: boolean
+  enabled: boolean
+  state?: string | null
+  version?: string | null
+  log_level?: string | null
+  mtu?: number | null
+  node_id?: number | null
+  node_name?: string | null
+}
 
 export interface WarperIpRangesResponse {
   ranges: Array<string | Record<string, unknown>>
@@ -2124,7 +2288,9 @@ export interface WarperTextContentResponse {
 
 export interface WarperSettingsOptionsResponse {
   warp_keys: string[]
+  warp_key_items?: WarperWarpKeyItem[]
   wg_configs: string[]
+  ovpn_configs?: WarperOvpnConfig[]
   node_id?: number | null
   node_name?: string | null
 }
@@ -2166,12 +2332,19 @@ export interface WarperCatalogInstalledResponse {
 
 export type SiteDiagnosticsStatus = 'ok' | 'warn' | 'fail'
 
+export interface SiteDiagnosticsCheckAction {
+  id: string
+  label: string
+}
+
 export interface SiteDiagnosticsCheck {
+  id?: string
   status: SiteDiagnosticsStatus
   title: string
   category: string
   detail?: string
   hint_ru?: string
+  action?: SiteDiagnosticsCheckAction
 }
 
 export interface SiteDiagnosticsStep {
@@ -2195,6 +2368,14 @@ export interface SiteDiagnosticsReport {
   steps: SiteDiagnosticsStep[]
   results: SiteDiagnosticsCheck[]
   recommended_commands: string[]
+}
+
+export interface SiteDiagnosticsCloseIpAccessResponse {
+  success: boolean
+  status: string
+  changed: boolean
+  message: string
+  check: SiteDiagnosticsCheck
 }
 
 export interface ServerRebootPendingItem {

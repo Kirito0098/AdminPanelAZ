@@ -154,11 +154,11 @@ def test_telegram_traffic_summary_uses_active_names(monkeypatch):
             captured["stale_seconds"] = stale_seconds
             captured["period_window"] = period_window
             row = SimpleNamespace(
-                common_name="Claymore_OpenWRT",
+                common_name="Home_Router",
                 traffic_period=15_000_000_000,
                 total_received=100,
                 total_sent=200,
-                is_active="Claymore_OpenWRT" in active_names,
+                is_active="Home_Router" in active_names,
             )
             return [row], SimpleNamespace()
 
@@ -168,7 +168,7 @@ def test_telegram_traffic_summary_uses_active_names(monkeypatch):
     monkeypatch.setattr(
         tg_traffic,
         "live_active_names_for_node",
-        lambda _db, _node: {"Claymore_OpenWRT"},
+        lambda _db, _node: {"Home_Router"},
     )
     monkeypatch.setattr(tg_traffic, "is_admin", lambda _u: True)
 
@@ -185,7 +185,7 @@ def test_telegram_traffic_summary_uses_active_names(monkeypatch):
     ctx = SimpleNamespace(db=object(), user=SimpleNamespace(), bot_token="t", chat_id=1)
     asyncio.run(tg_traffic.handle_traffic(ctx))
 
-    assert captured["active_names"] == {"Claymore_OpenWRT"}
+    assert captured["active_names"] == {"Home_Router"}
     assert captured["period_window"] is not None
     assert captured["period_window"].period == "1d"
     assert "online <b>1</b>" in sent["text"]

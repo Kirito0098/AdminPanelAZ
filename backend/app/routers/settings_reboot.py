@@ -12,7 +12,7 @@ from app.schemas import (
 )
 from app.services.admin_notify import admin_notify_service
 from app.services.action_log import log_action
-from app.services.node_manager import _is_vpn_node, get_adapter_for_node
+from app.services.node_manager import is_vpn_node, get_adapter_for_node
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.server_reboot import (
     CONFIRM_PHRASE,
@@ -61,7 +61,7 @@ def schedule_server_reboot(
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
 
-    if not _is_vpn_node(node):
+    if not is_vpn_node(node):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Перезагрузка доступна только для VPN-узлов",

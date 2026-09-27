@@ -10,8 +10,13 @@ logger = logging.getLogger(__name__)
 from app.middleware.api_rate_limit import ApiRateLimitMiddleware
 from app.middleware.http_security import HttpSecurityMiddleware, build_robots_txt, build_security_txt, get_panel_branding
 from app.middleware.active_session import ActiveSessionMiddleware
-from app.services.security_bootstrap import validate_panel_settings
-from app.database import Base, SessionLocal, engine, run_db_migrations
+from app.services.expected_node import EXPECTED_NODE_HEADER, ExpectedNodeMiddleware
+from app.services.security_bootstrap import (
+    restrict_backup_dir_permissions,
+    restrict_sensitive_file_permissions,
+    validate_panel_settings,
+)
+from app.database import Base, SessionLocal, engine, migrations_lock, run_db_migrations
 from app.cidr_database import run_cidr_db_migrations
 from app.models import User, UserRole, VpnConfig, VpnType
 from app.routers import (
@@ -26,6 +31,7 @@ from app.routers import (
     config_tags,
     configs,
     configs_bulk,
+    dns_aaaa,
     edit_files,
     ip_blocked,
     logs,
@@ -33,6 +39,7 @@ from app.routers import (
     monitoring,
     nodes,
     node_sync,
+    openvpn_buffer_guard,
     public_download,
     public_portal,
     routing,
@@ -58,7 +65,15 @@ from app.routers import users
 from app.services.admin_bootstrap import upsert_bootstrap_admin
 from app.services.node_manager import get_active_adapter, get_active_node, sync_local_node
 from app.services.ip_restriction import ip_restriction_service
-from app.services.lifespan_workers import cancel_background_tasks, spawn_background_tasks
+from app.services.lifespan_workers import (
+    cancel_background_tasks,
+    leader_lock_path,
+    spawn_background_tasks,
+    start_leader_workers,
+)
+from app.services.background_gate import configure_background_gate
+from app.services.shared_state import configure_shared_state
+from app.services.worker_leader import WorkerLeaderLock
 from app.services.worker_lifecycle import should_start_resource_monitor
 
 from app.services.panel_paths import (
@@ -77,6 +92,11 @@ _ACCESS_PREFIX = access_path(settings)
 
 
 def seed_database():
+    with migrations_lock():
+        _seed_database()
+
+
+def _seed_database():
     Base.metadata.create_all(bind=engine)
     run_db_migrations()
     run_cidr_db_migrations()
@@ -132,25 +152,7 @@ def seed_database():
         db.close()
 
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
-    from pathlib import Path
-
-    from app.services.health_checks import mark_app_started
-
-    mark_app_started()
-    seed_database()
-    app_root = Path(__file__).resolve().parents[1]
-    db_url = settings.database_url
-    db_path = Path(db_url.replace("sqlite:///", ""))
-    if not db_path.is_absolute():
-        db_path = app_root / db_path
-    env_path = app_root / ".env"
-    background_tasks = spawn_background_tasks(app_root=app_root, db_path=db_path, env_path=env_path)
-    from app.services.admin_notify import admin_notify_service
-
-    if should_start_resource_monitor():
-        admin_notify_service.start_monitor()
+def run_leader_startup_actions() -> None:
     try:
         from app.services.background_tasks import background_task_service
 
@@ -159,6 +161,22 @@ async def lifespan(_: FastAPI):
             logger.info("Recovered %d stale background task(s) after restart", recovered)
     except Exception:
         logger.exception("Failed to recover stale background tasks on startup")
+    try:
+        from app.services.node_sync.group_status import recover_stuck_pending_groups_once
+
+        stuck = recover_stuck_pending_groups_once()
+        if stuck:
+            logger.info("Marked %d HA group(s) left pending by an ended sync task as failed", stuck)
+    except Exception:
+        logger.exception("Failed to recover pending HA groups on startup")
+    try:
+        from app.services.server_reboot import interrupt_abandoned_reboots
+
+        interrupted = interrupt_abandoned_reboots()
+        if interrupted:
+            logger.info("Marked %d scheduled reboot(s) of stopped workers as interrupted", interrupted)
+    except Exception:
+        logger.exception("Failed to clear scheduled reboots on startup")
     try:
         from app.services.cidr.pipeline.list_migration import migrate_legacy_cidr_list_dir
 
@@ -171,7 +189,7 @@ async def lifespan(_: FastAPI):
         from app.services.node_update import resolve_repo_root
         from app.services.systemd_refresh import migrate_stale_systemd_units_on_startup
 
-        migrate_stale_systemd_units_on_startup(resolve_repo_root(), panel=True, node=True)
+        migrate_stale_systemd_units_on_startup(resolve_repo_root(), panel=True, node=True, proxy=True)
     except Exception:
         logger.debug("Systemd unit migration skipped", exc_info=True)
     try:
@@ -188,8 +206,46 @@ async def lifespan(_: FastAPI):
             startup_db.close()
     except Exception:
         logger.exception("Failed to sync whitelist port firewall on startup")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    from pathlib import Path
+
+    from app.services.health_checks import mark_app_started
+
+    mark_app_started()
+    seed_database()
+    app_root = Path(__file__).resolve().parents[1]
+    db_url = settings.database_url
+    db_path = Path(db_url.replace("sqlite:///", ""))
+    if not db_path.is_absolute():
+        db_path = app_root / db_path
+    env_path = app_root / ".env"
+    from app.cidr_database import resolve_cidr_db_path
+
+    restrict_sensitive_file_permissions([env_path, db_path, resolve_cidr_db_path()])
+    restrict_backup_dir_permissions(Path(settings.backup_root))
+
+    def _start_workers() -> dict:
+        tasks = spawn_background_tasks(app_root=app_root, db_path=db_path, env_path=env_path)
+        if should_start_resource_monitor():
+            from app.services.admin_notify import admin_notify_service
+
+            admin_notify_service.start_monitor()
+        return tasks
+
+    configure_background_gate(db_path)
+    configure_shared_state(SessionLocal)
+    leader_lock = WorkerLeaderLock(leader_lock_path(db_path))
+    background_tasks = start_leader_workers(
+        leader_lock, start=_start_workers, on_startup=run_leader_startup_actions
+    )
     yield
     await cancel_background_tasks(background_tasks)
+    leader_lock.release()
+    configure_background_gate(None)
+    configure_shared_state(None)
 
 
 app = FastAPI(
@@ -199,6 +255,7 @@ app = FastAPI(
     redoc_url=None,
     openapi_url=None,
 )
+app.add_middleware(ExpectedNodeMiddleware)
 app.add_middleware(ActiveSessionMiddleware)
 app.add_middleware(HttpSecurityMiddleware)
 app.add_middleware(
@@ -206,7 +263,14 @@ app.add_middleware(
     allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Captcha-Id", "X-Web-Session-Id", "Accept"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Captcha-Id",
+        "X-Web-Session-Id",
+        EXPECTED_NODE_HEADER,
+        "Accept",
+    ],
     expose_headers=["X-Qr-Content", "X-Qr-Download-Url", "Content-Disposition"],
 )
 app.add_middleware(ApiRateLimitMiddleware)
@@ -220,6 +284,8 @@ app.include_router(config_tags.router, prefix=_API_PREFIX)
 app.include_router(client_templates.router, prefix=_API_PREFIX)
 app.include_router(monitoring.router, prefix=_API_PREFIX)
 app.include_router(alert_rules.router, prefix=_API_PREFIX)
+app.include_router(openvpn_buffer_guard.router, prefix=_API_PREFIX)
+app.include_router(dns_aaaa.router, prefix=_API_PREFIX)
 app.include_router(settings_router.router, prefix=_API_PREFIX)
 app.include_router(maintenance.router, prefix=_API_PREFIX)
 app.include_router(settings_reboot.router, prefix=_API_PREFIX)
@@ -326,26 +392,38 @@ async def ip_restriction_middleware(request, call_next):
     if exempt:
         return await call_next(request)
 
-    from app.database import SessionLocal
     from fastapi.responses import JSONResponse, RedirectResponse
+    from starlette.concurrency import run_in_threadpool
+
+    client_ip = ip_restriction_service.get_client_ip(request)
+    # Runs on every non-exempt request: SQLite must not block the event loop.
+    verdict = await run_in_threadpool(_ip_restriction_verdict, client_ip, path)
+    if verdict == "hard_deny":
+        return JSONResponse(status_code=403, content={"detail": "Доступ заблокирован на уровне сервера"})
+    if verdict == "deny":
+        accept = request.headers.get("accept", "")
+        if is_api_path(path, settings) or "application/json" in accept:
+            return JSONResponse(status_code=403, content={"detail": "Доступ запрещён с вашего IP"})
+        return RedirectResponse(url=with_access_path(settings, "/ip-blocked"), status_code=302)
+    return await call_next(request)
+
+
+def _ip_restriction_verdict(client_ip: str, path: str) -> str | None:
+    """``hard_deny``, ``deny`` (attempt recorded) or ``None`` when the IP may pass."""
+    from app.database import SessionLocal
 
     db = SessionLocal()
     try:
-        client_ip = ip_restriction_service.get_client_ip(request)
         if ip_restriction_service.should_hard_deny(db, client_ip):
-            return JSONResponse(status_code=403, content={"detail": "Доступ заблокирован на уровне сервера"})
-
+            return "hard_deny"
         ip_settings = ip_restriction_service.get_settings(db)
         if ip_settings.get("ip_restriction_enabled") and not ip_restriction_service.is_ip_allowed(db, client_ip):
             if ip_restriction_service.should_count_denied_access(path):
                 ip_restriction_service.record_denied_access(db, client_ip)
-            accept = request.headers.get("accept", "")
-            if is_api_path(path, settings) or "application/json" in accept:
-                return JSONResponse(status_code=403, content={"detail": "Доступ запрещён с вашего IP"})
-            return RedirectResponse(url=with_access_path(settings, "/ip-blocked"), status_code=302)
+            return "deny"
+        return None
     finally:
         db.close()
-    return await call_next(request)
 
 
 def _register_openapi_docs_routes() -> None:
@@ -447,6 +525,7 @@ def _mount_frontend(app: FastAPI) -> None:
         if _ACCESS_PREFIX:
             app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets-portal-root")
 
+    dist_root = dist.resolve()
     index_file = dist / "index.html"
     spa_prefix = _ACCESS_PREFIX or ""
 
@@ -487,9 +566,9 @@ def _mount_frontend(app: FastAPI) -> None:
         # When ACCESS_PATH is set, /p/… is handled by serve_portal_spa_root.
         # Without ACCESS_PATH, portal pages share this catch-all at domain root.
         portal_root = (not spa_prefix) and (full_path == "p" or full_path.startswith("p/"))
-        if full_path:
-            candidate = dist / full_path
-            if candidate.is_file():
+        if full_path and "\x00" not in full_path:
+            candidate = (dist_root / full_path).resolve()
+            if candidate.is_relative_to(dist_root) and candidate.is_file():
                 return FileResponse(candidate)
         return serve_html_with_nonce(request, index_file, portal_root=portal_root)
 

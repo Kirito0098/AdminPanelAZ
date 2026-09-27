@@ -11,9 +11,10 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import Node, VpnConfig, VpnType
-from app.services.node_manager import _is_vpn_node, get_adapter_for_node
+from app.services.node_manager import is_vpn_node, get_adapter_for_node
 from app.services.node_sync.client_sync import maybe_replicate_delete, purge_ha_shadow_configs
 from app.services.node_sync.groups import find_sync_group_for_primary
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 AWG2_EXPIRE_INTERVAL_SECONDS = 60
@@ -103,7 +104,7 @@ def run_awg2_expire_once(db_session_factory: Callable[[], Session] = SessionLoca
         refreshed = 0
         for node_id in node_ids:
             node = db.get(Node, node_id)
-            if node is None or not _is_vpn_node(node):
+            if node is None or not is_vpn_node(node):
                 continue
             # One unreachable or un-provisioned node must not abort expiry for the others.
             try:
@@ -142,8 +143,8 @@ async def run_awg2_expire_loop() -> None:
                 await asyncio.sleep(AWG2_EXPIRE_INTERVAL_SECONDS)
                 continue
 
-            result = await asyncio.to_thread(run_awg2_expire_once, SessionLocal)
-            if result["deleted_cli"] or result["deleted_db"] or result["expiry_refreshed"]:
+            result = await run_background_step(run_awg2_expire_once, SessionLocal)
+            if result and (result["deleted_cli"] or result["deleted_db"] or result["expiry_refreshed"]):
                 logger.info(
                     "awg2_expire: nodes=%s failed=%s deleted_cli=%s deleted_db=%s refreshed=%s",
                     result["nodes_processed"],

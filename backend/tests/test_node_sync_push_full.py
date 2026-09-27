@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 from app.models import SyncStatus
 from app.services.node_sync import push_full
+from app.services.node_sync.vpn_state_sync import Awg2NotInstalledError
 from app.services.openvpn_pki import ProfileValidationResult
 
 
@@ -188,7 +189,16 @@ def test_push_full_uses_ha_restore_and_prune():
     assert result["success"] is True
 
 
-def _run_single_replica_push(*, primary_adapter, replica_adapter, awg2_sync=None):
+def _run_single_replica_push(
+    *,
+    primary_adapter,
+    replica_adapter,
+    awg2_sync=None,
+    copy_policies=None,
+    reapply=None,
+):
+    copy_policies = MagicMock() if copy_policies is None else copy_policies
+    reapply = MagicMock() if reapply is None else reapply
     group = _make_group(replica_ids=[2])
     primary = _make_node(1, "primary-1")
     replica = _make_node(2, "replica-1")
@@ -226,7 +236,8 @@ def _run_single_replica_push(*, primary_adapter, replica_adapter, awg2_sync=None
                                     return_value={"restarted": [], "failed": [], "skipped": [], "success": True},
                                 ):
                                     with patch.object(push_full, "import_clients_from_disk"):
-                                        with patch.object(push_full, "copy_access_policies_from_node"):
+                                        with patch.object(push_full, "copy_access_policies_from_node", copy_policies), \
+                                                patch.object(push_full, "reapply_blocked_runtime_policies", reapply):
                                             with patch.object(push_full, "collect_traffic_snapshot_for_node"):
                                                 with patch.object(push_full, "is_auto_sync_enabled", return_value=False):
                                                     with patch.object(push_full, "link_primary_configs_to_group"):
@@ -234,6 +245,157 @@ def _run_single_replica_push(*, primary_adapter, replica_adapter, awg2_sync=None
                                                             with extra["sync"]:
                                                                 return _run_push_full(db, group, auto_verify=False)
                                                         return _run_push_full(db, group, auto_verify=False)
+
+
+def test_push_full_reapplies_runtime_blocks_after_copying_policies():
+    primary_adapter = MagicMock()
+    primary_adapter.create_antizapret_backup.return_value = {
+        "archive_name": "backup.tar.gz",
+        "archive_path": "/tmp/backup.tar.gz",
+    }
+    primary_adapter.download_antizapret_backup.return_value = b"archive-bytes"
+    primary_adapter.get_awg2_health.return_value = {"installed": True}
+    replica_adapter = _successful_replica_adapter()
+    order = MagicMock()
+    copy_policies = MagicMock()
+    reapply = MagicMock()
+    order.attach_mock(copy_policies, "copy")
+    order.attach_mock(reapply, "reapply")
+
+    result = _run_single_replica_push(
+        primary_adapter=primary_adapter,
+        replica_adapter=replica_adapter,
+        awg2_sync=MagicMock(),
+        copy_policies=copy_policies,
+        reapply=reapply,
+    )
+
+    assert result["success"] is True
+    assert [c[0] for c in order.mock_calls] == ["copy", "reapply"]
+    assert reapply.call_args.args[2] is replica_adapter
+    assert reapply.call_args.kwargs == {"awg2": True}
+
+
+def test_push_full_fails_replica_when_runtime_reblock_raises():
+    primary_adapter = MagicMock()
+    primary_adapter.create_antizapret_backup.return_value = {
+        "archive_name": "backup.tar.gz",
+        "archive_path": "/tmp/backup.tar.gz",
+    }
+    primary_adapter.download_antizapret_backup.return_value = b"archive-bytes"
+    primary_adapter.get_awg2_health.return_value = {"installed": False}
+
+    result = _run_single_replica_push(
+        primary_adapter=primary_adapter,
+        replica_adapter=_successful_replica_adapter(),
+        reapply=MagicMock(side_effect=RuntimeError("wg set peer failed")),
+    )
+
+    assert result["success"] is False
+    assert "wg set peer failed" in result["failed"][0]["error"]
+
+
+def test_push_full_reblocks_wireguard_when_later_step_fails():
+    primary_adapter = MagicMock()
+    primary_adapter.create_antizapret_backup.return_value = {
+        "archive_name": "backup.tar.gz",
+        "archive_path": "/tmp/backup.tar.gz",
+    }
+    primary_adapter.download_antizapret_backup.return_value = b"archive-bytes"
+    primary_adapter.get_awg2_health.return_value = {"installed": True}
+    replica_adapter = _successful_replica_adapter()
+    reapply = MagicMock()
+
+    result = _run_single_replica_push(
+        primary_adapter=primary_adapter,
+        replica_adapter=replica_adapter,
+        awg2_sync=MagicMock(side_effect=Awg2NotInstalledError("AZ-AWG2 не установлен на replica")),
+        reapply=reapply,
+    )
+
+    assert result["success"] is False
+    reapply.assert_called_once()
+    assert reapply.call_args.args[2] is replica_adapter
+    assert reapply.call_args.kwargs == {"awg2": False}
+
+
+def _awg2_primary_adapter() -> MagicMock:
+    primary_adapter = MagicMock()
+    primary_adapter.create_antizapret_backup.return_value = {
+        "archive_name": "backup.tar.gz",
+        "archive_path": "/tmp/backup.tar.gz",
+    }
+    primary_adapter.download_antizapret_backup.return_value = b"archive-bytes"
+    primary_adapter.get_awg2_health.return_value = {"installed": True}
+    return primary_adapter
+
+
+def test_push_full_reblocks_awg2_when_step_after_awg2_sync_fails():
+    replica_adapter = _successful_replica_adapter()
+    reapply = MagicMock()
+
+    result = _run_single_replica_push(
+        primary_adapter=_awg2_primary_adapter(),
+        replica_adapter=replica_adapter,
+        awg2_sync=MagicMock(),
+        copy_policies=MagicMock(side_effect=RuntimeError("database is locked")),
+        reapply=reapply,
+    )
+
+    assert result["failed"][0]["failed_step"] == "access_policies"
+    reapply.assert_called_once()
+    assert reapply.call_args.args[2] is replica_adapter
+    assert reapply.call_args.kwargs == {"awg2": True}
+
+
+def test_push_full_reblocks_awg2_when_awg2_sync_fails_after_import():
+    reapply = MagicMock()
+
+    result = _run_single_replica_push(
+        primary_adapter=_awg2_primary_adapter(),
+        replica_adapter=_successful_replica_adapter(),
+        awg2_sync=MagicMock(side_effect=RuntimeError("apply_awg2_runtime: agent timeout")),
+        reapply=reapply,
+    )
+
+    assert result["failed"][0]["failed_step"] == "sync_awg2"
+    reapply.assert_called_once()
+    assert reapply.call_args.kwargs == {"awg2": True}
+
+
+def test_push_full_without_awg2_on_primary_reblocks_only_wireguard():
+    primary_adapter = _awg2_primary_adapter()
+    primary_adapter.get_awg2_health.return_value = {"installed": False}
+    reapply = MagicMock()
+
+    _run_single_replica_push(
+        primary_adapter=primary_adapter,
+        replica_adapter=_successful_replica_adapter(),
+        copy_policies=MagicMock(side_effect=RuntimeError("database is locked")),
+        reapply=reapply,
+    )
+
+    assert reapply.call_args.kwargs == {"awg2": False}
+
+
+def test_push_full_does_not_retry_failed_reblock():
+    primary_adapter = MagicMock()
+    primary_adapter.create_antizapret_backup.return_value = {
+        "archive_name": "backup.tar.gz",
+        "archive_path": "/tmp/backup.tar.gz",
+    }
+    primary_adapter.download_antizapret_backup.return_value = b"archive-bytes"
+    primary_adapter.get_awg2_health.return_value = {"installed": False}
+    reapply = MagicMock(side_effect=RuntimeError("wg set peer failed"))
+
+    result = _run_single_replica_push(
+        primary_adapter=primary_adapter,
+        replica_adapter=_successful_replica_adapter(),
+        reapply=reapply,
+    )
+
+    assert result["success"] is False
+    reapply.assert_called_once()
 
 
 def test_push_full_syncs_awg2_when_primary_has_layer():

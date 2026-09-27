@@ -13,6 +13,8 @@ interface MiniListToolbarProps {
   protocol?: ProtocolFilter
   onProtocolChange?: (value: ProtocolFilter) => void
   protocolCounts?: ProtocolCounts
+  /** When set, only these protocol chips are shown (plus any implied by counts). */
+  protocolOptions?: ProtocolFilter[]
   className?: string
 }
 
@@ -41,9 +43,14 @@ export default function MiniListToolbar({
   protocol,
   onProtocolChange,
   protocolCounts,
+  protocolOptions,
   className,
 }: MiniListToolbarProps) {
   const showProtocol = protocol != null && onProtocolChange != null
+  const options =
+    protocolOptions != null
+      ? PROTOCOL_OPTIONS.filter((option) => protocolOptions.includes(option.value))
+      : PROTOCOL_OPTIONS
 
   return (
     <div className={cn('tg-mini-list-toolbar', className)}>
@@ -68,9 +75,9 @@ export default function MiniListToolbar({
         )}
       </div>
 
-      {showProtocol && (
+      {showProtocol && options.length > 1 && (
         <div className="tg-mini-segmented" role="tablist" aria-label="Фильтр протокола">
-          {PROTOCOL_OPTIONS.map((option) => {
+          {options.map((option) => {
             const count = protocolCounts?.[option.value]
             const active = protocol === option.value
             return (

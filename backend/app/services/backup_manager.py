@@ -1,14 +1,21 @@
 import glob
 import json
+import logging
 import os
+import re
 import shutil
 import sqlite3
 import tarfile
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import HTTPException, status
+
+from app.services.atomic_file import atomic_write_bytes
+
+logger = logging.getLogger(__name__)
 
 
 def remove_sqlite_sidecars(db_path: Path) -> None:
@@ -18,6 +25,42 @@ def remove_sqlite_sidecars(db_path: Path) -> None:
             Path(f"{db_path}{suffix}").unlink(missing_ok=True)
         except OSError:
             pass
+
+
+_SQLITE_HEADER = b"SQLite format 3\x00"
+_PRE_RESTORE_STAMP = "%Y%m%d_%H%M%S_%f"
+_PRE_RESTORE_ID = re.compile(r"\d{8}_\d{6}_\d{6}")
+
+
+def validate_sqlite_bytes(data: bytes, label: str) -> None:
+    """Reject a restore before any live file is touched if the archived database is damaged."""
+    invalid = HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"{label} в архиве повреждена — восстановление отменено, текущие данные не изменены",
+    )
+    if not data.startswith(_SQLITE_HEADER):
+        raise invalid
+    # A WAL-mode copy grows -wal/-shm next to itself even when opened read-only.
+    with tempfile.TemporaryDirectory(prefix="adminpanelaz-restore-check-") as tmp_dir:
+        tmp = Path(tmp_dir) / "check.db"
+        tmp.write_bytes(data)
+        try:
+            conn = sqlite3.connect(f"file:{tmp.as_posix()}?mode=ro", uri=True)
+            try:
+                result = conn.execute("PRAGMA integrity_check(1)").fetchone()
+            finally:
+                conn.close()
+        except sqlite3.DatabaseError as exc:
+            raise invalid from exc
+    if not result or result[0] != "ok":
+        raise invalid
+
+
+def _write_private_bytes(path: Path, data: bytes) -> None:
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "wb") as fh:
+        fh.write(data)
 
 
 def backup_meta_path(archive_path: Path) -> Path:
@@ -37,6 +80,13 @@ class BackupManager:
         "allow-ips.txt",
     )
     AWG2_ARCHIVE_MEMBER = "awg2/az-awg2-backup.tar.gz"
+    PRE_RESTORE_DIR = ".pre-restore"
+    PRE_RESTORE_KEEP = 3
+    PRE_RESTORE_NAMES = {"db": "adminpanel.db", "cidr_db": "cidr.db", "env": ".env"}
+    SQLITE_ROLES = frozenset({"db", "cidr_db"})
+    RESTORE_FREE_SPACE_MARGIN = 64 * 1024 * 1024
+    PARTIAL_SUFFIX = ".partial"
+    STALE_PARTIAL_SECONDS = 24 * 3600
 
     def __init__(
         self,
@@ -53,8 +103,17 @@ class BackupManager:
         self.env_path = env_path.resolve()
         self.cidr_db_path = cidr_db_path.resolve() if cidr_db_path is not None else None
 
+    def _ensure_backup_root(self) -> None:
+        # Archives hold the panel DB and .env.
+        self.backup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        try:
+            if self.backup_root.stat().st_mode & 0o077:
+                os.chmod(self.backup_root, 0o700)
+        except OSError as exc:
+            logger.warning("Could not restrict permissions on %s: %s", self.backup_root, exc)
+
     def list_backups(self) -> list[dict]:
-        self.backup_root.mkdir(parents=True, exist_ok=True)
+        self._ensure_backup_root()
         archives = sorted(
             self.backup_root.glob("*.tar.gz"),
             key=lambda p: p.stat().st_mtime,
@@ -85,7 +144,7 @@ class BackupManager:
         retention: int = 5,
         awg2_archive: bytes | None = None,
     ) -> dict:
-        self.backup_root.mkdir(parents=True, exist_ok=True)
+        self._ensure_backup_root()
         timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
         archive_name = f"adminpanelaz_{timestamp}.tar.gz"
         archive_path = self.backup_root / archive_name
@@ -93,6 +152,52 @@ class BackupManager:
         components: list[str] = []
         summary_parts: list[str] = []
 
+        partial_path = self.backup_root / f".{archive_name}{self.PARTIAL_SUFFIX}"
+        try:
+            _write_private_bytes(partial_path, b"")
+            self._write_archive(
+                partial_path,
+                components=components,
+                summary_parts=summary_parts,
+                include_configs=include_configs,
+                config_contents=config_contents,
+                awg2_archive=awg2_archive,
+            )
+            os.replace(partial_path, archive_path)
+        except BaseException:
+            partial_path.unlink(missing_ok=True)
+            raise
+
+        metadata = {
+            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "components": components,
+            "summary": ",".join(summary_parts),
+        }
+        meta_path = backup_meta_path(archive_path)
+        try:
+            atomic_write_bytes(meta_path, json.dumps(metadata, ensure_ascii=False, indent=2).encode("utf-8"))
+        except BaseException:
+            archive_path.unlink(missing_ok=True)
+            raise
+
+        self._enforce_retention(max(1, int(retention)))
+        return {
+            "file_name": archive_name,
+            "file_path": str(archive_path),
+            "size_bytes": archive_path.stat().st_size,
+            **metadata,
+        }
+
+    def _write_archive(
+        self,
+        archive_path: Path,
+        *,
+        components: list[str],
+        summary_parts: list[str],
+        include_configs: bool,
+        config_contents: dict[str, str] | None,
+        awg2_archive: bytes | None,
+    ) -> None:
         with tarfile.open(archive_path, "w:gz") as tar:
             if self.db_path.exists():
                 self._add_sqlite_snapshot(tar, self.db_path, "data/adminpanel.db")
@@ -115,7 +220,7 @@ class BackupManager:
                         continue
                     tmp = self.backup_root / f".tmp_{filename}"
                     try:
-                        tmp.write_text(content, encoding="utf-8")
+                        _write_private_bytes(tmp, content.encode("utf-8"))
                         tar.add(tmp, arcname=f"antizapret/config/{filename}")
                     finally:
                         if tmp.exists():
@@ -127,28 +232,12 @@ class BackupManager:
             if awg2_archive:
                 tmp = self.backup_root / ".tmp_az-awg2-backup.tar.gz"
                 try:
-                    tmp.write_bytes(awg2_archive)
+                    _write_private_bytes(tmp, awg2_archive)
                     tar.add(tmp, arcname=self.AWG2_ARCHIVE_MEMBER)
                 finally:
                     tmp.unlink(missing_ok=True)
                 components.append("awg2")
                 summary_parts.append("AWG2:1")
-
-        metadata = {
-            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "components": components,
-            "summary": ",".join(summary_parts),
-        }
-        meta_path = backup_meta_path(archive_path)
-        meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-
-        self._enforce_retention(max(1, int(retention)))
-        return {
-            "file_name": archive_name,
-            "file_path": str(archive_path),
-            "size_bytes": archive_path.stat().st_size,
-            **metadata,
-        }
 
     def inspect_backup_archive(self, archive_path: Path) -> dict:
         path = archive_path.resolve()
@@ -192,7 +281,7 @@ class BackupManager:
     def import_uploaded_backup(self, source_path: Path, *, original_name: str | None = None) -> dict:
         source = source_path.resolve()
         metadata = self.inspect_backup_archive(source)
-        self.backup_root.mkdir(parents=True, exist_ok=True)
+        self._ensure_backup_root()
 
         target_name = self._upload_target_name(original_name)
         target_path = self.backup_root / target_name
@@ -202,8 +291,10 @@ class BackupManager:
             target_path = self.backup_root / target_name
 
         shutil.move(str(source), str(target_path))
+        os.chmod(target_path, 0o600)
         meta_path = backup_meta_path(target_path)
-        meta_path.write_text(
+        atomic_write_bytes(
+            meta_path,
             json.dumps(
                 {
                     "created_at": metadata["created_at"],
@@ -213,8 +304,7 @@ class BackupManager:
                 },
                 ensure_ascii=False,
                 indent=2,
-            ),
-            encoding="utf-8",
+            ).encode("utf-8"),
         )
         return {
             "file_name": target_name,
@@ -273,6 +363,11 @@ class BackupManager:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Архив не содержит данных для восстановления",
             )
+        if "db" in files:
+            validate_sqlite_bytes(files["db"], "База панели")
+        if "cidr_db" in files:
+            validate_sqlite_bytes(files["cidr_db"], "База CIDR")
+        self._ensure_restore_space(self._restore_targets(files))
         return {
             "restored": restored,
             "file_name": file_name,
@@ -280,24 +375,197 @@ class BackupManager:
             "_files": files,
         }
 
-    def apply_restore_payload(self, payload: dict) -> dict:
-        files = payload.get("_files") or {}
+    def _restore_targets(self, files: dict[str, bytes]) -> list[tuple[str, Path, bytes]]:
+        targets: list[tuple[str, Path, bytes]] = []
         if "db" in files:
-            self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.db_path.write_bytes(files["db"])
-            remove_sqlite_sidecars(self.db_path)
+            targets.append(("db", self.db_path, files["db"]))
         if "cidr_db" in files and self.cidr_db_path is not None:
-            self.cidr_db_path.parent.mkdir(parents=True, exist_ok=True)
-            self.cidr_db_path.write_bytes(files["cidr_db"])
-            remove_sqlite_sidecars(self.cidr_db_path)
+            targets.append(("cidr_db", self.cidr_db_path, files["cidr_db"]))
         if "env" in files:
-            self.env_path.parent.mkdir(parents=True, exist_ok=True)
-            self.env_path.write_bytes(files["env"])
-        return {
+            targets.append(("env", self.env_path, files["env"]))
+        return targets
+
+    def _ensure_restore_space(self, targets: list[tuple[str, Path, bytes]]) -> None:
+        """Refuse up front: running out of disk mid-restore would happen after node overlays were applied."""
+        required: dict[int, tuple[Path, int]] = {}
+
+        def need(directory: Path, size: int) -> None:
+            directory.mkdir(parents=True, exist_ok=True)
+            dev = directory.stat().st_dev
+            anchor, total = required.get(dev, (directory, 0))
+            required[dev] = (anchor, total + size)
+
+        for _role, path, data in targets:
+            if path.exists():
+                need(self.backup_root, path.stat().st_size)
+            need(path.parent, len(data))
+        for anchor, size in required.values():
+            if shutil.disk_usage(anchor).free < size + self.RESTORE_FREE_SPACE_MARGIN:
+                raise HTTPException(
+                    status_code=status.HTTP_507_INSUFFICIENT_STORAGE,
+                    detail=f"Недостаточно места на диске для восстановления ({anchor}) — текущие данные не изменены",
+                )
+
+    def apply_restore_payload(self, payload: dict) -> dict:
+        targets = self._restore_targets(payload.get("_files") or {})
+        snapshot = (
+            self._snapshot_live_files(
+                [(role, path) for role, path, _data in targets],
+                keep_snapshot_id=payload.get("_pre_restore_source"),
+            )
+            if targets
+            else None
+        )
+        replaced: list[tuple[str, Path]] = []
+        try:
+            for role, path, data in targets:
+                atomic_write_bytes(path, data)
+                replaced.append((role, path))
+                if role in self.SQLITE_ROLES:
+                    # A leftover WAL of the old database would be replayed onto the restored file.
+                    remove_sqlite_sidecars(path)
+        except BaseException:
+            self._rollback_from_snapshot(replaced, snapshot)
+            raise
+        if snapshot is not None:
+            self._carry_over_telegram_updates(snapshot / self.PRE_RESTORE_NAMES["db"])
+
+        result = {
             "restored": list(payload.get("restored") or []),
             "file_name": payload.get("file_name"),
             "configs": dict(payload.get("configs") or {}),
         }
+        if snapshot is not None:
+            result["pre_restore_snapshot"] = str(snapshot)
+        return result
+
+    def _carry_over_telegram_updates(self, live_copy: Path) -> None:
+        if not live_copy.is_file():
+            return
+        from app.services import telegram_update_dedup
+
+        try:
+            telegram_update_dedup.carry_over_processed_updates(live_copy, self.db_path)
+        except Exception:
+            logger.exception(
+                "Restore: Telegram update ids were not carried over to the restored DB; "
+                "a redelivered bot command may run again"
+            )
+
+    def _snapshot_live_files(self, targets: list[tuple[str, Path]], *, keep_snapshot_id: str | None = None) -> Path:
+        """Copy the files a restore is about to replace, so a bad restore can be undone by hand."""
+        root = self.backup_root / self.PRE_RESTORE_DIR
+        root.mkdir(parents=True, exist_ok=True)
+        os.chmod(root, 0o700)
+        stamp = datetime.now(timezone.utc).strftime(_PRE_RESTORE_STAMP)
+        snapshot = root / stamp
+        snapshot.mkdir(mode=0o700)
+        os.chmod(snapshot, 0o700)
+        for role, path in targets:
+            if not path.exists():
+                continue
+            dest = snapshot / self.PRE_RESTORE_NAMES[role]
+            if not self._copy_sqlite_consistent(path, dest):
+                shutil.copyfile(path, dest)
+            os.chmod(dest, 0o600)
+        self._enforce_pre_restore_retention(root, keep_snapshot_id=keep_snapshot_id)
+        return snapshot
+
+    @staticmethod
+    def _copy_sqlite_consistent(src: Path, dest: Path) -> bool:
+        """Online-backup copy (includes committed WAL frames); False if ``src`` is not a readable database."""
+        with src.open("rb") as fh:
+            if fh.read(len(_SQLITE_HEADER)) != _SQLITE_HEADER:
+                return False
+        try:
+            source = sqlite3.connect(f"file:{src.resolve().as_posix()}?mode=ro", uri=True)
+            try:
+                target = sqlite3.connect(str(dest))
+                try:
+                    source.backup(target)
+                finally:
+                    target.close()
+            finally:
+                source.close()
+        except sqlite3.DatabaseError:
+            dest.unlink(missing_ok=True)
+            return False
+        return True
+
+    def _rollback_from_snapshot(self, replaced: list[tuple[str, Path]], snapshot: Path | None) -> None:
+        for role, path in replaced:
+            saved = snapshot / self.PRE_RESTORE_NAMES[role] if snapshot is not None else None
+            try:
+                if saved is not None and saved.exists():
+                    atomic_write_bytes(path, saved.read_bytes())
+                else:
+                    path.unlink(missing_ok=True)
+                remove_sqlite_sidecars(path)
+            except OSError:
+                logger.exception("Restore rollback failed for %s (pre-restore copy: %s)", path, snapshot)
+
+    def _enforce_pre_restore_retention(self, root: Path, *, keep_snapshot_id: str | None = None) -> None:
+        """``keep_snapshot_id`` is the copy being rolled back to: it may be the oldest, yet the admin still needs it."""
+        snapshots = sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.name, reverse=True)
+        for old in snapshots[self.PRE_RESTORE_KEEP :]:
+            if old.name == keep_snapshot_id:
+                continue
+            shutil.rmtree(old, ignore_errors=True)
+
+    def list_pre_restore_snapshots(self) -> list[dict]:
+        root = self.backup_root / self.PRE_RESTORE_DIR
+        if not root.is_dir():
+            return []
+        result = []
+        snapshots = (p for p in root.iterdir() if p.is_dir() and _PRE_RESTORE_ID.fullmatch(p.name))
+        for snapshot in sorted(snapshots, key=lambda p: p.name, reverse=True):
+            files = {
+                role: snapshot / name
+                for role, name in self.PRE_RESTORE_NAMES.items()
+                if (snapshot / name).is_file()
+            }
+            created_at = datetime.strptime(snapshot.name, _PRE_RESTORE_STAMP).replace(tzinfo=timezone.utc)
+            result.append({
+                "snapshot_id": snapshot.name,
+                "created_at": created_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "size_bytes": sum(path.stat().st_size for path in files.values()),
+                "components": list(files),
+            })
+        return result
+
+    def _resolve_pre_restore_snapshot(self, snapshot_id: str) -> Path:
+        snapshot = self.backup_root / self.PRE_RESTORE_DIR / snapshot_id
+        if not _PRE_RESTORE_ID.fullmatch(snapshot_id) or not snapshot.is_dir():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Копия перед восстановлением не найдена")
+        return snapshot
+
+    def load_pre_restore_payload(self, snapshot_id: str) -> dict:
+        """Roll back a restore: the copy holds only the DB, CIDR DB and .env it replaced."""
+        snapshot = self._resolve_pre_restore_snapshot(snapshot_id)
+        files: dict[str, bytes] = {}
+        for role, name in self.PRE_RESTORE_NAMES.items():
+            if role == "cidr_db" and self.cidr_db_path is None:
+                continue
+            path = snapshot / name
+            if path.is_file():
+                files[role] = path.read_bytes()
+        if not files:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Копия перед восстановлением пуста")
+        if "db" in files:
+            validate_sqlite_bytes(files["db"], "База панели")
+        if "cidr_db" in files:
+            validate_sqlite_bytes(files["cidr_db"], "База CIDR")
+        self._ensure_restore_space(self._restore_targets(files))
+        return {
+            "restored": list(files),
+            "file_name": snapshot_id,
+            "configs": {},
+            "_files": files,
+            "_pre_restore_source": snapshot_id,
+        }
+
+    def delete_pre_restore_snapshot(self, snapshot_id: str) -> None:
+        shutil.rmtree(self._resolve_pre_restore_snapshot(snapshot_id))
 
     def restore_backup(self, file_name: str) -> dict:
         return self.apply_restore_payload(self.load_restore_payload(file_name))
@@ -373,13 +641,39 @@ class BackupManager:
                     continue
         return {}
 
+    def _has_metadata(self, archive_path: Path) -> bool:
+        return backup_meta_path(archive_path).exists() or archive_path.with_suffix(".json").exists()
+
     def _enforce_retention(self, count: int) -> None:
-        archives = sorted(
-            glob.glob(str(self.backup_root / "*.tar.gz")),
-            key=os.path.getmtime,
-            reverse=True,
-        )
-        for old in archives[count:]:
+        """Keep the ``count`` newest archives that have metadata.
+
+        Archives without metadata (interrupted writes of older versions) never push complete
+        ones out; they go only when older than the oldest kept complete archive.
+        """
+        stale_before = time.time() - self.STALE_PARTIAL_SECONDS
+        for partial in self.backup_root.glob(f".adminpanelaz_*.tar.gz{self.PARTIAL_SUFFIX}"):
+            try:
+                if partial.stat().st_mtime < stale_before:
+                    partial.unlink()
+            except OSError:
+                pass
+
+        dated: list[tuple[float, str]] = []
+        for name in glob.glob(str(self.backup_root / "*.tar.gz")):
+            try:
+                dated.append((os.path.getmtime(name), name))
+            except OSError:
+                continue
+        dated.sort(reverse=True)
+        complete = [(mtime, name) for mtime, name in dated if self._has_metadata(Path(name))]
+        if len(complete) <= count:
+            return
+        oldest_kept = complete[count - 1][0]
+        doomed = [name for _, name in complete[count:]]
+        doomed += [
+            name for mtime, name in dated if mtime < oldest_kept and not self._has_metadata(Path(name))
+        ]
+        for old in doomed:
             try:
                 os.remove(old)
                 old_path = Path(old)

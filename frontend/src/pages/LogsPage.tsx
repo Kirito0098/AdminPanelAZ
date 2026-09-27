@@ -582,7 +582,7 @@ export default function LogsPage() {
   const logsDashboardEnabled = isEnabled('logs_dashboard')
   const actionLogsEnabled = isEnabled('action_logs')
   const qrDownloadsEnabled = isEnabled('qr_downloads')
-  const { activeNode } = useNode()
+  const { activeNode, loading: nodeLoading } = useNode()
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal } = useProgress()
   const [actions, setActions] = useState<ActionLogEntry[]>([])
@@ -701,9 +701,10 @@ export default function LogsPage() {
   useEffect(() => {
     // Node switch (and URL deep-link): reload for the tab the user is viewing, not only initialLogTab.
     // activeTabRef stays in sync on each render; URL changes also setActiveTab(initialLogTab) above.
+    if (nodeLoading) return
     load(false, true, activeTabRef.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- remount on node / tab deep-link only
-  }, [activeNode?.id, initialLogTab])
+  }, [nodeLoading, activeNode?.id, initialLogTab])
 
   useIntervalWhenVisible(
     () => {

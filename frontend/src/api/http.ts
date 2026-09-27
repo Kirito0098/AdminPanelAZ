@@ -2,6 +2,12 @@ import { apiBase as API_BASE } from '@/lib/panelBase'
 import { parseHttpErrorBody } from '@/lib/httpErrorMessage'
 import { clearAccessToken, getAccessToken, setAccessToken } from '@/lib/accessToken'
 import { getActiveTimeZone } from '@/lib/datetime'
+import {
+  applyExpectedNodeHeader,
+  isActiveNodeChangedPayload,
+  notifyActiveNodeChanged,
+} from '@/lib/expectedNode'
+import { notifySessionLost } from '@/lib/sessionLost'
 import { getWebSessionId } from '@/lib/webSession'
 
 export class ApiError extends Error {
@@ -38,28 +44,71 @@ export function isNodeAgentAuthFailureDetail(detail: unknown): boolean {
   return text.includes('X-Node-Key') || text.includes('Неверный API-ключ')
 }
 
+const SERVER_UNREACHABLE_MESSAGE =
+  'Не удалось связаться с сервером. Возможен перезапуск панели — подождите и откройте новый адрес.'
+export const REFRESH_TIMEOUT_MS = 20_000
+const REFRESH_LOCK_NAME = 'az-auth-refresh'
+
 let refreshPromise: Promise<string | null> | null = null
 
-export async function refreshAccessToken(): Promise<string | null> {
-  if (!refreshPromise) {
-    refreshPromise = fetch(`${API_BASE}/auth/refresh`, {
-      method: 'POST',
-      credentials: 'include',
+function isServerUnavailableStatus(status: number): boolean {
+  return status >= 500 || status === 408 || status === 429
+}
+
+/**
+ * Tabs share one refresh cookie: overlapping rotations answered out of order leave a revoked token in it,
+ * which the server treats as reuse once the grace window has passed.
+ */
+function withRefreshLock<T>(task: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator === 'undefined' ? undefined : navigator.locks
+  if (!locks?.request) return task()
+  let granted = false
+  const locked = locks.request(REFRESH_LOCK_NAME, () => {
+    granted = true
+    return task()
+  }) as Promise<T>
+  return locked.catch((error: unknown) => {
+    if (granted) throw error
+    return task()
+  })
+}
+
+function requestRefresh(): Promise<string | null> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS)
+  return fetch(`${API_BASE}/auth/refresh`, {
+    method: 'POST',
+    credentials: 'include',
+    signal: controller.signal,
+  })
+    .catch(() => {
+      throw new ApiError(SERVER_UNREACHABLE_MESSAGE, 0)
     })
-      .then(async (response) => {
-        if (!response.ok) {
-          clearAccessToken()
-          return null
+    .then(async (response) => {
+      if (!response.ok) {
+        if (isServerUnavailableStatus(response.status)) {
+          throw new ApiError(parseHttpErrorBody(await response.text(), response.status), response.status)
         }
-        const data = await response.json()
-        const token = data.access_token as string
-        setAccessToken(token)
-        return token
-      })
-      .finally(() => {
-        refreshPromise = null
-      })
-  }
+        clearAccessToken()
+        notifySessionLost()
+        return null
+      }
+      const data = await response.json()
+      const token = data.access_token as string
+      setAccessToken(token)
+      return token
+    })
+    .finally(() => clearTimeout(timer))
+}
+
+/**
+ * Resolves to null only when the server refuses the session (it is cleared then).
+ * An unreachable or failing server rejects with ApiError and keeps the session for a retry.
+ */
+export async function refreshAccessToken(): Promise<string | null> {
+  refreshPromise ??= withRefreshLock(requestRefresh).finally(() => {
+    refreshPromise = null
+  })
   return refreshPromise
 }
 
@@ -87,14 +136,12 @@ export async function apiFetchAtBase<T>(
   }
 
   const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base
+  if (normalizedBase === API_BASE) applyExpectedNodeHeader(headers, options.method)
   let response: Response
   try {
     response = await fetch(`${normalizedBase}${path}`, { ...options, headers, credentials: 'include' })
   } catch {
-    throw new ApiError(
-      'Не удалось связаться с сервером. Возможен перезапуск панели — подождите и откройте новый адрес.',
-      0,
-    )
+    throw new ApiError(SERVER_UNREACHABLE_MESSAGE, 0)
   }
   if (response.status === 401 && retry && !path.startsWith('/auth/') && normalizedBase === API_BASE) {
     const body = await response.text()
@@ -130,6 +177,7 @@ export async function apiFetchAtBase<T>(
         payload = undefined
       }
     }
+    if (response.status === 409 && isActiveNodeChangedPayload(payload)) notifyActiveNodeChanged()
     const detail = parseHttpErrorBody(body, response.status)
     throw new ApiError(detail, response.status, payload)
   }

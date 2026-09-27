@@ -65,6 +65,58 @@ firewall_validate_ports() {
   return 0
 }
 
+# Порты sshd: текущей SSH-сессии, из sshd -T, слушающих сокетов и ssh.socket; без данных — 22.
+# При socket-активации порт слушает systemd, и в ss процесса sshd не видно.
+firewall_ssh_ports() {
+  local ports
+  ports="$(
+    {
+      [[ -z "${SSH_CONNECTION:-}" ]] || awk '{print $4}' <<<"$SSH_CONNECTION"
+      sshd -T 2>/dev/null | awk '$1 == "port" {print $2}'
+      ss -Htlnp 2>/dev/null | awk '/"sshd"/ {n = split($4, a, ":"); print a[n]}'
+      if systemctl is-active --quiet ssh.socket 2>/dev/null; then
+        systemctl show -p Listen --value ssh.socket 2>/dev/null \
+          | awk '/\(Stream\)/ {n = split($1, a, ":"); print a[n]}'
+      fi
+    } | grep -E '^[0-9]+$' | sort -un
+  )" || true
+  printf '%s\n' "${ports:-22}"
+}
+
+# firewall_check_ssh_not_closed <порт>... — порты, которые правила закроют.
+firewall_check_ssh_not_closed() {
+  local ssh_ports closed port
+  ssh_ports="$(firewall_ssh_ports)"
+  for closed in "$@"; do
+    [[ "$closed" != "0" ]] || continue
+    while IFS= read -r port; do
+      if [[ "$closed" == "$port" ]]; then
+        firewall_warn "Порт ${closed}/tcp занят SSH — правило firewall закрыло бы доступ к серверу. Выберите для панели или агента другой порт."
+        return 1
+      fi
+    done <<<"$ssh_ports"
+  done
+  return 0
+}
+
+# Правило SSH остаётся и после удаления панели: ufw уже активен, и повторная установка SSH не добавит.
+FIREWALL_UFW_SSH_COMMENT="SSH (AdminPanelAZ)"
+
+# ufw включается с политикой deny для входящих: без разрешения SSH на сервер больше не войти.
+# Правило SSH, заведённое пользователем (например, только со своего IP), не расширяем.
+firewall_ufw_allow_ssh() {
+  local added port
+  added="$(ufw show added 2>/dev/null || true)"
+  while IFS= read -r port; do
+    if grep -Eq "^ufw (allow|limit) (.* )?(port ${port}|${port}(/tcp)?|OpenSSH|ssh)( |$)" <<<"$added"; then
+      continue
+    fi
+    firewall_log "Разрешаю SSH (${port}/tcp) в ufw"
+    ufw allow "${port}/tcp" comment "$FIREWALL_UFW_SSH_COMMENT" >/dev/null 2>&1 || \
+      ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+  done <<<"$(firewall_ssh_ports)"
+}
+
 firewall_show_rules_summary() {
   local backend_port="$1"
   local node_port="$2"
@@ -139,6 +191,7 @@ firewall_show_manual_instructions() {
     echo "  sudo ufw allow ${https_port}/tcp comment 'AdminPanelAZ HTTPS'"
     echo "  sudo ufw allow ${http_port}/tcp comment 'AdminPanelAZ HTTP (ACME)'"
   fi
+  echo "  sudo ufw allow OpenSSH   # до включения ufw, иначе SSH будет закрыт"
   echo "  sudo ufw enable   # если ufw ещё не активен"
   echo
   echo "Пример для iptables:"
@@ -161,6 +214,52 @@ firewall_show_manual_instructions() {
   fi
 }
 
+# Порт, который открывал один режим публикации и закрывал другой: правило прежнего режима
+# стоит выше в цепочке и срабатывает первым, поэтому его нужно убрать, а не перекрыть.
+firewall_iptables_delete_all() {
+  while iptables -C INPUT "$@" 2>/dev/null; do
+    iptables -D INPUT "$@" || return 1
+  done
+}
+
+firewall_iptables_open_port() {
+  local port="$1"
+  firewall_iptables_delete_all -p tcp --dport "$port" ! -s 127.0.0.1 -j DROP
+  firewall_iptables_delete_all -p tcp --dport "$port" -j DROP
+  if ! iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
+    iptables -A INPUT -p tcp --dport "$port" -j ACCEPT
+  fi
+}
+
+firewall_iptables_close_port() {
+  local port="$1"
+  firewall_iptables_delete_all -p tcp --dport "$port" -j ACCEPT
+  if ! iptables -C INPUT -p tcp --dport "$port" ! -s 127.0.0.1 -j DROP 2>/dev/null; then
+    iptables -A INPUT -p tcp --dport "$port" ! -s 127.0.0.1 -j DROP
+  fi
+}
+
+# firewall_ufw_delete_port <порт> <ALLOW|DENY> — правило для порта со всех адресов.
+# Удаление по описанию снимает IPv4 и (v6) и работает на неактивном ufw, где status numbered пуст.
+firewall_ufw_delete_port() {
+  local port="$1" action="${2,,}"
+  ufw --force delete "$action" "${port}/tcp" >/dev/null 2>&1 || true
+}
+
+firewall_ufw_open_port() {
+  local port="$1" comment="$2"
+  firewall_ufw_delete_port "$port" DENY
+  ufw allow "${port}/tcp" comment "$comment" >/dev/null 2>&1 || \
+    ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+}
+
+firewall_ufw_close_port() {
+  local port="$1" comment="$2"
+  firewall_ufw_delete_port "$port" ALLOW
+  ufw deny "${port}/tcp" comment "$comment" >/dev/null 2>&1 || \
+    ufw deny "${port}/tcp" >/dev/null 2>&1 || true
+}
+
 firewall_apply_ufw_rules() {
   local backend_port="$1"
   local node_port="$2"
@@ -172,18 +271,15 @@ firewall_apply_ufw_rules() {
   local has_proxy="${8:-false}"
   local proxy_port="${9:-9101}"
 
+  local ufw_active=false
   if ufw status 2>/dev/null | grep -q "Status: active"; then
-    :
-  elif [[ "${FIREWALL_ENABLE_UFW:-}" == "true" ]]; then
-    firewall_log "Включение ufw..."
-    ufw --force enable
+    ufw_active=true
   else
-    firewall_warn "ufw установлен, но не активен. Правила будут добавлены; включите: sudo ufw enable"
+    firewall_ufw_allow_ssh
   fi
 
   if [[ "$backend_port" != "0" ]]; then
-    ufw deny "${backend_port}/tcp" comment "AdminPanelAZ backend" >/dev/null 2>&1 || \
-      ufw deny "${backend_port}/tcp" >/dev/null 2>&1 || true
+    firewall_ufw_close_port "$backend_port" "AdminPanelAZ backend"
   fi
 
   if [[ "$has_node" == true ]]; then
@@ -207,12 +303,19 @@ firewall_apply_ufw_rules() {
   fi
 
   if [[ "$has_nginx" == true ]]; then
-    ufw allow "${https_port}/tcp" comment "AdminPanelAZ HTTPS" >/dev/null 2>&1 || \
-      ufw allow "${https_port}/tcp" >/dev/null 2>&1 || true
+    firewall_ufw_open_port "$https_port" "AdminPanelAZ HTTPS"
     if [[ "$http_port" != "0" ]]; then
-      ufw allow "${http_port}/tcp" comment "AdminPanelAZ HTTP (ACME)" >/dev/null 2>&1 || \
-        ufw allow "${http_port}/tcp" >/dev/null 2>&1 || true
+      firewall_ufw_open_port "$http_port" "AdminPanelAZ HTTP (ACME)"
     fi
+  fi
+
+  if [[ "$ufw_active" == true ]]; then
+    :
+  elif [[ "${FIREWALL_ENABLE_UFW:-}" == "true" ]]; then
+    firewall_log "Включение ufw..."
+    ufw --force enable
+  else
+    firewall_warn "ufw установлен, но не активен. Правила (включая SSH) добавлены; включите: sudo ufw enable"
   fi
 
   ufw reload >/dev/null 2>&1 || true
@@ -230,9 +333,7 @@ firewall_apply_iptables_rules() {
   local proxy_port="${9:-9101}"
 
   if [[ "$backend_port" != "0" ]]; then
-    if ! iptables -C INPUT -p tcp --dport "$backend_port" ! -s 127.0.0.1 -j DROP 2>/dev/null; then
-      iptables -A INPUT -p tcp --dport "$backend_port" ! -s 127.0.0.1 -j DROP
-    fi
+    firewall_iptables_close_port "$backend_port"
   fi
 
   if [[ "$has_node" == true ]]; then
@@ -256,11 +357,9 @@ firewall_apply_iptables_rules() {
   fi
 
   if [[ "$has_nginx" == true ]]; then
-    if ! iptables -C INPUT -p tcp --dport "$https_port" -j ACCEPT 2>/dev/null; then
-      iptables -A INPUT -p tcp --dport "$https_port" -j ACCEPT
-    fi
-    if [[ "$http_port" != "0" ]] && ! iptables -C INPUT -p tcp --dport "$http_port" -j ACCEPT 2>/dev/null; then
-      iptables -A INPUT -p tcp --dport "$http_port" -j ACCEPT
+    firewall_iptables_open_port "$https_port"
+    if [[ "$http_port" != "0" ]]; then
+      firewall_iptables_open_port "$http_port"
     fi
   fi
 
@@ -278,14 +377,11 @@ firewall_apply_direct_port() {
 
   case "$tool" in
     ufw)
-      ufw allow "${port}/tcp" comment "AdminPanelAZ direct publish" >/dev/null 2>&1 || \
-        ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+      firewall_ufw_open_port "$port" "AdminPanelAZ direct publish"
       ufw reload >/dev/null 2>&1 || true
       ;;
     iptables)
-      if ! iptables -C INPUT -p tcp --dport "$port" -j ACCEPT 2>/dev/null; then
-        iptables -A INPUT -p tcp --dport "$port" -j ACCEPT
-      fi
+      firewall_iptables_open_port "$port"
       firewall_persist_iptables_rules
       ;;
     none)
@@ -331,6 +427,11 @@ firewall_apply_rules() {
     "$has_node" "$has_nginx" "$has_proxy" "$proxy_port"; then
     return 1
   fi
+
+  local -a closed_ports=("$backend_port")
+  [[ "$has_node" != true ]] || closed_ports+=("$node_port")
+  [[ "$has_proxy" != true ]] || closed_ports+=("$proxy_port")
+  firewall_check_ssh_not_closed "${closed_ports[@]}" || return 1
 
   local tool
   tool="$(firewall_detect_tool)"
@@ -525,17 +626,26 @@ firewall_remove_ufw_rules() {
   fi
 
   firewall_log "Удаление правил ufw AdminPanelAZ..."
-  local nums
-  nums=$(ufw status numbered 2>/dev/null | grep -i 'AdminPanelAZ' | sed -n 's/^\[\([0-9]*\)\].*/\1/p' | sort -rn || true)
-  if [[ -n "$nums" ]]; then
-    while IFS= read -r num; do
-      [[ -n "$num" ]] || continue
-      ufw --force delete "$num" >/dev/null 2>&1 || true
-    done <<<"$nums"
+  # ufw show added видит правила и на неактивном ufw; удаление по описанию снимает IPv4 и (v6).
+  local added rules rule removed=false
+  local -a words
+  added="$(ufw show added 2>/dev/null || true)"
+  rules="$(grep "comment '[^']*AdminPanelAZ" <<<"$added" \
+    | grep -vF "comment '${FIREWALL_UFW_SSH_COMMENT}'" \
+    | sed -n "s/^ufw \(.*\) comment '[^']*'\$/\1/p" || true)"
+  while IFS= read -r rule; do
+    [[ -n "$rule" ]] || continue
+    read -ra words <<<"$rule"
+    ufw --force delete "${words[@]}" >/dev/null 2>&1 && removed=true
+  done <<<"$rules"
+  if [[ "$removed" == true ]]; then
     ufw reload >/dev/null 2>&1 || true
     firewall_log "Правила ufw AdminPanelAZ удалены."
   else
     firewall_log "Правила ufw AdminPanelAZ не найдены."
+  fi
+  if grep -qF "comment '${FIREWALL_UFW_SSH_COMMENT}'" <<<"$added"; then
+    firewall_log "Правило SSH в ufw оставлено: без него ufw закрыл бы доступ к серверу."
   fi
 }
 

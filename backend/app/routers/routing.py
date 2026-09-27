@@ -17,10 +17,13 @@ from app.schemas import (
     RoutingOverview,
 )
 from app.services.antizapret_settings import (
+    VERIFIED_WRITE_TYPES,
     az_host_updates_conflict_with_panel_domain,
     build_schema,
     filter_known_keys,
+    normalize_choice_settings,
     openvpn_backup_tcp_conflict_warnings,
+    setting_write_mismatch_warnings,
 )
 from app.services.background_tasks import background_task_service
 from app.services.env_file import EnvFileService
@@ -180,7 +183,7 @@ def result_content(key: str, _: User = Depends(require_admin), db: Session = Dep
 def get_antizapret_settings(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
-    settings = adapter.get_antizapret_settings()
+    settings = normalize_choice_settings(adapter.get_antizapret_settings())
     return AntizapretSettingsResponse(
         settings=settings,
         param_schema=[AntizapretSettingFieldSchema(**item) for item in build_schema()],
@@ -207,13 +210,21 @@ def put_antizapret_settings(
     )
     if host_conflict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=host_conflict)
+    adapter = get_active_adapter(db)
     try:
-        result = get_active_adapter(db).update_antizapret_settings(filtered)
+        result = adapter.update_antizapret_settings(filtered)
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав на запись") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     https_public_port = env.get_env_value("HTTPS_PUBLIC_PORT", "443") or "443"
     warnings = list(result.get("warnings") or [])
+    if any(field["type"] in VERIFIED_WRITE_TYPES and field["key"] in filtered for field in build_schema()):
+        try:
+            warnings.extend(setting_write_mismatch_warnings(filtered, adapter.get_antizapret_settings()))
+        except Exception:  # noqa: BLE001 — best-effort verification
+            pass
     for warning in openvpn_backup_tcp_conflict_warnings(filtered, https_public_port=https_public_port):
         if warning not in warnings:
             warnings.append(warning)

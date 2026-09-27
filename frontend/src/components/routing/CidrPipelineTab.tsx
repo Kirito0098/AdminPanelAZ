@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { parseTimestamp } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type { AntifilterStatus, CidrDbStatus, CidrDeployPreview, CidrPipelineTask, CidrProviderInfo, Node } from '@/types'
 import { STAGE_BUILD, STAGE_DEPLOY, STAGE_LOAD, nodeStatusRu } from './routingLabels'
@@ -133,9 +134,9 @@ export default function CidrPipelineTab({
     if (!compile?.finished_at || compile.status !== 'completed') return false
     const deploy = cidrDb?.last_deploy
     if (!deploy?.finished_at) return true
-    const compileAt = Date.parse(compile.finished_at)
-    const deployAt = Date.parse(deploy.finished_at)
-    if (!Number.isNaN(compileAt) && !Number.isNaN(deployAt) && compileAt > deployAt) return true
+    const compileAt = parseTimestamp(compile.finished_at)
+    const deployAt = parseTimestamp(deploy.finished_at)
+    if (compileAt && deployAt && compileAt.getTime() > deployAt.getTime()) return true
     if (
       compile.artifact_stamp &&
       deploy.artifact_stamp &&

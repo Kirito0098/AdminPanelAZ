@@ -1,5 +1,5 @@
 import { ChevronRight } from 'lucide-react'
-import { formatBytes } from '@/components/monitoring/MonitoringCharts'
+import { formatBytes } from '@/lib/trafficFormat'
 import {
   HealthScoreBadge,
   ResourceMetricInline,

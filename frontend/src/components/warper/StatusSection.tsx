@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { useNotifications } from '@/context/NotificationContext'
 import type { Node, WarperHealthResponse, WarperStatusResponse } from '@/types'
 import { cn } from '@/lib/utils'
-import { formatNodeLabel, formatOutboundMode } from './utils'
+import { formatNodeLabel, formatOutboundMode, warperToggleLabel } from './utils'
 
 interface StatusSectionProps {
   embedded?: boolean
@@ -103,7 +103,7 @@ export default function StatusSection({
               </Badge>
             )}
             {health?.version && <Badge variant="outline">v{health.version}</Badge>}
-            {outboundMode && <Badge variant="outline">Режим: {outboundMode}</Badge>}
+            {outboundMode && <Badge variant="outline">Режим: {formatOutboundMode(outboundMode)}</Badge>}
           </div>
         )}
 
@@ -198,7 +198,7 @@ export default function StatusSection({
               disabled={loading || !health?.installed || health.conflict_antizapret_warp}
             >
               <Power className="mr-1.5 h-4 w-4" />
-              {health?.active ? 'Выключить' : 'Включить'}
+              {warperToggleLabel(health)}
             </Button>
           </div>
         )}

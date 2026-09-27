@@ -362,12 +362,7 @@ def geo_routing_hint(
     _: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    resolved_ip = client_ip
-    if not resolved_ip and request.client:
-        resolved_ip = request.client.host
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        resolved_ip = forwarded.split(",")[0].strip()
+    resolved_ip = client_ip or ip_restriction_service.get_client_ip(request)
     return build_geo_routing_hint(db, client_ip=resolved_ip)
 
 
@@ -598,6 +593,7 @@ def update_node(
             key_hash, key_encrypted = store_api_key("", payload.api_key)
             node.api_key_hash = key_hash
             node.api_key_encrypted = key_encrypted
+            node.api_key_rotated_at = datetime.utcnow()
 
     if "linked_vpn_node_id" in updates:
         node.linked_vpn_node_id = _validate_linked_vpn_node_id(

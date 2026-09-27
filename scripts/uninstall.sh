@@ -12,6 +12,7 @@ REMOVE_FIREWALL=false
 REMOVE_ENV=false
 REMOVE_BACKUPS=false
 REMOVE_SYSTEM_CONFIG=false
+KEEP_AGENT_PKI=false
 YES=false
 SKIP_CONFIRM=false
 
@@ -35,6 +36,7 @@ usage() {
   --remove-env          Удалить backend/.env, node_agent.env и proxy_agent.env
   --remove-backups      Удалить каталог бэкапов (BACKUP_ROOT из backend/.env)
   --remove-system-config  Удалить /etc/adminpanelaz (ddns.env, mtls, node_agent.env)
+  --keep-agent-pki        С --remove-system-config: оставить /etc/adminpanelaz/mtls (переустановка)
   -y, --yes             Без интерактивных подтверждений
   --skip-confirm        Не спрашивать подтверждение (вызывается из install.sh после своего диалога)
   --help                Показать справку
@@ -72,6 +74,9 @@ parse_args() {
         ;;
       --remove-system-config)
         REMOVE_SYSTEM_CONFIG=true
+        ;;
+      --keep-agent-pki)
+        KEEP_AGENT_PKI=true
         ;;
       -y|--yes)
         YES=true
@@ -204,6 +209,31 @@ stop_all_services() {
   stop_systemd_unit_if_loaded "adminpanelaz-proxy"
 }
 
+# nginx_conf_users <каталог nginx> <ERE> [файл, который не считается]: файлы, где ERE стоит вне комментария.
+nginx_conf_users() {
+  local dir="$1" pattern="$2" skip="${3:-}" path
+  while IFS= read -r path; do
+    [[ -n "$skip" && "$path" == "$skip" ]] && continue
+    sed 's/#.*//' "$path" 2>/dev/null | grep -Eq -- "$pattern" && printf '%s\n' "$path"
+  done < <(find "$dir" -path "$dir/backups" -prune -o \( -type f -o -type l \) -print 2>/dev/null | sort)
+  return 0
+}
+
+# Snippets Cloudflare подключают и vhost портала, и vhost других доменов панели, и чужие сайты:
+# удалить подключённый snippet — nginx не поднимется при следующем перезапуске.
+remove_nginx_shared_file_unless_used() {
+  local file="$1" label="$2"
+  shift 2
+  [[ -f "$file" ]] || return 0
+  if [[ -n "$*" ]]; then
+    warn "${label} ${file} оставлен, его использует: $*"
+    return 0
+  fi
+  rm -f "$file"
+  log "Удалён ${label}: ${file}"
+  NGINX_CHANGED=true
+}
+
 remove_nginx_site_if_present() {
   if [[ "$REMOVE_NGINX" != true ]]; then
     return 0
@@ -211,6 +241,8 @@ remove_nginx_site_if_present() {
 
   local env_file="$ROOT_DIR/backend/.env"
   local domain=""
+  local nginx_dir="${NGINX_DIR:-/etc/nginx}"
+  local ssl_dir="${SSL_DIR:-/etc/ssl}"
 
   if [[ -f "$env_file" ]]; then
     domain=$(grep -E '^DOMAIN=' "$env_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ' || true)
@@ -223,7 +255,9 @@ remove_nginx_site_if_present() {
 
   local conf_base="${domain//./_}"
   local removed=false
-  for path in "/etc/nginx/sites-available/${conf_base}" "/etc/nginx/sites-enabled/${conf_base}"; do
+  NGINX_CHANGED=false
+  for path in "${nginx_dir}/sites-available/${conf_base}" "${nginx_dir}/sites-enabled/${conf_base}" \
+    "${nginx_dir}/sites-available/00-adminpanelaz-default-deny" "${nginx_dir}/sites-enabled/00-adminpanelaz-default-deny"; do
     if [[ -f "$path" || -L "$path" ]]; then
       rm -f "$path"
       removed=true
@@ -232,21 +266,43 @@ remove_nginx_site_if_present() {
 
   if [[ "$removed" == true ]]; then
     log "Удалена конфигурация nginx для $domain"
-    if command -v nginx >/dev/null 2>&1; then
-      nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null || warn "nginx не перезагружен"
-    fi
+    NGINX_CHANGED=true
   else
     log "Конфигурация nginx для $domain не найдена"
   fi
 
-  if [[ -f /etc/ssl/certs/adminpanelaz.crt ]]; then
-    rm -f /etc/ssl/certs/adminpanelaz.crt /etc/ssl/private/adminpanelaz.key
+  if [[ -f "${ssl_dir}/certs/adminpanelaz.crt" ]]; then
+    rm -f "${ssl_dir}/certs/adminpanelaz.crt" "${ssl_dir}/private/adminpanelaz.key"
     log "Удалён самоподписанный сертификат adminpanelaz"
   fi
+  rm -f "${ssl_dir}/certs/adminpanelaz-default-deny.crt" "${ssl_dir}/private/adminpanelaz-default-deny.key"
 
-  if [[ -f /etc/nginx/snippets/cloudflare-realip.conf ]]; then
-    rm -f /etc/nginx/snippets/cloudflare-realip.conf
-    log "Удалён snippet Cloudflare realip: /etc/nginx/snippets/cloudflare-realip.conf"
+  local realip="${nginx_dir}/snippets/cloudflare-realip.conf"
+  local allow="${nginx_dir}/snippets/cloudflare-origin-allow.conf"
+  local lock="${nginx_dir}/snippets/cloudflare-origin-lock.conf"
+  local geo="${nginx_dir}/conf.d/adminpanelaz-cloudflare-origin.conf"
+  local -a users=()
+
+  mapfile -t users < <(nginx_conf_users "$nginx_dir" 'include[[:space:]]+[^;]*cloudflare-realip\.conf')
+  remove_nginx_shared_file_unless_used "$realip" "snippet Cloudflare realip" "${users[@]}"
+
+  mapfile -t users < <(nginx_conf_users "$nginx_dir" 'include[[:space:]]+[^;]*cloudflare-origin-lock\.conf')
+  remove_nginx_shared_file_unless_used "$lock" "snippet Cloudflare origin lock" "${users[@]}"
+
+  # geo задаёт $adminpanelaz_cf_origin для origin lock; allow — его источник при обновлении списков.
+  # shellcheck disable=SC2016
+  mapfile -t users < <(nginx_conf_users "$nginx_dir" '\$adminpanelaz_cf_origin([^_[:alnum:]]|$)' "$geo")
+  remove_nginx_shared_file_unless_used "$geo" "Cloudflare origin geo" "${users[@]}"
+  if [[ ! -f "$geo" ]]; then
+    remove_nginx_shared_file_unless_used "$allow" "snippet Cloudflare origin allow"
+  fi
+
+  if [[ "$NGINX_CHANGED" == true ]] && command -v nginx >/dev/null 2>&1; then
+    if ! nginx -t >/dev/null 2>&1; then
+      warn "nginx -t не прошёл после удаления — nginx не перезагружен, проверьте: nginx -t"
+    elif ! systemctl reload nginx 2>/dev/null; then
+      warn "nginx не перезагружен"
+    fi
   fi
 }
 
@@ -270,12 +326,14 @@ remove_system_config() {
     return 0
   fi
 
-  local config_dir="/etc/adminpanelaz"
+  local config_dir="${ADMINPANELAZ_CONFIG_DIR:-/etc/adminpanelaz}"
   if [[ -f "$config_dir/ddns.env" ]]; then
     rm -f "$config_dir/ddns.env"
     log "Удалён $config_dir/ddns.env"
   fi
-  if [[ -d "$config_dir/mtls" ]]; then
+  if [[ "$KEEP_AGENT_PKI" == true ]]; then
+    log "Сохранён $config_dir/mtls: панель уже доверяет этим сертификатам агента"
+  elif [[ -d "$config_dir/mtls" ]]; then
     rm -rf "$config_dir/mtls"
     log "Удалён $config_dir/mtls"
   fi

@@ -128,7 +128,7 @@ def test_awg2_install_stream_rejects_non_admin_token():
     viewer = SimpleNamespace(username="viewer", is_active=True, role=UserRole.user)
 
     with (
-        patch.object(awg2_router, "decode_access_token_username", return_value="viewer"),
+        patch.object(awg2_router, "get_active_user_from_access_token", return_value=viewer),
         patch.object(awg2_router, "SessionLocal", return_value=_FakeDb(owner=viewer)),
     ):
         response = client.get("/api/awg2/install/stream", params={"token": "jwt", "mode": "install"})
@@ -158,7 +158,7 @@ def test_awg2_install_stream_returns_json_sse_events():
     )
 
     with (
-        patch.object(awg2_router, "decode_access_token_username", return_value="admin"),
+        patch.object(awg2_router, "get_active_user_from_access_token", return_value=admin),
         patch.object(
             awg2_router,
             "SessionLocal",

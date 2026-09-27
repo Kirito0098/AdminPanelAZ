@@ -20,6 +20,8 @@ from app.models import AppSetting, Node, User
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.env_file import EnvFileService
 from app.services.node_agent_env import resolve_node_agent_env_file
+from app.services.panel_publish_info import panel_restart_command
+from app.services.refresh_token import invalidate_user_sessions
 
 CONFIRM_PHRASE = "ROTATE"
 PREVIEW_TTL_SECONDS = 600
@@ -173,7 +175,7 @@ def _build_warnings(defn: SecretDefinition, settings: Settings) -> list[str]:
             "все пользователи должны войти заново."
         )
         warnings.append(
-            "Зашифрованные в БД данные (API-ключи узлов, TOTP) будут перешифрованы автоматически."
+            "Зашифрованные в БД данные (API-ключи и SSH-ключи узлов, TOTP) будут перешифрованы автоматически."
         )
     if defn.secret_id == "node_agent_api_key":
         warnings.append("Перезапустите node agent после применения нового ключа.")
@@ -186,15 +188,20 @@ def _build_warnings(defn: SecretDefinition, settings: Settings) -> list[str]:
     return warnings
 
 
+_NODE_ENCRYPTED_FIELDS = ("api_key_encrypted", "ssh_private_key_encrypted", "ssh_passphrase_encrypted")
+
+
 def _reencrypt_secrets_with_new_key(db: Session, old_key: str, new_key: str) -> dict[str, int]:
     stats = {"nodes": 0, "totp_users": 0, "errors": 0}
 
     for node in db.query(Node).all():
-        if not (node.api_key_encrypted or "").strip():
+        fields = [field for field in _NODE_ENCRYPTED_FIELDS if (getattr(node, field) or "").strip()]
+        if not fields:
             continue
         try:
-            plain = decrypt_secret(node.api_key_encrypted, old_key)
-            node.api_key_encrypted = encrypt_secret(plain, new_key)
+            for field in fields:
+                plain = decrypt_secret(getattr(node, field), old_key)
+                setattr(node, field, encrypt_secret(plain, new_key))
             db.add(node)
             stats["nodes"] += 1
         except Exception:
@@ -326,6 +333,8 @@ class SecretsRotationService:
             os.environ["SECRET_KEY"] = new_value
             get_settings.cache_clear()
             reencrypt_stats = _reencrypt_secrets_with_new_key(db, old_key, new_value)
+            for user in db.query(User).all():
+                invalidate_user_sessions(db, user, reason="secret_key_rotation", commit=False)
         elif defn.secret_id == "node_agent_api_key":
             env_path = resolve_node_agent_env_file()
             EnvFileService(env_path).set_env_value("NODE_AGENT_API_KEY", new_value)
@@ -342,7 +351,7 @@ class SecretsRotationService:
         if defn.requires_relogin:
             next_steps.append("Все пользователи должны войти заново.")
         if defn.requires_restart:
-            next_steps.append("Перезапустите панель (systemctl restart admin-panel-az).")
+            next_steps.append(f"Перезапустите панель ({panel_restart_command()}).")
         if defn.secret_id == "node_agent_api_key":
             next_steps.append("Перезапустите node agent.")
         if defn.secret_id == "telegram_bot_token":

@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from app.services.atomic_file import atomic_write_text
 from app.services.node_agent_env import node_agent_env_targets
 from app.services.node_update import resolve_repo_root, schedule_agent_restart
 
@@ -100,8 +101,7 @@ def _write_env_updates(env_file: Path, updates: dict[str, str]) -> None:
         if key not in seen:
             result.append(_env_set_line(key, value))
 
-    env_file.parent.mkdir(parents=True, exist_ok=True)
-    env_file.write_text("\n".join(result) + "\n", encoding="utf-8")
+    atomic_write_text(env_file, "\n".join(result) + "\n")
 
 
 def persist_node_agent_env_mtls(paths: dict[str, str]) -> None:

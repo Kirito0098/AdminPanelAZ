@@ -23,7 +23,7 @@ import {
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import { MONITORING_PROTOCOL_COLORS } from '@/components/monitoring/monitoringChartTheme'
 import { getTrafficClientSessions } from '@/api/client'
-import { formatBytes } from '@/components/monitoring/MonitoringCharts'
+import { formatBytes } from '@/lib/trafficFormat'
 import TrafficPeriodControls, {
   CHART_PERIOD_PRESETS,
   type TrafficPeriodPreset,
@@ -42,7 +42,7 @@ import {
 } from '@/components/ui/table'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
-import { formatDate, formatDateTime, formatTime } from '@/lib/datetime'
+import { formatDate, formatDateTime, formatTime, parseTimestamp } from '@/lib/datetime'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { COL_VPN_IP } from '@/lib/uiLabels'
 import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficClientSessions } from '@/types'
@@ -93,9 +93,7 @@ type SourceSortKey = 'sessions' | 'last_seen'
 type SourceSortDir = 'asc' | 'desc'
 
 function lastSeenTs(value?: string | null) {
-  if (!value) return 0
-  const ts = Date.parse(value)
-  return Number.isFinite(ts) ? ts : 0
+  return parseTimestamp(value)?.getTime() ?? 0
 }
 
 function SourceSortIcon({ active, dir }: { active: boolean; dir: SourceSortDir }) {

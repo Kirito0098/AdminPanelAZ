@@ -3,17 +3,27 @@ import {
   apiFetch,
   getToken,
 } from './http'
+import type {
+  MonitoringOverview,
+  NocIncidentsResponse,
+  ConnectionHistoryResponse,
+  GeoRoutingHint,
+  ResourceHistory,
+  PanelResourceHistory,
+  PanelResourceCurrent,
+  DashboardSummary,
+} from '../types'
 
 export async function getMonitoring(
   scope: 'node' | 'all' = 'node',
   haMode: 'dedupe' | 'raw' = 'dedupe',
 ) {
   const params = new URLSearchParams({ scope, ha_mode: haMode })
-  return apiFetch<import('../types').MonitoringOverview>(`/monitoring/overview?${params}`)
+  return apiFetch<MonitoringOverview>(`/monitoring/overview?${params}`)
 }
 
 export async function getNocIncidents(limit = 20) {
-  return apiFetch<import('../types').NocIncidentsResponse>(`/monitoring/incidents?limit=${limit}`)
+  return apiFetch<NocIncidentsResponse>(`/monitoring/incidents?limit=${limit}`)
 }
 
 export async function getConnectionHistory(
@@ -21,18 +31,18 @@ export async function getConnectionHistory(
   scope: 'node' | 'all' = 'node',
 ) {
   const params = new URLSearchParams({ period, scope })
-  return apiFetch<import('../types').ConnectionHistoryResponse>(
+  return apiFetch<ConnectionHistoryResponse>(
     `/monitoring/connection-history?${params}`,
   )
 }
 
 export async function getGeoRoutingHint(clientIp?: string) {
   const query = clientIp ? `?client_ip=${encodeURIComponent(clientIp)}` : ''
-  return apiFetch<import('../types').GeoRoutingHint>(`/nodes/geo-routing-hint${query}`)
+  return apiFetch<GeoRoutingHint>(`/nodes/geo-routing-hint${query}`)
 }
 
 export function openMonitoringStream(
-  onData: (data: import('../types').MonitoringOverview) => void,
+  onData: (data: MonitoringOverview) => void,
   onError?: (message: string) => void,
   scope: 'node' | 'all' = 'node',
   haMode: 'dedupe' | 'raw' = 'dedupe',
@@ -48,7 +58,7 @@ export function openMonitoringStream(
   const source = new EventSource(url)
   source.onmessage = (event) => {
     try {
-      onData(JSON.parse(event.data) as import('../types').MonitoringOverview)
+      onData(JSON.parse(event.data) as MonitoringOverview)
     } catch {
       onError?.('Ошибка разбора потока мониторинга')
     }
@@ -67,19 +77,19 @@ export function openMonitoringStream(
 }
 
 export async function getResourceHistory(period: '1d' | '7d' | '30d' = '1d') {
-  return apiFetch<import('../types').ResourceHistory>(`/monitoring/resource-history?period=${period}`)
+  return apiFetch<ResourceHistory>(`/monitoring/resource-history?period=${period}`)
 }
 
 export async function getPanelResourceHistory(period: '1d' | '7d' | '30d' = '1d') {
-  return apiFetch<import('../types').PanelResourceHistory>(
+  return apiFetch<PanelResourceHistory>(
     `/monitoring/panel-resource-history?period=${period}`,
   )
 }
 
 export async function getPanelResourceCurrent() {
-  return apiFetch<import('../types').PanelResourceCurrent>('/monitoring/panel-resource-current')
+  return apiFetch<PanelResourceCurrent>('/monitoring/panel-resource-current')
 }
 
 export async function getDashboardSummary() {
-  return apiFetch<import('../types').DashboardSummary>('/monitoring/summary')
+  return apiFetch<DashboardSummary>('/monitoring/summary')
 }

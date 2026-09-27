@@ -134,20 +134,21 @@ print_access_url() {
 }
 
 verify_panel_health() {
-  local path_prefix health_path code host_header
+  local path_prefix health_path code port_suffix=""
   path_prefix="$(nginx_normalize_access_path "${ACCESS_PATH:-}")"
   health_path="${path_prefix}/api/health"
-  host_header="$DOMAIN"
-  if [[ "$HTTPS_PUBLIC_PORT" == "443" ]]; then
-    code="$(curl -sk -o /dev/null -w '%{http_code}' -H "Host: ${host_header}" "https://127.0.0.1${health_path}" 2>/dev/null || echo "000")"
-  else
-    code="$(curl -sk -o /dev/null -w '%{http_code}' -H "Host: ${host_header}" "https://127.0.0.1:${HTTPS_PUBLIC_PORT}${health_path}" 2>/dev/null || echo "000")"
-  fi
+  [[ "$HTTPS_PUBLIC_PORT" == "443" ]] || port_suffix=":${HTTPS_PUBLIC_PORT}"
+  # Без SNI (https://127.0.0.1) TLS отклоняет default-deny (ssl_reject_handshake): SNI и Host — домен панели.
+  code="$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' \
+    --resolve "${DOMAIN}:${HTTPS_PUBLIC_PORT}:127.0.0.1" \
+    "https://${DOMAIN}${port_suffix}${health_path}" 2>/dev/null)" || code="000"
   if [[ "$code" == "200" ]]; then
-    nginx_log "Проверка через nginx: OK (HTTP ${code}${health_path})"
+    nginx_log "Проверка через nginx: OK (HTTP ${code} на https://${DOMAIN}${port_suffix}${health_path})"
     return 0
   fi
-  code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${BACKEND_PORT}${health_path}" 2>/dev/null || echo "000")"
+  # ENFORCE_HTTPS: без X-Forwarded-Proto: https uvicorn отвечает 308 на голый HTTP.
+  code="$(curl -s --max-time 10 -o /dev/null -w '%{http_code}' -H 'X-Forwarded-Proto: https' \
+    "http://127.0.0.1:${BACKEND_PORT}${health_path}" 2>/dev/null)" || code="000"
   if [[ "$code" == "200" ]]; then
     nginx_log "Проверка uvicorn: OK (HTTP ${code} на 127.0.0.1:${BACKEND_PORT}${health_path})"
     return 0

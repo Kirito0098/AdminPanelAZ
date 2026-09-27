@@ -1,8 +1,9 @@
 import { apiFetch } from './http'
+import type { ClientPoliciesResponseEntry } from '../types'
 
 export async function getClientPolicies(clients: string) {
   const params = new URLSearchParams({ clients })
-  return apiFetch<Record<string, import('../types').ClientPoliciesResponseEntry>>(
+  return apiFetch<Record<string, ClientPoliciesResponseEntry>>(
     `/client-access/policies?${params}`,
   )
 }
@@ -28,10 +29,20 @@ export async function openvpnPermanentBlock(clientName: string) {
   })
 }
 
-export async function wgSetExpiry(clientName: string, days: number, extend = false) {
+export async function wgSetExpiry(
+  clientName: string,
+  days: number,
+  extend = false,
+  confirmOverride = false,
+) {
   return apiFetch('/client-access/wireguard/set-expiry', {
     method: 'POST',
-    body: JSON.stringify({ client_name: clientName, days, extend }),
+    body: JSON.stringify({
+      client_name: clientName,
+      days,
+      extend,
+      confirm_override: confirmOverride,
+    }),
   })
 }
 

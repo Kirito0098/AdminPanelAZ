@@ -227,6 +227,8 @@ def get_client_consumed_traffic_bytes(
     protocol_types: set[str] | frozenset[str] | None = None,
     normalize_identity=None,
 ):
+    from sqlalchemy import func
+
     from app.models import UserTrafficSample, UserTrafficStatProtocol
 
     normalize_identity = normalize_identity or (lambda name: (name or "").strip().lower())
@@ -240,50 +242,41 @@ def get_client_consumed_traffic_bytes(
         if not allowed_protocols:
             return 0
 
-    def _match_names(model):
-        names = []
-        query = db.query(model.common_name).distinct()
-        if node_id is not None:
-            query = query.filter(model.node_id == node_id)
-        for (stored_name,) in query.all():
-            candidate = (stored_name or "").strip()
-            if candidate and normalize_identity(candidate) == target:
-                names.append(candidate)
-        return names
+    # Totals hold every (node, name) the collector ever sampled and are tiny,
+    # unlike user_traffic_sample (~1M rows).
+    names_query = db.query(UserTrafficStatProtocol.common_name).distinct()
+    if node_id is not None:
+        names_query = names_query.filter(UserTrafficStatProtocol.node_id == node_id)
+    matched = [
+        stored_name
+        for (stored_name,) in names_query.all()
+        if (stored_name or "").strip() and normalize_identity(stored_name) == target
+    ]
+    if not matched:
+        return 0
 
     if period_days in TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED:
-        matched = _match_names(UserTrafficSample)
-        if not matched:
-            return 0
         now = datetime.now(timezone.utc)
         period_start, period_end = get_traffic_limit_period_bounds(period_days, now=now)
         since_dt = _as_utc(period_start).replace(tzinfo=None)
         until_dt = _as_utc(period_end).replace(tzinfo=None)
-        query = db.query(UserTrafficSample).filter(
-            UserTrafficSample.common_name.in_(matched),
-            UserTrafficSample.created_at >= since_dt,
-            UserTrafficSample.created_at < until_dt,
+        model = UserTrafficSample
+        total_expr = func.coalesce(model.delta_received, 0) + func.coalesce(model.delta_sent, 0)
+        query = db.query(func.coalesce(func.sum(total_expr), 0)).filter(
+            model.common_name.in_(matched),
+            model.created_at >= since_dt,
+            model.created_at < until_dt,
         )
         if node_id is not None:
-            query = query.filter(UserTrafficSample.node_id == node_id)
-        if allowed_protocols is not None:
-            query = query.filter(UserTrafficSample.protocol_type.in_(sorted(allowed_protocols)))
-        total = 0
-        for row in query.all():
-            total += int(row.delta_received or 0) + int(row.delta_sent or 0)
-        return total
-
-    matched = _match_names(UserTrafficStatProtocol)
-    if not matched:
-        return 0
-
-    total = 0
-    for candidate in matched:
-        query = db.query(UserTrafficStatProtocol).filter_by(common_name=candidate)
+            # "+ 0" keeps SQLite on (common_name, created_at): the (node_id, created_at)
+            # index would walk every client's samples of the node in the period.
+            query = query.filter(model.node_id + 0 == node_id)
+    else:
+        model = UserTrafficStatProtocol
+        total_expr = func.coalesce(model.total_received, 0) + func.coalesce(model.total_sent, 0)
+        query = db.query(func.coalesce(func.sum(total_expr), 0)).filter(model.common_name.in_(matched))
         if node_id is not None:
-            query = query.filter(UserTrafficStatProtocol.node_id == node_id)
-        if allowed_protocols is not None:
-            query = query.filter(UserTrafficStatProtocol.protocol_type.in_(sorted(allowed_protocols)))
-        for row in query.all():
-            total += int(row.total_received or 0) + int(row.total_sent or 0)
-    return total
+            query = query.filter(model.node_id == node_id)
+    if allowed_protocols is not None:
+        query = query.filter(model.protocol_type.in_(sorted(allowed_protocols)))
+    return int(query.scalar() or 0)

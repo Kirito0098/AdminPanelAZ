@@ -36,7 +36,7 @@ WIZ_NGINX_EMAIL="${WIZ_NGINX_EMAIL:-}"
 WIZ_ACCESS_PATH="${WIZ_ACCESS_PATH:-}"
 WIZ_NGINX_SUBPATH_INTEGRATE="${WIZ_NGINX_SUBPATH_INTEGRATE:-false}"
 WIZ_ADMIN_USERNAME="${WIZ_ADMIN_USERNAME:-admin}"
-WIZ_ADMIN_PASSWORD="${WIZ_ADMIN_PASSWORD:-admin}"
+WIZ_ADMIN_PASSWORD="${WIZ_ADMIN_PASSWORD:-}"
 WIZ_ADMIN_MUST_CHANGE_PASSWORD="${WIZ_ADMIN_MUST_CHANGE_PASSWORD:-true}"
 WIZ_NODE_AGENT_PORT="${WIZ_NODE_AGENT_PORT:-9100}"
 WIZ_NODE_AGENT_API_KEY="${WIZ_NODE_AGENT_API_KEY:-}"
@@ -791,17 +791,29 @@ wizard_ask_admin() {
   echo "Пароль администратора (Enter — сгенерировать случайный):"
   echo "  Политика (production): минимум 8 символов, буквы и цифры; не используйте admin/admin."
   if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
-    WIZ_ADMIN_PASSWORD="${WIZ_ADMIN_PASSWORD:-admin}"
-    echo "  [используется значение по умолчанию]"
+    if admin_password_is_weak "$WIZ_ADMIN_PASSWORD" "$WIZ_ADMIN_USERNAME"; then
+      if [[ -n "$WIZ_ADMIN_PASSWORD" ]]; then
+        print_warn "Заданный WIZ_ADMIN_PASSWORD не проходит политику паролей — будет сгенерирован случайный."
+      fi
+      WIZ_ADMIN_PASSWORD="$(generate_admin_password)"
+      echo "  Сгенерирован случайный пароль: $WIZ_ADMIN_PASSWORD"
+      echo "  Запишите его — он также будет показан в конце установки."
+    else
+      echo "  [используется заданный пароль]"
+    fi
   else
     while true; do
       read -r -s -p "Пароль (пусто = сгенерировать случайный): " _admin_pw
       echo
       if [[ -z "$_admin_pw" ]]; then
-        WIZ_ADMIN_PASSWORD="$(random_hex | cut -c1-16)"
+        WIZ_ADMIN_PASSWORD="$(generate_admin_password)"
         echo "  Сгенерирован случайный пароль: $WIZ_ADMIN_PASSWORD"
         echo "  Запишите его — он также будет показан в конце установки."
         break
+      fi
+      if admin_password_is_weak "$_admin_pw" "$WIZ_ADMIN_USERNAME"; then
+        print_warn "Пароль не проходит политику: минимум 8 символов, буквы и цифры, не admin и не имя пользователя."
+        continue
       fi
       read -r -s -p "Повторите пароль для подтверждения: " _admin_pw2
       echo
@@ -838,16 +850,27 @@ wizard_ask_node_agent() {
     print_info "Порт node agent: ${WIZ_NODE_AGENT_PORT} (задан на шаге сети)"
   fi
 
-  wiz_prompt_yesno "Сгенерировать NODE_AGENT_API_KEY автоматически (рекомендуется)?" "y"
+  local existing_key
+  existing_key="$(agent_env_value "$NODE_ENV_FILE" NODE_AGENT_API_KEY)"
+  REPLY="n"
+  if ! is_placeholder_secret "$existing_key"; then
+    wiz_prompt_yesno "На сервере уже есть NODE_AGENT_API_KEY — оставить его (иначе панель потеряет связь с узлом)?" "y"
+  fi
   if [[ "$REPLY" == "y" ]]; then
-    WIZ_NODE_AGENT_API_KEY="$(random_hex)"
-    echo "  Будет сгенерирован ключ (покажем в конце установки)."
+    WIZ_NODE_AGENT_API_KEY="$existing_key"
+    echo "  Ключ узла не меняется."
   else
-    wiz_prompt_secret "Введите NODE_AGENT_API_KEY (мин. 24 символа в production)" ""
-    if [[ -z "$REPLY" ]]; then
-      die "Node agent не может работать без API-ключа. Запустите мастер заново и выберите автогенерацию ключа (ответ 'y')."
+    wiz_prompt_yesno "Сгенерировать NODE_AGENT_API_KEY автоматически (рекомендуется)?" "y"
+    if [[ "$REPLY" == "y" ]]; then
+      WIZ_NODE_AGENT_API_KEY="$(random_hex)"
+      echo "  Будет сгенерирован ключ (покажем в конце установки)."
+    else
+      wiz_prompt_secret "Введите NODE_AGENT_API_KEY (мин. 24 символа в production)" ""
+      if [[ -z "$REPLY" ]]; then
+        die "Node agent не может работать без API-ключа. Запустите мастер заново и выберите автогенерацию ключа (ответ 'y')."
+      fi
+      WIZ_NODE_AGENT_API_KEY="$REPLY"
     fi
-    WIZ_NODE_AGENT_API_KEY="$REPLY"
   fi
 
   print_info "Ограничьте доступ к порту ${WIZ_NODE_AGENT_PORT} firewall: только IP панели управления."
@@ -869,16 +892,27 @@ wizard_ask_proxy_agent() {
   echo
   print_info "Порт proxy_agent: ${WIZ_PROXY_AGENT_PORT} (задан на шаге сети)"
 
-  wiz_prompt_yesno "Сгенерировать PROXY_AGENT_API_KEY автоматически (рекомендуется)?" "y"
+  local existing_key
+  existing_key="$(agent_env_value "$PROXY_ENV_FILE" PROXY_AGENT_API_KEY)"
+  REPLY="n"
+  if ! is_placeholder_secret "$existing_key"; then
+    wiz_prompt_yesno "На сервере уже есть PROXY_AGENT_API_KEY — оставить его (иначе панель потеряет связь с прокси)?" "y"
+  fi
   if [[ "$REPLY" == "y" ]]; then
-    WIZ_PROXY_AGENT_API_KEY="$(random_hex)"
-    echo "  Будет сгенерирован ключ (покажем в конце установки)."
+    WIZ_PROXY_AGENT_API_KEY="$existing_key"
+    echo "  Ключ прокси не меняется."
   else
-    wiz_prompt_secret "Введите PROXY_AGENT_API_KEY (мин. 24 символа)" ""
-    if [[ -z "$REPLY" ]]; then
-      die "proxy_agent не может работать без API-ключа. Выберите автогенерацию ключа (ответ 'y')."
+    wiz_prompt_yesno "Сгенерировать PROXY_AGENT_API_KEY автоматически (рекомендуется)?" "y"
+    if [[ "$REPLY" == "y" ]]; then
+      WIZ_PROXY_AGENT_API_KEY="$(random_hex)"
+      echo "  Будет сгенерирован ключ (покажем в конце установки)."
+    else
+      wiz_prompt_secret "Введите PROXY_AGENT_API_KEY (мин. 24 символа)" ""
+      if [[ -z "$REPLY" ]]; then
+        die "proxy_agent не может работать без API-ключа. Выберите автогенерацию ключа (ответ 'y')."
+      fi
+      WIZ_PROXY_AGENT_API_KEY="$REPLY"
     fi
-    WIZ_PROXY_AGENT_API_KEY="$REPLY"
   fi
 
   print_info "Ограничьте доступ к порту ${WIZ_PROXY_AGENT_PORT} firewall: только IP панели управления."

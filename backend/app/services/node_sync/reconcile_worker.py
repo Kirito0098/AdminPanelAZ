@@ -13,10 +13,17 @@ from app.database import SessionLocal
 from app.models import NodeSyncGroup, SyncStatus
 from app.services.node_sync.antizapret_sync import heal_antizapret_drift
 from app.services.node_sync.config_sync import heal_config_drift
-from app.services.node_sync.groups import is_auto_sync_enabled
+from app.services.node_sync.group_status import recover_stuck_pending_groups
+from app.services.node_sync.groups import (
+    AUTO_HEAL_SUSPENDED_PREFIX,
+    auto_heal_max_failures,
+    auto_heal_suspended_text,
+    is_auto_sync_enabled,
+)
 from app.services.node_sync.policy_sync import heal_policy_drift
 from app.services.node_sync.vpn_state_sync import heal_crypto_drift
 from app.services.node_sync.verify import verify_sync_group
+from app.services.background_gate import background_pause_requested, run_background_step
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -40,6 +47,10 @@ def classify_heal_actions(verify_result: dict[str, Any]) -> tuple[set[str], bool
             if kind in _CLIENT_DRIFT_KINDS:
                 actions.add("crypto_sync")
                 actions.add("policy")
+                has_healable = True
+                continue
+            if kind == "openvpn_restart_pending":
+                actions.add("crypto_sync")
                 has_healable = True
                 continue
             if kind == "fingerprint":
@@ -122,8 +133,12 @@ def reconcile_sync_groups_once() -> dict:
     checked = 0
     drift_groups: list[dict] = []
     try:
+        recover_stuck_pending_groups(db)
         groups = db.query(NodeSyncGroup).order_by(NodeSyncGroup.id).all()
         for group in groups:
+            if background_pause_requested():
+                logger.info("Node sync reconcile stopped: backup restore in progress")
+                break
             if group.sync_status == SyncStatus.pending:
                 continue
             prior_verify: dict[str, Any] | None = None
@@ -136,25 +151,27 @@ def reconcile_sync_groups_once() -> dict:
                     prior_verify = None
             prior_failures = _read_heal_failure_count(prior_verify)
 
+            # A ready check drops the failure count inside verify_sync_group.
             result = verify_sync_group(db, group)
             checked += 1
 
             if result.get("ready"):
-                if prior_failures:
-                    _persist_verify_result(group, _merge_heal_failure_count(result, 0))
-                    db.commit()
                 continue
 
+            max_failures = auto_heal_max_failures(settings)
+            auto_heal = settings.node_sync_auto_heal and is_auto_sync_enabled(group)
+            heal_suspended = auto_heal and prior_failures >= max_failures
             heal_attempted = False
             heal_errors: list[str] = []
-            if settings.node_sync_auto_heal and is_auto_sync_enabled(group):
+            if auto_heal and not heal_suspended:
+                if background_pause_requested():
+                    logger.info("Node sync auto-heal skipped: backup restore in progress")
+                    break
                 heal_attempted = True
                 heal_ok, heal_errors = _attempt_incremental_heal(db, group, result)
                 if heal_ok:
                     result = verify_sync_group(db, group)
                     if result.get("ready"):
-                        _persist_verify_result(group, _merge_heal_failure_count(result, 0))
-                        db.commit()
                         logger.info(
                             "Node sync auto-heal succeeded: group=%s domain=%s",
                             group.name,
@@ -166,19 +183,20 @@ def reconcile_sync_groups_once() -> dict:
             result = _merge_heal_failure_count(result, heal_failures)
             _persist_verify_result(group, result)
 
-            notify = (
-                not settings.node_sync_auto_heal
-                or not is_auto_sync_enabled(group)
-                or not heal_attempted
-                or heal_failures >= settings.node_sync_auto_heal_max_failures
-            )
+            # Suspended cycles stay silent: the attempt that reached the limit already notified.
+            just_suspended = heal_attempted and heal_failures >= max_failures
+            notify = not auto_heal or just_suspended
             group.sync_status = SyncStatus.failed
             summary = str(result.get("summary") or "parity mismatch")
-            if heal_attempted:
+            if just_suspended:
                 detail = "; ".join(heal_errors) if heal_errors else summary
-                group.last_sync_error = (
-                    f"auto-heal attempt {heal_failures}/{settings.node_sync_auto_heal_max_failures}: {detail}"
-                )
+                group.last_sync_error = f"{auto_heal_suspended_text(heal_failures)}. Последняя ошибка: {detail}"
+            elif heal_attempted:
+                detail = "; ".join(heal_errors) if heal_errors else summary
+                group.last_sync_error = f"auto-heal attempt {heal_failures}/{max_failures}: {detail}"
+            elif heal_suspended:
+                if not str(group.last_sync_error or "").startswith(AUTO_HEAL_SUSPENDED_PREFIX):
+                    group.last_sync_error = f"{auto_heal_suspended_text(heal_failures)}. Проверка: {summary}"
             else:
                 group.last_sync_error = summary
             db.commit()
@@ -191,9 +209,12 @@ def reconcile_sync_groups_once() -> dict:
                 "auto_heal_failures": heal_failures,
                 "notify": notify,
             }
-            if heal_attempted and notify:
+            if heal_suspended or just_suspended:
+                drift_item["auto_heal_suspended"] = True
+            if just_suspended:
                 drift_item["hint"] = (
-                    "Incremental auto-heal exhausted; run Push full manually or fix drift on primary"
+                    f"Автолечение приостановлено после {heal_failures} неудачных попыток подряд: "
+                    "запустите «Синхронизировать» (Push full) вручную или устраните расхождение на primary"
                 )
             drift_groups.append(drift_item)
             logger.warning(
@@ -240,7 +261,7 @@ def _notify_drift(drift_groups: list[dict]) -> None:
                     db,
                     actor_username="system",
                     settings_key="node_sync_drift",
-                    detail=json.dumps(item, ensure_ascii=False),
+                    details=json.dumps(item, ensure_ascii=False),
                 )
         finally:
             db.close()
@@ -259,7 +280,7 @@ async def run_node_sync_reconcile_loop() -> None:
                     "node_sync_reconcile skipped — NODE_SYNC_RECONCILE_ENABLED disabled"
                 )
             else:
-                await asyncio.to_thread(reconcile_sync_groups_safe)
+                await run_background_step(reconcile_sync_groups_safe)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

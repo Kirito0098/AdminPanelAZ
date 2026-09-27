@@ -1,4 +1,23 @@
 import { apiFetch } from './http'
+import type {
+  NodeMtlsDisableResult,
+  NodeTransportOption,
+  NodeTransportId,
+  NodeTransportPatchBody,
+  Node,
+  NodeTransportPreflightResult,
+  NodeMtlsStatus,
+  ActiveNode,
+  NodeKind,
+  ProxyStatusResponse,
+  ProxyMappingsResponse,
+  NodeStatus,
+  NodeRemoteHostsResponse,
+  NodeOpenVpnMultihomeResponse,
+  BackgroundTaskAccepted,
+  NodeSyncGroup,
+  NodeSyncVerifyResult,
+} from '../types'
 
 export async function rotateNodeApiKey(nodeId: number) {
   return apiFetch<{ message: string; node_id: number }>(`/nodes/${nodeId}/rotate-key`, {
@@ -7,7 +26,7 @@ export async function rotateNodeApiKey(nodeId: number) {
 }
 
 export async function disableNodeMtls(nodeId: number) {
-  return apiFetch<import('../types').NodeMtlsDisableResult>(`/nodes/${nodeId}/disable-mtls`, {
+  return apiFetch<NodeMtlsDisableResult>(`/nodes/${nodeId}/disable-mtls`, {
     method: 'POST',
   })
 }
@@ -20,16 +39,16 @@ export async function enableNodeMtls(nodeId: number) {
 }
 
 export async function listNodeTransports() {
-  return apiFetch<{ items: import('../types').NodeTransportOption[] }>('/nodes/transports')
+  return apiFetch<{ items: NodeTransportOption[] }>('/nodes/transports')
 }
 
 export async function patchNodeTransport(
   nodeId: number,
-  transportOrBody: import('../types').NodeTransportId | import('../types').NodeTransportPatchBody,
+  transportOrBody: NodeTransportId | NodeTransportPatchBody,
 ) {
   const body =
     typeof transportOrBody === 'string' ? { transport: transportOrBody } : transportOrBody
-  return apiFetch<import('../types').Node>(`/nodes/${nodeId}/transport`, {
+  return apiFetch<Node>(`/nodes/${nodeId}/transport`, {
     method: 'PATCH',
     body: JSON.stringify(body),
   })
@@ -37,11 +56,11 @@ export async function patchNodeTransport(
 
 export async function preflightNodeTransport(
   nodeId: number,
-  transportOrBody: import('../types').NodeTransportId | import('../types').NodeTransportPatchBody,
+  transportOrBody: NodeTransportId | NodeTransportPatchBody,
 ) {
   const body =
     typeof transportOrBody === 'string' ? { transport: transportOrBody } : transportOrBody
-  return apiFetch<import('../types').NodeTransportPreflightResult>(
+  return apiFetch<NodeTransportPreflightResult>(
     `/nodes/${nodeId}/transport/preflight`,
     {
       method: 'POST',
@@ -51,15 +70,15 @@ export async function preflightNodeTransport(
 }
 
 export async function getNodeMtlsStatus() {
-  return apiFetch<import('../types').NodeMtlsStatus>('/nodes/mtls/status')
+  return apiFetch<NodeMtlsStatus>('/nodes/mtls/status')
 }
 
 export async function getNodes() {
-  return apiFetch<import('../types').Node[]>('/nodes')
+  return apiFetch<Node[]>('/nodes')
 }
 
 export async function getActiveNode() {
-  return apiFetch<import('../types').ActiveNode>('/nodes/active')
+  return apiFetch<ActiveNode>('/nodes/active')
 }
 
 export async function createNode(data: {
@@ -67,10 +86,10 @@ export async function createNode(data: {
   host: string
   port: number
   api_key: string
-  node_kind?: import('../types').NodeKind | string
+  node_kind?: NodeKind | string
   destination_ip?: string | null
   linked_vpn_node_id?: number | null
-  transport?: import('../types').NodeTransportId
+  transport?: NodeTransportId
   ssh_host?: string | null
   ssh_port?: number | null
   ssh_username?: string | null
@@ -79,7 +98,7 @@ export async function createNode(data: {
   ssh_remote_agent_host?: string | null
   ssh_remote_agent_port?: number | null
 }) {
-  return apiFetch<import('../types').Node>('/nodes', {
+  return apiFetch<Node>('/nodes', {
     method: 'POST',
     body: JSON.stringify(data),
   })
@@ -96,31 +115,31 @@ export async function updateNode(
     linked_vpn_node_id: number | null
   }>,
 ) {
-  return apiFetch<import('../types').Node>(`/nodes/${id}`, {
+  return apiFetch<Node>(`/nodes/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   })
 }
 
 export async function getProxyNodeStatus(nodeId: number) {
-  return apiFetch<import('../types').ProxyStatusResponse>(`/nodes/${nodeId}/proxy/status`)
+  return apiFetch<ProxyStatusResponse>(`/nodes/${nodeId}/proxy/status`)
 }
 
 export async function putProxyNodeStatus(nodeId: number) {
-  return apiFetch<import('../types').ProxyStatusResponse>(`/nodes/${nodeId}/proxy/status`, {
+  return apiFetch<ProxyStatusResponse>(`/nodes/${nodeId}/proxy/status`, {
     method: 'PUT',
   })
 }
 
 export async function putProxyDestination(nodeId: number, destinationIp: string) {
-  return apiFetch<import('../types').ProxyStatusResponse>(`/nodes/${nodeId}/proxy/destination`, {
+  return apiFetch<ProxyStatusResponse>(`/nodes/${nodeId}/proxy/destination`, {
     method: 'PUT',
     body: JSON.stringify({ destination_ip: destinationIp }),
   })
 }
 
 export async function getProxyMappings(nodeId: number) {
-  return apiFetch<import('../types').ProxyMappingsResponse>(`/nodes/${nodeId}/proxy/mappings`)
+  return apiFetch<ProxyMappingsResponse>(`/nodes/${nodeId}/proxy/mappings`)
 }
 
 export async function deleteNode(id: number) {
@@ -130,18 +149,18 @@ export async function deleteNode(id: number) {
 export async function checkNodeHealth(id: number) {
   return apiFetch<{
     node_id: number
-    status: import('../types').NodeStatus
+    status: NodeStatus
     health: Record<string, unknown>
     last_seen_at?: string | null
   }>(`/nodes/${id}/health`, { method: 'POST' })
 }
 
 export async function activateNode(id: number) {
-  return apiFetch<import('../types').ActiveNode>(`/nodes/${id}/activate`, { method: 'POST' })
+  return apiFetch<ActiveNode>(`/nodes/${id}/activate`, { method: 'POST' })
 }
 
 export async function getNodeRemoteHosts(nodeId: number) {
-  return apiFetch<import('../types').NodeRemoteHostsResponse>(`/nodes/${nodeId}/remote-hosts`)
+  return apiFetch<NodeRemoteHostsResponse>(`/nodes/${nodeId}/remote-hosts`)
 }
 
 export async function putNodeRemoteHosts(
@@ -149,7 +168,7 @@ export async function putNodeRemoteHosts(
   hosts: string[],
   applyToWireguard = false,
 ) {
-  return apiFetch<import('../types').NodeRemoteHostsResponse>(`/nodes/${nodeId}/remote-hosts`, {
+  return apiFetch<NodeRemoteHostsResponse>(`/nodes/${nodeId}/remote-hosts`, {
     method: 'PUT',
     body: JSON.stringify({ hosts, apply_to_wireguard: applyToWireguard }),
   })
@@ -163,13 +182,13 @@ export async function allowFirstRemoteHost(nodeId: number) {
 }
 
 export async function getNodeOpenVpnMultihome(nodeId: number) {
-  return apiFetch<import('../types').NodeOpenVpnMultihomeResponse>(
+  return apiFetch<NodeOpenVpnMultihomeResponse>(
     `/nodes/${nodeId}/openvpn-multihome`,
   )
 }
 
 export async function putNodeOpenVpnMultihome(nodeId: number, enabled: boolean) {
-  return apiFetch<import('../types').NodeOpenVpnMultihomeResponse>(
+  return apiFetch<NodeOpenVpnMultihomeResponse>(
     `/nodes/${nodeId}/openvpn-multihome`,
     {
       method: 'PUT',
@@ -213,14 +232,14 @@ export async function restartNodeAgent(id: number) {
 }
 
 export async function rollingNodeUpdate(nodeIds: number[]) {
-  return apiFetch<import('../types').BackgroundTaskAccepted>('/nodes/update-roll', {
+  return apiFetch<BackgroundTaskAccepted>('/nodes/update-roll', {
     method: 'POST',
     body: JSON.stringify({ node_ids: nodeIds }),
   })
 }
 
 export async function getNodeSyncGroups() {
-  return apiFetch<import('../types').NodeSyncGroup[]>('/nodes/sync-groups')
+  return apiFetch<NodeSyncGroup[]>('/nodes/sync-groups')
 }
 
 export async function createNodeSyncGroup(data: {
@@ -231,7 +250,7 @@ export async function createNodeSyncGroup(data: {
   replica_node_ids: number[]
   sync_mode?: string
 }) {
-  return apiFetch<import('../types').NodeSyncGroup>('/nodes/sync-groups', {
+  return apiFetch<NodeSyncGroup>('/nodes/sync-groups', {
     method: 'POST',
     body: JSON.stringify(data),
   })
@@ -248,7 +267,7 @@ export async function updateNodeSyncGroup(
     sync_mode: string
   }>,
 ) {
-  return apiFetch<import('../types').NodeSyncGroup>(`/nodes/sync-groups/${id}`, {
+  return apiFetch<NodeSyncGroup>(`/nodes/sync-groups/${id}`, {
     method: 'PUT',
     body: JSON.stringify(data),
   })
@@ -279,7 +298,7 @@ export async function applyNodeSyncGroupSharedDomain(id: number) {
 }
 
 export async function verifyNodeSyncGroup(id: number) {
-  return apiFetch<import('../types').NodeSyncVerifyResult>(`/nodes/sync-groups/${id}/verify`, {
+  return apiFetch<NodeSyncVerifyResult>(`/nodes/sync-groups/${id}/verify`, {
     method: 'POST',
   })
 }

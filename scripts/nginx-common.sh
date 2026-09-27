@@ -187,13 +187,24 @@ nginx_resolve_existing_ssl_paths() {
   return 1
 }
 
+# Домен или IPv4 для server_name, CN сертификата и .env: только буквы, цифры, точки и дефисы.
+nginx_is_safe_host() {
+  [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]]
+}
+
+# Путь к сертификату или ключу, который подставляется в vhost и .env.
+nginx_is_safe_file_path() {
+  [[ "$1" =~ ^/[A-Za-z0-9._/@+-]+$ ]]
+}
+
 nginx_env_set() {
   local key="$1"
   local value="$2"
   local escaped
+  [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || nginx_die "${key}: перевод строки в значении недопустим"
   mkdir -p "$(dirname "$ENV_FILE")"
   touch "$ENV_FILE"
-  escaped=$(printf '%s' "$value" | sed 's/[&|]/\\&/g')
+  escaped=$(printf '%s' "$value" | sed 's/[\\&|]/\\&/g')
   if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
     sed -i "s|^${key}=.*|${key}=${escaped}|" "$ENV_FILE"
   else
@@ -220,8 +231,78 @@ nginx_sites_enabled_dir() {
   printf '%s' "${NGINX_SITES_ENABLED_DIR:-/etc/nginx/sites-enabled}"
 }
 
+nginx_acme_webroot() {
+  printf '%s' "${NGINX_ACME_WEBROOT:-/var/www/html}"
+}
+
 nginx_conf_d_dir() {
   printf '%s' "${NGINX_CONF_D_DIR:-/etc/nginx/conf.d}"
+}
+
+nginx_backups_dir() {
+  printf '%s' "${NGINX_BACKUPS_DIR:-/etc/nginx/backups}"
+}
+
+# Откат установки сайта при неудачном nginx -t. Первое изменение файла за запуск запоминает его
+# исходный вид (копия cp -a или отметка «файла не было»); откат возвращает все запомненные файлы,
+# фиксация удаляет копии. Состояние — в файлах, а не в переменных: часть файлов пишется из
+# подоболочек conf="$(nginx_render_template …)". Каталог — в backups: копия чужого vhost в
+# sites-enabled попала бы под include sites-enabled/*. Идентификатор не только PID: каталог,
+# оставшийся после аварийного выхода, не должен подхватиться запуском с тем же PID.
+: "${NGINX_INSTALL_TXN_ID:=$$.$(date +%s%N)}"
+
+nginx_install_txn_dir() {
+  printf '%s/.apaz-install.%s' "$(nginx_backups_dir)" "$NGINX_INSTALL_TXN_ID"
+}
+
+# Путь запоминается как есть: симлинк — как симлинк (для rm/mv по этому пути).
+nginx_install_txn_remember() {
+  local path="$1" dir n
+  dir="$(nginx_install_txn_dir)"
+  mkdir -p "$dir"
+  touch "$dir/manifest"
+  grep -Fxq -- "$path" "$dir/manifest" && return 0
+  n="$(wc -l <"$dir/manifest")"
+  if [[ -e "$path" || -L "$path" ]]; then
+    cp -a -- "$path" "$dir/${n}.orig"
+  fi
+  printf '%s\n' "$path" >>"$dir/manifest"
+}
+
+# Для записи содержимого через симлинк (cp, >, sed --follow-symlinks): запоминается цель.
+nginx_install_txn_remember_contents() {
+  local path="$1" real
+  real="$(readlink -f -- "$path" 2>/dev/null || true)"
+  nginx_install_txn_remember "${real:-$path}"
+}
+
+nginx_install_txn_rollback() {
+  local dir path n=0
+  dir="$(nginx_install_txn_dir)"
+  [[ -d "$dir" ]] || return 0
+  if [[ -f "$dir/manifest" ]]; then
+    while IFS= read -r path; do
+      if [[ -e "$dir/${n}.orig" || -L "$dir/${n}.orig" ]]; then
+        mv -f -- "$dir/${n}.orig" "$path"
+      else
+        rm -f -- "$path"
+      fi
+      n=$((n + 1))
+    done <"$dir/manifest"
+  fi
+  rm -rf -- "$dir"
+}
+
+nginx_install_txn_commit() {
+  local dir
+  dir="$(nginx_install_txn_dir)"
+  [[ -d "$dir" ]] || return 0
+  rm -rf -- "$dir"
+}
+
+nginx_install_txn_abort() {
+  nginx_install_txn_rollback
+  nginx_die "$1 — изменения файлов nginx откатаны, nginx не перезагружался"
 }
 
 nginx_conf_paths() {
@@ -368,6 +449,7 @@ nginx_stop_for_standalone_acme() {
   nginx_assert_ss_for_tcp_port_check
   if systemctl is-active --quiet nginx 2>/dev/null || nginx_tcp_port_is_listening "$http_port"; then
     nginx_log "Останавливаем nginx, чтобы освободить порт ${http_port} для certbot standalone…"
+    NGINX_STOPPED_FOR_ACME=true
     if ! systemctl stop nginx; then
       nginx_die "Не удалось остановить nginx перед certbot standalone (порт ${http_port}). Исправьте unit/nginx и повторите."
     fi
@@ -447,7 +529,7 @@ nginx_install_temp_acme_http_vhost() {
   http_port="${http_port:-80}"
 
   nginx_ensure_server_names_hash
-  mkdir -p /var/www/html/.well-known/acme-challenge
+  mkdir -p "$(nginx_acme_webroot)/.well-known/acme-challenge"
   base="$(nginx_acme_temp_site_basename "$domain")"
   available_dir="$(nginx_sites_available_dir)"
   enabled_dir="$(nginx_sites_enabled_dir)"
@@ -463,7 +545,7 @@ server {
     server_name ${domain};
 
     location /.well-known/acme-challenge/ {
-        root /var/www/html;
+        root $(nginx_acme_webroot);
     }
 
     location / {
@@ -586,6 +668,9 @@ nginx_render_subpath_template() {
   if ! nginx_cloudflare_proxy_enabled; then
     out="$(printf '%s\n' "$out" | sed '/include snippets\/cloudflare-realip.conf;/d')"
   fi
+  if ! nginx_cloudflare_origin_lock_enabled; then
+    out="$(printf '%s\n' "$out" | sed '/include snippets\/cloudflare-origin-lock.conf;/d')"
+  fi
   printf '%s\n' "$out"
 }
 
@@ -593,17 +678,46 @@ nginx_snippets_dir() {
   printf '%s' "${NGINX_SNIPPETS_DIR:-/etc/nginx/snippets}"
 }
 
+# Exported value (set by the panel when it regenerates nginx) wins; manual runs read ENV_FILE.
+nginx_cloudflare_flag() {
+  local key="$1" default="$2" v
+  v="${!key:-}"
+  if [[ -z "$v" ]]; then
+    v="$(nginx_env_get "$key" | tr -d "\"'" | tr -d '[:space:]')"
+  fi
+  printf '%s' "${v:-$default}"
+}
+
 nginx_cloudflare_proxy_enabled() {
-  local v="${CLOUDFLARE_PROXY_ENABLED:-true}"
+  local v
+  v="$(nginx_cloudflare_flag CLOUDFLARE_PROXY_ENABLED true)"
   case "${v,,}" in
     true|1|yes|on) return 0 ;;
     *) return 1 ;;
   esac
 }
 
-nginx_webhook_realip_include_line() {
+nginx_cloudflare_origin_lock_enabled() {
+  nginx_cloudflare_proxy_enabled || return 1
+  local v
+  v="$(nginx_cloudflare_flag CLOUDFLARE_ORIGIN_LOCK false)"
+  case "${v,,}" in
+    true|1|yes|on) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+nginx_realip_include_line() {
   if nginx_cloudflare_proxy_enabled; then
     printf '        include snippets/cloudflare-realip.conf;\n'
+  else
+    printf ''
+  fi
+}
+
+nginx_origin_lock_include_line() {
+  if nginx_cloudflare_origin_lock_enabled; then
+    printf '        include snippets/cloudflare-origin-lock.conf;\n'
   else
     printf ''
   fi
@@ -620,45 +734,186 @@ nginx_ensure_cloudflare_realip_snippet() {
   if [[ -f "$dest" ]] && ! cmp -s "$src" "$dest"; then
     cp "$dest" "${bak_dir}/cloudflare-realip.conf.$(date +%Y%m%d%H%M%S).bak"
   fi
+  cmp -s "$src" "$dest" || nginx_install_txn_remember_contents "$dest"
   cp "$src" "$dest"
   nginx_log "Snippet Cloudflare realip: ${dest}"
 }
 
-nginx_cloudflare_realip_apply() {
+nginx_ensure_cloudflare_origin_allow_snippet() {
+  local src dest dir bak_dir
+  src="${NGINX_TEMPLATE_DIR}/cloudflare-origin-allow.conf"
+  dir="$(nginx_snippets_dir)"
+  dest="${dir}/cloudflare-origin-allow.conf"
+  bak_dir="${NGINX_BACKUPS_DIR:-/etc/nginx/backups}"
+  [[ -f "$src" ]] || nginx_die "Нет шаблона Cloudflare origin allow: ${src}"
+  mkdir -p "$dir" "$bak_dir"
+  if [[ -f "$dest" ]] && ! cmp -s "$src" "$dest"; then
+    cp "$dest" "${bak_dir}/cloudflare-origin-allow.conf.$(date +%Y%m%d%H%M%S).bak"
+  fi
+  cmp -s "$src" "$dest" || nginx_install_txn_remember_contents "$dest"
+  cp "$src" "$dest"
+  nginx_log "Snippet Cloudflare origin allow: ${dest}"
+}
+
+nginx_cloudflare_origin_geo_dest() {
+  printf '%s/adminpanelaz-cloudflare-origin.conf' "$(nginx_conf_d_dir)"
+}
+
+# http-level geo keyed by the TCP peer: realip rewrites $remote_addr before the access
+# phase, so origin lock cannot use allow/deny in locations that also trust CF-Connecting-IP.
+nginx_render_cloudflare_origin_geo() {
+  local allow_file="$1"
+  [[ -f "$allow_file" ]] || nginx_die "Нет Cloudflare origin allow snippet: ${allow_file}"
+  printf '# AdminPanelAZ — generated from snippets/cloudflare-origin-allow.conf; do not edit.\n'
+  printf 'geo $realip_remote_addr $adminpanelaz_cf_origin {\n'
+  printf '    default 0;\n'
+  awk '
+    {
+      line = $0
+      sub(/#.*/, "", line)
+      if (line !~ /^[[:space:]]*allow[[:space:]]+[^;[:space:]]+[[:space:]]*;[[:space:]]*$/) { next }
+      split(line, parts, /[[:space:];]+/)
+      addr = (parts[1] == "") ? parts[3] : parts[2]
+      if (addr == "all") { next }
+      printf "    %s 1;\n", addr
+    }
+  ' "$allow_file"
+  printf '}\n'
+}
+
+nginx_ensure_cloudflare_origin_geo_conf() {
+  local allow_file dest dir bak_dir tmp
+  allow_file="$(nginx_snippets_dir)/cloudflare-origin-allow.conf"
+  dir="$(nginx_conf_d_dir)"
+  dest="$(nginx_cloudflare_origin_geo_dest)"
+  bak_dir="${NGINX_BACKUPS_DIR:-/etc/nginx/backups}"
+  mkdir -p "$dir" "$bak_dir"
+  tmp="${dest}.tmp.$$"
+  nginx_render_cloudflare_origin_geo "$allow_file" >"$tmp"
+  if [[ ! -f "$dest" ]]; then
+    nginx_install_txn_remember "$dest"
+  elif ! cmp -s "$tmp" "$dest"; then
+    cp "$dest" "${bak_dir}/adminpanelaz-cloudflare-origin.conf.$(date +%Y%m%d%H%M%S).bak"
+    nginx_install_txn_remember "$dest"
+  fi
+  mv -f "$tmp" "$dest"
+  nginx_log "Cloudflare origin geo: ${dest}"
+}
+
+nginx_ensure_cloudflare_origin_lock_snippet() {
+  local src dest dir
+  src="${NGINX_TEMPLATE_DIR}/cloudflare-origin-lock.conf"
+  dir="$(nginx_snippets_dir)"
+  dest="${dir}/cloudflare-origin-lock.conf"
+  [[ -f "$src" ]] || nginx_die "Нет шаблона Cloudflare origin lock: ${src}"
+  mkdir -p "$dir"
+  cmp -s "$src" "$dest" || nginx_install_txn_remember_contents "$dest"
+  cp "$src" "$dest"
+}
+
+# Allow list (source of truth) → conf.d geo → location-level lock snippet.
+nginx_ensure_cloudflare_origin_snippets() {
+  nginx_ensure_cloudflare_origin_allow_snippet
+  nginx_ensure_cloudflare_origin_geo_conf
+  nginx_ensure_cloudflare_origin_lock_snippet
+}
+
+# Restore <dest> from <bak>, or drop it if it did not exist before (<created>=true).
+nginx_restore_file_from_backup() {
+  local dest="$1" bak="$2" created="$3"
+  if [[ -n "$bak" && -f "$bak" ]]; then
+    mv -f "$bak" "$dest"
+  elif [[ "$created" == true ]]; then
+    rm -f "$dest"
+  fi
+}
+
+nginx_cloudflare_snippets_apply() {
   local new_file="$1"
-  local dir dest bak_dir tmp latest
+  local allow_file="${2:-}"
+  local dir dest allow_dest geo_dest bak_dir tmp stamp
+  local dest_bak="" allow_bak="" geo_bak=""
+  local dest_created=false allow_created=false geo_created=false
   [[ -f "$new_file" ]] || nginx_die "Файл не найден: $new_file"
   [[ "$(id -u)" -eq 0 ]] || nginx_die "Запустите от root"
+  if [[ -n "$allow_file" ]]; then
+    [[ -f "$allow_file" ]] || nginx_die "Файл не найден: $allow_file"
+  fi
 
   dir="$(nginx_snippets_dir)"
   dest="${dir}/cloudflare-realip.conf"
+  allow_dest="${dir}/cloudflare-origin-allow.conf"
+  geo_dest="$(nginx_cloudflare_origin_geo_dest)"
   bak_dir="${NGINX_BACKUPS_DIR:-/etc/nginx/backups}"
+  stamp="$(date +%Y%m%d%H%M%S)"
   mkdir -p "$dir" "$bak_dir"
 
   if [[ -f "$dest" ]]; then
-    cp "$dest" "${bak_dir}/cloudflare-realip.conf.$(date +%Y%m%d%H%M%S).bak"
+    dest_bak="${bak_dir}/cloudflare-realip.conf.${stamp}.bak"
+    cp "$dest" "$dest_bak"
+  else
+    dest_created=true
   fi
   tmp="${dest}.tmp.$$"
   cp "$new_file" "$tmp"
   mv "$tmp" "$dest"
 
-  if ! nginx -t; then
-    latest="$(ls -1t "${bak_dir}"/cloudflare-realip.conf.*.bak 2>/dev/null | head -1 || true)"
-    if [[ -n "$latest" ]]; then
-      cp "$latest" "$dest"
+  if [[ -n "$allow_file" ]]; then
+    if [[ -f "$allow_dest" ]]; then
+      allow_bak="${bak_dir}/cloudflare-origin-allow.conf.${stamp}.bak"
+      cp "$allow_dest" "$allow_bak"
+    else
+      allow_created=true
     fi
-    nginx_die "nginx -t не прошёл — восстановлен предыдущий cloudflare-realip.conf"
+    tmp="${allow_dest}.tmp.$$"
+    cp "$allow_file" "$tmp"
+    mv "$tmp" "$allow_dest"
+
+    if [[ -f "$geo_dest" ]]; then
+      geo_bak="${bak_dir}/adminpanelaz-cloudflare-origin.conf.${stamp}.bak"
+      cp "$geo_dest" "$geo_bak"
+    else
+      geo_created=true
+    fi
+    mkdir -p "$(dirname "$geo_dest")"
+    tmp="${geo_dest}.tmp.$$"
+    nginx_render_cloudflare_origin_geo "$allow_dest" >"$tmp"
+    mv "$tmp" "$geo_dest"
   fi
-  systemctl reload nginx || nginx_die "Не удалось reload nginx"
+
+  local failure=""
+  if ! nginx -t; then
+    failure="nginx -t не прошёл"
+  elif ! systemctl reload nginx; then
+    failure="Не удалось reload nginx"
+  fi
+  if [[ -n "$failure" ]]; then
+    nginx_restore_file_from_backup "$dest" "$dest_bak" "$dest_created"
+    if [[ -n "$allow_file" ]]; then
+      nginx_restore_file_from_backup "$allow_dest" "$allow_bak" "$allow_created"
+      nginx_restore_file_from_backup "$geo_dest" "$geo_bak" "$geo_created"
+    fi
+    nginx_die "${failure} — восстановлены предыдущие cloudflare snippets"
+  fi
   nginx_log "Cloudflare realip snippet обновлён: ${dest}"
+  if [[ -n "$allow_file" ]]; then
+    nginx_log "Cloudflare origin allow snippet обновлён: ${allow_dest}"
+    nginx_log "Cloudflare origin geo обновлён: ${geo_dest}"
+  fi
+}
+
+nginx_cloudflare_realip_apply() {
+  local new_file="$1"
+  nginx_cloudflare_snippets_apply "$new_file"
 }
 
 nginx_root_panel_location_blocks() {
   local backend_port="$1"
   cat <<EOF
-    # Telegram Bot API webhook: Cloudflare real client IP only here
+    # Telegram Bot API webhook
     location ^~ /api/telegram/webhook/ {
-$(nginx_webhook_realip_include_line)
+$(nginx_realip_include_line)
+$(nginx_origin_lock_include_line)
 
         proxy_pass http://127.0.0.1:${backend_port};
         proxy_http_version 1.1;
@@ -672,6 +927,8 @@ $(nginx_webhook_realip_include_line)
 
     # Telegram Mini App — без X-Frame-Options (WebView Telegram блокируется SAMEORIGIN)
     location ^~ /api/tg-mini {
+$(nginx_realip_include_line)
+$(nginx_origin_lock_include_line)
         proxy_pass http://127.0.0.1:${backend_port};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -686,6 +943,8 @@ $(nginx_webhook_realip_include_line)
 
     # API, SPA, WebSocket (/api/server-monitor/ws)
     location / {
+$(nginx_realip_include_line)
+$(nginx_origin_lock_include_line)
         proxy_pass http://127.0.0.1:${backend_port};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -706,6 +965,7 @@ nginx_portal_location_blocks() {
   local backend_port="$1"
   cat <<EOF
     location = /p {
+$(nginx_realip_include_line)
         proxy_pass http://127.0.0.1:${backend_port};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -717,6 +977,7 @@ nginx_portal_location_blocks() {
     }
 
     location ^~ /p/ {
+$(nginx_realip_include_line)
         proxy_pass http://127.0.0.1:${backend_port};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -728,6 +989,7 @@ nginx_portal_location_blocks() {
     }
 
     location ^~ /api/public/ {
+$(nginx_realip_include_line)
         proxy_pass http://127.0.0.1:${backend_port};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -739,6 +1001,7 @@ nginx_portal_location_blocks() {
     }
 
     location = /assets {
+$(nginx_realip_include_line)
         proxy_pass http://127.0.0.1:${backend_port};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -748,6 +1011,7 @@ nginx_portal_location_blocks() {
     }
 
     location ^~ /assets/ {
+$(nginx_realip_include_line)
         proxy_pass http://127.0.0.1:${backend_port};
         proxy_http_version 1.1;
         proxy_set_header Host \$host;
@@ -794,8 +1058,8 @@ nginx_has_vhost_for_domain() {
   [[ -n "$domain" ]] || return 1
   local base path
   base="$(nginx_conf_basename "$domain")"
-  [[ -f "/etc/nginx/sites-enabled/${base}" || -f "/etc/nginx/sites-available/${base}" ]] && return 0
-  if grep -Rsl "server_name[^;]*\b${domain}\b" /etc/nginx/sites-enabled /etc/nginx/sites-available 2>/dev/null | grep -q .; then
+  [[ -f "$(nginx_sites_enabled_dir)/${base}" || -f "$(nginx_sites_available_dir)/${base}" ]] && return 0
+  if grep -Rsl "server_name[^;]*\b${domain}\b" "$(nginx_sites_enabled_dir)" "$(nginx_sites_available_dir)" 2>/dev/null | grep -q .; then
     return 0
   fi
   return 1
@@ -810,8 +1074,11 @@ nginx_is_our_panel_vhost_file() {
 nginx_grep_vhosts_for_domain() {
   local domain="$1"
   local root="$2"
+  local escaped
   [[ -n "$domain" && -n "$root" && -d "$root" ]] || return 0
-  grep -Rsl "server_name[^;]*\\b${domain}\\b" "$root" 2>/dev/null || true
+  # Whole server_name token: \b would also match portal.<domain> and delete the portal vhost on repair.
+  escaped="$(printf '%s' "$domain" | sed 's/[][\.*^$()+?{}|]/\\&/g')"
+  grep -RslE "^[[:space:]]*server_name([[:space:]]+[^;[:space:]]+)*[[:space:]]+${escaped}([[:space:];]|$)" "$root" 2>/dev/null || true
 }
 
 # sites-enabled первым: StatusOpenVPN и др. часто кладут копию в enabled, а не symlink.
@@ -819,8 +1086,8 @@ nginx_list_vhosts_for_domain() {
   local domain="$1"
   [[ -n "$domain" ]] || return 0
   {
-    nginx_grep_vhosts_for_domain "$domain" /etc/nginx/sites-enabled
-    nginx_grep_vhosts_for_domain "$domain" /etc/nginx/sites-available
+    nginx_grep_vhosts_for_domain "$domain" "$(nginx_sites_enabled_dir)"
+    nginx_grep_vhosts_for_domain "$domain" "$(nginx_sites_available_dir)"
   } | awk '!seen[$0]++'
 }
 
@@ -840,7 +1107,7 @@ nginx_list_status_openvpn_vhosts_for_domain() {
     [[ -n "$path" && -f "$path" ]] || continue
     nginx_is_status_openvpn_vhost_file "$path" || continue
     printf '%s\n' "$path"
-  done < <(nginx_grep_vhosts_for_domain "$domain" /etc/nginx/sites-enabled)
+  done < <(nginx_grep_vhosts_for_domain "$domain" "$(nginx_sites_enabled_dir)")
 }
 
 nginx_has_status_openvpn_vhost_for_domain() {
@@ -890,7 +1157,9 @@ nginx_remove_our_dedicated_sites_for_domain() {
       continue
     fi
     base="$(basename "$path")"
-    rm -f "/etc/nginx/sites-enabled/${base}"
+    nginx_install_txn_remember "$(nginx_sites_enabled_dir)/${base}"
+    nginx_install_txn_remember "$path"
+    rm -f "$(nginx_sites_enabled_dir)/${base}"
     rm -f "$path"
     nginx_log "Удалён выделенный vhost панели: ${path}"
   done < <(nginx_list_vhosts_for_domain "$domain")
@@ -912,10 +1181,12 @@ nginx_install_subpath_snippet() {
   local domain="$3"
   local snippet_name snippet_path content
   snippet_name="$(nginx_subpath_snippet_basename "$domain" "$access_path")"
-  snippet_path="/etc/nginx/snippets/${snippet_name}.conf"
+  snippet_path="$(nginx_snippets_dir)/${snippet_name}.conf"
   nginx_ensure_cloudflare_realip_snippet
-  mkdir -p /etc/nginx/snippets /etc/nginx/backups
+  nginx_ensure_cloudflare_origin_snippets
+  mkdir -p "$(nginx_snippets_dir)" "$(nginx_backups_dir)"
   content="$(nginx_render_subpath_template "$access_path" "$backend_port")"
+  nginx_install_txn_remember_contents "$snippet_path"
   printf '%s\n' "$content" >"$snippet_path"
   nginx_log "Snippet subpath: ${snippet_path}"
   nginx_log "Добавьте в server { } для ${domain}: include snippets/${snippet_name}.conf;"
@@ -933,8 +1204,9 @@ _nginx_integrate_subpath_into_vhost_file() {
     return 0
   fi
   stamp="$(date +%Y%m%d%H%M%S)"
-  backup="/etc/nginx/backups/$(basename "$target").${stamp}.bak"
+  backup="$(nginx_backups_dir)/$(basename "$target").${stamp}.bak"
   cp "$target" "$backup"
+  nginx_install_txn_remember_contents "$target"
   INCLUDE_LINE="$include_line" TARGET_FILE="$target" python3 - <<'PY'
 import os
 import re
@@ -969,7 +1241,7 @@ nginx_integrate_subpath_snippet_status_openvpn() {
     [[ -n "$target" && -f "$target" ]] || continue
     _nginx_integrate_subpath_into_vhost_file "$target" "$include_line" || continue
     if ! _nginx_assert_status_openvpn_vhost_intact "$target"; then
-      nginx_die "Интеграция нарушила конфиг StatusOpenVPN (${target}) — восстановите из /etc/nginx/backups/"
+      nginx_install_txn_abort "Интеграция нарушила конфиг StatusOpenVPN (${target})"
     fi
     nginx_log "StatusOpenVPN: блок /status/ сохранён в ${target}"
     integrated=1
@@ -1000,7 +1272,7 @@ nginx_cleanup_subpath_snippets_for_domain() {
   local domain="$1"
   [[ -n "$domain" ]] || return 0
 
-  mkdir -p /etc/nginx/backups
+  mkdir -p "$(nginx_backups_dir)"
   local target stamp backup
   while IFS= read -r target; do
     [[ -n "$target" && -f "$target" ]] || continue
@@ -1011,20 +1283,74 @@ nginx_cleanup_subpath_snippets_for_domain() {
       continue
     fi
     stamp="$(date +%Y%m%d%H%M%S)"
-    backup="/etc/nginx/backups/$(basename "$target").${stamp}.bak"
+    backup="$(nginx_backups_dir)/$(basename "$target").${stamp}.bak"
     cp "$target" "$backup"
-    sed -i '\|include snippets/adminpanelaz-|d' "$target"
+    nginx_install_txn_remember_contents "$target"
+    # Без --follow-symlinks sed -i заменил бы симлинк sites-enabled → sites-available копией файла.
+    sed -i --follow-symlinks '\|include snippets/adminpanelaz-|d' "$target"
     nginx_log "Удалён subpath include из ${target} (бэкап: ${backup})"
-  done < <(grep -Rsl "server_name" /etc/nginx/sites-enabled /etc/nginx/sites-available 2>/dev/null || true)
+  done < <(grep -Rsl "server_name" "$(nginx_sites_enabled_dir)" "$(nginx_sites_available_dir)" 2>/dev/null || true)
 
   local domain_slug snippet
   domain_slug="$(nginx_conf_basename "$domain")"
   shopt -s nullglob
-  for snippet in /etc/nginx/snippets/adminpanelaz-"${domain_slug}"-*.conf; do
+  for snippet in "$(nginx_snippets_dir)"/adminpanelaz-"${domain_slug}"-*.conf; do
+    nginx_install_txn_remember "$snippet"
     rm -f "$snippet"
     nginx_log "Удалён snippet: ${snippet}"
   done
   shopt -u nullglob
+}
+
+nginx_subpath_integrate_enabled() {
+  [[ "${NGINX_SUBPATH_INTEGRATE:-}" == "true" || "${NGINX_SUBPATH_INTEGRATE:-}" == "1" ]]
+}
+
+# Подпуть на домене с чужим сайтом: snippet панели вместо выделенного vhost (0 — установлен).
+# 1 — нужен выделенный vhost. Вызывается в условии if: сама функция и всё, что она вызывает,
+# должны быть в этой библиотеке — install.sh подключает только её, а «command not found» в if
+# молча выбрал бы выделенный vhost.
+nginx_finalize_nginx_site() {
+  local domain="$1"
+  local backend_port="$2"
+  local access_path
+  access_path="$(nginx_normalize_access_path "${ACCESS_PATH:-}")"
+  nginx_cleanup_subpath_snippets_for_domain "$domain"
+  if [[ -n "$access_path" ]] && nginx_has_foreign_vhost_for_domain "$domain"; then
+    nginx_remove_our_dedicated_sites_for_domain "$domain"
+    nginx_install_subpath_snippet "$access_path" "$backend_port" "$domain"
+    if nginx_subpath_integrate_enabled; then
+      if nginx_has_status_openvpn_vhost_for_domain "$domain"; then
+        nginx_integrate_subpath_snippet_status_openvpn "$domain" "${NGINX_SUBPATH_SNIPPET_INCLUDE:-}" || \
+          nginx_install_txn_abort "Не удалось встроить snippet в StatusOpenVPN vhost ${domain}"
+      else
+        nginx_integrate_subpath_snippet "$domain" "${NGINX_SUBPATH_SNIPPET_INCLUDE:-}" || \
+          nginx_install_txn_abort "Не удалось встроить snippet панели в vhost ${domain}"
+      fi
+    else
+      nginx_warn "Snippet создан (${NGINX_SUBPATH_SNIPPET_INCLUDE:-}) — включите интеграцию в панели или добавьте include вручную"
+    fi
+    nginx -t || nginx_install_txn_abort "nginx -t не прошёл после встраивания snippet (vhost ${domain}, snippet панели, snippets Cloudflare)"
+    nginx_install_txn_commit
+    systemctl reload nginx || nginx_die "Не удалось перезагрузить nginx"
+    return 0
+  fi
+  return 1
+}
+
+nginx_check_render_inputs() {
+  local domain="$1" ssl_cert="${2:-}" ssl_key="${3:-}"
+  if ! nginx_is_safe_host "$domain"; then
+    nginx_warn "Недопустимый домен для vhost: ${domain//$'\n'/\\n}"
+    return 1
+  fi
+  local path
+  for path in "$ssl_cert" "$ssl_key"; do
+    if [[ -n "$path" ]] && ! nginx_is_safe_file_path "$path"; then
+      nginx_warn "Недопустимый путь сертификата для vhost: ${path//$'\n'/\\n}"
+      return 1
+    fi
+  done
 }
 
 nginx_render_template() {
@@ -1036,7 +1362,9 @@ nginx_render_template() {
   local https_port="${6:-443}"
   local http_port="${7:-80}"
   local https_redirect_suffix access_path panel_blocks rendered
+  nginx_check_render_inputs "$domain" "$ssl_cert" "$ssl_key" || return 1
   nginx_ensure_cloudflare_realip_snippet
+  nginx_ensure_cloudflare_origin_snippets
   https_redirect_suffix="$(nginx_https_redirect_suffix "$https_port")"
   access_path="$(nginx_normalize_access_path "${ACCESS_PATH:-}")"
   panel_blocks="$(nginx_panel_location_blocks "$access_path" "$backend_port")"
@@ -1049,24 +1377,35 @@ nginx_render_template() {
     -e "s|__SSL_CERT__|${ssl_cert}|g" \
     -e "s|__SSL_KEY__|${ssl_key}|g" \
     -e "s|__UVICORN_PORT__|${backend_port}|g" \
-    "$template")"
+    "$template")" || { nginx_warn "Не удалось сформировать vhost из $template"; return 1; }
+  [[ -n "$rendered" ]] || { nginx_warn "Пустой vhost из $template"; return 1; }
   ACCESS_PATH="$access_path" PANEL_BLOCKS="$panel_blocks" RENDERED="$rendered" python3 - <<'PY'
 import os
 print(os.environ["RENDERED"].replace("__PANEL_LOCATION_BLOCKS__", os.environ["PANEL_BLOCKS"]), end="")
 PY
 }
 
+# Файлы с блоком server, кроме файлов панели и стандартной заглушки default. Список берётся
+# из nginx -T: сайты бывают и в conf.d, и в любых include, а не только в sites-enabled.
 nginx_count_other_enabled_sites() {
   local domain="$1"
   local count=0
   local base=""
   [[ -n "$domain" ]] && base="$(nginx_conf_basename "$domain")"
+  local -a files=()
+  mapfile -t files < <(nginx -T 2>/dev/null | sed -n 's/^# configuration file \(.*\):$/\1/p')
+  if ((${#files[@]} == 0)); then
+    files=("$(nginx_sites_enabled_dir)"/* "$(nginx_conf_d_dir)"/*.conf)
+  fi
   local path name
-  for path in /etc/nginx/sites-enabled/*; do
-    [[ -e "$path" ]] || continue
+  for path in "${files[@]}"; do
+    [[ -f "$path" ]] || continue
     name="$(basename "$path")"
     [[ -n "$base" && "$name" == "$base" ]] && continue
-    [[ "$name" == "default" ]] && continue
+    case "$name" in
+      default | default.conf | adminpanelaz-* | 00-adminpanelaz-*) continue ;;
+    esac
+    sed 's/#.*//' "$path" | grep -Eq '(^|[[:space:];{}])server([[:space:]]*\{|[[:space:]]*$)' || continue
     count=$((count + 1))
   done
   printf '%s' "$count"
@@ -1080,12 +1419,15 @@ nginx_disable_for_direct_publish() {
   if [[ -n "$domain" ]]; then
     nginx_remove_site "$domain"
   fi
+  # В режиме uvicorn панель сама слушает HTTPS-порт: сервер по умолчанию nginx занял бы его.
+  nginx_remove_default_deny
 
   command -v nginx >/dev/null 2>&1 || return 0
 
   local other
   other="$(nginx_count_other_enabled_sites "$domain")"
   if [[ "${other:-0}" -gt 0 ]]; then
+    nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
     nginx_warn "Nginx оставлен запущенным: на сервере есть другие сайты (${other}). Панель — напрямую на своём порту."
     return 0
   fi
@@ -1214,7 +1556,7 @@ nginx_remove_all_vhosts_for_domain() {
   local domain="$1"
   [[ -n "$domain" ]] || return 0
 
-  mkdir -p /etc/nginx/backups
+  mkdir -p "$(nginx_backups_dir)"
   local path stamp backup base
   declare -A seen=()
   while IFS= read -r path; do
@@ -1222,11 +1564,14 @@ nginx_remove_all_vhosts_for_domain() {
     [[ -n "${seen[$path]:-}" ]] && continue
     seen[$path]=1
     stamp="$(date +%Y%m%d%H%M%S)"
-    backup="/etc/nginx/backups/$(basename "$path").repair.${stamp}.bak"
+    backup="$(nginx_backups_dir)/$(basename "$path").repair.${stamp}.bak"
     cp "$path" "$backup"
     nginx_log "Бэкап vhost: ${backup}"
     base="$(basename "$path")"
-    rm -f "$path" "/etc/nginx/sites-enabled/${base}" "/etc/nginx/sites-available/${base}"
+    nginx_install_txn_remember "$path"
+    nginx_install_txn_remember "$(nginx_sites_enabled_dir)/${base}"
+    nginx_install_txn_remember "$(nginx_sites_available_dir)/${base}"
+    rm -f "$path" "$(nginx_sites_enabled_dir)/${base}" "$(nginx_sites_available_dir)/${base}"
     nginx_log "Удалён vhost: ${path}"
   done < <(nginx_list_vhosts_for_domain "$domain")
 }
@@ -1270,10 +1615,257 @@ nginx_install_dedicated_panel_vhost() {
   local conf
 
   nginx_ensure_cloudflare_realip_snippet
+  nginx_ensure_cloudflare_origin_snippets
   conf="$(nginx_render_template \
     "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-    "$domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port")"
+    "$domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port")" || return 1
   nginx_install_site "$conf" "$domain"
+}
+
+nginx_default_deny_basename() {
+  printf '%s' "00-adminpanelaz-default-deny"
+}
+
+nginx_version_at_least() {
+  local want="$1" version_output="$2" have
+  have="$(printf '%s' "$version_output" | sed -n 's|.*nginx/\([0-9][0-9.]*\).*|\1|p' | head -1)"
+  [[ -n "$have" ]] || return 1
+  [[ "$(printf '%s\n%s\n' "$want" "$have" | sort -V | head -1)" == "$want" ]]
+}
+
+# nginx_render_default_deny <HTTP listen через пробел|""> <HTTPS listen через пробел|""> <вывод nginx -v>
+nginx_render_default_deny() {
+  local http_listens="$1" https_listens="$2" version_output="$3" listen
+  printf '# AdminPanelAZ: запросы по IP сервера и к чужим именам не доходят до панели.\n'
+  if [[ -n "$http_listens" ]]; then
+    printf 'server {\n'
+    for listen in $http_listens; do
+      printf '    listen %s default_server;\n' "$listen"
+    done
+    printf '    server_name _;\n    return 444;\n}\n'
+  fi
+  if [[ -n "$https_listens" ]]; then
+    printf 'server {\n'
+    for listen in $https_listens; do
+      printf '    listen %s ssl default_server;\n' "$listen"
+    done
+    printf '    server_name _;\n'
+    if nginx_version_at_least 1.19.4 "$version_output"; then
+      printf '    ssl_reject_handshake on;\n'
+    else
+      printf '    ssl_certificate %s;\n    ssl_certificate_key %s;\n    return 444;\n' \
+        "$(nginx_default_deny_cert)" "$(nginx_default_deny_key)"
+    fi
+    printf '}\n'
+  fi
+}
+
+nginx_default_deny_cert() {
+  printf '%s' "${NGINX_DEFAULT_DENY_CERT:-/etc/ssl/certs/adminpanelaz-default-deny.crt}"
+}
+
+nginx_default_deny_key() {
+  printf '%s' "${NGINX_DEFAULT_DENY_KEY:-/etc/ssl/private/adminpanelaz-default-deny.key}"
+}
+
+nginx_default_deny_cert_ready() {
+  [[ -s "$(nginx_default_deny_cert)" && -s "$(nginx_default_deny_key)" ]]
+}
+
+nginx_ensure_default_deny_cert() {
+  local cert key
+  cert="$(nginx_default_deny_cert)"
+  key="$(nginx_default_deny_key)"
+  nginx_default_deny_cert_ready && return 0
+  mkdir -p "$(dirname "$cert")" "$(dirname "$key")"
+  (umask 077 && openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -subj "/CN=invalid" \
+    -keyout "$key" -out "$cert" >/dev/null 2>&1)
+}
+
+# Файлы конфигурации в порядке загрузки: по nginx -T, иначе как в nginx.conf Debian — conf.d, затем sites-enabled.
+nginx_loaded_conf_files() {
+  local files path
+  files="$(nginx -T 2>/dev/null | sed -n 's/^# configuration file \(.*\):$/\1/p' || true)"
+  if [[ -z "$files" ]]; then
+    files="$(printf '%s\n' "$(nginx_conf_d_dir)"/*.conf "$(nginx_sites_enabled_dir)"/*)"
+  fi
+  while IFS= read -r path; do
+    [[ -f "$path" ]] && printf '%s\n' "$path"
+  done <<<"$files"
+  return 0
+}
+
+# nginx_conf_listens <файл> → «порт ssl|plain default|- адрес» на каждую директиву listen.
+nginx_conf_listens() {
+  sed 's/#.*//' "$1" | tr ';{}' '\n\n\n' | awk '
+    $1 == "listen" {
+      addr = $2
+      port = addr
+      sub(/.*:/, "", port)
+      if (port !~ /^[0-9]+$/) next
+      ssl = "plain"; def = "-"
+      for (i = 3; i <= NF; i++) {
+        if ($i == "ssl") ssl = "ssl"
+        if ($i == "default_server" || $i == "default") def = "default"
+      }
+      print port, ssl, def, addr
+    }'
+}
+
+# IP в server_name: клиент по IP не шлёт SNI, TLS-рукопожатие достаётся серверу по умолчанию.
+nginx_conf_has_ip_server_name() {
+  sed 's/#.*//' "$1" | tr ';{}' '\n\n\n' | awk '
+    $1 == "server_name" {
+      for (i = 2; i <= NF; i++)
+        if ($i ~ /^[0-9]+(\.[0-9]+)+$/ || $i ~ /^\[?[0-9a-fA-F]*:[0-9a-fA-F:.]*\]?$/) found = 1
+    }
+    END { exit !found }'
+}
+
+# Файл панели или портала: шаблоны начинаются с «# AdminPanelAZ»; только что записанный vhost — тоже свой.
+nginx_conf_is_panel_owned() {
+  local path="$1"
+  [[ -n "${NGINX_CONF_FILE:-}" && "$(basename "$path")" == "$(basename "$NGINX_CONF_FILE")" ]] && return 0
+  head -n 1 "$path" 2>/dev/null | grep -q '^#.*AdminPanelAZ'
+}
+
+nginx_remove_default_deny() {
+  local base
+  base="$(nginx_default_deny_basename)"
+  rm -f "$(nginx_sites_enabled_dir)/${base}" "$(nginx_sites_available_dir)/${base}"
+}
+
+# Без сервера по умолчанию nginx отдаёт запросы по голому IP первому vhost'у на порту.
+# Сервер по умолчанию нужен только на портах, где этот первый vhost — панель или портал:
+# иначе по IP и так отвечает чужой сайт, и менять его поведение нельзя.
+# nginx_default_deny_plan → строка на каждый порт панели или портала, по возрастанию порта:
+#   «порт plain|ssl install адрес…» — ставить сервер по умолчанию на эти listen;
+#   «порт plain|ssl skip existing_default_server|foreign_first|ip_server_name» — порт не трогать;
+#   «порт ssl skip no_cert» — только после nginx_default_deny_plan_cert_fallback.
+nginx_default_deny_plan() {
+  local base path owned has_ip port kind def addr
+  local -A first=() has_default=() our_kind=() ip_name=() listens=() seen=()
+  base="$(nginx_default_deny_basename)"
+
+  while IFS= read -r path; do
+    [[ "$(basename "$path")" == "$base" ]] && continue
+    owned=false
+    has_ip=false
+    nginx_conf_is_panel_owned "$path" && owned=true
+    nginx_conf_has_ip_server_name "$path" && has_ip=true
+    while read -r port kind def addr; do
+      [[ -n "${first[$port]:-}" ]] || first[$port]="$owned"
+      [[ "$def" == default ]] && has_default[$port]=1
+      [[ "$has_ip" == true ]] && ip_name[$port]=1
+      [[ "$owned" == true ]] || continue
+      our_kind[$port]="$kind"
+      if [[ -z "${seen[$addr]:-}" ]]; then
+        seen[$addr]=1
+        listens[$port]+="${listens[$port]:+ }${addr}"
+      fi
+    done < <(nginx_conf_listens "$path")
+  done < <(nginx_loaded_conf_files)
+
+  while read -r port; do
+    [[ -n "$port" ]] || continue
+    kind="${our_kind[$port]}"
+    if [[ -n "${has_default[$port]:-}" ]]; then
+      printf '%s %s skip existing_default_server\n' "$port" "$kind"
+    elif [[ "${first[$port]}" != true ]]; then
+      printf '%s %s skip foreign_first\n' "$port" "$kind"
+    elif [[ "$kind" == ssl && -n "${ip_name[$port]:-}" ]]; then
+      printf '%s %s skip ip_server_name\n' "$port" "$kind"
+    else
+      printf '%s %s install %s\n' "$port" "$kind" "${listens[$port]}"
+    fi
+  done < <(printf '%s\n' "${!our_kind[@]}" | sort -n)
+}
+
+# nginx_default_deny_plan_cert_fallback <план> <вывод nginx -v>: nginx < 1.19.4 без сертификата-заглушки
+# не может отклонить рукопожатие — HTTPS-порты из install переходят в «skip no_cert», как при установке,
+# когда сертификат создать не удалось.
+nginx_default_deny_plan_cert_fallback() {
+  local plan="$1" version_output="$2" port kind action rest
+  if nginx_version_at_least 1.19.4 "$version_output" || nginx_default_deny_cert_ready; then
+    [[ -n "$plan" ]] && printf '%s\n' "$plan"
+    return 0
+  fi
+  while read -r port kind action rest; do
+    [[ -n "$port" ]] || continue
+    if [[ "$kind" == ssl && "$action" == install ]]; then
+      printf '%s ssl skip no_cert\n' "$port"
+    else
+      printf '%s %s %s %s\n' "$port" "$kind" "$action" "$rest"
+    fi
+  done <<<"$plan"
+}
+
+# nginx_default_deny_plan_listens <план> <plain|ssl> → listen-адреса через пробел для сервера по умолчанию
+nginx_default_deny_plan_listens() {
+  local plan="$1" want="$2" port kind action rest out=""
+  while read -r port kind action rest; do
+    [[ "$action" == install && "$kind" == "$want" ]] && out+="${out:+ }${rest}"
+  done <<<"$plan"
+  printf '%s' "$out"
+}
+
+# nginx_default_deny_expected_conf <план> <вывод nginx -v> → что nginx_install_default_deny запишет сейчас
+nginx_default_deny_expected_conf() {
+  nginx_render_default_deny "$(nginx_default_deny_plan_listens "$1" plain)" \
+    "$(nginx_default_deny_plan_listens "$1" ssl)" "$2"
+}
+
+# Ошибка здесь не должна ломать публикацию: default-deny откатывается, панель остаётся.
+nginx_install_default_deny() {
+  local base conf_file enabled_link version_output conf plan port kind action rest
+  local http_listens https_listens
+  base="$(nginx_default_deny_basename)"
+  conf_file="$(nginx_sites_available_dir)/${base}"
+  enabled_link="$(nginx_sites_enabled_dir)/${base}"
+
+  plan="$(nginx_default_deny_plan)"
+  while read -r port kind action rest; do
+    [[ "$action" == skip ]] || continue
+    case "$rest" in
+      existing_default_server)
+        nginx_warn "На порту ${port} уже есть default_server — сервер по умолчанию панели не ставится" ;;
+      foreign_first)
+        nginx_log "Порт ${port}: первым объявлен чужой сайт — он отвечает по IP, сервер по умолчанию не ставится" ;;
+      ip_server_name)
+        nginx_log "Порт ${port}: панель или другой сайт открывается по IP — HTTPS-сервер по умолчанию не ставится" ;;
+    esac
+  done <<<"$plan"
+  http_listens="$(nginx_default_deny_plan_listens "$plan" plain)"
+  https_listens="$(nginx_default_deny_plan_listens "$plan" ssl)"
+
+  if [[ -z "$http_listens" && -z "$https_listens" ]]; then
+    nginx_remove_default_deny
+    return 0
+  fi
+
+  version_output="$(nginx -v 2>&1 || true)"
+  if [[ -n "$https_listens" ]] && ! nginx_version_at_least 1.19.4 "$version_output"; then
+    if ! nginx_ensure_default_deny_cert; then
+      nginx_warn "Не удалось создать сертификат для сервера по умолчанию — HTTPS по IP не закрыт"
+      https_listens=""
+      if [[ -z "$http_listens" ]]; then
+        nginx_remove_default_deny
+        return 0
+      fi
+    fi
+  fi
+  conf="$(nginx_render_default_deny "$http_listens" "$https_listens" "$version_output")"
+  if ! printf '%s\n' "$conf" 2>/dev/null >"$conf_file" || ! ln -sf "$conf_file" "$enabled_link"; then
+    nginx_remove_default_deny
+    nginx_warn "Не удалось записать ${conf_file} — панель может открываться по IP сервера"
+    return 0
+  fi
+  if ! nginx -t >/dev/null 2>&1; then
+    nginx_remove_default_deny
+    nginx_warn "Сервер по умолчанию не прошёл nginx -t — убран; панель может открываться по IP сервера"
+    return 0
+  fi
+  nginx_log "Запросы по IP сервера и к чужим именам отклоняются (${base})"
 }
 
 # Undo a failed install: never leave a broken site enabled (would block nginx after reboot/reload).
@@ -1291,6 +1883,7 @@ nginx_rollback_site_install() {
     rm -f "$NGINX_CONF_FILE"
   fi
   nginx_rollback_server_names_hash
+  nginx_install_txn_rollback
 }
 
 nginx_install_site() {
@@ -1301,6 +1894,10 @@ nginx_install_site() {
   local created_enabled=false
   local enabled_dir available_dir
 
+  if [[ -z "${conf_content//[[:space:]]/}" ]]; then
+    nginx_warn "Пустая конфигурация vhost для ${domain}: установка отменена"
+    return 1
+  fi
   nginx_ensure_server_names_hash
   nginx_conf_paths "$domain"
   available_dir="$(nginx_sites_available_dir)"
@@ -1326,6 +1923,8 @@ nginx_install_site() {
   fi
   [[ -n "$bak" && -f "$bak" ]] && rm -f "$bak"
   nginx_cleanup_server_names_hash_bak
+  nginx_install_txn_commit
+  nginx_install_default_deny
 
   systemctl enable nginx >/dev/null 2>&1 || true
   # Config already passed nginx -t — leave it enabled even if reload/restart fails
@@ -1352,32 +1951,89 @@ nginx_update_proxy_port() {
   fi
 }
 
+PORT80_NAT_RULES=()
+
+# Правила NAT PREROUTING для порта 80 на внешнем интерфейсе перехватили бы запросы
+# Let's Encrypt к certbot standalone. Снимаются и возвращаются только они, одной транзакцией
+# iptables-restore --noflush: полный откат снимка iptables стёр бы правила, добавленные
+# за время certbot (fail2ban, VPN, docker). Элемент PORT80_NAT_RULES: "<позиция> <правило>".
 nginx_temp_clear_port80_nat() {
-  SAVE_RULES=""
-  PORT80_RULES=""
-  if ! command -v iptables-save >/dev/null 2>&1; then
+  PORT80_NAT_RULES=()
+  command -v iptables >/dev/null 2>&1 || return 0
+  local iface line entry pos=0
+  iface="$(ip route 2>/dev/null | awk '$1 == "default" {for (i = 2; i < NF; i++) if ($i == "dev") {print $(i + 1); exit}}')"
+  [[ -n "$iface" ]] || return 0
+  while IFS= read -r line; do
+    [[ "$line" == "-A PREROUTING "* ]] || continue
+    pos=$((pos + 1))
+    [[ " $line " == *" -i ${iface} "* && " $line " == *" -p tcp "* && " $line " == *" --dport 80 "* ]] || continue
+    PORT80_NAT_RULES+=("${pos} ${line#-A PREROUTING }")
+  done < <(iptables -t nat -S PREROUTING 2>/dev/null)
+  ((${#PORT80_NAT_RULES[@]} > 0)) || return 0
+  if ! {
+    echo "*nat"
+    for entry in "${PORT80_NAT_RULES[@]}"; do
+      echo "-D PREROUTING ${entry#* }"
+    done
+    echo "COMMIT"
+  } | iptables-restore --noflush; then
+    nginx_warn "Не удалось снять правила NAT для порта 80 — certbot может не пройти проверку"
+    PORT80_NAT_RULES=()
     return 0
   fi
-  SAVE_RULES=$(iptables-save)
-  local iface
-  iface=$(ip route 2>/dev/null | awk '/default/ {print $5; exit}')
-  [ -n "$iface" ] || return 0
-  PORT80_RULES=$(iptables-save | grep "PREROUTING.*-p tcp.*--dport 80" | grep "$iface" || true)
-  if [ -n "$PORT80_RULES" ]; then
-    local -a rule_parts=()
-    while read -r line; do
-      [ -n "$line" ] || continue
-      read -r -a rule_parts <<<"${line#-A }"
-      iptables -t nat -D "${rule_parts[@]}" 2>/dev/null || true
-    done <<<"$PORT80_RULES"
-    nginx_log "Временно сняты iptables-правила NAT для порта 80"
-  fi
+  nginx_log "Временно сняты правила NAT для порта 80: ${#PORT80_NAT_RULES[@]}"
 }
 
 nginx_restore_port80_nat() {
-  if [ -n "${SAVE_RULES:-}" ]; then
-    echo "$SAVE_RULES" | iptables-restore 2>/dev/null || true
+  ((${#PORT80_NAT_RULES[@]} > 0)) || return 0
+  local current entry pos rule len
+  local -a lines=()
+  current="$(iptables -t nat -S PREROUTING 2>/dev/null || true)"
+  len="$(grep -c '^-A PREROUTING ' <<<"$current" || true)"
+  for entry in "${PORT80_NAT_RULES[@]}"; do
+    pos="${entry%% *}"
+    rule="${entry#* }"
+    grep -qxF -- "-A PREROUTING ${rule}" <<<"$current" && continue
+    ((pos <= len + 1)) || pos=$((len + 1))
+    lines+=("-I PREROUTING ${pos} ${rule}")
+    len=$((len + 1))
+  done
+  if ((${#lines[@]} > 0)) && ! printf '*nat\n%s\nCOMMIT\n' "$(printf '%s\n' "${lines[@]}")" | iptables-restore --noflush; then
+    nginx_warn "Не удалось вернуть правила NAT для порта 80. Верните их вручную:"
+    for entry in "${PORT80_NAT_RULES[@]}"; do
+      nginx_warn "  iptables -t nat -A PREROUTING ${entry#* }"
+    done
+    PORT80_NAT_RULES=()
+    return 1
   fi
+  PORT80_NAT_RULES=()
+  nginx_log "Правила NAT для порта 80 возвращены"
+}
+
+# nginx_certbot_standalone <HTTP-порт ACME> <аргументы certbot> — остановить nginx и выполнить
+# certbot без NAT порта 80. При прерывании (bash выполняет EXIT-trap и при SIGINT/SIGTERM)
+# правила возвращаются, а остановленный здесь nginx запускается, иначе сервер остался бы без
+# сайтов и перенаправления порта 80. Прежний EXIT-trap выполняется следом и восстанавливается.
+# После certbot nginx запускает вызывающий код.
+nginx_certbot_standalone() {
+  local http_port="$1" prev_exit rc=0
+  local -a prev=()
+  shift
+  prev_exit="$(trap -p EXIT)"
+  [[ -z "$prev_exit" ]] || eval "prev=(${prev_exit})"
+  NGINX_PREV_EXIT_TRAP="${prev[2]:-}"
+  NGINX_STOPPED_FOR_ACME=false
+  trap 'nginx_restore_port80_nat || true
+    [[ "$NGINX_STOPPED_FOR_ACME" != true ]] || systemctl start nginx >/dev/null 2>&1 || true
+    eval "$NGINX_PREV_EXIT_TRAP"' EXIT
+
+  nginx_stop_for_standalone_acme "$http_port"
+  nginx_temp_clear_port80_nat
+  certbot "$@" || rc=$?
+  nginx_restore_port80_nat || true
+
+  eval "${prev_exit:-trap - EXIT}"
+  return "$rc"
 }
 
 nginx_obtain_letsencrypt_cert() {
@@ -1391,7 +2047,7 @@ nginx_obtain_letsencrypt_cert() {
   fi
 
   nginx_ensure_certbot || nginx_die "Не удалось установить certbot"
-  mkdir -p /var/www/html/.well-known/acme-challenge
+  mkdir -p "$(nginx_acme_webroot)/.well-known/acme-challenge"
 
   local certbot_ok=false
   local http_acme_port
@@ -1402,9 +2058,9 @@ nginx_obtain_letsencrypt_cert() {
     nginx_install_temp_acme_http_vhost "$domain" "$http_acme_port" || true
     nginx_log "Пробуем certbot webroot (nginx остаётся запущенным)…"
     if [[ -n "$email" ]]; then
-      certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos -m "$email" -d "$domain" && certbot_ok=true || true
+      certbot certonly --webroot -w "$(nginx_acme_webroot)" --non-interactive --agree-tos -m "$email" -d "$domain" && certbot_ok=true || true
     else
-      certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos --register-unsafely-without-email -d "$domain" && certbot_ok=true || true
+      certbot certonly --webroot -w "$(nginx_acme_webroot)" --non-interactive --agree-tos --register-unsafely-without-email -d "$domain" && certbot_ok=true || true
     fi
   fi
 
@@ -1416,32 +2072,17 @@ nginx_obtain_letsencrypt_cert() {
 
   nginx_remove_temp_acme_http_vhost "$domain"
   nginx_log "Webroot не сработал — certbot standalone (nginx будет остановлен)…"
-  nginx_stop_for_standalone_acme "$http_acme_port"
-  nginx_temp_clear_port80_nat
-
-  if [[ -n "$email" ]]; then
-    certbot certonly --standalone --non-interactive --agree-tos -m "$email" -d "$domain" || {
-      nginx_restore_port80_nat
-      systemctl start nginx 2>/dev/null || true
-      if [[ "${NGINX_FAIL_SOFT:-false}" == true ]]; then
-        nginx_warn "Не удалось получить сертификат Let's Encrypt"
-        return 1
-      fi
-      nginx_die "Не удалось получить сертификат Let's Encrypt"
-    }
-  else
-    certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email -d "$domain" || {
-      nginx_restore_port80_nat
-      systemctl start nginx 2>/dev/null || true
-      if [[ "${NGINX_FAIL_SOFT:-false}" == true ]]; then
-        nginx_warn "Не удалось получить сертификат Let's Encrypt"
-        return 1
-      fi
-      nginx_die "Не удалось получить сертификат Let's Encrypt"
-    }
+  local -a email_args=(--register-unsafely-without-email)
+  [[ -z "$email" ]] || email_args=(-m "$email")
+  if ! nginx_certbot_standalone "$http_acme_port" certonly --standalone --non-interactive --agree-tos "${email_args[@]}" -d "$domain"; then
+    systemctl start nginx 2>/dev/null || true
+    if [[ "${NGINX_FAIL_SOFT:-false}" == true ]]; then
+      nginx_warn "Не удалось получить сертификат Let's Encrypt"
+      return 1
+    fi
+    nginx_die "Не удалось получить сертификат Let's Encrypt"
   fi
 
-  nginx_restore_port80_nat
   systemctl start nginx 2>/dev/null || true
   [ -f "$cert_path" ] || nginx_die "Сертификат не найден после certbot: $cert_path"
 }
@@ -1539,7 +2180,7 @@ nginx_obtain_letsencrypt_cert_hosts() {
   fi
 
   nginx_ensure_certbot || nginx_die "Не удалось установить certbot"
-  mkdir -p /var/www/html/.well-known/acme-challenge
+  mkdir -p "$(nginx_acme_webroot)/.well-known/acme-challenge"
 
   local certbot_ok=false
   local expand_flag=()
@@ -1556,10 +2197,10 @@ nginx_obtain_letsencrypt_cert_hosts() {
     done
     nginx_log "certbot webroot для: ${hosts[*]}"
     if [[ -n "$email" ]]; then
-      certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos -m "$email" \
+      certbot certonly --webroot -w "$(nginx_acme_webroot)" --non-interactive --agree-tos -m "$email" \
         "${expand_flag[@]}" "${d_args[@]}" && certbot_ok=true || true
     else
-      certbot certonly --webroot -w /var/www/html --non-interactive --agree-tos --register-unsafely-without-email \
+      certbot certonly --webroot -w "$(nginx_acme_webroot)" --non-interactive --agree-tos --register-unsafely-without-email \
         "${expand_flag[@]}" "${d_args[@]}" && certbot_ok=true || true
     fi
   fi
@@ -1577,26 +2218,14 @@ nginx_obtain_letsencrypt_cert_hosts() {
   done
 
   nginx_log "Webroot не сработал — certbot standalone для: ${hosts[*]}"
-  nginx_stop_for_standalone_acme "$http_acme_port"
-  nginx_temp_clear_port80_nat
-
-  if [[ -n "$email" ]]; then
-    certbot certonly --standalone --non-interactive --agree-tos -m "$email" \
-      "${expand_flag[@]}" "${d_args[@]}" || {
-      nginx_restore_port80_nat
-      systemctl start nginx 2>/dev/null || true
-      nginx_die "Не удалось получить сертификат Let's Encrypt для ${hosts[*]}"
-    }
-  else
-    certbot certonly --standalone --non-interactive --agree-tos --register-unsafely-without-email \
-      "${expand_flag[@]}" "${d_args[@]}" || {
-      nginx_restore_port80_nat
-      systemctl start nginx 2>/dev/null || true
-      nginx_die "Не удалось получить сертификат Let's Encrypt для ${hosts[*]}"
-    }
+  local -a email_args=(--register-unsafely-without-email)
+  [[ -z "$email" ]] || email_args=(-m "$email")
+  if ! nginx_certbot_standalone "$http_acme_port" certonly --standalone --non-interactive --agree-tos "${email_args[@]}" \
+    "${expand_flag[@]}" "${d_args[@]}"; then
+    systemctl start nginx 2>/dev/null || true
+    nginx_die "Не удалось получить сертификат Let's Encrypt для ${hosts[*]}"
   fi
 
-  nginx_restore_port80_nat
   systemctl start nginx 2>/dev/null || true
   [[ -f "$cert_path" ]] || nginx_die "Сертификат не найден после certbot: $cert_path"
 }
@@ -1651,7 +2280,9 @@ nginx_render_portal_template() {
   local template https_redirect_suffix portal_blocks rendered
   # Portal subdomain always serves at root (not panel ACCESS_PATH); allowlist only.
   template="$NGINX_TEMPLATE_DIR/adminpanelaz-portal.conf.template"
+  nginx_check_render_inputs "$portal_domain" "$ssl_cert" "$ssl_key" || return 1
   nginx_ensure_cloudflare_realip_snippet
+  nginx_ensure_cloudflare_origin_snippets
   https_redirect_suffix="$(nginx_https_redirect_suffix "$https_port")"
   portal_blocks="$(nginx_portal_location_blocks "$backend_port")"
   rendered="$(sed \
@@ -1663,7 +2294,8 @@ nginx_render_portal_template() {
     -e "s|__SSL_CERT__|${ssl_cert}|g" \
     -e "s|__SSL_KEY__|${ssl_key}|g" \
     -e "s|__UVICORN_PORT__|${backend_port}|g" \
-    "$template")"
+    "$template")" || { nginx_warn "Не удалось сформировать vhost портала"; return 1; }
+  [[ -n "$rendered" ]] || { nginx_warn "Пустой vhost портала"; return 1; }
   PANEL_BLOCKS="$portal_blocks" RENDERED="$rendered" python3 - <<'PY'
 import os
 print(os.environ["RENDERED"].replace("__PANEL_LOCATION_BLOCKS__", os.environ["PANEL_BLOCKS"]), end="")
@@ -1678,7 +2310,8 @@ nginx_install_portal_vhost() {
   local https_port="${5:-443}"
   local http_port="${6:-80}"
   local conf
-  conf="$(nginx_render_portal_template "$portal_domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port")"
+  conf="$(nginx_render_portal_template "$portal_domain" "$backend_port" "$ssl_cert" "$ssl_key" "$https_port" "$http_port")" \
+    || return 1
   nginx_install_site "$conf" "$portal_domain" "true"
 }
 

@@ -9,6 +9,7 @@ from app.config import get_settings
 from app.models import AppSetting, User, UserRole, VpnConfig
 from app.services.rate_limit.backends import MemoryRateLimitBackend
 from app.services.rate_limit.sliding_window import RateLimitExceeded, SlidingWindowLimiter
+from app.services.user_subscription import user_subscription_expired
 
 SETTING_QUOTA_DEFAULT = "user_config_quota_default"
 SETTING_CREATE_RATE_MAX = "user_config_create_rate_max"
@@ -116,6 +117,11 @@ user_config_create_rate_limit_service = UserConfigCreateRateLimitService()
 def enforce_user_can_create_config(db: Session, user: User) -> None:
     if user.role == UserRole.admin:
         return
+    if user_subscription_expired(user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="subscription_expired: Срок подписки истёк",
+        )
     if not bool(getattr(user, "can_create_configs", True)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Создание конфигураций отключено администратором")
     limit = get_user_config_quota_limit(db, user)

@@ -50,8 +50,8 @@ def test_public_portal_api_available_at_root_and_prefixed():
         patch("app.routers.public_portal.public_download_rate_limit_service"),
         patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
         patch(
-            "app.routers.public_portal.build_portal_payload",
-            return_value={"client_name": "alice", "files": []},
+            "app.routers.public_portal.build_public_portal_payload",
+            return_value={"kind": "client", "client_name": "alice", "files": []},
         ),
     ):
         feats.return_value.is_enabled.return_value = True

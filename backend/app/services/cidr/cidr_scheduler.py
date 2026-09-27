@@ -13,6 +13,7 @@ from app.models import AppSetting
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.cidr.pipeline.deploy import compute_artifact_stamp
 from app.services.cidr.pipeline.orchestrator import run_compile, run_ingest, run_multi_deploy
+from app.services.background_gate import run_long_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +267,32 @@ def _scheduler_may_run(settings: Settings) -> bool:
     return bool(settings.cidr_db_refresh_enabled) and _is_routing_module_enabled()
 
 
+def _run_scheduled_refresh(settings: Settings) -> None:
+    db = SessionLocal()
+    try:
+        interval_days = max(1, int(settings.cidr_db_refresh_interval_days or 1))
+        if not _should_run_interval(db, interval_days):
+            last = get_last_cron_run_at(db)
+            logger.info(
+                "CIDR DB scheduler: skipped (interval=%d day(s), last_run=%s)",
+                interval_days,
+                last.isoformat() if last else "never",
+            )
+            return
+        summary = run_nightly_cidr_pipeline(db, settings)
+        refresh_status = str((summary.get("refresh") or {}).get("status") or "")
+        if refresh_status in ("ok", "partial"):
+            mark_cron_run(db)
+            db.commit()
+        else:
+            logger.warning(
+                "CIDR DB scheduler: refresh status=%s — last_run not updated, will retry next slot",
+                refresh_status or "empty",
+            )
+    finally:
+        db.close()
+
+
 async def run_cidr_db_scheduler_loop() -> None:
     while True:
         try:
@@ -296,29 +323,8 @@ async def run_cidr_db_scheduler_loop() -> None:
                 )
                 continue
 
-            db = SessionLocal()
-            try:
-                interval_days = max(1, int(settings.cidr_db_refresh_interval_days or 1))
-                if not _should_run_interval(db, interval_days):
-                    last = get_last_cron_run_at(db)
-                    logger.info(
-                        "CIDR DB scheduler: skipped (interval=%d day(s), last_run=%s)",
-                        interval_days,
-                        last.isoformat() if last else "never",
-                    )
-                else:
-                    summary = run_nightly_cidr_pipeline(db, settings)
-                    refresh_status = str((summary.get("refresh") or {}).get("status") or "")
-                    if refresh_status in ("ok", "partial"):
-                        mark_cron_run(db)
-                        db.commit()
-                    else:
-                        logger.warning(
-                            "CIDR DB scheduler: refresh status=%s — last_run not updated, will retry next slot",
-                            refresh_status or "empty",
-                        )
-            finally:
-                db.close()
+            # Provider downloads, compile and deploy take minutes.
+            await run_long_background_step(_run_scheduled_refresh, settings)
             await asyncio.sleep(60)
         except asyncio.CancelledError:
             raise

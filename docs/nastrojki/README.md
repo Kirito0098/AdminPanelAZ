@@ -8,18 +8,18 @@
 
 | Подраздел | Администратор | Пользователь |
 |-----------|:-------------:|:------------:|
-| Профиль | ✓ | ✓ |
+| Мой профиль | ✓ | ✓ |
 | Пользователи | ✓ | — |
-| Доступ к панели | ✓ | — |
-| Раздача конфигов | ✓ | — |
-| Обслуживание | ✓ | — |
+| Защита входа | ✓ | — |
+| Выдача VPN-профилей | ✓ | — |
+| Обслуживание VPN | ✓ | — |
 | Адрес сайта и HTTPS | ✓ | — |
 | Резервные копии | ✓ | — |
-| Мониторинг и алерты | ✓ | — |
-| Модули | ✓ | — |
-| Обновления | ✓ | — |
+| Нагрузка и уведомления | ✓ | — |
+| Разделы панели | ✓ | — |
+| Обновление панели | ✓ | — |
 | Перезапуск и пересборка | ✓ | — |
-| Диагностика | ✓ | — |
+| Проверка работы | ✓ | — |
 
 ---
 
@@ -27,17 +27,19 @@
 
 | Подраздел | О чём | Инструкция |
 |-----------|-------|------------|
-| **Профиль** | Тема, пароль, 2FA, passkey | [profil.md](profil.md) |
-| **Пользователи** | Учётные записи и роли | [polzovateli.md](polzovateli.md) |
-| **Доступ к панели** | IP, баны, секреты | [bezopasnost.md](bezopasnost.md) |
-| **Раздача конфигов** | QR-ссылки, публичные файлы | [razdacha-konfigov.md](razdacha-konfigov.md) |
-| **Обслуживание** | VPN-службы, GeoIP | [obsluzhivanie.md](obsluzhivanie.md) |
-| **Адрес сайта и HTTPS** | HTTPS, домен, StatusOpenVPN | [set-i-publikaciya.md](set-i-publikaciya.md) |
-| **Резервные копии** | Бэкапы и расписание | [rezervnye-kopii.md](rezervnye-kopii.md) |
-| **Мониторинг и алерты** | Пороги CPU/RAM | [monitoring-i-alerty.md](monitoring-i-alerty.md) |
-| **Модули** | Разделы панели, профили | [moduli.md](moduli.md) |
-| **Обновления** | Обновление панели | [obnovleniya.md](obnovleniya.md) |
+| **Мой профиль** | Тема, пароль, 2FA, passkey | [profil.md](profil.md) |
+| **Пользователи** | Учётные записи, роли, срок доступа | [polzovateli.md](polzovateli.md) |
+| **Защита входа** | IP, баны, web-сессии, секреты | [bezopasnost.md](bezopasnost.md) |
+| **Выдача VPN-профилей** | QR-ссылки, файлы для роутеров | [razdacha-konfigov.md](razdacha-konfigov.md) |
+| **Обслуживание VPN** | VPN-службы, хранение данных, GeoIP | [obsluzhivanie.md](obsluzhivanie.md) |
+| **Адрес сайта и HTTPS** | HTTPS, домен, Cloudflare, StatusOpenVPN | [set-i-publikaciya.md](set-i-publikaciya.md) |
+| **Резервные копии** | Бэкапы, расписание, копии перед восстановлением | [rezervnye-kopii.md](rezervnye-kopii.md) |
+| **Нагрузка и уведомления** | Пороги CPU/RAM, уведомления | [monitoring-i-alerty.md](monitoring-i-alerty.md) |
+| **Разделы панели** | Модули, профили ресурсов | [moduli.md](moduli.md) |
+| **Обновление панели** | Проверка и установка версий | [obnovleniya.md](obnovleniya.md) |
 | **Перезапуск и пересборка** | Restart / rebuild UI | [perezapusk-i-peresborka.md](perezapusk-i-peresborka.md) |
-| **Диагностика** | Проверка работы | [diagnostika.md](diagnostika.md) |
+| **Проверка работы** | Автоматическая диагностика | [diagnostika.md](diagnostika.md) |
+
+Обновляетесь с 2.25.1 на 2.26.0 — см. [Обновление с 2.25.1 до 2.26.0](obnovleniya.md#обновление-с-2251-до-2260).
 
 [← Вернуться к оглавлению](../README.md)

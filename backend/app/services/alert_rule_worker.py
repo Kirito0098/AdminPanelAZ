@@ -7,6 +7,7 @@ import logging
 
 from app.config import get_settings
 from app.services.alert_rules import run_alert_rules_tick
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ async def run_alert_rules_loop() -> None:
             if not _is_alert_rules_runtime_enabled():
                 logger.debug("alert_rules skipped — disabled or telegram off")
                 continue
-            result = await asyncio.to_thread(run_alert_rules_tick)
+            result = await run_background_step(run_alert_rules_tick) or {}
             if result.get("triggered"):
                 logger.info(
                     "Alert rules: %d/%d rule(s) triggered",

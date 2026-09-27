@@ -1,26 +1,36 @@
 import { Component, Fragment, type ErrorInfo, type ReactNode } from 'react'
 import { Button } from '@/components/ui/button'
+import { reloadOnChunkError } from '@/lib/lazyWithRetry'
 
 type Props = {
   children: ReactNode
   /** Optional label for the failed section (shown in the fallback). */
   label?: string
+  /** A caught error is cleared when this value changes (e.g. the route pathname). */
+  resetOn?: unknown
 }
 
 type State = {
   error: Error | null
   resetKey: number
+  resetOn: unknown
 }
 
 export default class ErrorBoundary extends Component<Props, State> {
-  state: State = { error: null, resetKey: 0 }
+  state: State = { error: null, resetKey: 0, resetOn: this.props.resetOn }
 
   static getDerivedStateFromError(error: Error): Partial<State> {
     return { error }
   }
 
+  static getDerivedStateFromProps(props: Props, state: State): Partial<State> | null {
+    if (Object.is(props.resetOn, state.resetOn)) return null
+    return { error: null, resetOn: props.resetOn }
+  }
+
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('UI error boundary caught', error, info.componentStack)
+    reloadOnChunkError(error)
   }
 
   private handleReload = () => {

@@ -3,10 +3,9 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
-import jwt
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_admin
+from app.auth import get_active_user_from_access_token, get_current_user, require_admin
 from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models import User
@@ -42,7 +41,6 @@ from app.services.panel_resource_metrics import query_history as query_panel_his
 from app.services.resource_metrics import VALID_PERIODS, query_history
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
-_settings = get_settings()
 
 
 def _monitoring_cache_ttl() -> int:
@@ -141,23 +139,12 @@ def monitoring_incidents(
 
 
 def _user_from_access_token(token: str, db: Session) -> User:
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Неверный токен авторизации",
-    )
-    try:
-        payload = jwt.decode(token, _settings.secret_key, algorithms=[_settings.algorithm])
-        if payload.get("type") not in (None, "access"):
-            raise credentials_exception
-        username: str | None = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-    except jwt.PyJWTError as exc:
-        raise credentials_exception from exc
-
-    user = db.query(User).filter(User.username == username).first()
-    if user is None or not user.is_active:
-        raise credentials_exception
+    user = get_active_user_from_access_token(db, token)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Неверный токен авторизации",
+        )
     return user
 
 
@@ -176,6 +163,21 @@ async def monitoring_stream(
     finally:
         db.close()
 
+    def _overview_payload(coalesce_ttl: float) -> dict:
+        db = SessionLocal()
+        try:
+            # Coalesce concurrent SSE clients on a dedicated key (not REST 45s TTL).
+            overview = _build_monitoring_overview(
+                db,
+                scope=scope,
+                ha_mode=ha_mode,
+                cache_ttl=coalesce_ttl,
+                cache_key_prefix="sse:",
+            )
+            return overview.model_dump(mode="json")
+        finally:
+            db.close()
+
     async def event_generator():
         while True:
             if await request.is_disconnected():
@@ -183,22 +185,12 @@ async def monitoring_stream(
             # Re-read each tick so env/settings changes apply without reconnect.
             tick_interval = _stream_interval_seconds()
             coalesce_ttl = _stream_coalesce_ttl(tick_interval)
-            db = SessionLocal()
             try:
-                # Coalesce concurrent SSE clients on a dedicated key (not REST 45s TTL).
-                overview = _build_monitoring_overview(
-                    db,
-                    scope=scope,
-                    ha_mode=ha_mode,
-                    cache_ttl=coalesce_ttl,
-                    cache_key_prefix="sse:",
-                )
-                payload = overview.model_dump(mode="json")
+                # Polls every node of the scope over the agent API.
+                payload = await asyncio.to_thread(_overview_payload, coalesce_ttl)
                 yield f"data: {json.dumps(payload, default=str)}\n\n"
             except Exception as exc:
                 yield f"event: error\ndata: {json.dumps({'detail': str(exc)}, default=str)}\n\n"
-            finally:
-                db.close()
             await asyncio.sleep(tick_interval)
 
     return StreamingResponse(

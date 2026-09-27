@@ -73,7 +73,7 @@ export default function ForcePasswordChange() {
                 value={newPwd}
                 onChange={(e) => setNewPwd(e.target.value)}
               />
-              <p className="text-xs text-muted-foreground">Минимум 8 символов</p>
+              <p className="text-xs text-muted-foreground">Минимум 8 символов, буквы и цифры</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="forceConfirm">Подтверждение</Label>

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.auth import create_access_token
+from app.auth import create_access_token, create_tg_mini_token
 from app.services.admin_notify import admin_notify_service
 from app.services.feature_guards import get_feature_service
 from app.services.ip_restriction import ip_restriction_service
@@ -73,6 +73,7 @@ __all__ = [
     "admin_notify_service",
     "check_bot_delivery",
     "create_access_token",
+    "create_tg_mini_token",
     "get_client_timezone_from_request",
     "get_feature_service",
     "ip_restriction_service",

@@ -8,7 +8,7 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, require_admin
+from app.auth import get_current_user, require_admin, tg_mini_token_allowed
 from app.database import get_db
 from app.models import AppSetting, User, UserRole, VpnConfig, VpnType
 from app.schemas import (
@@ -23,6 +23,7 @@ from app.schemas import (
     VpnConfigUpdate,
 )
 from app.services.self_service import build_quota_payload, enforce_user_can_create_config
+from app.services.user_subscription import apply_owner_access_until_to_config, replicate_inherited_access_until
 from app.services.config_access import can_mutate_config, can_view_config, list_accessible_configs
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
@@ -296,8 +297,7 @@ def _require_profile_path_allowed(
     files = node_adapter.get_profile_files(config.client_name, config.vpn_type)
     match = next((item for item in files if item.get("path") == path), None)
     if match is None:
-        # Path may still be readable; deny if policy would hide all matches by path suffix.
-        match = {"protocol": "", "variant": "", "path": path}
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Файл профиля недоступен")
     policy = _viewer_visibility_policy(db, current_user)
     if not profile_file_allowed(
         policy,
@@ -309,6 +309,7 @@ def _require_profile_path_allowed(
 
 
 @router.get("/quota", response_model=SelfServiceQuotaResponse)
+@tg_mini_token_allowed
 def get_config_quota(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -474,13 +475,13 @@ def export_configs_csv(
 
 
 @router.post("/import")
-async def import_configs_csv(
+def import_configs_csv(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
     require_ha_primary_for_client_ops(db)
-    content = await file.read()
+    content = file.file.read()
     if not content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пуст")
     try:
@@ -507,6 +508,7 @@ async def import_configs_csv(
 
 
 @router.post("", response_model=VpnConfigResponse, status_code=status.HTTP_201_CREATED)
+@tg_mini_token_allowed
 def create_config(
     payload: VpnConfigCreate,
     request: Request,
@@ -589,11 +591,26 @@ def create_config(
     db.commit()
     db.refresh(config)
 
+    inherit = apply_owner_access_until_to_config(
+        db,
+        config,
+        actor=current_user.username,
+        commit=True,
+        replicate=False,
+    )
+
     ha_replicate_warning = None
     group = find_sync_group_for_primary(db, node_id)
     if group:
         replicate_result = maybe_replicate_create(db, node_id=node_id, primary_config=config)
         ha_replicate_warning = format_ha_replicate_errors(replicate_result)
+        inherit = replicate_inherited_access_until(db, config, inherit, actor=current_user.username)
+
+    if inherit.get("warning"):
+        if ha_replicate_warning:
+            ha_replicate_warning = f"{ha_replicate_warning}; {inherit['warning']}"
+        else:
+            ha_replicate_warning = inherit["warning"]
 
     node = get_active_node(db)
     admin_notify_service.send_config_create(
@@ -618,6 +635,7 @@ def create_config(
 
 
 @router.get("/{config_id}", response_model=VpnConfigResponse)
+@tg_mini_token_allowed
 def get_config(
     config_id: int,
     include_files: bool = Query(True, description="Загружать список файлов профилей с узла"),
@@ -640,6 +658,7 @@ def get_config(
 
 
 @router.patch("/{config_id}", response_model=VpnConfigResponse)
+@tg_mini_token_allowed
 def update_config(
     config_id: int,
     payload: VpnConfigUpdate,
@@ -707,6 +726,7 @@ def update_config(
 
 
 @router.delete("/{config_id}", response_model=MessageResponse)
+@tg_mini_token_allowed
 def delete_config(
     config_id: int,
     request: Request,

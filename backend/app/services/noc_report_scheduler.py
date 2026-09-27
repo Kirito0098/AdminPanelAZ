@@ -18,6 +18,7 @@ from app.services.noc_schedule import (
     should_run_daily,
     should_run_weekly,
 )
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -159,7 +160,7 @@ async def run_noc_report_scheduler_loop() -> None:
             if not _is_telegram_enabled():
                 logger.debug("noc_report_scheduler skipped — telegram module disabled")
                 continue
-            results = await asyncio.to_thread(run_noc_report_scheduler_tick)
+            results = await run_background_step(run_noc_report_scheduler_tick) or []
             for result in results:
                 if result.get("status") == "sent":
                     logger.debug("NOC report scheduler: %s", result)

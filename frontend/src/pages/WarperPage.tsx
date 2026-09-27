@@ -12,11 +12,13 @@ import WarperHero from '@/components/warper/WarperHero'
 import WarperInstallPrompt from '@/components/warper/WarperInstallPrompt'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNode } from '@/context/NodeContext'
+import { useLatestRequest } from '@/hooks/useLatestRequest'
+import { runLatest } from '@/lib/latestRequest'
 import type { WarperDomainsResponse, WarperHealthResponse, WarperStatusResponse } from '@/types'
 import { formatNodeLabel, type WarperTab } from '@/components/warper/utils'
 
 export default function WarperPage() {
-  const { activeNode } = useNode()
+  const { activeNode, loading: nodeLoading } = useNode()
   const [tab, setTab] = useState<WarperTab>('domains')
   const [health, setHealth] = useState<WarperHealthResponse | null>(null)
   const [status, setStatus] = useState<WarperStatusResponse | null>(null)
@@ -26,44 +28,52 @@ export default function WarperPage() {
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  const activeNodeId = activeNode?.id ?? null
+  const [loadedNodeId, setLoadedNodeId] = useState<number | null | undefined>(undefined)
+  const requests = useLatestRequest(activeNodeId)
+
   const load = useCallback(async () => {
     setLoading(true)
     setLoadError(null)
-    try {
-      const healthData = await getWarperHealth()
-      setHealth(healthData)
-
-      if (healthData.installed) {
+    await runLatest(
+      requests,
+      async () => {
+        const healthData = await getWarperHealth()
+        if (!healthData.installed) return { healthData, statusData: null, domainsData: null, trafficData: null }
         const [statusData, domainsData, trafficData] = await Promise.all([
           getWarperStatus().catch(() => null),
           getWarperDomains().catch(() => null),
           getWarperTraffic('today').catch(() => null),
         ])
-        setStatus(statusData)
-        setDomainsPayload(domainsData)
-        setDomainCount(domainsData?.domains?.length ?? null)
-        setTrafficToday(trafficData?.data ?? null)
-      } else {
-        setStatus(null)
-        setDomainsPayload(null)
-        setDomainCount(null)
-        setTrafficToday(null)
-      }
-    } catch (err) {
-      setHealth(null)
-      setStatus(null)
-      setDomainsPayload(null)
-      setDomainCount(null)
-      setTrafficToday(null)
-      setLoadError(err instanceof Error ? err.message : 'Не удалось загрузить AZ-WARP')
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+        return { healthData, statusData, domainsData, trafficData }
+      },
+      {
+        apply: ({ healthData, statusData, domainsData, trafficData }) => {
+          setLoadedNodeId(activeNodeId)
+          setHealth(healthData)
+          setStatus(statusData)
+          setDomainsPayload(domainsData)
+          setDomainCount(domainsData?.domains?.length ?? null)
+          setTrafficToday(trafficData?.data ?? null)
+        },
+        fail: (err) => {
+          setLoadedNodeId(activeNodeId)
+          setHealth(null)
+          setStatus(null)
+          setDomainsPayload(null)
+          setDomainCount(null)
+          setTrafficToday(null)
+          setLoadError(err instanceof Error ? err.message : 'Не удалось загрузить AZ-WARP')
+        },
+        settle: () => setLoading(false),
+      },
+    )
+  }, [activeNodeId, requests])
 
   useEffect(() => {
+    if (nodeLoading) return
     void load()
-  }, [load, activeNode?.id])
+  }, [load, nodeLoading])
 
   const nodeLabel = formatNodeLabel(health, activeNode)
   const warperReady = Boolean(health?.installed)
@@ -78,7 +88,7 @@ export default function WarperPage() {
         onToggled={() => void load()}
       />
 
-      <WarperAlerts health={health} activeNode={activeNode} loadError={loadError} />
+      <WarperAlerts health={health} activeNode={activeNode} loadError={loadError} onToggled={() => void load()} />
 
       {warperReady && (
         <OverviewCards
@@ -122,7 +132,7 @@ export default function WarperPage() {
         <TabsContent value="domains" className="mt-0 focus-visible:outline-none">
           <DomainsTab
             health={health}
-            initialDomains={loading ? undefined : domainsPayload}
+            initialDomains={loading || loadedNodeId !== activeNodeId ? undefined : domainsPayload}
             onDomainsChange={setDomainCount}
           />
         </TabsContent>

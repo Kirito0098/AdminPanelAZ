@@ -2,13 +2,12 @@ import asyncio
 import json
 
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
-import jwt
 from sqlalchemy.orm import Session
 
-from app.auth import require_admin
+from app.auth import get_active_user_from_access_token, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import User
+from app.models import User, UserRole
 from app.services.node_manager import get_active_adapter, get_active_node
 
 router = APIRouter(prefix="/server-monitor", tags=["server-monitor"])
@@ -67,36 +66,43 @@ async def monitor_ws(websocket: WebSocket):
     if not _is_server_monitor_enabled():
         await websocket.close(code=1008)
         return
+
+    from app.database import SessionLocal
+
     token = websocket.query_params.get("token", "")
+    auth_db = SessionLocal()
     try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        username = payload.get("sub")
-        if not username:
-            await websocket.close(code=1008)
-            return
-    except jwt.PyJWTError:
+        user = get_active_user_from_access_token(auth_db, token)
+        is_admin = user is not None and user.role == UserRole.admin
+    finally:
+        auth_db.close()
+    if not is_admin:
         await websocket.close(code=1008)
         return
     iface = (websocket.query_params.get("iface") or "eth0").strip() or "eth0"
+
+    def _read_metrics() -> tuple[dict, dict]:
+        db = SessionLocal()
+        try:
+            adapter = get_active_adapter(db)
+            metrics = adapter.get_server_metrics()
+            live = adapter.get_server_live_throughput(
+                interval=_WS_THROUGHPUT_INTERVAL_S,
+                max_interfaces=1,
+                interface_names=[iface],
+            )
+            return metrics, live
+        finally:
+            db.close()
+
     try:
         while True:
             if not _is_server_monitor_enabled():
                 await websocket.close(code=1008)
                 return
 
-            from app.database import SessionLocal
-
-            db = SessionLocal()
-            try:
-                adapter = get_active_adapter(db)
-                metrics = adapter.get_server_metrics()
-                live = adapter.get_server_live_throughput(
-                    interval=_WS_THROUGHPUT_INTERVAL_S,
-                    max_interfaces=1,
-                    interface_names=[iface],
-                )
-            finally:
-                db.close()
+            # Throughput is measured by sampling counters over an interval (a blocking sleep).
+            metrics, live = await asyncio.to_thread(_read_metrics)
 
             payload = {
                 "cpu_percent": metrics["cpu_percent"],

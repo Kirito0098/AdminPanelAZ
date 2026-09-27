@@ -7,6 +7,7 @@ import {
   updateCloudflareProxySettings,
 } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -14,6 +15,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useNotifications } from '@/context/NotificationContext'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type { CloudflareProxySettings } from '@/types'
@@ -33,6 +35,7 @@ function shortHash(value: string | null | undefined): string | null {
 
 export default function CloudflareProxyCard() {
   const { success, error: notifyError } = useNotifications()
+  const { confirm, dialogProps } = useConfirmDialog()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -64,7 +67,7 @@ export default function CloudflareProxyCard() {
   }, [load])
 
   async function patchSettings(
-    patch: Partial<Pick<CloudflareProxySettings, 'enabled' | 'auto_update' | 'interval_days'>>,
+    patch: Partial<Pick<CloudflareProxySettings, 'enabled' | 'origin_lock_enabled' | 'auto_update' | 'interval_days'>>,
     opts?: { silent?: boolean },
   ) {
     if (!settings) return
@@ -85,8 +88,51 @@ export default function CloudflareProxyCard() {
 
   async function handleEnabledChange(checked: boolean) {
     if (!settings || saving || refreshing) return
-    setSettings({ ...settings, enabled: checked })
-    await patchSettings({ enabled: checked }, { silent: true })
+    confirm({
+      title: checked ? 'Включить Cloudflare proxy-mode?' : 'Выключить Cloudflare proxy-mode?',
+      description: checked
+        ? 'Nginx пересоберёт конфиг панели: во всех location’ах подключится cloudflare-realip (реальный IP клиента). Включайте только если домен панели в Cloudflare в режиме Proxied (оранжевое облако).'
+        : 'Nginx уберёт realip. Если домен панели всё ещё за Proxied Cloudflare, Telegram-бот снова может отвечать 403, а лимиты входа и аудит будут видеть IP Cloudflare. «Доступ только через Cloudflare» тоже будет выключен.',
+      alert: {
+        variant: 'warning',
+        title: 'Перезапуск nginx',
+        children:
+          'Vhost домена панели будет пересоздан, nginx перезапущен (restart) — возможен краткий обрыв HTTP, в том числе у портала. Сама панель не перезапускается. В .env TRUSTED_PROXY_IPS и FORWARDED_ALLOW_IPS станут 127.0.0.1 — вступит в силу после перезапуска панели.',
+      },
+      confirmLabel: checked ? 'Включить' : 'Выключить',
+      onConfirm: async () => {
+        setSettings({ ...settings, enabled: checked, origin_lock_enabled: checked ? settings.origin_lock_enabled : false })
+        await patchSettings({ enabled: checked }, { silent: true })
+      },
+    })
+  }
+
+  async function handleOriginLockChange(checked: boolean) {
+    if (!settings || saving || refreshing || !settings.enabled) return
+    confirm({
+      title: checked ? 'Включить доступ только через Cloudflare?' : 'Снять ограничение origin?',
+      description: checked
+        ? 'Прямой заход на панель по публичному IP origin будет запрещён (403). Доступ останется через Cloudflare, localhost и локальные/VPN-сети (RFC1918).'
+        : 'Панель снова будет принимать прямые подключения не только из сетей Cloudflare.',
+      alert: checked
+        ? {
+            variant: 'warning',
+            title: 'Нужен Proxied DNS для панели',
+            children:
+              'Домен панели должен быть за оранжевым облаком Cloudflare. Клиентский портал (отдельный хост, DNS only) этим правилом не ограничивается. Nginx будет перезапущен — возможен краткий обрыв HTTP. В .env TRUSTED_PROXY_IPS и FORWARDED_ALLOW_IPS станут 127.0.0.1 — вступит в силу после перезапуска панели.',
+          }
+        : {
+            variant: 'info',
+            title: 'Перезапуск nginx',
+            children:
+              'Allow-snippet уберётся из location’ов панели; nginx будет перезапущен — возможен краткий обрыв HTTP. В .env TRUSTED_PROXY_IPS и FORWARDED_ALLOW_IPS станут 127.0.0.1 — вступит в силу после перезапуска панели.',
+          },
+      confirmLabel: checked ? 'Включить ограничение' : 'Снять ограничение',
+      onConfirm: async () => {
+        setSettings({ ...settings, origin_lock_enabled: checked })
+        await patchSettings({ origin_lock_enabled: checked }, { silent: true })
+      },
+    })
   }
 
   async function handleAutoUpdateChange(checked: boolean) {
@@ -160,6 +206,7 @@ export default function CloudflareProxyCard() {
   const hashLabel = shortHash(settings.last_hash)
 
   return (
+    <>
     <Card className="shadow-sm">
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -172,8 +219,8 @@ export default function CloudflareProxyCard() {
           </Badge>
         </div>
         <CardDescription className="mt-1.5">
-          Для Telegram webhook за Cloudflare в режиме Proxied (orange-cloud). Nginx подставляет реальный IP
-          клиента из списков Cloudflare. Без Cloudflare можно выключить.
+          Для домена за Cloudflare в режиме Proxied (orange-cloud). Nginx подставляет реальный IP клиента
+          из CF-Connecting-IP (только от адресов Cloudflare). Без Cloudflare можно выключить.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -194,6 +241,28 @@ export default function CloudflareProxyCard() {
             disabled={busy}
             onCheckedChange={(checked) => void handleEnabledChange(checked)}
             aria-label="Cloudflare proxy-mode"
+          />
+        </div>
+
+        <div
+          className={cn(
+            'flex items-start justify-between gap-4 rounded-xl border bg-muted/15 px-4 py-3',
+            settings.origin_lock_enabled && settings.enabled && 'border-primary/20 bg-primary/5',
+          )}
+        >
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Доступ только через Cloudflare</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {settings.enabled
+                ? 'Nginx пускает панель только с IP Cloudflare, localhost и локальных/VPN-сетей (RFC1918). Прямой доступ по публичному IP сервера будет запрещён (403).'
+                : 'Сначала включите Cloudflare proxy-mode.'}
+            </p>
+          </div>
+          <Switch
+            checked={settings.origin_lock_enabled}
+            disabled={busy || !settings.enabled}
+            onCheckedChange={(checked) => void handleOriginLockChange(checked)}
+            aria-label="Доступ только через Cloudflare"
           />
         </div>
 
@@ -263,5 +332,7 @@ export default function CloudflareProxyCard() {
         </div>
       </CardContent>
     </Card>
+    <ConfirmDialogHost dialogProps={dialogProps} />
+    </>
   )
 }

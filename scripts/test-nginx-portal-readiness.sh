@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${ENV_FILE:-$ROOT_DIR/backend/.env}"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+# Не рабочий backend/.env: библиотека пишет в ENV_FILE.
+ENV_FILE="$TMP/.env"
+: >"$ENV_FILE"
 # shellcheck source=scripts/nginx-common.sh
 source "$ROOT_DIR/scripts/nginx-common.sh"
 nginx_common_init
-
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
 
 pass=0; fail=0
 ok() { pass=$((pass+1)); echo "  OK  $1"; }
@@ -53,6 +54,11 @@ cat >"$TMP/bin/nginx" <<'EOF'
 exit 0
 EOF
 chmod +x "$TMP/bin/nginx"
+cat >"$TMP/bin/systemctl" <<EOF
+#!/usr/bin/env bash
+echo "\$*" >>"$TMP/systemctl.log"
+EOF
+chmod +x "$TMP/bin/systemctl"
 export PATH="$TMP/bin:$PATH"
 
 out="$(PORTAL_DOMAIN=portal.example.com bash "$ROOT_DIR/scripts/nginx-portal-readiness.sh" --check)"
@@ -104,6 +110,7 @@ if [[ ! -e "$NGINX_SITES_ENABLED_DIR/$PORTAL_BASE" && ! -f "$NGINX_SITES_AVAILAB
 else
   bad "stale site still present"
 fi
+grep -qx 'reload nginx' "$TMP/systemctl.log" 2>/dev/null && ok "nginx reload requested (stubbed)" || bad "no nginx reload after stale removal"
 
 echo "[test] unrelated broken site must not delete portal vhost"
 printf 'DOMAIN=panel.example.com\nPUBLISH_MODE=nginx_le\nPORTAL_DOMAIN=portal.example.com\n' >"$ENV_FILE"

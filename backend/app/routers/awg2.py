@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import io
 import json
 from collections.abc import Iterator
@@ -12,10 +11,11 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.auth import decode_access_token_username, require_admin
+from app.auth import get_active_user_from_access_token, require_admin
 from app.database import SessionLocal, get_db
 from app.models import User, UserRole
 from app.schemas import Awg2ObfuscationApply
+from app.services.async_iter import iterate_in_thread
 from app.services.awg2 import Awg2ClientNotFoundError, Awg2NotInstalledError
 from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node
 from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes
@@ -29,11 +29,10 @@ def _node_meta(node) -> dict:
 
 
 def _admin_from_stream_token(token: str, db: Session) -> User:
-    username = decode_access_token_username(token)
-    if not username:
+    user = get_active_user_from_access_token(db, token)
+    if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    user = db.query(User).filter(User.username == username).first()
-    if user is None or not user.is_active or user.role != UserRole.admin:
+    if user.role != UserRole.admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     return user
 
@@ -126,7 +125,7 @@ def awg2_backup(db: Session = Depends(get_db), _: User = Depends(require_admin))
 
 
 @router.post("/restore")
-async def awg2_restore(
+def awg2_restore(
     archive: UploadFile = File(...),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
@@ -134,7 +133,7 @@ async def awg2_restore(
     node = get_active_node(db)
     try:
         runtime = get_active_adapter(db).restore_awg2_backup(
-            await archive.read(),
+            archive.file.read(),
             archive.filename or "az-awg2-backup.tar.gz",
         )
     except Exception as exc:  # noqa: BLE001
@@ -230,17 +229,22 @@ async def awg2_install_stream(
         db = SessionLocal()
         try:
             adapter = get_active_adapter(db)
-            for chunk in _iter_awg2_install_sse(
-                adapter,
-                mode,
-                preset=preset,
-                template=template,
-                mtu=mtu,
-            ):
-                if await request.is_disconnected():
-                    break
-                yield chunk
-                await asyncio.sleep(0)
+            chunks = iterate_in_thread(
+                _iter_awg2_install_sse(
+                    adapter,
+                    mode,
+                    preset=preset,
+                    template=template,
+                    mtu=mtu,
+                )
+            )
+            try:
+                async for chunk in chunks:
+                    if await request.is_disconnected():
+                        break
+                    yield chunk
+            finally:
+                await chunks.aclose()
         except Exception as exc:
             yield f"data: {json.dumps({'event': 'error', 'detail': str(exc)}, default=str)}\n\n"
         finally:

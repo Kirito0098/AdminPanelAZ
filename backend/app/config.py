@@ -103,6 +103,7 @@ class Settings(BaseSettings):
     self_service_reminder_enabled: bool = True
     self_service_reminder_interval_seconds: int = 3600
     self_service_reminder_cert_days_threshold: int = 7
+    self_service_reminder_access_days_threshold: int = 7
     self_service_traffic_warning_percent: int = 90
     node_active_health_cache_seconds: int = 45
     openvpn_socket_dir: Path = Path("/run/openvpn-server")
@@ -126,6 +127,7 @@ class Settings(BaseSettings):
     https_public_port: int = 443
     behind_nginx: bool = False
     cloudflare_proxy_enabled: bool = True
+    cloudflare_origin_lock: bool = False
     cloudflare_ips_auto_update: bool = False
     cloudflare_ips_update_interval_days: int = 7
     trusted_proxy_ips: str = "127.0.0.1"
@@ -143,12 +145,13 @@ class Settings(BaseSettings):
     active_web_session_touch_interval_seconds: int = 30
     nightly_idle_restart_enabled: bool = True
     nightly_idle_restart_cron: str = "0 4 * * *"
-    admin_panel_az_service_name: str = "admin-panel-az.service"
+    admin_panel_az_service_name: str = "adminpanelaz.service"
     uvicorn_workers: int = 1
     resource_profile: str = "standard"
     retention_enabled: bool = True
     retention_interval_hours: int = 24
     traffic_sample_retention_days: int = 90
+    traffic_session_retention_days: int = 30
     action_log_retention_days: int = 365
     retention_batch_size: int = 5000
     health_deep_node_ping: bool = True

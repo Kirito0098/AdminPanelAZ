@@ -26,7 +26,8 @@ import {
   restartService,
 } from '@/api/client'
 import GeoRoutingHintBanner from '@/components/dashboard/GeoRoutingHintBanner'
-import MonitoringCharts, { formatBytes, totalTraffic } from '@/components/monitoring/MonitoringCharts'
+import MonitoringCharts from '@/components/monitoring/MonitoringCharts'
+import { formatBytes, totalTraffic } from '@/lib/trafficFormat'
 import MonitoringConnectionsList, {
   buildMonitoringConnectionRows,
 } from '@/components/monitoring/MonitoringConnectionsList'
@@ -199,7 +200,7 @@ function ScopeToggle({ value, onChange, nodesOnline, nodesTotal }: ScopeTogglePr
 
 export default function MonitoringPage() {
   const { user } = useAuth()
-  const { activeNode, nodes, loading: nodesLoading, activate } = useNode()
+  const { activeNode, nodes, loading: nodeLoading, nodesLoading, activate } = useNode()
   const { isEnabled } = useFeatureModules()
   const awg2Enabled = isEnabled('awg2')
   const isAdmin = user?.role === 'admin'
@@ -263,20 +264,37 @@ export default function MonitoringPage() {
   const [resourceLoading, setResourceLoading] = useState(false)
   const loadRef = useRef<(opts?: { initial?: boolean; manual?: boolean }) => Promise<void>>()
   const lastIncidentsAtRef = useRef(0)
+  const activeNodeIdRef = useRef(activeNode?.id)
+  activeNodeIdRef.current = activeNode?.id
+  // Service incidents come from the server-side active node, so a node switch makes the list stale.
+  const incidentsNodeIdRef = useRef<number | undefined>(undefined)
+  const incidentsInFlightRef = useRef<Promise<void> | null>(null)
 
-  const refreshIncidents = useCallback(async (opts: { force?: boolean } = {}) => {
+  const refreshIncidents = useCallback((opts: { force?: boolean } = {}) => {
     const { force = false } = opts
+    const nodeId = activeNodeIdRef.current
+    const sameNode = incidentsNodeIdRef.current === nodeId
+    if (incidentsInFlightRef.current && sameNode) return incidentsInFlightRef.current
     const now = Date.now()
-    if (!force && now - lastIncidentsAtRef.current < INCIDENTS_REFRESH_INTERVAL_MS) {
-      return
+    if (!force && sameNode && now - lastIncidentsAtRef.current < INCIDENTS_REFRESH_INTERVAL_MS) {
+      return Promise.resolve()
     }
     lastIncidentsAtRef.current = now
-    try {
-      const resp = await getNocIncidents(20)
-      setIncidents(resp.items)
-    } catch {
-      /* keep previous */
-    }
+    incidentsNodeIdRef.current = nodeId
+    const request: Promise<void> = getNocIncidents(20)
+      .then(
+        (resp) => {
+          if (incidentsInFlightRef.current === request) setIncidents(resp.items)
+        },
+        () => {
+          /* keep previous */
+        },
+      )
+      .finally(() => {
+        if (incidentsInFlightRef.current === request) incidentsInFlightRef.current = null
+      })
+    incidentsInFlightRef.current = request
+    return request
   }, [])
 
   const loadConnectionHistory = useCallback(async (period: '1h' | '6h' | '24h', historyScope: MonitoringScope) => {
@@ -302,7 +320,7 @@ export default function MonitoringPage() {
       try {
         setData(await getMonitoring(scope, haMode))
         setLoadError(null)
-        void refreshIncidents({ force: true })
+        void refreshIncidents({ force: manual })
         if (manual) success('Данные мониторинга обновлены')
         setCountdown(REFRESH_INTERVAL)
       } catch (err) {
@@ -387,21 +405,25 @@ export default function MonitoringPage() {
     [notifyError],
   )
 
+  const scopeReady = !nodeLoading && scopeInitialized
+
   useEffect(() => {
-    if (nodesLoading && !scopeInitialized) return
+    if (!scopeReady) return
     load({ initial: true })
-  }, [load, activeNode?.id, scope, haMode, nodesLoading, scopeInitialized])
+  }, [load, activeNode?.id, scope, haMode, scopeReady])
 
   useEffect(() => {
+    if (nodeLoading) return
     loadResourceHistory(resourcePeriod)
-  }, [loadResourceHistory, activeNode?.id, resourcePeriod])
+  }, [loadResourceHistory, nodeLoading, activeNode?.id, resourcePeriod])
 
   useEffect(() => {
+    if (!scopeReady) return
     void loadConnectionHistory(connectionHistoryPeriod, scope)
-  }, [loadConnectionHistory, connectionHistoryPeriod, scope, activeNode?.id])
+  }, [loadConnectionHistory, connectionHistoryPeriod, scope, scopeReady, activeNode?.id])
 
   useEffect(() => {
-    if (!autoRefresh) return
+    if (!autoRefresh || !scopeReady) return
 
     let source: EventSource | null = null
     let tick: ReturnType<typeof setInterval> | undefined
@@ -451,7 +473,7 @@ export default function MonitoringPage() {
       disconnect()
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [autoRefresh, scope, haMode, activeNode?.id, refreshIncidents])
+  }, [autoRefresh, scopeReady, scope, haMode, activeNode?.id, refreshIncidents])
 
   const isFederated = scope === 'all' || data?.scope === 'all'
   const showNodeColumn = isFederated

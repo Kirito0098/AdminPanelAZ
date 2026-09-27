@@ -126,15 +126,7 @@ export default defineConfig(({ mode }) => {
                 assetFileNames: 'assets/tg-mini-[hash][extname]',
               },
             }
-          : {
-              output: {
-                manualChunks(id) {
-                  if (id.includes('node_modules/recharts')) return 'recharts'
-                  if (id.includes('node_modules/victory-vendor')) return 'victory-vendor'
-                  return undefined
-                },
-              },
-            }),
+          : {}),
       },
     },
     server: {
@@ -150,7 +142,7 @@ export default defineConfig(({ mode }) => {
     },
     test: {
       environment: 'node',
-      include: ['src/**/*.test.ts'],
+      include: ['src/**/*.test.{ts,tsx}'],
     },
   }
 })

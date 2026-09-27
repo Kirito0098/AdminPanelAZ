@@ -13,7 +13,6 @@ EnvironmentFile=-/opt/AdminPanelAZ/backend/node_agent.env
 Environment=NODE_AGENT_STATE_DIR=/var/lib/adminpanelaz-node
 Environment=NODE_AGENT_HOST=0.0.0.0
 Environment=NODE_AGENT_PORT=9100
-Environment=NODE_AGENT_API_KEY=change-me-node-agent-key
 Environment=ANTIZAPRET_PATH=/root/antizapret
 ExecStart=/opt/AdminPanelAZ/scripts/systemd-exec-node.sh
 Restart=on-failure

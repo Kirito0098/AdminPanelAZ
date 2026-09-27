@@ -1,4 +1,7 @@
+import tempfile
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -8,18 +11,25 @@ from fastapi import HTTPException, status
 
 from app.models import VpnType
 from app.services.profile_files import profile_files_batch_key
+from app.services.runtime_peer_batch import CLIENTS_PER_REQUEST
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.config import get_settings
 from app.paths import get_cidr_list_dir
 from app.services.node_mtls import build_node_agent_ssl_context, node_agent_base_scheme
 from app.services.node_mtls_certs import MtlsProvisionBundle
 from app.services.antizapret import AntiZapretService
-from app.services.antizapret_settings import read_antizapret_settings, update_antizapret_settings
+from app.services.antizapret_settings import (
+    choice_updates_for_agent,
+    read_antizapret_settings,
+    update_antizapret_settings,
+)
 from app.services.cidr.service import CidrRoutingService
+from app.services.file_editor import FILES_SINCE_AGENT_1_11, KRESD_CUSTOM_UNITS, ConfigFileUnsupportedError
 from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
+from app.services.openvpn_buffer_guard import fetch_unit_journal, normalize_watch_unit
 from app.services.server_monitor import get_server_monitor
 from app.services.local_vpn_status_cache import (
     LocalVpnClientsSnapshot,
@@ -27,8 +37,10 @@ from app.services.local_vpn_status_cache import (
 )
 from app.services.node_remote_cache import get_cached_monitoring_overview, monitoring_overview_cache_key
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
+from app.services.wg_runtime import block_clients_runtime as wg_block_clients_runtime
 from app.services.awg2_runtime import (
     block_client_runtime as awg2_block_client_runtime,
+    block_clients_runtime as awg2_block_clients_runtime,
     unblock_client_runtime as awg2_unblock_client_runtime,
 )
 from app.services.warper import WarperService, build_ip_ranges_text_from_items, build_user_domains_text_from_items
@@ -85,6 +97,19 @@ class NodeAdapter(ABC):
     @abstractmethod
     def create_antizapret_backup(self) -> dict[str, str]: ...
 
+    @contextmanager
+    def antizapret_backup_file(self, backup: dict[str, str]) -> Iterator[Path]:
+        """The archive from ``create_antizapret_backup`` as a file on the panel host.
+
+        ``archive_path`` is a path on the node, so it is fetched through the agent into a temp file.
+        """
+        archive_name = backup.get("archive_name") or Path(backup.get("archive_path") or "").name
+        data = self.download_antizapret_backup(archive_name)
+        with tempfile.TemporaryDirectory(prefix="az-backup-") as tmp:
+            path = Path(tmp) / "archive.tar.gz"
+            path.write_bytes(data)
+            yield path
+
     @abstractmethod
     def get_profile_files(self, client_name: str, vpn_type: VpnType) -> list[dict[str, str]]: ...
 
@@ -130,6 +155,9 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def get_openvpn_socket_status(self) -> list[dict]: ...
+
+    @abstractmethod
+    def sample_openvpn_journal(self, unit: str, window_seconds: int) -> dict: ...
 
     @abstractmethod
     def parse_wireguard_status(self) -> list[WireGuardPeer]: ...
@@ -198,10 +226,19 @@ class NodeAdapter(ABC):
     def unblock_wireguard_client_runtime(self, client_name: str) -> dict: ...
 
     @abstractmethod
+    def block_wireguard_clients_runtime(self, client_names: list[str]) -> dict[str, dict]: ...
+
+    @abstractmethod
     def block_awg2_client_runtime(self, client_name: str) -> dict: ...
 
     @abstractmethod
     def unblock_awg2_client_runtime(self, client_name: str) -> dict: ...
+
+    @abstractmethod
+    def block_awg2_clients_runtime(self, client_names: list[str]) -> dict[str, dict]: ...
+
+    @abstractmethod
+    def kill_openvpn_client(self, unit: str, client_name: str) -> dict: ...
 
     @abstractmethod
     def disconnect_openvpn_client(self, client_name: str) -> dict: ...
@@ -360,13 +397,73 @@ class NodeAdapter(ABC):
     def set_warper_mode_warp(self, key_source: str | None = None) -> dict: ...
 
     @abstractmethod
-    def set_warper_mode_slave(self, host: str, port: int, key: str) -> dict: ...
+    def set_warper_mode_slave(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        key: str | None = None,
+        *,
+        link: str | None = None,
+    ) -> dict: ...
 
     @abstractmethod
     def set_warper_mode_wg(self, config_path: str) -> dict: ...
 
     @abstractmethod
+    def set_warper_mode_vless(self, link: str) -> dict: ...
+
+    @abstractmethod
+    def set_warper_mode_hy2(self, link: str) -> dict: ...
+
+    @abstractmethod
+    def set_warper_mode_openvpn(
+        self,
+        config_path: str,
+        username: str | None = None,
+        password: str | None = None,
+    ) -> dict: ...
+
+    @abstractmethod
+    def warper_forget_ovpn_credentials(self, config_path: str) -> dict: ...
+
+    @abstractmethod
     def set_warper_fullvpn(self, *, enable: bool) -> dict: ...
+
+    @abstractmethod
+    def set_warper_autopatch(self, *, enable: bool) -> dict: ...
+
+    @abstractmethod
+    def warper_resync(self) -> dict: ...
+
+    @abstractmethod
+    def warper_restart_kresd(self) -> dict: ...
+
+    @abstractmethod
+    def warper_update_lists(self) -> dict: ...
+
+    @abstractmethod
+    def get_warper_auto_resolve(self) -> dict: ...
+
+    @abstractmethod
+    def set_warper_auto_resolve(self, *, enable: bool) -> dict: ...
+
+    @abstractmethod
+    def warper_resolve_sync(self, *, force: bool = False) -> dict: ...
+
+    @abstractmethod
+    def warper_resolve_clean(self, domain: str | None = None) -> dict: ...
+
+    @abstractmethod
+    def get_warper_ip_routes(self) -> list: ...
+
+    @abstractmethod
+    def warper_clear_ip_routes(self) -> dict: ...
+
+    @abstractmethod
+    def get_warper_subnets(self) -> dict: ...
+
+    @abstractmethod
+    def get_warper_singbox_status(self) -> dict: ...
 
     @abstractmethod
     def set_warper_subnet(self, subnet: str) -> dict: ...
@@ -492,13 +589,15 @@ class LocalNodeAdapter(NodeAdapter):
     def create_antizapret_backup(self) -> dict[str, str]:
         return self._service.create_antizapret_backup()
 
-    def download_antizapret_backup(self, archive_name: str) -> bytes:
-        from pathlib import Path
+    @contextmanager
+    def antizapret_backup_file(self, backup: dict[str, str]) -> Iterator[Path]:
+        yield Path(backup["archive_path"])
 
-        path = Path(archive_name)
-        if not path.is_file():
-            path = self._service.base_path / archive_name
-        if not path.is_file():
+    def download_antizapret_backup(self, archive_name: str) -> bytes:
+        from app.services.antizapret_backup import resolve_backup_archive
+
+        path = resolve_backup_archive(archive_name, [self._service.base_path])
+        if path is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Архив AntiZapret не найден: {archive_name}",
@@ -677,6 +776,9 @@ class LocalNodeAdapter(NodeAdapter):
     def get_openvpn_socket_status(self) -> list[dict]:
         return openvpn_management_service.get_socket_status()
 
+    def sample_openvpn_journal(self, unit: str, window_seconds: int) -> dict:
+        return fetch_unit_journal(unit, window_seconds)
+
     def parse_wireguard_status(self) -> list[WireGuardPeer]:
         return list(self._local_vpn_clients_snapshot().wireguard_peers)
 
@@ -747,11 +849,21 @@ class LocalNodeAdapter(NodeAdapter):
     def unblock_wireguard_client_runtime(self, client_name: str) -> dict:
         return unblock_client_runtime(client_name)
 
+    def block_wireguard_clients_runtime(self, client_names: list[str]) -> dict[str, dict]:
+        return wg_block_clients_runtime(client_names)
+
     def block_awg2_client_runtime(self, client_name: str) -> dict:
         return awg2_block_client_runtime(client_name)
 
     def unblock_awg2_client_runtime(self, client_name: str) -> dict:
         return awg2_unblock_client_runtime(client_name)
+
+    def block_awg2_clients_runtime(self, client_names: list[str]) -> dict[str, dict]:
+        return awg2_block_clients_runtime(client_names)
+
+    def kill_openvpn_client(self, unit: str, client_name: str) -> dict:
+        profile_key = normalize_watch_unit(unit) or unit
+        return openvpn_management_service.kill_client(profile_key, client_name)
 
     def disconnect_openvpn_client(self, client_name: str) -> dict:
         return openvpn_management_service.disconnect_client(client_name)
@@ -872,20 +984,82 @@ class LocalNodeAdapter(NodeAdapter):
     def get_warper_settings_options(self) -> dict:
         return {
             "warp_keys": self._warper.list_warp_keys(),
+            "warp_key_items": self._warper.list_warp_key_items(),
             "wg_configs": self._warper.list_wg_configs(),
+            "ovpn_configs": self._warper.list_ovpn_configs(),
         }
 
     def set_warper_mode_warp(self, key_source: str | None = None) -> dict:
         return self._warper.set_mode_warp(key_source)
 
-    def set_warper_mode_slave(self, host: str, port: int, key: str) -> dict:
-        return self._warper.set_mode_slave(host, port, key)
+    def set_warper_mode_slave(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        key: str | None = None,
+        *,
+        link: str | None = None,
+    ) -> dict:
+        return self._warper.set_mode_slave(host, port, key, link=link)
 
     def set_warper_mode_wg(self, config_path: str) -> dict:
         return self._warper.set_mode_wg(config_path)
 
+    def set_warper_mode_vless(self, link: str) -> dict:
+        return self._warper.set_mode_vless(link)
+
+    def set_warper_mode_hy2(self, link: str) -> dict:
+        return self._warper.set_mode_hy2(link)
+
+    def set_warper_mode_openvpn(
+        self,
+        config_path: str,
+        username: str | None = None,
+        password: str | None = None,
+    ) -> dict:
+        return self._warper.set_mode_openvpn(config_path, username, password)
+
+    def warper_forget_ovpn_credentials(self, config_path: str) -> dict:
+        return self._warper.forget_ovpn_credentials(config_path)
+
     def set_warper_fullvpn(self, *, enable: bool) -> dict:
         return self._warper.set_fullvpn(enable=enable)
+
+    def set_warper_autopatch(self, *, enable: bool) -> dict:
+        return self._warper.set_autopatch(enable=enable)
+
+    def warper_resync(self) -> dict:
+        return self._warper.resync()
+
+    def warper_restart_kresd(self) -> dict:
+        return self._warper.restart_kresd()
+
+    def warper_update_lists(self) -> dict:
+        return self._warper.update_lists()
+
+    def get_warper_auto_resolve(self) -> dict:
+        return self._warper.get_auto_resolve()
+
+    def set_warper_auto_resolve(self, *, enable: bool) -> dict:
+        return self._warper.set_auto_resolve(enable=enable)
+
+    def warper_resolve_sync(self, *, force: bool = False) -> dict:
+        return self._warper.resolve_sync(force=force)
+
+    def warper_resolve_clean(self, domain: str | None = None) -> dict:
+        return self._warper.resolve_clean(domain)
+
+    def get_warper_ip_routes(self) -> list:
+        return self._warper.list_ip_routes()
+
+    def warper_clear_ip_routes(self) -> dict:
+        return self._warper.clear_ip_routes()
+
+    def get_warper_subnets(self) -> dict:
+        return self._warper.get_subnets()
+
+    def get_warper_singbox_status(self) -> dict:
+        return self._warper.singbox_status()
 
     def set_warper_subnet(self, subnet: str) -> dict:
         return self._warper.set_subnet(subnet)
@@ -1282,12 +1456,25 @@ class RemoteNodeAdapter(NodeAdapter):
             timeout=120.0,
         )
 
+    @contextmanager
+    def _config_file_request(self, filename: str) -> Iterator[None]:
+        try:
+            yield
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_400_BAD_REQUEST and filename in FILES_SINCE_AGENT_1_11:
+                raise ConfigFileUnsupportedError(filename) from exc
+            raise
+
     def read_config_file(self, filename: str) -> str:
-        data = self._request("GET", f"/configs/files/{filename}")
+        with self._config_file_request(filename):
+            data = self._request("GET", f"/configs/files/{filename}")
         return data.get("content", "")
 
     def write_config_file(self, filename: str, content: str) -> None:
-        self._request("PUT", f"/configs/files/{filename}", json={"content": content})
+        # Restarting kresd after custom.lua (plus a rollback) can outlast the default timeout.
+        timeout = 180.0 if filename in KRESD_CUSTOM_UNITS else HTTP_TIMEOUT
+        with self._config_file_request(filename):
+            self._request("PUT", f"/configs/files/{filename}", json={"content": content}, timeout=timeout)
 
     def apply_config_changes(self) -> str:
         data = self._request("POST", "/configs/apply", timeout=300.0)
@@ -1337,6 +1524,23 @@ class RemoteNodeAdapter(NodeAdapter):
         data = self._request("GET", "/openvpn/management/sockets")
         return data.get("sockets", [])
 
+    def sample_openvpn_journal(self, unit: str, window_seconds: int) -> dict:
+        return self._request(
+            "POST",
+            "/openvpn/buffer-guard/journal-sample",
+            json={"unit": unit, "window_seconds": int(window_seconds)},
+            timeout=60.0,
+        )
+
+    def kill_openvpn_client(self, unit: str, client_name: str) -> dict:
+        payload = {"unit": unit, "client_name": client_name}
+        return self._request(
+            "POST",
+            "/openvpn/management/kill",
+            json=payload,
+            timeout=30.0,
+        )
+
     def parse_wireguard_status(self) -> list[WireGuardPeer]:
         overview = self._get_monitoring_overview()
         return [WireGuardPeer(**p) for p in overview.get("wireguard_peers", [])]
@@ -1381,7 +1585,7 @@ class RemoteNodeAdapter(NodeAdapter):
         return data.get("settings", {})
 
     def update_antizapret_settings(self, updates: dict) -> dict:
-        return self._request("PUT", "/routing/antizapret-settings", json=updates)
+        return self._request("PUT", "/routing/antizapret-settings", json=choice_updates_for_agent(updates))
 
     def get_server_metrics(self, *, accurate_cpu: bool = False) -> dict:
         return self._request(
@@ -1429,11 +1633,30 @@ class RemoteNodeAdapter(NodeAdapter):
     def unblock_wireguard_client_runtime(self, client_name: str) -> dict:
         return self._request("POST", f"/clients/wireguard/{client_name}/unblock", timeout=30.0)
 
+    def _block_clients_runtime_batched(self, path: str, client_names: list[str]) -> dict[str, dict]:
+        names = list(client_names)
+        results: dict[str, dict] = {}
+        for start in range(0, len(names), CLIENTS_PER_REQUEST):
+            data = self._request(
+                "POST",
+                path,
+                json={"client_names": names[start : start + CLIENTS_PER_REQUEST]},
+                timeout=60.0,
+            )
+            results.update((data or {}).get("results") or {})
+        return results
+
+    def block_wireguard_clients_runtime(self, client_names: list[str]) -> dict[str, dict]:
+        return self._block_clients_runtime_batched("/clients/wireguard/runtime/block-batch", client_names)
+
     def block_awg2_client_runtime(self, client_name: str) -> dict:
         return self._request("POST", f"/clients/amneziawg2/{client_name}/block", timeout=30.0)
 
     def unblock_awg2_client_runtime(self, client_name: str) -> dict:
         return self._request("POST", f"/clients/amneziawg2/{client_name}/unblock", timeout=30.0)
+
+    def block_awg2_clients_runtime(self, client_names: list[str]) -> dict[str, dict]:
+        return self._block_clients_runtime_batched("/clients/amneziawg2/runtime/block-batch", client_names)
 
     def disconnect_openvpn_client(self, client_name: str) -> dict:
         return self._request(
@@ -1718,18 +1941,109 @@ class RemoteNodeAdapter(NodeAdapter):
         payload: dict[str, str | None] = {"key_source": key_source}
         return self._request("POST", "/warper/settings/mode/warp", json=payload)
 
-    def set_warper_mode_slave(self, host: str, port: int, key: str) -> dict:
+    def _warper_agent_request(self, method: str, path: str, *, legacy_statuses: tuple[int, ...] = (), **kwargs) -> Any:
+        try:
+            return self._request(method, path, **kwargs)
+        except HTTPException as exc:
+            if exc.status_code not in {
+                status.HTTP_404_NOT_FOUND,
+                status.HTTP_405_METHOD_NOT_ALLOWED,
+                *legacy_statuses,
+            }:
+                raise
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Обновите node agent панели на узле — функция AZ-WARP 1.5 недоступна",
+            ) from exc
+
+    def set_warper_mode_slave(
+        self,
+        host: str | None = None,
+        port: int | None = None,
+        key: str | None = None,
+        *,
+        link: str | None = None,
+    ) -> dict:
+        if link:
+            return self._warper_agent_request(
+                "POST",
+                "/warper/settings/mode/slave",
+                legacy_statuses=(status.HTTP_422_UNPROCESSABLE_ENTITY,),
+                json={"link": link},
+                timeout=180.0,
+            )
         return self._request(
             "POST",
             "/warper/settings/mode/slave",
             json={"host": host, "port": port, "key": key},
+            timeout=180.0,
         )
 
     def set_warper_mode_wg(self, config_path: str) -> dict:
-        return self._request("POST", "/warper/settings/mode/wg", json={"config_path": config_path})
+        return self._request("POST", "/warper/settings/mode/wg", json={"config_path": config_path}, timeout=180.0)
+
+    def set_warper_mode_vless(self, link: str) -> dict:
+        return self._warper_agent_request("POST", "/warper/settings/mode/vless", json={"link": link}, timeout=180.0)
+
+    def set_warper_mode_hy2(self, link: str) -> dict:
+        return self._warper_agent_request("POST", "/warper/settings/mode/hy2", json={"link": link}, timeout=180.0)
+
+    def set_warper_mode_openvpn(
+        self,
+        config_path: str,
+        username: str | None = None,
+        password: str | None = None,
+    ) -> dict:
+        return self._warper_agent_request(
+            "POST",
+            "/warper/settings/mode/openvpn",
+            json={"config_path": config_path, "username": username, "password": password},
+            timeout=180.0,
+        )
+
+    def warper_forget_ovpn_credentials(self, config_path: str) -> dict:
+        return self._warper_agent_request("POST", "/warper/settings/ovpn/forget", json={"config_path": config_path})
 
     def set_warper_fullvpn(self, *, enable: bool) -> dict:
         return self._request("PUT", "/warper/settings/fullvpn", json={"enable": enable})
+
+    def set_warper_autopatch(self, *, enable: bool) -> dict:
+        return self._warper_agent_request("PUT", "/warper/settings/autopatch", json={"enable": enable})
+
+    def warper_resync(self) -> dict:
+        return self._warper_agent_request("POST", "/warper/resync", timeout=330.0)
+
+    def warper_restart_kresd(self) -> dict:
+        return self._warper_agent_request("POST", "/warper/kresd/restart", timeout=150.0)
+
+    def warper_update_lists(self) -> dict:
+        return self._warper_agent_request("POST", "/warper/domains/update-lists", timeout=150.0)
+
+    def get_warper_auto_resolve(self) -> dict:
+        return self._warper_agent_request("GET", "/warper/resolve")
+
+    def set_warper_auto_resolve(self, *, enable: bool) -> dict:
+        return self._warper_agent_request("PUT", "/warper/resolve", json={"enable": enable})
+
+    def warper_resolve_sync(self, *, force: bool = False) -> dict:
+        return self._warper_agent_request("POST", "/warper/resolve/sync", params={"force": force}, timeout=330.0)
+
+    def warper_resolve_clean(self, domain: str | None = None) -> dict:
+        return self._warper_agent_request("POST", "/warper/resolve/clean", json={"domain": domain}, timeout=150.0)
+
+    def get_warper_ip_routes(self) -> list:
+        data = self._warper_agent_request("GET", "/warper/ip-routes")
+        return data.get("routes", []) if isinstance(data, dict) else []
+
+    def warper_clear_ip_routes(self) -> dict:
+        return self._warper_agent_request("POST", "/warper/ip-routes/clear", timeout=150.0)
+
+    def get_warper_subnets(self) -> dict:
+        data = self._warper_agent_request("GET", "/warper/subnets")
+        return data.get("subnets", {}) if isinstance(data, dict) else {}
+
+    def get_warper_singbox_status(self) -> dict:
+        return self._warper_agent_request("GET", "/warper/singbox/status")
 
     def set_warper_subnet(self, subnet: str) -> dict:
         return self._request("PUT", "/warper/settings/subnet", json={"subnet": subnet})
@@ -1741,7 +2055,15 @@ class RemoteNodeAdapter(NodeAdapter):
         return self._request("PUT", "/warper/settings/log-level", json={"level": level})
 
     def warper_singbox_action(self, action: str) -> dict:
-        return self._request("POST", f"/warper/singbox/{action}", timeout=180.0)
+        timeout = 330.0 if action == "upgrade" else 180.0
+        if action in {"start", "stop", "restart"}:
+            return self._request("POST", f"/warper/singbox/{action}", timeout=timeout)
+        return self._warper_agent_request(
+            "POST",
+            f"/warper/singbox/{action}",
+            legacy_statuses=(status.HTTP_400_BAD_REQUEST,),
+            timeout=timeout,
+        )
 
     def warper_catalog_search(self, query: str = "") -> list:
         data = self._request("GET", "/warper/catalog/search", params={"query": query}, timeout=60.0)

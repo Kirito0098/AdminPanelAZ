@@ -3,19 +3,26 @@ import {
   apiFetch,
   getToken,
 } from './http'
+import type {
+  QrDownloadAuditEntry,
+  OpenVpnSocketStatus,
+  ActionLogEntry,
+  ConnectionLogsSnapshot,
+  OpenVpnEventProfile,
+} from '../types'
 
 export async function getQrDownloadLogs(limit = 50) {
-  return apiFetch<import('../types').QrDownloadAuditEntry[]>(`/logs/qr-downloads?limit=${limit}`)
+  return apiFetch<QrDownloadAuditEntry[]>(`/logs/qr-downloads?limit=${limit}`)
 }
 
 export async function getOpenVpnSockets() {
-  return apiFetch<{ sockets: import('../types').OpenVpnSocketStatus[]; timestamp: string }>(
+  return apiFetch<{ sockets: OpenVpnSocketStatus[]; timestamp: string }>(
     '/logs/openvpn-sockets',
   )
 }
 
 export async function getActionLogs(limit = 100) {
-  return apiFetch<import('../types').ActionLogEntry[]>(`/logs/actions?limit=${limit}`)
+  return apiFetch<ActionLogEntry[]>(`/logs/actions?limit=${limit}`)
 }
 
 export function downloadActionLogsExport() {
@@ -27,9 +34,9 @@ export function downloadActionLogsExport() {
 }
 
 export async function getConnectionLogs() {
-  return apiFetch<import('../types').ConnectionLogsSnapshot>('/logs/connections')
+  return apiFetch<ConnectionLogsSnapshot>('/logs/connections')
 }
 
 export async function getOpenVpnEvents() {
-  return apiFetch<{ profiles: import('../types').OpenVpnEventProfile[]; timestamp: string }>('/logs/openvpn-events')
+  return apiFetch<{ profiles: OpenVpnEventProfile[]; timestamp: string }>('/logs/openvpn-events')
 }

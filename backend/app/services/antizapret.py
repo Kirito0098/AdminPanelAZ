@@ -1,10 +1,13 @@
 import csv
 import io
+import os
 import re
 import shutil
 import subprocess
 import tarfile
 import tempfile
+import zlib
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -14,7 +17,9 @@ from app.config import get_settings
 from app.models import VpnType
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.services.antizapret_backup import AntizapretBackupService
+from app.services.file_editor import EDITABLE_FILES, KRESD_CUSTOM_UNITS
 from app.services.openvpn_management import openvpn_management_service
+from app.services.path_stash import stashed
 from app.services.profile_files import iter_client_profile_paths, profile_filename_matches_client
 
 settings = get_settings()
@@ -23,8 +28,36 @@ WIREGUARD_SERVER_INTERFACES = frozenset({"antizapret", "vpn"})
 WIREGUARD_SERVER_CONFIG_DIR = Path("/etc/wireguard")
 WIREGUARD_CLIENT_PROFILE_DIRS = ("wireguard", "amneziawg")
 OPENVPN_CLIENT_PROFILE_DIR = "openvpn"
+PROFILE_FILE_SUFFIXES = frozenset({".ovpn", ".conf"})
 EASYRSA3_ROOT = Path("/etc/openvpn/easyrsa3")
 EASYRSA_INDEX_PATH = EASYRSA3_ROOT / "pki" / "index.txt"
+
+
+
+def _install_staged(src: Path, dst: Path) -> None:
+    os.rename(src, dst)
+
+
+def _extract_to_staging(data: bytes, parent: Path, select: Callable[[str], bool], what: str) -> Path:
+    """Unpack the selected members next to ``parent``'s live content; any damage aborts before changes."""
+    if not data:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Пустой архив {what}")
+    parent.mkdir(parents=True, exist_ok=True)
+    staging = Path(tempfile.mkdtemp(prefix=".import-", dir=parent))
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+            members = [member for member in archive.getmembers() if select(member.name)]
+            archive.extractall(path=staging, members=members, filter="data")
+    except (tarfile.TarError, EOFError, zlib.error, OSError) as exc:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Архив {what} повреждён или не распаковывается ({exc}) — текущие файлы не изменены",
+        ) from exc
+    except BaseException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+    return staging
 
 
 class AntiZapretService:
@@ -33,6 +66,7 @@ class AntiZapretService:
         self.client_script = self.base_path / "client.sh"
         self.client_dir = self.base_path / "client"
         self.config_dir = self.base_path / "config"
+        self.knot_resolver_dir = Path("/etc/knot-resolver")
         self.openvpn_logs = Path("/etc/openvpn/server/logs")
 
     def _run_client_script(self, *args: str, timeout: int = 120) -> str:
@@ -169,30 +203,23 @@ class AntiZapretService:
         return buffer.getvalue()
 
     def import_easyrsa3_archive(self, data: bytes) -> None:
-        if not data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Пустой архив easyrsa3",
-            )
-        temp_path = None
+        staging = _extract_to_staging(
+            data,
+            EASYRSA3_ROOT.parent,
+            lambda name: name == "easyrsa3" or name.startswith("easyrsa3/"),
+            "easyrsa3",
+        )
         try:
-            with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
-                tmp.write(data)
-                temp_path = tmp.name
-            if EASYRSA3_ROOT.is_dir():
-                shutil.rmtree(EASYRSA3_ROOT, ignore_errors=True)
-            with tarfile.open(temp_path, "r:gz") as archive:
-                for member in archive.getmembers():
-                    if member.name == "easyrsa3" or member.name.startswith("easyrsa3/"):
-                        archive.extract(member, path="/etc/openvpn", filter="data")
-            if not EASYRSA3_ROOT.is_dir():
+            extracted = staging / "easyrsa3"
+            if not extracted.is_dir():
                 raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Архив easyrsa3 не содержит каталог easyrsa3",
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Архив easyrsa3 не содержит каталог easyrsa3 — текущий PKI не изменён",
                 )
+            with stashed([EASYRSA3_ROOT]):
+                _install_staged(extracted, EASYRSA3_ROOT)
         finally:
-            if temp_path:
-                Path(temp_path).unlink(missing_ok=True)
+            shutil.rmtree(staging, ignore_errors=True)
 
     def create_antizapret_backup(self) -> dict[str, str]:
         return AntizapretBackupService(install_dir=self.base_path).create_backup()
@@ -284,13 +311,15 @@ class AntiZapretService:
 
     def write_profile_file(self, path: str, content: str) -> None:
         file_path = self._resolve_profile_file_path(path)
+        if file_path.suffix not in PROFILE_FILE_SUFFIXES:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ к файлу запрещён")
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(content or "", encoding="utf-8")
 
     def _resolve_profile_file_path(self, path: str) -> Path:
         file_path = Path(path).resolve()
         client_root = self.client_dir.resolve()
-        if not str(file_path).startswith(str(client_root)):
+        if not file_path.is_relative_to(client_root):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ к файлу запрещён")
         return file_path
 
@@ -309,47 +338,12 @@ class AntiZapretService:
         return buffer.getvalue()
 
     def import_wireguard_client_profiles_archive(self, data: bytes) -> None:
-        if not data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Пустой архив профилей WireGuard",
-            )
-        temp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
-                tmp.write(data)
-                temp_path = tmp.name
-            with tarfile.open(temp_path, "r:gz") as archive:
-                has_profile_file = any(
-                    member.isfile()
-                    and (
-                        member.name.startswith("client/wireguard/")
-                        or member.name.startswith("client/amneziawg/")
-                    )
-                    for member in archive.getmembers()
-                )
-                if not has_profile_file:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Архив профилей WireGuard не содержит файлов client/wireguard или client/amneziawg",
-                    )
-            for subdir in WIREGUARD_CLIENT_PROFILE_DIRS:
-                root = self.client_dir / subdir
-                if root.is_dir():
-                    shutil.rmtree(root)
-            with tarfile.open(temp_path, "r:gz") as archive:
-                for member in archive.getmembers():
-                    name = member.name
-                    if not (
-                        name.startswith("client/wireguard/")
-                        or name.startswith("client/amneziawg/")
-                        or name in {"client/wireguard", "client/amneziawg"}
-                    ):
-                        continue
-                    archive.extract(member, path=str(self.base_path), filter="data")
-        finally:
-            if temp_path:
-                Path(temp_path).unlink(missing_ok=True)
+        self._replace_client_profile_dirs(
+            data,
+            WIREGUARD_CLIENT_PROFILE_DIRS,
+            what="профилей WireGuard",
+            missing_detail="Архив профилей WireGuard не содержит файлов client/wireguard или client/amneziawg",
+        )
 
     def export_openvpn_client_profiles_archive(self) -> bytes:
         buffer = io.BytesIO()
@@ -364,74 +358,106 @@ class AntiZapretService:
         return buffer.getvalue()
 
     def import_openvpn_client_profiles_archive(self, data: bytes) -> None:
-        if not data:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Пустой архив профилей OpenVPN",
-            )
-        temp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
-                tmp.write(data)
-                temp_path = tmp.name
-            with tarfile.open(temp_path, "r:gz") as archive:
-                has_profile_file = any(
-                    member.isfile() and member.name.startswith("client/openvpn/")
-                    for member in archive.getmembers()
-                )
-                if not has_profile_file:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Архив профилей OpenVPN не содержит файлов client/openvpn",
-                    )
-            openvpn_root = self.client_dir / OPENVPN_CLIENT_PROFILE_DIR
-            if openvpn_root.is_dir():
-                shutil.rmtree(openvpn_root)
-            with tarfile.open(temp_path, "r:gz") as archive:
-                for member in archive.getmembers():
-                    name = member.name
-                    if not (
-                        name.startswith("client/openvpn/")
-                        or name == "client/openvpn"
-                    ):
-                        continue
-                    archive.extract(member, path=str(self.base_path), filter="data")
-        finally:
-            if temp_path:
-                Path(temp_path).unlink(missing_ok=True)
+        self._replace_client_profile_dirs(
+            data,
+            (OPENVPN_CLIENT_PROFILE_DIR,),
+            what="профилей OpenVPN",
+            missing_detail="Архив профилей OpenVPN не содержит файлов client/openvpn",
+        )
 
-    _CONFIG_FILES = frozenset(
-        {
-            "include-hosts.txt",
-            "exclude-hosts.txt",
-            "include-ips.txt",
-            "exclude-ips.txt",
-            "allow-ips.txt",
-            "drop-ips.txt",
-            "forward-ips.txt",
-            "include-adblock-hosts.txt",
-            "exclude-adblock-hosts.txt",
-            "remove-hosts.txt",
-            "deny-ips.txt",
-            "banned_clients",
-        }
-    )
+    def _replace_client_profile_dirs(
+        self, data: bytes, subdirs: tuple[str, ...], *, what: str, missing_detail: str
+    ) -> None:
+        prefixes = tuple(f"client/{sub}" for sub in subdirs)
+        staging = _extract_to_staging(
+            data,
+            self.client_dir,
+            lambda name: name in prefixes or name.startswith(tuple(f"{prefix}/" for prefix in prefixes)),
+            what,
+        )
+        try:
+            extracted = staging / "client"
+            if not any(path.is_file() for sub in subdirs for path in (extracted / sub).rglob("*")):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=missing_detail)
+            with stashed([self.client_dir / sub for sub in subdirs]):
+                for sub in subdirs:
+                    if (extracted / sub).is_dir():
+                        _install_staged(extracted / sub, self.client_dir / sub)
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+
+    _CONFIG_FILES = (frozenset(EDITABLE_FILES.values()) - frozenset(KRESD_CUSTOM_UNITS)) | {"banned_clients"}
+
+    def _config_file_path(self, filename: str) -> Path | None:
+        if filename in KRESD_CUSTOM_UNITS:
+            return self.knot_resolver_dir / filename
+        if filename in self._CONFIG_FILES:
+            return self.config_dir / filename
+        return None
 
     def read_config_file(self, filename: str) -> str:
-        allowed = self._CONFIG_FILES
-        if filename not in allowed:
+        path = self._config_file_path(filename)
+        if path is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимый конфигурационный файл")
-        path = self.config_dir / filename
         if not path.exists():
             return ""
         return path.read_text(encoding="utf-8", errors="replace")
 
     def write_config_file(self, filename: str, content: str) -> None:
-        allowed = self._CONFIG_FILES
-        if filename not in allowed:
+        path = self._config_file_path(filename)
+        if path is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл недоступен для записи")
-        path = self.config_dir / filename
+        if filename in KRESD_CUSTOM_UNITS:
+            self._write_kresd_custom(path, content)
+            return
         path.write_text(content, encoding="utf-8")
+
+    def _write_kresd_custom(self, path: Path, content: str) -> None:
+        """Write custom.lua / custom2.lua and restart its kresd; restore the old file if kresd fails."""
+        previous = path.read_text(encoding="utf-8", errors="replace") if path.exists() else None
+        if previous == content:
+            return
+        unit = KRESD_CUSTOM_UNITS[path.name]
+        path.write_text(content, encoding="utf-8")
+        error = self._restart_kresd(unit)
+        if error is None:
+            return
+        # kresd.conf dofile()s this path unconditionally: an empty file keeps kresd bootable.
+        path.write_text(previous or "", encoding="utf-8")
+        rollback_error = self._restart_kresd(unit)
+        detail = f"{unit} не запустился с новым {path.name}, прежний файл восстановлен. Ошибка: {error}"
+        if rollback_error:
+            detail += f". После отката {unit} тоже не запустился: {rollback_error}"
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+    @staticmethod
+    def _restart_kresd(unit: str) -> str | None:
+        """Restart a kresd instance; return an error text when it did not come back up."""
+        try:
+            result = subprocess.run(
+                ["systemctl", "restart", unit],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            return str(exc)
+        if result.returncode == 0:
+            return None
+        error = ((result.stdout or "") + (result.stderr or "")).strip() or f"exit {result.returncode}"
+        try:
+            journal = subprocess.run(
+                ["journalctl", "-u", unit, "-n", "5", "--no-pager", "-o", "cat"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return error
+        tail = (journal.stdout or "").strip()
+        return f"{error}\n{tail}" if tail else error
 
     def restart_service(self, service_name: str) -> str:
         allowed = {

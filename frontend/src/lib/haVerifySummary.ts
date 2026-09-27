@@ -1,4 +1,4 @@
-import type { NodeSyncMismatch, NodeSyncVerifyResult } from '@/types'
+import type { NodeSyncMismatch, NodeSyncVerifyResult, OpenVpnProfileCertIssue } from '@/types'
 
 export type HaVerifyResultVariant = 'success' | 'warning'
 
@@ -46,6 +46,7 @@ const VERIFY_CHECKS = [
   'список клиентов WireGuard',
   'сертификаты PKI и файлы WireGuard',
   'сертификаты в файлах .ovpn (не отозваны)',
+  'OpenVPN перезапущен после смены сертификата сервера',
   'файлы настроек AntiZapret (config/)',
 ] as const
 
@@ -79,6 +80,12 @@ const CONFIG_FILE_TITLES: Record<string, string> = {
   'exclude-adblock-hosts.txt': 'Adblock — исключить',
   'remove-hosts.txt': 'Удалить домены',
   'deny-ips.txt': 'Запретить входящие IP',
+  'include-warp-hosts.txt': 'WARP — включить домены',
+  'exclude-warp-hosts.txt': 'WARP — исключить домены',
+  'deny-rpz.txt': 'RPZ — блокировка (AntiZapret)',
+  'deny2-rpz.txt': 'RPZ — блокировка (полный VPN)',
+  'warp-rpz.txt': 'RPZ — через WARP',
+  'proxy-rpz.txt': 'RPZ — через AntiZapret',
 }
 
 function formatConfigFileEntry(filename: string): HaVerifyFileEntry {
@@ -167,6 +174,17 @@ function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismatchView 
         mismatch.detail || 'Панель не может связаться с репликой или узел помечен как offline.',
       ],
       hint: 'Откройте «Узлы» → проверьте статус, host, порт и API-ключ. После восстановления связи нажмите «Проверить» снова.',
+    }
+  }
+
+  if (mismatch.kind === 'openvpn_restart_pending') {
+    return {
+      title: 'OpenVPN не перезапущен после смены сертификата сервера',
+      details: [
+        mismatch.detail ||
+          'Новые CA, сертификат или ключ сервера уже на реплике, но OpenVPN работает со старыми.',
+      ],
+      hint: 'Клиенты с новыми профилями к реплике не подключатся. Авто-лечение или «Синхронизировать» перезапустит OpenVPN на реплике.',
     }
   }
 
@@ -278,7 +296,7 @@ function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismatchView 
 }
 
 function formatPrimaryProfileIssues(
-  issues: import('@/types').OpenVpnProfileCertIssue[] | undefined,
+  issues: OpenVpnProfileCertIssue[] | undefined,
 ): HaVerifyMismatchView[] {
   if (!issues?.length) return []
   return [

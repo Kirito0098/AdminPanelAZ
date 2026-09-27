@@ -58,7 +58,7 @@ export default function PageSectionHeader({
             <h2 className="text-2xl font-bold tracking-tight">{title}</h2>
             {titleAddon}
           </div>
-          {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+          {description ? <div className="text-sm text-muted-foreground">{description}</div> : null}
         </div>
       </div>
       {actions || docsControl ? (

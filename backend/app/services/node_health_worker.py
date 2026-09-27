@@ -7,6 +7,7 @@ from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Node
 from app.services.node_manager import check_node_health, update_node_from_health
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ async def run_node_health_loop():
             if not _is_node_health_sync_enabled():
                 logger.debug("node_health skipped — NODE_HEALTH_SYNC_ENABLED disabled")
             else:
-                await asyncio.to_thread(_poll_all_nodes)
+                await run_background_step(_poll_all_nodes)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

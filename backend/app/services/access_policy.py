@@ -1,13 +1,22 @@
 """Client block/expiry policies for OpenVPN and WireGuard (ported from AdminAntizapret 1.9.0)."""
 
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, WgAccessPolicy
+from app.models import (
+    AmneziaWg2AccessPolicy,
+    Node,
+    OpenVpnAccessPolicy,
+    OpenVpnBufferGuardEvent,
+    WgAccessPolicy,
+)
 from app.services.awg2_runtime import (
     block_client_runtime as awg2_block_client_runtime,
+    block_clients_runtime as awg2_block_clients_runtime,
     unblock_client_runtime as awg2_unblock_client_runtime,
 )
 from app.services.node_adapter import NodeAdapter
@@ -30,8 +39,13 @@ from app.services.traffic_limit import (
     parse_traffic_limit_period_days,
     resolve_traffic_limit_state,
 )
-from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
+from app.services.wg_runtime import (
+    block_client_runtime,
+    unblock_client_runtime,
+)
+from app.services.wg_runtime import block_clients_runtime as wg_block_clients_runtime
 
+logger = logging.getLogger(__name__)
 
 NODE_DEFAULT_POLICY_CLIENT = "__node_default__"
 NODE_ROUTE_MODES = frozenset({"route_all", "route_selective"})
@@ -313,6 +327,21 @@ class AccessPolicyService:
             changed = True
         return changed
 
+    def _openvpn_runtime_ban_active(self, node_id: int, client_name: str) -> bool:
+        """Bans outside the policy row: the disconnect cooldown and a Buffer Guard temporary ban."""
+        if is_cooldown_ban_active(node_id, client_name):
+            return True
+        guard_ban = (
+            self.db.query(OpenVpnBufferGuardEvent.id)
+            .filter(
+                OpenVpnBufferGuardEvent.node_id == node_id,
+                OpenVpnBufferGuardEvent.common_name == client_name,
+                OpenVpnBufferGuardEvent.ban_expires_at > _now(),
+            )
+            .first()
+        )
+        return guard_ban is not None
+
     def reconcile_openvpn(self, client_name: str, *, traffic_limit_changed: bool = False) -> None:
         node_id = self._require_node_id()
         row = (
@@ -322,7 +351,7 @@ class AccessPolicyService:
         )
         banned = self.read_banned_clients()
         if row is None:
-            want_ban = is_cooldown_ban_active(node_id, client_name)
+            want_ban = self._openvpn_runtime_ban_active(node_id, client_name)
             has_ban = client_name in banned
             if want_ban and not has_ban:
                 banned.add(client_name)
@@ -348,7 +377,7 @@ class AccessPolicyService:
             banned.add(client_name)
         else:
             banned.discard(client_name)
-        if is_cooldown_ban_active(node_id, client_name):
+        if self._openvpn_runtime_ban_active(node_id, client_name):
             banned.add(client_name)
         if changed:
             self.db.commit()
@@ -539,20 +568,65 @@ class AccessPolicyService:
         now = _now()
         node_id = self._require_node_id()
         excluded = (exclude_client or "").strip().lower()
-        results: list[dict] = []
+        blocked: list[str] = []
         for row in self.db.query(AmneziaWg2AccessPolicy).filter_by(node_id=node_id).all():
             if excluded and row.client_name == excluded:
                 continue
             state = self._awg2_state(row, now)
             if not state["is_blocked"]:
                 continue
-            results.append(
-                {
-                    "client_name": row.client_name,
-                    "result": self._apply_awg2_client_runtime(row.client_name, is_blocked=True),
-                }
-            )
-        return results
+            blocked.append(row.client_name)
+        return self._reblock_runtime_batch(
+            blocked,
+            node_id=node_id,
+            apply=self._apply_awg2_client_runtime,
+            batch_method="block_awg2_clients_runtime",
+            local_batch=awg2_block_clients_runtime,
+        )
+
+    def _reblock_runtime_batch(
+        self,
+        client_names: list[str],
+        *,
+        node_id: int,
+        apply,
+        batch_method: str,
+        local_batch,
+        count_wg_calls: bool = False,
+    ) -> list[dict]:
+        """Re-block peers with one runtime call; agents without the batch route get one call per client."""
+        if not client_names:
+            return []
+        if self._adapter is None:
+            batch = local_batch
+        else:
+            batch = getattr(self._adapter, batch_method, None)
+            if not callable(batch):
+                return [self._reblock_runtime(apply, name, node_id) for name in client_names]
+        if count_wg_calls:
+            self.wg_runtime_calls += 1
+        try:
+            results = batch([name.strip().lower() for name in client_names])
+        except HTTPException as exc:
+            if exc.status_code in (404, 405):
+                return [self._reblock_runtime(apply, name, node_id) for name in client_names]
+            error = str(exc.detail)
+        except Exception as exc:
+            error = str(exc)
+        else:
+            results = results or {}
+            return [{"client_name": name, "result": results.get(name.strip().lower())} for name in client_names]
+        logger.warning("Runtime re-block of %d clients on node %s failed: %s", len(client_names), node_id, error)
+        return [{"client_name": name, "error": error} for name in client_names]
+
+    @staticmethod
+    def _reblock_runtime(apply, client_name: str, node_id: int) -> dict:
+        """Block one peer; a failure must not leave the remaining blocked peers live."""
+        try:
+            return {"client_name": client_name, "result": apply(client_name, is_blocked=True)}
+        except Exception as exc:
+            logger.warning("Runtime re-block of %s on node %s failed: %s", client_name, node_id, exc)
+            return {"client_name": client_name, "error": str(exc)}
 
     def _awg2_traffic_state(self, row: AmneziaWg2AccessPolicy | None, *, client_name: str | None = None) -> dict:
         if row is None:
@@ -796,7 +870,7 @@ class AccessPolicyService:
         now = _now()
         node_id = self._require_node_id()
         excluded = (exclude_client or "").strip().lower()
-        results: list[dict] = []
+        blocked: list[str] = []
         for row in self.db.query(WgAccessPolicy).filter_by(node_id=node_id).all():
             if is_node_default_policy_client(row.client_name):
                 continue
@@ -805,13 +879,15 @@ class AccessPolicyService:
             state = self._wg_state(row, now)
             if not state["is_blocked"]:
                 continue
-            results.append(
-                {
-                    "client_name": row.client_name,
-                    "result": self._apply_wg_client_runtime(row.client_name, is_blocked=True),
-                }
-            )
-        return results
+            blocked.append(row.client_name)
+        return self._reblock_runtime_batch(
+            blocked,
+            node_id=node_id,
+            apply=self._apply_wg_client_runtime,
+            batch_method="block_wireguard_clients_runtime",
+            local_batch=wg_block_clients_runtime,
+            count_wg_calls=True,
+        )
 
     def _wg_state(self, row: WgAccessPolicy, now: datetime | None = None) -> dict:
         now = _as_utc(now) or _now()
@@ -899,14 +975,26 @@ class AccessPolicyService:
                 self._reapply_all_blocked_runtime(exclude_client=normalized)
         self.db.commit()
 
+    @staticmethod
+    def _wg_expiry_from(existing: datetime | None, days: int, *, extend: bool) -> datetime:
+        now = _now()
+        base = existing if (extend and existing and existing > now) else now
+        return base + timedelta(days=days)
+
+    def wg_expiry_target(self, client_name: str, days: int, *, extend: bool = False) -> datetime:
+        """Deadline that wg_set_expiry would write — for the owner conflict guard."""
+        normalized = client_name.strip().lower()
+        row = (
+            self.db.query(WgAccessPolicy)
+            .filter_by(node_id=self._require_node_id(), client_name=normalized)
+            .first()
+        )
+        existing = _as_utc(row.expires_at) if row is not None else None
+        return self._wg_expiry_from(existing, days, extend=extend)
+
     def wg_set_expiry(self, client_name: str, days: int, *, extend: bool = False, actor: str | None = None) -> dict:
         row = self._get_wg(client_name)
-        now = _now()
-        base = now
-        existing = _as_utc(row.expires_at)
-        if extend and existing and existing > now:
-            base = existing
-        row.expires_at = base + timedelta(days=days)
+        row.expires_at = self._wg_expiry_from(_as_utc(row.expires_at), days, extend=extend)
         row.updated_by = actor
         self.db.commit()
         self.reconcile_wg(client_name, force_runtime=True)

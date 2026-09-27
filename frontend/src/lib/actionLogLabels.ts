@@ -119,6 +119,7 @@ const ACTION_LOG_LABELS: Record<string, string> = {
   system_update_queued: 'Обновление системы в очереди',
   system_rebuild_queued: 'Пересборка frontend в очереди',
   system_restart: 'Перезапуск панели',
+  site_diagnostics_close_ip_access: 'Закрытие доступа к панели по IP (nginx)',
   backup_restore: 'Восстановление из бэкапа',
   edit_files_transfer: 'Передача файлов конфигурации',
   ha_replicate_partial_failure: 'Частичный сбой репликации HA',

@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.models import Node
 from app.services.cidr.pipeline.orchestrator import resolve_deploy_targets
-from app.services.file_editor import EDITABLE_FILES
-from app.services.node_manager import _is_vpn_node, get_active_node, get_adapter_for_node
+from app.services.file_editor import EDITABLE_FILES, ConfigFileUnsupportedError, is_kresd_custom_key
+from app.services.node_manager import is_vpn_node, get_active_node, get_adapter_for_node
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,8 @@ def _load_file_contents(
     source_adapter,
     file_keys: list[str],
     content_overrides: dict[str, str] | None,
+    *,
+    skip_unsupported: bool = False,
 ) -> dict[str, str]:
     contents: dict[str, str] = {}
     for key in file_keys:
@@ -45,7 +47,11 @@ def _load_file_contents(
             contents[key] = content_overrides[key]
             continue
         fname = EDITABLE_FILES[key]
-        contents[key] = source_adapter.read_config_file(fname)
+        try:
+            contents[key] = source_adapter.read_config_file(fname)
+        except ConfigFileUnsupportedError:
+            if not skip_unsupported:
+                raise
     return contents
 
 
@@ -58,9 +64,15 @@ def run_edit_files_transfer(
     source_node_id: int | None = None,
     run_doall: bool = False,
     content_overrides: dict[str, str] | None = None,
+    skip_unsupported: bool = False,
 ) -> dict[str, Any]:
-    """Copy config file(s) from source node to one or more target nodes."""
+    """Copy config file(s) from source node to one or more target nodes.
+
+    ``skip_unsupported`` drops files an outdated node agent cannot read or write instead of
+    failing the node (background HA heal must not fail on files the user never touched).
+    """
     validated_keys = _validate_file_keys(file_keys)
+    run_doall = run_doall and any(not is_kresd_custom_key(key) for key in validated_keys)
     source = _resolve_source_node(db, source_node_id)
 
     try:
@@ -68,7 +80,12 @@ def run_edit_files_transfer(
     except Exception as exc:
         raise ValueError(f"Не удалось подключиться к исходному узлу «{source.name}»: {exc}") from exc
 
-    contents = _load_file_contents(source_adapter, validated_keys, content_overrides)
+    try:
+        contents = _load_file_contents(
+            source_adapter, validated_keys, content_overrides, skip_unsupported=skip_unsupported
+        )
+    except ConfigFileUnsupportedError as exc:
+        raise ValueError(f"Исходный узел «{source.name}»: {exc.detail}") from exc
 
     if all_online:
         nodes, skipped = resolve_deploy_targets(db, all_online=True)
@@ -98,7 +115,7 @@ def run_edit_files_transfer(
             nodes_skipped += 1
             continue
 
-        if not _is_vpn_node(node):
+        if not is_vpn_node(node):
             per_node.append(
                 {
                     "node_id": node.id,
@@ -129,12 +146,20 @@ def run_edit_files_transfer(
             continue
 
         transferred: list[str] = []
+        unsupported: list[str] = []
         failed: list[dict[str, str]] = []
         for key in validated_keys:
+            if key not in contents:
+                continue
             fname = EDITABLE_FILES[key]
             try:
                 adapter.write_config_file(fname, contents[key])
                 transferred.append(fname)
+            except ConfigFileUnsupportedError as exc:
+                if skip_unsupported:
+                    unsupported.append(fname)
+                else:
+                    failed.append({"file": fname, "error": str(exc.detail)})
             except Exception as exc:
                 failed.append({"file": fname, "error": str(exc)})
 
@@ -179,6 +204,7 @@ def run_edit_files_transfer(
                 "node_name": node.name,
                 "status": "success",
                 "transferred_files": transferred,
+                "unsupported_files": unsupported,
                 "failed": [],
                 "doall_output": doall_output,
             }

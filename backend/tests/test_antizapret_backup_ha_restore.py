@@ -1,4 +1,4 @@
-"""Tests for HA replica restore (wipe + replace, no client.sh 7)."""
+"""Tests for HA replica restore (replace VPN/crypto paths, no client.sh 7)."""
 
 import io
 import shutil
@@ -8,35 +8,28 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.services.antizapret_backup import AntizapretBackupService, wipe_ha_vpn_crypto_paths
+from app.services.antizapret_backup import AntizapretBackupService, ha_vpn_crypto_paths
 
 
-def test_wipe_ha_vpn_crypto_paths_removes_pki_wireguard_and_profiles(tmp_path, monkeypatch):
+def test_ha_vpn_crypto_paths_cover_pki_wireguard_and_profiles(tmp_path, monkeypatch):
     install_dir = tmp_path / "antizapret"
-    install_dir.mkdir()
     easyrsa = tmp_path / "easyrsa3"
-    (easyrsa / "pki").mkdir(parents=True)
-    (easyrsa / "pki" / "ca.crt").write_text("ca", encoding="utf-8")
     wg_dir = tmp_path / "wireguard"
     wg_dir.mkdir()
     (wg_dir / "antizapret.conf").write_text("wg", encoding="utf-8")
     (wg_dir / "extra.conf").write_text("old", encoding="utf-8")
-    ovpn_dir = install_dir / "client" / "openvpn" / "vpn"
-    ovpn_dir.mkdir(parents=True)
-    (ovpn_dir / "x.ovpn").write_text("ovpn", encoding="utf-8")
-    wg_profiles = install_dir / "client" / "wireguard" / "vpn"
-    wg_profiles.mkdir(parents=True)
-    (wg_profiles / "a.conf").write_text("profile", encoding="utf-8")
-
+    (wg_dir / "params").write_text("keep", encoding="utf-8")
     monkeypatch.setattr("app.services.antizapret_backup._HA_EASYRSA3_ROOT", easyrsa)
     monkeypatch.setattr("app.services.antizapret_backup._HA_WIREGUARD_DIR", wg_dir)
 
-    wipe_ha_vpn_crypto_paths(install_dir=install_dir)
-
-    assert not easyrsa.exists()
-    assert list(wg_dir.glob("*.conf")) == []
-    assert not (install_dir / "client" / "openvpn").exists()
-    assert not (install_dir / "client" / "wireguard").exists()
+    assert ha_vpn_crypto_paths(install_dir=install_dir) == [
+        easyrsa,
+        wg_dir / "antizapret.conf",
+        wg_dir / "extra.conf",
+        install_dir / "client" / "openvpn",
+        install_dir / "client" / "wireguard",
+        install_dir / "client" / "amneziawg",
+    ]
 
 
 def test_restore_backup_for_ha_replica_skips_client_sh_7(tmp_path, monkeypatch):
@@ -58,8 +51,8 @@ def test_restore_backup_for_ha_replica_skips_client_sh_7(tmp_path, monkeypatch):
         tar.add(extract_root / "wireguard", arcname="wireguard")
 
     service = AntizapretBackupService(install_dir=install_dir, timeout_seconds=30)
-    wipe_mock = MagicMock()
-    monkeypatch.setattr("app.services.antizapret_backup.wipe_ha_vpn_crypto_paths", wipe_mock)
+    monkeypatch.setattr("app.services.antizapret_backup._HA_EASYRSA3_ROOT", tmp_path / "dst_easyrsa3")
+    monkeypatch.setattr("app.services.antizapret_backup._HA_WIREGUARD_DIR", tmp_path / "dst_wg")
     monkeypatch.setattr(service, "_run_client_sh_7", MagicMock(side_effect=AssertionError("sh7 must not run")))
     monkeypatch.setattr(service, "_restart_legacy_services", MagicMock())
     monkeypatch.setattr(service, "_run_doall_sh", lambda: "")
@@ -81,7 +74,6 @@ def test_restore_backup_for_ha_replica_skips_client_sh_7(tmp_path, monkeypatch):
 
     result = service.restore_backup_for_ha_replica(archive)
 
-    wipe_mock.assert_called_once()
     assert result.get("ha_replica") is True
 
 

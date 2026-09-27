@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.config import get_settings
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import User
 from app.services.app_setting_store import _get_setting
 from app.schemas import TelegramBotInfoResponse, TelegramLinkCodeResponse
@@ -17,7 +17,9 @@ from app.services.feature_guards import get_feature_service, module_disabled_mes
 from app.services.panel_publish_info import resolve_request_url_root
 from app.services.rate_limit.sliding_window import RateLimitExceeded
 from app.services.telegram_bot import telegram_bot_service
+from app.services.telegram_bot_loop import run_on_bot_loop
 from app.services.telegram_link import create_link_code
+from app.services.telegram_update_dedup import claim_telegram_update
 from app.services.telegram_webhook_security import (
     TELEGRAM_SECRET_TOKEN_HEADER,
     consume_webhook_rate_limit,
@@ -71,7 +73,7 @@ async def telegram_webhook(
     header_secret = (request.headers.get(TELEGRAM_SECRET_TOKEN_HEADER) or "").strip()
     if not expected or not secrets_match(secret, expected):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-    # Header required only when Telegram/proxy sends it (setWebhook secret_token).
+    # Webhooks registered before secret_token was sent have no header; the URL secret still authenticates.
     if header_secret and not secrets_match(header_secret, expected):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
@@ -89,13 +91,31 @@ async def telegram_webhook(
         update = await request.json()
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid JSON") from exc
+    if not isinstance(update, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid update")
 
-    await telegram_bot_service.handle_update(
-        db,
-        update,
-        mini_app_url=_mini_app_url(request),
-    )
+    update_id = update.get("update_id")
+    if not claim_telegram_update(db, update_id):
+        return {"ok": True}
+
+    # A non-2xx reply makes Telegram redeliver the update, re-running restore/reboot actions.
+    try:
+        await run_on_bot_loop(_handle_update(update, mini_app_url=_mini_app_url(request)))
+    except Exception:
+        logger.exception("Telegram update %s handling failed", update_id)
     return {"ok": True}
+
+
+async def _handle_update(update: dict, *, mini_app_url: str) -> None:
+    # Runs on the bot thread and may outlive the webhook request, so it cannot share the request session.
+    db = SessionLocal()
+    try:
+        await telegram_bot_service.handle_update(db, update, mini_app_url=mini_app_url)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 @router.get("/bot-info", response_model=TelegramBotInfoResponse)

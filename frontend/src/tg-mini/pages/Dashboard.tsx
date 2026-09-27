@@ -12,7 +12,7 @@ import {
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { ApiError } from '@/api/client'
-import { formatBytes } from '@/components/monitoring/MonitoringCharts'
+import { formatBytes } from '@/lib/trafficFormat'
 import MetricCard from '@/components/noc/MetricCard'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

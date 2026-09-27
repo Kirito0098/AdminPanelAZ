@@ -8,9 +8,10 @@ import logging
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Node, VpnConfig, VpnType
-from app.services.node_manager import _is_vpn_node, get_adapter_for_node
+from app.services.node_manager import is_vpn_node, get_adapter_for_node
 from app.services.openvpn_cert import resolve_openvpn_cert_not_after, to_naive_utc
 from app.services.openvpn_pki import load_cert_expiry_map
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ def sync_cert_expiry(db) -> int:
     updated = 0
     for node_id in node_ids:
         node = db.get(Node, node_id)
-        if node is None or not _is_vpn_node(node):
+        if node is None or not is_vpn_node(node):
             continue
         try:
             count = _sync_node(db, node)
@@ -111,6 +112,19 @@ def sync_cert_expiry(db) -> int:
     return updated
 
 
+def _sync_cert_expiry_once() -> None:
+    db = SessionLocal()
+    try:
+        count = sync_cert_expiry(db)
+        if count:
+            logger.info(
+                "cert_sync: refreshed cert_expires_at for %s configs total",
+                count,
+            )
+    finally:
+        db.close()
+
+
 async def run_cert_sync_loop() -> None:
     """Cert sync loop — re-checks CERT_SYNC_ENABLED / openvpn each tick."""
     await asyncio.sleep(INITIAL_DELAY_SECONDS)
@@ -123,16 +137,8 @@ async def run_cert_sync_loop() -> None:
             elif not _is_openvpn_module_enabled():
                 logger.debug("cert_sync skipped — openvpn module disabled")
             else:
-                db = SessionLocal()
-                try:
-                    count = sync_cert_expiry(db)
-                    if count:
-                        logger.info(
-                            "cert_sync: refreshed cert_expires_at for %s configs total",
-                            count,
-                        )
-                finally:
-                    db.close()
+                # Reads certificates from every OpenVPN node over the agent API.
+                await run_background_step(_sync_cert_expiry_once)
         except asyncio.CancelledError:
             raise
         except Exception:

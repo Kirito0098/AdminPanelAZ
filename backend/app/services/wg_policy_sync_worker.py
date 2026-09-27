@@ -11,7 +11,8 @@ from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Node, WgAccessPolicy
 from app.services.access_policy import AccessPolicyService
-from app.services.node_manager import _is_vpn_node, get_adapter_for_node, node_metadata_dict
+from app.services.node_manager import is_vpn_node, get_adapter_for_node, node_metadata_dict
+from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
 _startup_full_sync_done = False
@@ -32,7 +33,7 @@ def reconcile_wg_policies_for_all_nodes(db: Session, *, sync_all_runtime: bool =
     total_clients_changed = 0
     nodes_skipped_empty = 0
     for node in db.query(Node).all():
-        if not _is_vpn_node(node):
+        if not is_vpn_node(node):
             continue
         # Avoid adapter/SSH setup when the node has no WG policy rows to reconcile.
         if not sync_all_runtime:
@@ -122,10 +123,10 @@ async def run_wg_policy_sync_loop() -> None:
                 logger.debug("wg_policy_sync skipped — wg_policy_sync disabled")
             else:
                 if not _startup_full_sync_done:
-                    await asyncio.to_thread(_reconcile_all_nodes_once, sync_all_runtime=True)
+                    await run_background_step(_reconcile_all_nodes_once, sync_all_runtime=True)
                     _startup_full_sync_done = True
                 else:
-                    await asyncio.to_thread(_reconcile_all_nodes_once, sync_all_runtime=False)
+                    await run_background_step(_reconcile_all_nodes_once, sync_all_runtime=False)
         except asyncio.CancelledError:
             raise
         except Exception as exc:

@@ -5,15 +5,20 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.auth import get_current_user, require_admin
 from app.database import get_db
 from app.models import User, UserRole, VpnConfig
 from app.services.client_portal import (
+    ensure_portal_user,
     get_or_create_portal_token,
+    get_or_create_user_portal_token,
     link_response,
     revoke_portal_token,
+    revoke_user_portal_token,
     rotate_portal_token,
     resolve_portal_base_url,
+    rotate_user_portal_token,
+    user_link_response,
 )
 from app.services.feature_guards import get_feature_service, module_disabled_message
 from app.services.node_manager import get_active_node
@@ -117,3 +122,54 @@ def revoke_portal_link(
     _assert_can_manage_client(current_user, db, client_name)
     revoke_portal_token(db, client_name=client_name)
     return {"ok": True, "client_name": client_name}
+
+
+@router.get("/users/{user_id}/link")
+def get_user_portal_link(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    _require_portal_enabled()
+    _require_portal_domain(db)
+    ensure_portal_user(db, user_id)
+    row = get_or_create_user_portal_token(db, user_id=user_id, creator=admin)
+    return user_link_response(db, row)
+
+
+@router.post("/users/{user_id}/link")
+def create_user_portal_link(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    _require_portal_enabled()
+    _require_portal_domain(db)
+    ensure_portal_user(db, user_id)
+    row = get_or_create_user_portal_token(db, user_id=user_id, creator=admin)
+    return user_link_response(db, row)
+
+
+@router.post("/users/{user_id}/rotate")
+def rotate_user_portal_link(
+    user_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    _require_portal_enabled()
+    _require_portal_domain(db)
+    ensure_portal_user(db, user_id)
+    row = rotate_user_portal_token(db, user_id=user_id, creator=admin)
+    return user_link_response(db, row)
+
+
+@router.post("/users/{user_id}/revoke")
+def revoke_user_portal_link(
+    user_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    _require_portal_enabled()
+    ensure_portal_user(db, user_id)
+    revoke_user_portal_token(db, user_id=user_id)
+    return {"ok": True, "user_id": user_id}

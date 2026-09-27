@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 import jwt
 
-from app.auth import decode_access_token_username
+from app.auth import get_active_user_from_access_token
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import User, UserRole
@@ -39,23 +39,8 @@ def _ip_matches_allowlist(client_ip: str, entries: list[str]) -> bool:
 
 
 def _is_admin_token(token: str, db: Session) -> bool:
-    settings = get_settings()
-    try:
-        payload = jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-        if payload.get("type") not in (None, "access"):
-            return False
-        if payload.get("role") == UserRole.admin.value:
-            return True
-        username = payload.get("sub")
-    except jwt.PyJWTError:
-        username = decode_access_token_username(token)
-    else:
-        if not username:
-            username = decode_access_token_username(token)
-    if not username:
-        return False
-    user = db.query(User).filter(User.username == username).first()
-    return bool(user and user.is_active and user.role == UserRole.admin)
+    user = get_active_user_from_access_token(db, token)
+    return bool(user and user.role == UserRole.admin)
 
 
 def assert_openapi_docs_access(request: Request) -> None:

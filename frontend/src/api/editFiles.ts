@@ -1,7 +1,8 @@
 import { apiFetch } from './http'
+import type { EditFileEntry } from '../types'
 
 export async function getEditFiles() {
-  return apiFetch<import('../types').EditFileEntry[]>('/edit-files')
+  return apiFetch<EditFileEntry[]>('/edit-files')
 }
 
 export async function getEditFileContent(key: string) {

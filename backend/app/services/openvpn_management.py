@@ -13,6 +13,9 @@ from app.config import get_settings
 from app.schemas import OpenVpnClient
 
 OPENVPN_PROFILES = ("antizapret-tcp", "antizapret-udp", "vpn-tcp", "vpn-udp")
+# One whitespace-free token: a newline would start another management command.
+KILL_CLIENT_NAME_PATTERN = r"^[^\s\x00-\x1f\x7f]+$"
+KILL_CLIENT_NAME_RE = re.compile(KILL_CLIENT_NAME_PATTERN)
 
 _CLIENT_PATTERN = re.compile(
     r"CLIENT_LIST,([^,\n]+),([^,\n]+),([^,\n]*),([^,\n]*),(\d+),(\d+),([^,\n]+),(\d+),([^,\n]*),([^,\n]*),([^,\n]*),([^,\n\r ]+)"
@@ -132,7 +135,7 @@ class OpenVpnManagementService:
                     timeout_streak = 0
                     if is_status_cmd:
                         end_probe = (end_probe + text_chunk)[-256:]
-                        if re.search(r"(^|\n)END(\n|$)", end_probe):
+                        if re.search(r"(^|\n)END\r?(\n|$)", end_probe):
                             break
                     if hit_limit:
                         break
@@ -407,16 +410,20 @@ class OpenVpnManagementService:
     def kill_client(self, profile_key: str, client_name: str) -> dict:
         """Force-disconnect an OpenVPN client via management socket kill command."""
         socket_path = self.openvpn_socket_path(profile_key)
+        if not KILL_CLIENT_NAME_RE.fullmatch(client_name or ""):
+            return {"success": False, "client_name": client_name, "message": "Недопустимое имя клиента"}
         if not socket_path.exists():
             return {"success": False, "message": f"Сокет {profile_key} недоступен"}
         cmd = f"kill {client_name}"
         raw = self.query_openvpn_management_socket(socket_path, cmd)
-        success = "SUCCESS" in raw.upper() or "killed" in raw.lower() or bool(raw.strip())
+        lines = [line.strip() for line in raw.splitlines()]
+        success = any(line.startswith("SUCCESS:") for line in lines)
+        error = next((line for line in lines if line.startswith("ERROR:")), "")
         return {
             "success": success,
             "profile": profile_key,
             "client_name": client_name,
-            "message": "Клиент отключён" if success else (raw.strip() or "Не удалось отключить клиента"),
+            "message": "Клиент отключён" if success else (error or "Не удалось отключить клиента"),
             "raw": raw[:500],
         }
 

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import logging
 
+from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-from app.auth import decode_access_token_username
+from app.auth import access_token_session_id, get_active_user_from_access_token
 from app.database import SessionLocal
-from app.models import User
-from app.services.active_web_session import WEB_SESSION_ID_HEADER, active_web_session_service
+from app.services.active_web_session import active_web_session_service
 from app.services.notify_time import get_client_timezone_from_request, remember_client_timezone
 
 logger = logging.getLogger(__name__)
@@ -25,6 +25,28 @@ _SKIP_PATHS = frozenset(
 )
 
 
+def _touch_session(request: Request, token: str, session_id: str, client_tz: str | None) -> None:
+    db = SessionLocal()
+    try:
+        user = get_active_user_from_access_token(db, token)
+        if user is not None:
+            if client_tz:
+                remember_client_timezone(db, user, client_tz)
+            if session_id:
+                active_web_session_service.touch_active_web_session(
+                    db,
+                    user.username,
+                    request=request,
+                    session_id=session_id,
+                    force=False,
+                )
+    except Exception as exc:
+        db.rollback()
+        logger.debug("Active session touch skipped: %s", exc)
+    finally:
+        db.close()
+
+
 class ActiveSessionMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         path = request.url.path
@@ -32,27 +54,11 @@ class ActiveSessionMiddleware(BaseHTTPMiddleware):
             auth_header = request.headers.get("Authorization") or ""
             if auth_header.startswith("Bearer "):
                 token = auth_header[7:].strip()
-                username = decode_access_token_username(token)
-                session_id = (request.headers.get(WEB_SESSION_ID_HEADER) or "").strip()
+                # The session is the one the token was issued for; the X-Web-Session-Id header is not trusted.
+                session_id = access_token_session_id(token) if token else None
                 client_tz = get_client_timezone_from_request(request)
-                if username and (session_id or client_tz):
-                    db = SessionLocal()
-                    try:
-                        if client_tz:
-                            user = db.query(User).filter(User.username == username).first()
-                            remember_client_timezone(db, user, client_tz)
-                        if session_id:
-                            active_web_session_service.touch_active_web_session(
-                                db,
-                                username,
-                                request=request,
-                                session_id=session_id,
-                                force=False,
-                            )
-                    except Exception as exc:
-                        db.rollback()
-                        logger.debug("Active session touch skipped: %s", exc)
-                    finally:
-                        db.close()
+                if token and (session_id or client_tz):
+                    # Runs on every authenticated API request: SQLite must not block the event loop.
+                    await run_in_threadpool(_touch_session, request, token, session_id, client_tz)
 
         return await call_next(request)

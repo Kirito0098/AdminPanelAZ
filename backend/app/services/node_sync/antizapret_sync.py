@@ -8,7 +8,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import BackgroundTask, Node, NodeSyncGroup
-from app.services.antizapret_params import filter_ha_replicable_settings
+from app.services.antizapret_params import ANTIZAPRET_PARAMS, filter_ha_replicable_settings
+from app.services.antizapret_settings import VERIFIED_WRITE_TYPES, setting_write_mismatch_warnings
 from app.services.background_tasks import background_task_service
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.groups import get_replica_nodes, is_auto_sync_enabled
@@ -40,10 +41,15 @@ def replicate_antizapret_settings(
         )
         return result
 
+    has_verified_keys = any(p["type"] in VERIFIED_WRITE_TYPES and p["key"] in filtered for p in ANTIZAPRET_PARAMS)
     for replica_node in get_replica_nodes(db, group):
-        adapter = get_adapter_for_node(replica_node)
         try:
+            adapter = get_adapter_for_node(replica_node)
             adapter.update_antizapret_settings(filtered)
+            if has_verified_keys:
+                mismatch = setting_write_mismatch_warnings(filtered, adapter.get_antizapret_settings())
+                if mismatch:
+                    raise RuntimeError(" ".join(mismatch))
         except Exception as exc:
             logger.warning(
                 "HA antizapret settings sync failed on replica %s: %s",

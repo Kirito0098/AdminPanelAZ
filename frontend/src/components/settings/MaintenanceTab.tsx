@@ -539,6 +539,27 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
                       </p>
                     </div>
                     <div className="space-y-1.5">
+                      <Label htmlFor="retention-sessions" className="text-xs">
+                        Сессии VPN, дн.
+                      </Label>
+                      <Input
+                        id="retention-sessions"
+                        type="number"
+                        min={1}
+                        value={retention.traffic_session_retention_days}
+                        onChange={(e) =>
+                          setRetention({
+                            ...retention,
+                            traffic_session_retention_days: Number(e.target.value),
+                          })
+                        }
+                      />
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        Сколько хранить завершённые подключения в истории сессий клиента. Активные сессии не
+                        удаляются.
+                      </p>
+                    </div>
+                    <div className="space-y-1.5">
                       <Label htmlFor="retention-logs" className="text-xs">
                         Журнал, дн.
                       </Label>

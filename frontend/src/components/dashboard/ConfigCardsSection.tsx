@@ -8,7 +8,6 @@ import {
   deleteConfig,
   deleteConfigTag,
   getConfigTags,
-  getEffectiveVisibleVpnProfiles,
   getOpenVpnGroup,
   openvpnPermanentBlock,
   openvpnTempBlock,
@@ -71,6 +70,7 @@ import { useEffect, useMemo, useState } from 'react'
 interface ConfigCardsSectionProps {
   configs: VpnConfig[]
   policies: Record<string, ClientPoliciesResponseEntry>
+  visibilityPolicy: VisibleVpnProfilesPolicy | null
   userRole: UserRole
   currentUserId?: number
   ownerCandidates?: User[]
@@ -106,6 +106,7 @@ function useVisibleTabs(visibilityPolicy: VisibleVpnProfilesPolicy | null, userR
 export default function ConfigCardsSection({
   configs,
   policies,
+  visibilityPolicy,
   userRole,
   currentUserId,
   ownerCandidates = [],
@@ -123,7 +124,6 @@ export default function ConfigCardsSection({
   const qrDownloadsEnabled = isEnabled('qr_downloads')
   const trafficLinkEnabled = isEnabled('traffic_sync')
   const clientPortalEnabled = isEnabled('client_portal')
-  const [visibilityPolicy, setVisibilityPolicy] = useState<VisibleVpnProfilesPolicy | null>(null)
   const visibleTabs = useVisibleTabs(visibilityPolicy, userRole)
   const [activeTab, setActiveTab] = useState<ProtocolTab>(visibleTabs[0] ?? 'openvpn')
   useEffect(() => {
@@ -158,12 +158,6 @@ export default function ConfigCardsSection({
   useEffect(() => {
     setViewPrefs(loadConfigCardViewPrefs())
   }, [])
-
-  useEffect(() => {
-    void getEffectiveVisibleVpnProfiles()
-      .then((data) => setVisibilityPolicy(data.policy))
-      .catch(() => setVisibilityPolicy(null))
-  }, [userRole])
 
   const handleViewPrefsChange = (next: ConfigCardViewPrefs) => {
     setViewPrefs(next)

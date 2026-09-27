@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth import require_admin
+from app.auth import require_admin, tg_mini_token_allowed
 from app.database import get_db
 from app.models import User
 from app.services.feature_guards import get_feature_service, module_disabled_message
@@ -47,6 +47,7 @@ def _default_max_redemptions(mode: str, max_redemptions: int | None) -> int:
 
 
 @router.get("")
+@tg_mini_token_allowed
 def get_unlock_codes(
     include_revoked: bool = False,
     db: Session = Depends(get_db),
@@ -57,6 +58,7 @@ def get_unlock_codes(
 
 
 @router.post("")
+@tg_mini_token_allowed
 def post_unlock_code(
     payload: UnlockCodeCreateRequest,
     db: Session = Depends(get_db),
@@ -81,6 +83,7 @@ def post_unlock_code(
 
 
 @router.post("/{code_id}/revoke")
+@tg_mini_token_allowed
 def revoke_code(
     code_id: int,
     db: Session = Depends(get_db),

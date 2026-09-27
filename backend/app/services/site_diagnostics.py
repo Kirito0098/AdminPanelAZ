@@ -11,6 +11,12 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from app.services.firewall_tools_check import apt_install_hint, check_firewall_tools
+from app.services.nginx_default_deny import (
+    DefaultDenyResult,
+    is_nginx_publish_mode,
+    run_default_deny_script,
+    script_path as default_deny_script_path,
+)
 
 Status = Literal["ok", "warn", "fail"]
 RunCategory = Literal["systemd", "files", "https", "port", "http", "nginx", "firewall", "summary"]
@@ -70,6 +76,8 @@ class CheckResult:
     detail: str = ""
     hint_ru: str = ""
     category: RunCategory = "summary"
+    check_id: str = ""
+    action: dict[str, str] | None = None
 
 
 @dataclass
@@ -228,16 +236,20 @@ def _step_status(results: list[CheckResult]) -> Status:
     return "ok"
 
 
-def _check_result_dict(result: CheckResult) -> dict[str, str]:
-    payload: dict[str, str] = {
+def check_result_to_dict(result: CheckResult) -> dict[str, object]:
+    payload: dict[str, object] = {
         "status": result.status,
         "title": result.title,
         "category": result.category,
     }
+    if result.check_id:
+        payload["id"] = result.check_id
     if result.detail:
         payload["detail"] = result.detail
     if result.hint_ru:
         payload["hint_ru"] = result.hint_ru
+    if result.action:
+        payload["action"] = dict(result.action)
     return payload
 
 
@@ -254,7 +266,7 @@ def report_to_dict(report: DiagnosticsReport, ctx: DiagnosticsContext) -> dict:
             {
                 **step_def,
                 "status": _step_status(step_results),
-                "checks": [_check_result_dict(r) for r in step_results],
+                "checks": [check_result_to_dict(r) for r in step_results],
             }
         )
 
@@ -269,7 +281,7 @@ def report_to_dict(report: DiagnosticsReport, ctx: DiagnosticsContext) -> dict:
             "has_failures": report.has_failures(),
         },
         "steps": steps,
-        "results": [_check_result_dict(r) for r in report.results],
+        "results": [check_result_to_dict(r) for r in report.results],
         "recommended_commands": list(report.recommended_commands),
     }
 
@@ -815,6 +827,173 @@ def _check_nginx(
         )
 
 
+IP_ACCESS_CHECK_ID = "ip_access"
+IP_ACCESS_TITLE = "Доступ к панели по IP сервера"
+CLOSE_IP_ACCESS_ACTION = {"id": "close_ip_access", "label": "Закрыть доступ по IP"}
+_IP_ACCESS_FIREWALL_HINT = (
+    "Если панель не должна открываться у всех — разрешите вход только с ваших адресов "
+    "(Настройки → Защита входа) или закройте порт firewall'ом."
+)
+_SKIP_REASONS_RU = {
+    "existing_default_server": "там уже есть свой default_server",
+    "foreign_first": "первым объявлен другой сайт — по IP отвечает он",
+    "ip_server_name": "у сайта IP в server_name — HTTPS по IP не закрывается",
+    "no_cert": "nginx старше 1.19.4 и нет сертификата-заглушки — HTTPS по IP не закрывается",
+}
+
+
+def read_diagnostics_env(ctx: DiagnosticsContext) -> dict[str, str]:
+    return _read_env_file(os.path.join(ctx.backend_dir(), ".env"))
+
+
+def _port_label(port: dict) -> str:
+    kind = "HTTPS" if port.get("kind") == "https" else "HTTP"
+    return f"{port.get('port')} ({kind})"
+
+
+def _ports_with_action(result: DefaultDenyResult, action: str) -> list[dict]:
+    return [p for p in result.ports if p.get("action") == action]
+
+
+def _skipped_ports_note(result: DefaultDenyResult) -> str:
+    lines = [
+        f"• порт {_port_label(p)}: {_SKIP_REASONS_RU.get(str(p.get('reason')), str(p.get('reason')))}"
+        for p in _ports_with_action(result, "skip")
+    ]
+    return ("Не трогаются:\n" + "\n".join(lines)) if lines else ""
+
+
+def _join_paragraphs(*parts: str) -> str:
+    return "\n\n".join(part for part in parts if part)
+
+
+def ip_access_check_result(result: DefaultDenyResult, ctx: DiagnosticsContext) -> CheckResult:
+    """Результат scripts/nginx-default-deny.sh → проверка «Доступ к панели по IP сервера»."""
+    apply_cmd = f"sudo bash {default_deny_script_path(ctx.install_dir)} --apply"
+    install_ports = ", ".join(_port_label(p) for p in _ports_with_action(result, "install"))
+    skipped = _skipped_ports_note(result)
+
+    if result.status is None:
+        return CheckResult(
+            "warn",
+            f"{IP_ACCESS_TITLE}: проверить не удалось",
+            detail=result.message or "Скрипт проверки не вернул результат",
+            hint_ru=(
+                "Панель опубликована через nginx, но проверка сервера по умолчанию не выполнилась — "
+                "закрыт ли доступ по IP, неизвестно. Запустите в консоли "
+                f"sudo bash {default_deny_script_path(ctx.install_dir)} --check и посмотрите ошибку."
+            ),
+            check_id=IP_ACCESS_CHECK_ID,
+        )
+    if result.status == "installed" and any(p.get("reason") == "no_cert" for p in result.ports):
+        return CheckResult(
+            "warn",
+            "Запросы по IP сервера отклоняются только по HTTP",
+            detail=_join_paragraphs(
+                f"Сервер по умолчанию nginx закрывает порты: {install_ports}. "
+                "Для HTTPS nginx старше 1.19.4 нужен сертификат-заглушка, а создать его не удалось — "
+                "по IP сервера через HTTPS по-прежнему открывается панель.",
+                skipped,
+            ),
+            hint_ru=(
+                "Обновите nginx до 1.19.4 или новее либо установите openssl (apt install openssl), "
+                f"затем выполните в консоли: {apply_cmd}"
+            ),
+            check_id=IP_ACCESS_CHECK_ID,
+        )
+    if result.status == "installed":
+        return CheckResult(
+            "ok",
+            "Запросы по IP сервера отклоняются",
+            detail=_join_paragraphs(
+                f"Сервер по умолчанию nginx (00-adminpanelaz-default-deny) отклоняет запросы по IP сервера "
+                f"и к чужим именам на портах: {install_ports}. Панель открывается только по своему домену.",
+                skipped,
+            ),
+            check_id=IP_ACCESS_CHECK_ID,
+        )
+    if result.status == "own_default":
+        return CheckResult(
+            "ok",
+            "Запросы по IP сервера обрабатывает ваш сервер по умолчанию",
+            detail=_join_paragraphs(
+                "На портах панели уже есть свой default_server — по IP сервера отвечает он, а не панель. "
+                "Панель его не заменяет.",
+                skipped,
+            ),
+            check_id=IP_ACCESS_CHECK_ID,
+        )
+    if result.status in ("needed", "outdated"):
+        if result.status == "needed":
+            title = "Панель открывается по IP сервера"
+            lead = (
+                "Без сервера по умолчанию nginx отдаёт запросы по голому IP и к чужим именам vhost'у панели. "
+                f"Нужно закрыть порты: {install_ports}."
+            )
+        else:
+            title = "Сервер по умолчанию nginx устарел"
+            lead = (
+                "Файл 00-adminpanelaz-default-deny не совпадает с текущими портами панели и портала — "
+                f"часть запросов по IP может доходить до панели. Нужные порты: {install_ports or 'нет'}."
+            )
+        return CheckResult(
+            "warn",
+            title,
+            detail=_join_paragraphs(lead, skipped),
+            hint_ru=(
+                "Нажмите «Закрыть доступ по IP»: nginx получит сервер по умолчанию и перечитает "
+                f"конфигурацию без перезапуска. Из консоли: {apply_cmd}"
+            ),
+            check_id=IP_ACCESS_CHECK_ID,
+            action=dict(CLOSE_IP_ACCESS_ACTION),
+        )
+
+    if not result.ports:
+        return CheckResult(
+            "ok",
+            f"{IP_ACCESS_TITLE}: vhost панели в nginx не найден",
+            detail="В nginx нет vhost'а панели или портала на своих портах — закрывать по IP нечего.",
+            hint_ru=_IP_ACCESS_FIREWALL_HINT,
+            check_id=IP_ACCESS_CHECK_ID,
+        )
+    return CheckResult(
+        "ok",
+        f"{IP_ACCESS_TITLE}: панель по IP не отвечает",
+        detail=_join_paragraphs(
+            "Сервер по умолчанию панели не нужен: на её портах по IP сервера отвечает другой сайт "
+            "или панель сама открывается по IP.",
+            skipped,
+        ),
+        check_id=IP_ACCESS_CHECK_ID,
+    )
+
+
+def _check_ip_access(
+    ctx: DiagnosticsContext,
+    env: dict[str, str],
+    report: DiagnosticsReport,
+    run_cmd: RunCmd,
+) -> None:
+    if not is_nginx_publish_mode(env):
+        mode = (env.get("PUBLISH_MODE") or "").strip() or "без nginx"
+        _append_result(
+            report,
+            CheckResult(
+                "ok",
+                f"{IP_ACCESS_TITLE}: проверка пропущена",
+                detail=(
+                    f"Панель опубликована без nginx ({mode}) и отвечает на IP-адрес и порт сервера — "
+                    "так устроена прямая публикация."
+                ),
+                hint_ru=_IP_ACCESS_FIREWALL_HINT,
+                check_id=IP_ACCESS_CHECK_ID,
+            ),
+        )
+        return
+    result = run_default_deny_script(default_deny_script_path(ctx.install_dir), "--check", run_cmd=run_cmd)
+    _append_result(report, ip_access_check_result(result, ctx))
+
+
 def _build_summary(report: DiagnosticsReport, ctx: DiagnosticsContext) -> None:
     summary_detail = (
         f"ok={report.ok_count}, warn={report.warn_count}, fail={report.fail_count}"
@@ -869,6 +1048,7 @@ def run_site_diagnostics(
     _check_http_probe(env, report, runner)
     _set_category(report, "nginx")
     _check_nginx(env, report, runner)
+    _check_ip_access(ctx, env, report, runner)
     _set_category(report, "firewall")
     _check_firewall_tools(report, runner)
     _set_category(report, "summary")
@@ -884,6 +1064,7 @@ def _check_firewall_tools(report: DiagnosticsReport, runner: RunCmd) -> None:
             report,
             CheckResult("ok", "iptables и ipset", detail=fw.operational_detail),
         )
+        _check_scanner_firewall(report, runner)
         return
 
     parts: list[str] = []
@@ -901,6 +1082,29 @@ def _check_firewall_tools(report: DiagnosticsReport, runner: RunCmd) -> None:
             "iptables и ipset (бан сканеров, whitelist порта панели)",
             detail="; ".join(parts) or fw.operational_detail,
             hint_ru=apt_install_hint(hint_pkgs),
+        ),
+    )
+
+
+def _check_scanner_firewall(report: DiagnosticsReport, runner: RunCmd) -> None:
+    from app.services.scanner_firewall_store import check_scanner_firewall, scanner_firewall_store
+
+    if not scanner_firewall_store.firewall_enabled or scanner_firewall_store.dry_run:
+        return
+    issues = check_scanner_firewall(run_cmd=runner)
+    if not issues:
+        _append_result(
+            report,
+            CheckResult("ok", "Баны сканеров в firewall", detail="наборы ipset и правила DROP на месте"),
+        )
+        return
+    _append_result(
+        report,
+        CheckResult(
+            "warn",
+            "Баны сканеров в firewall",
+            detail="; ".join(issues),
+            hint_ru="Перезапустите панель (systemctl restart adminpanelaz): наборы и правила создаются при старте.",
         ),
     )
 

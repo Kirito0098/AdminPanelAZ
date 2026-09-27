@@ -16,7 +16,7 @@ import { useNode } from '@/context/NodeContext'
 import type { Awg2HealthResponse, Awg2StatusResponse } from '@/types'
 
 export default function Awg2Page() {
-  const { activeNode } = useNode()
+  const { activeNode, loading: nodeLoading } = useNode()
   const [tab, setTab] = useState<Awg2Tab>('obfuscation')
   const [health, setHealth] = useState<Awg2HealthResponse | null>(null)
   const [status, setStatus] = useState<Awg2StatusResponse | null>(null)
@@ -45,8 +45,9 @@ export default function Awg2Page() {
   }, [])
 
   useEffect(() => {
+    if (nodeLoading) return
     void load()
-  }, [load, activeNode?.id])
+  }, [load, nodeLoading, activeNode?.id])
 
   const nodeLabel = formatAwg2NodeLabel(health, activeNode)
   const ready = Boolean(health?.installed)

@@ -60,6 +60,7 @@ import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { buildClientConnectionMap, type ClientConnectionMap } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
 import type {
+  ClientPoliciesResponseEntry,
   DashboardSummary,
   SelfServiceQuota,
   User,
@@ -89,7 +90,7 @@ export default function DashboardPage() {
     (user?.role === 'admin' ||
       visibilityPolicy == null ||
       visibilityPolicy.protocols.includes('amneziawg2'))
-  const { activeNode } = useNode()
+  const { activeNode, loading: nodeLoading } = useNode()
   const haReplicaReadonly = useHaReplicaReadonly()
   const { success, error: notifyError, warning: notifyWarning } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
@@ -111,7 +112,7 @@ export default function DashboardPage() {
     contentMode: import('../api/client').QrContentMode
     downloadUrl?: string
   } | null>(null)
-  const [policies, setPolicies] = useState<Record<string, import('../types').ClientPoliciesResponseEntry>>({})
+  const [policies, setPolicies] = useState<Record<string, ClientPoliciesResponseEntry>>({})
   const [connectionMap, setConnectionMap] = useState<ClientConnectionMap | null>(null)
   const [panelUsers, setPanelUsers] = useState<User[]>([])
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
@@ -139,6 +140,7 @@ export default function DashboardPage() {
       setAwg2Installed(true)
       return
     }
+    if (nodeLoading) return
     let cancelled = false
     void getAwg2Health()
       .then((health) => {
@@ -150,7 +152,7 @@ export default function DashboardPage() {
     return () => {
       cancelled = true
     }
-  }, [awg2ToggleOn, isAdmin, activeNode?.id])
+  }, [awg2ToggleOn, isAdmin, nodeLoading, activeNode?.id])
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
@@ -209,7 +211,7 @@ export default function DashboardPage() {
         setQuota(null)
       }
       if (configsData.length > 0) {
-        const names = configsData.map((c) => c.client_name).join(',')
+        const names = [...new Set(configsData.map((c) => c.client_name))].join(',')
         getClientPolicies(names).then(setPolicies).catch(() => setPolicies({}))
       } else {
         setPolicies({})
@@ -238,8 +240,9 @@ export default function DashboardPage() {
   }
 
   useEffect(() => {
+    if (nodeLoading) return
     load()
-  }, [activeNode?.id])
+  }, [nodeLoading, activeNode?.id])
 
   useEffect(() => {
     if (!isAdmin) {
@@ -630,6 +633,7 @@ export default function DashboardPage() {
         <ConfigCardsSection
           configs={configs}
           policies={policies}
+          visibilityPolicy={visibilityPolicy}
           userRole={user.role}
           currentUserId={user.id}
           ownerCandidates={panelUsers}

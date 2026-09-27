@@ -1,6 +1,7 @@
 """IP-blocked dwell page (ported from AdminAntizapret ip_blocked blueprint)."""
 
 import time
+from html import escape
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -74,7 +75,7 @@ def ip_blocked_page(request: Request, db: Session = Depends(get_db)):
         return JSONResponse(status_code=403, content={"detail": "Доступ заблокирован"})
     scanner_settings = ip_restriction_service._scanner_runtime_settings(db)
     html = BLOCKED_HTML.format(
-        client_ip=client_ip,
+        client_ip=escape(client_ip),
         current_time=time.strftime("%Y-%m-%d %H:%M:%S"),
         dwell_enabled="true" if scanner_settings["block_ip_blocked_dwell"] else "false",
         dwell_seconds=scanner_settings["ip_blocked_dwell_seconds"],

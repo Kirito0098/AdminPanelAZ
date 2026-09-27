@@ -87,7 +87,7 @@ export default function PanelRebuildCard({ className }: Props) {
           </CardTitle>
           <CardDescription>
             Полная сборка frontend и mini-app без обновления кода из Git — как{' '}
-            <code className="text-xs">npm run build:all && systemctl restart adminpanelaz</code>
+            <code className="text-xs">{'npm run build:all && systemctl restart adminpanelaz'}</code>
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

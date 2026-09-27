@@ -1,23 +1,33 @@
-"""Refresh token issuance, validation, and revocation."""
+"""Refresh token issuance, rotation with reuse detection, and revocation."""
 
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import RefreshToken, User
+
+logger = logging.getLogger(__name__)
+
+# A rotated token presented within this window is a sibling tab's race or a refresh response the
+# browser never received, not token theft: the session gets a fresh successor instead of a 401.
+ROTATION_GRACE_SECONDS = 30
+
+_INVALID_TOKEN_DETAIL = "Недействительный или истёкший refresh-токен"
 
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def create_refresh_token(db: Session, user: User) -> tuple[str, RefreshToken]:
+def create_refresh_token(db: Session, user: User, *, family_id: str | None = None) -> tuple[str, RefreshToken]:
     settings = get_settings()
     raw = secrets.token_urlsafe(48)
     token_hash = _hash_token(raw)
@@ -27,6 +37,7 @@ def create_refresh_token(db: Session, user: User) -> tuple[str, RefreshToken]:
         token_hash=token_hash,
         expires_at=expires_at,
         revoked=False,
+        family_id=family_id or secrets.token_hex(16),
     )
     db.add(row)
     db.commit()
@@ -34,42 +45,149 @@ def create_refresh_token(db: Session, user: User) -> tuple[str, RefreshToken]:
     return raw, row
 
 
-def validate_refresh_token(db: Session, raw_token: str) -> User:
-    token_hash = _hash_token(raw_token)
-    row = (
-        db.query(RefreshToken)
-        .filter(RefreshToken.token_hash == token_hash, RefreshToken.revoked.is_(False))
-        .first()
-    )
-    if not row or row.expires_at < datetime.utcnow():
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Недействительный или истёкший refresh-токен",
-        )
-    user = db.query(User).filter(User.id == row.user_id).first()
+def _active_user(db: Session, user_id: int) -> User:
+    user = db.query(User).filter(User.id == user_id).first()
     if not user or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Пользователь не найден")
     return user
 
 
+def _revoke_family_on_reuse(db: Session, row: RefreshToken) -> None:
+    query = db.query(RefreshToken).filter(RefreshToken.revoked.is_(False))
+    if row.family_id:
+        query = query.filter(RefreshToken.family_id == row.family_id)
+    else:
+        query = query.filter(RefreshToken.user_id == row.user_id)
+    revoked = query.update(
+        {"revoked": True, "revoked_at": datetime.utcnow(), "revoke_reason": "reuse"},
+        synchronize_session=False,
+    )
+    db.commit()
+    logger.warning(
+        "Refresh token reuse detected: user_id=%s family=%s, revoked %s token(s)",
+        row.user_id,
+        row.family_id or "-",
+        revoked,
+    )
+
+
+def _within_rotation_grace(row: RefreshToken, now: datetime) -> bool:
+    return row.revoked_at is not None and now - row.revoked_at <= timedelta(seconds=ROTATION_GRACE_SECONDS)
+
+
+def _family_has_live_token(db: Session, row: RefreshToken, now: datetime) -> bool:
+    """Grace only covers a sibling tab: the session must still be alive (not logged out / invalidated)."""
+    query = db.query(RefreshToken.id).filter(RefreshToken.revoked.is_(False), RefreshToken.expires_at > now)
+    if row.family_id:
+        query = query.filter(RefreshToken.family_id == row.family_id)
+    else:
+        query = query.filter(RefreshToken.user_id == row.user_id)
+    return query.first() is not None
+
+
+def rotate_refresh_token(db: Session, raw_token: str) -> tuple[str | None, User]:
+    """Exchange a refresh token for a new one.
+
+    A rotated token presented within ``ROTATION_GRACE_SECONDS`` of its rotation, while its family is
+    still alive, gets a new successor in the same family and the family's live tokens are marked
+    rotated: the browser may never have received the previous successor's cookie. So a replayed
+    rotated token inside the window gets a successor too; reuse detection then fires on the other
+    holder's next refresh after the window.
+
+    Returns ``(None, user)`` when the caller should issue an access token only and keep the cookie:
+    a concurrent refresh that lost the claim race, or a pre-upgrade token without a family.
+    """
+    now = datetime.utcnow()
+    row = db.query(RefreshToken).filter(RefreshToken.token_hash == _hash_token(raw_token)).first()
+    if row is None or row.expires_at < now:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_INVALID_TOKEN_DETAIL)
+    if row.revoked:
+        # Only a rotated token signals theft; logout / password / pre-upgrade revocations are plain 401.
+        if row.revoke_reason == "rotated":
+            if not _within_rotation_grace(row, now):
+                _revoke_family_on_reuse(db, row)
+            elif _family_has_live_token(db, row, now):
+                user = _active_user(db, row.user_id)
+                # Without a family the undelivered successor can't be found to revoke it.
+                if not row.family_id:
+                    return None, user
+                # The live-token check above is unlocked; this UPDATE is the gate, as the claim below.
+                superseded = (
+                    db.query(RefreshToken)
+                    .filter(
+                        RefreshToken.family_id == row.family_id,
+                        RefreshToken.revoked.is_(False),
+                        RefreshToken.expires_at > now,
+                    )
+                    .update(
+                        {"revoked": True, "revoked_at": now, "revoke_reason": "rotated"},
+                        synchronize_session=False,
+                    )
+                )
+                if superseded:
+                    raw, _ = create_refresh_token(db, user, family_id=row.family_id)
+                    return raw, user
+                db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_INVALID_TOKEN_DETAIL)
+
+    user = _active_user(db, row.user_id)
+    claimed = (
+        db.query(RefreshToken)
+        .filter(RefreshToken.id == row.id, RefreshToken.revoked.is_(False))
+        .update(
+            {"revoked": True, "revoked_at": now, "revoke_reason": "rotated"},
+            synchronize_session=False,
+        )
+    )
+    if not claimed:
+        db.commit()
+        return None, user
+    # Claim and successor commit together: a concurrent family revocation waits for the write lock
+    # and then revokes the successor too, instead of leaving it alive in a revoked session.
+    raw, _ = create_refresh_token(db, user, family_id=row.family_id)
+    return raw, user
+
+
 def revoke_refresh_token(db: Session, raw_token: str) -> None:
     token_hash = _hash_token(raw_token)
     row = db.query(RefreshToken).filter(RefreshToken.token_hash == token_hash).first()
-    if row:
+    if row and not row.revoked:
         row.revoked = True
+        row.revoked_at = datetime.utcnow()
+        row.revoke_reason = "logout"
         db.commit()
 
 
-def revoke_all_user_tokens(db: Session, user_id: int) -> None:
+def refresh_token_family(db: Session, raw_token: str) -> str | None:
+    row = db.query(RefreshToken.family_id).filter(RefreshToken.token_hash == _hash_token(raw_token)).first()
+    return row.family_id if row else None
+
+
+def revoke_token_family(db: Session, family_id: str, *, reason: str, commit: bool = True) -> None:
+    db.query(RefreshToken).filter(
+        RefreshToken.family_id == family_id,
+        RefreshToken.revoked.is_(False),
+    ).update(
+        {"revoked": True, "revoked_at": datetime.utcnow(), "revoke_reason": reason},
+        synchronize_session=False,
+    )
+    if commit:
+        db.commit()
+
+
+def invalidate_user_sessions(db: Session, user: User, *, reason: str, commit: bool = True) -> None:
+    """End every issued session: bump ``token_version`` (access / Mini App JWTs) and revoke refresh tokens."""
+    user.token_version = func.coalesce(User.token_version, 0) + 1
+    revoke_all_user_tokens(db, user.id, reason=reason, commit=commit)
+
+
+def revoke_all_user_tokens(db: Session, user_id: int, *, reason: str = "revoked", commit: bool = True) -> None:
     db.query(RefreshToken).filter(
         RefreshToken.user_id == user_id,
         RefreshToken.revoked.is_(False),
-    ).update({"revoked": True})
-    db.commit()
-
-
-def rotate_refresh_token(db: Session, raw_token: str) -> tuple[str, User]:
-    user = validate_refresh_token(db, raw_token)
-    revoke_refresh_token(db, raw_token)
-    raw, _ = create_refresh_token(db, user)
-    return raw, user
+    ).update(
+        {"revoked": True, "revoked_at": datetime.utcnow(), "revoke_reason": reason},
+        synchronize_session=False,
+    )
+    if commit:
+        db.commit()

@@ -5,10 +5,11 @@ import { Button } from '@/components/ui/button'
 import DocsLink from '@/components/shared/DocsLink'
 import { DOCS } from '@/lib/docsUrls'
 import { REFRESH_INTERVAL } from './useRoutingPage'
+import type { NodeStatus } from '@/types'
 
 interface RoutingPageHeaderProps {
   nodeName?: string | null
-  nodeStatus?: import('@/types').NodeStatus
+  nodeStatus?: NodeStatus
   isAdmin: boolean
   autoRefresh: boolean
   countdown: number

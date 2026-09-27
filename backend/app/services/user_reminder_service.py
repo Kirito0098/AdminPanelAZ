@@ -1,37 +1,40 @@
-"""Self-service user reminders: cert expiry, traffic limit, temp block."""
+"""Self-service user reminders: access expiry, cert expiry, traffic limit, temp block."""
 
 from __future__ import annotations
 
 import logging
 
+from datetime import datetime, timezone
+from pathlib import Path
 from sqlalchemy.orm import Session
 
-from pathlib import Path
-
 from app.config import get_settings
-from app.models import Node, User, VpnConfig, VpnType
+from app.models import Node, User, UserRole, VpnConfig, VpnType
 from app.services.app_setting_store import _get_setting
 from app.services.access_policy import AccessPolicyService
 from app.services.admin_notify import admin_notify_service
 from app.services.feature_guards import get_feature_service
-from app.services.node_manager import _is_vpn_node, get_adapter_for_node, node_metadata_dict
+from app.services.node_manager import is_vpn_node, get_adapter_for_node, node_metadata_dict
 from app.services.openvpn_cert import days_remaining_until
 from app.services.self_service import record_reminder_sent, reminder_recently_sent, self_service_reminder_enabled
 from app.services.telegram import send_tg_message
 
 logger = logging.getLogger(__name__)
 
+REMINDER_ACCESS = "access_expiry"
 REMINDER_CERT = "cert_expiry"
 REMINDER_TRAFFIC = "traffic_limit"
 REMINDER_TEMP_BLOCK = "temp_block"
 
 OWNER_EVENT_MAP = {
+    REMINDER_ACCESS: "access_expiry_reminder",
     REMINDER_CERT: "cert_expiry_reminder",
     REMINDER_TRAFFIC: "traffic_limit_reminder",
     REMINDER_TEMP_BLOCK: "temp_block_reminder",
 }
 
 ADMIN_EVENT_MAP = {
+    REMINDER_ACCESS: "user_access_expiry_reminder",
     REMINDER_CERT: "user_cert_expiry_reminder",
     REMINDER_TRAFFIC: "user_traffic_limit_reminder",
     REMINDER_TEMP_BLOCK: "user_temp_block_reminder",
@@ -40,6 +43,16 @@ ADMIN_EVENT_MAP = {
 
 def _cert_threshold() -> int:
     return max(1, int(get_settings().self_service_reminder_cert_days_threshold))
+
+
+def _access_threshold() -> int:
+    return max(1, int(get_settings().self_service_reminder_access_days_threshold))
+
+
+def _already_expired(value: datetime) -> bool:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value <= datetime.now(timezone.utc)
 
 
 def _traffic_warning_percent() -> int:
@@ -55,32 +68,34 @@ def _traffic_warning(limit_bytes: int | None, consumed_bytes: int | None) -> boo
 
 def _build_owner_message(
     reminder_type: str,
-    config: VpnConfig,
     details: str,
     *,
+    config: VpnConfig | None = None,
     client_timezone: str | None = None,
 ) -> str:
     from app.services.admin_notify import (
         _format_notify_card,
         _fmt_when,
         _line_code,
-        _line_text,
+        _line_html,
     )
     from app.services.notify_time import format_notify_when
 
     when = _fmt_when(format_notify_when(client_timezone))
     titles = {
+        REMINDER_ACCESS: "⚠️ <b>Доступ скоро истечёт</b>",
         REMINDER_CERT: "⚠️ <b>Сертификат скоро истечёт</b>",
         REMINDER_TRAFFIC: "📊 <b>Лимит трафика</b>",
         REMINDER_TEMP_BLOCK: "⛔ <b>Временная блокировка</b>",
     }
+    detail_lines = []
+    if config is not None:
+        detail_lines.append(_line_code("📁", "Клиент", config.client_name))
+    detail_lines.append(_line_html("📋", "Детали", details))
     return _format_notify_card(
         titles[reminder_type],
         when,
-        detail_lines=[
-            _line_code("📁", "Клиент", config.client_name),
-            _line_text("📋", "Детали", details),
-        ],
+        detail_lines=detail_lines,
     )
 
 
@@ -88,9 +103,10 @@ def _send_owner_reminder(
     db: Session,
     owner: User,
     reminder_type: str,
-    config: VpnConfig,
     details: str,
     dedup_key: str,
+    *,
+    config: VpnConfig | None = None,
 ) -> bool:
     if reminder_recently_sent(db, owner.id, reminder_type, dedup_key):
         return False
@@ -104,8 +120,8 @@ def _send_owner_reminder(
         if bot_token and get_feature_service().is_enabled("telegram"):
             text = _build_owner_message(
                 reminder_type,
-                config,
                 details,
+                config=config,
                 client_timezone=owner_tz,
             )
             send_tg_message(bot_token, owner.telegram_id, text)
@@ -115,11 +131,11 @@ def _send_owner_reminder(
         db,
         admin_event,
         actor_username=owner.username,
-        target_name=config.client_name,
-        target_type=config.vpn_type.value,
+        target_name=config.client_name if config is not None else None,
+        target_type=config.vpn_type.value if config is not None else None,
         details=details,
         subject_name=owner.username,
-        node_id=config.node_id,
+        node_id=config.node_id if config is not None else None,
         client_timezone=owner_tz,
     )
 
@@ -138,11 +154,25 @@ def process_user_reminders(db: Session) -> int:
         return 0
 
     sent = 0
+    access_threshold = _access_threshold()
     threshold = _cert_threshold()
+    users = db.query(User).filter(User.access_until.isnot(None)).all()
+    for user in users:
+        days_left = days_remaining_until(user.access_until)
+        if days_left is None or days_left > access_threshold:
+            continue
+        access_until = user.access_until
+        if access_until is None or _already_expired(access_until):
+            continue
+        dedup_key = f"user:{user.id}:access:{access_until.date().isoformat()}"
+        details = f"Доступ до <code>{access_until.date().isoformat()}</code>, осталось <b>{days_left}</b> дн."
+        if _send_owner_reminder(db, user, REMINDER_ACCESS, details, dedup_key):
+            sent += 1
+
     nodes = db.query(Node).all()
     settings = get_settings()
     for node in nodes:
-        if not _is_vpn_node(node):
+        if not is_vpn_node(node):
             continue
         try:
             adapter = get_adapter_for_node(node)
@@ -176,17 +206,21 @@ def process_user_reminders(db: Session) -> int:
 
             if config.vpn_type == VpnType.openvpn:
                 days_left = days_remaining_until(config.cert_expires_at)
-                if days_left is not None and days_left <= threshold:
+                if (
+                    days_left is not None
+                    and days_left <= threshold
+                    and not _already_expired(config.cert_expires_at)
+                ):
                     dedup_key = f"config:{config.id}"
                     details = f"Осталось <b>{days_left}</b> дн."
-                    if _send_owner_reminder(db, owner, REMINDER_CERT, config, details, dedup_key):
+                    if _send_owner_reminder(db, owner, REMINDER_CERT, details, dedup_key, config=config):
                         sent += 1
 
             if policy.get("block_mode") == "temp":
                 dedup_key = f"config:{config.id}:temp"
                 until = policy.get("block_until") or "—"
                 details = f"До: <code>{until}</code>"
-                if _send_owner_reminder(db, owner, REMINDER_TEMP_BLOCK, config, details, dedup_key):
+                if _send_owner_reminder(db, owner, REMINDER_TEMP_BLOCK, details, dedup_key, config=config):
                     sent += 1
 
             traffic_exceeded = bool(policy.get("traffic_limit_exceeded"))
@@ -203,7 +237,7 @@ def process_user_reminders(db: Session) -> int:
                     details = f"Превышен лимит: {consumed_human or '—'} / {limit_human or '—'}"
                 else:
                     details = f"Использовано {consumed_human or '—'} из {limit_human or '—'} ({_traffic_warning_percent()}%)"
-                if _send_owner_reminder(db, owner, REMINDER_TRAFFIC, config, details, dedup_key):
+                if _send_owner_reminder(db, owner, REMINDER_TRAFFIC, details, dedup_key, config=config):
                     sent += 1
 
     return sent

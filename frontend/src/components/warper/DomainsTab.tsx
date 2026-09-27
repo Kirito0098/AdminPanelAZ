@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Bot, Globe, RefreshCw, RotateCcw, Save } from 'lucide-react'
 import {
   getWarperDomains,
+  postWarperUpdateLists,
   saveWarperUserDomainsText,
   setWarperDomainList,
 } from '@/api/client'
@@ -14,6 +15,8 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useLatestRequest } from '@/hooks/useLatestRequest'
+import { runLatest } from '@/lib/latestRequest'
 import type { WarperDomainsResponse, WarperHealthResponse } from '@/types'
 import { buildUserDomainsTextFromItems, countActiveTextLines, isWarperDisabled } from './utils'
 
@@ -45,6 +48,15 @@ export default function DomainsTab({ health, initialDomains, onDomainsChange }: 
   const [listBusy, setListBusy] = useState<string | null>(null)
   const [listStatus, setListStatus] = useState({ gemini: false, chatgpt: false })
   const appliedInitialKeyRef = useRef<string | null>(null)
+  const requests = useLatestRequest(activeNode?.id ?? null)
+  const saveRequests = useLatestRequest(activeNode?.id ?? null)
+
+  useEffect(() => {
+    setSavedText('')
+    setDraftText('')
+    setLoadError(null)
+    setLoading(true)
+  }, [activeNode?.id])
 
   const dirty = draftText !== savedText
   const domainCount = useMemo(() => countActiveTextLines(draftText), [draftText])
@@ -67,6 +79,7 @@ export default function DomainsTab({ health, initialDomains, onDomainsChange }: 
 
   const load = useCallback(async () => {
     if (!health?.installed) {
+      requests.begin()
       setSavedText('')
       setDraftText('')
       setLoading(false)
@@ -76,15 +89,12 @@ export default function DomainsTab({ health, initialDomains, onDomainsChange }: 
     }
     setLoading(true)
     setLoadError(null)
-    try {
-      const listsData = await getWarperDomains()
-      applyPayload(listsData)
-    } catch (err) {
-      setLoadError(err instanceof Error ? err.message : 'Не удалось загрузить домены')
-    } finally {
-      setLoading(false)
-    }
-  }, [applyPayload, health?.installed, onDomainsChange])
+    await runLatest(requests, getWarperDomains, {
+      apply: applyPayload,
+      fail: (err) => setLoadError(err instanceof Error ? err.message : 'Не удалось загрузить домены'),
+      settle: () => setLoading(false),
+    })
+  }, [applyPayload, health?.installed, onDomainsChange, requests])
 
   useEffect(() => {
     if (!health?.installed) {
@@ -104,6 +114,7 @@ export default function DomainsTab({ health, initialDomains, onDomainsChange }: 
     appliedInitialKeyRef.current = seedKey
 
     if (initialDomains) {
+      requests.begin()
       applyPayload(initialDomains)
       setLoadError(null)
       setLoading(false)
@@ -111,16 +122,19 @@ export default function DomainsTab({ health, initialDomains, onDomainsChange }: 
     }
 
     void load()
-  }, [activeNode?.id, applyPayload, health?.installed, initialDomains, load])
+  }, [activeNode?.id, applyPayload, health?.installed, initialDomains, load, requests])
 
   async function handleSave() {
     if (!dirty) return
+    const savedDraft = draftText
+    const isCurrent = saveRequests.begin()
     setSaving(true)
     try {
-      const result = await saveWarperUserDomainsText(draftText)
-      setSavedText(draftText)
-      onDomainsChange?.(countActiveTextLines(draftText))
+      const result = await saveWarperUserDomainsText(savedDraft)
       success(result.message ?? 'Домены сохранены')
+      if (!isCurrent()) return
+      setSavedText(savedDraft)
+      onDomainsChange?.(countActiveTextLines(savedDraft))
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Не удалось сохранить домены')
     } finally {
@@ -138,6 +152,19 @@ export default function DomainsTab({ health, initialDomains, onDomainsChange }: 
       await load()
     } catch (err) {
       notifyError(err instanceof Error ? err.message : `Не удалось изменить список ${name}`)
+    } finally {
+      setListBusy(null)
+    }
+  }
+
+  async function updateBuiltinLists() {
+    setListBusy('update')
+    try {
+      const result = await postWarperUpdateLists()
+      success(result.message || 'Встроенные списки обновлены')
+      await load()
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Не удалось обновить встроенные списки')
     } finally {
       setListBusy(null)
     }
@@ -190,6 +217,17 @@ export default function DomainsTab({ health, initialDomains, onDomainsChange }: 
               </div>
             )
           })}
+        </div>
+        <div className="mt-3 flex justify-end">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={disabled || listBusy !== null}
+            onClick={() => void updateBuiltinLists()}
+          >
+            <RefreshCw className={`mr-1.5 h-4 w-4 ${listBusy === 'update' ? 'animate-spin' : ''}`} />
+            Обновить списки из репозитория
+          </Button>
         </div>
       </StatusPanel>
 

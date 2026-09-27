@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Node, NodeSyncGroup, SyncStatus
 from app.services.node_manager import get_adapter_for_node
+from app.services.node_sync.group_status import fail_group_on_error
 from app.services.node_sync.groups import (
     effective_openvpn_domain,
     effective_wireguard_domain,
@@ -31,7 +32,7 @@ from app.services.node_sync.groups import (
     parse_replica_node_ids,
 )
 from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
-from app.services.node_sync.vpn_state_sync import copy_openvpn_profiles_from_primary
+from app.services.node_sync.vpn_state_sync import clear_openvpn_restart_pending, copy_openvpn_profiles_from_primary
 from app.services.openvpn_remote_hosts import parse_hosts_json
 from app.services.profile_delivery import patch_openvpn_profiles_on_node
 
@@ -140,9 +141,9 @@ def apply_shared_domain_to_members(
         for index, node in enumerate(nodes):
             percent = 45 + int((index / total) * 50)
             progress(percent, f"{node.name}: doall.sh + client.sh 7…")
-            adapter = get_adapter_for_node(node)
             is_primary = node.id == group.primary_node_id
             try:
+                adapter = get_adapter_for_node(node)
                 doall_output = adapter.apply_config_changes()
                 recreate_output = adapter.recreate_profiles()
                 hosts = parse_hosts_json(node.openvpn_remote_hosts)
@@ -172,6 +173,8 @@ def apply_shared_domain_to_members(
                         }
                     )
                 progress(percent, f"{node.name}: перезапуск OpenVPN…")
+                # Read before the restart: a PKI sync marking the node meanwhile still owes its own.
+                restart_owed = not is_primary and node.openvpn_restart_pending is True
                 if bool(node.openvpn_multihome):
                     from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
 
@@ -191,6 +194,8 @@ def apply_shared_domain_to_members(
                         **restart_result,
                     }
                 )
+                if restart_owed and restart_result.get("success") and not restart_result.get("failed"):
+                    clear_openvpn_restart_pending(db, node)
                 if restart_result.get("failed"):
                     result["errors"].append(
                         {
@@ -236,9 +241,10 @@ def make_shared_domain_callable(group_id: int) -> Callable[..., dict[str, Any]]:
             if group is None:
                 raise RuntimeError("Sync group не найдена")
 
-            result = apply_shared_domain_to_members(
-                db, group, run_apply=True, progress_callback=progress_updater
-            )
+            with fail_group_on_error(db, captured_group_id):
+                result = apply_shared_domain_to_members(
+                    db, group, run_apply=True, progress_callback=progress_updater
+                )
 
             group.last_sync_at = datetime.utcnow()
             if result.get("success"):

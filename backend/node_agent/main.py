@@ -8,6 +8,7 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -17,6 +18,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from app.models import VpnType
 from app.paths import get_cidr_list_dir
 from app.services.antizapret import AntiZapretService
+from app.services.atomic_file import atomic_write_text
+from app.services.antizapret_backup import resolve_backup_archive
 from app.services.antizapret_settings import build_schema, filter_known_keys, is_openvpn_verbose_log_enabled, read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
@@ -28,13 +31,16 @@ from app.services.node_update import (
     resolve_repo_root,
     schedule_agent_restart,
 )
-from app.services.openvpn_management import openvpn_management_service
+from app.services.openvpn_management import KILL_CLIENT_NAME_PATTERN, openvpn_management_service
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.profile_files import profile_files_batch_key
+from app.services.runtime_peer_batch import CLIENTS_PER_REQUEST
 from app.services.server_monitor import ServerMonitorService
 from app.services.wg_runtime import block_client_runtime, unblock_client_runtime
+from app.services.wg_runtime import block_clients_runtime as wg_block_clients_runtime
 from app.services.awg2_runtime import (
     block_client_runtime as awg2_block_client_runtime,
+    block_clients_runtime as awg2_block_clients_runtime,
     unblock_client_runtime as awg2_unblock_client_runtime,
 )
 from app.services.warper import WarperService, run_warper_action
@@ -44,6 +50,7 @@ from app.services.awg2 import (
     Awg2Service,
     is_awg2_profile_path,
 )
+from app.services.openvpn_buffer_guard import fetch_unit_journal, normalize_watch_unit
 
 NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", "change-me-node-agent-key")
 ANTIZAPRET_PATH = Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret"))
@@ -76,7 +83,7 @@ async def _node_agent_lifespan(_: FastAPI):
     try:
         from app.services.systemd_refresh import migrate_stale_systemd_units_on_startup
 
-        migrate_stale_systemd_units_on_startup(resolve_repo_root(), panel=False, node=True)
+        migrate_stale_systemd_units_on_startup(resolve_repo_root(), panel=False, node=True, proxy=True)
     except Exception:
         pass
     yield
@@ -137,6 +144,10 @@ class WireGuardClientRequest(BaseModel):
     client_name: str = Field(min_length=1, max_length=32)
 
 
+class ClientNamesRequest(BaseModel):
+    client_names: list[Annotated[str, Field(min_length=1, max_length=32)]] = Field(max_length=CLIENTS_PER_REQUEST)
+
+
 class Awg2ClientRequest(BaseModel):
     client_name: str = Field(min_length=1, max_length=32)
     ttl: str | None = None
@@ -172,6 +183,16 @@ class OpenVpnMultihomeRequest(BaseModel):
     enabled: bool = False
 
 
+class OpenVpnJournalSampleRequest(BaseModel):
+    unit: str = Field(min_length=1, max_length=128)
+    window_seconds: int = Field(default=60, ge=5, le=600)
+
+
+class OpenVpnKillClientRequest(BaseModel):
+    unit: str = Field(min_length=1, max_length=128)
+    client_name: str = Field(min_length=1, max_length=32, pattern=KILL_CLIENT_NAME_PATTERN)
+
+
 class RotateApiKeyRequest(BaseModel):
     new_api_key: str = Field(min_length=24)
 
@@ -186,11 +207,11 @@ class ProvisionMtlsRequest(BaseModel):
 def _persist_api_key(new_key: str) -> None:
     global NODE_AGENT_API_KEY
     NODE_AGENT_API_KEY = new_key
-    if not NODE_AGENT_ENV_FILE.is_file():
-        return
+    # The unit no longer carries the key: without the file a restart would lose the rotated key.
+    existing = NODE_AGENT_ENV_FILE.read_text(encoding="utf-8") if NODE_AGENT_ENV_FILE.is_file() else ""
     lines: list[str] = []
     replaced = False
-    for line in NODE_AGENT_ENV_FILE.read_text(encoding="utf-8").splitlines():
+    for line in existing.splitlines():
         if line.startswith("NODE_AGENT_API_KEY="):
             lines.append(f"NODE_AGENT_API_KEY={new_key}")
             replaced = True
@@ -198,7 +219,7 @@ def _persist_api_key(new_key: str) -> None:
             lines.append(line)
     if not replaced:
         lines.append(f"NODE_AGENT_API_KEY={new_key}")
-    NODE_AGENT_ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(NODE_AGENT_ENV_FILE, "\n".join(lines) + "\n")
 
 
 @app.get("/health")
@@ -286,6 +307,14 @@ def openvpn_disconnect(payload: WireGuardClientRequest, _: None = Depends(verify
     return openvpn_management_service.disconnect_client(payload.client_name)
 
 
+@app.post("/openvpn/management/kill")
+def openvpn_kill(payload: OpenVpnKillClientRequest, _: None = Depends(verify_api_key)):
+    unit = normalize_watch_unit(payload.unit)
+    if not unit:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимый OpenVPN unit")
+    return openvpn_management_service.kill_client(unit, payload.client_name)
+
+
 @app.get("/openvpn/multihome")
 def openvpn_multihome_status(_: None = Depends(verify_api_key)):
     return service.get_openvpn_multihome_status()
@@ -294,6 +323,14 @@ def openvpn_multihome_status(_: None = Depends(verify_api_key)):
 @app.post("/openvpn/multihome")
 def openvpn_multihome_ensure(payload: OpenVpnMultihomeRequest, _: None = Depends(verify_api_key)):
     return service.ensure_openvpn_multihome(bool(payload.enabled))
+
+
+@app.post("/openvpn/buffer-guard/journal-sample")
+def openvpn_buffer_guard_journal_sample(
+    payload: OpenVpnJournalSampleRequest,
+    _: None = Depends(verify_api_key),
+):
+    return fetch_unit_journal(payload.unit, payload.window_seconds)
 
 
 @app.get("/clients/openvpn")
@@ -353,6 +390,16 @@ def add_awg2_client(payload: Awg2ClientRequest, _: None = Depends(verify_api_key
 def delete_awg2_client(client_name: str, _: None = Depends(verify_api_key)):
     output = Awg2Service().delete_client(client_name)
     return {"message": f"Клиент '{client_name}' удалён", "detail": output}
+
+
+@app.post("/clients/wireguard/runtime/block-batch")
+def block_wireguard_batch(payload: ClientNamesRequest, _: None = Depends(verify_api_key)):
+    return {"results": wg_block_clients_runtime(payload.client_names)}
+
+
+@app.post("/clients/amneziawg2/runtime/block-batch")
+def block_awg2_batch(payload: ClientNamesRequest, _: None = Depends(verify_api_key)):
+    return {"results": awg2_block_clients_runtime(payload.client_names)}
 
 
 @app.post("/clients/wireguard/{client_name}/block")
@@ -463,12 +510,8 @@ def download_antizapret_backup(
     name: str = Query(..., min_length=1),
     _: None = Depends(verify_api_key),
 ):
-    candidate = Path(name)
-    if not candidate.is_file():
-        candidate = ANTIZAPRET_PATH / name
-    if not candidate.is_file():
-        candidate = Path("/root") / name
-    if not candidate.is_file():
+    candidate = resolve_backup_archive(name, [ANTIZAPRET_PATH, Path("/root")])
+    if candidate is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив не найден")
     return FileResponse(candidate, filename=candidate.name, media_type="application/gzip")
 
@@ -681,6 +724,8 @@ def routing_antizapret_settings_put(payload: dict, _: None = Depends(verify_api_
         return update_antizapret_settings(ANTIZAPRET_PATH / "setup", filter_known_keys(payload))
     except PermissionError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Нет прав на запись") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 class WarperDomainRequest(BaseModel):
@@ -724,13 +769,32 @@ class WarperModeWarpRequest(BaseModel):
 
 
 class WarperModeSlaveRequest(BaseModel):
-    host: str = Field(..., min_length=1)
-    port: int = Field(..., ge=1, le=65535)
-    key: str = Field(..., min_length=1)
+    host: str | None = None
+    port: int | None = Field(default=None, ge=1, le=65535)
+    key: str | None = None
+    link: str | None = None
 
 
 class WarperModeWgRequest(BaseModel):
     config_path: str = Field(..., min_length=1)
+
+
+class WarperModeLinkRequest(BaseModel):
+    link: str = Field(..., min_length=1)
+
+
+class WarperModeOpenVpnRequest(BaseModel):
+    config_path: str = Field(..., min_length=1)
+    username: str | None = None
+    password: str | None = None
+
+
+class WarperOvpnForgetRequest(BaseModel):
+    config_path: str = Field(..., min_length=1)
+
+
+class WarperResolveCleanRequest(BaseModel):
+    domain: str | None = None
 
 
 class WarperFullVpnRequest(BaseModel):
@@ -1044,7 +1108,9 @@ def warper_settings_mode(_: None = Depends(verify_api_key)):
 def warper_settings_options(_: None = Depends(verify_api_key)):
     return {
         "warp_keys": run_warper_action("list_warp_keys"),
+        "warp_key_items": run_warper_action("list_warp_key_items"),
         "wg_configs": run_warper_action("list_wg_configs"),
+        "ovpn_configs": run_warper_action("list_ovpn_configs"),
     }
 
 
@@ -1055,7 +1121,13 @@ def warper_settings_mode_warp(payload: WarperModeWarpRequest, _: None = Depends(
 
 @app.post("/warper/settings/mode/slave")
 def warper_settings_mode_slave(payload: WarperModeSlaveRequest, _: None = Depends(verify_api_key)):
-    return run_warper_action("set_mode_slave", host=payload.host, port=payload.port, key=payload.key)
+    return run_warper_action(
+        "set_mode_slave",
+        host=payload.host,
+        port=payload.port,
+        key=payload.key,
+        link=payload.link,
+    )
 
 
 @app.post("/warper/settings/mode/wg")
@@ -1063,9 +1135,94 @@ def warper_settings_mode_wg(payload: WarperModeWgRequest, _: None = Depends(veri
     return run_warper_action("set_mode_wg", config_path=payload.config_path)
 
 
+@app.post("/warper/settings/mode/vless")
+def warper_settings_mode_vless(payload: WarperModeLinkRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_mode_vless", link=payload.link)
+
+
+@app.post("/warper/settings/mode/hy2")
+def warper_settings_mode_hy2(payload: WarperModeLinkRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_mode_hy2", link=payload.link)
+
+
+@app.post("/warper/settings/mode/openvpn")
+def warper_settings_mode_openvpn(payload: WarperModeOpenVpnRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action(
+        "set_mode_openvpn",
+        config_path=payload.config_path,
+        username=payload.username,
+        password=payload.password,
+    )
+
+
+@app.post("/warper/settings/ovpn/forget")
+def warper_settings_ovpn_forget(payload: WarperOvpnForgetRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("forget_ovpn_credentials", config_path=payload.config_path)
+
+
 @app.put("/warper/settings/fullvpn")
 def warper_settings_fullvpn(payload: WarperFullVpnRequest, _: None = Depends(verify_api_key)):
     return run_warper_action("set_fullvpn", enable=payload.enable)
+
+
+@app.put("/warper/settings/autopatch")
+def warper_settings_autopatch(payload: WarperFullVpnRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_autopatch", enable=payload.enable)
+
+
+@app.post("/warper/resync")
+def warper_resync(_: None = Depends(verify_api_key)):
+    return run_warper_action("resync")
+
+
+@app.post("/warper/kresd/restart")
+def warper_kresd_restart(_: None = Depends(verify_api_key)):
+    return run_warper_action("restart_kresd")
+
+
+@app.post("/warper/domains/update-lists")
+def warper_domains_update_lists(_: None = Depends(verify_api_key)):
+    return run_warper_action("update_lists")
+
+
+@app.get("/warper/resolve")
+def warper_resolve_get(_: None = Depends(verify_api_key)):
+    return run_warper_action("get_auto_resolve")
+
+
+@app.put("/warper/resolve")
+def warper_resolve_set(payload: WarperFullVpnRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("set_auto_resolve", enable=payload.enable)
+
+
+@app.post("/warper/resolve/sync")
+def warper_resolve_sync(force: bool = False, _: None = Depends(verify_api_key)):
+    return run_warper_action("resolve_sync", force=force)
+
+
+@app.post("/warper/resolve/clean")
+def warper_resolve_clean(payload: WarperResolveCleanRequest, _: None = Depends(verify_api_key)):
+    return run_warper_action("resolve_clean", domain=payload.domain)
+
+
+@app.get("/warper/ip-routes")
+def warper_ip_routes(_: None = Depends(verify_api_key)):
+    return {"routes": run_warper_action("list_ip_routes")}
+
+
+@app.post("/warper/ip-routes/clear")
+def warper_ip_routes_clear(_: None = Depends(verify_api_key)):
+    return run_warper_action("clear_ip_routes")
+
+
+@app.get("/warper/subnets")
+def warper_subnets(_: None = Depends(verify_api_key)):
+    return {"subnets": run_warper_action("get_subnets")}
+
+
+@app.get("/warper/singbox/status")
+def warper_singbox_status(_: None = Depends(verify_api_key)):
+    return run_warper_action("singbox_status")
 
 
 @app.put("/warper/settings/subnet")
@@ -1085,8 +1242,6 @@ def warper_settings_log_level(payload: WarperLogLevelRequest, _: None = Depends(
 
 @app.post("/warper/singbox/{action}")
 def warper_singbox_action(action: str, _: None = Depends(verify_api_key)):
-    if action not in {"start", "stop", "restart"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Допустимо: start, stop, restart")
     return run_warper_action("singbox_action", action=action)
 
 

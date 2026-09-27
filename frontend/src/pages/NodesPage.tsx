@@ -17,7 +17,6 @@ import {
   ApiError,
   checkNodeHealth,
   createNode,
-  deleteNode,
   listNodeTransports,
   patchNodeTransport,
   preflightNodeTransport,
@@ -144,6 +143,7 @@ export default function NodesPage() {
     refreshSyncGroups,
     applySyncGroups,
     activate,
+    deleteNode,
   } = useNode()
   const { features } = useFeatureModules()
   // Default-off toggle: treat missing key as disabled (isEnabled() falls back to true).
@@ -1822,7 +1822,7 @@ export default function NodesPage() {
                   variant: 'warning',
                   title: 'Старый ключ перестанет работать',
                   children:
-                    'Будет сгенерирован новый API-ключ. Обновите его в конфигурации node agent на сервере, иначе связь с панелью прервётся.',
+                    'Панель передаст агенту новый API-ключ: агент сразу перейдёт на него и сохранит в backend/node_agent.env (права 600), на сервере ничего править не нужно. Узел должен быть на связи. Сначала обновите агент до 1.11.0: агент 1.8.0 может потерять новый ключ при перезапуске.',
                 }
               : confirmAction === 'enable-mtls'
                 ? confirmTarget && isProxyNode(confirmTarget)

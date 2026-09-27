@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, BarChart3 } from 'lucide-react'
 import { getWarperTraffic } from '@/api/client'
 import StatusPanel from '@/components/noc/StatusPanel'
@@ -7,9 +7,13 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useLatestRequest } from '@/hooks/useLatestRequest'
 import { formatDate, formatTime } from '@/lib/datetime'
+import { runLatest } from '@/lib/latestRequest'
 import type { WarperHealthResponse } from '@/types'
-import WarperTrafficChart, { type WarperTrafficChartPoint } from './WarperTrafficChart'
+import type { WarperTrafficChartPoint } from './WarperTrafficChart'
+
+const WarperTrafficChart = lazy(() => import('./WarperTrafficChart'))
 import { WarperStatTile } from './WarperSection'
 import { formatBytes } from './utils'
 
@@ -129,24 +133,25 @@ export default function TrafficTab({ health, embedded = false, hideTitle = false
   const [period, setPeriod] = useState<PeriodKey>('today')
   const [data, setData] = useState<Record<string, unknown>>({})
   const [loading, setLoading] = useState(true)
+  const requests = useLatestRequest(activeNode?.id ?? null)
 
   const load = useCallback(async () => {
     if (!health?.installed) {
+      requests.begin()
       setData({})
       setLoading(false)
       return
     }
     setLoading(true)
-    try {
-      const response = await getWarperTraffic(period)
-      setData(response.data ?? {})
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Не удалось загрузить трафик')
-      setData({})
-    } finally {
-      setLoading(false)
-    }
-  }, [health?.installed, notifyError, period])
+    await runLatest(requests, () => getWarperTraffic(period), {
+      apply: (response) => setData(response.data ?? {}),
+      fail: (err) => {
+        notifyError(err instanceof Error ? err.message : 'Не удалось загрузить трафик')
+        setData({})
+      },
+      settle: () => setLoading(false),
+    })
+  }, [health?.installed, notifyError, period, requests])
 
   useEffect(() => {
     void load()
@@ -239,7 +244,9 @@ export default function TrafficTab({ health, embedded = false, hideTitle = false
                 </p>
               </div>
             </div>
-            <WarperTrafficChart points={chartPoints} embedded={embedded} />
+            <Suspense fallback={<Spinner />}>
+              <WarperTrafficChart points={chartPoints} embedded={embedded} />
+            </Suspense>
           </div>
 
           {summary && (

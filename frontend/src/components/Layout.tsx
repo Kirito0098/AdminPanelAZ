@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { LogOut, Menu, Moon, Radio, Shield, Sun, User } from 'lucide-react'
 import NodeSelector from '@/components/NodeSelector'
+import ActiveNodeChangedBanner from '@/components/ActiveNodeChangedBanner'
 import HaScopeEnforcer from '@/components/HaScopeEnforcer'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -270,6 +271,7 @@ export default function Layout() {
         </header>
 
         <main className="flex-1 overflow-auto p-4 lg:p-6">
+          <ActiveNodeChangedBanner />
           <Outlet />
         </main>
       </div>

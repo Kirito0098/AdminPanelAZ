@@ -12,12 +12,15 @@ import {
   verifyPasskeyLogin,
 } from '@/api/client'
 import { authenticatePasskey } from '@/lib/passkeys'
-import { storeWebSessionId } from '@/lib/webSession'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import Spinner from '@/components/ui/Spinner'
+import ServerUnavailableScreen from '@/components/ServerUnavailableScreen'
+import SettingsAlert from '@/components/settings/SettingsAlert'
+import { readLoginRedirectParams } from '@/lib/loginRedirectParams'
+import { clearWebSessionId, storeWebSessionId } from '@/lib/webSession'
 import { useAuth } from '@/context/AuthContext'
 import { useNotifications } from '@/context/NotificationContext'
 
@@ -33,7 +36,7 @@ function resolveApiBase(): string {
 }
 
 export default function LoginPage() {
-  const { user, login, loading, setToken } = useAuth()
+  const { user, login, loading, setToken, unavailable, retry, sessionEnded } = useAuth()
   const { error: notifyError } = useNotifications()
   const [searchParams] = useSearchParams()
   const [username, setUsername] = useState('')
@@ -59,18 +62,17 @@ export default function LoginPage() {
   )
 
   useEffect(() => {
-    const hashToken = window.location.hash.match(/^#token=(.+)$/)?.[1]
-    const queryToken = searchParams.get('token')
-    const token = hashToken || queryToken
+    const { token, webSessionId, tgError } = readLoginRedirectParams(window.location.hash, searchParams)
     if (token && setToken) {
-      setToken(decodeURIComponent(token))
-      if (hashToken) {
+      if (webSessionId) storeWebSessionId(webSessionId)
+      else clearWebSessionId()
+      setToken(token)
+      if (window.location.hash.startsWith('#token=')) {
         window.history.replaceState(null, '', window.location.pathname + window.location.search)
       }
     }
-    const tgError = searchParams.get('tg_error')
     if (tgError) {
-      notifyError(decodeURIComponent(tgError))
+      notifyError(tgError)
       const next = new URLSearchParams(searchParams)
       next.delete('tg_error')
       const qs = next.toString()
@@ -178,6 +180,7 @@ export default function LoginPage() {
   }
 
   if (user) return <Navigate to="/" replace />
+  if (unavailable) return <ServerUnavailableScreen message={unavailable} onRetry={() => void retry()} />
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -185,7 +188,6 @@ export default function LoginPage() {
     try {
       if (needs2FA && tempToken) {
         const res = await login2FA(tempToken, totpCode)
-        if (res.web_session_id) storeWebSessionId(res.web_session_id)
         if (setToken) await setToken(res.access_token)
         return
       }
@@ -230,7 +232,6 @@ export default function LoginPage() {
       const { options } = await getPasskeyLoginOptions(tempToken)
       const { sessionKey, credential } = await authenticatePasskey(options)
       const res = await verifyPasskeyLogin(tempToken, sessionKey, credential)
-      if (res.web_session_id) storeWebSessionId(res.web_session_id)
       if (setToken) await setToken(res.access_token)
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Passkey вход не выполнен')
@@ -250,6 +251,11 @@ export default function LoginPage() {
           <CardDescription>Панель администрирования</CardDescription>
         </CardHeader>
         <CardContent className="min-w-0">
+          {sessionEnded && (
+            <SettingsAlert variant="info" className="mb-4">
+              Сессия завершена: срок входа истёк или сессию отозвали. Войдите снова.
+            </SettingsAlert>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="username">Логин</Label>

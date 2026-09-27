@@ -514,18 +514,21 @@ backup_env_for_reinstall() {
   local stamp
   stamp="$(date +%Y%m%d-%H%M%S)"
   ENV_BACKUP_DIR="$ROOT_DIR/.reinstall-backup/$stamp"
-  mkdir -p "$ENV_BACKUP_DIR"
+  install -d -m 700 "$ROOT_DIR/.reinstall-backup" "$ENV_BACKUP_DIR"
 
   if [[ -f "$ENV_FILE" ]]; then
     cp -a "$ENV_FILE" "$ENV_BACKUP_DIR/.env"
+    chmod 600 "$ENV_BACKUP_DIR/.env"
     log "Резервная копия: $ENV_BACKUP_DIR/.env"
   fi
   if [[ -f "$NODE_ENV_FILE" ]]; then
     cp -a "$NODE_ENV_FILE" "$ENV_BACKUP_DIR/node_agent.env"
+    chmod 600 "$ENV_BACKUP_DIR/node_agent.env"
     log "Резервная копия: $ENV_BACKUP_DIR/node_agent.env"
   fi
   if [[ -f "$PROXY_ENV_FILE" ]]; then
     cp -a "$PROXY_ENV_FILE" "$ENV_BACKUP_DIR/proxy_agent.env"
+    chmod 600 "$ENV_BACKUP_DIR/proxy_agent.env"
     log "Резервная копия: $ENV_BACKUP_DIR/proxy_agent.env"
   fi
 }
@@ -551,14 +554,17 @@ offer_restore_env_backup() {
 restore_env_backup() {
   if [[ -f "$ENV_BACKUP_DIR/.env" ]]; then
     cp -a "$ENV_BACKUP_DIR/.env" "$ENV_FILE"
+    chmod 600 "$ENV_FILE"
     log "Восстановлен backend/.env из $ENV_BACKUP_DIR"
   fi
   if [[ -f "$ENV_BACKUP_DIR/node_agent.env" ]]; then
     cp -a "$ENV_BACKUP_DIR/node_agent.env" "$NODE_ENV_FILE"
+    chmod 600 "$NODE_ENV_FILE"
     log "Восстановлен backend/node_agent.env из $ENV_BACKUP_DIR"
   fi
   if [[ -f "$ENV_BACKUP_DIR/proxy_agent.env" ]]; then
     cp -a "$ENV_BACKUP_DIR/proxy_agent.env" "$PROXY_ENV_FILE"
+    chmod 600 "$PROXY_ENV_FILE"
     log "Восстановлен backend/proxy_agent.env из $ENV_BACKUP_DIR"
   fi
 }
@@ -581,7 +587,7 @@ run_reinstall_action() {
 
   backup_env_for_reinstall
 
-  local -a uninstall_args=(--purge-state --remove-nginx --remove-firewall --remove-system-config --skip-confirm)
+  local -a uninstall_args=(--purge-state --remove-nginx --remove-firewall --remove-system-config --keep-agent-pki --skip-confirm)
   if [[ "$NON_INTERACTIVE" == true || "$ACCEPT_DEFAULTS" == true ]]; then
     uninstall_args+=(--yes)
   fi
@@ -737,6 +743,10 @@ random_hex() {
   fi
 }
 
+# Node 20 больше не поддерживается; ставим актуальную LTS.
+NODE_MIN_MAJOR=22
+NODE_INSTALL_MAJOR=24
+
 node_major_version() {
   if ! command -v node >/dev/null 2>&1; then
     echo 0
@@ -745,35 +755,49 @@ node_major_version() {
   node -v | sed 's/^v//' | cut -d. -f1
 }
 
+# Мажорная версия nodejs, которую предлагает apt (0 — нет кандидата).
+node_apt_candidate_major() {
+  local candidate
+  candidate="$(apt-cache policy nodejs 2>/dev/null | awk '/Candidate:/ {print $2; exit}')"
+  candidate="${candidate#*:}"
+  if [[ "$candidate" =~ ^([0-9]+)\. ]]; then
+    echo "${BASH_REMATCH[1]}"
+  else
+    echo 0
+  fi
+}
+
 install_nodejs() {
   local major
   major="$(node_major_version)"
-  if [[ "$major" -ge 20 ]]; then
+  if [[ "$major" -ge "$NODE_MIN_MAJOR" ]]; then
     log "Node.js $(node -v) — OK"
     return
   fi
 
-  if [[ "$major" -ge 18 ]]; then
-    warn "Node.js $(node -v) ниже рекомендуемого минимума (20+), обновление..."
+  if [[ "$major" -gt 0 ]]; then
+    warn "Node.js $(node -v) больше не поддерживается (нужен ${NODE_MIN_MAJOR}+), обновление..."
   else
-    log "Установка Node.js 20+..."
+    log "Установка Node.js ${NODE_INSTALL_MAJOR}..."
   fi
 
-  if apt-cache show nodejs 2>/dev/null | grep -qE '^Version: (20|22)'; then
-    apt-get install -y nodejs npm
+  if [[ "$(node_apt_candidate_major)" -ge "$NODE_MIN_MAJOR" ]]; then
+    # nodejs из NodeSource уже содержит npm, и пакет npm Debian с ним конфликтует.
+    apt-get install -y nodejs
+    command -v npm >/dev/null 2>&1 || apt-get install -y npm
     major="$(node_major_version)"
-    if [[ "$major" -ge 20 ]]; then
+    if [[ "$major" -ge "$NODE_MIN_MAJOR" ]]; then
       log "Node.js $(node -v) установлен из apt"
       return
     fi
   fi
 
-  log "Подключение NodeSource (Node.js 20.x)..."
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  log "Подключение NodeSource (Node.js ${NODE_INSTALL_MAJOR}.x)..."
+  curl -fsSL "https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" | bash -
   apt-get install -y nodejs
   major="$(node_major_version)"
-  if [[ "$major" -lt 20 ]]; then
-    die "Не удалось установить Node.js 20+ (текущая версия: $(node -v 2>/dev/null || echo 'нет'))"
+  if [[ "$major" -lt "$NODE_MIN_MAJOR" ]]; then
+    die "Не удалось установить Node.js ${NODE_MIN_MAJOR}+ (текущая версия: $(node -v 2>/dev/null || echo 'нет'))"
   fi
   log "Node.js $(node -v) установлен"
 }
@@ -1001,6 +1025,50 @@ proxy_env_set() {
   fi
 }
 
+agent_env_value() {
+  local file="$1" key="$2"
+  [[ -f "$file" ]] || return 0
+  sed -n "s/^${key}=//p" "$file" | tail -1
+}
+
+# Сертификат агента не истёк, подписан этим CA и соответствует ключу.
+agent_mtls_bundle_valid() {
+  local ca="$1" cert="$2" key="$3"
+  openssl verify -CAfile "$ca" "$cert" >/dev/null 2>&1 || return 1
+  [[ "$(openssl x509 -in "$cert" -noout -pubkey 2>/dev/null)" == "$(openssl pkey -in "$key" -pubout 2>/dev/null)" ]]
+}
+
+# agent_env_preserve <env-файл> <NODE|PROXY>
+# Ключ и mTLS, которые уже знает панель, переживают пересоздание env-файла из примера:
+# иначе панель теряет связь с агентом до ручной перепривязки.
+agent_env_preserve() {
+  local file="$1" prefix="$2" key ca cert pkey
+  AGENT_PRESERVED_KEY=""
+  AGENT_PRESERVED_MTLS=()
+  [[ -f "$file" ]] || return 0
+  key="$(agent_env_value "$file" "${prefix}_AGENT_API_KEY")"
+  if ! is_placeholder_secret "$key"; then
+    AGENT_PRESERVED_KEY="$key"
+  fi
+  [[ "$(agent_env_value "$file" "${prefix}_AGENT_MTLS_ENABLED")" == "true" ]] || return 0
+  ca="$(agent_env_value "$file" "${prefix}_AGENT_MTLS_CA_CERT")"
+  cert="$(agent_env_value "$file" "${prefix}_AGENT_MTLS_SERVER_CERT")"
+  pkey="$(agent_env_value "$file" "${prefix}_AGENT_MTLS_SERVER_KEY")"
+  ca="${ca:-/etc/adminpanelaz/mtls/ca.crt}"
+  cert="${cert:-/etc/adminpanelaz/mtls/agent.crt}"
+  pkey="${pkey:-/etc/adminpanelaz/mtls/agent.key}"
+  if agent_mtls_bundle_valid "$ca" "$cert" "$pkey"; then
+    AGENT_PRESERVED_MTLS=(
+      "${prefix}_AGENT_MTLS_ENABLED=true"
+      "${prefix}_AGENT_MTLS_CA_CERT=${ca}"
+      "${prefix}_AGENT_MTLS_SERVER_CERT=${cert}"
+      "${prefix}_AGENT_MTLS_SERVER_KEY=${pkey}"
+    )
+  else
+    warn "mTLS агента не перенесён: сертификаты ${cert} / ${pkey} отсутствуют, истекли или не от CA ${ca}. Перепривяжите узел в панели."
+  fi
+}
+
 is_placeholder_secret() {
   local value="$1"
   [[ -z "$value" ]] && return 0
@@ -1010,6 +1078,61 @@ is_placeholder_secret() {
       ;;
   esac
   return 1
+}
+
+# Правила панели в production (password_policy.py, security_bootstrap.py): слабый
+# DEFAULT_ADMIN_PASSWORD не даёт панели стартовать. Словарь слабых паролей панели
+# целиком отсекается длиной и требованием букв и цифр.
+admin_password_is_weak() {
+  local pw="$1" user="${2:-}" lowered
+  is_placeholder_secret "$pw" && return 0
+  lowered="${pw,,}"
+  [[ -n "$user" && "$lowered" == "${user,,}" ]] && return 0
+  (( ${#pw} >= 8 )) || return 0
+  [[ "$pw" =~ [A-Za-z] && "$pw" =~ [0-9] ]] || return 0
+  return 1
+}
+
+generate_admin_password() {
+  local pw
+  while true; do
+    pw="$(random_hex | cut -c1-16)"
+    [[ "$pw" =~ [a-f] && "$pw" =~ [0-9] ]] && break
+  done
+  printf '%s\n' "$pw"
+}
+
+# Файл SQLite панели из DATABASE_URL; для другой СУБД — код 1.
+panel_db_file() {
+  local url path
+  url="$(env_get DATABASE_URL)"
+  url="${url:-sqlite:///./data/adminpanel.db}"
+  [[ "$url" == sqlite:///* ]] || return 1
+  path="${url#sqlite:///}"
+  [[ "$path" == /* ]] || path="${BACKEND_DIR}/${path#./}"
+  printf '%s\n' "$path"
+}
+
+# Пароль администратора, когда WIZ_* пришли из окружения без мастера. Слабый пароль
+# (из WIZ_ADMIN_PASSWORD или .env) заменяется: с ним панель в production не стартует.
+# Пустой генерируется только для новой БД: seed-admin-user.py --bootstrap при пустом
+# пароле оставляет прежний пароль существующего администратора, а нового создать не может.
+resolve_wiz_admin_password() {
+  local pw="${WIZ_ADMIN_PASSWORD:-}" origin=WIZ_ADMIN_PASSWORD db
+  if [[ -z "$pw" ]]; then
+    pw="$(env_get DEFAULT_ADMIN_PASSWORD)"
+    origin=DEFAULT_ADMIN_PASSWORD
+  fi
+  if [[ -n "$pw" ]]; then
+    if admin_password_is_weak "$pw" "${WIZ_ADMIN_USERNAME:-}"; then
+      warn "${origin} не проходит политику паролей — сгенерирован случайный пароль администратора"
+      pw="$(generate_admin_password)"
+    fi
+  elif db="$(panel_db_file)" && [[ ! -f "$db" ]]; then
+    pw="$(generate_admin_password)"
+    log "Сгенерирован пароль администратора"
+  fi
+  WIZ_ADMIN_PASSWORD="$pw"
 }
 
 install_controller_selected() {
@@ -1094,7 +1217,10 @@ apply_wiz_env_settings() {
   fi
   if _wiz_should_apply WIZ_ADMIN_USERNAME; then
     env_set DEFAULT_ADMIN_USERNAME "$WIZ_ADMIN_USERNAME"
-    env_set DEFAULT_ADMIN_PASSWORD "$WIZ_ADMIN_PASSWORD"
+    resolve_wiz_admin_password
+    if [[ -n "$WIZ_ADMIN_PASSWORD" ]]; then
+      env_set DEFAULT_ADMIN_PASSWORD "$WIZ_ADMIN_PASSWORD"
+    fi
     env_set DEFAULT_ADMIN_MUST_CHANGE_PASSWORD "$WIZ_ADMIN_MUST_CHANGE_PASSWORD"
   fi
   if _wiz_should_apply WIZ_BACKEND_HOST; then
@@ -1189,6 +1315,17 @@ apply_wiz_env_settings() {
   fi
 }
 
+reset_env_from_example() {
+  # SECRET_KEY is the Fernet root for node API keys, SSH keys and TOTP secrets stored in the DB.
+  local preserved_secret_key
+  preserved_secret_key="$(env_get SECRET_KEY)"
+  cp "$ENV_EXAMPLE" "$ENV_FILE"
+  if ! is_placeholder_secret "$preserved_secret_key"; then
+    env_set SECRET_KEY "$preserved_secret_key"
+    log "SECRET_KEY сохранён из прежнего backend/.env"
+  fi
+}
+
 setup_env() {
   install_set_step "Настройка backend/.env"
   if ! install_controller_selected; then
@@ -1204,11 +1341,12 @@ setup_env() {
     log "backend/.env уже существует — не перезаписываем (флаг --force для перезаписи)"
   elif [[ -f "$ENV_FILE" && "$FORCE" == true ]]; then
     log "Перезапись backend/.env из .env.example (--force)"
-    cp "$ENV_EXAMPLE" "$ENV_FILE"
+    reset_env_from_example
   else
     log "Создание backend/.env из .env.example"
     cp "$ENV_EXAMPLE" "$ENV_FILE"
   fi
+  chmod 600 "$ENV_FILE"
 
   local secret_key
   secret_key="$(env_get SECRET_KEY)"
@@ -1236,7 +1374,7 @@ setup_env() {
       admin_pw="$(env_get DEFAULT_ADMIN_PASSWORD)"
       [[ -n "$admin_user" ]] || admin_user="admin"
       if is_placeholder_secret "$admin_pw" || [[ -z "$admin_pw" ]]; then
-        admin_pw="$(random_hex | cut -c1-16)"
+        admin_pw="$(generate_admin_password)"
         log "Non-interactive: сгенерирован пароль администратора"
       fi
       env_set DEFAULT_ADMIN_USERNAME "$admin_user"
@@ -1269,6 +1407,7 @@ setup_node_env() {
     return 0
   fi
 
+  agent_env_preserve "$NODE_ENV_FILE" NODE
   log "Создание $NODE_ENV_FILE"
   if [[ -f "$NODE_ENV_EXAMPLE" ]]; then
     cp "$NODE_ENV_EXAMPLE" "$NODE_ENV_FILE"
@@ -1278,7 +1417,11 @@ setup_node_env() {
   chmod 600 "$NODE_ENV_FILE"
 
   local api_key="${WIZ_NODE_AGENT_API_KEY:-${NODE_AGENT_API_KEY:-}}"
-  if [[ -z "$api_key" ]] || is_placeholder_secret "$api_key"; then
+  if is_placeholder_secret "$api_key" && [[ -n "$AGENT_PRESERVED_KEY" ]]; then
+    api_key="$AGENT_PRESERVED_KEY"
+    log "NODE_AGENT_API_KEY сохранён из прежнего $NODE_ENV_FILE"
+  fi
+  if is_placeholder_secret "$api_key"; then
     api_key="$(random_hex)"
     log "Сгенерирован NODE_AGENT_API_KEY"
   fi
@@ -1301,6 +1444,10 @@ setup_node_env() {
   if [[ "${WIZ_NODE_AGENT_MTLS_ENABLED:-false}" == "true" ]]; then
     node_env_set NODE_AGENT_MTLS_ENABLED "true"
   fi
+  local line
+  for line in "${AGENT_PRESERVED_MTLS[@]}"; do
+    node_env_set "${line%%=*}" "${line#*=}"
+  done
 
   GENERATED_NODE_KEY="$api_key"
   export NODE_AGENT_API_KEY="$api_key"
@@ -1311,6 +1458,7 @@ setup_proxy_env() {
     return 0
   fi
 
+  agent_env_preserve "$PROXY_ENV_FILE" PROXY
   log "Создание $PROXY_ENV_FILE"
   if [[ -f "$PROXY_ENV_EXAMPLE" ]]; then
     cp "$PROXY_ENV_EXAMPLE" "$PROXY_ENV_FILE"
@@ -1320,7 +1468,11 @@ setup_proxy_env() {
   chmod 600 "$PROXY_ENV_FILE"
 
   local api_key="${WIZ_PROXY_AGENT_API_KEY:-${PROXY_AGENT_API_KEY:-}}"
-  if [[ -z "$api_key" ]] || is_placeholder_secret "$api_key"; then
+  if is_placeholder_secret "$api_key" && [[ -n "$AGENT_PRESERVED_KEY" ]]; then
+    api_key="$AGENT_PRESERVED_KEY"
+    log "PROXY_AGENT_API_KEY сохранён из прежнего $PROXY_ENV_FILE"
+  fi
+  if is_placeholder_secret "$api_key"; then
     api_key="$(random_hex)"
     log "Сгенерирован PROXY_AGENT_API_KEY"
   fi
@@ -1341,6 +1493,10 @@ setup_proxy_env() {
   if [[ "${WIZ_PROXY_AGENT_MTLS_ENABLED:-false}" == "true" ]]; then
     proxy_env_set PROXY_AGENT_MTLS_ENABLED "true"
   fi
+  local line
+  for line in "${AGENT_PRESERVED_MTLS[@]}"; do
+    proxy_env_set "${line%%=*}" "${line#*=}"
+  done
 
   GENERATED_PROXY_KEY="$api_key"
   export PROXY_AGENT_API_KEY="$api_key"
@@ -1401,14 +1557,14 @@ setup_frontend() {
     return 0
   fi
 
-  install_set_step "Настройка frontend (npm install / build)"
-  ui_progress_start "Настройка frontend (npm install)"
+  install_set_step "Настройка frontend (npm ci / build)"
+  ui_progress_start "Настройка frontend (npm ci)"
   if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
-    (cd "$FRONTEND_DIR" && npm install)
+    (cd "$FRONTEND_DIR" && npm ci)
   else
-    print_info "node_modules уже существует, npm install пропущен (удалите node_modules для полной переустановки)"
+    print_info "node_modules уже существует, npm ci пропущен (удалите node_modules для полной переустановки)"
   fi
-  ui_progress_done "Frontend (npm install)"
+  ui_progress_done "Frontend (npm ci)"
 
   ui_progress_start "Сборка frontend (npm run build:all)"
   (cd "$FRONTEND_DIR" && npm run build:all)
@@ -1638,7 +1794,8 @@ setup_nginx_if_selected() {
     fi
     conf="$(nginx_render_template \
       "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-      "$site_domain" "$site_backend" "$site_cert" "$site_key" "$site_https" "$site_http")"
+      "$site_domain" "$site_backend" "$site_cert" "$site_key" "$site_https" "$site_http")" \
+      || die "Не удалось сформировать конфигурацию nginx"
     nginx_install_site "$conf" "$site_domain"
     nginx_apply_behind_proxy_env "$site_domain" "$site_backend" "https" "$site_https" "$site_http"
   }
@@ -1912,7 +2069,7 @@ print_post_install() {
   local node_key="${1:-${GENERATED_NODE_KEY:-}}"
   local proxy_key="${GENERATED_PROXY_KEY:-}"
   local admin_user="${WIZ_ADMIN_USERNAME:-admin}"
-  local admin_pass="${WIZ_ADMIN_PASSWORD:-admin}"
+  local admin_pass="${WIZ_ADMIN_PASSWORD:-}"
 
   echo
   if [[ "$UI_USE_COLOR" == true ]]; then
@@ -1929,7 +2086,11 @@ print_post_install() {
     ui_bold "Учётные данные"
     echo
     ui_summary_row "Логин" "$admin_user"
-    ui_summary_row "Пароль" "$admin_pass"
+    if [[ -n "$admin_pass" ]]; then
+      ui_summary_row "Пароль" "$admin_pass"
+    else
+      print_info "Пароль администратора не менялся (задан при прошлой установке)"
+    fi
     print_info "Смените пароль при первом входе, если включена принудительная смена"
     echo
     ui_separator

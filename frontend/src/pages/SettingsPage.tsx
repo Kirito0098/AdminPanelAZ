@@ -46,7 +46,7 @@ export default function SettingsPage() {
   const { section: sectionParam } = useParams<{ section?: string }>()
   const { user } = useAuth()
   const { isSettingsTabEnabled, isEnabled } = useFeatureModules()
-  const { activeNode } = useNode()
+  const { activeNode, loading: nodeLoading } = useNode()
   const { theme, setTheme } = useTheme()
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal } = useProgress()
@@ -75,7 +75,7 @@ export default function SettingsPage() {
   // GET /settings reads active-node config files — only maintenance uses the parent payload.
   // Users are panel-wide. Personal and other tabs self-fetch; skip reloads on node switch.
   useEffect(() => {
-    if (!settingsSectionNeedsNodeSettings(activeSection)) return
+    if (!settingsSectionNeedsNodeSettings(activeSection) || nodeLoading) return
     let cancelled = false
     const loadNodeSettings = async () => {
       startGlobal()
@@ -94,7 +94,7 @@ export default function SettingsPage() {
     return () => {
       cancelled = true
     }
-  }, [activeSection, activeNode?.id, user?.role, startGlobal, doneGlobal, notifyError])
+  }, [activeSection, nodeLoading, activeNode?.id, user?.role, startGlobal, doneGlobal, notifyError])
 
   useEffect(() => {
     if (!settingsSectionNeedsUsers(activeSection, isAdmin)) return
@@ -166,7 +166,7 @@ export default function SettingsPage() {
       return
     }
     if (!newPwd || newPwd.length < 4) {
-      notifyError('Новый пароль: минимум 4 символа')
+      notifyError('Новый пароль слишком короткий')
       return
     }
     try {

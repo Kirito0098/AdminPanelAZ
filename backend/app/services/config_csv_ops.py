@@ -370,6 +370,25 @@ def _import_single_row(
     db.commit()
     db.refresh(config)
 
+    # I7: stamp owner subscription deadline onto the new profile policy.
+    inherit: dict[str, Any] = {}
+    try:
+        from app.services.user_subscription import apply_owner_access_until_to_config
+
+        inherit = apply_owner_access_until_to_config(
+            db,
+            config,
+            actor=actor_username,
+            commit=True,
+            replicate=False,
+        )
+    except Exception:
+        logger.warning(
+            "Failed to inherit owner access_until for CSV import client=%s",
+            client_name,
+            exc_info=True,
+        )
+
     try:
         policy_fields = _parse_policy_fields(row)
     except ValueError as exc:
@@ -400,6 +419,17 @@ def _import_single_row(
         }
 
     maybe_replicate_create(db, node_id=node_id, primary_config=config)
+
+    try:
+        from app.services.user_subscription import replicate_inherited_access_until
+
+        replicate_inherited_access_until(db, config, inherit, actor=actor_username)
+    except Exception:
+        logger.warning(
+            "Failed to replicate inherited access_until for CSV import client=%s",
+            client_name,
+            exc_info=True,
+        )
 
     try:
         _replicate_csv_policies(

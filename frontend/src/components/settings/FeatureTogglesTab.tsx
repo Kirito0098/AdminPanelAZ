@@ -38,6 +38,7 @@ import {
   summarizePanelResources,
   type PanelResourceSummary,
 } from '@/lib/panelResourceStats'
+import { parseTimestamp } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type { FeatureToggleItem, ResourceProfileImpact, ResourceProfileItem } from '@/types'
 
@@ -55,9 +56,7 @@ function stripPresetRamLine(description: string): string {
 }
 
 function parseIsoMs(value: string | null | undefined): number | null {
-  if (!value) return null
-  const ms = Date.parse(value)
-  return Number.isNaN(ms) ? null : ms
+  return parseTimestamp(value)?.getTime() ?? null
 }
 
 function workerLabel(key: string): string {

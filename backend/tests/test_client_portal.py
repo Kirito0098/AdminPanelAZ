@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
+from app.auth import require_admin
 from app.database import get_db
-from app.models import ClientPortalToken, VpnConfig, VpnType
+from app.models import ClientPortalToken, UserPortalToken, VpnConfig, VpnType
+from app.routers import client_portal as client_portal_router
 from app.routers import public_portal as public_portal_router
 from app.services import client_portal as portal
+from app.services import unlock_codes
 
 
 def _utc_now_naive() -> datetime:
@@ -213,10 +216,55 @@ def test_get_valid_portal_token_revoked():
         client_name="alice",
         revoked_at=_utc_now_naive(),
     )
-    db.query.return_value.filter.return_value.first.return_value = row
+    empty = MagicMock()
+    empty.filter.return_value.first.return_value = None
+    revoked = MagicMock()
+    revoked.filter.return_value.first.return_value = row
+    db.query.side_effect = [revoked, empty]
     with pytest.raises(HTTPException) as ei:
         portal.get_valid_portal_token(db, "abc")
     assert ei.value.status_code == 410
+
+
+def test_get_valid_portal_token_resolves_user_token():
+    db = MagicMock()
+    row = UserPortalToken(id=2, token="usr", user_id=7, revoked_at=None)
+    empty = MagicMock()
+    empty.filter.return_value.first.return_value = None
+    active = MagicMock()
+    active.filter.return_value.first.return_value = row
+    db.query.side_effect = [empty, active]
+    resolved = portal.get_valid_portal_token(db, "usr")
+    assert resolved.kind == "user"
+    assert resolved.user_row is row
+
+
+def test_new_token_value_retries_when_value_exists_in_other_portal_table():
+    with (
+        patch("app.services.client_portal.secrets.token_urlsafe", side_effect=["dup", "fresh"]),
+        patch("app.services.client_portal._token_exists", side_effect=[True, False]),
+    ):
+        assert portal._new_token_value(MagicMock(), prefix="c_") == "c_fresh"
+
+
+def test_create_paths_namespace_tokens_across_tables():
+    client_db = MagicMock()
+    user_db = MagicMock()
+    configs = [VpnConfig(node_id=1, client_name="alice")]
+    with (
+        patch("app.services.client_portal.ensure_client_configs", return_value=configs),
+        patch("app.services.client_portal.ensure_portal_user"),
+        patch("app.services.client_portal._active_token", return_value=None),
+        patch("app.services.client_portal._active_user_token", return_value=None),
+        patch("app.services.client_portal.secrets.token_urlsafe", side_effect=["shared", "shared"]),
+        patch("app.services.client_portal._token_exists", return_value=False),
+    ):
+        client_row = portal.get_or_create_portal_token(client_db, client_name="alice")
+        user_row = portal.get_or_create_user_portal_token(user_db, user_id=7)
+
+    assert client_row.token == "c_shared"
+    assert user_row.token == "u_shared"
+    assert client_row.token != user_row.token
 
 
 @pytest.fixture
@@ -438,8 +486,15 @@ def test_public_portal_redeem_returns_access_until(public_client):
         patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
         patch("app.routers.public_portal.public_download_rate_limit_service") as rl,
         patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
-        patch("app.routers.public_portal.redeem_unlock_code", return_value={"grant_days": 7, "protocols_applied": ["openvpn"], "access_until_by_protocol": {"openvpn": fixed_until.isoformat()}}),
-        patch("app.routers.public_portal.effective_access_until_for_client", return_value=fixed_until),
+        patch(
+            "app.routers.public_portal.redeem_public_portal_code",
+            return_value={
+                "grant_days": 7,
+                "protocols_applied": ["openvpn"],
+                "access_until_by_protocol": {"openvpn": fixed_until.isoformat()},
+                "access_until": fixed_until.isoformat(),
+            },
+        ),
     ):
         feats.return_value.is_enabled.side_effect = lambda key: True
         ip_svc.get_client_ip.return_value = "198.51.100.1"
@@ -468,7 +523,10 @@ def test_public_portal_redeem_returns_bad_request_for_redeem_errors(public_clien
         patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
         patch("app.routers.public_portal.public_download_rate_limit_service") as rl,
         patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
-        patch("app.routers.public_portal.redeem_unlock_code", side_effect=ValueError("Этот unlock-ключ уже использован вами")),
+        patch(
+            "app.routers.public_portal.redeem_public_portal_code",
+            side_effect=ValueError("Этот unlock-ключ уже использован вами"),
+        ),
     ):
         feats.return_value.is_enabled.side_effect = lambda key: True
         ip_svc.get_client_ip.return_value = "198.51.100.1"
@@ -530,7 +588,7 @@ def test_public_portal_redeem_rate_limit_propagates(public_client):
         patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
         patch("app.routers.public_portal.public_download_rate_limit_service") as rl,
         patch("app.routers.public_portal.get_valid_portal_token") as get_token,
-        patch("app.routers.public_portal.redeem_unlock_code") as redeem,
+        patch("app.routers.public_portal.redeem_public_portal_code") as redeem,
     ):
         ip_svc.get_client_ip.return_value = "198.51.100.9"
         rl.consume.side_effect = HTTPException(status_code=429, detail="too many")
@@ -547,12 +605,447 @@ def test_public_portal_redeem_rate_limit_propagates(public_client):
     redeem.assert_not_called()
 
 
+def test_public_download_passes_user_target_query_params(public_client):
+    user_token = UserPortalToken(id=1, token="tok", user_id=10, revoked_at=None)
+    with (
+        patch("app.routers.public_portal.get_feature_service") as feats,
+        patch("app.routers.public_portal.assert_portal_host"),
+        patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_portal.public_download_rate_limit_service") as rl,
+        patch("app.routers.public_portal.get_valid_portal_token", return_value=user_token),
+        patch("app.routers.public_portal.read_portal_profile", return_value=("bob.ovpn", b"client\n")) as read_profile,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        ip_svc.get_client_ip.return_value = "198.51.100.1"
+        resp = public_client.get(
+            "/api/public/portal/tok/download",
+            params={"path": "/tmp/bob.ovpn", "node_id": 2, "client_name": "bob"},
+            headers={"Host": "sub.example.com"},
+        )
+
+    assert resp.status_code == 200
+    read_profile.assert_called_once_with(
+        ANY,
+        user_token,
+        "/tmp/bob.ovpn",
+        node_id=2,
+        client_name="bob",
+    )
+    rl.consume.assert_called_once_with("198.51.100.1")
+
+
+def test_build_user_portal_payload_lists_clients_and_marks_expired_subscription():
+    db = MagicMock()
+    expired_user = MagicMock(id=7, access_until=_utc_now_naive() - timedelta(days=1))
+    alice_entry = {
+        "node_id": 1,
+        "client_name": "alice",
+        "protocols": ["openvpn"],
+        "files": [],
+        "status": {
+            "status": "active",
+            "status_label": "Активна",
+            "expires_at": None,
+            "expires_label": "Бессрочно",
+            "traffic_used_bytes": 0,
+            "traffic_limit_bytes": None,
+            "traffic_label": "0 B / ∞",
+        },
+    }
+    bob_entry = {
+        "node_id": 2,
+        "client_name": "bob",
+        "protocols": ["wireguard"],
+        "files": [],
+        "status": {
+            "status": "blocked",
+            "status_label": "Заблокирована",
+            "expires_at": None,
+            "expires_label": "Бессрочно",
+            "traffic_used_bytes": 0,
+            "traffic_limit_bytes": None,
+            "traffic_label": "0 B / ∞",
+        },
+    }
+    with (
+        patch("app.services.client_portal.resolve_portal_base_url", return_value="https://sub.example.com"),
+        patch("app.services.client_portal.ensure_portal_user", return_value=expired_user),
+        patch("app.services.client_portal._owned_portal_targets", return_value=[(1, "alice"), (2, "bob")]),
+        patch("app.services.client_portal._build_client_portal_entry", side_effect=[alice_entry, bob_entry]),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+    ):
+        feats.return_value.is_enabled.side_effect = lambda key: key == "unlock_codes"
+        payload = portal.build_user_portal_payload(
+            db,
+            UserPortalToken(id=3, token="usr", user_id=7, revoked_at=None),
+        )
+
+    assert payload["kind"] == "user"
+    assert len(payload["clients"]) == 2
+    assert payload["clients"][0]["client_name"] == "alice"
+    assert payload["clients"][0]["status"]["status"] == "expired"
+    assert payload["clients"][0]["status"]["status_label"] == "Истекла"
+    assert payload["clients"][1]["status"]["status"] == "blocked"
+
+
+def test_redeem_public_portal_code_user_retries_next_owned_client():
+    user_token = UserPortalToken(id=3, token="usr", user_id=7, revoked_at=None)
+    fixed_until = datetime(2030, 1, 8, 12, 30)
+    user = MagicMock(id=7, access_until=fixed_until)
+    with (
+        patch("app.services.client_portal._owned_portal_targets", return_value=[(1, "alice"), (2, "bob")]),
+        patch("app.services.client_portal.ensure_portal_user", return_value=user),
+        patch("app.services.unlock_codes.redeem_unlock_code") as redeem,
+    ):
+        redeem.side_effect = [
+            ValueError("Нет пересечения протоколов клиента и unlock-ключа"),
+            {
+                "grant_days": 7,
+                "protocols_applied": ["openvpn"],
+                "access_until_by_protocol": {"openvpn": fixed_until.isoformat()},
+            },
+        ]
+        result = portal.redeem_public_portal_code(
+            MagicMock(),
+            portal.PortalTokenResolution(kind="user", user_row=user_token),
+            code="ABCD-EFGH-IJKL",
+        )
+
+    assert redeem.call_count == 2
+    assert [call.kwargs["user_id"] for call in redeem.call_args_list] == [7, 7]
+    assert result["access_until"] == fixed_until.isoformat()
+    assert result["protocols_applied"] == ["openvpn"]
+
+
+def test_redeem_public_portal_code_user_skips_manually_blocked_client():
+    user_token = UserPortalToken(id=3, token="usr", user_id=7, revoked_at=None)
+    fixed_until = datetime(2030, 1, 8, 12, 30)
+    user = MagicMock(id=7, access_until=fixed_until)
+    with (
+        patch("app.services.client_portal._owned_portal_targets", return_value=[(1, "alice"), (2, "bob")]),
+        patch("app.services.client_portal.ensure_portal_user", return_value=user),
+        patch("app.services.unlock_codes.redeem_unlock_code") as redeem,
+    ):
+        redeem.side_effect = [
+            ValueError(unlock_codes._REDEEM_MANUAL_BLOCK_MESSAGE),
+            {
+                "grant_days": 7,
+                "protocols_applied": ["wireguard"],
+                "access_until_by_protocol": {"wireguard": fixed_until.isoformat()},
+            },
+        ]
+        result = portal.redeem_public_portal_code(
+            MagicMock(),
+            portal.PortalTokenResolution(kind="user", user_row=user_token),
+            code="ABCD-EFGH-IJKL",
+        )
+
+    assert redeem.call_count == 2
+    assert result["protocols_applied"] == ["wireguard"]
+
+
+def test_redeem_public_portal_code_user_reports_manual_block_when_no_profile_left():
+    user_token = UserPortalToken(id=3, token="usr", user_id=7, revoked_at=None)
+    with (
+        patch("app.services.client_portal._owned_portal_targets", return_value=[(1, "alice")]),
+        patch("app.services.unlock_codes.redeem_unlock_code") as redeem,
+    ):
+        redeem.side_effect = ValueError(unlock_codes._REDEEM_MANUAL_BLOCK_MESSAGE)
+        with pytest.raises(ValueError) as excinfo:
+            portal.redeem_public_portal_code(
+                MagicMock(),
+                portal.PortalTokenResolution(kind="user", user_row=user_token),
+                code="ABCD-EFGH-IJKL",
+            )
+
+    assert str(excinfo.value) == unlock_codes._REDEEM_MANUAL_BLOCK_MESSAGE
+
+
+def test_admin_user_portal_get_link_route_uses_user_id():
+    app = FastAPI()
+    app.include_router(client_portal_router.router, prefix="/api")
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+    app.dependency_overrides[require_admin] = lambda: MagicMock(id=1, username="admin")
+
+    with (
+        patch("app.routers.client_portal.get_feature_service") as feats,
+        patch("app.routers.client_portal._require_portal_domain"),
+        patch("app.routers.client_portal.ensure_portal_user"),
+        patch(
+            "app.routers.client_portal.get_or_create_user_portal_token",
+            return_value=UserPortalToken(id=1, token="usr", user_id=9, revoked_at=None),
+        ) as create_link,
+        patch(
+            "app.routers.client_portal.user_link_response",
+            return_value={"kind": "user", "token": "usr", "user_id": 9, "url": "https://sub.example.com/p/usr", "revoked": False},
+        ),
+    ):
+        feats.return_value.is_enabled.return_value = True
+        with TestClient(app) as client:
+            resp = client.get("/api/portal/users/9/link")
+
+    assert resp.status_code == 200
+    assert resp.json()["user_id"] == 9
+    assert create_link.call_args.kwargs["user_id"] == 9
+
+
+def test_admin_user_portal_revoke_route_uses_user_id():
+    app = FastAPI()
+    app.include_router(client_portal_router.router, prefix="/api")
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+    app.dependency_overrides[require_admin] = lambda: MagicMock(id=1, username="admin")
+
+    with (
+        patch("app.routers.client_portal.get_feature_service") as feats,
+        patch("app.routers.client_portal.ensure_portal_user"),
+        patch("app.routers.client_portal.revoke_user_portal_token") as revoke_link,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        with TestClient(app) as client:
+            resp = client.post("/api/portal/users/9/revoke")
+
+    assert resp.status_code == 200
+    assert resp.json() == {"ok": True, "user_id": 9}
+    assert revoke_link.call_args.kwargs["user_id"] == 9
+
+
 def test_portal_protocol_prefers_file_protocol_over_db_vpn_type():
     cfg = MagicMock()
     cfg.vpn_type = VpnType.wireguard
     assert portal._portal_protocol_for_file({"protocol": "amneziawg"}, cfg) == "amneziawg"
     assert portal._portal_protocol_for_file({"protocol": "wireguard"}, cfg) == "wireguard"
     assert portal._portal_protocol_for_file({}, cfg) == "wireguard"
+
+
+_AZ_ONLY_POLICY = {
+    "routes": ["az"],
+    "protocols": ["openvpn", "wireguard", "amneziawg", "amneziawg2"],
+    "openvpn_groups": ["udp_tcp", "udp", "tcp"],
+}
+
+_AZ_OPENBOX_PATH = "/client/openvpn/antizapret/AZ-OpenBox.ovpn"
+_VPN_OPENBOX_PATH = "/client/openvpn/vpn/VPN-OpenBox.ovpn"
+
+
+def _openbox_openvpn_files() -> list[dict]:
+    return [
+        {
+            "protocol": "openvpn",
+            "variant": "antizapret",
+            "path": _AZ_OPENBOX_PATH,
+            "filename": "AZ-OpenBox.ovpn",
+        },
+        {
+            "protocol": "openvpn",
+            "variant": "vpn",
+            "path": _VPN_OPENBOX_PATH,
+            "filename": "VPN-OpenBox.ovpn",
+        },
+    ]
+
+
+def _openbox_cfg(*, owner_id: int | None) -> MagicMock:
+    cfg = MagicMock()
+    cfg.id = 7
+    cfg.node_id = 3
+    cfg.client_name = "OpenBox"
+    cfg.vpn_type = VpnType.openvpn
+    cfg.owner_id = owner_id
+    return cfg
+
+
+def _portal_db_for_list_and_download(*, configs: list, node: MagicMock, owner=None):
+    """MagicMock db: VpnConfig → configs; Node → node; User via db.get."""
+    db = MagicMock()
+
+    def query_side_effect(model):
+        q = MagicMock()
+        name = getattr(model, "__name__", "")
+        if name == "VpnConfig" or model is VpnConfig:
+            q.filter.return_value.all.return_value = configs
+            return q
+        if name == "Node" or model is type(node):
+            q.filter.return_value.first.return_value = node
+            return q
+        q.filter.return_value.first.return_value = owner
+        q.filter.return_value.all.return_value = []
+        return q
+
+    db.query.side_effect = query_side_effect
+    if owner is not None:
+        db.get.side_effect = lambda model, pk: owner if pk == getattr(owner, "id", None) else None
+    else:
+        db.get.return_value = None
+    return db
+
+
+def test_list_files_hides_vpn_route_when_owner_visibility_az_only():
+    from app.models import User, UserRole
+    from app.services.vpn_profile_visibility import policy_to_json
+
+    owner = User(
+        id=5,
+        username="bob",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        visible_vpn_profiles=policy_to_json(_AZ_ONLY_POLICY),
+    )
+    cfg = _openbox_cfg(owner_id=5)
+    adapter = MagicMock()
+    adapter.get_profile_files.return_value = _openbox_openvpn_files()
+    node = MagicMock()
+    db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=owner)
+
+    with (
+        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        files = portal._list_files_for_configs(db, [cfg])
+
+    paths = [f["path"] for f in files]
+    assert _AZ_OPENBOX_PATH in paths
+    assert _VPN_OPENBOX_PATH not in paths
+
+
+def test_list_files_orphan_uses_restrictive_default_visibility():
+    cfg = _openbox_cfg(owner_id=None)
+    adapter = MagicMock()
+    adapter.get_profile_files.return_value = _openbox_openvpn_files()
+    node = MagicMock()
+    db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=None)
+
+    with (
+        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+        patch("app.services.client_portal.get_default_visible_vpn_profiles", return_value=_AZ_ONLY_POLICY),
+        patch(
+            "app.services.client_portal.feature_flags_from_service",
+            return_value={"openvpn": True, "wireguard": True, "amneziawg": True, "awg2": True},
+        ),
+    ):
+        feats.return_value.is_enabled.return_value = True
+        files = portal._list_files_for_configs(db, [cfg])
+
+    paths = [f["path"] for f in files]
+    assert _AZ_OPENBOX_PATH in paths
+    assert _VPN_OPENBOX_PATH not in paths
+
+
+def test_read_client_portal_profile_rejects_vpn_via_owner_visibility():
+    """Download allowlist comes from real _list_files_for_configs (no stub)."""
+    from app.models import User, UserRole
+    from app.services.vpn_profile_visibility import policy_to_json
+
+    owner = User(
+        id=5,
+        username="bob",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        visible_vpn_profiles=policy_to_json(_AZ_ONLY_POLICY),
+    )
+    cfg = _openbox_cfg(owner_id=5)
+    adapter = MagicMock()
+    adapter.get_profile_files.return_value = _openbox_openvpn_files()
+    node = MagicMock()
+    db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=owner)
+
+    with (
+        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+        patch("app.services.client_portal.load_node_remote_hosts", return_value=[]),
+        patch(
+            "app.services.client_portal.read_profile_file_for_delivery",
+            return_value=b"client\n",
+        ) as read_file,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        with pytest.raises(HTTPException) as hidden:
+            portal._read_client_portal_profile(
+                db,
+                node_id=3,
+                client_name="OpenBox",
+                path=_VPN_OPENBOX_PATH,
+            )
+        assert hidden.value.status_code == 404
+        read_file.assert_not_called()
+
+        filename, content = portal._read_client_portal_profile(
+            db,
+            node_id=3,
+            client_name="OpenBox",
+            path=_AZ_OPENBOX_PATH,
+        )
+    assert content == b"client\n"
+    assert "AZ" in filename or filename.endswith(".ovpn")
+
+
+def test_read_client_portal_profile_rejects_vpn_for_orphan_default_az_only():
+    cfg = _openbox_cfg(owner_id=None)
+    adapter = MagicMock()
+    adapter.get_profile_files.return_value = _openbox_openvpn_files()
+    node = MagicMock()
+    db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=None)
+
+    with (
+        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+        patch("app.services.client_portal.get_default_visible_vpn_profiles", return_value=_AZ_ONLY_POLICY),
+        patch(
+            "app.services.client_portal.feature_flags_from_service",
+            return_value={"openvpn": True, "wireguard": True, "amneziawg": True, "awg2": True},
+        ),
+    ):
+        feats.return_value.is_enabled.return_value = True
+        with pytest.raises(HTTPException) as hidden:
+            portal._read_client_portal_profile(
+                db,
+                node_id=3,
+                client_name="OpenBox",
+                path=_VPN_OPENBOX_PATH,
+            )
+    assert hidden.value.status_code == 404
+
+
+def test_build_user_portal_payload_hides_vpn_for_restricted_owner():
+    from app.models import User, UserRole
+    from app.services.vpn_profile_visibility import policy_to_json
+
+    owner = User(
+        id=5,
+        username="bob",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        visible_vpn_profiles=policy_to_json(_AZ_ONLY_POLICY),
+    )
+    cfg = _openbox_cfg(owner_id=5)
+    adapter = MagicMock()
+    adapter.get_profile_files.return_value = _openbox_openvpn_files()
+    node = MagicMock()
+    db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=owner)
+    token_row = MagicMock(token="u_tok", user_id=5)
+
+    with (
+        patch("app.services.client_portal.resolve_portal_base_url", return_value="https://portal.example.com"),
+        patch("app.services.client_portal.ensure_portal_user", return_value=owner),
+        patch("app.services.client_portal._owned_portal_targets", return_value=[(3, "OpenBox")]),
+        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
+        patch("app.services.client_portal.build_portal_status", return_value={"state": "active"}),
+        patch("app.services.client_portal._apply_user_subscription_status", side_effect=lambda status, _u: status),
+        patch("app.services.client_portal._portal_brand_title", return_value="VPN"),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        payload = portal.build_user_portal_payload(db, token_row)
+
+    assert payload["kind"] == "user"
+    assert len(payload["clients"]) == 1
+    paths = [f["path"] for f in payload["clients"][0]["files"]]
+    assert _AZ_OPENBOX_PATH in paths
+    assert _VPN_OPENBOX_PATH not in paths
 
 
 def test_list_files_hides_wireguard_when_feature_disabled():
@@ -562,6 +1055,7 @@ def test_list_files_hides_wireguard_when_feature_disabled():
     cfg.node_id = 3
     cfg.client_name = "test1"
     cfg.vpn_type = VpnType.wireguard
+    cfg.owner_id = None
     adapter = MagicMock()
     adapter.get_profile_files.return_value = [
         {"protocol": "wireguard", "variant": "vpn", "path": "/client/wireguard/vpn/a-wg.conf", "filename": "a-wg.conf"},
@@ -576,6 +1070,14 @@ def test_list_files_hides_wireguard_when_feature_disabled():
     with (
         patch("app.services.client_portal.get_adapter_for_node", return_value=adapter) as get_adapter,
         patch("app.services.feature_guards.get_feature_service") as feats,
+        patch(
+            "app.services.client_portal.get_default_visible_vpn_profiles",
+            return_value={
+                "routes": ["az", "vpn"],
+                "protocols": ["openvpn", "wireguard", "amneziawg", "amneziawg2"],
+                "openvpn_groups": ["udp_tcp", "udp", "tcp"],
+            },
+        ),
     ):
         feats.return_value.is_enabled.side_effect = feat_enabled
         files = portal._list_files_for_configs(db, [cfg])

@@ -31,7 +31,17 @@ type HaReplicaPrune = {
   success?: boolean
 }
 
+type HaFailedReplica = {
+  node_name?: string
+  node_id?: number
+  failed_step?: string
+  failed_step_label?: string
+  error?: string
+}
+
 type HaPushFullPayload = {
+  success?: boolean
+  failed?: HaFailedReplica[]
   host_copy?: HaHostCopy[]
   restored?: Array<{ node_name?: string; node_id?: number }>
   openvpn_restart?: HaOpenVpnRestart[]
@@ -41,6 +51,7 @@ type HaPushFullPayload = {
 }
 
 type HaSharedDomainPayload = {
+  success?: boolean
   domain?: string
   updated?: Array<{ node_name?: string; node_id?: number }>
   openvpn_restart?: HaOpenVpnRestart[]
@@ -110,6 +121,22 @@ function parseTaskOutput(task: BackgroundTask | null | undefined): unknown {
     return JSON.parse(raw) as unknown
   } catch {
     return null
+  }
+}
+
+function buildFailedReplicaSection(items: HaFailedReplica[] | undefined): HaSyncResultSection | null {
+  if (!items?.length) return null
+  return {
+    title: 'Ошибки на репликах',
+    description:
+      'Синхронизация этих реплик остановилась на указанном шаге, следующие шаги для них не выполнялись.',
+    items: items.map((item) => ({
+      nodeName: nodeLabel(item),
+      text: `Ошибка на шаге «${item.failed_step_label || item.failed_step || 'неизвестно'}»`,
+      explanation: 'Устраните причину и повторите синхронизацию.',
+      status: 'error' as const,
+      details: item.error ? [item.error] : undefined,
+    })),
   }
 }
 
@@ -368,8 +395,22 @@ function buildOverviewDescription(
   return parts.join(' ')
 }
 
+function payloadReportsFailure(parsed: unknown): boolean {
+  if (!parsed || typeof parsed !== 'object') return false
+  const payload = parsed as { success?: boolean } & HaSetupPayload
+  return (
+    payload.success === false ||
+    payload.push_full?.success === false ||
+    payload.shared_domain?.success === false
+  )
+}
+
+export function isHaSyncTaskFailed(task: BackgroundTask | null | undefined): boolean {
+  return task?.status === 'failed' || payloadReportsFailure(parseTaskOutput(task))
+}
+
 function resolveVariant(sections: HaSyncResultSection[], task?: BackgroundTask | null): HaSyncResultVariant {
-  if (task?.status === 'failed') return 'error'
+  if (isHaSyncTaskFailed(task)) return 'error'
   const hasError = sections.some((section) =>
     section.items.some((item) => item.status === 'error'),
   )
@@ -412,6 +453,7 @@ export function parseHaSyncTaskResult(
         title = 'Полная синхронизация завершена'
       }
 
+      pushSection(sections, buildFailedReplicaSection(setup.push_full?.failed))
       pushSection(sections, buildDomainSection(setup.shared_domain?.updated, domain))
       pushSection(sections, buildOpenVpnSection(setup.shared_domain?.openvpn_restart, 'domain'))
       pushSection(sections, buildHostCopySection(setup.push_full?.host_copy))
@@ -419,10 +461,11 @@ export function parseHaSyncTaskResult(
       pushSection(sections, buildOpenVpnProfileCopySection(setup.push_full?.openvpn_profile_copy))
       pushSection(sections, buildReplicaPruneSection(setup.push_full?.replica_prune))
       pushSection(sections, buildOpenVpnSection(setup.push_full?.openvpn_restart, 'replica'))
-    } else if ('host_copy' in parsed || 'restored' in parsed) {
+    } else if ('host_copy' in parsed || 'restored' in parsed || 'failed' in parsed) {
       const push = parsed as HaPushFullPayload
       mode = 'push'
       title = 'Полная синхронизация завершена'
+      pushSection(sections, buildFailedReplicaSection(push.failed))
       pushSection(sections, buildHostCopySection(push.host_copy))
       pushSection(sections, buildRestoredSection(push.restored))
       pushSection(sections, buildOpenVpnProfileCopySection(push.openvpn_profile_copy))
@@ -448,6 +491,9 @@ export function parseHaSyncTaskResult(
     }
   }
 
+  if (payloadReportsFailure(parsed)) {
+    title = task?.message?.trim() || 'Синхронизация завершилась с ошибками'
+  }
   const description = buildOverviewDescription(sections, domain, mode)
 
   return {

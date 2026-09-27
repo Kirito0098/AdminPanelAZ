@@ -3,13 +3,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-ENV_FILE="${ENV_FILE:-$ROOT_DIR/backend/.env}"
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+# Не рабочий backend/.env: библиотека пишет в ENV_FILE.
+ENV_FILE="$TMP/.env"
+: >"$ENV_FILE"
 # shellcheck source=scripts/nginx-common.sh
 source "$ROOT_DIR/scripts/nginx-common.sh"
 nginx_common_init
-
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
 
 pass=0
 fail=0
@@ -155,6 +156,7 @@ echo "[test] temp ACME http vhost helpers"
 export NGINX_SITES_AVAILABLE_DIR="$TMP/sites-available"
 export NGINX_SITES_ENABLED_DIR="$TMP/sites-enabled"
 export NGINX_CONF_D_DIR="$TMP/conf.d2"
+export NGINX_ACME_WEBROOT="$TMP/www"
 mkdir -p "$NGINX_SITES_AVAILABLE_DIR" "$NGINX_SITES_ENABLED_DIR" "$NGINX_CONF_D_DIR"
 # nginx -t will fail in fake dirs — install helper should clean up and return 1
 set +e
@@ -166,6 +168,7 @@ if [[ "$acme_rc" -ne 0 ]]; then
 else
   bad "temp ACME should fail nginx -t in fake root"
 fi
+[[ -d "$TMP/www/.well-known/acme-challenge" ]] && ok "ACME webroot created under NGINX_ACME_WEBROOT" || bad "ACME webroot not under NGINX_ACME_WEBROOT"
 base="$(nginx_acme_temp_site_basename "portal.example.com")"
 [[ "$base" == "adminpanelaz-acme-portal_example_com" ]] && ok "acme temp basename ($base)" || bad "acme temp basename ($base)"
 
@@ -204,6 +207,8 @@ if [[ "$acme_ok_rc" -eq 0 ]]; then
 else
   bad "temp ACME install should succeed with passing nginx -t mock"
 fi
+acme_ok_conf="$NGINX_SITES_AVAILABLE_DIR/$(nginx_acme_temp_site_basename "acme-remove-restore.example.com")"
+grep -qF "root $TMP/www;" "$acme_ok_conf" && ok "temp ACME vhost serves NGINX_ACME_WEBROOT" || bad "temp ACME vhost root is not NGINX_ACME_WEBROOT"
 if [[ ! -e "$NGINX_SITES_ENABLED_DIR/default" && ! -L "$NGINX_SITES_ENABLED_DIR/default" ]]; then
   ok "default removed while temp ACME vhost active"
 else
@@ -279,6 +284,22 @@ if [[ "$ss_wait_rc" -ne 0 ]]; then
   ok "wait_tcp_port_free dies without ss"
 else
   bad "wait_tcp_port_free should die when ss unavailable"
+fi
+
+echo "[test] vhost lookup matches the exact server_name, not subdomains"
+VH="$TMP/vhosts"
+mkdir -p "$VH"
+printf 'server {\n    server_name panel.example.com;\n}\n' >"$VH/panel"
+printf 'server {\n    server_name www.example.org   panel.example.com ;\n}\n' >"$VH/multi"
+printf 'server {\n    server_name portal.panel.example.com;\n}\n' >"$VH/portal"
+printf 'server {\n    server_name panel.example.com.evil.net;\n}\n' >"$VH/suffix"
+printf 'server {\n    server_name panelXexample.com;\n}\n' >"$VH/dotwild"
+printf 'server {\n    # server_name panel.example.com;\n    server_name other.example.com;\n}\n' >"$VH/commented"
+FOUND="$(nginx_grep_vhosts_for_domain panel.example.com "$VH" | xargs -n1 basename | sort | tr '\n' ' ')"
+if [[ "$FOUND" == "multi panel " ]]; then
+  ok "vhost lookup: exact server_name only"
+else
+  bad "vhost lookup: expected 'multi panel ', got '$FOUND'"
 fi
 
 echo

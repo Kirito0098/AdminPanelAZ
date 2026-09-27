@@ -32,11 +32,19 @@ def secrets_match(provided: str | None, expected: str | None) -> bool:
 
 
 def get_telegram_webhook_client_ip(request) -> str:
-    """Resolve client IP for webhook allowlist — never trust client X-Forwarded-For."""
-    real_ip = (request.headers.get("x-real-ip") or "").strip()
-    if real_ip:
-        return real_ip
-    return (request.client.host if request.client else "") or ""
+    """Resolve client IP for webhook allowlist.
+
+    X-Real-IP (set by the panel nginx to $remote_addr) is honoured only when the direct peer is a
+    trusted proxy; X-Forwarded-For is never used.
+    """
+    from app.services.ip_restriction import ip_restriction_service
+
+    peer = ip_restriction_service._normalize_remote_ip((request.client.host if request.client else "") or "")
+    if ip_restriction_service._remote_is_trusted_proxy(peer):
+        real_ip = (request.headers.get("x-real-ip") or "").strip()
+        if real_ip:
+            return real_ip
+    return peer
 
 
 def is_telegram_ip(client_ip: str) -> bool:

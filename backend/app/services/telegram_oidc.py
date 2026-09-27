@@ -6,12 +6,14 @@ import base64
 import hashlib
 import secrets
 import threading
-import time
+from datetime import timedelta
 from typing import Any
 
 import httpx
 import jwt
 from jwt import PyJWKClient
+
+from app.services.shared_state import pop_state, put_state
 
 OIDC_ISSUER = "https://oauth.telegram.org"
 OIDC_AUTH_URL = f"{OIDC_ISSUER}/auth"
@@ -19,19 +21,10 @@ OIDC_TOKEN_URL = f"{OIDC_ISSUER}/token"
 OIDC_JWKS_URL = f"{OIDC_ISSUER}/.well-known/jwks.json"
 OIDC_SCOPE = "openid profile"
 OIDC_STATE_TTL = 600
+OIDC_STATE_NAMESPACE = "tg_oidc_state"
 
-_oauth_store: dict[str, dict[str, Any]] = {}
-_oauth_lock = threading.Lock()
 _jwks_client: PyJWKClient | None = None
 _jwks_client_lock = threading.Lock()
-
-
-def _cleanup_oauth_store() -> None:
-    now = time.time()
-    with _oauth_lock:
-        stale = [k for k, v in _oauth_store.items() if now - v.get("created", 0) > OIDC_STATE_TTL]
-        for key in stale:
-            _oauth_store.pop(key, None)
 
 
 def pkce_verifier() -> str:
@@ -44,19 +37,17 @@ def pkce_challenge(code_verifier: str) -> str:
 
 
 def save_oidc_state(state: str, *, code_verifier: str, redirect_uri: str) -> None:
-    _cleanup_oauth_store()
-    with _oauth_lock:
-        _oauth_store[state] = {
-            "code_verifier": code_verifier,
-            "redirect_uri": redirect_uri,
-            "created": time.time(),
-        }
+    # The OAuth callback may reach another uvicorn worker.
+    put_state(
+        OIDC_STATE_NAMESPACE,
+        state,
+        {"code_verifier": code_verifier, "redirect_uri": redirect_uri},
+        ttl=timedelta(seconds=OIDC_STATE_TTL),
+    )
 
 
 def pop_oidc_state(state: str) -> dict[str, Any] | None:
-    _cleanup_oauth_store()
-    with _oauth_lock:
-        return _oauth_store.pop(state, None)
+    return pop_state(OIDC_STATE_NAMESPACE, state)
 
 
 def build_authorization_url(*, client_id: str, redirect_uri: str, state: str, code_verifier: str) -> str:

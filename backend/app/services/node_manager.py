@@ -14,6 +14,7 @@ from app.models import (
     AmneziaWg2AccessPolicy,
     AlertRule,
     AppSetting,
+    ClientPortalToken,
     ClientTemplate,
     ConfigTag,
     ConnectionCountSample,
@@ -21,13 +22,17 @@ from app.models import (
     NodeResourceSample,
     NodeStatus,
     OpenVpnAccessPolicy,
+    OpenVpnBufferGuardEvent,
+    OpenVpnBufferGuardSettings,
     TrafficSessionState,
+    UnlockCodeRedemption,
     UserTrafficSample,
     UserTrafficStatProtocol,
     VpnConfig,
     WgAccessPolicy,
 )
 from app.services.crypto import decrypt_secret, encrypt_secret
+from app.services.expected_node import confirmed_node_id, ensure_expected_node, forget_expected_node
 from app.services.antizapret import AntiZapretService
 from app.services.node_adapter import LocalNodeAdapter, NodeAdapter, RemoteNodeAdapter
 from app.services.node_health import HEALTH_METADATA_KEYS
@@ -141,13 +146,13 @@ def get_active_node_id(db: Session) -> int | None:
         return None
 
 
-def _is_vpn_node(node: Node) -> bool:
+def is_vpn_node(node: Node) -> bool:
     return (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower() == NODE_KIND_VPN
 
 
 def list_vpn_nodes(db: Session) -> list[Node]:
     """All nodes that speak node_agent (OpenVPN/WG). Excludes proxy_agent cards."""
-    return [node for node in db.query(Node).order_by(Node.id.asc()).all() if _is_vpn_node(node)]
+    return [node for node in db.query(Node).order_by(Node.id.asc()).all() if is_vpn_node(node)]
 
 
 def proxy_is_not_vpn_message(node: Node) -> str:
@@ -170,25 +175,43 @@ def vpn_is_not_proxy_message(node: Node) -> str:
 def set_active_node_id(db: Session, node_id: int) -> None:
     """Set active VPN node. Rejects ``node_kind=proxy`` for all callers (HTTP, TG, mini)."""
     node = db.query(Node).filter(Node.id == node_id).first()
-    if node is not None and not _is_vpn_node(node):
+    if node is not None and not is_vpn_node(node):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Прокси-узел нельзя сделать активным для VPN: у него нет OpenVPN/WireGuard.",
         )
     _set_setting(db, ACTIVE_NODE_KEY, str(node_id))
+    forget_expected_node()
 
 
 def clear_active_node_id(db: Session) -> None:
     _set_setting(db, ACTIVE_NODE_KEY, "")
+    forget_expected_node()
 
 
 def get_active_node(db: Session) -> Node:
-    """Return the active VPN node. Never returns ``node_kind=proxy``."""
+    """Return the active VPN node. Never returns ``node_kind=proxy``.
+
+    A write request that names the node shown in its UI (``X-Expected-Node-Id``) gets ``409``
+    when the active node was switched elsewhere in the meantime. Once the check passed, later
+    lookups in the same request return that node.
+    """
+    confirmed_id = confirmed_node_id()
+    if confirmed_id is not None:
+        confirmed = db.query(Node).filter(Node.id == confirmed_id).first()
+        if confirmed is not None:
+            return confirmed
+    node = _resolve_active_node(db)
+    ensure_expected_node(node)
+    return node
+
+
+def _resolve_active_node(db: Session) -> Node:
     node_id = get_active_node_id(db)
     if node_id:
         node = db.query(Node).filter(Node.id == node_id).first()
         if node:
-            if not _is_vpn_node(node):
+            if not is_vpn_node(node):
                 _set_setting(db, ACTIVE_NODE_KEY, "")
                 db.commit()
             elif node.is_local and not settings.local_antizapret_enabled:
@@ -204,7 +227,7 @@ def get_active_node(db: Session) -> Node:
             .first()
         )
         if local:
-            set_active_node_id(db, local.id)
+            _set_setting(db, ACTIVE_NODE_KEY, str(local.id))
             db.commit()
             return local
 
@@ -215,7 +238,7 @@ def get_active_node(db: Session) -> Node:
         .first()
     )
     if remote:
-        set_active_node_id(db, remote.id)
+        _set_setting(db, ACTIVE_NODE_KEY, str(remote.id))
         db.commit()
         return remote
 
@@ -331,7 +354,26 @@ def purge_node_related(db: Session, node_id: int) -> None:
             synchronize_session=False,
         )
 
+    # «Уже погашен» для владельца проверяется по (код, пользователь): запись переносится, а не удаляется,
+    # иначе после удаления узла тот же код можно погасить снова.
+    fallback = (
+        db.query(Node.id)
+        .filter(Node.id != node_id)
+        .order_by(Node.is_local.desc(), Node.id)
+        .first()
+    )
+    owner_redemptions = db.query(UnlockCodeRedemption).filter(
+        UnlockCodeRedemption.node_id == node_id,
+        UnlockCodeRedemption.user_id.isnot(None),
+    )
+    if fallback is not None:
+        owner_redemptions.update({UnlockCodeRedemption.node_id: fallback[0]}, synchronize_session=False)
+
     for model in (
+        UnlockCodeRedemption,
+        ClientPortalToken,
+        OpenVpnBufferGuardEvent,
+        OpenVpnBufferGuardSettings,
         VpnConfig,
         TrafficSessionState,
         UserTrafficStatProtocol,

@@ -16,6 +16,30 @@ export function isWarperDisabled(health: WarperHealthResponse | null): boolean {
   return !health?.installed || Boolean(health?.conflict_antizapret_warp)
 }
 
+/** `warper toggle` switches off whenever the kresd patch is present, even with sing-box stopped. */
+export function warperToggleLabel(health: WarperHealthResponse | null): string {
+  if (health?.active) return 'Выключить'
+  if (health?.dns_patch_orphaned) return 'Выключить полностью'
+  return 'Включить'
+}
+
+/** Shows the new switch position while saving and puts the previous one back if the save failed. */
+export async function saveSwitch<T>(
+  previous: T,
+  next: T,
+  show: (value: T) => void,
+  save: () => Promise<boolean>,
+): Promise<boolean> {
+  show(next)
+  let saved = false
+  try {
+    saved = await save()
+    return saved
+  } finally {
+    if (!saved) show(previous)
+  }
+}
+
 export function formatBytes(value: number): string {
   if (!Number.isFinite(value) || value < 0) return '—'
   const units = ['B', 'KB', 'MB', 'GB', 'TB']
@@ -74,6 +98,12 @@ export function formatOutboundMode(mode: string | null | undefined): string {
       return 'Slave'
     case 'wg':
       return 'WireGuard'
+    case 'vless':
+      return 'VLESS'
+    case 'hy2':
+      return 'Hysteria2'
+    case 'openvpn':
+      return 'OpenVPN'
     default:
       return mode ?? '—'
   }
@@ -81,13 +111,35 @@ export function formatOutboundMode(mode: string | null | undefined): string {
 
 export type WarperTab = 'domains' | 'catalog' | 'ip-ranges' | 'monitoring' | 'settings'
 
-export type WarperOutboundMode = 'warp' | 'slave' | 'wg'
+export type WarperOutboundMode = 'warp' | 'slave' | 'wg' | 'vless' | 'hy2' | 'openvpn'
+
+export const DEFAULT_FAKE_SUBNET = '10.224.0.0/16'
+
+const PROXY_LINK_RE = /(?:ss|vless|hy2|hysteria2):\/\/[^\s"']+/
+
+/** Pulls the donor link out of pasted `warperslave link` output or a `warper mode … '<link>'` line. */
+export function extractProxyLink(text: string): string {
+  const value = text.trim()
+  return PROXY_LINK_RE.exec(value)?.[0] ?? value
+}
+
+/** Outbound mode a donor link switches to: AZ-WARP 1.5.1 turns vless:// and hy2:// from the Slave field into their modes. */
+export function donorLinkMode(link: string): Extract<WarperOutboundMode, 'slave' | 'vless' | 'hy2'> | null {
+  if (link.startsWith('ss://')) return 'slave'
+  if (link.startsWith('vless://')) return 'vless'
+  if (link.startsWith('hy2://') || link.startsWith('hysteria2://')) return 'hy2'
+  return null
+}
 
 export const WARP_KEY_SOURCES = [
   { value: 'auto', label: 'Автовыбор', description: 'WARP сам выберет доступный ключ' },
-  { value: 'system', label: 'AntiZapret', description: 'Ключи из настроек AntiZapret' },
+  { value: 'system', label: 'AntiZapret', description: 'Ключи встроенного WARP AntiZapret (warp-antizapret / warp-vpn)' },
+  { value: 'wgcf', label: 'wgcf (локальный)', description: 'wgcf-profile.conf в каталоге AZ-WARP' },
+  { value: 'root', label: 'wgcf в /root', description: '/root/wgcf-profile.conf' },
   { value: 'generate', label: 'Новый ключ', description: 'Сгенерировать новый WARP-ключ' },
 ] as const
+
+export type WarperWarpKeySource = (typeof WARP_KEY_SOURCES)[number]['value']
 
 export const OUTBOUND_MODE_OPTIONS: Array<{
   id: WarperOutboundMode
@@ -102,17 +154,44 @@ export const OUTBOUND_MODE_OPTIONS: Array<{
   {
     id: 'slave',
     label: 'Slave',
-    description: 'Выход через донор-сервер Shadowsocks',
+    description: 'Свой донор warperslave (ссылка из warperslave link или host/port/key)',
   },
   {
     id: 'wg',
     label: 'WireGuard',
     description: 'Собственный WG-конфиг на узле',
   },
+  {
+    id: 'vless',
+    label: 'VLESS',
+    description: 'VLESS / Reality по ссылке vless://',
+  },
+  {
+    id: 'hy2',
+    label: 'Hysteria2',
+    description: 'Hysteria2 по ссылке hy2://',
+  },
+  {
+    id: 'openvpn',
+    label: 'OpenVPN',
+    description: 'Сторонний сервер по файлу .ovpn на узле',
+  },
 ]
 
 export function normalizeOutboundMode(value: unknown): WarperOutboundMode | null {
   const mode = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  if (mode === 'warp' || mode === 'slave' || mode === 'wg') return mode
-  return null
+  return OUTBOUND_MODE_OPTIONS.some((option) => option.id === mode) ? (mode as WarperOutboundMode) : null
+}
+
+export function formatAzWarpMode(mode: string | null | undefined): string {
+  switch (mode) {
+    case 'all':
+      return 'весь трафик'
+    case 'selective':
+      return 'выборочно (домены)'
+    case 'off':
+      return 'выключен'
+    default:
+      return '—'
+  }
 }

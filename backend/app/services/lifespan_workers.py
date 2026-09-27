@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import os
 from pathlib import Path
 from typing import Callable
 
@@ -27,6 +29,7 @@ from app.services.wg_policy_sync_worker import run_wg_policy_sync_loop
 from app.services.user_reminder_worker import run_user_reminder_loop
 from app.services.noc_report_scheduler import run_noc_report_scheduler_loop
 from app.services.alert_rule_worker import run_alert_rules_loop
+from app.services.openvpn_buffer_guard_worker import run_openvpn_buffer_guard_loop
 from app.services.webhook_delivery_worker import run_webhook_delivery_loop
 from app.services.worker_lifecycle import (
     should_start_backup_scheduler,
@@ -50,9 +53,14 @@ from app.services.worker_lifecycle import (
     should_start_awg2_expire,
     should_start_access_expiry,
     should_start_cloudflare_ips_scheduler,
+    should_start_openvpn_buffer_guard,
 )
+from app.services.worker_leader import WorkerLeaderLock
+
+logger = logging.getLogger(__name__)
 
 TaskFactory = Callable[[], asyncio.Task]
+LEADER_RETRY_SECONDS = 15
 
 
 def get_worker_startup_plan() -> dict[str, bool]:
@@ -79,6 +87,7 @@ def get_worker_startup_plan() -> dict[str, bool]:
         "awg2_expire": should_start_awg2_expire(),
         "access_expiry": should_start_access_expiry(),
         "cloudflare_ips_scheduler": should_start_cloudflare_ips_scheduler(),
+        "openvpn_buffer_guard": should_start_openvpn_buffer_guard(),
     }
 
 
@@ -143,14 +152,57 @@ def spawn_background_tasks(
         tasks["access_expiry"] = create_task(run_access_expiry_loop())
     if plan.get("cloudflare_ips_scheduler"):
         tasks["cloudflare_ips_scheduler"] = create_task(run_cloudflare_ips_scheduler_loop())
+    if plan.get("openvpn_buffer_guard"):
+        tasks["openvpn_buffer_guard"] = create_task(run_openvpn_buffer_guard_loop())
 
     tasks["webhook_delivery"] = create_task(run_webhook_delivery_loop())
 
     return tasks
 
 
+def leader_lock_path(db_path: Path) -> Path:
+    return db_path.with_name(f"{db_path.name}.leader.lock")
+
+
+async def _take_over_leadership(
+    lock: WorkerLeaderLock,
+    tasks: dict[str, asyncio.Task | None],
+    start: Callable[[], dict[str, asyncio.Task | None]],
+) -> None:
+    while not lock.try_acquire():
+        await asyncio.sleep(LEADER_RETRY_SECONDS)
+    logger.info("Worker pid=%s took over background tasks", os.getpid())
+    try:
+        tasks.update(start())
+    except Exception:
+        logger.exception("Worker pid=%s failed to take over background tasks", os.getpid())
+        lock.release()
+
+
+def start_leader_workers(
+    lock: WorkerLeaderLock,
+    *,
+    start: Callable[[], dict[str, asyncio.Task | None]],
+    on_startup: Callable[[], None],
+) -> dict[str, asyncio.Task | None]:
+    """Run schedulers in one worker; the others wait to take over if it exits.
+
+    ``on_startup`` covers one-shot actions of a fresh panel start (recovering
+    interrupted tasks, firewall sync). A worker that takes over later skips them:
+    the remaining workers are still running their tasks.
+    """
+    if lock.try_acquire():
+        tasks = start()
+        on_startup()
+        return tasks
+    logger.info("Worker pid=%s: background tasks run in another worker", os.getpid())
+    tasks: dict[str, asyncio.Task | None] = {}
+    tasks["leader_takeover"] = asyncio.create_task(_take_over_leadership(lock, tasks, start))
+    return tasks
+
+
 async def cancel_background_tasks(tasks: dict[str, asyncio.Task | None]) -> None:
-    for task in tasks.values():
+    for name, task in tasks.items():
         if task is None:
             continue
         task.cancel()
@@ -158,3 +210,5 @@ async def cancel_background_tasks(tasks: dict[str, asyncio.Task | None]) -> None
             await task
         except asyncio.CancelledError:
             pass
+        except Exception:
+            logger.exception("Background task %s failed while stopping", name)

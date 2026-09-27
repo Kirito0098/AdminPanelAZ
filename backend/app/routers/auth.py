@@ -5,20 +5,23 @@ import os
 import secrets
 import time
 from datetime import timedelta
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.auth import (
+    access_token_session_id,
     authenticate_user,
+    bearer_session_id,
     create_2fa_pending_token,
-    create_access_token,
+    create_user_access_token,
     decode_2fa_pending_token,
     get_current_user,
     get_password_hash,
+    oauth2_scheme,
     verify_password,
 )
 from app.config import get_settings
@@ -37,6 +40,7 @@ from app.schemas import (
     PasskeyRegisterVerifyRequest,
     PasskeyRenameRequest,
     PasswordChangeRequest,
+    PasswordChangeResponse,
     TelegramOidcTokenRequest,
     Token,
     TwoFABackupCodesResponse,
@@ -57,7 +61,8 @@ from app.services.ip_restriction import ip_restriction_service
 from app.services.password_policy import validate_password
 from app.services.refresh_token import (
     create_refresh_token,
-    revoke_all_user_tokens,
+    invalidate_user_sessions,
+    refresh_token_family,
     revoke_refresh_token,
     rotate_refresh_token,
 )
@@ -138,12 +143,12 @@ def _resolve_user_by_telegram_id(db: Session, tg_id: str) -> User | None:
     return user
 
 
-def _telegram_login_redirect(user: User) -> RedirectResponse:
-    access_token = create_access_token(
-        data={"sub": user.username, "role": user.role.value},
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-    )
-    return RedirectResponse(url=f"{with_access_path(settings, '/login')}#token={access_token}", status_code=302)
+def _telegram_login_redirect(user: User, db: Session, request: Request) -> RedirectResponse:
+    response = RedirectResponse(url=with_access_path(settings, "/login"), status_code=302)
+    token = _issue_token_pair(user, db, response, request)
+    fragment = urlencode({"token": token.access_token, "session": token.web_session_id})
+    response.headers["location"] = f"{with_access_path(settings, '/login')}#{fragment}"
+    return response
 
 
 def _complete_telegram_login(
@@ -221,12 +226,10 @@ def _issue_token_pair(
     response: Response | None = None,
     request: Request | None = None,
 ) -> Token:
-    access = create_access_token(
-        data={"sub": user.username, "role": user.role.value},
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-    )
-    raw_refresh, _ = create_refresh_token(db, user)
+    # One login = one web session = one refresh-token family, so revoking the session ends all of it.
     web_session_id = active_web_session_service.generate_session_id()
+    access = create_user_access_token(user, session_id=web_session_id)
+    raw_refresh, _ = create_refresh_token(db, user, family_id=web_session_id)
     if response is not None:
         _set_refresh_cookie(response, raw_refresh, request)
     if request is not None:
@@ -481,14 +484,19 @@ def telegram_oidc_callback(request: Request, db: Session = Depends(get_db)):
 
     try:
         user = _complete_telegram_login(db, request, tg_id, mini=False)
-        return _telegram_login_redirect(user)
+        return _telegram_login_redirect(user, db, request)
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else "Ошибка входа через Telegram"
         return _oidc_login_error_redirect(detail)
 
 
-@router.post("/telegram/oidc/token")
-def telegram_oidc_token(payload: TelegramOidcTokenRequest, request: Request, db: Session = Depends(get_db)):
+@router.post("/telegram/oidc/token", response_model=Token)
+def telegram_oidc_token(
+    payload: TelegramOidcTokenRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
     from app.services.feature_guards import get_feature_service
 
     if not get_feature_service().is_enabled("telegram"):
@@ -505,11 +513,7 @@ def telegram_oidc_token(payload: TelegramOidcTokenRequest, request: Request, db:
         user = _complete_telegram_login(db, request, tg_id, mini=False)
     except HTTPException:
         raise
-    access_token = create_access_token(
-        data={"sub": user.username, "role": user.role.value},
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-    )
-    return {"access_token": access_token, "token_type": "bearer"}
+    return _issue_token_pair(user, db, response, request)
 
 
 @router.get("/telegram")
@@ -526,7 +530,7 @@ def telegram_login_callback(request: Request, db: Session = Depends(get_db)):
     tg_id = str(payload.get("id", ""))
     try:
         user = _complete_telegram_login(db, request, tg_id, mini=False)
-        return _telegram_login_redirect(user)
+        return _telegram_login_redirect(user, db, request)
     except HTTPException as exc:
         raise exc
 
@@ -581,24 +585,30 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
     raw = request.cookies.get(settings.refresh_token_cookie_name)
     if not raw:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh-токен отсутствует")
-    new_raw, user = rotate_refresh_token(db, raw)
-    access = create_access_token(
-        data={"sub": user.username, "role": user.role.value},
-        expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
-    )
-    _set_refresh_cookie(response, new_raw, request)
+    try:
+        new_raw, user = rotate_refresh_token(db, raw)
+    except HTTPException as exc:
+        # Drop the dead cookie so the browser stops replaying it on every page load / tab focus.
+        failed = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        _clear_refresh_cookie(failed, request)
+        return failed
+    # A pre-upgrade token has no family; its successor starts one, and the access token must name it.
+    access = create_user_access_token(user, session_id=refresh_token_family(db, new_raw or raw))
+    if new_raw is not None:
+        _set_refresh_cookie(response, new_raw, request)
     return Token(access_token=access)
 
 
 @router.post("/logout", response_model=MessageResponse)
 def logout(request: Request, response: Response, db: Session = Depends(get_db)):
-    session_id = active_web_session_service.get_session_id_from_request(request)
-    if session_id:
+    raw = request.cookies.get(settings.refresh_token_cookie_name)
+    # Only a session the caller holds a token for: the X-Web-Session-Id header proves nothing.
+    proven = {refresh_token_family(db, raw) if raw else None, bearer_session_id(request)} - {None}
+    for session_id in proven:
         try:
-            active_web_session_service.remove_active_web_session(db, session_id)
+            active_web_session_service.revoke_session(db, session_id)
         except Exception:
             db.rollback()
-    raw = request.cookies.get(settings.refresh_token_cookie_name)
     if raw:
         revoke_refresh_token(db, raw)
     _clear_refresh_cookie(response, request)
@@ -610,20 +620,25 @@ def me(current_user: User = Depends(get_current_user)):
     return current_user
 
 
-@router.post("/change-password", response_model=MessageResponse)
+@router.post("/change-password", response_model=PasswordChangeResponse)
 def change_password(
     payload: PasswordChangeRequest,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    token: str = Depends(oauth2_scheme),
 ):
     if not verify_password(payload.current_password, current_user.password_hash):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный текущий пароль")
     validate_password(payload.new_password, username=current_user.username)
     current_user.password_hash = get_password_hash(payload.new_password)
     current_user.must_change_password = False
-    revoke_all_user_tokens(db, current_user.id)
-    db.commit()
+    invalidate_user_sessions(db, current_user, reason="password")
+    session_id = access_token_session_id(token)
+    access = create_user_access_token(current_user, session_id=session_id)
+    raw_refresh, _ = create_refresh_token(db, current_user, family_id=session_id)
+    _set_refresh_cookie(response, raw_refresh, request)
     if should_scrub_env_after_password_change(current_user.username):
         scrub_admin_bootstrap_secret_from_env()
     if settings.audit_log_enabled:
@@ -634,7 +649,7 @@ def change_password(
             username=current_user.username,
             remote_addr=ip_restriction_service.get_client_ip(request),
         )
-    return MessageResponse(message="Пароль успешно изменён")
+    return PasswordChangeResponse(message="Пароль успешно изменён", access_token=access)
 
 
 @router.get("/2fa/status", response_model=TwoFAStatusResponse)

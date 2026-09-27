@@ -8,7 +8,7 @@ from threading import Lock
 from sqlalchemy.orm import Session
 
 from app.models import Node, TrafficSessionState
-from app.services.node_manager import _is_vpn_node, get_adapter_for_node
+from app.services.node_manager import is_vpn_node, get_adapter_for_node
 from app.services.wireguard_status import wireguard_peer_is_online
 
 # Coalesce rapid /traffic/active-clients + overview?live=true probes (UI + Telegram).
@@ -44,7 +44,7 @@ def live_active_names_for_node(
     Short TTL cache avoids duplicate adapter status reads when TrafficPage,
     Telegram, or overview?live=true hit the same node within a few seconds.
     """
-    if not _is_vpn_node(node):
+    if not is_vpn_node(node):
         return db_active_traffic_client_names(db, node.id)
 
     ttl = 0.0 if ttl_seconds is None else max(0.0, float(ttl_seconds))

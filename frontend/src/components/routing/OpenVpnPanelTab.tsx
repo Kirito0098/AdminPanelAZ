@@ -4,6 +4,8 @@ import {
   putNodeOpenVpnMultihome,
 } from '@/api/client'
 import RemoteHostsCard from '@/components/proxy/RemoteHostsCard'
+import DnsAaaaCard from '@/components/routing/DnsAaaaCard'
+import OpenVpnBufferGuardCard from '@/components/routing/OpenVpnBufferGuardCard'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -295,6 +297,9 @@ export default function OpenVpnPanelTab({
           />
         </CardContent>
       </Card>
+
+      <OpenVpnBufferGuardCard activeNodeId={activeNodeId} nodeName={nodeName} disabled={disabled} />
+      <DnsAaaaCard activeNodeId={activeNodeId} disabled={disabled} />
     </div>
   )
 }

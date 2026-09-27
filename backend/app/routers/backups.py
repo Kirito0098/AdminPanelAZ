@@ -2,6 +2,7 @@ import logging
 import os
 import tempfile
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile, status
@@ -23,8 +24,10 @@ from app.schemas import (
     BackupSettingsUpdate,
     BackupTestTelegramRequest,
     MessageResponse,
+    PreRestoreSnapshotEntry,
 )
 from app.services.admin_notify import admin_notify_service
+from app.services.background_gate import pause_background_work, resume_background_work
 from app.services.background_tasks import background_task_service
 from app.services.backup_manager import BackupManager
 from app.services.backup_overlays import apply_backup_overlays
@@ -41,6 +44,11 @@ settings = get_settings()
 logger = logging.getLogger(__name__)
 MAX_BACKUP_UPLOAD_BYTES = 200 * 1024 * 1024
 RESTORE_RESTART_MESSAGE = "Восстановление выполнено. Панель будет перезапущена через несколько секунд."
+RESTORE_PAUSE_TIMEOUT_SECONDS = 30
+RESTORE_BUSY_MESSAGE = (
+    "Идёт фоновая задача (например, автобэкап или обновление CIDR). "
+    "Повторите восстановление через несколько минут — данные не изменены."
+)
 RESTORE_APPLY_HINT = (
     "Если восстановлены списки AntiZapret, выполните Применение, "
     "иначе маршрутизация может остаться устаревшей."
@@ -65,8 +73,17 @@ def _schedule_panel_restart_after_restore() -> None:
     project_root = _project_root()
 
     def _restart() -> None:
-        _dispose_db_engines()
-        restart_controller(project_root)
+        # Пауза держится до перезапуска процесса; если он не случился, планировщики иначе стоят до ручного рестарта.
+        try:
+            _dispose_db_engines()
+            result = restart_controller(project_root)
+        except Exception:
+            logger.exception("Restore: panel restart failed; resuming background work")
+            resume_background_work()
+            return
+        if not result.get("success"):
+            logger.error("Restore: panel restart failed (%s); resuming background work", result.get("error"))
+            resume_background_work()
 
     timer = threading.Timer(RESTART_DELAY_SECONDS, _restart)
     timer.daemon = True
@@ -244,25 +261,27 @@ def _create_backup_with_optional_telegram(
             az_result = adapter.create_antizapret_backup()
             if tg and az_result.get("archive_path"):
                 archive_name = az_result.get("archive_name") or Path(az_result["archive_path"]).name
-                for chat_id in tg[1]:
-                    sent = send_tg_document(
-                        tg[0],
-                        chat_id,
-                        az_result["archive_path"],
-                        caption=f"{az_caption_prefix}: {archive_name}",
-                        run_async=False,
-                    )
-                    if not sent:
-                        if send_to_telegram:
-                            raise HTTPException(
-                                status_code=status.HTTP_502_BAD_GATEWAY,
-                                detail="Не удалось отправить архив AntiZapret в Telegram",
-                            )
-                        logger.warning(
-                            "Не удалось отправить архив AntiZapret в Telegram: chat_id=%s file=%s",
+                with adapter.antizapret_backup_file(az_result) as local_archive:
+                    for chat_id in tg[1]:
+                        sent = send_tg_document(
+                            tg[0],
                             chat_id,
-                            az_result["archive_path"],
+                            str(local_archive),
+                            caption=f"{az_caption_prefix}: {archive_name}",
+                            run_async=False,
+                            filename=archive_name,
                         )
+                        if not sent:
+                            if send_to_telegram:
+                                raise HTTPException(
+                                    status_code=status.HTTP_502_BAD_GATEWAY,
+                                    detail="Не удалось отправить архив AntiZapret в Telegram",
+                                )
+                            logger.warning(
+                                "Не удалось отправить архив AntiZapret в Telegram: chat_id=%s file=%s",
+                                chat_id,
+                                archive_name,
+                            )
         except Exception as exc:
             if send_to_telegram:
                 raise
@@ -299,7 +318,7 @@ def create_backup(
 
 
 @router.post("/upload", response_model=BackupEntry)
-async def upload_backup(
+def upload_backup(
     request: Request,
     file: UploadFile = File(...),
     restore: bool = Form(False),
@@ -313,7 +332,7 @@ async def upload_backup(
             detail="Ожидается архив .tar.gz",
         )
 
-    content = await file.read()
+    content = file.file.read()
     if not content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл пуст")
     if len(content) > MAX_BACKUP_UPLOAD_BYTES:
@@ -367,11 +386,36 @@ async def upload_backup(
     return BackupEntry(**result)
 
 
+@contextmanager
+def _background_work_paused(manager: BackupManager):
+    """Scheduled jobs stay paused until the restart; a failed restore lets them run again."""
+    try:
+        pause_background_work(manager.db_path, timeout=RESTORE_PAUSE_TIMEOUT_SECONDS)
+    except TimeoutError:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=RESTORE_BUSY_MESSAGE) from None
+    try:
+        yield
+    except BaseException:
+        resume_background_work()
+        raise
+
+
 def _restore_panel_and_restart(manager: BackupManager, file_name: str, db: Session) -> dict:
+    payload = manager.load_restore_payload(file_name)
+    with _background_work_paused(manager):
+        apply_backup_overlays(payload, mode="adapter", db=db)
+        return _apply_local_restore_and_restart(manager, payload)
+
+
+def _rollback_and_restart(manager: BackupManager, snapshot_id: str) -> dict:
+    payload = manager.load_pre_restore_payload(snapshot_id)
+    with _background_work_paused(manager):
+        return _apply_local_restore_and_restart(manager, payload)
+
+
+def _apply_local_restore_and_restart(manager: BackupManager, payload: dict) -> dict:
     from app.services.client_portal import sync_portal_domain_after_restore
 
-    payload = manager.load_restore_payload(file_name)
-    apply_backup_overlays(payload, mode="adapter", db=db)
     _dispose_db_engines()
     result = manager.apply_restore_payload(payload)
     result.update(
@@ -432,6 +476,36 @@ def restore_backup(
     )
     result.pop("configs", None)
     return _restore_response(result)
+
+
+@router.get("/pre-restore", response_model=list[PreRestoreSnapshotEntry])
+def list_pre_restore_snapshots(_: User = Depends(require_admin)):
+    return [PreRestoreSnapshotEntry(**entry) for entry in _get_backup_manager().list_pre_restore_snapshots()]
+
+
+@router.post("/pre-restore/{snapshot_id}/restore", response_model=MessageResponse)
+def rollback_to_pre_restore_snapshot(
+    snapshot_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    manager = _get_backup_manager()
+    result = _rollback_and_restart(manager, snapshot_id)
+    _record_backup_restore_side_effects(
+        admin=admin,
+        request=request,
+        file_name=f"копия перед восстановлением {snapshot_id}",
+        details=f"pre-restore:{snapshot_id}",
+    )
+    result.pop("configs", None)
+    return _restore_response(result)
+
+
+@router.delete("/pre-restore/{snapshot_id}", response_model=MessageResponse)
+def delete_pre_restore_snapshot(snapshot_id: str, _: User = Depends(require_admin)):
+    _get_backup_manager().delete_pre_restore_snapshot(snapshot_id)
+    return MessageResponse(message="Копия перед восстановлением удалена")
 
 
 @router.delete("/{file_name}", response_model=MessageResponse)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections.abc import Iterable
+from pathlib import Path
 
 from app.config import Settings
 
@@ -62,6 +64,34 @@ def validate_panel_settings(settings: Settings) -> None:
             "В production нельзя использовать слабый DEFAULT_ADMIN_PASSWORD при установке. "
             "Задайте надёжный пароль в мастере установки; после входа он хранится только в БД."
         )
+
+
+_SQLITE_SIDECAR_SUFFIXES = ("-wal", "-shm", "-journal")
+
+
+def restrict_sensitive_file_permissions(paths: Iterable[Path]) -> None:
+    """Keep secrets (.env, SQLite DBs and their WAL/SHM files) readable by the owner only."""
+    for path in paths:
+        candidates = [path, *(path.with_name(path.name + suffix) for suffix in _SQLITE_SIDECAR_SUFFIXES)]
+        for candidate in candidates:
+            try:
+                if candidate.is_file() and candidate.stat().st_mode & 0o077:
+                    candidate.chmod(0o600)
+            except OSError as exc:
+                logger.warning("Could not restrict permissions on %s: %s", candidate, exc)
+
+
+def restrict_backup_dir_permissions(backup_root: Path) -> None:
+    """Backup archives contain the panel DB and .env; tighten ones written before this was enforced."""
+    if not backup_root.is_dir():
+        return
+    archives = [path for path in backup_root.glob("adminpanelaz_*") if path.is_file()]
+    for path, mode in [(backup_root, 0o700), *((archive, 0o600) for archive in archives)]:
+        try:
+            if path.stat().st_mode & 0o077:
+                path.chmod(mode)
+        except OSError as exc:
+            logger.warning("Could not restrict permissions on %s: %s", path, exc)
 
 
 def validate_node_agent_key(api_key: str, *, production: bool) -> None:

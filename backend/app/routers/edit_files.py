@@ -8,7 +8,7 @@ from app.models import User
 from app.schemas import MessageResponse
 from app.services.action_log import log_action
 from app.services.edit_files_transfer import run_edit_files_transfer
-from app.services.file_editor import EDITABLE_FILES, FileEditorService
+from app.services.file_editor import EDITABLE_FILES, FileEditorService, is_kresd_custom_key
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import require_ha_primary_for_config_ops
@@ -64,6 +64,17 @@ def save_edit_file(
     current_user: User = Depends(require_admin),
 ):
     require_ha_primary_for_config_ops(db)
+    if is_kresd_custom_key(file_key):
+        adapter = get_active_adapter(db)
+        adapter.write_config_file(EDITABLE_FILES[file_key], payload.content)
+        maybe_replicate_config_files(
+            db,
+            node_id=get_active_node(db).id,
+            file_keys=[file_key],
+            run_doall=False,
+            content_overrides={file_key: payload.content},
+        )
+        return MessageResponse(message="Файл сохранён, DNS-резолвер перезапущен")
     try:
         adapter = get_active_adapter(db)
         adapter.write_config_file(_filename_for_key(file_key), payload.content)
@@ -92,11 +103,16 @@ def save_batch(
     _: User = Depends(require_admin),
 ):
     require_ha_primary_for_config_ops(db)
+    try:
+        filenames = {key: _filename_for_key(key) for key in payload.files}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     adapter = get_active_adapter(db)
     for key, content in payload.files.items():
-        adapter.write_config_file(_filename_for_key(key), content)
+        adapter.write_config_file(filenames[key], content)
+    run_doall = payload.run_doall and any(not is_kresd_custom_key(key) for key in payload.files)
     output = None
-    if payload.run_doall:
+    if run_doall:
         output = adapter.apply_config_changes()
         from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
 
@@ -105,7 +121,7 @@ def save_batch(
         db,
         node_id=get_active_node(db).id,
         file_keys=list(payload.files.keys()),
-        run_doall=payload.run_doall,
+        run_doall=run_doall,
         content_overrides=dict(payload.files),
     )
     return MessageResponse(message="Файлы сохранены", detail=output)

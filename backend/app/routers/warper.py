@@ -1,6 +1,5 @@
 """AZ-WARP (WARPER) management API."""
 
-import asyncio
 import json
 from collections.abc import Iterator
 
@@ -9,10 +8,11 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
-from app.auth import decode_access_token_username, require_admin
+from app.auth import get_active_user_from_access_token, require_admin
 from app.models import User, UserRole
 from app.schemas import (
     WarperActionResponse,
+    WarperAutoResolveResponse,
     WarperCatalogInstalledResponse,
     WarperCatalogNameRequest,
     WarperCatalogSearchResponse,
@@ -22,30 +22,39 @@ from app.schemas import (
     WarperDomainListsStatus,
     WarperDomainListToggle,
     WarperDomainsResponse,
+    WarperEnableUpdate,
     WarperFullVpnUpdate,
     WarperHealthResponse,
     WarperIpExportUpdate,
     WarperIpRangeCreate,
     WarperIpRangeModeUpdate,
     WarperIpRangesResponse,
+    WarperIpRoutesResponse,
     WarperLogLevelUpdate,
     WarperLogsResponse,
+    WarperModeLinkUpdate,
+    WarperModeOpenVpnUpdate,
     WarperModeResponse,
     WarperModeSlaveUpdate,
     WarperModeWarpUpdate,
     WarperModeWgUpdate,
     WarperMtuUpdate,
+    WarperOvpnConfigRequest,
+    WarperResolveCleanRequest,
     WarperSettingsOptionsResponse,
+    WarperSingboxStatusResponse,
     WarperStatusResponse,
+    WarperSubnetsResponse,
     WarperSubnetUpdate,
     WarperTextContentResponse,
     WarperTextSaveRequest,
     WarperTrafficResponse,
     WarperUpdatesCheckResponse,
 )
+from app.services.async_iter import iterate_in_thread
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.chart_timezone import resolve_chart_timezone
-from app.services.warper import enrich_warper_traffic_payload
+from app.services.warper import SINGBOX_ACTIONS, enrich_warper_traffic_payload, extract_proxy_link
 
 router = APIRouter(prefix="/warper", tags=["warper"])
 
@@ -283,9 +292,13 @@ def warper_settings_options(_: User = Depends(require_admin), db: Session = Depe
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     options = adapter.get_warper_settings_options()
+    if not isinstance(options, dict):
+        options = {}
     return WarperSettingsOptionsResponse(
-        warp_keys=options.get("warp_keys", []) if isinstance(options, dict) else [],
-        wg_configs=options.get("wg_configs", []) if isinstance(options, dict) else [],
+        warp_keys=options.get("warp_keys") or [],
+        warp_key_items=options.get("warp_key_items") or [],
+        wg_configs=options.get("wg_configs") or [],
+        ovpn_configs=options.get("ovpn_configs") or [],
         **_node_meta(node),
     )
 
@@ -309,6 +322,14 @@ def warper_settings_mode_slave(
 ):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
+    link = extract_proxy_link(payload.link)
+    # A donor on VLESS/Hysteria2 hands out its own link; AZ-WARP 1.5.1 switches mode by it as well.
+    if link.startswith("vless://"):
+        return _action_response(adapter.set_warper_mode_vless(link), node)
+    if link.startswith(("hy2://", "hysteria2://")):
+        return _action_response(adapter.set_warper_mode_hy2(link), node)
+    if link:
+        return _action_response(adapter.set_warper_mode_slave(link=link), node)
     return _action_response(adapter.set_warper_mode_slave(payload.host, payload.port, payload.key), node)
 
 
@@ -321,6 +342,158 @@ def warper_settings_mode_wg(
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     return _action_response(adapter.set_warper_mode_wg(payload.config_path), node)
+
+
+@router.post("/settings/mode/vless", response_model=WarperActionResponse)
+def warper_settings_mode_vless(
+    payload: WarperModeLinkUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.set_warper_mode_vless(extract_proxy_link(payload.link)), node)
+
+
+@router.post("/settings/mode/hy2", response_model=WarperActionResponse)
+def warper_settings_mode_hy2(
+    payload: WarperModeLinkUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.set_warper_mode_hy2(extract_proxy_link(payload.link)), node)
+
+
+@router.post("/settings/mode/openvpn", response_model=WarperActionResponse)
+def warper_settings_mode_openvpn(
+    payload: WarperModeOpenVpnUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(
+        adapter.set_warper_mode_openvpn(payload.config_path, payload.username, payload.password),
+        node,
+    )
+
+
+@router.post("/settings/ovpn/forget", response_model=WarperActionResponse)
+def warper_settings_ovpn_forget(
+    payload: WarperOvpnConfigRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_forget_ovpn_credentials(payload.config_path), node)
+
+
+@router.put("/settings/autopatch", response_model=WarperActionResponse)
+def warper_settings_autopatch(
+    payload: WarperEnableUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.set_warper_autopatch(enable=payload.enable), node)
+
+
+@router.post("/resync", response_model=WarperActionResponse)
+def warper_resync(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_resync(), node)
+
+
+@router.post("/kresd/restart", response_model=WarperActionResponse)
+def warper_kresd_restart(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_restart_kresd(), node)
+
+
+@router.post("/domains/update-lists", response_model=WarperActionResponse)
+def warper_domains_update_lists(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_update_lists(), node)
+
+
+@router.get("/resolve", response_model=WarperAutoResolveResponse)
+def warper_resolve_get(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    data = adapter.get_warper_auto_resolve()
+    enabled = bool(data.get("enabled")) if isinstance(data, dict) else False
+    return WarperAutoResolveResponse(enabled=enabled, **_node_meta(node))
+
+
+@router.put("/resolve", response_model=WarperActionResponse)
+def warper_resolve_set(
+    payload: WarperEnableUpdate,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.set_warper_auto_resolve(enable=payload.enable), node)
+
+
+@router.post("/resolve/sync", response_model=WarperActionResponse)
+def warper_resolve_sync(
+    force: bool = Query(False),
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_resolve_sync(force=force), node)
+
+
+@router.post("/resolve/clean", response_model=WarperActionResponse)
+def warper_resolve_clean(
+    payload: WarperResolveCleanRequest,
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    domain = (payload.domain or "").strip() or None
+    return _action_response(adapter.warper_resolve_clean(domain), node)
+
+
+@router.get("/ip-routes", response_model=WarperIpRoutesResponse)
+def warper_ip_routes(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return WarperIpRoutesResponse(routes=adapter.get_warper_ip_routes(), **_node_meta(node))
+
+
+@router.post("/ip-routes/clear", response_model=WarperActionResponse)
+def warper_ip_routes_clear(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return _action_response(adapter.warper_clear_ip_routes(), node)
+
+
+@router.get("/subnets", response_model=WarperSubnetsResponse)
+def warper_subnets(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    return WarperSubnetsResponse(subnets=adapter.get_warper_subnets(), **_node_meta(node))
+
+
+@router.get("/singbox/status", response_model=WarperSingboxStatusResponse)
+def warper_singbox_status(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
+    data = adapter.get_warper_singbox_status()
+    payload = {k: v for k, v in data.items() if k not in {"node_id", "node_name"}} if isinstance(data, dict) else {}
+    return WarperSingboxStatusResponse(**payload, **_node_meta(node))
 
 
 @router.put("/settings/fullvpn", response_model=WarperActionResponse)
@@ -373,10 +546,8 @@ def warper_singbox_action(
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    if action not in {"start", "stop", "restart"}:
-        from fastapi import HTTPException, status
-
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Допустимо: start, stop, restart")
+    if action not in SINGBOX_ACTIONS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Допустимо: {', '.join(SINGBOX_ACTIONS)}")
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     return _action_response(adapter.warper_singbox_action(action), node)
@@ -466,11 +637,10 @@ def warper_updates_check(
 
 
 def _admin_from_stream_token(token: str, db: Session) -> User:
-    username = decode_access_token_username(token)
-    if not username:
+    user = get_active_user_from_access_token(db, token)
+    if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    user = db.query(User).filter(User.username == username).first()
-    if user is None or not user.is_active or user.role != UserRole.admin:
+    if user.role != UserRole.admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
     return user
 
@@ -495,11 +665,14 @@ async def warper_updates_stream(
         db = SessionLocal()
         try:
             adapter = get_active_adapter(db)
-            for chunk in _iter_warper_update_sse(adapter):
-                if await request.is_disconnected():
-                    break
-                yield chunk
-                await asyncio.sleep(0)
+            chunks = iterate_in_thread(_iter_warper_update_sse(adapter))
+            try:
+                async for chunk in chunks:
+                    if await request.is_disconnected():
+                        break
+                    yield chunk
+            finally:
+                await chunks.aclose()
         except Exception as exc:
             yield f"data: {json.dumps({'event': 'error', 'detail': str(exc)}, default=str)}\n\n"
         finally:
