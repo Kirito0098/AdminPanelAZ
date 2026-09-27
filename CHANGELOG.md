@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.26.0](#2260---2026-09-27) — 2026-09-27
 - [2.25.1](#2251---2026-09-14) — 2026-09-14
 - [2.25.0](#2250---2026-09-13) — 2026-09-13
 - [2.24.0](#2240---2026-09-10) — 2026-09-10
@@ -51,6 +52,24 @@
 ---
 
 ## [Unreleased]
+
+### ✨ Added
+
+### 🔄 Changed
+
+### 🐛 Fixed
+
+### 🗑️ Removed
+
+### 🔒 Security
+
+### 🧪 Tests
+
+---
+
+## [2.26.0] - 2026-09-27
+
+> **Кратко:** AZ-WARP 1.5 / 1.5.1 (VLESS, Hysteria2, OpenVPN, sing-box, авто-резолв, перезапуск kresd); режимы WARP 1–4, `WARP_MTU` и файлы WARP/RPZ/Lua в редакторе; переключатель DNS-ответа на AAAA; OpenVPN Buffer Guard; срок подписки на пользователе, портал пользователя (`u_…`) и unlock-ключи; копии перед восстановлением; усиление безопасности (сессии, секреты, nginx, агенты) и надёжности HA; ускорение и разгрузка панели; node agent 1.11.0.
 
 **Обновление с 2.25.1** — что сделать администратору (подробности в пунктах ниже):
 
@@ -2911,7 +2930,8 @@ Major release: roadmap этапы 1–8 (и большая часть 9) — pro
 
 </details>
 
-[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.25.1...HEAD
+[Unreleased]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.26.0...HEAD
+[2.26.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.25.1...v2.26.0
 [2.25.1]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.25.0...v2.25.1
 [2.25.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.24.0...v2.25.0
 [2.24.0]: https://github.com/Kirito0098/AdminPanelAZ/compare/v2.23.1...v2.24.0
