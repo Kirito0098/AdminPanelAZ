@@ -20,6 +20,19 @@ from app.services import server_reboot as sr
 DEAD_OWNER = "999999999:1"
 
 
+def _wait_until(predicate, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return predicate()
+
+
+def _status(reboot_id: str) -> str:
+    return sr.get_pending(reboot_id).status
+
+
 @pytest.fixture(autouse=True)
 def _clean(tmp_path, monkeypatch):
     engine = create_engine(f"sqlite:///{tmp_path / 'reboot.db'}", connect_args={"check_same_thread": False})
@@ -189,8 +202,7 @@ def test_timer_errors_are_logged(monkeypatch, caplog):
     monkeypatch.setattr(sr, "_set_status", locked)
     with caplog.at_level(logging.ERROR, logger=sr.logger.name):
         sr.schedule_reboot(node_id=22, node_name="n22", scheduled_by="a", execute_fn=Mock(), delay_seconds=0.02)
-        time.sleep(0.15)
-    assert any("n22" in record.getMessage() for record in caplog.records)
+        assert _wait_until(lambda: any("n22" in record.getMessage() for record in caplog.records))
 
 
 def test_schedule_requires_exact_confirm_via_wrapper():
@@ -206,10 +218,9 @@ def test_schedule_requires_exact_confirm_via_wrapper():
     )
     assert pending.status == "pending"
     assert pending.node_id == 1
-    time.sleep(0.12)
+    assert _wait_until(lambda: _status(pending.reboot_id) == "executed")
     executed.assert_called_once()
     assert executed.call_args[0][0].reboot_id == pending.reboot_id
-    assert sr.get_pending(pending.reboot_id).status == "executed"
 
 
 def test_cancel_before_execute():
@@ -258,8 +269,7 @@ def test_execute_failure_marks_failed():
         execute_fn=boom,
         delay_seconds=0.05,
     )
-    time.sleep(0.12)
-    assert sr.get_pending(pending.reboot_id).status == "failed"
+    assert _wait_until(lambda: _status(pending.reboot_id) == "failed")
 
 
 def test_cancel_during_execute_is_not_cancellable():
@@ -282,8 +292,7 @@ def test_cancel_during_execute_is_not_cancellable():
         sr.cancel_reboot(pending.reboot_id)
     assert ei.value.code == "not_cancellable"
     release.set()
-    time.sleep(0.05)
-    assert sr.get_pending(pending.reboot_id).status == "executed"
+    assert _wait_until(lambda: _status(pending.reboot_id) == "executed")
 
 
 def _hold_set_status(monkeypatch, *, hold_when, until: threading.Event):
@@ -333,11 +342,10 @@ def test_timer_wins_when_cancel_checked_before_switch(monkeypatch):
 
     with pytest.raises(sr.RebootError) as ei:
         sr.cancel_reboot(pending.reboot_id)
-    time.sleep(0.05)
 
     assert ei.value.code == "not_cancellable"
+    assert _wait_until(lambda: _status(pending.reboot_id) == "executed")
     assert calls == ["executing"]
-    assert sr.get_pending(pending.reboot_id).status == "executed"
 
 
 def test_simultaneous_timer_and_cancel_have_exactly_one_winner():
