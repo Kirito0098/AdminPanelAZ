@@ -1,16 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { cleanup, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Node, User, VpnConfig } from '@/types'
+import { mountWhileActiveNodeResolves, resetNodeState } from '@/test/nodePageHarness'
+import type { VpnConfig } from '@/types'
 import DashboardPage from './DashboardPage'
 
-const nodeState = vi.hoisted(() => ({
-  activeNode: null as Node | null,
-  activeNodeHa: null,
-  loading: true,
-}))
 const api = vi.hoisted(() => ({
   getMonitoring: vi.fn(),
   getConfigs: vi.fn(),
@@ -22,31 +17,19 @@ const api = vi.hoisted(() => ({
   getConfigTags: vi.fn(),
   getOpenVpnGroup: vi.fn(),
 }))
-const stable = vi.hoisted(() => ({
-  notify: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
-  progress: {
-    startGlobal: vi.fn(),
-    doneGlobal: vi.fn(),
-    withInline: vi.fn(),
-    trackBackgroundTask: vi.fn(),
-  },
-  poll: { task: null, polling: false, startPoll: vi.fn() },
-  modules: { isEnabled: () => true },
-}))
-
-const admin = { id: 7, username: 'admin', role: 'admin', theme: 'dark', is_active: true } as User
+const poll = vi.hoisted(() => ({ task: null, polling: false, startPoll: vi.fn() }))
 
 vi.mock('@/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/client')>()),
   ...api,
 }))
-vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: admin }) }))
-vi.mock('@/context/NodeContext', () => ({ useNode: () => nodeState }))
-vi.mock('@/context/FeatureModulesContext', () => ({ useFeatureModules: () => stable.modules }))
-vi.mock('@/context/NotificationContext', () => ({ useNotifications: () => stable.notify }))
-vi.mock('@/context/ProgressContext', () => ({ useProgress: () => stable.progress }))
+vi.mock('@/context/AuthContext', async () => (await import('@/test/nodePageHarness')).authModule)
+vi.mock('@/context/NodeContext', async () => (await import('@/test/nodePageHarness')).nodeContextModule)
+vi.mock('@/context/FeatureModulesContext', async () => (await import('@/test/nodePageHarness')).featureModulesModule)
+vi.mock('@/context/NotificationContext', async () => (await import('@/test/nodePageHarness')).notificationModule)
+vi.mock('@/context/ProgressContext', async () => (await import('@/test/nodePageHarness')).progressModule)
 vi.mock('@/hooks/useHaReplicaReadonly', () => ({ useHaReplicaReadonly: () => false }))
-vi.mock('@/hooks/useBackgroundTaskPoll', () => ({ useBackgroundTaskPoll: () => stable.poll }))
+vi.mock('@/hooks/useBackgroundTaskPoll', () => ({ useBackgroundTaskPoll: () => poll }))
 
 function config(id: number, clientName: string, vpnType: VpnConfig['vpn_type']): VpnConfig {
   return {
@@ -60,20 +43,9 @@ function config(id: number, clientName: string, vpnType: VpnConfig['vpn_type']):
   }
 }
 
-const node = { id: 1, name: 'main', status: 'online', is_local: true } as unknown as Node
-
-function renderPage() {
-  return render(
-    <MemoryRouter>
-      <DashboardPage />
-    </MemoryRouter>,
-  )
-}
-
 describe('DashboardPage initial load', () => {
   beforeEach(() => {
-    nodeState.activeNode = null
-    nodeState.loading = true
+    resetNodeState()
     api.getMonitoring.mockResolvedValue({ services: [], openvpn_clients: [], wireguard_peers: [], timestamp: '' })
     api.getConfigs.mockResolvedValue([
       config(1, 'alice', 'openvpn'),
@@ -98,17 +70,7 @@ describe('DashboardPage initial load', () => {
   })
 
   it('fetches every endpoint once while the active node resolves after mount', async () => {
-    const { rerender } = renderPage()
-    await act(async () => {})
-
-    nodeState.activeNode = node
-    nodeState.loading = false
-    rerender(
-      <MemoryRouter>
-        <DashboardPage />
-      </MemoryRouter>,
-    )
-    await act(async () => {})
+    await mountWhileActiveNodeResolves(() => <DashboardPage />)
     await screen.findAllByText('alice')
 
     expect({

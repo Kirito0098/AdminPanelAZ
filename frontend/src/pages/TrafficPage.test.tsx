@@ -1,15 +1,10 @@
 // @vitest-environment jsdom
-import { act, cleanup, render } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { cleanup } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Node, User } from '@/types'
+import { mountWhileActiveNodeResolves, resetNodeState } from '@/test/nodePageHarness'
 import TrafficPage from './TrafficPage'
 
-const nodeState = vi.hoisted(() => ({
-  activeNode: null as Node | null,
-  loading: true,
-}))
 const api = vi.hoisted(() => ({
   getTrafficOverview: vi.fn(),
   getTrafficActiveClients: vi.fn(),
@@ -18,13 +13,6 @@ const api = vi.hoisted(() => ({
   getTrafficCleanupSchedule: vi.fn(),
 }))
 const settingsApi = vi.hoisted(() => ({ getRetentionSettings: vi.fn() }))
-const stable = vi.hoisted(() => ({
-  notify: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
-  progress: { startGlobal: vi.fn(), doneGlobal: vi.fn(), withInline: vi.fn() },
-  modules: { isEnabled: () => true },
-}))
-
-const admin = { id: 7, username: 'admin', role: 'admin', theme: 'dark', is_active: true } as User
 
 vi.mock('@/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/client')>()),
@@ -34,26 +22,15 @@ vi.mock('@/api/settings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/settings')>()),
   ...settingsApi,
 }))
-vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: admin }) }))
-vi.mock('@/context/NodeContext', () => ({ useNode: () => nodeState }))
-vi.mock('@/context/FeatureModulesContext', () => ({ useFeatureModules: () => stable.modules }))
-vi.mock('@/context/NotificationContext', () => ({ useNotifications: () => stable.notify }))
-vi.mock('@/context/ProgressContext', () => ({ useProgress: () => stable.progress }))
-
-const node = { id: 1, name: 'main', status: 'online', is_local: true } as unknown as Node
-
-function page() {
-  return (
-    <MemoryRouter>
-      <TrafficPage />
-    </MemoryRouter>
-  )
-}
+vi.mock('@/context/AuthContext', async () => (await import('@/test/nodePageHarness')).authModule)
+vi.mock('@/context/NodeContext', async () => (await import('@/test/nodePageHarness')).nodeContextModule)
+vi.mock('@/context/FeatureModulesContext', async () => (await import('@/test/nodePageHarness')).featureModulesModule)
+vi.mock('@/context/NotificationContext', async () => (await import('@/test/nodePageHarness')).notificationModule)
+vi.mock('@/context/ProgressContext', async () => (await import('@/test/nodePageHarness')).progressModule)
 
 describe('TrafficPage initial load', () => {
   beforeEach(() => {
-    nodeState.activeNode = null
-    nodeState.loading = true
+    resetNodeState()
     api.getTrafficOverview.mockResolvedValue({
       rows: [],
       summary: { users_count: 0, total_bytes: 0 },
@@ -72,12 +49,7 @@ describe('TrafficPage initial load', () => {
   })
 
   it('fetches every endpoint once while the active node resolves after mount', async () => {
-    const { rerender } = render(page())
-    await act(async () => {})
-    nodeState.activeNode = node
-    nodeState.loading = false
-    rerender(page())
-    await act(async () => {})
+    await mountWhileActiveNodeResolves(() => <TrafficPage />)
 
     expect({
       overview: api.getTrafficOverview.mock.calls.length,
