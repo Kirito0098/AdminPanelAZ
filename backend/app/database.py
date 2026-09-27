@@ -1438,6 +1438,20 @@ def _migrate_user_traffic_sample_name_index() -> None:
         conn.execute(text("DROP INDEX IF EXISTS ix_user_traffic_sample_common_name"))
 
 
+def _migrate_user_traffic_sample_node_client_index() -> None:
+    """Traffic overview sums a 30d window per client without sorting every sample."""
+    with _migration_transaction() as conn:
+        if "user_traffic_sample" not in inspect(conn).get_table_names():
+            return
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_user_traffic_sample_node_client_created "
+                "ON user_traffic_sample "
+                "(node_id, common_name, protocol_type, created_at, delta_received, delta_sent)"
+            )
+        )
+
+
 def _migrate_client_portal_tokens_active_unique() -> None:
     """One active (revoked_at IS NULL) portal token per (node_id, client_name)."""
     inspector = inspect(engine)
@@ -1598,6 +1612,7 @@ def _run_db_migrations() -> None:
     _migrate_traffic_session_state_node_scoped_key()
     _migrate_traffic_session_state_active_index()
     _migrate_user_traffic_sample_name_index()
+    _migrate_user_traffic_sample_node_client_index()
     inspector = inspect(engine)
     migrations = {
         "wg_access_policy": [

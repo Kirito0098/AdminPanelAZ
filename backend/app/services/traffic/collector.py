@@ -6,6 +6,8 @@ from threading import Lock
 
 from sqlalchemy import func, true
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import operators
+from sqlalchemy.sql.elements import UnaryExpression
 
 from app.models import Node, TrafficSessionState, UserTrafficSample, UserTrafficStatProtocol
 from app.schemas import (
@@ -30,6 +32,8 @@ from app.services.wireguard_status import wireguard_peer_is_online
 _RECENT_USAGE_TTL_SECONDS = 12.0
 _recent_usage_lock = Lock()
 _recent_usage_cache: dict[tuple, tuple[float, dict]] = {}
+# Past ~3 days, scanning the node's covering index in group order beats sorting the window.
+_CLIENT_INDEX_MIN_WINDOW = timedelta(days=3)
 
 
 def clear_recent_usage_cache() -> None:
@@ -565,23 +569,32 @@ class TrafficCollectorService:
         delta = func.coalesce(UserTrafficSample.delta_received, 0) + func.coalesce(
             UserTrafficSample.delta_sent, 0
         )
-        common_name_lower = func.lower(UserTrafficSample.common_name)
+        created_at = UserTrafficSample.created_at
+        if until_utc - since_utc > _CLIENT_INDEX_MIN_WINDOW:
+            # Unary "+" hides created_at from the (node_id, created_at) range so SQLite
+            # streams ix_user_traffic_sample_node_client_created in GROUP BY order.
+            created_at = UnaryExpression(
+                UserTrafficSample.created_at,
+                operator=operators.custom_op("+"),
+                type_=UserTrafficSample.created_at.type,
+            )
 
+        # Group by the raw name (index order), fold case variants below.
         rows = (
             self.db.query(
                 UserTrafficSample.node_id,
-                common_name_lower.label("cn"),
+                func.lower(UserTrafficSample.common_name).label("cn"),
                 UserTrafficSample.protocol_type,
                 func.sum(delta).label("period_bytes"),
             )
             .filter(
                 UserTrafficSample.node_id.in_(scope_ids),
-                UserTrafficSample.created_at >= since_utc,
-                UserTrafficSample.created_at < until_utc,
+                created_at >= since_utc,
+                created_at < until_utc,
             )
             .group_by(
                 UserTrafficSample.node_id,
-                common_name_lower,
+                UserTrafficSample.common_name,
                 UserTrafficSample.protocol_type,
             )
             .all()
@@ -590,9 +603,8 @@ class TrafficCollectorService:
         result: dict[tuple[int, str, str], dict[str, int]] = {}
         for row in rows:
             key = (row.node_id, row.cn or "", row.protocol_type)
-            result[key] = {
-                "period": int(row.period_bytes or 0),
-            }
+            entry = result.setdefault(key, {"period": 0})
+            entry["period"] += int(row.period_bytes or 0)
         if ttl > 0:
             with _recent_usage_lock:
                 _recent_usage_cache[cache_key] = (now_mono + ttl, result)

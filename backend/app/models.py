@@ -625,6 +625,15 @@ class UserTrafficSample(Base):
     __table_args__ = (
         Index("ix_user_traffic_sample_node_created", "node_id", "created_at"),
         Index("ix_user_traffic_sample_name_created", "common_name", "created_at"),
+        Index(
+            "ix_user_traffic_sample_node_client_created",
+            "node_id",
+            "common_name",
+            "protocol_type",
+            "created_at",
+            "delta_received",
+            "delta_sent",
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
