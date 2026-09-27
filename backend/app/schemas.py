@@ -987,6 +987,16 @@ class OpenVpnBufferGuardEventOut(BaseModel):
     ban_expires_at: datetime | None
 
 
+class DnsAaaaStateOut(BaseModel):
+    antizapret: Literal["zero", "nodata", "custom"]
+    vpn: Literal["zero", "nodata", "custom"]
+
+
+class DnsAaaaUpdate(BaseModel):
+    target: Literal["antizapret", "vpn"]
+    nodata: bool
+
+
 class GeoIpStatusResponse(BaseModel):
     loaded: bool
     source: Literal["local", "ip-api"]

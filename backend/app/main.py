@@ -31,6 +31,7 @@ from app.routers import (
     config_tags,
     configs,
     configs_bulk,
+    dns_aaaa,
     edit_files,
     ip_blocked,
     logs,
@@ -284,6 +285,7 @@ app.include_router(client_templates.router, prefix=_API_PREFIX)
 app.include_router(monitoring.router, prefix=_API_PREFIX)
 app.include_router(alert_rules.router, prefix=_API_PREFIX)
 app.include_router(openvpn_buffer_guard.router, prefix=_API_PREFIX)
+app.include_router(dns_aaaa.router, prefix=_API_PREFIX)
 app.include_router(settings_router.router, prefix=_API_PREFIX)
 app.include_router(maintenance.router, prefix=_API_PREFIX)
 app.include_router(settings_reboot.router, prefix=_API_PREFIX)

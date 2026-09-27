@@ -7,9 +7,13 @@ import socket
 import subprocess
 import time
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 
+from app.routers import dns_aaaa
+from app.schemas import DnsAaaaUpdate
 from app.services.kresd_aaaa import NODATA_BLOCK, aaaa_mode, with_aaaa_nodata
 
 UPSTREAM_CUSTOM = """-- Custom query policies for AntiZapret VPN
@@ -163,3 +167,100 @@ def test_kresd_answers_aaaa_by_block(tmp_path: Path, nodata: bool):
     assert ("IN\tSOA\t. . 1 1 1 1 86400" in ordinary) is nodata
     assert "status: NOERROR" in localhost
     assert "IN\tAAAA\t::1\n" in localhost
+
+
+@pytest.fixture
+def api_env(monkeypatch):
+    files = {"custom.lua": UPSTREAM_CUSTOM, "custom2.lua": UPSTREAM_CUSTOM}
+    adapter = MagicMock()
+    adapter.read_config_file.side_effect = lambda name: files[name]
+    adapter.write_config_file.side_effect = lambda name, content: files.__setitem__(name, content)
+    node = MagicMock()
+    node.id = 7
+    replicate = MagicMock()
+    logged = MagicMock()
+    monkeypatch.setattr(dns_aaaa, "require_ha_primary_for_config_ops", lambda _db: None)
+    monkeypatch.setattr(dns_aaaa, "get_active_adapter", lambda _db: adapter)
+    monkeypatch.setattr(dns_aaaa, "get_active_node", lambda _db: node)
+    monkeypatch.setattr(dns_aaaa, "maybe_replicate_config_files", replicate)
+    monkeypatch.setattr(dns_aaaa, "log_action", logged)
+    return files, adapter, replicate, logged
+
+
+def _put(target: str, nodata: bool):
+    return dns_aaaa.set_dns_aaaa(DnsAaaaUpdate(target=target, nodata=nodata), db=MagicMock(), current_user=MagicMock())
+
+
+def test_get_reports_both_resolvers(api_env):
+    files, *_ = api_env
+    files["custom2.lua"] = with_aaaa_nodata(UPSTREAM_CUSTOM, True)
+
+    state = dns_aaaa.get_dns_aaaa(db=MagicMock(), _=MagicMock())
+
+    assert (state.antizapret, state.vpn) == ("zero", "nodata")
+
+
+def test_put_writes_block_and_replicates_without_doall(api_env):
+    files, adapter, replicate, logged = api_env
+
+    state = _put("vpn", True)
+
+    assert (state.antizapret, state.vpn) == ("zero", "nodata")
+    adapter.write_config_file.assert_called_once_with("custom2.lua", files["custom2.lua"])
+    assert replicate.call_args.kwargs == {
+        "node_id": 7,
+        "file_keys": ["kresd_custom2"],
+        "run_doall": False,
+        "content_overrides": {"kresd_custom2": files["custom2.lua"]},
+    }
+    assert "target=vpn;nodata=True" in logged.call_args.kwargs["details"]
+
+
+def test_put_without_change_does_not_write(api_env):
+    _files, adapter, replicate, logged = api_env
+
+    state = _put("antizapret", False)
+
+    assert state.antizapret == "zero"
+    adapter.write_config_file.assert_not_called()
+    replicate.assert_not_called()
+    logged.assert_not_called()
+
+
+def test_put_on_hand_edited_block_is_conflict(api_env):
+    files, adapter, *_ = api_env
+    files["custom.lua"] = NODATA_BLOCK.replace("86400", "3600")
+
+    with pytest.raises(HTTPException) as exc:
+        _put("antizapret", False)
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail == "Блок AAAA в custom.lua изменён вручную — поправьте его в Редакторе файлов"
+    adapter.write_config_file.assert_not_called()
+
+
+def test_put_on_ha_replica_is_rejected_before_reading(api_env, monkeypatch):
+    _files, adapter, *_ = api_env
+
+    def forbid(_db):
+        raise HTTPException(status_code=403, detail="replica")
+
+    monkeypatch.setattr(dns_aaaa, "require_ha_primary_for_config_ops", forbid)
+
+    with pytest.raises(HTTPException) as exc:
+        _put("antizapret", True)
+
+    assert exc.value.status_code == 403
+    adapter.read_config_file.assert_not_called()
+
+
+def test_old_node_agent_error_passes_through(api_env):
+    from app.services.file_editor import ConfigFileUnsupportedError
+
+    _files, adapter, *_ = api_env
+    adapter.read_config_file.side_effect = ConfigFileUnsupportedError("custom.lua")
+
+    with pytest.raises(ConfigFileUnsupportedError) as exc:
+        dns_aaaa.get_dns_aaaa(db=MagicMock(), _=MagicMock())
+
+    assert exc.value.status_code == 503
