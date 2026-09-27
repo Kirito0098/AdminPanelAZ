@@ -191,7 +191,7 @@ API: `GET/PUT /api/openvpn-buffer-guard/settings`, `GET /api/openvpn-buffer-guar
 
 Флаг **OPENVPN_BACKUP_TCP** поднимает OpenVPN TCP на портах **80, 443, 504, 508**. Если панель публикует HTTPS на **443** (`HTTPS_PUBLIC_PORT`, по умолчанию), после `doall.sh` nginx и панель станут недоступны.
 
-- Перед включением смените **Публичный порт HTTPS** в [Настройки → Адрес сайта и HTTPS](/settings/vpn_network).
+- Перед включением смените **Публичный порт HTTPS** в **Настройки → Адрес сайта и HTTPS** ([инструкция](nastrojki/set-i-publikaciya.md)).
 - В UI при включении на 443 показывается подтверждение и постоянное предупреждение; API `PUT /routing/antizapret-settings` возвращает `warnings` (сохранение не блокируется).
 - При установке (`install.sh`), если в `{ANTIZAPRET_PATH}/setup` уже стоит `OPENVPN_BACKUP_TCP=y`, а HTTPS панели будет на 443 (режимы nginx `le` / `selfsigned` / `nginx_custom`), флаг принудительно сбрасывается в `n` до настройки nginx.
 

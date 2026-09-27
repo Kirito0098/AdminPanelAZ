@@ -42,7 +42,7 @@
 | Слой | Стек | Точка входа |
 |------|------|-------------|
 | Backend | Python 3.12 (Ubuntu 24.04) / 3.13 (Debian 13), FastAPI, SQLAlchemy, Pydantic | `backend/app/main.py` |
-| Frontend | React 18, TypeScript, Vite, Tailwind, shadcn/ui | `frontend/src/main.tsx` |
+| Frontend | React 18, TypeScript, Vite, Tailwind, shadcn/ui; Node.js ≥ 22 (`engines` в `frontend/package.json`) | `frontend/src/main.tsx` |
 | TG Mini App | Отдельная сборка Vite (`mode=tg-mini`) | `frontend/src/tg-mini/main.tsx` |
 | БД | SQLite (основная + отдельная CIDR) | `backend/app/database.py`, `cidr_database.py` |
 | Деплой | `install.sh`, systemd | `/opt/AdminPanelAZ` |
@@ -62,10 +62,11 @@
 │   │   ├── schemas.py           # Pydantic-схемы API
 │   │   ├── database.py          # engine, миграции основной БД
 │   │   ├── cidr_database.py     # engine CIDR БД
-│   │   ├── routers/             # HTTP API (37 роутеров)
-│   │   ├── services/            # бизнес-логика (~160+ файлов + подпакеты)
+│   │   ├── routers/             # HTTP API (41 модуль роутеров, включая пакет tg_mini/)
+│   │   ├── services/            # бизнес-логика (~190 файлов + подпакеты cidr/, node_sync/, rate_limit/, telegram_bot_handlers/, traffic/)
 │   │   ├── middleware/          # rate limit, security, sessions
 │   │   └── static/tg_mini/      # собранный Mini App
+│   ├── node_agent/              # агент VPN-узла (:9100, systemd adminpanelaz-node)
 │   └── proxy_agent/             # агент прокси-узла (:9101)
 ├── frontend/
 │   ├── src/
@@ -93,6 +94,7 @@
 │   ├── uzly.md
 │   ├── proxy-nodes.md           # полная схема прокси (UI + allow-ips + NOC)
 │   ├── proxy-agent.md           # systemd install proxy_agent на RU
+│   ├── podpiska.md              # UI: Подписка (портал, unlock-ключи)
 │   ├── nastrojki/               # инструкции по подразделам Настроек
 │   │   ├── README.md
 │   │   ├── profil.md … diagnostika.md
@@ -130,6 +132,8 @@
 | `/warper` | `WarperPage` | [`warper.md`](warper.md) |
 | `/awg2` | `Awg2Page` | [`awg2.md`](awg2.md) |
 | `/telegram` | `TelegramPage` | [`Telegram.md`](Telegram.md) |
+| `/subscription` | `SubscriptionPage` | [`podpiska.md`](podpiska.md) |
+| `/p/:token` | `PortalPage` (публичный портал, без входа) | [`podpiska.md`](podpiska.md#клиентский-портал) |
 | `/edit-files` | `EditFilesPage` | [`edit-files.md`](edit-files.md) |
 | `/logs` | `LogsPage` | [`logs.md`](logs.md) |
 | `/server-monitor` | `ServerMonitorPage` | [`server-monitor.md`](server-monitor.md) |
@@ -151,6 +155,7 @@
 | `monitoring` | `MonitoringTab`, `AlertRulesCard` | [`nastrojki/monitoring-i-alerty.md`](nastrojki/monitoring-i-alerty.md) |
 | `modules` | `FeatureTogglesTab` | [`nastrojki/moduli.md`](nastrojki/moduli.md) |
 | `updates` | `UpdatesTab` | [`nastrojki/obnovleniya.md`](nastrojki/obnovleniya.md) |
+| `panel_ops` | `PanelOpsTab` | [`nastrojki/perezapusk-i-peresborka.md`](nastrojki/perezapusk-i-peresborka.md) |
 | `tests` | `RunbookTab` | [`nastrojki/diagnostika.md`](nastrojki/diagnostika.md) |
 
 ---
@@ -168,6 +173,8 @@
 | `/warper` | `WarperPage` | `warper` | [warper](warper.md) | AZ-WARP / Cloudflare WARP |
 | `/awg2` | `Awg2Page` | `awg2` | [awg2](awg2.md) | AZ-AWG2: health, клиенты, обфускация, мониторинг `amneziawg2` |
 | `/telegram` | `TelegramPage` | `telegram` | [Telegram](Telegram.md) | Настройки бота и Mini App |
+| `/subscription` | `SubscriptionPage` | `client_portal` / `unlock_codes` | [podpiska](podpiska.md) | Клиентский портал, портал пользователей, unlock-ключи (admin) |
+| `/p/:token` | `PortalPage` | — (API проверяет `client_portal`) | [podpiska](podpiska.md) | Публичный портал `c_…` / `u_…` на хосте портала |
 | `/edit-files` | `EditFilesPage` | `edit_files` | [edit-files](edit-files.md) | Редактор файлов AntiZapret |
 | `/logs` | `LogsPage` | `logs_dashboard` / `action_logs` | [logs](logs.md) | Журналы |
 | `/server-monitor` | `ServerMonitorPage` | `server_monitor` | [server-monitor](server-monitor.md) | vnStat, нагрузка сервера |
@@ -188,9 +195,13 @@
 | Роутер | Домен |
 |--------|-------|
 | `auth`, `session`, `users` | Аутентификация, 2FA, пользователи, роли |
-| `configs`, `client_access` | VPN-клиенты, блокировки, лимиты |
+| `configs`, `configs_bulk`, `config_tags`, `client_templates`, `client_access` | VPN-клиенты, массовые операции, теги, шаблоны, блокировки, лимиты, сроки (`access_until`) |
+| `client_portal`, `public_portal`, `unlock_codes` | Подписка: admin API ссылок портала (`/portal`, `c_…` / `u_…`), публичный портал без входа (`/public/portal/{token}`, redeem), unlock-ключи |
 | `nodes` | Управление узлами, health, обновления; **admin** `GET/PUT /nodes/{id}/remote-hosts` → `{ hosts, warnings }` (список OpenVPN remote в БД; непустой PUT best-effort пишет `hosts[0]` в `OPENVPN_HOST`); **admin** `POST /nodes/{id}/remote-hosts/allow-first` → `{ added, host, detail?, warnings }` (идемпотентно дописать `hosts[0]` в `allow-ips.txt` + apply); при `proxy_nodes`: CRUD `node_kind=proxy` (default port 9101); **admin** `GET/PUT /nodes/{id}/proxy/status`, `PUT /nodes/{id}/proxy/destination`, `GET /nodes/{id}/proxy/mappings` (handler-level toggle — `/api/nodes` в ALWAYS_ALLOWED) |
-| `monitoring` | NOC: подключения, гео, службы |
+| `node_sync` | HA / sync groups (`/nodes/sync-groups`) |
+| `monitoring`, `alert_rules` | NOC: подключения, гео, службы; правила алертов |
+| `openvpn_buffer_guard` | OpenVPN Buffer Guard (`/openvpn-buffer-guard`) |
+| `dns_aaaa` | Переключатель AAAA-ответов резолверов AntiZapret активного узла (`/dns-aaaa`) |
 | `traffic` | Сбор и отображение трафика |
 | `routing`, `cidr_db` | CIDR-провайдеры, pipeline, deploy |
 | `warper` | AZ-WARP |
@@ -200,14 +211,14 @@
 | `settings`, `security` | Настройки панели, IP whitelist, firewall |
 | `server_monitor` | Мониторинг сервера (vnStat) |
 | `logs` | Action logs |
-| `feature_toggles` | Включение/выключение модулей |
+| `feature_toggles` | Включение/выключение модулей (`/feature-toggles`, `/feature-modules`) |
 | `tg_mini`, `telegram_webhook` | Telegram Mini App + бот |
 | `public_download` | Публичная выдача конфигов по QR |
 | `tasks` | Фоновые задачи (CIDR pipeline и др.) |
-| `tests` | Диагностика (feature-gated) |
+| `site_diagnostics` | Диагностика «Проверка работы» (`/site-diagnostics`) |
 | `ip_blocked` | Страница блокировки IP (без `/api`) |
 
-Регистрация роутеров: `backend/app/main.py`.
+Регистрация роутеров: `backend/app/main.py` (`public_portal` при `ACCESS_PATH` подключается ещё и на корневой `/api`).
 
 ---
 
@@ -249,7 +260,16 @@
 - `feature_guards.py`, `feature_toggles.py`
 - `middleware/` — rate limit, CSP, active sessions
 
+### Подписка и портал
+- `user_subscription.py` — срок `access_until` пользователя, каскад на owned-профили, продление по unlock-ключу
+- `access_until.py`, `access_expiry_worker.py` — сроки на политиках клиентов и их истечение
+- `unlock_codes.py` — создание, отзыв и погашение unlock-ключей
+- `client_portal.py`, `portal_host_gate.py`, `portal_readiness.py` — ссылки `c_…` / `u_…`, выдача файлов, ограничение путей на хосте портала, проверка/подготовка nginx
+- Пользовательская инструкция: [`podpiska.md`](podpiska.md)
+
 ### Прочее
+- `openvpn_buffer_guard.py`, `openvpn_buffer_guard_worker.py` — OpenVPN Buffer Guard
+- `kresd_aaaa.py` — переключатель AAAA-ответов Knot Resolver (блок NODATA в `custom.lua` / `custom2.lua`)
 - `backup_manager.py`, `backup_scheduler.py`
 - `warper.py` — AZ-WARP
 - `awg2.py` — AZ-AWG2 detect/health/status, клиенты `awg-client`, obfuscation, monitoring (`awg_stats` / dump)
@@ -265,13 +285,21 @@
 | `User`, `RefreshToken`, `ActiveWebSession` | Пользователи, сессии; у `User` личные NOC-поля: `noc_daily_time`, `noc_weekly_dow`, `noc_weekly_time` (+ `timezone` / `last_client_timezone`) |
 | `VpnConfig` | Привязка клиента к узлу и владельцу |
 | `Node` | Узел: `node_kind` ∈ {`vpn`,`proxy`} (default `vpn`); local/remote, API key, mTLS; `openvpn_remote_hosts` — JSON remote OpenVPN (VPN); `openvpn_multihome` — bool, multi-IP OpenVPN reply (VPN, node-local); у proxy — `destination_ip` (кэш DESTINATION); `linked_vpn_node_id` (опц. FK на VPN-узел; UI «Привязан к» HA-группа/сервер) |
-| `WgAccessPolicy`, `OpenVpnAccessPolicy` | Блокировки, лимиты трафика |
+| `WgAccessPolicy`, `OpenVpnAccessPolicy`, `AmneziaWg2AccessPolicy` | Блокировки, лимиты трафика, сроки доступа по протоколам |
+| `UnlockCode`, `UnlockCodeRedemption` | Unlock-ключи и их погашения (на клиента + узел или на пользователя) |
+| `ClientPortalToken`, `UserPortalToken` | Ссылки портала клиента (`c_…`) и пользователя (`u_…`) |
 | `TrafficSessionState`, `UserTrafficStatProtocol`, `UserTrafficSample` | Трафик |
 | `NodeResourceSample`, `PanelResourceSample` | Метрики ресурсов |
+| `OpenVpnBufferGuardSettings`, `OpenVpnBufferGuardEvent` | OpenVPN Buffer Guard: настройки по узлу и события |
+| `ServerRebootRecord` | Запланированные перезагрузки ОС узла (общие для всех uvicorn-воркеров) |
+| `TelegramProcessedUpdate` | Уже обработанные update Telegram (защита от повторной обработки) |
+| `SharedState` | Общее состояние воркеров (диалоги бота, OIDC) |
 | `ProviderMeta` | Мета CIDR-провайдеров |
 | `AppSetting` | key-value настройки |
 | `UserActionLog` | Аудит действий |
 | `QrDownloadToken` | Публичные ссылки на конфиги |
+
+Всего в `models.py` 43 модели; в таблице — основные.
 
 **Отдельная БД:** `ProviderCidr` в `cidr_models.py` → `cidr.db`.
 
@@ -279,18 +307,27 @@
 
 ## Фоновые workers (запуск в `lifespan`)
 
-При старте FastAPI (`backend/app/main.py`) поднимаются asyncio-задачи:
+Список и запуск — `backend/app/services/lifespan_workers.py` (`get_worker_startup_plan`, `spawn_background_tasks`); `main.py` только вызывает его в `lifespan`. При нескольких uvicorn-воркерах задачи работают в одном из них (file lock `WorkerLeaderLock`), остальные ждут и перехватывают, если он завершился. Каждый worker стартует, только если его включает `should_start_*` (`worker_lifecycle.py`).
 
-1. `run_traffic_collector_loop` — сбор трафика
-2. `run_node_health_loop` — health узлов
-3. `run_resource_metrics_loop` / `run_panel_resource_metrics_loop` — метрики
-4. `run_backup_scheduler_loop` — бэкапы по расписанию
-5. `run_cidr_db_scheduler_loop` — обновление CIDR
-6. `run_wg_policy_sync_loop` — синхронизация WG-политик
-7. `run_nightly_idle_restart_loop` — ночной рестарт
-8. `run_node_key_rotation_loop` — ротация ключей узлов
-9. `run_cert_sync_loop` — синхронизация сертификатов (если включено)
-10. `admin_notify_service.start_monitor()` — алерты CPU/RAM
+- `run_traffic_collector_loop` — сбор трафика
+- `run_node_health_loop` — health узлов
+- `run_resource_metrics_loop` / `run_panel_resource_metrics_loop` — метрики
+- `run_connection_history_loop` — история подключений
+- `run_backup_scheduler_loop`, `run_runtime_backup_cleanup_loop` — бэкапы по расписанию и чистка
+- `run_cidr_db_scheduler_loop` — обновление CIDR
+- `run_wg_policy_sync_loop` — синхронизация WG-политик
+- `run_node_sync_reconcile_loop` — сверка HA-групп
+- `run_nightly_idle_restart_loop` — ночной рестарт
+- `run_node_key_rotation_loop` — ротация ключей узлов
+- `run_cert_sync_loop` — синхронизация сертификатов
+- `run_retention_loop` — очистка старых данных
+- `run_user_reminder_loop`, `run_access_expiry_loop`, `run_awg2_expire_loop` — напоминания и истечение сроков доступа
+- `run_noc_report_scheduler_loop` — NOC-сводки в Telegram
+- `run_alert_rules_loop` — правила алертов
+- `run_cloudflare_ips_scheduler_loop` — обновление IP Cloudflare
+- `run_openvpn_buffer_guard_loop` — OpenVPN Buffer Guard
+- `run_webhook_delivery_loop` — доставка webhook (запускается всегда)
+- `admin_notify_service.start_monitor()` — алерты CPU/RAM (из `main.py`)
 
 ---
 
