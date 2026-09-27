@@ -90,7 +90,9 @@ def rotate_refresh_token(db: Session, raw_token: str) -> tuple[str | None, User]
 
     A rotated token presented within ``ROTATION_GRACE_SECONDS`` of its rotation, while its family is
     still alive, gets a new successor in the same family and the family's live tokens are marked
-    rotated: the browser may never have received the previous successor's cookie.
+    rotated: the browser may never have received the previous successor's cookie. So a replayed
+    rotated token inside the window gets a successor too; reuse detection then fires on the other
+    holder's next refresh after the window.
 
     Returns ``(None, user)`` when the caller should issue an access token only and keep the cookie:
     a concurrent refresh that lost the claim race, or a pre-upgrade token without a family.
@@ -109,9 +111,23 @@ def rotate_refresh_token(db: Session, raw_token: str) -> tuple[str | None, User]
                 # Without a family the undelivered successor can't be found to revoke it.
                 if not row.family_id:
                     return None, user
-                revoke_token_family(db, row.family_id, reason="rotated", commit=False)
-                raw, _ = create_refresh_token(db, user, family_id=row.family_id)
-                return raw, user
+                # The live-token check above is unlocked; this UPDATE is the gate, as the claim below.
+                superseded = (
+                    db.query(RefreshToken)
+                    .filter(
+                        RefreshToken.family_id == row.family_id,
+                        RefreshToken.revoked.is_(False),
+                        RefreshToken.expires_at > now,
+                    )
+                    .update(
+                        {"revoked": True, "revoked_at": now, "revoke_reason": "rotated"},
+                        synchronize_session=False,
+                    )
+                )
+                if superseded:
+                    raw, _ = create_refresh_token(db, user, family_id=row.family_id)
+                    return raw, user
+                db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_INVALID_TOKEN_DETAIL)
 
     user = _active_user(db, row.user_id)

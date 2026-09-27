@@ -148,6 +148,26 @@ def test_grace_after_logout_issues_no_token(db, user):
     assert _row(db, new_raw).revoke_reason == "logout"
 
 
+def test_logout_during_grace_recovery_leaves_family_dead(db, user, monkeypatch):
+    raw, first = rt.create_refresh_token(db, user)
+    new_raw, _ = rt.rotate_refresh_token(db, raw)
+    real_active_user = rt._active_user
+
+    def concurrent_logout(session, user_id):
+        rt.revoke_refresh_token(session, new_raw)
+        return real_active_user(session, user_id)
+
+    monkeypatch.setattr(rt, "_active_user", concurrent_logout)
+
+    with pytest.raises(HTTPException) as exc:
+        rt.rotate_refresh_token(db, raw)
+
+    assert exc.value.status_code == 401
+    assert not db.in_transaction(), "the failed gate must not keep the write transaction open"
+    assert _live_in_family(db, first.family_id) == []
+    assert db.query(RefreshToken).count() == 2
+
+
 def test_legacy_token_within_grace_returns_access_only(db, user):
     _legacy_token(db, user, "legacy-token", revoked=False)
     new_raw, _ = rt.rotate_refresh_token(db, "legacy-token")
