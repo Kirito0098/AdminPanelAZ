@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AppSetting
 from app.services.env_file import EnvFileService
-from app.services.firewall_tools_check import check_firewall_tools
+from app.services.firewall_tools_check import cached_firewall_tools_status
 from app.services.panel_port_firewall import panel_port_firewall
 from app.services.panel_publish_info import is_whitelist_port_firewall_applicable
 from app.services.public_download_settings import is_public_download_enabled, set_public_download_enabled
@@ -68,7 +68,7 @@ class SecurityService:
             e for e in temp_list
             if datetime.fromisoformat(e["expires_at"].replace("Z", "+00:00")) > now
         ]
-        fw_status = check_firewall_tools()
+        fw_status = cached_firewall_tools_status()
         applicable = self.is_whitelist_port_firewall_applicable()
         whitelist_firewall = _get(db, "security_whitelist_firewall", "false") == "true"
         result = {

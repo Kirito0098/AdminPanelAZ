@@ -4,13 +4,22 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from threading import Lock
 
 RunCmd = Callable[[list[str], float], subprocess.CompletedProcess]
 
 FIREWALL_COMMANDS = ("iptables", "ipset")
 FIREWALL_DEB_PACKAGES = ("iptables", "ipset")
+
+# Security settings are read on every request (IP-restriction middleware); the probe
+# spawns dpkg/iptables/ipset, and the packages only change on a manual apt install.
+FIREWALL_TOOLS_STATUS_TTL_SECONDS = 60.0
+
+_status_lock = Lock()
+_status_cache: tuple[float, "FirewallToolsStatus"] | None = None
 
 
 @dataclass(frozen=True)
@@ -92,6 +101,25 @@ def check_firewall_tools(*, run_cmd: RunCmd | None = None) -> FirewallToolsStatu
         operational_ok=operational_ok,
         operational_detail=operational_detail,
     )
+
+
+def cached_firewall_tools_status() -> FirewallToolsStatus:
+    global _status_cache
+    now = time.monotonic()
+    with _status_lock:
+        entry = _status_cache
+        if entry is not None and now < entry[0]:
+            return entry[1]
+    status = check_firewall_tools()
+    with _status_lock:
+        _status_cache = (now + FIREWALL_TOOLS_STATUS_TTL_SECONDS, status)
+    return status
+
+
+def clear_firewall_tools_status_cache() -> None:
+    global _status_cache
+    with _status_lock:
+        _status_cache = None
 
 
 def apt_install_hint(missing_packages: tuple[str, ...] | list[str]) -> str:
