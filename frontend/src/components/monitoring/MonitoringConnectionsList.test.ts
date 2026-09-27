@@ -51,4 +51,20 @@ describe('buildMonitoringConnectionRows sortTime', () => {
 
     expect(row.sortTime).toBe(1_790_507_694_000)
   })
+
+  it('reads OpenVPN connected_since as local time when connected_since_ts is missing', () => {
+    const client: OpenVpnClient = {
+      common_name: 'alice',
+      real_address: '1.2.3.4:5555',
+      virtual_address: '10.8.0.2',
+      bytes_received: 0,
+      bytes_sent: 0,
+      connected_since: '2026-09-27 14:14:54',
+      connected_since_ts: 0,
+    }
+
+    const [row] = buildMonitoringConnectionRows([client], [], baseOptions)
+
+    expect(row.sortTime).toBe(new Date(2026, 8, 27, 14, 14, 54).getTime())
+  })
 })
