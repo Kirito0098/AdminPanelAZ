@@ -20,6 +20,8 @@ interface NodeContextValue {
   syncGroups: NodeSyncGroup[]
   syncGroupsLoaded: boolean
   loading: boolean
+  /** ``nodes`` not yet fetched for the signed-in user (always false for non-admins once checked). */
+  nodesLoading: boolean
   refresh: () => Promise<void>
   refreshNodes: () => Promise<void>
   refreshSyncGroups: () => Promise<void>
@@ -41,8 +43,13 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
   const [syncGroups, setSyncGroups] = useState<NodeSyncGroup[]>([])
   const [syncGroupsLoaded, setSyncGroupsLoaded] = useState(false)
   const [resolvedForUserId, setResolvedForUserId] = useState<number | null>(null)
+  const [nodesResolvedForUserId, setNodesResolvedForUserId] = useState<number | null>(null)
   // Pages mount in the same render the user appears, before refresh() runs — loading must already be true then.
   const loading = user != null && resolvedForUserId !== user.id
+  const nodesLoading = user != null && nodesResolvedForUserId !== user.id
+  // A request started for the previous user may settle after logout → login.
+  const currentUserIdRef = useRef<number | null>(null)
+  currentUserIdRef.current = user?.id ?? null
 
   const showActiveNode = useCallback((state: ActiveNodeState) => {
     trackerRef.current.show(state.node?.id ?? null)
@@ -57,27 +64,34 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
       setResolvedForUserId(null)
       return
     }
+    const isCurrentUser = () => currentUserIdRef.current === user.id
     try {
       const result = await refreshActiveNode(trackerRef.current, api.getActiveNode)
+      if (!isCurrentUser()) return
       if (result.outcome !== 'show' && result.outcome !== 'changed-elsewhere') return
       const state = { node: result.active.node, ha: result.active.ha ?? null }
       if (result.outcome === 'changed-elsewhere') setChangedElsewhere(state)
       else showActiveNode(state)
     } finally {
-      setResolvedForUserId(user.id)
+      if (isCurrentUser()) setResolvedForUserId(user.id)
     }
   }, [user, showActiveNode])
 
   const refreshNodes = useCallback(async () => {
     if (!user || user.role !== 'admin') {
       setNodes([])
+      setNodesResolvedForUserId(user?.id ?? null)
       return
     }
+    const isCurrentUser = () => currentUserIdRef.current === user.id
     try {
-      setNodes(await api.getNodes())
+      const list = await api.getNodes()
+      if (isCurrentUser()) setNodes(list)
     } catch (err) {
-      setNodes([])
+      if (isCurrentUser()) setNodes([])
       throw err
+    } finally {
+      if (isCurrentUser()) setNodesResolvedForUserId(user.id)
     }
   }, [user])
 
@@ -180,6 +194,7 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
       syncGroups,
       syncGroupsLoaded,
       loading,
+      nodesLoading,
       refresh,
       refreshNodes,
       refreshSyncGroups,
@@ -196,6 +211,7 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
       syncGroups,
       syncGroupsLoaded,
       loading,
+      nodesLoading,
       refresh,
       refreshNodes,
       refreshSyncGroups,

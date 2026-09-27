@@ -200,7 +200,7 @@ function ScopeToggle({ value, onChange, nodesOnline, nodesTotal }: ScopeTogglePr
 
 export default function MonitoringPage() {
   const { user } = useAuth()
-  const { activeNode, nodes, loading: nodesLoading, activate } = useNode()
+  const { activeNode, nodes, loading: nodeLoading, nodesLoading, activate } = useNode()
   const { isEnabled } = useFeatureModules()
   const awg2Enabled = isEnabled('awg2')
   const isAdmin = user?.role === 'admin'
@@ -388,7 +388,7 @@ export default function MonitoringPage() {
     [notifyError],
   )
 
-  const scopeReady = !nodesLoading && scopeInitialized
+  const scopeReady = !nodeLoading && scopeInitialized
 
   useEffect(() => {
     if (!scopeReady) return
@@ -396,9 +396,9 @@ export default function MonitoringPage() {
   }, [load, activeNode?.id, scope, haMode, scopeReady])
 
   useEffect(() => {
-    if (nodesLoading) return
+    if (nodeLoading) return
     loadResourceHistory(resourcePeriod)
-  }, [loadResourceHistory, nodesLoading, activeNode?.id, resourcePeriod])
+  }, [loadResourceHistory, nodeLoading, activeNode?.id, resourcePeriod])
 
   useEffect(() => {
     if (!scopeReady) return

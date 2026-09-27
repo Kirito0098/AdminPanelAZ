@@ -1,18 +1,16 @@
 // @vitest-environment jsdom
-import { act, cleanup, render } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { cleanup } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { Node, User } from '@/types'
+import {
+  mountWhileActiveNodeResolves,
+  resetNodeState,
+  testNode,
+  updateNodeState,
+} from '@/test/nodePageHarness'
+import type { Node } from '@/types'
 import MonitoringPage from './MonitoringPage'
 
-const nodeState = vi.hoisted(() => ({
-  activeNode: null as Node | null,
-  activeNodeHa: null,
-  nodes: [] as Node[],
-  loading: true,
-  activate: vi.fn(),
-}))
 const api = vi.hoisted(() => ({
   getMonitoring: vi.fn(),
   getNocIncidents: vi.fn(),
@@ -20,47 +18,23 @@ const api = vi.hoisted(() => ({
   getResourceHistory: vi.fn(),
   openMonitoringStream: vi.fn(),
 }))
-const stable = vi.hoisted(() => ({
-  notify: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
-  progress: { startGlobal: vi.fn(), doneGlobal: vi.fn() },
-  modules: { isEnabled: () => true },
-}))
-
-const admin = { id: 7, username: 'admin', role: 'admin', theme: 'dark', is_active: true } as User
 
 vi.mock('@/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/client')>()),
   ...api,
 }))
-vi.mock('@/context/AuthContext', () => ({ useAuth: () => ({ user: admin }) }))
-vi.mock('@/context/NodeContext', () => ({ useNode: () => nodeState }))
-vi.mock('@/context/FeatureModulesContext', () => ({ useFeatureModules: () => stable.modules }))
-vi.mock('@/context/NotificationContext', () => ({ useNotifications: () => stable.notify }))
-vi.mock('@/context/ProgressContext', () => ({ useProgress: () => stable.progress }))
+vi.mock('@/context/AuthContext', async () => (await import('@/test/nodePageHarness')).authModule)
+vi.mock('@/context/NodeContext', async () => (await import('@/test/nodePageHarness')).nodeContextModule)
+vi.mock('@/context/FeatureModulesContext', async () => (await import('@/test/nodePageHarness')).featureModulesModule)
+vi.mock('@/context/NotificationContext', async () => (await import('@/test/nodePageHarness')).notificationModule)
+vi.mock('@/context/ProgressContext', async () => (await import('@/test/nodePageHarness')).progressModule)
 vi.mock('@/components/dashboard/GeoRoutingHintBanner', () => ({ default: () => null }))
 vi.mock('@/components/monitoring/MonitoringCharts', () => ({ default: () => null }))
 vi.mock('@/components/monitoring/ResourceHistoryCharts', () => ({ default: () => null }))
 vi.mock('@/components/monitoring/PanelResourceHistoryCharts', () => ({ default: () => null }))
 
-const node = { id: 1, name: 'main', status: 'online', is_local: true } as unknown as Node
-
-function page() {
-  return (
-    <MemoryRouter>
-      <MonitoringPage />
-    </MemoryRouter>
-  )
-}
-
-async function mountWhileActiveNodeResolves() {
-  const { rerender } = render(page())
-  await act(async () => {})
-  nodeState.activeNode = node
-  nodeState.nodes = [node]
-  nodeState.loading = false
-  rerender(page())
-  await act(async () => {})
-}
+const secondNode = { ...testNode, id: 2, name: 'edge', is_local: false } as Node
+const page = () => <MonitoringPage />
 
 function callCounts() {
   return {
@@ -77,9 +51,7 @@ const once = { overview: 1, incidents: 1, connectionHistory: 1, resourceHistory:
 describe('MonitoringPage initial load', () => {
   beforeEach(() => {
     window.localStorage.clear()
-    nodeState.activeNode = null
-    nodeState.nodes = []
-    nodeState.loading = true
+    resetNodeState()
     api.getMonitoring.mockResolvedValue({ services: [], openvpn_clients: [], wireguard_peers: [], timestamp: '' })
     api.getNocIncidents.mockResolvedValue({ items: [] })
     api.getConnectionHistory.mockResolvedValue({ points: [] })
@@ -93,7 +65,7 @@ describe('MonitoringPage initial load', () => {
   })
 
   it('fetches once on the first visit (scope not stored yet)', async () => {
-    await mountWhileActiveNodeResolves()
+    await mountWhileActiveNodeResolves(page, { nodes: [testNode] })
 
     expect(callCounts()).toEqual(once)
     expect(api.getMonitoring).toHaveBeenCalledWith('node', 'dedupe')
@@ -102,8 +74,32 @@ describe('MonitoringPage initial load', () => {
   it('fetches once when the scope is already stored', async () => {
     window.localStorage.setItem('noc-monitoring:scope', 'node')
 
-    await mountWhileActiveNodeResolves()
+    await mountWhileActiveNodeResolves(page, { nodes: [testNode] })
 
     expect(callCounts()).toEqual(once)
+  })
+
+  describe('first visit with several nodes', () => {
+    it('defaults to all nodes when the node list arrives after the active node', async () => {
+      const result = await mountWhileActiveNodeResolves(page, { nodes: [], nodesLoading: true })
+
+      expect(api.getMonitoring).not.toHaveBeenCalled()
+      expect(window.localStorage.getItem('noc-monitoring:scope')).toBeNull()
+
+      await updateNodeState(result, page, { nodes: [testNode, secondNode], nodesLoading: false })
+
+      expect(callCounts()).toEqual(once)
+      expect(api.getMonitoring).toHaveBeenCalledWith('all', 'dedupe')
+      expect(api.getConnectionHistory).toHaveBeenCalledWith('1h', 'all')
+      expect(window.localStorage.getItem('noc-monitoring:scope')).toBe('all')
+    })
+
+    it('defaults to all nodes when the node list arrives before the active node', async () => {
+      await mountWhileActiveNodeResolves(page, { nodes: [testNode, secondNode], nodesLoading: false })
+
+      expect(callCounts()).toEqual(once)
+      expect(api.getMonitoring).toHaveBeenCalledWith('all', 'dedupe')
+      expect(window.localStorage.getItem('noc-monitoring:scope')).toBe('all')
+    })
   })
 })
