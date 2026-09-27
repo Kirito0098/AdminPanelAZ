@@ -1668,11 +1668,15 @@ nginx_default_deny_key() {
   printf '%s' "${NGINX_DEFAULT_DENY_KEY:-/etc/ssl/private/adminpanelaz-default-deny.key}"
 }
 
+nginx_default_deny_cert_ready() {
+  [[ -s "$(nginx_default_deny_cert)" && -s "$(nginx_default_deny_key)" ]]
+}
+
 nginx_ensure_default_deny_cert() {
   local cert key
   cert="$(nginx_default_deny_cert)"
   key="$(nginx_default_deny_key)"
-  [[ -s "$cert" && -s "$key" ]] && return 0
+  nginx_default_deny_cert_ready && return 0
   mkdir -p "$(dirname "$cert")" "$(dirname "$key")"
   (umask 077 && openssl req -x509 -nodes -days 3650 -newkey rsa:2048 -subj "/CN=invalid" \
     -keyout "$key" -out "$cert" >/dev/null 2>&1)
@@ -1732,16 +1736,16 @@ nginx_remove_default_deny() {
 }
 
 # Без сервера по умолчанию nginx отдаёт запросы по голому IP первому vhost'у на порту.
-# Сервер по умолчанию ставится только на порты, где этот первый vhost — панель или портал:
+# Сервер по умолчанию нужен только на портах, где этот первый vhost — панель или портал:
 # иначе по IP и так отвечает чужой сайт, и менять его поведение нельзя.
-# Ошибка здесь не должна ломать публикацию: default-deny откатывается, панель остаётся.
-nginx_install_default_deny() {
-  local base conf_file enabled_link version_output conf path owned has_ip
-  local port kind def addr http_listens="" https_listens=""
+# nginx_default_deny_plan → строка на каждый порт панели или портала, по возрастанию порта:
+#   «порт plain|ssl install адрес…» — ставить сервер по умолчанию на эти listen;
+#   «порт plain|ssl skip existing_default_server|foreign_first|ip_server_name» — порт не трогать;
+#   «порт ssl skip no_cert» — только после nginx_default_deny_plan_cert_fallback.
+nginx_default_deny_plan() {
+  local base path owned has_ip port kind def addr
   local -A first=() has_default=() our_kind=() ip_name=() listens=() seen=()
   base="$(nginx_default_deny_basename)"
-  conf_file="$(nginx_sites_available_dir)/${base}"
-  enabled_link="$(nginx_sites_enabled_dir)/${base}"
 
   while IFS= read -r path; do
     [[ "$(basename "$path")" == "$base" ]] && continue
@@ -1764,18 +1768,75 @@ nginx_install_default_deny() {
 
   while read -r port; do
     [[ -n "$port" ]] || continue
+    kind="${our_kind[$port]}"
     if [[ -n "${has_default[$port]:-}" ]]; then
-      nginx_warn "На порту ${port} уже есть default_server — сервер по умолчанию панели не ставится"
+      printf '%s %s skip existing_default_server\n' "$port" "$kind"
     elif [[ "${first[$port]}" != true ]]; then
-      nginx_log "Порт ${port}: первым объявлен чужой сайт — он отвечает по IP, сервер по умолчанию не ставится"
-    elif [[ "${our_kind[$port]}" == ssl && -n "${ip_name[$port]:-}" ]]; then
-      nginx_log "Порт ${port}: панель или другой сайт открывается по IP — HTTPS-сервер по умолчанию не ставится"
-    elif [[ "${our_kind[$port]}" == ssl ]]; then
-      https_listens+="${https_listens:+ }${listens[$port]}"
+      printf '%s %s skip foreign_first\n' "$port" "$kind"
+    elif [[ "$kind" == ssl && -n "${ip_name[$port]:-}" ]]; then
+      printf '%s %s skip ip_server_name\n' "$port" "$kind"
     else
-      http_listens+="${http_listens:+ }${listens[$port]}"
+      printf '%s %s install %s\n' "$port" "$kind" "${listens[$port]}"
     fi
   done < <(printf '%s\n' "${!our_kind[@]}" | sort -n)
+}
+
+# nginx_default_deny_plan_cert_fallback <план> <вывод nginx -v>: nginx < 1.19.4 без сертификата-заглушки
+# не может отклонить рукопожатие — HTTPS-порты из install переходят в «skip no_cert», как при установке,
+# когда сертификат создать не удалось.
+nginx_default_deny_plan_cert_fallback() {
+  local plan="$1" version_output="$2" port kind action rest
+  if nginx_version_at_least 1.19.4 "$version_output" || nginx_default_deny_cert_ready; then
+    [[ -n "$plan" ]] && printf '%s\n' "$plan"
+    return 0
+  fi
+  while read -r port kind action rest; do
+    [[ -n "$port" ]] || continue
+    if [[ "$kind" == ssl && "$action" == install ]]; then
+      printf '%s ssl skip no_cert\n' "$port"
+    else
+      printf '%s %s %s %s\n' "$port" "$kind" "$action" "$rest"
+    fi
+  done <<<"$plan"
+}
+
+# nginx_default_deny_plan_listens <план> <plain|ssl> → listen-адреса через пробел для сервера по умолчанию
+nginx_default_deny_plan_listens() {
+  local plan="$1" want="$2" port kind action rest out=""
+  while read -r port kind action rest; do
+    [[ "$action" == install && "$kind" == "$want" ]] && out+="${out:+ }${rest}"
+  done <<<"$plan"
+  printf '%s' "$out"
+}
+
+# nginx_default_deny_expected_conf <план> <вывод nginx -v> → что nginx_install_default_deny запишет сейчас
+nginx_default_deny_expected_conf() {
+  nginx_render_default_deny "$(nginx_default_deny_plan_listens "$1" plain)" \
+    "$(nginx_default_deny_plan_listens "$1" ssl)" "$2"
+}
+
+# Ошибка здесь не должна ломать публикацию: default-deny откатывается, панель остаётся.
+nginx_install_default_deny() {
+  local base conf_file enabled_link version_output conf plan port kind action rest
+  local http_listens https_listens
+  base="$(nginx_default_deny_basename)"
+  conf_file="$(nginx_sites_available_dir)/${base}"
+  enabled_link="$(nginx_sites_enabled_dir)/${base}"
+
+  plan="$(nginx_default_deny_plan)"
+  while read -r port kind action rest; do
+    [[ "$action" == skip ]] || continue
+    case "$rest" in
+      existing_default_server)
+        nginx_warn "На порту ${port} уже есть default_server — сервер по умолчанию панели не ставится" ;;
+      foreign_first)
+        nginx_log "Порт ${port}: первым объявлен чужой сайт — он отвечает по IP, сервер по умолчанию не ставится" ;;
+      ip_server_name)
+        nginx_log "Порт ${port}: панель или другой сайт открывается по IP — HTTPS-сервер по умолчанию не ставится" ;;
+    esac
+  done <<<"$plan"
+  http_listens="$(nginx_default_deny_plan_listens "$plan" plain)"
+  https_listens="$(nginx_default_deny_plan_listens "$plan" ssl)"
 
   if [[ -z "$http_listens" && -z "$https_listens" ]]; then
     nginx_remove_default_deny
@@ -1787,6 +1848,10 @@ nginx_install_default_deny() {
     if ! nginx_ensure_default_deny_cert; then
       nginx_warn "Не удалось создать сертификат для сервера по умолчанию — HTTPS по IP не закрыт"
       https_listens=""
+      if [[ -z "$http_listens" ]]; then
+        nginx_remove_default_deny
+        return 0
+      fi
     fi
   fi
   conf="$(nginx_render_default_deny "$http_listens" "$https_listens" "$version_output")"

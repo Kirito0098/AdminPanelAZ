@@ -2332,12 +2332,19 @@ export interface WarperCatalogInstalledResponse {
 
 export type SiteDiagnosticsStatus = 'ok' | 'warn' | 'fail'
 
+export interface SiteDiagnosticsCheckAction {
+  id: string
+  label: string
+}
+
 export interface SiteDiagnosticsCheck {
+  id?: string
   status: SiteDiagnosticsStatus
   title: string
   category: string
   detail?: string
   hint_ru?: string
+  action?: SiteDiagnosticsCheckAction
 }
 
 export interface SiteDiagnosticsStep {
@@ -2361,6 +2368,14 @@ export interface SiteDiagnosticsReport {
   steps: SiteDiagnosticsStep[]
   results: SiteDiagnosticsCheck[]
   recommended_commands: string[]
+}
+
+export interface SiteDiagnosticsCloseIpAccessResponse {
+  success: boolean
+  status: string
+  changed: boolean
+  message: string
+  check: SiteDiagnosticsCheck
 }
 
 export interface ServerRebootPendingItem {

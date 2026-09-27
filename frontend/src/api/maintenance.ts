@@ -27,6 +27,7 @@ import type {
   AntizapretSettingsResponse,
   AntizapretSettingsUpdateResponse,
   OpenVpnGroupState,
+  SiteDiagnosticsCloseIpAccessResponse,
   SiteDiagnosticsReport,
   ServerRebootScheduleResponse,
   ServerRebootPendingItem,
@@ -284,6 +285,12 @@ export async function setOpenVpnGroup(group: string) {
 
 export async function runSiteDiagnostics() {
   return apiFetch<SiteDiagnosticsReport>('/site-diagnostics/run', {
+    method: 'POST',
+  })
+}
+
+export async function closeIpAccess() {
+  return apiFetch<SiteDiagnosticsCloseIpAccessResponse>('/site-diagnostics/close-ip-access', {
     method: 'POST',
   })
 }

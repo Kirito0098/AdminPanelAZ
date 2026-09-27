@@ -13,6 +13,7 @@ import {
   Globe,
   Layers,
   Loader2,
+  Lock,
   Network,
   Play,
   RefreshCw,
@@ -22,15 +23,25 @@ import {
   Terminal,
   XCircle,
 } from 'lucide-react'
-import { ApiError, runSiteDiagnostics } from '@/api/client'
+import { ApiError, closeIpAccess, runSiteDiagnostics } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { SettingsCollapsible, SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
+import { replaceDiagnosticsCheck } from '@/components/settings/siteDiagnosticsReport'
+import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useNotifications } from '@/context/NotificationContext'
-import type { SiteDiagnosticsReport, SiteDiagnosticsStatus, SiteDiagnosticsStep } from '@/types'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
+import type {
+  SiteDiagnosticsCheck,
+  SiteDiagnosticsReport,
+  SiteDiagnosticsStatus,
+  SiteDiagnosticsStep,
+} from '@/types'
 import { cn } from '@/lib/utils'
+
+const CLOSE_IP_ACCESS_ACTION = 'close_ip_access'
 
 const STATUS_META: Record<
   SiteDiagnosticsStatus,
@@ -127,6 +138,8 @@ function StepCard({
   onToggle,
   pending,
   isLast,
+  onCheckAction,
+  actionBusy,
 }: {
   step: SiteDiagnosticsStep | { id: string; title: string; description: string }
   stepNumber: number
@@ -134,6 +147,8 @@ function StepCard({
   onToggle: () => void
   pending?: boolean
   isLast?: boolean
+  onCheckAction?: (check: SiteDiagnosticsCheck) => void
+  actionBusy?: boolean
 }) {
   const status = 'status' in step ? step.status : undefined
   const checks = 'checks' in step ? step.checks : []
@@ -240,6 +255,19 @@ function StepCard({
                           {check.hint_ru}
                         </p>
                       )}
+                      {check.status === 'warn' && check.action && onCheckAction && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="gap-2"
+                          disabled={actionBusy}
+                          onClick={() => onCheckAction(check)}
+                        >
+                          {actionBusy ? <Loader2 size={14} className="animate-spin" /> : <Lock size={14} />}
+                          {check.action.label}
+                        </Button>
+                      )}
                     </div>
                   </div>
                 )
@@ -259,6 +287,42 @@ export default function RunbookTab() {
   const [expandedStep, setExpandedStep] = useState<string | null>(null)
   const [showJson, setShowJson] = useState(false)
   const [commandsOpen, setCommandsOpen] = useState(true)
+  const [closingIpAccess, setClosingIpAccess] = useState(false)
+  const { confirm, dialogProps } = useConfirmDialog()
+
+  const handleCheckAction = useCallback(
+    (check: SiteDiagnosticsCheck) => {
+      if (check.action?.id !== CLOSE_IP_ACCESS_ACTION) return
+      confirm({
+        title: 'Закрыть доступ к панели по IP?',
+        icon: Lock,
+        description: 'Nginx будет отклонять запросы по IP сервера и к чужим именам.',
+        alert: {
+          variant: 'info',
+          children: (
+            <>
+              HTTP — соединение закрывается без ответа, HTTPS — рукопожатие отклоняется. Домены панели и портала
+              продолжают работать. Nginx перечитает конфигурацию без перезапуска.
+            </>
+          ),
+        },
+        confirmLabel: 'Закрыть доступ',
+        onConfirm: async () => {
+          setClosingIpAccess(true)
+          try {
+            const result = await closeIpAccess()
+            setReport((current) => (current ? replaceDiagnosticsCheck(current, result.check) : current))
+            success(result.message)
+          } catch (err) {
+            notifyError(err instanceof ApiError ? err.message : 'Не удалось закрыть доступ по IP')
+          } finally {
+            setClosingIpAccess(false)
+          }
+        },
+      })
+    },
+    [confirm, notifyError, success],
+  )
 
   const run = useCallback(async () => {
     setRunning(true)
@@ -339,6 +403,7 @@ export default function RunbookTab() {
 
   return (
     <div className="space-y-4">
+      <ConfirmDialogHost dialogProps={dialogProps} />
       <SettingsToolbar
         title="Диагностика запуска"
         meta={
@@ -430,6 +495,8 @@ export default function RunbookTab() {
                   onToggle={() => setExpandedStep((current) => (current === step.id ? null : step.id))}
                   pending={running}
                   isLast={index === steps.length - 1}
+                  onCheckAction={handleCheckAction}
+                  actionBusy={closingIpAccess}
                 />
               ))}
             </div>
