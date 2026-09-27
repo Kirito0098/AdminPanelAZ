@@ -57,7 +57,7 @@ export default function DnsAaaaCard({ activeNodeId, disabled = false }: DnsAaaaC
   function askToggle(target: (typeof TARGETS)[number], nodata: boolean) {
     confirm({
       title: nodata ? `${target.label}: отвечать NODATA на AAAA?` : `${target.label}: вернуть ответ :: на AAAA?`,
-      description: `DNS-резолвер ${target.resolver} перезапустится — несколько секунд клиенты не смогут разрешать имена.`,
+      description: `DNS-резолвер ${target.resolver} перезапустится — несколько секунд клиенты не смогут разрешать имена. Клиенты могут помнить прежний ответ до суток: переподключите VPN или перезапустите приложение.`,
       confirmLabel: nodata ? 'Включить NODATA' : 'Вернуть ::',
       onConfirm: async () => {
         const isCurrent = requests.begin()
