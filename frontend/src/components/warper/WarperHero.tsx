@@ -8,6 +8,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import { DOCS } from '@/lib/docsUrls'
 import type { WarperHealthResponse } from '@/types'
 import { cn } from '@/lib/utils'
+import { warperToggleLabel } from './utils'
 
 interface WarperHeroProps {
   health: WarperHealthResponse | null
@@ -29,6 +30,9 @@ function statusMeta(health: WarperHealthResponse | null) {
   }
   if (health.active) {
     return { label: 'Активен', variant: 'success' as const, dot: 'bg-emerald-500' }
+  }
+  if (health.dns_patch_orphaned) {
+    return { label: 'Выключен не полностью', variant: 'warning' as const, dot: 'bg-amber-500' }
   }
   return { label: 'Выключен', variant: 'secondary' as const, dot: 'bg-muted-foreground' }
 }
@@ -94,7 +98,7 @@ export default function WarperHero({ health, loading, nodeLabel, onRefresh, onTo
             onClick={() => void handleToggle()}
           >
             <Power className="mr-1.5 h-4 w-4" />
-            {health?.active ? 'Выключить' : 'Включить'}
+            {warperToggleLabel(health)}
           </Button>
         </div>
       </div>

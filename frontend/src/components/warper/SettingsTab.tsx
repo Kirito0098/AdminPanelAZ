@@ -300,7 +300,7 @@ export default function SettingsTab({ health }: SettingsTabProps) {
     confirm({
       title: 'Остановить sing-box?',
       description:
-        'Трафик через AZ-WARP перестанет ходить: домены и IP-подсети из списков AZ-WARP станут недоступны клиентам, пока sing-box не запустят снова.',
+        'Трафик через AZ-WARP перестанет ходить: домены и IP-подсети из списков AZ-WARP станут недоступны клиентам, пока sing-box не запустят снова. Чтобы выключить AZ-WARP совсем и вернуть эти домены в AntiZapret, нажмите «Выключить» вверху страницы.',
       confirmLabel: 'Остановить',
       destructive: true,
       onConfirm: async () => {

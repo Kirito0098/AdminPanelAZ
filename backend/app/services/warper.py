@@ -215,6 +215,19 @@ def _result_or_raise(result: Any, *, default: Any = None) -> Any:
     return result.data if result.data is not None else {"message": result.message}
 
 
+def _dns_patch_orphaned(api: Any) -> bool:
+    """sing-box is stopped but kresd.conf still sends AZ-WARP domains to its DNS on 127.0.0.1:40000."""
+    try:
+        raw = _result_or_raise(api.get_status(), default={})
+    except Exception:
+        return False
+    if not isinstance(raw, dict):
+        return False
+    singbox = raw.get("singbox") if isinstance(raw.get("singbox"), dict) else {}
+    kresd = raw.get("kresd") if isinstance(raw.get("kresd"), dict) else {}
+    return singbox.get("running") is False and bool(kresd.get("patched") or kresd.get("fullvpn_patched"))
+
+
 def _has_list_block(list_name: str, text: str | None = None) -> bool:
     marker = _BUILTIN_LIST_MARKERS.get(list_name)
     if not marker:
@@ -669,6 +682,7 @@ class WarperService:
             "conflict_antizapret_warp": False,
             **_antizapret_warp_modes(),
             "update_pending": False,
+            "dns_patch_orphaned": False,
             "warper_bin": detection["warper_bin"],
             "warper_script": detection["warper_script"],
             "warper_api": detection["warper_api"],
@@ -685,6 +699,9 @@ class WarperService:
             raise
         except Exception as exc:
             payload["health_error"] = str(exc)
+            return payload
+        if not payload["active"]:
+            payload["dns_patch_orphaned"] = _dns_patch_orphaned(api)
         return payload
 
     def get_status(self) -> dict[str, Any]:

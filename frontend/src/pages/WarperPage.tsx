@@ -87,7 +87,7 @@ export default function WarperPage() {
         onToggled={() => void load()}
       />
 
-      <WarperAlerts health={health} activeNode={activeNode} loadError={loadError} />
+      <WarperAlerts health={health} activeNode={activeNode} loadError={loadError} onToggled={() => void load()} />
 
       {warperReady && (
         <OverviewCards

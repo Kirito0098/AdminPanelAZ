@@ -16,6 +16,13 @@ export function isWarperDisabled(health: WarperHealthResponse | null): boolean {
   return !health?.installed || Boolean(health?.conflict_antizapret_warp)
 }
 
+/** `warper toggle` switches off whenever the kresd patch is present, even with sing-box stopped. */
+export function warperToggleLabel(health: WarperHealthResponse | null): string {
+  if (health?.active) return 'Выключить'
+  if (health?.dns_patch_orphaned) return 'Выключить полностью'
+  return 'Включить'
+}
+
 /** Shows the new switch position while saving and puts the previous one back if the save failed. */
 export async function saveSwitch<T>(
   previous: T,

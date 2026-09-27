@@ -93,6 +93,62 @@ def test_health_never_reports_conflict(monkeypatch):
     assert health["active"] is True
 
 
+def _patch_installed(monkeypatch):
+    monkeypatch.setattr(
+        warper_module,
+        "detect_warper_installation",
+        lambda: {
+            "installed": True,
+            "warper_bin": True,
+            "warper_script": True,
+            "warper_api": True,
+            "missing_components": [],
+        },
+    )
+    monkeypatch.setattr(
+        warper_module,
+        "_antizapret_warp_modes",
+        lambda: {"antizapret_warp_mode": "off", "vpn_warp_mode": "off"},
+    )
+    monkeypatch.setattr(warper_module, "is_update_pending", lambda: False)
+
+
+@pytest.mark.parametrize(
+    ("kresd", "expected"),
+    [
+        ({"patched": True, "fullvpn_patched": False}, True),
+        ({"patched": False, "fullvpn_patched": True}, True),
+        ({"patched": False, "fullvpn_patched": False}, False),
+    ],
+)
+def test_health_reports_orphaned_dns_patch(monkeypatch, kresd, expected):
+    _patch_installed(monkeypatch)
+    api = _FakeApi(is_active=False, get_status={"singbox": {"running": False}, "kresd": kresd})
+    health = _service(api, monkeypatch).get_health()
+    assert health["active"] is False
+    assert health["dns_patch_orphaned"] is expected
+
+
+def test_health_active_is_not_orphaned(monkeypatch):
+    _patch_installed(monkeypatch)
+    api = _FakeApi(is_active=True, get_status={"singbox": {"running": True}, "kresd": {"patched": True}})
+    health = _service(api, monkeypatch).get_health()
+    assert health["dns_patch_orphaned"] is False
+    assert ("get_status", ()) not in api.calls
+
+
+def test_health_orphaned_false_when_status_fails(monkeypatch):
+    _patch_installed(monkeypatch)
+
+    def broken_status():
+        raise RuntimeError("warper status failed")
+
+    api = _FakeApi(is_active=False, get_status=broken_status)
+    health = _service(api, monkeypatch).get_health()
+    assert health["dns_patch_orphaned"] is False
+    assert "health_error" not in health
+
+
 def test_status_strips_slave_password(monkeypatch):
     api = _FakeApi(get_status={"mode": "slave", "slave": {"host": "h", "password": "secret"}})
     status = _service(api, monkeypatch).get_status()

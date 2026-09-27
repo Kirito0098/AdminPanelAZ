@@ -1999,6 +1999,7 @@ export interface WarperHealthResponse {
   antizapret_warp_mode?: WarperAzWarpMode | null
   vpn_warp_mode?: WarperAzWarpMode | null
   update_pending?: boolean
+  dns_patch_orphaned?: boolean
   health_error?: string | null
   warper_bin?: boolean | null
   warper_script?: boolean | null

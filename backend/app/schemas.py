@@ -1764,6 +1764,7 @@ class WarperHealthResponse(BaseModel):
     antizapret_warp_mode: str | None = None
     vpn_warp_mode: str | None = None
     update_pending: bool = False
+    dns_patch_orphaned: bool = False
     health_error: str | None = None
     warper_bin: bool | None = None
     warper_script: bool | None = None

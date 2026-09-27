@@ -1,6 +1,30 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { donorLinkMode, extractProxyLink, saveSwitch } from './utils'
+import type { WarperHealthResponse } from '@/types'
+
+import { donorLinkMode, extractProxyLink, saveSwitch, warperToggleLabel } from './utils'
+
+describe('warperToggleLabel', () => {
+  const health = (patch: Partial<WarperHealthResponse>): WarperHealthResponse => ({
+    installed: true,
+    active: false,
+    conflict_antizapret_warp: false,
+    ...patch,
+  })
+
+  it('offers to switch off an active AZ-WARP', () => {
+    expect(warperToggleLabel(health({ active: true }))).toBe('Выключить')
+  })
+
+  it('offers to finish switching off when the DNS patch outlived sing-box', () => {
+    expect(warperToggleLabel(health({ dns_patch_orphaned: true }))).toBe('Выключить полностью')
+  })
+
+  it('offers to switch on otherwise', () => {
+    expect(warperToggleLabel(health({}))).toBe('Включить')
+    expect(warperToggleLabel(null)).toBe('Включить')
+  })
+})
 
 describe('saveSwitch', () => {
   it('shows the new position while saving and keeps it after a successful save', async () => {
