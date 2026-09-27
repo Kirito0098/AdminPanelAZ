@@ -66,8 +66,8 @@ function RouterFileRow({
         !ready && 'opacity-75',
       )}
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
           <div
             className={cn(
               'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold',
@@ -90,7 +90,7 @@ function RouterFileRow({
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2 sm:shrink-0">
+        <div className="flex flex-wrap gap-2">
           <Button size="sm" className="gap-1.5" disabled={!ready || downloading} onClick={onDownload}>
             <Download size={14} />
             {downloading ? '…' : 'Скачать'}
