@@ -642,7 +642,7 @@ export default function SecurityTab() {
                 Активные web-сессии
               </CardTitle>
               <CardDescription className="mt-1.5">
-                Открытые вкладки. «Отозвать» разлогинивает при следующем heartbeat.
+                Открытые вкладки. «Отозвать» сразу завершает сессию на сервере.
               </CardDescription>
             </div>
             {sessions.length > 0 && (

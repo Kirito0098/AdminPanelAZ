@@ -83,7 +83,7 @@ def run_nightly_idle_restart_once() -> dict:
             _set_setting(db, "nightly_idle_restart_last_run", now.isoformat())
             return {"status": "skipped", "reason": "active_sessions", "active_count": active_count}
 
-        service_name = settings.admin_panel_az_service_name.strip() or "admin-panel-az.service"
+        service_name = settings.admin_panel_az_service_name.strip() or "adminpanelaz.service"
         subprocess.run(
             ["systemctl", "restart", service_name],
             capture_output=True,

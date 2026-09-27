@@ -20,6 +20,7 @@ from app.models import AppSetting, Node, User
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.env_file import EnvFileService
 from app.services.node_agent_env import resolve_node_agent_env_file
+from app.services.panel_publish_info import panel_restart_command
 from app.services.refresh_token import invalidate_user_sessions
 
 CONFIRM_PHRASE = "ROTATE"
@@ -350,7 +351,7 @@ class SecretsRotationService:
         if defn.requires_relogin:
             next_steps.append("Все пользователи должны войти заново.")
         if defn.requires_restart:
-            next_steps.append("Перезапустите панель (systemctl restart admin-panel-az).")
+            next_steps.append(f"Перезапустите панель ({panel_restart_command()}).")
         if defn.secret_id == "node_agent_api_key":
             next_steps.append("Перезапустите node agent.")
         if defn.secret_id == "telegram_bot_token":

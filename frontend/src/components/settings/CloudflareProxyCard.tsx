@@ -95,9 +95,9 @@ export default function CloudflareProxyCard() {
         : 'Nginx уберёт realip. Если домен панели всё ещё за Proxied Cloudflare, Telegram-бот снова может отвечать 403, а лимиты входа и аудит будут видеть IP Cloudflare. «Доступ только через Cloudflare» тоже будет выключен.',
       alert: {
         variant: 'warning',
-        title: 'Пересборка nginx',
+        title: 'Перезапуск nginx',
         children:
-          'Конфиг панели обновится (reload nginx). Клиентский портал на отдельном хосте этой опцией не закрывается, но краткий обрыв HTTP при reload возможен.',
+          'Vhost домена панели будет пересоздан, nginx перезапущен (restart) — возможен краткий обрыв HTTP, в том числе у портала. Сама панель не перезапускается. В .env TRUSTED_PROXY_IPS и FORWARDED_ALLOW_IPS станут 127.0.0.1 — вступит в силу после перезапуска панели.',
       },
       confirmLabel: checked ? 'Включить' : 'Выключить',
       onConfirm: async () => {
@@ -119,12 +119,13 @@ export default function CloudflareProxyCard() {
             variant: 'warning',
             title: 'Нужен Proxied DNS для панели',
             children:
-              'Домен панели должен быть за оранжевым облаком Cloudflare. Клиентский портал (отдельный хост, DNS only) этим правилом не ограничивается. Nginx панели будет пересобран.',
+              'Домен панели должен быть за оранжевым облаком Cloudflare. Клиентский портал (отдельный хост, DNS only) этим правилом не ограничивается. Nginx будет перезапущен — возможен краткий обрыв HTTP. В .env TRUSTED_PROXY_IPS и FORWARDED_ALLOW_IPS станут 127.0.0.1 — вступит в силу после перезапуска панели.',
           }
         : {
             variant: 'info',
-            title: 'Пересборка nginx',
-            children: 'Allow-snippet уберётся из location’ов панели; возможен краткий reload nginx.',
+            title: 'Перезапуск nginx',
+            children:
+              'Allow-snippet уберётся из location’ов панели; nginx будет перезапущен — возможен краткий обрыв HTTP. В .env TRUSTED_PROXY_IPS и FORWARDED_ALLOW_IPS станут 127.0.0.1 — вступит в силу после перезапуска панели.',
           },
       confirmLabel: checked ? 'Включить ограничение' : 'Снять ограничение',
       onConfirm: async () => {

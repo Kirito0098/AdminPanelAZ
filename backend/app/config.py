@@ -145,7 +145,7 @@ class Settings(BaseSettings):
     active_web_session_touch_interval_seconds: int = 30
     nightly_idle_restart_enabled: bool = True
     nightly_idle_restart_cron: str = "0 4 * * *"
-    admin_panel_az_service_name: str = "admin-panel-az.service"
+    admin_panel_az_service_name: str = "adminpanelaz.service"
     uvicorn_workers: int = 1
     resource_profile: str = "standard"
     retention_enabled: bool = True

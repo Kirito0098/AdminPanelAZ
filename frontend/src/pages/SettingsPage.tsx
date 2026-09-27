@@ -166,7 +166,7 @@ export default function SettingsPage() {
       return
     }
     if (!newPwd || newPwd.length < 4) {
-      notifyError('Новый пароль: минимум 4 символа')
+      notifyError('Новый пароль слишком короткий')
       return
     }
     try {

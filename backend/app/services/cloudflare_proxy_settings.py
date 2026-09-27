@@ -271,8 +271,8 @@ def regenerate_panel_nginx_for_cloudflare_proxy() -> tuple[str, str]:
     run_env = os.environ.copy()
     run_env["DOMAIN"] = domain
     run_env["ENV_FILE"] = str(_ENV_FILE)
-    # Nginx reload is enough: flags already persisted to DB/.env. Restarting the
-    # panel service here caused a transient UI 502 on every proxy-mode toggle.
+    # Rebuilding the vhost (the script restarts nginx) is enough: flags already persisted to DB/.env.
+    # Restarting the panel service here caused a transient UI 502 on every proxy-mode toggle.
     result = subprocess.run(
         [
             "sudo",

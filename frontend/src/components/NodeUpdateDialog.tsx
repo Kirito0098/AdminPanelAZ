@@ -68,8 +68,9 @@ function GitBlock({ title, info }: { title: string; info: GitStatus | null }) {
         {info.diverged && !info.error && (
           <p className="text-xs text-amber-700 dark:text-amber-300">
             История расходится с GitHub (часто после squash или force push). Обновление выполнит{' '}
-            <code className="font-mono">git reset --hard origin/main</code>, если на узле нет локальных
-            изменений.
+            <code className="font-mono">git reset --hard</code> на upstream текущей ветки узла, если на узле
+            нет локальных изменений и коммитов, которых нет на сервере git. Агент 1.8.0 ещё сбрасывает на{' '}
+            <code className="font-mono">origin/main</code>.
           </p>
         )}
         {info.error && <p className="text-xs text-destructive">{info.error}</p>}

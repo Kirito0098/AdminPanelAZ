@@ -117,3 +117,9 @@ def test_rotation_ends_every_session(db, rotate):
     db.expire_all()
     versions = {u.username: u.token_version for u in db.query(User).all()}
     assert versions == {"admin": 4, "bob": 1}
+
+
+def test_rotation_names_the_real_panel_unit(rotate):
+    result = rotate()
+
+    assert "Перезапустите панель (sudo systemctl restart adminpanelaz)." in result["next_steps"]

@@ -214,7 +214,7 @@ export default function PersonalTab({
             </div>
           </div>
           <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs text-muted-foreground">Минимум 4 символа</p>
+            <p className="text-xs text-muted-foreground">Минимум 8 символов, буквы и цифры</p>
             <Button type="submit" className="w-full gap-1.5 sm:w-auto sm:shrink-0">
               <Save size={16} />
               Сохранить пароль
