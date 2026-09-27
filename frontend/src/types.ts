@@ -1953,6 +1953,12 @@ export interface OpenVpnBufferGuardSettings {
   updated_at?: string | null
 }
 
+export type DnsAaaaMode = 'zero' | 'nodata' | 'custom'
+
+export type DnsAaaaTarget = 'antizapret' | 'vpn'
+
+export type DnsAaaaState = Record<DnsAaaaTarget, DnsAaaaMode>
+
 export interface OpenVpnBufferGuardEvent {
   id: number
   node_id: number
