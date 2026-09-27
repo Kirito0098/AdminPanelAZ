@@ -16,8 +16,8 @@ from app.models import RefreshToken, User
 
 logger = logging.getLogger(__name__)
 
-# Browser tabs share the refresh cookie and may refresh at the same moment; the loser presents
-# the token the winner just rotated. Within this window that is a race, not token theft.
+# A rotated token presented within this window is a sibling tab's race or a refresh response the
+# browser never received, not token theft: the session gets a fresh successor instead of a 401.
 ROTATION_GRACE_SECONDS = 30
 
 _INVALID_TOKEN_DETAIL = "Недействительный или истёкший refresh-токен"
@@ -88,8 +88,12 @@ def _family_has_live_token(db: Session, row: RefreshToken, now: datetime) -> boo
 def rotate_refresh_token(db: Session, raw_token: str) -> tuple[str | None, User]:
     """Exchange a refresh token for a new one.
 
-    Returns ``(None, user)`` for a concurrent refresh that lost the race: the caller should issue
-    an access token only, since the browser already holds the winner's cookie.
+    A rotated token presented within ``ROTATION_GRACE_SECONDS`` of its rotation, while its family is
+    still alive, gets a new successor in the same family and the family's live tokens are marked
+    rotated: the browser may never have received the previous successor's cookie.
+
+    Returns ``(None, user)`` when the caller should issue an access token only and keep the cookie:
+    a concurrent refresh that lost the claim race, or a pre-upgrade token without a family.
     """
     now = datetime.utcnow()
     row = db.query(RefreshToken).filter(RefreshToken.token_hash == _hash_token(raw_token)).first()
@@ -101,7 +105,13 @@ def rotate_refresh_token(db: Session, raw_token: str) -> tuple[str | None, User]
             if not _within_rotation_grace(row, now):
                 _revoke_family_on_reuse(db, row)
             elif _family_has_live_token(db, row, now):
-                return None, _active_user(db, row.user_id)
+                user = _active_user(db, row.user_id)
+                # Without a family the undelivered successor can't be found to revoke it.
+                if not row.family_id:
+                    return None, user
+                revoke_token_family(db, row.family_id, reason="rotated", commit=False)
+                raw, _ = create_refresh_token(db, user, family_id=row.family_id)
+                return raw, user
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=_INVALID_TOKEN_DETAIL)
 
     user = _active_user(db, row.user_id)

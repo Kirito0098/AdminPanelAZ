@@ -84,16 +84,79 @@ def test_reuse_after_grace_revokes_whole_family_only(db, user):
     assert _row(db, other_device).revoked is False
 
 
-def test_reuse_within_grace_returns_access_only_and_keeps_family(db, user):
+def _live_in_family(db, family_id: str) -> list[RefreshToken]:
+    db.expire_all()
+    return db.query(RefreshToken).filter_by(family_id=family_id, revoked=False).all()
+
+
+def test_lost_rotation_response_is_recovered_within_grace(db, user):
+    raw, first = rt.create_refresh_token(db, user)
+    lost_raw, _ = rt.rotate_refresh_token(db, raw)
+
+    recovered_raw, got_user = rt.rotate_refresh_token(db, raw)
+
+    assert got_user.id == user.id
+    assert recovered_raw and recovered_raw not in (raw, lost_raw)
+    assert _row(db, recovered_raw).family_id == first.family_id
+    lost = _row(db, lost_raw)
+    assert lost.revoked is True
+    assert lost.revoke_reason == "rotated"
+    assert lost.revoked_at is not None
+    assert [t.token_hash for t in _live_in_family(db, first.family_id)] == [rt._hash_token(recovered_raw)]
+
+    next_raw, _ = rt.rotate_refresh_token(db, recovered_raw)
+    assert next_raw and _row(db, next_raw).family_id == first.family_id
+    assert _row(db, recovered_raw).revoke_reason == "rotated"
+
+
+def test_sibling_tab_with_superseded_cookie_recovers_too(db, user):
+    raw, first = rt.create_refresh_token(db, user)
+    sibling_raw, _ = rt.rotate_refresh_token(db, raw)
+    recovered_raw, _ = rt.rotate_refresh_token(db, raw)
+
+    sibling_new, _ = rt.rotate_refresh_token(db, sibling_raw)
+
+    assert sibling_new
+    assert _row(db, recovered_raw).revoke_reason == "rotated"
+    assert [t.token_hash for t in _live_in_family(db, first.family_id)] == [rt._hash_token(sibling_new)]
+
+
+def test_recovered_token_reused_after_grace_revokes_family(db, user):
+    raw, first = rt.create_refresh_token(db, user)
+    rt.rotate_refresh_token(db, raw)
+    recovered_raw, _ = rt.rotate_refresh_token(db, raw)
+    _age_revocation(db, raw, rt.ROTATION_GRACE_SECONDS + 5)
+
+    with pytest.raises(HTTPException) as exc:
+        rt.rotate_refresh_token(db, raw)
+
+    assert exc.value.status_code == 401
+    assert _row(db, recovered_raw).revoke_reason == "reuse"
+    assert _live_in_family(db, first.family_id) == []
+
+
+def test_grace_after_logout_issues_no_token(db, user):
     raw, _ = rt.create_refresh_token(db, user)
     new_raw, _ = rt.rotate_refresh_token(db, raw)
+    rt.revoke_refresh_token(db, new_raw)
 
-    again_raw, got_user = rt.rotate_refresh_token(db, raw)
+    with pytest.raises(HTTPException) as exc:
+        rt.rotate_refresh_token(db, raw)
+
+    assert exc.value.status_code == 401
+    assert db.query(RefreshToken).count() == 2
+    assert _row(db, new_raw).revoke_reason == "logout"
+
+
+def test_legacy_token_within_grace_returns_access_only(db, user):
+    _legacy_token(db, user, "legacy-token", revoked=False)
+    new_raw, _ = rt.rotate_refresh_token(db, "legacy-token")
+
+    again_raw, got_user = rt.rotate_refresh_token(db, "legacy-token")
 
     assert again_raw is None
     assert got_user.id == user.id
     assert _row(db, new_raw).revoked is False
-    assert db.query(RefreshToken).count() == 2
 
 
 def test_lost_rotation_race_issues_no_second_token(db, user, monkeypatch):
@@ -283,17 +346,22 @@ def test_migration_adds_rotation_columns_to_legacy_table(monkeypatch):
     assert "ix_refresh_tokens_family_id" in {idx["name"] for idx in inspect(engine).get_indexes("refresh_tokens")}
 
 
-def test_refresh_route_in_grace_does_not_overwrite_cookie(db, user):
+def test_refresh_route_in_grace_resends_refresh_cookie(db, user):
     raw, _ = rt.create_refresh_token(db, user)
-    rt.rotate_refresh_token(db, raw)
+    lost_raw, _ = rt.rotate_refresh_token(db, raw)
+    cookie_name = get_settings().refresh_token_cookie_name
     request = MagicMock()
-    request.cookies = {get_settings().refresh_token_cookie_name: raw}
+    request.cookies = {cookie_name: raw}
     response = Response()
 
     token = auth_router.refresh_token(request, response, db)
 
     assert token.access_token
-    assert "set-cookie" not in response.headers
+    set_cookie = response.headers.get("set-cookie", "")
+    assert set_cookie.startswith(f"{cookie_name}=")
+    sent_raw = set_cookie.split(";", 1)[0].split("=", 1)[1]
+    assert sent_raw not in (raw, lost_raw)
+    assert _row(db, sent_raw).revoked is False
 
 
 def test_refresh_route_failure_clears_cookie(db, user):
