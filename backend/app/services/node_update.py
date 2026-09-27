@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import threading
 from datetime import datetime, timezone
@@ -13,6 +14,7 @@ SYSTEMD_UNIT = "adminpanelaz-node"
 
 DEFAULT_GIT_BRANCH = "main"
 GIT_TIMEOUT = 120.0
+_OID_RE = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
 
 def resolve_repo_root(start: Path | None = None) -> Path | None:
@@ -128,6 +130,49 @@ def _working_tree_clean(repo_path: Path) -> bool:
     return status.returncode == 0 and not status.stdout.strip()
 
 
+def _seen_upstream_tips(repo_path: Path, ref: str) -> list[str]:
+    """Every tip of ``refs/remotes/<ref>`` recorded in its reflog, old values included.
+
+    A fresh clone has no reflog for the ref; the first fetch after a force-push records the
+    pre-rewrite tip only as the old value of its entry.
+    """
+    log_path = _git_run(["rev-parse", "--git-path", f"logs/refs/remotes/{ref}"], repo_path, timeout=10.0)
+    if log_path.returncode != 0 or not log_path.stdout.strip():
+        return []
+    try:
+        lines = (repo_path / log_path.stdout.strip()).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return []
+    tips: set[str] = set()
+    for line in lines:
+        for oid in line.split()[:2]:
+            if _OID_RE.fullmatch(oid) and oid.strip("0"):
+                tips.add(oid)
+    return sorted(tips)
+
+
+def _unpushed_commit_count(repo_path: Path, ref: str) -> int | None:
+    """Commits of HEAD that are on no remote branch and were never on ``ref`` (None if git failed).
+
+    Commits dropped from ``ref`` by a force-push were on the server, so they do not count.
+    """
+    seen_tips = _seen_upstream_tips(repo_path, ref)
+    count = _git_run(["rev-list", "--count", "HEAD", "--not", "--remotes", *seen_tips], repo_path, timeout=15.0)
+    if count.returncode != 0:
+        return None
+    try:
+        return int(count.stdout.strip())
+    except ValueError:
+        return None
+
+
+def _unpushed_commits_error(count: int | None, ref: str) -> str:
+    return (
+        f"В локальной ветке есть коммиты, которых нет на сервере git: {count if count is not None else '?'} "
+        f"(история расходится с {ref}) — синхронизируйте вручную"
+    )
+
+
 def git_pull(repo_path: Path) -> dict[str, Any]:
     if not repo_path.is_dir() or not (repo_path / ".git").is_dir():
         return {"success": False, "output": "", "error": "Не git-репозиторий"}
@@ -149,6 +194,14 @@ def git_pull(repo_path: Path) -> dict[str, Any]:
 
         # After force-push on origin the node copy may diverge while the tree is still clean.
         if _working_tree_clean(repo_path):
+            unpushed = _unpushed_commit_count(repo_path, ref)
+            if unpushed != 0:
+                return {
+                    "success": False,
+                    "output": output,
+                    "error": _unpushed_commits_error(unpushed, ref),
+                    "method": "fast-forward",
+                }
             reset = _git_run(["reset", "--hard", ref], repo_path)
             reset_output = ((reset.stdout or "") + (reset.stderr or "")).strip()
             if reset.returncode == 0:

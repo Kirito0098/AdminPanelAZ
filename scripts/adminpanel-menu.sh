@@ -51,6 +51,15 @@ press_any_key() {
   fi
 }
 
+# Пункт интерактивного меню: отказ или ошибка действия не закрывает меню, а внутри действия set -e работает
+# (в `действие || true` bash его отключает).
+menu_action() {
+  set +e
+  (set -e; "$@")
+  set -e
+  press_any_key
+}
+
 require_root() {
   if [[ "$(id -u)" -ne 0 ]]; then
     ui_fail "Нужны права root (sudo)."
@@ -143,6 +152,42 @@ panel_logs() {
   fi
 }
 
+# Ветка, с которой обновляется рабочая копия, — те же правила, что у обновления из панели
+# (resolve_update_ref в backend/app/services/node_update.py): upstream текущей ветки, для main без upstream —
+# origin/main. Ветку релиза нельзя двигать на историю другой ветки.
+panel_update_ref() {
+  local branch upstream
+  branch="$(git -C "$INSTALL_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null || true)"
+  if [[ -z "$branch" ]]; then
+    ui_fail "Рабочая копия не на ветке (detached HEAD): обновите вручную"
+    return 1
+  fi
+  upstream="$(git -C "$INSTALL_DIR" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if [[ -n "$upstream" ]]; then
+    printf '%s\n' "$upstream"
+    return 0
+  fi
+  if [[ "$branch" == main ]]; then
+    printf '%s\n' origin/main
+    return 0
+  fi
+  ui_fail "У ветки $branch нет upstream: обновите вручную или привяжите её (git branch -u origin/$branch)"
+  return 1
+}
+
+# Коммиты HEAD, которых нет ни в одной ветке origin и не было в upstream ($1), — как _unpushed_commit_count
+# в node_update.py; «?», если git не ответил. Вершины upstream до force-push берутся из обеих колонок его
+# reflog: у свежего клона reflog нет, и первый fetch после force-push пишет прежнюю вершину только как old.
+panel_unpushed_count() {
+  local log seen=()
+  log="$(git -C "$INSTALL_DIR" rev-parse --git-path "logs/refs/remotes/$1" 2>/dev/null)" || log=""
+  [[ -z "$log" || "$log" == /* ]] || log="$INSTALL_DIR/$log"
+  if [[ -f "$log" ]]; then
+    mapfile -t seen < <(awk '{ print $1; print $2 }' "$log" | grep -Ex '[0-9a-f]{40}|[0-9a-f]{64}' | grep -vx '0*' | sort -u || true)
+  fi
+  git -C "$INSTALL_DIR" rev-list --count HEAD --not --remotes ${seen[@]+"${seen[@]}"} 2>/dev/null || echo '?'
+}
+
 panel_update() {
   require_root
   if [[ ! -d "$INSTALL_DIR/.git" ]]; then
@@ -161,16 +206,21 @@ panel_update() {
     return 1
   fi
 
-  local local_rev remote_rev
+  local ref local_rev remote_rev behind ahead
+  ref="$(panel_update_ref)" || return 1
   local_rev="$(git -C "$INSTALL_DIR" rev-parse HEAD)"
-  remote_rev="$(git -C "$INSTALL_DIR" rev-parse origin/main 2>/dev/null || git -C "$INSTALL_DIR" rev-parse origin/master 2>/dev/null || true)"
-  if [[ -z "$remote_rev" ]]; then
-    ui_fail "Не найдена ветка origin/main (или origin/master)"
+  if ! remote_rev="$(git -C "$INSTALL_DIR" rev-parse --verify --quiet "$ref^{commit}")"; then
+    ui_fail "Не найдена ветка $ref"
     return 1
   fi
+  behind="$(git -C "$INSTALL_DIR" rev-list --count "$local_rev..$remote_rev")"
+  ahead="$(git -C "$INSTALL_DIR" rev-list --count "$remote_rev..$local_rev")"
 
-  if [[ "$local_rev" == "$remote_rev" ]]; then
-    ui_ok "Репозиторий актуален ($(git -C "$INSTALL_DIR" rev-parse --short HEAD))"
+  if [[ "$behind" -eq 0 ]]; then
+    ui_ok "Репозиторий актуален ($(git -C "$INSTALL_DIR" rev-parse --short HEAD), $ref)"
+    if [[ "$ahead" -gt 0 ]]; then
+      ui_info "Локальных коммитов, которых нет в $ref: $ahead"
+    fi
     # Так досборка доходит до обновившихся меню 2.25.1: оно делало git pull без сборки интерфейса.
     if frontend_build_stale; then
       ui_warn "Интерфейс собран до последнего обновления кода"
@@ -183,11 +233,28 @@ panel_update() {
     return 0
   fi
 
-  ui_info "Найдены обновления. git pull --ff-only…"
-  if ! git -C "$INSTALL_DIR" pull --ff-only origin main 2>/dev/null && \
-     ! git -C "$INSTALL_DIR" pull --ff-only origin master 2>/dev/null; then
-    ui_fail "git pull не удался (возможен конфликт — обновите вручную)"
-    return 1
+  ui_info "Найдены обновления в $ref (отставание: $behind). git merge --ff-only $ref…"
+  local merge_out status_out unpushed
+  if ! merge_out="$(git -C "$INSTALL_DIR" merge --ff-only "$ref" 2>&1)"; then
+    # После force-push на origin история расходится при чистом дереве: сброс только на upstream той же ветки.
+    if ! status_out="$(git -C "$INSTALL_DIR" status --porcelain 2>/dev/null)" || [[ -n "$status_out" ]]; then
+      [[ -n "$merge_out" ]] && printf '%s\n' "$merge_out" >&2
+      ui_fail "Обновление не удалось: история расходится с $ref или есть локальные изменения — обновите вручную"
+      return 1
+    fi
+    unpushed="$(panel_unpushed_count "$ref")"
+    if [[ "$unpushed" != 0 ]]; then
+      [[ -n "$merge_out" ]] && printf '%s\n' "$merge_out" >&2
+      ui_fail "В локальной ветке есть коммиты, которых нет на сервере git: $unpushed (история расходится с $ref) — синхронизируйте вручную"
+      return 1
+    fi
+    if ! git -C "$INSTALL_DIR" reset --hard --quiet "$ref"; then
+      ui_fail "Обновление не удалось: git reset --hard $ref — обновите вручную"
+      return 1
+    fi
+    ui_warn "История переписана: reset --hard $ref"
+  else
+    [[ -n "$merge_out" ]] && printf '%s\n' "$merge_out"
   fi
   ui_ok "Код обновлён"
 
@@ -286,9 +353,9 @@ menu_service_panel() {
 
     read -r -p "  Выберите действие [0-3]: " choice
     case "$choice" in
-      1) panel_restart; press_any_key ;;
-      2) panel_status; press_any_key ;;
-      3) panel_logs; press_any_key ;;
+      1) menu_action panel_restart ;;
+      2) menu_action panel_status ;;
+      3) menu_action panel_logs ;;
       0) break ;;
       *)
         ui_warn "Неверный выбор"
@@ -313,8 +380,8 @@ menu_backups_updates() {
 
     read -r -p "  Выберите действие [0-2]: " choice
     case "$choice" in
-      1) panel_update; press_any_key ;;
-      2) panel_backup; press_any_key ;;
+      1) menu_action panel_update ;;
+      2) menu_action panel_backup ;;
       0) break ;;
       *)
         ui_warn "Неверный выбор"
@@ -334,6 +401,11 @@ panel_disable_ip_whitelist() {
   bash "$script" disable
 }
 
+panel_nginx_repair() {
+  require_root
+  bash "$ROOT_DIR/scripts/nginx-repair.sh"
+}
+
 menu_diagnostics() {
   while true; do
     clear || true
@@ -350,13 +422,9 @@ menu_diagnostics() {
 
     read -r -p "  Выберите действие [0-3]: " choice
     case "$choice" in
-      1) panel_diagnose; press_any_key ;;
-      2)
-        require_root
-        bash "$ROOT_DIR/scripts/nginx-repair.sh"
-        press_any_key
-        ;;
-      3) panel_disable_ip_whitelist; press_any_key ;;
+      1) menu_action panel_diagnose ;;
+      2) menu_action panel_nginx_repair ;;
+      3) menu_action panel_disable_ip_whitelist ;;
       0) break ;;
       *)
         ui_warn "Неверный выбор"
@@ -388,7 +456,7 @@ main_menu() {
       1) menu_service_panel ;;
       2) menu_backups_updates ;;
       3) menu_diagnostics ;;
-      7) panel_diagnose; press_any_key ;;
+      7) menu_action panel_diagnose ;;
       0) exit 0 ;;
       *)
         ui_warn "Неверный выбор"
@@ -407,7 +475,8 @@ usage() {
 
 Опции (как adminpanel.sh в AA):
   --restart              Перезапустить панель (systemctl restart adminpanelaz)
-  --update               git fetch + pull + pip + сборка интерфейса (если есть обновления
+  --update               git fetch + fast-forward из upstream текущей ветки (main без upstream —
+                         origin/main) + pip + сборка интерфейса (если есть обновления
                          или интерфейс собран до последнего обновления кода)
   --backup               Создать резервную копию (scripts/backup-cli.py)
   --diagnose             Диагностика запуска (scripts/site-diagnostics.sh)
