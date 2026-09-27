@@ -591,6 +591,7 @@ export default function TrafficPage() {
 
   // Seed retention early so the calendar knows max window even before overview succeeds.
   useEffect(() => {
+    if (nodeLoading) return
     let cancelled = false
     void getRetentionSettings()
       .then((cfg) => {
@@ -604,7 +605,7 @@ export default function TrafficPage() {
     return () => {
       cancelled = true
     }
-  }, [activeNode?.id])
+  }, [nodeLoading, activeNode?.id])
 
   const loadDeletedClients = useCallback(async () => {
     if (!isAdmin) return

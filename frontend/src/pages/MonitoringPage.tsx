@@ -388,21 +388,25 @@ export default function MonitoringPage() {
     [notifyError],
   )
 
+  const scopeReady = !nodesLoading && scopeInitialized
+
   useEffect(() => {
-    if (nodesLoading && !scopeInitialized) return
+    if (!scopeReady) return
     load({ initial: true })
-  }, [load, activeNode?.id, scope, haMode, nodesLoading, scopeInitialized])
+  }, [load, activeNode?.id, scope, haMode, scopeReady])
 
   useEffect(() => {
+    if (nodesLoading) return
     loadResourceHistory(resourcePeriod)
-  }, [loadResourceHistory, activeNode?.id, resourcePeriod])
+  }, [loadResourceHistory, nodesLoading, activeNode?.id, resourcePeriod])
 
   useEffect(() => {
+    if (!scopeReady) return
     void loadConnectionHistory(connectionHistoryPeriod, scope)
-  }, [loadConnectionHistory, connectionHistoryPeriod, scope, activeNode?.id])
+  }, [loadConnectionHistory, connectionHistoryPeriod, scope, scopeReady, activeNode?.id])
 
   useEffect(() => {
-    if (!autoRefresh) return
+    if (!autoRefresh || !scopeReady) return
 
     let source: EventSource | null = null
     let tick: ReturnType<typeof setInterval> | undefined
@@ -452,7 +456,7 @@ export default function MonitoringPage() {
       disconnect()
       document.removeEventListener('visibilitychange', onVisibility)
     }
-  }, [autoRefresh, scope, haMode, activeNode?.id, refreshIncidents])
+  }, [autoRefresh, scopeReady, scope, haMode, activeNode?.id, refreshIncidents])
 
   const isFederated = scope === 'all' || data?.scope === 'all'
   const showNodeColumn = isFederated

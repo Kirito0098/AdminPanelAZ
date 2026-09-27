@@ -686,7 +686,7 @@ function WorkflowStep({
 }
 
 export default function AntizapretConfigTab() {
-  const { activeNode } = useNode()
+  const { activeNode, loading: nodeLoading } = useNode()
   const { success, error: notifyError, warning: notifyWarning } = useNotifications()
   const { trackBackgroundTask } = useProgress()
   const haReplicaReadonly = useHaReplicaReadonly()
@@ -765,8 +765,9 @@ export default function AntizapretConfigTab() {
   }, [activeNode?.name, notifyError])
 
   useEffect(() => {
+    if (nodeLoading) return
     void load()
-  }, [load, activeNode?.id])
+  }, [load, nodeLoading, activeNode?.id])
 
   const handleSavedHostsChange = useCallback((hosts: string[], applyToWireguard?: boolean) => {
     setSavedRemoteHosts(hosts)

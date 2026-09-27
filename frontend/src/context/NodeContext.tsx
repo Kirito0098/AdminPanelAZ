@@ -40,7 +40,9 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
   const [nodes, setNodes] = useState<Node[]>([])
   const [syncGroups, setSyncGroups] = useState<NodeSyncGroup[]>([])
   const [syncGroupsLoaded, setSyncGroupsLoaded] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [resolvedForUserId, setResolvedForUserId] = useState<number | null>(null)
+  // Pages mount in the same render the user appears, before refresh() runs — loading must already be true then.
+  const loading = user != null && resolvedForUserId !== user.id
 
   const showActiveNode = useCallback((state: ActiveNodeState) => {
     trackerRef.current.show(state.node?.id ?? null)
@@ -52,7 +54,7 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
   const refresh = useCallback(async () => {
     if (!user) {
       showActiveNode({ node: null, ha: null })
-      setLoading(false)
+      setResolvedForUserId(null)
       return
     }
     try {
@@ -62,7 +64,7 @@ export function NodeProvider({ children }: { children: React.ReactNode }) {
       if (result.outcome === 'changed-elsewhere') setChangedElsewhere(state)
       else showActiveNode(state)
     } finally {
-      setLoading(false)
+      setResolvedForUserId(user.id)
     }
   }, [user, showActiveNode])
 
