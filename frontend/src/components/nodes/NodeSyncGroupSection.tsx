@@ -32,6 +32,7 @@ import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import DocsLink from '@/components/shared/DocsLink'
+import { parseTimestamp } from '@/lib/datetime'
 import { DOCS } from '@/lib/docsUrls'
 import {
   DropdownMenu,
@@ -98,9 +99,8 @@ const AUTO_SYNC_OPERATIONS = [
 ] as const
 
 function formatTimestamp(value?: string | null): string | null {
-  if (!value) return null
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return null
+  const date = parseTimestamp(value)
+  if (!date) return null
   return date.toLocaleString()
 }
 

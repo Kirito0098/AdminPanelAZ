@@ -1,4 +1,5 @@
 import { Badge } from '@/components/ui/badge'
+import { parseTimestamp } from '@/lib/datetime'
 import { DOCS } from '@/lib/docsUrls'
 import { cn } from '@/lib/utils'
 
@@ -12,10 +13,9 @@ type NocDataFreshnessProps = {
 }
 
 function dataAgeSec(timestamp?: string | null): number | null {
-  if (!timestamp) return null
-  const ms = Date.parse(timestamp)
-  if (Number.isNaN(ms)) return null
-  return Math.max(0, (Date.now() - ms) / 1000)
+  const date = parseTimestamp(timestamp)
+  if (!date) return null
+  return Math.max(0, (Date.now() - date.getTime()) / 1000)
 }
 
 function formatAge(sec: number): string {

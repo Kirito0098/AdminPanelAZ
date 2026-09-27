@@ -27,7 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { formatDateTime } from '@/lib/datetime'
+import { formatDateTime, parseTimestamp } from '@/lib/datetime'
 import { formatBitrate, formatDurationShort, sessionDurationSeconds } from '@/lib/formatTraffic'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { formatProxyViaBadgeLabel } from '@/lib/proxyViaBadgeLabel'
@@ -83,6 +83,11 @@ function protocolBadgeVariant(protocol: MonitoringConnectionProtocol): 'default'
 }
 
 function parseTime(value?: string | null): number {
+  return parseTimestamp(value)?.getTime() ?? 0
+}
+
+// OpenVPN prints connected_since in the VPN server's local time, not UTC.
+function parseOpenVpnConnectedSince(value?: string | null): number {
   if (!value) return 0
   const ms = Date.parse(value)
   return Number.isNaN(ms) ? 0 : ms
@@ -179,7 +184,7 @@ export function buildMonitoringConnectionRows(
           ? client.connected_since_ts > 1e12
             ? client.connected_since_ts
             : client.connected_since_ts * 1000
-          : parseTime(client.connected_since),
+          : parseOpenVpnConnectedSince(client.connected_since),
         durationSec: sessionDurationSeconds(client.connected_since_ts, client.connected_since),
         rxBps: rate?.rxBps ?? null,
         txBps: rate?.txBps ?? null,

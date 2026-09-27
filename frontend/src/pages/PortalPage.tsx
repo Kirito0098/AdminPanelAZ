@@ -22,6 +22,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import Spinner from '@/components/ui/Spinner'
+import { parseTimestamp } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 
 type OsId = 'windows' | 'android' | 'ios' | 'mac' | 'linux'
@@ -145,8 +146,8 @@ function statusToneClass(status?: string) {
 
 function formatPortalDate(value: string | null): string {
   if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
+  const date = parseTimestamp(value)
+  if (!date) return value
   return new Intl.DateTimeFormat('ru-RU', {
     dateStyle: 'medium',
     timeStyle: 'short',

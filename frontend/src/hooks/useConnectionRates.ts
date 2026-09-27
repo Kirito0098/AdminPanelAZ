@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { parseTimestamp } from '@/lib/datetime'
 
 type RateSample = { rx: number; tx: number; at: number }
 
@@ -26,8 +27,7 @@ export function useConnectionRates(
 
   useEffect(() => {
     const currentRows = rowsRef.current
-    const at = timestamp ? Date.parse(timestamp) : Date.now()
-    const atMs = Number.isNaN(at) ? Date.now() : at
+    const atMs = parseTimestamp(timestamp)?.getTime() ?? Date.now()
     const nextPrev = new Map<string, RateSample>()
     const nextRates = new Map<string, ConnectionRate>()
     const seen = new Set<string>()
