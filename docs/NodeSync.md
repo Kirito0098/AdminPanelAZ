@@ -8,6 +8,7 @@
 
 - **Sync Group** — primary + 1+ replica, shared domains (`shared_domain` → `OPENVPN_HOST`, `shared_domain_wireguard` → `WIREGUARD_HOST`; пустой WG-домен = тот же, что OpenVPN)
 - **Push full** — `client.sh 8` на primary → transfer → **HA restore** на replica (`?ha_replica=true`): **wipe-and-replace** VPN/crypto (PKI `easyrsa3`, server WireGuard `.conf`, каталоги профилей OVPN/WG/AWG) — **без `client.sh 7`**. Каталог `config/` — **merge** (как раньше). Дополнительно копирует непустые `OPENVPN_HOST` / `WIREGUARD_HOST` из `setup` primary на каждую replica **перед** restore. После restore — **байт-копия `.ovpn`** с primary, **prune** VPN-клиентов only-on-replica, restart OpenVPN + apply WireGuard runtime. Если на primary установлен слой AZ-AWG2 — overlay копируется на replica (`sync_amneziawg2_state_from_primary`). Ошибки copy/prune/restart/AWG2 → `sync_status=failed` (не warning).
+- **Блокировки WireGuard / AWG2 на replica** — `wg syncconf` из конфигов primary возвращает peer'ов, убранных из runtime блокировкой. Поэтому после копирования политик доступа в Push full и после каждой HA crypto sync (create/delete/renew, heal) панель заново блокирует на replica всех заблокированных по её политикам клиентов: node agent 1.11.0 — пакетно (`…/runtime/block-batch`), старый агент — по одному клиенту. Если синхронизация упала после применения состояния primary, блокировки всё равно возвращаются, а исходная ошибка сообщается. Сбой блокировки одного клиента не останавливает остальных; синхронизация помечается неуспешной с именами клиентов.
 - **Verify** — списки OVPN/WG клиентов + checksums PKI/WG/config/**`.ovpn`** + **read-only проверка сертификатов в `.ovpn`**
 
 ### OpenVPN-профили и HA
@@ -37,7 +38,7 @@
 | POST | `/api/nodes/sync-groups/{id}/verify` |
 | GET | `/api/nodes/sync-groups/{id}/status` |
 
-Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backups/antizapret/restore?ha_replica=true`, `GET /backups/antizapret/download`, `GET /backups/antizapret/fingerprints`, `GET/POST /profiles/openvpn/export|import`, `GET /openvpn/easyrsa3/index`, `GET /wireguard/server-config-files`, `DELETE /wireguard/server-config-file/{filename}`.
+Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backups/antizapret/restore?ha_replica=true`, `GET /backups/antizapret/download`, `GET /backups/antizapret/fingerprints`, `GET/POST /profiles/openvpn/export|import`, `GET /openvpn/easyrsa3/index`, `GET /wireguard/server-config-files`, `DELETE /wireguard/server-config-file/{filename}`. Пакетная переблокировка WireGuard/AWG2, файлы WARP/RPZ/Lua и запись режимов WARP 3/4 и `WARP_MTU` на replica требуют node agent **1.11.0** — обновление агента: [uzly.md](uzly.md#обновление-агента-на-узле).
 
 ## Ограничения
 
@@ -46,7 +47,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 - Push full **destructive** на replica для **VPN/crypto** (wipe-and-replace, не merge). `config/` остаётся merge; `warper-include-ips.txt` — node-local (excluded из fingerprint parity)
 - Удаление HA-группы **не** очищает диск replica — для выравнивания выполните Push full
 - Split-brain: изменения только на primary; при failed sync — `sync_status=failed`, Push full или (в `auto`, opt-in) incremental auto-heal
-- **`manual_full`** (по умолчанию) — полное выравнивание через **Push full**; клиенты на replica попадают в панель после Push full (импорт в БД + политики + снимок трафика). HA-бейдж на primary — **да** (`sync_group_id`, без теней на replica). **Create / delete / renew OVPN на primary** дополнительно копируют **crypto-состояние** (WG conf + профили, easyrsa3) на replica — один профиль работает на обоих IP; shadow `VpnConfig` и прочая auto-репликация политик/файлов — **нет**. После расформирования группы на replica: **Конфигурации → Синхронизировать**
+- **`manual_full`** (по умолчанию) — полное выравнивание через **Push full**; клиенты на replica попадают в панель после Push full (импорт в БД + политики + снимок трафика). HA-бейдж на primary — **да** (`sync_group_id`, без теней на replica). **Create / delete / renew OVPN на primary** дополнительно копируют **crypto-состояние** (WG conf + профили, easyrsa3) на replica — один профиль работает на обоих IP; shadow `VpnConfig` и прочая auto-репликация политик/файлов — **нет**. После расформирования группы на replica: **Клиенты → Синхронизировать**
 - **`auto`** — см. раздел [v2 — HA auto-sync](#v2--ha-auto-sync-этапы-ac) ниже
 
 ## v2 — HA auto-sync (этапы A–C)
@@ -84,6 +85,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 | Temp / permanent block, unblock | Та же политика в БД + runtime (iptables/WG) |
 | Set / clear traffic limit | Те же `traffic_limit_*` + reconcile runtime |
 | WG set-expiry | Тот же `expires_at` + runtime |
+| Срок доступа профиля (`access_until`): правка в карточке, каскад со срока пользователя, продление unlock-кодом | Тот же `access_until` в политике на replica; сбой на реплике → `sync_status=failed` |
 | OpenVPN disconnect | Разрыв сессии на primary и replica (если клиент онлайн) |
 | PATCH: description, owner | Обновление shadow `VpnConfig` (метаданные панели) |
 | Bulk: block, renew, unblock | Как одиночные операции |
@@ -102,6 +104,11 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 | Редактор файлов (один / batch) | Изменённые файлы + опционально `doall.sh` |
 | Routing UI (route files: include/exclude/forward/drop IPs) | Те же файлы на replica без `doall.sh` по умолчанию |
 | Routing UI (provider files) | Аналогично, если файл в scope HA |
+| Редактор: файлы WARP и RPZ (`include-warp-hosts.txt`, `exclude-warp-hosts.txt`, `*-rpz.txt`) | Те же файлы + опционально `doall.sh` |
+| Редактор: `custom.lua` / `custom2.lua` (`/etc/knot-resolver`) | Тот же файл, перезапуск `kresd@1` / `kresd@2` на replica без `doall.sh`; если резолвер не поднялся — прежний файл возвращается |
+| **DNS: ответ на AAAA** | Помеченный блок в `custom.lua` / `custom2.lua` — как при правке Lua |
+
+Файлы WARP, RPZ и Lua поддерживаются с node agent **1.11.0**. При правке на primary реплика со старым агентом получает ошибку («Обновите node agent панели на узле…», группа → `failed`). Фоновое auto-heal такие файлы на старом агенте пропускает, не помечая реплику ошибкой.
 
 См. [edit-files.md](edit-files.md) — auto vs ручной перенос.
 
@@ -111,6 +118,8 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 |----------|---------|
 | `PUT /routing/antizapret-settings` | Те же ключи `setup` (см. исключения ниже) |
 | `POST /routing/apply` | Фоновый apply (`doall.sh`) на каждой replica |
+
+Режимы встроенного WARP None / All уходят на replica как `n` / `y` — их понимает и старый (до 1.11.0) node agent. Режимы Domain / Custom (`ANTIZAPRET_WARP` 3 / 4) и `WARP_MTU` старый агент записать не может: после записи панель перечитывает setup реплики и при расхождении помечает синхронизацию ошибкой (`sync_status=failed`, «Обновите node agent панели на узле и сохраните ещё раз»), а не оставляет реплику молча без WARP.
 
 См. [antizapret-config.md](antizapret-config.md).
 
@@ -128,6 +137,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 | Config files | `warper-include-ips.txt` и др. node-local файлы | `CONFIG_FINGERPRINT_EXCLUDE` в `fingerprints.py` |
 | Setup (`/root/antizapret/setup`) | (пусто) — все ключи из `ANTIZAPRET_PARAMS`, включая `ANTIZAPRET_WARP` / `VPN_WARP` | `ANTIZAPRET_HA_SETTING_EXCLUDE` |
 | Setup | **`OPENVPN_HOST` / `WIREGUARD_HOST` реплицируются** (из `shared_domain` / `shared_domain_wireguard`) | — |
+| Verify / Push full | Excluded config не ломают паритет fingerprint `antizapret/config` | `fingerprints.py` |
 
 ### Apply shared domain (`POST …/apply-shared-domain`)
 
@@ -135,14 +145,14 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 - `shared_domain` → `OPENVPN_HOST`
 - `shared_domain_wireguard` → `WIREGUARD_HOST` (если пусто — тот же host, что `shared_domain`)
 
-Так же, как в оригинальном AntiZapret `setup.sh`, можно задать **разные** домены для OpenVPN и WireGuard/AmneziaWG. Затем на каждом узле выполняется `doall.sh` (apply_config_changes) + `client.sh 7` (recreate_profiles), чтобы новые хосты попали в перегенерированные профили клиентов. Фоновая задача `node_sync_shared_domain`; ошибка на одном узле не прерывает остальные (partial failure → `sync_status=failed`, детали в `last_sync_error`). Вызывается при **HA Setup** (если включён toggle «Сразу настроить» при создании), при изменении доменов в группе, а также вручную кнопкой «Домен → узлы». Создание группы **без** Setup **не** применяет домены автоматически.
-| Verify / Push full | Excluded config не ломают паритет fingerprint `antizapret/config` | `fingerprints.py` |
+Так же, как в оригинальном AntiZapret `setup.sh`, можно задать **разные** домены для OpenVPN и WireGuard/AmneziaWG. Затем на каждом узле выполняется `doall.sh` (apply_config_changes) + `client.sh 7` (recreate_profiles), чтобы новые хосты попали в перегенерированные профили клиентов. Фоновая задача `node_sync_shared_domain`; ошибка на одном узле не прерывает остальные (partial failure → `sync_status=failed`, детали в `last_sync_error`). Вызывается при **HA Setup** (если при создании включён переключатель «Сразу настроить группу»), при изменении доменов в группе, а также вручную кнопкой «Домен». Создание группы **без** Setup **не** применяет домены автоматически.
 
 ### Partial failure
 
 - Primary **не откатывается** при ошибке на одной replica.
 - `sync_status=failed`, `last_sync_error` — детали; audit `ha_replicate_partial_failure`.
 - UI: warning-toast при `sync_status=failed` (polling auto-групп) или при `warnings` в API.
+- **Группа не зависает в `pending`.** Если задача настройки группы («Синхронизировать») или применения общего домена упала, группа сразу переходит в `failed` с текстом ошибки. Если задача прервалась перезапуском панели или завершилась без итогового статуса, группу переводит в `failed` старт панели или воркер сверки. Раньше повторная настройка отвечала `409` «синхронизация уже выполняется», а auto-heal группу пропускал.
 - **Auto-heal** (opt-in, `NODE_SYNC_AUTO_HEAL=true`): reconcile worker пытается incremental heal (`crypto_sync` / `policy_sync` / `config_sync` / `antizapret_sync`); **никогда** auto Push full. После N неудач подряд — notify (один раз) + `failed`, и авто-лечение группы приостанавливается: проверка продолжается, `last_sync_error` сообщает о приостановке. Возобновляется после успешной «Синхронизировать» или проверки без расхождений (счётчик сбрасывается).
 
 ### Reconcile worker
