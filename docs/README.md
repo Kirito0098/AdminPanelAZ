@@ -45,18 +45,18 @@
 
 | Раздел | Файл |
 |--------|------|
-| Профиль | [profil.md](nastrojki/profil.md) |
+| Мой профиль | [profil.md](nastrojki/profil.md) |
 | Пользователи | [polzovateli.md](nastrojki/polzovateli.md) |
-| Доступ к панели | [bezopasnost.md](nastrojki/bezopasnost.md) |
-| Раздача конфигов | [razdacha-konfigov.md](nastrojki/razdacha-konfigov.md) |
-| Обслуживание | [obsluzhivanie.md](nastrojki/obsluzhivanie.md) |
+| Защита входа | [bezopasnost.md](nastrojki/bezopasnost.md) |
+| Выдача VPN-профилей | [razdacha-konfigov.md](nastrojki/razdacha-konfigov.md) |
+| Обслуживание VPN | [obsluzhivanie.md](nastrojki/obsluzhivanie.md) |
 | Адрес сайта и HTTPS | [set-i-publikaciya.md](nastrojki/set-i-publikaciya.md) |
 | Резервные копии | [rezervnye-kopii.md](nastrojki/rezervnye-kopii.md) |
-| Мониторинг и алерты | [monitoring-i-alerty.md](nastrojki/monitoring-i-alerty.md) |
-| Модули | [moduli.md](nastrojki/moduli.md) |
-| Обновления | [obnovleniya.md](nastrojki/obnovleniya.md) |
+| Нагрузка и уведомления | [monitoring-i-alerty.md](nastrojki/monitoring-i-alerty.md) |
+| Разделы панели | [moduli.md](nastrojki/moduli.md) |
+| Обновление панели | [obnovleniya.md](nastrojki/obnovleniya.md) |
 | Перезапуск и пересборка | [perezapusk-i-peresborka.md](nastrojki/perezapusk-i-peresborka.md) |
-| Диагностика | [diagnostika.md](nastrojki/diagnostika.md) |
+| Проверка работы | [diagnostika.md](nastrojki/diagnostika.md) |
 
 ---
 
@@ -87,8 +87,12 @@ GitHub для этого не нужен.
 
 После `install.sh` панель открывается по `http://IP:порт/` (HTTPS — позже в UI). Авто-бэкап уже включён (каждые 7 дней).
 
+Логин и пароль администратора — в итоговой сводке установщика, блок **«Учётные данные»**. Пароля `admin` / `admin` по умолчанию нет: если пароль не вводили, установщик сгенерировал случайный — [подробнее](../README.md#вход-после-установки).
+
 1. Смените пароль и включите двухфакторную защиту — [profil.md](nastrojki/profil.md)
 2. Настройте домен и HTTPS — [set-i-publikaciya.md](nastrojki/set-i-publikaciya.md)
 3. Если VPN на другом сервере — добавьте узел — [uzly.md](uzly.md)
-4. На **Конфигурации** нажмите **Синхронизировать** — [konfiguracii.md](konfiguracii.md)
+4. В разделе **Клиенты** нажмите **Синхронизировать** — [konfiguracii.md](konfiguracii.md)
 5. Telegram (token в UI) и бэкапы — [Telegram.md](Telegram.md), [rezervnye-kopii.md](nastrojki/rezervnye-kopii.md)
+
+Обновляетесь с 2.25.1 на 2.26.0 — выполните шаги из раздела [Обновление с 2.25.1 до 2.26.0](nastrojki/obnovleniya.md#обновление-с-2251-до-2260).
