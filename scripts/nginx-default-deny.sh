@@ -19,8 +19,10 @@ usage() {
 Закрывает доступ к панели по IP сервера: nginx отклоняет запросы без домена панели или портала
 (HTTP — закрывает соединение, HTTPS — отклоняет рукопожатие).
 
-  --check   Одна строка JSON: status = installed | needed | outdated | own_default | not_applicable,
+  --check   Одна строка JSON: status = installed | needed | outdated | own_default | not_applicable | disabled,
             ports — план по портам панели и портала. Ничего не меняет; код 0, если проверка прошла.
+            disabled — NGINX_DEFAULT_DENY=0 в backend/.env: сервер по умолчанию не ставится,
+            --apply убирает уже поставленный.
   --apply   Ставит или обновляет только сервер по умолчанию; при изменении — nginx -t и
             systemctl reload nginx (без restart). Выводит ту же строку с changed и error;
             ненулевой код, если nginx -t или reload не прошли. Если не прошёл nginx -t,
@@ -58,6 +60,13 @@ dd_is_installed() {
 # HTTPS-порты без сертификата-заглушки (nginx < 1.19.4) — «skip no_cert»: так же их пропустит установка.
 dd_evaluate() {
   local plan_installs expected current version_output
+  if ! nginx_default_deny_enabled; then
+    DD_PLAN=""
+    DD_INSTALLED=false
+    dd_is_installed && DD_INSTALLED=true
+    DD_STATUS=disabled
+    return 0
+  fi
   version_output="$(nginx -v 2>&1 || true)"
   DD_PLAN="$(nginx_default_deny_plan_cert_fallback "$(nginx_default_deny_plan)" "$version_output")"
   plan_installs="$(nginx_default_deny_plan_listens "$DD_PLAN" plain)$(nginx_default_deny_plan_listens "$DD_PLAN" ssl)"

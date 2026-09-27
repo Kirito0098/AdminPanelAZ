@@ -35,12 +35,79 @@ _REFUSE_NOT_APPLICABLE = (
 _REFUSE_OWN_DEFAULT = (
     "На портах панели уже есть ваш сервер по умолчанию nginx — панель его не заменяет."
 )
+_REFUSE_DISABLED = (
+    "Закрытие доступа по IP отключено: в backend/.env задано NGINX_DEFAULT_DENY=0. "
+    "Уберите флаг, если перед сервером нет своего reverse proxy или он передаёт домен панели."
+)
 # Фоновые задачи, которые переписывают конфигурацию nginx и перезагружают его.
 _NGINX_TASK_CONFLICTS = (
     ("vpn_network_publish", "Сначала дождитесь завершения публикации панели"),
     ("portal_publish", "Сейчас выполняется настройка портала"),
     ("portal_readiness_prepare", "Подготовка портала уже выполняется"),
 )
+
+
+# Запрос с сервера по SSH-туннелю приходит мимо nginx — default-deny его не задевает.
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _host_without_port(raw: str) -> str:
+    host = raw.strip().lower()
+    if host.startswith("["):
+        host = host[1 : host.find("]")] if "]" in host else host[1:]
+    elif host.count(":") == 1:
+        host = host.split(":", 1)[0]
+    return host.rstrip(".")
+
+
+def _panel_domain_url(env: dict[str, str], domain_host: str) -> str:
+    from app.services.panel_paths import normalize_access_path
+    from app.services.panel_publish_info import public_https_origin_host
+
+    try:
+        https_port = int(env.get("HTTPS_PUBLIC_PORT", "443") or "443")
+    except ValueError:
+        https_port = 443
+    access_path = normalize_access_path(env.get("ACCESS_PATH", ""))
+    return f"https://{public_https_origin_host(domain_host, https_port)}{access_path}/"
+
+
+def _opened_not_by_domain_detail(request: Request, env: dict[str, str]) -> str | None:
+    """После default-deny nginx отвечает только по DOMAIN: админ, открывший панель иначе, её потеряет."""
+    domain_host = _host_without_port(env.get("DOMAIN") or "")
+    if not domain_host:
+        return (
+            "В backend/.env не задан DOMAIN — после закрытия доступа по IP панель не откроется ни по какому адресу. "
+            "Опубликуйте панель по домену (Адрес сайта и HTTPS) и повторите."
+        )
+    host = _host_without_port(request.headers.get("host") or "")
+    if host == domain_host or host in _LOCAL_HOSTS:
+        return None
+    url = _panel_domain_url(env, domain_host)
+    return (
+        f"Панель сейчас открыта по адресу {host or 'без имени'}, а после закрытия доступа по IP nginx будет "
+        f"отвечать только по {url} — вы потеряете доступ к панели. "
+        f"Откройте панель по {url} и нажмите «Закрыть доступ по IP» там."
+    )
+
+
+def _front_proxy_detail(request: Request, env: dict[str, str], script: str) -> str | None:
+    """Ещё один прокси перед nginx панели обычно ходит к нему по IP без SNI — default-deny отклонит и его."""
+    if request.headers.get("cf-connecting-ip"):
+        return None
+    chain = [part.strip() for part in (request.headers.get("x-forwarded-for") or "").split(",") if part.strip()]
+    if len(chain) < 2:
+        return None
+    domain = _host_without_port(env.get("DOMAIN") or "")
+    return (
+        f"Панель открыта через ещё один прокси перед nginx этого сервера (цепочка адресов: {', '.join(chain)}). "
+        "После закрытия доступа по IP nginx отклоняет подключения без имени домена в TLS (SNI), и прокси, "
+        "который подключается к серверу по IP, потеряет связь с панелью. Сначала добавьте в его конфигурацию "
+        f"proxy_ssl_server_name on; proxy_ssl_name {domain}; proxy_set_header Host {domain}; — "
+        f"затем закройте доступ в консоли сервера: sudo bash {script} --apply. "
+        "Если прокси настраивать не хотите, оставьте доступ по IP открытым: NGINX_DEFAULT_DENY=0 в backend/.env "
+        "(тогда и публикация панели не будет ставить сервер по умолчанию)."
+    )
 
 
 def _nginx_task_conflict_response() -> JSONResponse | None:
@@ -93,11 +160,14 @@ def close_ip_access_api(
             detail="Панель опубликована без nginx — закрыть доступ по IP через nginx нельзя. "
             "Ограничьте вход в разделе «Защита входа» или firewall'ом.",
         )
+    script = default_deny_script_path(ctx.install_dir)
+    refusal = _opened_not_by_domain_detail(request, env) or _front_proxy_detail(request, env, str(script))
+    if refusal is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=refusal)
     conflict = _nginx_task_conflict_response()
     if conflict is not None:
         return conflict
 
-    script = default_deny_script_path(ctx.install_dir)
     current = run_default_deny_script(script, "--check")
     if current.status is None:
         raise HTTPException(
@@ -108,6 +178,8 @@ def close_ip_access_api(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_REFUSE_NOT_APPLICABLE)
     if current.status == "own_default":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_REFUSE_OWN_DEFAULT)
+    if current.status == "disabled":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_REFUSE_DISABLED)
 
     result = run_default_deny_script(script, "--apply")
 

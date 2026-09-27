@@ -237,6 +237,22 @@ def test_check_not_applicable_foreign_first(script):
     assert "другой сайт" in check.detail
 
 
+def test_check_disabled_is_ok_without_action(script):
+    check = _run_check(script, NGINX_ENV, _script_returns(_line("disabled")))
+
+    assert check.status == "ok"
+    assert check.action is None
+    assert "NGINX_DEFAULT_DENY=0" in check.title + check.detail
+
+
+def test_check_disabled_but_still_installed_is_warn_with_apply_hint(script):
+    check = _run_check(script, NGINX_ENV, _script_returns(_line("disabled", installed=True)))
+
+    assert check.status == "warn"
+    assert check.action is None
+    assert "nginx-default-deny.sh --apply" in check.hint_ru
+
+
 def test_check_not_applicable_without_panel_vhost_suggests_firewall(script):
     check = _run_check(script, NGINX_ENV, _script_returns(_line("not_applicable")))
 
@@ -369,7 +385,7 @@ def api(script, monkeypatch):
         lambda task_type: active_tasks.get(task_type),
     )
 
-    with TestClient(app) as client:
+    with TestClient(app, base_url=f"https://{NGINX_ENV['DOMAIN']}") as client:
         yield {
             "client": client,
             "env": env,
@@ -441,6 +457,17 @@ def test_close_ip_access_refuses_direct_publish(api):
     assert resp.status_code == 409
     assert "nginx" in resp.json()["detail"]
     assert api["runs"] == []
+    assert api["logged"] == []
+
+
+def test_close_ip_access_refuses_when_disabled_by_env_flag(api):
+    api["replies"]["--check"] = _result("disabled", ports=[])
+
+    resp = api["client"].post(URL)
+
+    assert resp.status_code == 409
+    assert "NGINX_DEFAULT_DENY" in resp.json()["detail"]
+    assert api["runs"] == ["--check"]
     assert api["logged"] == []
 
 
@@ -526,6 +553,83 @@ def test_close_ip_access_message_follows_result_status(api, status, changed, exp
     message = resp.json()["message"]
     assert expected in message
     assert unexpected not in message
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["203.0.113.10", "203.0.113.10:8443", "[2001:db8::1]:443", "other.example.com", "www.panel.example.com"],
+)
+def test_close_ip_access_refuses_when_panel_opened_not_by_domain(api, host):
+    api["replies"]["--check"] = _result("needed")
+    api["replies"]["--apply"] = _result("installed", changed=True)
+
+    resp = api["client"].post(URL, headers={"Host": host})
+
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "https://panel.example.com/" in detail
+    assert "потеряете доступ" in detail
+    assert api["runs"] == []
+    assert api["logged"] == []
+
+
+def test_close_ip_access_refusal_links_panel_with_port_and_path(api):
+    api["env"].update({"HTTPS_PUBLIC_PORT": "8443", "ACCESS_PATH": "/panel"})
+
+    resp = api["client"].post(URL, headers={"Host": "203.0.113.10:8443"})
+
+    assert resp.status_code == 409
+    assert "https://panel.example.com:8443/panel/" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize("host", ["PANEL.example.com", "panel.example.com:8443", "panel.example.com.", "localhost:8000"])
+def test_close_ip_access_allows_domain_and_local_hosts(api, host):
+    api["replies"]["--check"] = _result("needed")
+    api["replies"]["--apply"] = _result("installed", changed=True)
+
+    resp = api["client"].post(URL, headers={"Host": host})
+
+    assert resp.status_code == 200, resp.text
+    assert api["runs"] == ["--check", "--apply"]
+
+
+def test_close_ip_access_refuses_behind_another_reverse_proxy(api):
+    api["replies"]["--check"] = _result("needed")
+    api["replies"]["--apply"] = _result("installed", changed=True)
+
+    resp = api["client"].post(URL, headers={"X-Forwarded-For": "198.51.100.7, 192.168.1.10"})
+
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert "proxy_ssl_server_name on" in detail
+    assert "nginx-default-deny.sh --apply" in detail
+    assert api["runs"] == []
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"X-Forwarded-For": "198.51.100.7"},
+        {"X-Forwarded-For": "198.51.100.7, 172.70.1.1", "CF-Connecting-IP": "198.51.100.7"},
+    ],
+)
+def test_close_ip_access_allows_direct_client_and_cloudflare(api, headers):
+    api["replies"]["--check"] = _result("needed")
+    api["replies"]["--apply"] = _result("installed", changed=True)
+
+    resp = api["client"].post(URL, headers=headers)
+
+    assert resp.status_code == 200, resp.text
+
+
+def test_close_ip_access_refuses_without_domain(api):
+    api["env"]["DOMAIN"] = ""
+
+    resp = api["client"].post(URL)
+
+    assert resp.status_code == 409
+    assert "DOMAIN" in resp.json()["detail"]
+    assert api["runs"] == []
 
 
 def test_close_ip_access_http_only_message_mentions_https(api):

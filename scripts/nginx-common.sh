@@ -1729,6 +1729,16 @@ nginx_conf_is_panel_owned() {
   head -n 1 "$path" 2>/dev/null | grep -q '^#.*AdminPanelAZ'
 }
 
+# NGINX_DEFAULT_DENY=0: свой reverse proxy перед сервером подключается по IP без SNI — сервер по умолчанию его отрежет.
+nginx_default_deny_enabled() {
+  local v
+  v="$(nginx_cloudflare_flag NGINX_DEFAULT_DENY true)"
+  case "${v,,}" in
+    false|0|no|off) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
 nginx_remove_default_deny() {
   local base
   base="$(nginx_default_deny_basename)"
@@ -1822,6 +1832,12 @@ nginx_install_default_deny() {
   base="$(nginx_default_deny_basename)"
   conf_file="$(nginx_sites_available_dir)/${base}"
   enabled_link="$(nginx_sites_enabled_dir)/${base}"
+
+  if ! nginx_default_deny_enabled; then
+    nginx_remove_default_deny
+    nginx_log "NGINX_DEFAULT_DENY=0 — сервер по умолчанию не ставится, панель открывается и по IP сервера"
+    return 0
+  fi
 
   plan="$(nginx_default_deny_plan)"
   while read -r port kind action rest; do

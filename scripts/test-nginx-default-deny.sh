@@ -103,6 +103,16 @@ echo "[test] повторная установка не считает свой 
 ( nginx_install_site "$PANEL_CONF" panel.example.com ) >/dev/null 2>&1
 check 'grep -q "listen 8080 default_server;" "$DENY" && grep -q "listen 8443 ssl default_server;" "$DENY"' "оба порта на месте после повтора"
 
+echo "[test] NGINX_DEFAULT_DENY=0 в .env: установка vhost не ставит сервер по умолчанию и убирает прежний"
+reset
+( nginx_install_site "$PANEL_CONF" panel.example.com ) >/dev/null 2>&1
+check '[[ -L "$DENY_LINK" ]]' "без флага default-deny стоит"
+echo "NGINX_DEFAULT_DENY=0" >"$ENV_FILE"
+( nginx_install_site "$PANEL_CONF" panel.example.com ) >/dev/null 2>&1
+check '[[ ! -e "$DENY" && ! -L "$DENY_LINK" ]]' "с флагом default-deny убран"
+check '[[ -L "$ENABLED/panel_example_com" ]]' "vhost панели установлен"
+: >"$ENV_FILE"
+
 echo "[test] nginx 1.18: самоподписанный сертификат вместо ssl_reject_handshake"
 reset
 FAKE_NGINX_VERSION="1.18.0"

@@ -322,5 +322,38 @@ run --apply
 check '[[ "$rc" != 0 ]] && has "\"error\":\"reload_failed\""' "error=reload_failed"
 check '[[ -L "$DENY_LINK" ]]' "конфиг остаётся (прошёл nginx -t)"
 
+echo "[test] NGINX_DEFAULT_DENY=0: --check — disabled, файлы не меняются"
+reset
+site panel_example_com "$PANEL_CONF"
+echo "NGINX_DEFAULT_DENY=0" >"$ENV_FILE"
+run --check
+check '[[ "$rc" == 0 ]] && has "\"status\":\"disabled\""' "status=disabled"
+check '[[ ! -e "$DENY" ]]' "файл не создан"
+
+echo "[test] NGINX_DEFAULT_DENY=0: --apply убирает поставленный сервер по умолчанию и делает reload"
+reset
+site panel_example_com "$PANEL_CONF"
+: >"$ENV_FILE"
+run --apply
+check '[[ -L "$DENY_LINK" ]]' "без флага сервер по умолчанию стоит"
+echo "NGINX_DEFAULT_DENY=false" >"$ENV_FILE"
+: >"$FAKE_LOG"
+run --apply
+check '[[ "$rc" == 0 ]] && has "\"status\":\"disabled\"" && has "\"changed\":true"' "status=disabled, changed=true"
+check '[[ ! -e "$DENY" && ! -L "$DENY_LINK" ]]' "файл и ссылка удалены"
+check 'grep -q "systemctl reload nginx" "$FAKE_LOG"' "reload"
+: >"$FAKE_LOG"
+run --apply
+check '[[ "$rc" == 0 ]] && has "\"changed\":false" && ! grep -q systemctl "$FAKE_LOG"' "повтор: без изменений и без reload"
+
+echo "[test] NGINX_DEFAULT_DENY из окружения важнее .env (так передаёт панель)"
+reset
+site panel_example_com "$PANEL_CONF"
+echo "NGINX_DEFAULT_DENY=0" >"$ENV_FILE"
+rc=0
+out="$(NGINX_DEFAULT_DENY=1 bash "$SCRIPT" --check 2>"$TMP/stderr")" || rc=$?
+check 'has "\"status\":\"needed\""' "NGINX_DEFAULT_DENY=1 в окружении — needed"
+: >"$ENV_FILE"
+
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]
