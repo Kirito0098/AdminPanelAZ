@@ -264,20 +264,37 @@ export default function MonitoringPage() {
   const [resourceLoading, setResourceLoading] = useState(false)
   const loadRef = useRef<(opts?: { initial?: boolean; manual?: boolean }) => Promise<void>>()
   const lastIncidentsAtRef = useRef(0)
+  const activeNodeIdRef = useRef(activeNode?.id)
+  activeNodeIdRef.current = activeNode?.id
+  // Service incidents come from the server-side active node, so a node switch makes the list stale.
+  const incidentsNodeIdRef = useRef<number | undefined>(undefined)
+  const incidentsInFlightRef = useRef<Promise<void> | null>(null)
 
-  const refreshIncidents = useCallback(async (opts: { force?: boolean } = {}) => {
+  const refreshIncidents = useCallback((opts: { force?: boolean } = {}) => {
     const { force = false } = opts
+    const nodeId = activeNodeIdRef.current
+    const sameNode = incidentsNodeIdRef.current === nodeId
+    if (incidentsInFlightRef.current && sameNode) return incidentsInFlightRef.current
     const now = Date.now()
-    if (!force && now - lastIncidentsAtRef.current < INCIDENTS_REFRESH_INTERVAL_MS) {
-      return
+    if (!force && sameNode && now - lastIncidentsAtRef.current < INCIDENTS_REFRESH_INTERVAL_MS) {
+      return Promise.resolve()
     }
     lastIncidentsAtRef.current = now
-    try {
-      const resp = await getNocIncidents(20)
-      setIncidents(resp.items)
-    } catch {
-      /* keep previous */
-    }
+    incidentsNodeIdRef.current = nodeId
+    const request: Promise<void> = getNocIncidents(20)
+      .then(
+        (resp) => {
+          if (incidentsInFlightRef.current === request) setIncidents(resp.items)
+        },
+        () => {
+          /* keep previous */
+        },
+      )
+      .finally(() => {
+        if (incidentsInFlightRef.current === request) incidentsInFlightRef.current = null
+      })
+    incidentsInFlightRef.current = request
+    return request
   }, [])
 
   const loadConnectionHistory = useCallback(async (period: '1h' | '6h' | '24h', historyScope: MonitoringScope) => {
@@ -303,7 +320,7 @@ export default function MonitoringPage() {
       try {
         setData(await getMonitoring(scope, haMode))
         setLoadError(null)
-        void refreshIncidents({ force: true })
+        void refreshIncidents({ force: manual })
         if (manual) success('Данные мониторинга обновлены')
         setCountdown(REFRESH_INTERVAL)
       } catch (err) {

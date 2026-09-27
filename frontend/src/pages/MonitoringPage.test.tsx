@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup } from '@testing-library/react'
+import { act, cleanup, fireEvent, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -101,5 +101,93 @@ describe('MonitoringPage initial load', () => {
       expect(api.getMonitoring).toHaveBeenCalledWith('all', 'dedupe')
       expect(window.localStorage.getItem('noc-monitoring:scope')).toBe('all')
     })
+  })
+})
+
+describe('MonitoringPage incidents', () => {
+  const overview = { services: [], openvpn_clients: [], wireguard_peers: [], timestamp: '' }
+
+  beforeEach(() => {
+    window.localStorage.clear()
+    resetNodeState()
+    api.getMonitoring.mockResolvedValue(overview)
+    api.getNocIncidents.mockResolvedValue({ items: [] })
+    api.getConnectionHistory.mockResolvedValue({ points: [] })
+    api.getResourceHistory.mockResolvedValue({ points: [] })
+    api.openMonitoringStream.mockReturnValue({ close: vi.fn() })
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.clearAllMocks()
+  })
+
+  it('fetches once when the stream payload arrives before the overview', async () => {
+    let resolveOverview: (value: typeof overview) => void = () => {}
+    let resolveIncidents: (value: { items: [] }) => void = () => {}
+    api.getMonitoring.mockReturnValue(new Promise((resolve) => (resolveOverview = resolve)))
+    api.getNocIncidents.mockReturnValue(new Promise((resolve) => (resolveIncidents = resolve)))
+
+    await mountWhileActiveNodeResolves(page, { nodes: [testNode] })
+    const onPayload = api.openMonitoringStream.mock.calls[0][0] as (payload: typeof overview) => void
+    await act(async () => onPayload(overview))
+    expect(api.getNocIncidents).toHaveBeenCalledTimes(1)
+
+    await act(async () => resolveOverview(overview))
+    await act(async () => resolveIncidents({ items: [] }))
+
+    expect(api.getNocIncidents).toHaveBeenCalledTimes(1)
+  })
+
+  it('refetches on manual refresh', async () => {
+    await mountWhileActiveNodeResolves(page, { nodes: [testNode] })
+    expect(api.getNocIncidents).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить' }))
+    await act(async () => {})
+
+    expect(api.getNocIncidents).toHaveBeenCalledTimes(2)
+  })
+
+  it('reuses the pending request on manual refresh', async () => {
+    api.getNocIncidents.mockReturnValue(new Promise(() => {}))
+    await mountWhileActiveNodeResolves(page, { nodes: [testNode] })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить' }))
+    await act(async () => {})
+
+    expect(api.getMonitoring).toHaveBeenCalledTimes(2)
+    expect(api.getNocIncidents).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries on manual refresh after a failed request', async () => {
+    api.getNocIncidents.mockRejectedValueOnce(new Error('boom'))
+    await mountWhileActiveNodeResolves(page, { nodes: [testNode] })
+    expect(api.getNocIncidents).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Обновить' }))
+    await act(async () => {})
+
+    expect(api.getNocIncidents).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not refetch when the scope changes', async () => {
+    await mountWhileActiveNodeResolves(page, { nodes: [testNode, secondNode] })
+    expect(api.getNocIncidents).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Активный узел' }))
+    await act(async () => {})
+
+    expect(api.getMonitoring).toHaveBeenLastCalledWith('node', 'dedupe')
+    expect(api.getNocIncidents).toHaveBeenCalledTimes(1)
+  })
+
+  it('refetches when the active node changes (service incidents belong to it)', async () => {
+    const result = await mountWhileActiveNodeResolves(page, { nodes: [testNode, secondNode] })
+    expect(api.getNocIncidents).toHaveBeenCalledTimes(1)
+
+    await updateNodeState(result, page, { activeNode: secondNode })
+
+    expect(api.getNocIncidents).toHaveBeenCalledTimes(2)
   })
 })
