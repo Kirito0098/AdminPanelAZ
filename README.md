@@ -328,7 +328,7 @@ CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|
 ```bash
 cd /opt/AdminPanelAZ
 sudo ./scripts/adminpanel-menu.sh   # меню: перезапуск, бэкап, обновление
-sudo ./scripts/adminpanel-menu.sh --update   # обновить: git pull, pip, сборка интерфейса
+sudo ./scripts/adminpanel-menu.sh --update   # обновить из upstream текущей ветки: код, pip, сборка интерфейса
 sudo ./scripts/adminpanel-menu.sh --restart  # перезапуск панели после --update
 sudo systemctl restart adminpanelaz # перезапуск панели
 sudo systemctl restart adminpanelaz-proxy  # proxy_agent на RU (порт 9101)
