@@ -135,7 +135,7 @@ class OpenVpnManagementService:
                     timeout_streak = 0
                     if is_status_cmd:
                         end_probe = (end_probe + text_chunk)[-256:]
-                        if re.search(r"(^|\n)END(\n|$)", end_probe):
+                        if re.search(r"(^|\n)END\r?(\n|$)", end_probe):
                             break
                     if hit_limit:
                         break
