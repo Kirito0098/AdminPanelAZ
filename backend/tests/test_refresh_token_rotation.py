@@ -121,6 +121,24 @@ def test_sibling_tab_with_superseded_cookie_recovers_too(db, user):
     assert [t.token_hash for t in _live_in_family(db, first.family_id)] == [rt._hash_token(sibling_new)]
 
 
+def test_overlapping_tab_refreshes_answered_out_of_order_end_the_session(db, user):
+    """The server cannot tell which answer the browser kept; the frontend's cross-tab refresh lock
+    (Web Locks `az-auth-refresh` in api/http.ts) is what keeps two tabs from rotating the same cookie at once."""
+    raw, first = rt.create_refresh_token(db, user)
+    tab_a_raw, _ = rt.rotate_refresh_token(db, raw)
+    tab_b_raw, _ = rt.rotate_refresh_token(db, raw)
+    kept_in_cookie = tab_a_raw
+    _age_revocation(db, raw, rt.ROTATION_GRACE_SECONDS + 5)
+    _age_revocation(db, kept_in_cookie, rt.ROTATION_GRACE_SECONDS + 5)
+
+    with pytest.raises(HTTPException) as exc:
+        rt.rotate_refresh_token(db, kept_in_cookie)
+
+    assert exc.value.status_code == 401
+    assert _row(db, tab_b_raw).revoke_reason == "reuse"
+    assert _live_in_family(db, first.family_id) == []
+
+
 def test_recovered_token_reused_after_grace_revokes_family(db, user):
     raw, first = rt.create_refresh_token(db, user)
     rt.rotate_refresh_token(db, raw)
