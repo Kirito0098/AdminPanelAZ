@@ -23,9 +23,22 @@ do
 \t\t\treturn nodata
 \t\tend
 \tend)
-\t-- kresd.conf adds its AAAA -> :: rule before loading this file; the first matching rule wins.
-\ttable.remove(policy.rules)
-\ttable.insert(policy.rules, 1, rule)
+\t-- kresd.conf adds its AAAA -> :: rule before loading this file and the first matching rule wins;
+\t-- policy.special_names (localhost, private zones) stay ahead of this rule.
+\tif policy.rules[#policy.rules] == rule then
+\t\ttable.remove(policy.rules)
+\t\tlocal special = {{}}
+\t\tfor _, item in ipairs(policy.special_names) do
+\t\t\tspecial[item.cb] = true
+\t\tend
+\t\tlocal pos = 1
+\t\tfor i, r in ipairs(policy.rules) do
+\t\t\tif special[r.cb] then
+\t\t\t\tpos = i + 1
+\t\t\tend
+\t\tend
+\t\ttable.insert(policy.rules, pos, rule)
+\tend
 end
 {BLOCK_END}
 """
