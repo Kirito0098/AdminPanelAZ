@@ -46,10 +46,11 @@ def _mini_notify_settings_response(db: Session, user: User) -> AdminNotifySettin
         return response
     labels = dict(TG_NOTIFY_EVENT_LABELS)
     merged = user.merged_tg_notify_events()
-    owner_meta = {g[0]: (g[1], g[2]) for g in TG_NOTIFY_EVENT_GROUPS}.get(
-        "owner_reminders", ("Мои напоминания", "🔔")
-    )
-    group_title, group_icon = owner_meta
+    # Non-admin Mini App group id is distinct from catalog `owner_reminders`
+    # (admin user_* keys). Title/icon reuse that catalog entry so strings stay
+    # single-sourced; direct index — the catalog always carries owner_reminders
+    # (see test_nine_groups_with_titles_and_icons).
+    group_title, group_icon = {g[0]: (g[1], g[2]) for g in TG_NOTIFY_EVENT_GROUPS}["owner_reminders"]
     return AdminNotifySettingsResponse(
         telegram_id=response.telegram_id,
         recipient_user_ids=[],
@@ -60,13 +61,13 @@ def _mini_notify_settings_response(db: Session, user: User) -> AdminNotifySettin
                 key=key,
                 label=labels.get(key, key),
                 enabled=merged.get(key, False),
-                group="owner_reminders",
+                group="my_reminders",
             )
             for key in PERSONAL_OWNER_NOTIFY_KEY_ORDER
         ],
         groups=[
             AdminNotifyGroupInfo(
-                group="owner_reminders",
+                group="my_reminders",
                 title=group_title,
                 icon=group_icon,
                 keys=list(PERSONAL_OWNER_NOTIFY_KEY_ORDER),

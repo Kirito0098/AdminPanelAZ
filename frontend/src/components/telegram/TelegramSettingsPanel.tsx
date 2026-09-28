@@ -251,10 +251,11 @@ function NotifyGroupsAccordion({ tg }: { tg: TelegramSettingsHook }) {
   return (
     <div className="space-y-2">
       {groups.map((group) => {
-        const on = enabledCount(group.keys, tg.eventToggles)
-        const total = group.keys.length
+        const visibleKeys = group.keys.filter((key) => eventsByKey[key])
+        const on = enabledCount(visibleKeys, tg.eventToggles)
+        const total = visibleKeys.length
         const allOn = total > 0 && on === total
-        const indeterminate = isIndeterminate(group.keys, tg.eventToggles)
+        const indeterminate = isIndeterminate(visibleKeys, tg.eventToggles)
         const isCollapsed = collapsed[group.group] === true
         return (
           <div key={group.group} className="rounded-lg border">
@@ -298,9 +299,7 @@ function NotifyGroupsAccordion({ tg }: { tg: TelegramSettingsHook }) {
             {!isCollapsed && (
               <div className="space-y-2 border-t p-3">
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {group.keys
-                    .filter((key) => eventsByKey[key])
-                    .map((key) => {
+                  {visibleKeys.map((key) => {
                       const event = eventsByKey[key]
                       const enabled = tg.eventToggles[key] ?? false
                       return (
@@ -318,9 +317,11 @@ function NotifyGroupsAccordion({ tg }: { tg: TelegramSettingsHook }) {
                       )
                     })}
                 </div>
-                {group.group === 'nodes_ha' && (tg.eventToggles.node_offline ?? false) && (
-                  <NodeOfflineGraceBlock tg={tg} />
-                )}
+              </div>
+            )}
+            {group.group === 'nodes_ha' && (tg.eventToggles.node_offline ?? false) && (
+              <div className="border-t p-3">
+                <NodeOfflineGraceBlock tg={tg} />
               </div>
             )}
           </div>

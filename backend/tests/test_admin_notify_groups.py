@@ -108,10 +108,10 @@ def test_mini_notify_non_admin_single_owner_group_admin_passthrough():
 
         mini = _mini_notify_settings_response(db, owner)
         assert [e.key for e in mini.events] == list(PERSONAL_OWNER_NOTIFY_KEY_ORDER)
-        assert all(e.group == "owner_reminders" for e in mini.events)
+        assert all(e.group == "my_reminders" for e in mini.events)
         assert len(mini.groups) == 1
         group = mini.groups[0]
-        assert group.group == "owner_reminders"
+        assert group.group == "my_reminders"
         assert group.title == "Мои напоминания"
         assert group.icon
         assert group.keys == list(PERSONAL_OWNER_NOTIFY_KEY_ORDER)

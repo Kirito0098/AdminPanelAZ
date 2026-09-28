@@ -723,7 +723,7 @@ export interface AdminNotifyEventItem {
   key: string
   label: string
   enabled: boolean
-  group: string
+  group?: string
 }
 
 export interface AdminNotifyGroupInfo {
@@ -739,7 +739,7 @@ export interface AdminNotifySettings {
   notify_enabled: boolean
   bot_token_set: boolean
   events: AdminNotifyEventItem[]
-  groups: AdminNotifyGroupInfo[]
+  groups?: AdminNotifyGroupInfo[]
   node_offline_grace_seconds: number
 }
 

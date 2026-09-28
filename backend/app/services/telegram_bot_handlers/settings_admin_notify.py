@@ -65,7 +65,7 @@ def _group_mark(enabled: int, total: int) -> str:
     return "◐"
 
 
-def _format_admin_notify_menu(settings, *, group: str | None = None, page: int = 0) -> str:
+def _format_admin_notify_menu(settings, *, group: str | None = None) -> str:
     events = _events_map(settings)
     enabled_count = sum(1 for key in _EVENT_KEYS if events.get(key))
     tg_id = settings.telegram_id or "(не задан)"
@@ -96,7 +96,7 @@ def _common_footer_rows(settings) -> list[list]:
     return rows
 
 
-def _admin_notify_keyboard(settings, *, group: str | None = None, page: int = 0) -> dict:
+def _admin_notify_keyboard(settings, *, group: str | None = None) -> dict:
     events = _events_map(settings)
 
     rows: list[list] = []

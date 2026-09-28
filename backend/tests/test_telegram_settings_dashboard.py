@@ -170,7 +170,7 @@ def test_admin_notify_group_toggle_off_patches_both_keys_at_once():
     assert "st:an:ge:nodes_ha:0" in callbacks
     assert "st:an" in callbacks
     text = admin_notify_ui._format_admin_notify_menu(settings, group="nodes_ha")
-    assert "1/2" in text or "2/2" in text
+    assert "2/2" in text
 
     ctx = MagicMock()
     ctx.user = MagicMock(role=UserRole.admin)

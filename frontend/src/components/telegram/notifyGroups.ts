@@ -20,7 +20,7 @@ export function applyGroupToggle(
 
 /**
  * Group toggle is shown only when several groups share one list (admin).
- * A single group (non-admin `owner_reminders`, empty/legacy payload) renders
+ * A single group (non-admin `my_reminders`, empty/legacy payload) renders
  * a flat event list with no group-level switch.
  */
 export function shouldShowGroupToggle(groupCount: number): boolean {

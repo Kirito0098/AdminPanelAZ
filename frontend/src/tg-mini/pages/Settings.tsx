@@ -129,7 +129,7 @@ export function MiniNotifyGroupsAccordion({
   const eventsByKey: Record<string, AdminNotifyEventItem> = {}
   for (const event of events) eventsByKey[event.key] = event
 
-  // Single group (non-admin `owner_reminders`) or legacy payload without
+  // Single group (non-admin `my_reminders`) or legacy payload without
   // groups: flat list, no group-level switch — render unchanged.
   if (!shouldShowGroupToggle(groups.length)) {
     return (
@@ -149,10 +149,11 @@ export function MiniNotifyGroupsAccordion({
   return (
     <div className="space-y-2">
       {groups.map((group) => {
-        const on = enabledCount(group.keys, eventToggles)
-        const total = group.keys.length
+        const visibleKeys = group.keys.filter((key) => eventsByKey[key])
+        const on = enabledCount(visibleKeys, eventToggles)
+        const total = visibleKeys.length
         const allOn = total > 0 && on === total
-        const indeterminate = isIndeterminate(group.keys, eventToggles)
+        const indeterminate = isIndeterminate(visibleKeys, eventToggles)
         const isCollapsed = collapsed[group.group] === true
         return (
           <div key={group.group} className="rounded-lg border">
@@ -193,9 +194,7 @@ export function MiniNotifyGroupsAccordion({
             </div>
             {!isCollapsed && (
               <div className="space-y-1 border-t p-1">
-                {group.keys
-                  .filter((key) => eventsByKey[key])
-                  .map((key) => {
+                {visibleKeys.map((key) => {
                     const event = eventsByKey[key]
                     return (
                       <MiniSettingToggle
