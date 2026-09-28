@@ -182,7 +182,7 @@ function NotifyEventRow({
   onTest: () => void
 }) {
   return (
-    <div className="group/row flex items-center gap-3 border-b border-border/50 py-2 text-sm">
+    <div className="group/row flex items-center gap-3 border-b border-border/50 py-1.5 text-sm">
       <button
         type="button"
         onClick={onToggle}
@@ -195,7 +195,7 @@ function NotifyEventRow({
         type="button"
         variant="ghost"
         size="icon"
-        className="h-7 w-7 shrink-0 text-muted-foreground/70 hover:text-foreground"
+        className="size-7 shrink-0 text-muted-foreground/70 hover:text-foreground"
         title={`Отправить пример: ${event.label}`}
         disabled={testDisabled}
         onClick={onTest}
@@ -209,7 +209,7 @@ function NotifyEventRow({
 
 function NodeOfflineGraceBlock({ tg }: { tg: TelegramSettingsHook }) {
   return (
-    <div className="space-y-2 border-t border-dashed pt-3">
+    <div className="flex flex-col gap-2 border-t border-dashed pt-3">
       <Label htmlFor="nodeOfflineGraceMinutes">Не уведомлять, пока узел offline меньше (мин)</Label>
       <p className="text-xs text-muted-foreground">
         Алерт уйдёт только после непрерывного offline дольше порога. То же значение настраивается на
@@ -284,9 +284,9 @@ function NotifyGroupsAccordion({ tg }: { tg: TelegramSettingsHook }) {
                   )}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{group.title}</span>
-                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                <Badge variant="secondary" className="shrink-0 tabular-nums">
                   {on}/{total}
-                </span>
+                </Badge>
                 <ChevronDown
                   size={16}
                   aria-hidden
@@ -308,7 +308,7 @@ function NotifyGroupsAccordion({ tg }: { tg: TelegramSettingsHook }) {
               />
             </div>
             {!isCollapsed && (
-              <div className="grid grid-cols-1 gap-x-8 pb-1 pl-8 md:grid-cols-2 2xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-x-8 pb-1 pl-6 md:grid-cols-2 2xl:grid-cols-3">
                 {visibleKeys.map((key) => {
                   const event = eventsByKey[key]
                   const enabled = tg.eventToggles[key] ?? false
@@ -329,7 +329,7 @@ function NotifyGroupsAccordion({ tg }: { tg: TelegramSettingsHook }) {
               </div>
             )}
             {group.group === 'nodes_ha' && (tg.eventToggles.node_offline ?? false) && (
-              <div className="pb-2 pl-8">
+              <div className="pb-2 pl-6">
                 <NodeOfflineGraceBlock tg={tg} />
               </div>
             )}
