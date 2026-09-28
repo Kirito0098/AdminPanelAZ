@@ -48,10 +48,10 @@ def test_task_routing_apply_default_recreates():
 def test_task_run_doall_ensures_multihome_when_flagged():
     adapter = _adapter()
     background_task_service.task_run_doall(adapter, ensure_openvpn_multihome=True)
-    adapter.ensure_openvpn_multihome.assert_called_once_with(True)
+    adapter.ensure_openvpn_multihome.assert_called_once_with(True, restart_if_unchanged=False)
 
 
 def test_task_routing_apply_ensures_multihome_when_flagged():
     adapter = _adapter()
     background_task_service.task_routing_apply(adapter, ensure_openvpn_multihome=True)
-    adapter.ensure_openvpn_multihome.assert_called_once_with(True)
+    adapter.ensure_openvpn_multihome.assert_called_once_with(True, restart_if_unchanged=False)

@@ -557,8 +557,13 @@ class AntiZapretService:
             "missing": missing,
         }
 
-    def ensure_openvpn_multihome(self, enabled: bool) -> dict:
-        """Patch OpenVPN server confs, then restart setup-enabled active units."""
+    def ensure_openvpn_multihome(self, enabled: bool, *, restart_if_unchanged: bool = True) -> dict:
+        """Patch OpenVPN server confs, then restart setup-enabled active units.
+
+        ``restart_if_unchanged=False`` skips the restart when no conf was patched:
+        after a plain doall the confs are untouched and a restart would only drop
+        every connected OpenVPN client.
+        """
         from app.services.antizapret_settings import read_protocol_enable_flags
         from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
         from app.services.openvpn_multihome import apply_multihome_to_conf
@@ -576,30 +581,32 @@ class AntiZapretService:
             else:
                 unchanged.append(name)
 
-        protocol_flags = read_protocol_enable_flags(self.base_path / "setup")
+        restart_result: dict | None = None
+        if patched or restart_if_unchanged:
+            protocol_flags = read_protocol_enable_flags(self.base_path / "setup")
 
-        # LocalAdapter duck-types restart_service / get_service_status /
-        # get_antizapret_settings for restart_all_openvpn_servers.
-        class _RestartProxy:
-            def __init__(self, service: "AntiZapretService"):
-                self._service = service
+            # LocalAdapter duck-types restart_service / get_service_status /
+            # get_antizapret_settings for restart_all_openvpn_servers.
+            class _RestartProxy:
+                def __init__(self, service: "AntiZapretService"):
+                    self._service = service
 
-            def get_service_status(self):
-                return self._service.get_service_status()
+                def get_service_status(self):
+                    return self._service.get_service_status()
 
-            def restart_service(self, service_name: str) -> str:
-                return self._service.restart_service(service_name)
+                def restart_service(self, service_name: str) -> str:
+                    return self._service.restart_service(service_name)
 
-            def get_antizapret_settings(self) -> dict[str, str]:
-                return dict(protocol_flags)
+                def get_antizapret_settings(self) -> dict[str, str]:
+                    return dict(protocol_flags)
 
-        restart_result = restart_all_openvpn_servers(
-            _RestartProxy(self),
-            protocol_flags=protocol_flags,
-        )
+            restart_result = restart_all_openvpn_servers(
+                _RestartProxy(self),
+                protocol_flags=protocol_flags,
+            )
         status = self.get_openvpn_multihome_status()
         return {
-            "success": bool(restart_result.get("success", True)),
+            "success": bool((restart_result or {}).get("success", True)),
             "enabled": enabled,
             "patched": patched,
             "unchanged": unchanged,

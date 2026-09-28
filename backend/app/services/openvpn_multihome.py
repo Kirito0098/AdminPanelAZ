@@ -57,13 +57,34 @@ def node_wants_openvpn_multihome(node: Any) -> bool:
     return bool(getattr(node, "openvpn_multihome", False))
 
 
-def maybe_ensure_openvpn_multihome(adapter: Any, *, enabled: bool) -> dict[str, Any] | None:
-    """Re-apply ``multihome`` on the node when the panel flag is on (after doall/restore)."""
+def maybe_ensure_openvpn_multihome(
+    adapter: Any,
+    *,
+    enabled: bool,
+    restart_if_unchanged: bool = True,
+) -> dict[str, Any] | None:
+    """Re-apply ``multihome`` on the node when the panel flag is on (after doall/restore).
+
+    Pass ``restart_if_unchanged=False`` after doall: OpenVPN is then restarted only
+    if a conf actually lost ``multihome``. Keep the default where the caller relies
+    on this call to restart OpenVPN anyway (PKI/CRL sync).
+    """
     if not enabled:
         return None
-    return adapter.ensure_openvpn_multihome(True)
+    if restart_if_unchanged:
+        return adapter.ensure_openvpn_multihome(True)
+    return adapter.ensure_openvpn_multihome(True, restart_if_unchanged=False)
 
 
-def maybe_ensure_node_openvpn_multihome(adapter: Any, node: Any) -> dict[str, Any] | None:
+def maybe_ensure_node_openvpn_multihome(
+    adapter: Any,
+    node: Any,
+    *,
+    restart_if_unchanged: bool = True,
+) -> dict[str, Any] | None:
     """Convenience: ensure when ``node.openvpn_multihome`` is true."""
-    return maybe_ensure_openvpn_multihome(adapter, enabled=node_wants_openvpn_multihome(node))
+    return maybe_ensure_openvpn_multihome(
+        adapter,
+        enabled=node_wants_openvpn_multihome(node),
+        restart_if_unchanged=restart_if_unchanged,
+    )

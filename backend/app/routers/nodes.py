@@ -1099,7 +1099,7 @@ def allow_first_remote_host(
         adapter.apply_config_changes()
         from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
 
-        maybe_ensure_node_openvpn_multihome(adapter, node)
+        maybe_ensure_node_openvpn_multihome(adapter, node, restart_if_unchanged=False)
     except Exception as exc:  # noqa: BLE001 — best-effort; file already written
         detail = getattr(exc, "detail", None) or str(exc)
         warnings.append(f"Файл сохранён, но doall.sh ошибка: {detail}")
