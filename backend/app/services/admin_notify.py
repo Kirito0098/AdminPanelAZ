@@ -62,6 +62,47 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("openvpn_buffer_guard_triggered", "OpenVPN Buffer Guard"),
 ]
 
+TG_NOTIFY_EVENT_GROUPS: list[tuple[str, str, str, tuple[str, ...]]] = [
+    ("login", "Входы", "🔐", ("login_success", "login_failed", "tg_unlinked")),
+    (
+        "clients",
+        "Клиенты и пользователи",
+        "👥",
+        ("config_create", "config_delete", "user_create", "user_delete", "client_ban", "traffic_limit"),
+    ),
+    (
+        "reminders",
+        "Напоминания",
+        "⏰",
+        ("cert_expiry_reminder", "access_expiry_reminder", "traffic_limit_reminder", "temp_block_reminder"),
+    ),
+    (
+        "owner_reminders",
+        "Мои напоминания",
+        "🔔",
+        (
+            "user_cert_expiry_reminder",
+            "user_access_expiry_reminder",
+            "user_traffic_limit_reminder",
+            "user_temp_block_reminder",
+        ),
+    ),
+    ("settings", "Настройки", "⚙️", ("settings_change",)),
+    ("load", "Нагрузка", "📊", ("high_cpu", "high_ram")),
+    ("nodes_ha", "Узлы и HA", "🖥️", ("node_offline", "node_sync_drift")),
+    ("cidr", "CIDR", "🌐", ("cidr_deploy_failed", "cidr_ingest_partial")),
+    (
+        "reports",
+        "Отчёты и алерты",
+        "📋",
+        ("noc_report", "alert_rule", "openvpn_buffer_guard_triggered"),
+    ),
+]
+
+TG_NOTIFY_EVENT_GROUP_BY_KEY: dict[str, str] = {
+    key: group_id for group_id, _title, _icon, keys in TG_NOTIFY_EVENT_GROUPS for key in keys
+}
+
 # Owner self-service reminders (Mini App / personal prefs). Not admin broadcast events.
 PERSONAL_OWNER_NOTIFY_KEYS = frozenset({
     "cert_expiry_reminder",
