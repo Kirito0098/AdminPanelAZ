@@ -11,7 +11,8 @@ from app.database import Base, get_db
 import app.models  # noqa: F401 — register ORM models on Base.metadata
 from app.models import DEFAULT_TG_NOTIFY_EVENTS, User, UserRole
 from app.routers import settings_telegram as settings_router
-from app.services.admin_notify import TG_NOTIFY_EVENT_GROUPS
+from app.routers.tg_mini.settings import _mini_notify_settings_response
+from app.services.admin_notify import PERSONAL_OWNER_NOTIFY_KEY_ORDER, TG_NOTIFY_EVENT_GROUPS
 
 
 def _group_keys() -> dict[str, list[str]]:
@@ -82,6 +83,43 @@ def test_admin_notify_get_returns_groups_and_event_group():
         all_keys = [k for g in groups for k in g["keys"]]
         assert sorted(all_keys) == sorted(item["key"] for item in body["events"])
         assert len(set(all_keys)) == len(all_keys)
+    finally:
+        db.close()
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+
+def test_mini_notify_non_admin_single_owner_group_admin_passthrough():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    db = Session()
+    try:
+        owner = User(username="owner", role=UserRole.user, password_hash="x")
+        admin = User(username="admin", role=UserRole.admin, password_hash="x")
+        db.add_all([owner, admin])
+        db.commit()
+        db.refresh(owner)
+        db.refresh(admin)
+
+        mini = _mini_notify_settings_response(db, owner)
+        assert [e.key for e in mini.events] == list(PERSONAL_OWNER_NOTIFY_KEY_ORDER)
+        assert all(e.group == "owner_reminders" for e in mini.events)
+        assert len(mini.groups) == 1
+        group = mini.groups[0]
+        assert group.group == "owner_reminders"
+        assert group.title == "Мои напоминания"
+        assert group.icon
+        assert group.keys == list(PERSONAL_OWNER_NOTIFY_KEY_ORDER)
+
+        admin_resp = _mini_notify_settings_response(db, admin)
+        assert len(admin_resp.groups) == 9
+        assert len(admin_resp.events) == len(DEFAULT_TG_NOTIFY_EVENTS)
+        assert {e.key for e in admin_resp.events} == set(DEFAULT_TG_NOTIFY_EVENTS)
     finally:
         db.close()
         Base.metadata.drop_all(engine)
