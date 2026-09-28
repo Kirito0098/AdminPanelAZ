@@ -182,7 +182,7 @@ function NotifyEventRow({
   onTest: () => void
 }) {
   return (
-    <div className="group/row flex items-center gap-3 py-2 text-sm">
+    <div className="group/row flex items-center gap-3 border-b border-border/50 py-2 text-sm">
       <button
         type="button"
         onClick={onToggle}
@@ -308,7 +308,7 @@ function NotifyGroupsAccordion({ tg }: { tg: TelegramSettingsHook }) {
               />
             </div>
             {!isCollapsed && (
-              <div className="pb-1 pl-8">
+              <div className="grid grid-cols-1 gap-x-8 pb-1 pl-8 sm:grid-cols-2">
                 {visibleKeys.map((key) => {
                   const event = eventsByKey[key]
                   const enabled = tg.eventToggles[key] ?? false
