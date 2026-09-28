@@ -145,9 +145,10 @@ export default function NodesPage() {
     activate,
     deleteNode,
   } = useNode()
-  const { features } = useFeatureModules()
+  const { features, isEnabled } = useFeatureModules()
   // Default-off toggle: treat missing key as disabled (isEnabled() falls back to true).
   const proxyNodesEnabled = features.proxy_nodes === true
+  const telegramEnabled = isEnabled('telegram')
   const { success, warning, error: notifyError } = useNotifications()
   const [loading, setLoading] = useState(true)
   const [showDialog, setShowDialog] = useState(false)
@@ -980,7 +981,7 @@ export default function NodesPage() {
 
       {showMtlsStatus && mtlsStatus && <MtlsCaStatusAlert status={mtlsStatus} />}
 
-      <NodeOfflineNotifyCard />
+      {telegramEnabled && <NodeOfflineNotifyCard />}
 
       <NodeSyncGroupSection
         nodes={nodes}
