@@ -288,10 +288,12 @@ CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|
 
 [StatusOpenVPN](https://github.com/TheMurmabis/StatusOpenVPN) занимает `https://домен/status/`. Если оба поставят отдельный nginx-сайт на один домен — будет конфликт.
 
-**Установка → UI:** `sudo ./install.sh` (панель по HTTP) → **Настройки → Адрес сайта и HTTPS** → Nginx + Let's Encrypt → подпуть `panel` → **Интегрировать с StatusOpenVPN**. Итог: `https://домен/status/` и `https://домен/panel/`.
+**Способ 1 — панель внутри сайта Status (UI, рекомендуется):** `sudo ./install.sh` (панель по HTTP) → **Настройки → Адрес сайта и HTTPS** → Nginx + Let's Encrypt → подпуть `panel` → **Интегрировать с StatusOpenVPN**. Итог: `https://домен/status/` и `https://домен/panel/`. Подпуть здесь обязателен.
+
+**Способ 2 — Status внутри сайта панели (вручную):** панель на корне домена, Status ставится без своего nginx, а в nginx-сайт панели добавляется блок `location /status/` с `proxy_pass` на порт Status. Итог: `https://домен/status/` и `https://домен/`. Блок нужно добавлять заново после **Адрес сайта и HTTPS → Применить** и `nginx-repair.sh`.
 
 > [!WARNING]
-> Подпуть обязателен. Не удаляйте Status через его `uninstall` после интеграции — может сломать nginx и доступ к панели.
+> Не удаляйте Status через его `uninstall` после интеграции — может сломать nginx и доступ к панели.
 > Если панель пропала — по SSH: `cd /opt/AdminPanelAZ && sudo ./scripts/nginx-repair.sh`
 
 Подробно: [docs/nastrojki/set-i-publikaciya.md](docs/nastrojki/set-i-publikaciya.md#совместно-со-statusopenvpn-на-одном-домене)

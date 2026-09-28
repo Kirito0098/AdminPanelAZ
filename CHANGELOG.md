@@ -59,6 +59,8 @@
 
 ### 🔄 Changed
 
+- **Документация / StatusOpenVPN на одном домене** — второй способ: панель остаётся на корне домена, Status ставится без своего nginx и подключается блоком `location /status/` в nginx-сайт панели. Пошагово с блоком nginx, строками Cloudflare, когда блок нужно добавлять заново (**Адрес сайта и HTTPS → Применить**, `nginx-repair.sh`, переустановка) и почему при этом способе не включать «Интегрировать с StatusOpenVPN» (`docs/nastrojki/set-i-publikaciya.md`, `diagnostika.md`, README).
+
 ### 🐛 Fixed
 
 ### 🗑️ Removed
