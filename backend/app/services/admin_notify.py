@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
 import threading
 import time
@@ -53,6 +54,7 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("high_cpu", "Высокая нагрузка CPU"),
     ("high_ram", "Высокая нагрузка RAM"),
     ("node_offline", "Узел offline / восстановление"),
+    ("node_sync_drift", "HA: расхождение основного узла и реплики"),
     ("cidr_deploy_failed", "Ошибка развёртывания CIDR"),
     ("cidr_ingest_partial", "Частичное обновление CIDR БД"),
     ("noc_report", "NOC: ежедневная/еженедельная сводка"),
@@ -123,7 +125,6 @@ SETTINGS_TG_TITLES = {
     "settings_backup_upload": "Бэкапы",
     "settings_backup_delete": "Бэкапы",
     "settings_backup_auto_failed": "Ошибка авто-бэкапа",
-    "node_sync_drift": "HA: расхождение",
     "settings_restart_service": "Перезапуск сервиса",
     "settings_user_password_update": "Пароль пользователя",
     "settings_user_role_update": "Роль пользователя",
@@ -451,6 +452,28 @@ def _build_client_ban_message(
 
     _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
     return _format_notify_card(title, when, actor_line=actor_admin, detail_lines=detail_lines)
+
+
+def _build_node_sync_drift_message(details: str | None, when: str) -> str:
+    try:
+        item = json.loads(details) if details else {}
+    except ValueError:
+        item = {}
+    if not isinstance(item, dict):
+        item = {}
+    detail_lines: list[str] = []
+    name = str(item.get("name") or item.get("group_id") or "").strip()
+    if name:
+        detail_lines.append(_line_text("🧩", "Группа", name))
+    domain = str(item.get("shared_domain") or "").strip()
+    if domain:
+        detail_lines.append(_line_code("🌐", "Домен", domain))
+    summary = str(item.get("summary") or "").strip()
+    detail_lines.append(_line_text("📋", "Расхождения", summary or "основной узел и реплика различаются"))
+    hint = str(item.get("hint") or "").strip()
+    if hint:
+        detail_lines.append(_line_text("💡", "Что сделать", hint))
+    return _format_notify_card("🟠 <b>HA: расхождение</b>", when, detail_lines=detail_lines)
 
 
 class AdminNotifyService:
@@ -1213,6 +1236,9 @@ class AdminNotifyService:
                 detail_lines=detail_lines,
             )
 
+        if event_type == "node_sync_drift":
+            return _build_node_sync_drift_message(details, when)
+
         if event_type == "node_online":
             detail_lines = [_line_text("📋", "Детали", details or "Узел снова online")]
             _append_node_detail(detail_lines, node_id=node_id, node_name=node_name)
@@ -1478,6 +1504,18 @@ def _preview_event_build_kwargs(event_key: str, *, actor_username: str) -> dict 
             "event_type": "node_offline",
             "details": "Connection refused",
             **node_ctx,
+        },
+        "node_sync_drift": {
+            "event_type": "node_sync_drift",
+            "details": json.dumps(
+                {
+                    "group_id": 1,
+                    "name": "Основа",
+                    "shared_domain": "vpn.example.com",
+                    "summary": "Расхождения между основным узлом и репликой",
+                },
+                ensure_ascii=False,
+            ),
         },
         "cidr_deploy_failed": {
             "event_type": "cidr_deploy_failed",
