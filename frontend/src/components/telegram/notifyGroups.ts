@@ -17,3 +17,12 @@ export function applyGroupToggle(
   for (const key of keys) next[key] = enabled
   return next
 }
+
+/**
+ * Group toggle is shown only when several groups share one list (admin).
+ * A single group (non-admin `owner_reminders`, empty/legacy payload) renders
+ * a flat event list with no group-level switch.
+ */
+export function shouldShowGroupToggle(groupCount: number): boolean {
+  return groupCount > 1
+}

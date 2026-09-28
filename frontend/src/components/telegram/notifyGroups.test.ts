@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { applyGroupToggle, enabledCount, isIndeterminate } from './notifyGroups'
+import { applyGroupToggle, enabledCount, isIndeterminate, shouldShowGroupToggle } from './notifyGroups'
 
 describe('enabledCount', () => {
   it('counts enabled keys from toggles', () => {
@@ -54,5 +54,19 @@ describe('applyGroupToggle', () => {
     const prev = { a: false }
     applyGroupToggle(prev, ['a'], true)
     expect(prev).toEqual({ a: false })
+  })
+})
+
+describe('shouldShowGroupToggle', () => {
+  it('hides the group toggle when a single group is present', () => {
+    expect(shouldShowGroupToggle(1)).toBe(false)
+  })
+
+  it('shows group toggles for multiple groups', () => {
+    expect(shouldShowGroupToggle(9)).toBe(true)
+  })
+
+  it('hides the group toggle when there are no groups', () => {
+    expect(shouldShowGroupToggle(0)).toBe(false)
   })
 })

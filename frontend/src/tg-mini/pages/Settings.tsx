@@ -3,6 +3,7 @@ import {
   Bell,
   Bot,
   CheckCircle2,
+  ChevronDown,
   Copy,
   Loader2,
   Send,
@@ -16,7 +17,14 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import MetricCard from '@/components/noc/MetricCard'
+import {
+  applyGroupToggle,
+  enabledCount,
+  isIndeterminate,
+  shouldShowGroupToggle,
+} from '@/components/telegram/notifyGroups'
 import {
   LABEL_AUTH_MAX_AGE,
   LABEL_BOT_USERNAME,
@@ -29,7 +37,7 @@ import MiniSettingToggle from '@/tg-mini/components/MiniSettingToggle'
 import { getTgAdminNotify, getTgTelegramSettings, testTgAdminNotify, testTgTelegram, updateTgAdminNotify, updateTgTelegramSettings } from '@/tg-mini/api'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import { miniRoleLabel } from '@/tg-mini/lib/settingsMini'
-import type { AdminNotifySettings, TelegramSettings } from '@/types'
+import type { AdminNotifyEventItem, AdminNotifyGroupInfo, AdminNotifySettings, TelegramSettings } from '@/types'
 
 type Feedback = { tone: 'success' | 'error' | 'info'; text: string }
 
@@ -101,6 +109,109 @@ function CopyableValue({ value, label }: { value: string; label: string }) {
       <Copy size={13} className="shrink-0 opacity-60" aria-hidden />
       {hint && <span className="tg-mini-copy-hint">{hint}</span>}
     </button>
+  )
+}
+
+function MiniNotifyGroupsAccordion({
+  groups,
+  events,
+  eventToggles,
+  onToggleEvent,
+  onToggleGroup,
+}: {
+  groups: AdminNotifyGroupInfo[]
+  events: AdminNotifyEventItem[]
+  eventToggles: Record<string, boolean>
+  onToggleEvent: (key: string, checked: boolean) => void
+  onToggleGroup: (keys: string[], checked: boolean) => void
+}) {
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const eventsByKey: Record<string, AdminNotifyEventItem> = {}
+  for (const event of events) eventsByKey[event.key] = event
+
+  // Single group (non-admin `owner_reminders`) or legacy payload without
+  // groups: flat list, no group-level switch — render unchanged.
+  if (!shouldShowGroupToggle(groups.length)) {
+    return (
+      <>
+        {events.map((event) => (
+          <MiniSettingToggle
+            key={event.key}
+            label={event.label}
+            checked={Boolean(eventToggles[event.key])}
+            onCheckedChange={(checked) => onToggleEvent(event.key, checked)}
+          />
+        ))}
+      </>
+    )
+  }
+
+  return (
+    <div className="space-y-2">
+      {groups.map((group) => {
+        const on = enabledCount(group.keys, eventToggles)
+        const total = group.keys.length
+        const allOn = total > 0 && on === total
+        const indeterminate = isIndeterminate(group.keys, eventToggles)
+        const isCollapsed = collapsed[group.group] === true
+        return (
+          <div key={group.group} className="rounded-lg border">
+            <div className="flex items-center gap-2 p-2.5">
+              <button
+                type="button"
+                aria-expanded={!isCollapsed}
+                aria-label={`${group.title}: включено ${on} из ${total}`}
+                onClick={() =>
+                  setCollapsed((prev) => ({ ...prev, [group.group]: !isCollapsed }))
+                }
+                className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left hover:opacity-90"
+              >
+                <span aria-hidden className="shrink-0">
+                  {group.icon}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{group.title}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  вкл {on}/{total}
+                </span>
+                <ChevronDown
+                  size={16}
+                  aria-hidden
+                  className={cn(
+                    'shrink-0 text-muted-foreground transition-transform',
+                    !isCollapsed && 'rotate-180',
+                  )}
+                />
+              </button>
+              <Switch
+                checked={allOn}
+                aria-checked={indeterminate ? 'mixed' : allOn}
+                aria-label={`${group.title}: все события группы`}
+                data-indeterminate={indeterminate || undefined}
+                onCheckedChange={(next) => onToggleGroup(group.keys, next)}
+                className={cn(indeterminate && 'bg-primary/50')}
+              />
+            </div>
+            {!isCollapsed && (
+              <div className="space-y-1 border-t p-1">
+                {group.keys
+                  .filter((key) => eventsByKey[key])
+                  .map((key) => {
+                    const event = eventsByKey[key]
+                    return (
+                      <MiniSettingToggle
+                        key={key}
+                        label={event.label}
+                        checked={Boolean(eventToggles[key])}
+                        onCheckedChange={(checked) => onToggleEvent(key, checked)}
+                      />
+                    )
+                  })}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -350,16 +461,19 @@ export default function Settings() {
           </div>
 
           <form className="space-y-1" onSubmit={(e) => void handleSaveNotify(e)}>
-            {notify?.events.map((event) => (
-              <MiniSettingToggle
-                key={event.key}
-                label={event.label}
-                checked={Boolean(eventToggles[event.key])}
-                onCheckedChange={(checked) =>
-                  setEventToggles((prev) => ({ ...prev, [event.key]: checked }))
+            {notify && (
+              <MiniNotifyGroupsAccordion
+                groups={notify.groups ?? []}
+                events={notify.events}
+                eventToggles={eventToggles}
+                onToggleEvent={(key, checked) =>
+                  setEventToggles((prev) => ({ ...prev, [key]: checked }))
+                }
+                onToggleGroup={(keys, checked) =>
+                  setEventToggles((prev) => applyGroupToggle(prev, keys, checked))
                 }
               />
-            ))}
+            )}
             <div className="flex flex-wrap gap-2 pt-3">
               <Button type="submit" className="gap-1.5" disabled={savingNotify}>
                 {savingNotify ? <Loader2 size={16} className="animate-spin" aria-hidden /> : null}
