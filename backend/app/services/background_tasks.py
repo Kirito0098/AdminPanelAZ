@@ -478,7 +478,7 @@ class BackgroundTaskService:
             if progress_updater:
                 progress_updater(90, "AntiZapret: восстановление OpenVPN multihome…")
             try:
-                mh = adapter.ensure_openvpn_multihome(True)
+                mh = adapter.ensure_openvpn_multihome(True, restart_if_unchanged=False)
                 if isinstance(mh, dict):
                     multihome_output = json.dumps(mh, ensure_ascii=False)
                 else:

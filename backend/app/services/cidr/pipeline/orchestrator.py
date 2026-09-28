@@ -97,7 +97,7 @@ def run_apply(
     if ensure_openvpn_multihome and (apply_after or recreate_profiles_after):
         from app.services.openvpn_multihome import maybe_ensure_openvpn_multihome
 
-        mh = maybe_ensure_openvpn_multihome(adapter, enabled=True)
+        mh = maybe_ensure_openvpn_multihome(adapter, enabled=True, restart_if_unchanged=False)
         if mh is not None:
             result["openvpn_multihome"] = mh
     return result

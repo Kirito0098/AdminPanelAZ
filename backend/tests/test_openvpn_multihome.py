@@ -82,3 +82,21 @@ def test_maybe_ensure_node_uses_flag():
 
     assert node_wants_openvpn_multihome(_Node()) is True
     assert maybe_ensure_node_openvpn_multihome(_Adapter(), _Node()) == {"ok": True}
+
+
+def test_maybe_ensure_forwards_restart_if_unchanged():
+    class _Node:
+        openvpn_multihome = True
+
+    class _Adapter:
+        def __init__(self):
+            self.calls: list[tuple[bool, bool]] = []
+
+        def ensure_openvpn_multihome(self, enabled: bool, *, restart_if_unchanged: bool = True):
+            self.calls.append((enabled, restart_if_unchanged))
+            return {"success": True}
+
+    adapter = _Adapter()
+    maybe_ensure_node_openvpn_multihome(adapter, _Node(), restart_if_unchanged=False)
+    maybe_ensure_openvpn_multihome(adapter, enabled=True)
+    assert adapter.calls == [(True, False), (True, True)]

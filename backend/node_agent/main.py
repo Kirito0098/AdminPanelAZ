@@ -181,6 +181,7 @@ class ServiceRestartRequest(BaseModel):
 
 class OpenVpnMultihomeRequest(BaseModel):
     enabled: bool = False
+    restart_if_unchanged: bool = True
 
 
 class OpenVpnJournalSampleRequest(BaseModel):
@@ -322,7 +323,9 @@ def openvpn_multihome_status(_: None = Depends(verify_api_key)):
 
 @app.post("/openvpn/multihome")
 def openvpn_multihome_ensure(payload: OpenVpnMultihomeRequest, _: None = Depends(verify_api_key)):
-    return service.ensure_openvpn_multihome(bool(payload.enabled))
+    return service.ensure_openvpn_multihome(
+        bool(payload.enabled), restart_if_unchanged=bool(payload.restart_if_unchanged)
+    )
 
 
 @app.post("/openvpn/buffer-guard/journal-sample")
