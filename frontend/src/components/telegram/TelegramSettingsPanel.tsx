@@ -1,4 +1,5 @@
-import { CheckCircle2, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell, BarChart3, ImageIcon } from 'lucide-react'
+import { useState } from 'react'
+import { CheckCircle2, ChevronDown, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell, BarChart3, ImageIcon } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import TelegramBotAuthGuide from '@/components/telegram/TelegramBotAuthGuide'
@@ -16,6 +17,8 @@ import { Label } from '@/components/ui/label'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
+import { applyGroupToggle, enabledCount, isIndeterminate } from './notifyGroups'
+import type { AdminNotifyEventItem } from '@/types'
 import type { TelegramSection, TelegramSettingsHook } from './useTelegramSettings'
 
 interface TelegramSettingsPanelProps {
@@ -148,6 +151,182 @@ function AuthMethodOption({
       <p className="font-medium">{title}</p>
       <p className="mt-1 text-xs text-muted-foreground">{description}</p>
     </button>
+  )
+}
+
+function NotifyEventRow({
+  event,
+  enabled,
+  sending,
+  testDisabled,
+  onToggle,
+  onTest,
+}: {
+  event: AdminNotifyEventItem
+  enabled: boolean
+  sending: boolean
+  testDisabled: boolean
+  onToggle: () => void
+  onTest: () => void
+}) {
+  return (
+    <div
+      className={cn(
+        'flex items-start gap-2 rounded-lg border p-3 text-sm transition-colors',
+        enabled && 'border-primary/40 bg-primary/5',
+        event.key === 'node_offline' && 'sm:col-span-2',
+      )}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-left hover:opacity-90"
+      >
+        <Switch checked={enabled} tabIndex={-1} aria-hidden className="pointer-events-none mt-0.5" />
+        <span>{event.label}</span>
+      </button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+        title={`Отправить пример: ${event.label}`}
+        disabled={testDisabled}
+        onClick={onTest}
+      >
+        <Send size={14} aria-hidden />
+        <span className="sr-only">{sending ? 'Отправка...' : 'Тест'}</span>
+      </Button>
+    </div>
+  )
+}
+
+function NodeOfflineGraceBlock({ tg }: { tg: TelegramSettingsHook }) {
+  return (
+    <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+      <Label htmlFor="nodeOfflineGraceMinutes">Не уведомлять, пока узел offline меньше (мин)</Label>
+      <p className="text-xs text-muted-foreground">
+        Алерт уйдёт только после непрерывного offline дольше порога. То же значение настраивается на
+        странице Узлы.
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <Input
+          id="nodeOfflineGraceMinutes"
+          type="number"
+          min={1}
+          max={1440}
+          className="w-24"
+          value={tg.nodeOfflineGraceMinutes}
+          onChange={(e) => tg.setNodeOfflineGraceMinutes(e.target.value)}
+        />
+        {[1, 3, 5, 10].map((mins) => (
+          <Button
+            key={mins}
+            type="button"
+            size="sm"
+            variant={tg.nodeOfflineGraceMinutes === String(mins) ? 'default' : 'outline'}
+            onClick={() => tg.setNodeOfflineGraceMinutes(String(mins))}
+          >
+            {mins} мин
+          </Button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function NotifyGroupsAccordion({ tg }: { tg: TelegramSettingsHook }) {
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
+  const groups = tg.adminNotify?.groups ?? []
+  const eventsByKey: Record<string, AdminNotifyEventItem> = {}
+  for (const event of tg.adminNotify?.events ?? []) eventsByKey[event.key] = event
+
+  const isTestDisabled =
+    tg.testingNotifyEvent !== null ||
+    tg.testingNocReport !== null ||
+    tg.testingNotify ||
+    !tg.adminNotify?.bot_token_set ||
+    !tg.hasNotifyRecipients
+
+  return (
+    <div className="space-y-2">
+      {groups.map((group) => {
+        const on = enabledCount(group.keys, tg.eventToggles)
+        const total = group.keys.length
+        const allOn = total > 0 && on === total
+        const indeterminate = isIndeterminate(group.keys, tg.eventToggles)
+        const isCollapsed = collapsed[group.group] === true
+        return (
+          <div key={group.group} className="rounded-lg border">
+            <div className="flex items-center gap-2 p-3">
+              <button
+                type="button"
+                aria-expanded={!isCollapsed}
+                aria-label={`${group.title}: включено ${on} из ${total}`}
+                onClick={() =>
+                  setCollapsed((prev) => ({ ...prev, [group.group]: !isCollapsed }))
+                }
+                className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left hover:opacity-90"
+              >
+                <span aria-hidden className="shrink-0">
+                  {group.icon}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-sm font-medium">{group.title}</span>
+                <span className="shrink-0 text-xs text-muted-foreground">
+                  вкл {on}/{total}
+                </span>
+                <ChevronDown
+                  size={16}
+                  aria-hidden
+                  className={cn(
+                    'shrink-0 text-muted-foreground transition-transform',
+                    !isCollapsed && 'rotate-180',
+                  )}
+                />
+              </button>
+              <Switch
+                checked={allOn}
+                aria-checked={indeterminate ? 'mixed' : allOn}
+                aria-label={`${group.title}: все события группы`}
+                data-indeterminate={indeterminate || undefined}
+                onCheckedChange={(next) =>
+                  tg.setEventToggles((prev) => applyGroupToggle(prev, group.keys, next))
+                }
+                className={cn(indeterminate && 'bg-primary/50')}
+              />
+            </div>
+            {!isCollapsed && (
+              <div className="space-y-2 border-t p-3">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {group.keys
+                    .filter((key) => eventsByKey[key])
+                    .map((key) => {
+                      const event = eventsByKey[key]
+                      const enabled = tg.eventToggles[key] ?? false
+                      return (
+                        <NotifyEventRow
+                          key={key}
+                          event={event}
+                          enabled={enabled}
+                          sending={tg.testingNotifyEvent === key}
+                          testDisabled={isTestDisabled}
+                          onToggle={() =>
+                            tg.setEventToggles((prev) => ({ ...prev, [key]: !enabled }))
+                          }
+                          onTest={() => void tg.handleTestNotifyEvent(key)}
+                        />
+                      )
+                    })}
+                </div>
+                {group.group === 'nodes_ha' && (tg.eventToggles.node_offline ?? false) && (
+                  <NodeOfflineGraceBlock tg={tg} />
+                )}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
@@ -771,88 +950,36 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                   <Send size={12} className="inline align-text-bottom" aria-hidden /> — отправить
                   пример в Telegram.
                 </p>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {tg.adminNotify?.events.map((event) => {
-                    const enabled = tg.eventToggles[event.key] ?? false
-                    const sending = tg.testingNotifyEvent === event.key
-                    const testDisabled =
-                      tg.testingNotifyEvent !== null ||
-                      tg.testingNocReport !== null ||
-                      tg.testingNotify ||
-                      !tg.adminNotify?.bot_token_set ||
-                      !tg.hasNotifyRecipients
-                    return (
-                      <div
-                        key={event.key}
-                        className={cn(
-                          'flex items-start gap-2 rounded-lg border p-3 text-sm transition-colors',
-                          enabled && 'border-primary/40 bg-primary/5',
-                          event.key === 'node_offline' && 'sm:col-span-2',
-                        )}
-                      >
-                        <button
-                          type="button"
-                          onClick={() =>
-                            tg.setEventToggles((prev) => ({ ...prev, [event.key]: !enabled }))
-                          }
-                          className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-left hover:opacity-90"
-                        >
-                          <Switch
-                            checked={enabled}
-                            tabIndex={-1}
-                            aria-hidden
-                            className="pointer-events-none mt-0.5"
+                {(tg.adminNotify?.groups?.length ?? 0) > 0 ? (
+                  <NotifyGroupsAccordion tg={tg} />
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {(tg.adminNotify?.events ?? []).map((event) => {
+                        const enabled = tg.eventToggles[event.key] ?? false
+                        return (
+                          <NotifyEventRow
+                            key={event.key}
+                            event={event}
+                            enabled={enabled}
+                            sending={tg.testingNotifyEvent === event.key}
+                            testDisabled={
+                              tg.testingNotifyEvent !== null ||
+                              tg.testingNocReport !== null ||
+                              tg.testingNotify ||
+                              !tg.adminNotify?.bot_token_set ||
+                              !tg.hasNotifyRecipients
+                            }
+                            onToggle={() =>
+                              tg.setEventToggles((prev) => ({ ...prev, [event.key]: !enabled }))
+                            }
+                            onTest={() => void tg.handleTestNotifyEvent(event.key)}
                           />
-                          <span>{event.label}</span>
-                        </button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                          title={`Отправить пример: ${event.label}`}
-                          disabled={testDisabled}
-                          onClick={() => void tg.handleTestNotifyEvent(event.key)}
-                        >
-                          <Send size={14} aria-hidden />
-                          <span className="sr-only">{sending ? 'Отправка...' : 'Тест'}</span>
-                        </Button>
-                      </div>
-                    )
-                  })}
-                </div>
-                {(tg.eventToggles.node_offline ?? false) && (
-                  <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
-                    <Label htmlFor="nodeOfflineGraceMinutes">
-                      Не уведомлять, пока узел offline меньше (мин)
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      Алерт уйдёт только после непрерывного offline дольше порога. То же значение
-                      настраивается на странице Узлы.
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Input
-                        id="nodeOfflineGraceMinutes"
-                        type="number"
-                        min={1}
-                        max={1440}
-                        className="w-24"
-                        value={tg.nodeOfflineGraceMinutes}
-                        onChange={(e) => tg.setNodeOfflineGraceMinutes(e.target.value)}
-                      />
-                      {[1, 3, 5, 10].map((mins) => (
-                        <Button
-                          key={mins}
-                          type="button"
-                          size="sm"
-                          variant={tg.nodeOfflineGraceMinutes === String(mins) ? 'default' : 'outline'}
-                          onClick={() => tg.setNodeOfflineGraceMinutes(String(mins))}
-                        >
-                          {mins} мин
-                        </Button>
-                      ))}
+                        )
+                      })}
                     </div>
-                  </div>
+                    {(tg.eventToggles.node_offline ?? false) && <NodeOfflineGraceBlock tg={tg} />}
+                  </>
                 )}
               </div>
 

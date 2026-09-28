@@ -723,6 +723,14 @@ export interface AdminNotifyEventItem {
   key: string
   label: string
   enabled: boolean
+  group: string
+}
+
+export interface AdminNotifyGroupInfo {
+  group: string
+  title: string
+  icon: string
+  keys: string[]
 }
 
 export interface AdminNotifySettings {
@@ -731,6 +739,7 @@ export interface AdminNotifySettings {
   notify_enabled: boolean
   bot_token_set: boolean
   events: AdminNotifyEventItem[]
+  groups: AdminNotifyGroupInfo[]
   node_offline_grace_seconds: number
 }
 
