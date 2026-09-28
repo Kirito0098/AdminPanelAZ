@@ -308,7 +308,7 @@ function NotifyGroupsAccordion({ tg }: { tg: TelegramSettingsHook }) {
               />
             </div>
             {!isCollapsed && (
-              <div className="grid grid-cols-1 gap-x-8 pb-1 pl-8 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-8 pb-1 pl-8 md:grid-cols-2 2xl:grid-cols-3">
                 {visibleKeys.map((key) => {
                   const event = eventsByKey[key]
                   const enabled = tg.eventToggles[key] ?? false
