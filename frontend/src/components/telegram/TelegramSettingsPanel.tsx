@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CheckCircle2, ChevronDown, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell, BarChart3, ImageIcon } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell, BarChart3, ImageIcon, Users, BellRing, Settings2, Cpu, Network, Database } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import TelegramBotAuthGuide from '@/components/telegram/TelegramBotAuthGuide'
@@ -154,6 +154,18 @@ function AuthMethodOption({
   )
 }
 
+const GROUP_ICONS: Record<string, typeof LogIn> = {
+  login: LogIn,
+  clients: Users,
+  reminders: BellRing,
+  owner_reminders: Bell,
+  settings: Settings2,
+  load: Cpu,
+  nodes_ha: Network,
+  cidr: Database,
+  reports: BarChart3,
+}
+
 function NotifyEventRow({
   event,
   enabled,
@@ -170,26 +182,20 @@ function NotifyEventRow({
   onTest: () => void
 }) {
   return (
-    <div
-      className={cn(
-        'flex items-start gap-2 rounded-lg border p-3 text-sm transition-colors',
-        enabled && 'border-primary/40 bg-primary/5',
-        event.key === 'node_offline' && 'sm:col-span-2',
-      )}
-    >
+    <div className="group/row flex items-center gap-3 py-2 text-sm">
       <button
         type="button"
         onClick={onToggle}
-        className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 text-left hover:opacity-90"
+        className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left hover:opacity-90"
       >
-        <Switch checked={enabled} tabIndex={-1} aria-hidden className="pointer-events-none mt-0.5" />
-        <span>{event.label}</span>
+        <Switch checked={enabled} tabIndex={-1} aria-hidden className="pointer-events-none" />
+        <span className={cn('min-w-0 flex-1 truncate', !enabled && 'text-muted-foreground')}>{event.label}</span>
       </button>
       <Button
         type="button"
         variant="ghost"
         size="icon"
-        className="h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+        className="h-7 w-7 shrink-0 text-muted-foreground/70 hover:text-foreground"
         title={`Отправить пример: ${event.label}`}
         disabled={testDisabled}
         onClick={onTest}
@@ -203,7 +209,7 @@ function NotifyEventRow({
 
 function NodeOfflineGraceBlock({ tg }: { tg: TelegramSettingsHook }) {
   return (
-    <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
+    <div className="space-y-2 border-t border-dashed pt-3">
       <Label htmlFor="nodeOfflineGraceMinutes">Не уведомлять, пока узел offline меньше (мин)</Label>
       <p className="text-xs text-muted-foreground">
         Алерт уйдёт только после непрерывного offline дольше порога. То же значение настраивается на
@@ -249,7 +255,7 @@ function NotifyGroupsAccordion({ tg }: { tg: TelegramSettingsHook }) {
     !tg.hasNotifyRecipients
 
   return (
-    <div className="space-y-2">
+    <div className="divide-y divide-border/60">
       {groups.map((group) => {
         const visibleKeys = group.keys.filter((key) => eventsByKey[key])
         const on = enabledCount(visibleKeys, tg.eventToggles)
@@ -257,9 +263,10 @@ function NotifyGroupsAccordion({ tg }: { tg: TelegramSettingsHook }) {
         const allOn = total > 0 && on === total
         const indeterminate = isIndeterminate(visibleKeys, tg.eventToggles)
         const isCollapsed = collapsed[group.group] === true
+        const GroupIcon = GROUP_ICONS[group.group] ?? null
         return (
-          <div key={group.group} className="rounded-lg border">
-            <div className="flex items-center gap-2 p-3">
+          <div key={group.group} className="py-1">
+            <div className="flex items-center gap-2 py-1.5">
               <button
                 type="button"
                 aria-expanded={!isCollapsed}
@@ -269,12 +276,16 @@ function NotifyGroupsAccordion({ tg }: { tg: TelegramSettingsHook }) {
                 }
                 className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left hover:opacity-90"
               >
-                <span aria-hidden className="shrink-0">
-                  {group.icon}
+                <span aria-hidden className="shrink-0 text-muted-foreground">
+                  {GroupIcon ? (
+                    <GroupIcon size={16} aria-hidden />
+                  ) : (
+                    group.icon
+                  )}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-sm font-medium">{group.title}</span>
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  вкл {on}/{total}
+                <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                  {on}/{total}
                 </span>
                 <ChevronDown
                   size={16}
@@ -297,30 +308,28 @@ function NotifyGroupsAccordion({ tg }: { tg: TelegramSettingsHook }) {
               />
             </div>
             {!isCollapsed && (
-              <div className="space-y-2 border-t p-3">
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {visibleKeys.map((key) => {
-                      const event = eventsByKey[key]
-                      const enabled = tg.eventToggles[key] ?? false
-                      return (
-                        <NotifyEventRow
-                          key={key}
-                          event={event}
-                          enabled={enabled}
-                          sending={tg.testingNotifyEvent === key}
-                          testDisabled={isTestDisabled}
-                          onToggle={() =>
-                            tg.setEventToggles((prev) => ({ ...prev, [key]: !enabled }))
-                          }
-                          onTest={() => void tg.handleTestNotifyEvent(key)}
-                        />
-                      )
-                    })}
-                </div>
+              <div className="pb-1 pl-8">
+                {visibleKeys.map((key) => {
+                  const event = eventsByKey[key]
+                  const enabled = tg.eventToggles[key] ?? false
+                  return (
+                    <NotifyEventRow
+                      key={key}
+                      event={event}
+                      enabled={enabled}
+                      sending={tg.testingNotifyEvent === key}
+                      testDisabled={isTestDisabled}
+                      onToggle={() =>
+                        tg.setEventToggles((prev) => ({ ...prev, [key]: !enabled }))
+                      }
+                      onTest={() => void tg.handleTestNotifyEvent(key)}
+                    />
+                  )
+                })}
               </div>
             )}
             {group.group === 'nodes_ha' && (tg.eventToggles.node_offline ?? false) && (
-              <div className="border-t p-3">
+              <div className="pb-2 pl-8">
                 <NodeOfflineGraceBlock tg={tg} />
               </div>
             )}
@@ -947,9 +956,9 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               <div className="space-y-3 border-t pt-4">
                 <Label>О чём сообщать</Label>
                 <p className="text-xs text-muted-foreground">
-                  Нажмите на строку, чтобы включить или выключить событие. Кнопка{' '}
-                  <Send size={12} className="inline align-text-bottom" aria-hidden /> — отправить
-                  пример в Telegram.
+                  Строка — вкл/выкл, тумблер группы — всё сразу,{' '}
+                  <Send size={12} className="inline align-text-bottom" aria-hidden /> — пример в
+                  Telegram.
                 </p>
                 {(tg.adminNotify?.groups?.length ?? 0) > 0 ? (
                   <NotifyGroupsAccordion tg={tg} />
