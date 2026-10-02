@@ -1190,6 +1190,14 @@ class AdminNotifyEventItem(BaseModel):
     key: str
     label: str
     enabled: bool
+    group: str = ""
+
+
+class AdminNotifyGroupInfo(BaseModel):
+    group: str
+    title: str
+    icon: str
+    keys: list[str]
 
 
 class AdminNotifySettingsResponse(BaseModel):
@@ -1198,6 +1206,7 @@ class AdminNotifySettingsResponse(BaseModel):
     notify_enabled: bool = False
     bot_token_set: bool = False
     events: list[AdminNotifyEventItem]
+    groups: list[AdminNotifyGroupInfo] = Field(default_factory=list)
     node_offline_grace_seconds: int = 180
 
 

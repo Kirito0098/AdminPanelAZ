@@ -257,10 +257,9 @@ def _notify_drift(drift_groups: list[dict]) -> None:
         db = SessionLocal()
         try:
             for item in drift_groups:
-                admin_notify_service.send_settings_change(
+                admin_notify_service.send(
                     db,
-                    actor_username="system",
-                    settings_key="node_sync_drift",
+                    "node_sync_drift",
                     details=json.dumps(item, ensure_ascii=False),
                 )
         finally:

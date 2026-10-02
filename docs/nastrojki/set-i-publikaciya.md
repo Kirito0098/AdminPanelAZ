@@ -107,16 +107,14 @@ Telegram webhook не увидит IP Telegram — см. [`docs/Telegram.md`](..
 
 ### Совместно со StatusOpenVPN на одном домене
 
-[StatusOpenVPN](https://github.com/TheMurmabis/StatusOpenVPN) занимает `https://ваш-домен/status/`. Если оба сервиса поставят **отдельный** nginx-сайт на один домен — конфиги конфликтуют.
+[StatusOpenVPN](https://github.com/TheMurmabis/StatusOpenVPN) занимает `https://ваш-домен/status/`. Если оба сервиса поставят **отдельный** nginx-сайт на один домен — конфиги конфликтуют. Поэтому nginx-сайт на домене должен быть один, а второй сервис встраивается в него.
 
-**Что получится**
+| Способ | Панель | StatusOpenVPN | Чей nginx-сайт |
+|--------|--------|---------------|----------------|
+| [1. Панель внутри сайта Status](#способ-1-панель-внутри-сайта-status-через-ui-рекомендуется) — через UI, рекомендуется | `https://ваш-домен/panel/` | `https://ваш-домен/status/` | StatusOpenVPN |
+| [2. Status внутри сайта панели](#способ-2-status-внутри-сайта-панели-вручную) — вручную | `https://ваш-домен/` | `https://ваш-домен/status/` | AdminPanelAZ |
 
-| URL | Сервис |
-|-----|--------|
-| `https://ваш-домен/status/` | StatusOpenVPN |
-| `https://ваш-домен/panel/` | AdminPanelAZ (подпуть можно выбрать другой) |
-
-#### Установка → UI (рекомендуется)
+#### Способ 1: панель внутри сайта Status (через UI, рекомендуется)
 
 1. Сначала установите StatusOpenVPN и проверьте `https://ваш-домен/status/`
 2. Установите панель: `sudo ./install.sh` (откроется по `http://IP:порт/`)
@@ -127,15 +125,61 @@ Telegram webhook не увидит IP Telegram — см. [`docs/Telegram.md`](..
 
 Подпуть можно выбрать и **без** Status: корень / `/panel` / свой сегмент.
 
-#### Проверка
+**Проверка**
 
 1. `https://ваш-домен/status/` — Status работает
 2. `https://ваш-домен/panel/` — вход в панель
 3. Лучше проверить с телефона через мобильный интернет
 
-#### Важно
+**Важно**
 
-- Подпуть **обязателен** для совместной публикации — без него dedicated vhost панели конфликтует со Status
+- В этом способе подпуть **обязателен** — без него собственный nginx-сайт панели конфликтует со Status
+
+#### Способ 2: Status внутри сайта панели (вручную)
+
+Подходит, если панель уже опубликована на корне домена через **Настройки → Адрес сайта и HTTPS** (Nginx + Let's Encrypt) и переносить её на подпуть не хочется. Status тогда подключается блоком `location /status/` в nginx-сайт панели.
+
+1. Установите StatusOpenVPN **без его nginx**: на вопрос `Do you want to enable HTTPS? (y/N)` ответьте `N`, иначе Status создаст второй сайт на том же домене. Запомните порт Status (по умолчанию `1234`). Если Status уже настроил nginx на этом домене — используйте способ 1.
+2. Откройте nginx-сайт панели. Файл называется по домену, точки заменены на `_`:
+
+   ```bash
+   sudo nano /etc/nginx/sites-available/example_com
+   ```
+
+3. В блоке `server { listen 443 ... }`, рядом с `location / {`, добавьте (вместо `<порт>` — порт Status):
+
+   ```nginx
+   location /status/ {
+       proxy_pass http://127.0.0.1:<порт>;
+       client_max_body_size 512m;
+
+       proxy_set_header Host $host;
+       proxy_set_header X-Real-IP $remote_addr;
+       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto https;
+       proxy_set_header X-Script-Name /status;
+
+       proxy_redirect off;
+   }
+   ```
+
+   Если в `location /` вашего файла есть строки `include snippets/cloudflare-realip.conf;` и `include snippets/cloudflare-origin-lock.conf;` (включён режим Cloudflare), добавьте их и в начало блока `/status/`: тогда Status увидит настоящие IP клиентов и тоже будет закрыт от прямых обращений к IP сервера.
+
+4. Проверьте конфиг и примените:
+
+   ```bash
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+5. Откройте `https://ваш-домен/status/` (Status) и `https://ваш-домен/` (панель).
+
+**Важно**
+
+- Блок пропадает, когда панель заново записывает свой nginx-сайт: **Настройки → Адрес сайта и HTTPS → Применить**, `sudo ./scripts/nginx-repair.sh` (и пункт «Диагностика» в меню `adminpanel-menu.sh`), переустановка через `install.sh`. После этого добавьте блок снова. Обычное обновление панели, переключение Cloudflare и «Закрыть доступ по IP» сайт не переписывают.
+- С этим блоком мастер **Адрес сайта и HTTPS** принимает сайт панели за сайт StatusOpenVPN и может предложить **Интегрировать с StatusOpenVPN**. Не включайте интеграцию, пока пользуетесь способом 2: она рассчитана на сайт, который создал сам Status (способ 1).
+
+#### Для обоих способов
+
 - Не удаляйте Status через его `uninstall` после интеграции — часто ломает общий nginx и доступ к панели
 
 #### Если панель пропала после удаления Status

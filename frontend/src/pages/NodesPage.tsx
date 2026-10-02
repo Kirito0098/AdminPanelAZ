@@ -1,6 +1,7 @@
 import { FormEvent, Fragment, useEffect, useState } from 'react'
 import {
   Activity,
+  BellOff,
   Check,
   ExternalLink,
   Globe,
@@ -104,7 +105,7 @@ import type {
   NodeTransportOption,
   NodeTransportPatchBody,
 } from '@/types'
-import { Navigate } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { DOCS } from '@/lib/docsUrls'
 
 export { isProxyNode }
@@ -145,9 +146,10 @@ export default function NodesPage() {
     activate,
     deleteNode,
   } = useNode()
-  const { features } = useFeatureModules()
+  const { features, isEnabled } = useFeatureModules()
   // Default-off toggle: treat missing key as disabled (isEnabled() falls back to true).
   const proxyNodesEnabled = features.proxy_nodes === true
+  const telegramEnabled = isEnabled('telegram')
   const { success, warning, error: notifyError } = useNotifications()
   const [loading, setLoading] = useState(true)
   const [showDialog, setShowDialog] = useState(false)
@@ -980,7 +982,17 @@ export default function NodesPage() {
 
       {showMtlsStatus && mtlsStatus && <MtlsCaStatusAlert status={mtlsStatus} />}
 
-      <NodeOfflineNotifyCard />
+      {telegramEnabled ? (
+        <NodeOfflineNotifyCard />
+      ) : (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground">
+          <BellOff size={14} aria-hidden className="shrink-0" />
+          Модуль Telegram отключён — алерты offline не отправляются.{' '}
+          <Link to="/settings/modules" className="underline underline-offset-2">
+            Включить
+          </Link>
+        </p>
+      )}
 
       <NodeSyncGroupSection
         nodes={nodes}

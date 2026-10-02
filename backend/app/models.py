@@ -56,11 +56,18 @@ DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
     "high_cpu": True,
     "high_ram": True,
     "node_offline": True,
+    "node_sync_drift": True,
     "cidr_deploy_failed": True,
     "cidr_ingest_partial": True,
     "noc_report": True,
     "alert_rule": True,
     "openvpn_buffer_guard_triggered": True,
+}
+
+# Event split out of an older one: until the user saves prefs again, it follows the old event,
+# so a muted "settings_change" keeps HA drift muted after the split.
+TG_NOTIFY_EVENT_INHERITS: dict[str, str] = {
+    "node_sync_drift": "settings_change",
 }
 
 
@@ -106,15 +113,22 @@ class User(Base):
         events = self.get_tg_notify_events()
         if not self.tg_notify_events or not events:
             return bool(DEFAULT_TG_NOTIFY_EVENTS.get(event_type, False))
-        if event_type in events:
-            return bool(events[event_type])
-        return bool(DEFAULT_TG_NOTIFY_EVENTS.get(event_type, False))
+        return _stored_tg_notify_event(events, event_type)
 
     def merged_tg_notify_events(self) -> dict[str, bool]:
         stored = self.get_tg_notify_events()
         if not self.tg_notify_events or not stored:
             return dict(DEFAULT_TG_NOTIFY_EVENTS)
-        return {key: bool(stored.get(key, DEFAULT_TG_NOTIFY_EVENTS.get(key, False))) for key in DEFAULT_TG_NOTIFY_EVENTS}
+        return {key: _stored_tg_notify_event(stored, key) for key in DEFAULT_TG_NOTIFY_EVENTS}
+
+
+def _stored_tg_notify_event(stored: dict[str, bool], event_type: str) -> bool:
+    if event_type in stored:
+        return bool(stored[event_type])
+    parent = TG_NOTIFY_EVENT_INHERITS.get(event_type)
+    if parent and parent in stored:
+        return bool(stored[parent])
+    return bool(DEFAULT_TG_NOTIFY_EVENTS.get(event_type, False))
 
 
 class RefreshToken(Base):

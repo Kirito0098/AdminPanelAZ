@@ -18,6 +18,7 @@
 ## Быстрая навигация
 
 - [Unreleased](#unreleased)
+- [2.26.3](#2263---2026-10-02) — 2026-10-02
 - [2.26.2](#2262---2026-09-28) — 2026-09-28
 - [2.26.1](#2261---2026-09-28) — 2026-09-28
 - [2.26.0](#2260---2026-09-27) — 2026-09-27
@@ -64,6 +65,36 @@
 ### 🗑️ Removed
 
 ### 🔒 Security
+
+### 🧪 Tests
+
+---
+
+## [2.26.3] - 2026-10-02
+
+> **Кратко:** TG-уведомления: HA-расхождение отдельным событием, 27 событий в 9 группах с групповыми тумблерами в панели, боте и Mini App; обновлены PyJWT, react-router и vitest (закрыты уязвимости). Node agent без изменений (`1.11.1`).
+
+### ✨ Added
+
+### 🔄 Changed
+
+- **Документация / StatusOpenVPN на одном домене** — второй способ: панель остаётся на корне домена, Status ставится без своего nginx и подключается блоком `location /status/` в nginx-сайт панели. Пошагово с блоком nginx, строками Cloudflare, когда блок нужно добавлять заново (**Адрес сайта и HTTPS → Применить**, `nginx-repair.sh`, переустановка) и почему при этом способе не включать «Интегрировать с StatusOpenVPN» (`docs/nastrojki/set-i-publikaciya.md`, `diagnostika.md`, README).
+- **TG-уведомления / HA-расхождение отдельным событием** — `node_sync_drift` выделен из `settings_change` в отдельное событие со своей карточкой и тумблером; при выключенном тумблере наследует состояние `settings_change`, текст события убран из общего списка настроек (`models.py`, `admin_notify.py`, `admin_notify_settings_text.py`, `node_sync/reconcile_worker.py`).
+- **TG-уведомления / группы событий** — 27 событий сгруппированы в 9 групп с групповыми тумблерами в панели (аккордеон), Telegram-боте (меню групп) и Mini App (аккордеон): выключение группы гасит все её события разом, включение возвращает прежние индивидуальные настройки (`routers/settings_telegram.py`, `routers/tg_mini/settings.py`, `schemas.py`, `services/admin_notify.py`, `telegram_bot_handlers/settings_admin_notify.py`, `components/telegram/TelegramSettingsPanel.tsx`, `components/telegram/notifyGroups.ts`, `tg-mini/pages/Settings.tsx`).
+- **TG-уведомления / облегчённая вкладка в панели** — группы событий плоскими блоками с иконками `lucide-react` вместо карточек, строки событий плотнее и раскладываются в 2–3 колонки по ширине экрана, счётчики включённых событий — бейджи (`components/telegram/TelegramSettingsPanel.tsx`).
+- **Mini App / узкие экраны** — пары полей ввода в настройках и кодах разблокировки на узких экранах встают в одну колонку (`tg-mini/pages/Settings.tsx`, `tg-mini/pages/UnlockCodes.tsx`).
+
+### 🐛 Fixed
+
+- **Узлы / алерты offline при выключенном Telegram** — карточка настройки Telegram-алертов offline скрывается, если модуль `telegram` выключен; вместо неё подсказка, что алерты не отправляются, со ссылкой на включение модуля (`pages/NodesPage.tsx`).
+
+### 🗑️ Removed
+
+### 🔒 Security
+
+- **Frontend / зависимости** — override `brace-expansion` поднят `5.0.9` → `5.0.12` (GHSA-q2hr-2g5m-vwhr, GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p: DoS при раскрытии фигурных скобок; dev-зависимость eslint/`minimatch`), `npm audit --audit-level=high` снова зелёный (`frontend/package.json`, `package-lock.json`).
+- **Backend / PyJWT** — `2.13.0` → `2.15.1`: закрыты 12 advisory, в том числе по `PyJWKClient.get_signing_key_from_jwt` и редиректам при загрузке JWKS (PYSEC-2026-4141, PYSEC-2026-4144), что касается входа через Telegram OIDC. `PYSEC-2026-4146` (без исправленной версии, затрагивает только `decode` с `verify_signature=False`, в панели не используется) — `--ignore-vuln` в `pip-audit` CI (`backend/requirements.txt`, `.github/workflows/ci.yml`).
+- **Frontend / react-router и vitest** — `react-router-dom` `6.30` → `7.18.4` (GHSA-wrjc-x8rr-h8h6: open redirect через обратный слэш в `<Link>`/`useNavigate`; GHSA-337j-9hxr-rhxg касается только SSR) и `vitest` `3.2` → `4.1.11` (GHSA-82fw-gwwq-j7x9: чтение файлов через redirect-мок, только dev). Поведение v7 `startTransition`/`relativeSplatPath` теперь по умолчанию — проп `future` убран из тестового харнесса; `npm audit` — 0 уязвимостей (`frontend/package.json`, `package-lock.json`, `test/nodePageHarness.tsx`).
 
 ### 🧪 Tests
 

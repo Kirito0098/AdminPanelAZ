@@ -6,7 +6,7 @@ from fastapi import HTTPException
 
 from app.schemas import AdminNotifySettingsUpdate
 from app.services import telegram_bot_i18n as i18n
-from app.services.admin_notify import TG_NOTIFY_EVENT_LABELS
+from app.services.admin_notify import TG_NOTIFY_EVENT_GROUPS, TG_NOTIFY_EVENT_LABELS
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext, inline_button, inline_keyboard
 from app.services.telegram_bot_handlers import settings_fsm
@@ -18,9 +18,14 @@ from app.services.telegram_bot_handlers.settings import (
     _yes_no,
 )
 
-_EVENTS_PER_PAGE = 5
 _EVENT_KEYS = [key for key, _ in TG_NOTIFY_EVENT_LABELS]
 _EVENT_LABELS = dict(TG_NOTIFY_EVENT_LABELS)
+
+_GROUP_META: dict[str, tuple[str, str, tuple[str, ...]]] = {
+    group_id: (title, icon, tuple(keys)) for group_id, title, icon, keys in TG_NOTIFY_EVENT_GROUPS
+}
+_GROUP_ORDER = [group_id for group_id, _title, _icon, _keys in TG_NOTIFY_EVENT_GROUPS]
+_GROUP_OF_KEY = {key: group_id for group_id in _GROUP_ORDER for key in _GROUP_META[group_id][2]}
 
 
 def _get_admin_notify(ctx: BotContext):
@@ -46,64 +51,91 @@ def _apply_admin_notify_patch(ctx: BotContext, payload: AdminNotifySettingsUpdat
         raise ValueError(detail) from exc
 
 
-def _total_pages() -> int:
-    return max(1, (len(_EVENT_KEYS) + _EVENTS_PER_PAGE - 1) // _EVENTS_PER_PAGE)
+def _group_counts(events: dict[str, bool], group_id: str) -> tuple[int, int]:
+    keys = _GROUP_META[group_id][2]
+    enabled = sum(1 for key in keys if events.get(key))
+    return enabled, len(keys)
 
 
-def _format_admin_notify_menu(settings, *, page: int) -> str:
+def _group_mark(enabled: int, total: int) -> str:
+    if enabled >= total:
+        return "✓"
+    if enabled <= 0:
+        return "✗"
+    return "◐"
+
+
+def _format_admin_notify_menu(settings, *, group: str | None = None) -> str:
     events = _events_map(settings)
     enabled_count = sum(1 for key in _EVENT_KEYS if events.get(key))
     tg_id = settings.telegram_id or "(не задан)"
-    total_pages = _total_pages()
-    page = max(0, min(page, total_pages - 1))
-    return (
+    header = (
         "🔔 <b>Уведомления администратору</b>\n\n"
         f"Telegram ID: <code>{tg_id}</code>\n"
         f"Глоб. TG-уведомления: <b>{_on_off(settings.notify_enabled)}</b>\n"
         f"Токен бота: {_yes_no(settings.bot_token_set)} "
         f"{'задан' if settings.bot_token_set else 'не задан'}\n"
         f"Включено событий: <b>{enabled_count}/{len(_EVENT_KEYS)}</b>\n\n"
-        f"Стр. {page + 1}/{total_pages} — нажмите для переключения:"
     )
+    if group is not None and group in _GROUP_META:
+        title, icon, _keys = _GROUP_META[group]
+        enabled, total = _group_counts(events, group)
+        return header + f"{icon} <b>{title}</b> — Включено {enabled}/{total}, нажмите для переключения:"
+    return header + "Группы — выберите группу:"
 
 
-def _admin_notify_keyboard(settings, *, page: int) -> dict:
-    events = _events_map(settings)
-    total_pages = _total_pages()
-    page = max(0, min(page, total_pages - 1))
-    start = page * _EVENTS_PER_PAGE
-    chunk = _EVENT_KEYS[start : start + _EVENTS_PER_PAGE]
-
-    rows: list[list] = []
-    for key in chunk:
-        enabled = events.get(key, False)
-        label = _EVENT_LABELS.get(key, key)
-        mark = "✓" if enabled else "✗"
-        rows.append(
-            [
-                inline_button(
-                    f"{mark} {label}",
-                    callback_data=f"st:an:e:{key}",
-                )
-            ]
-        )
-
-    nav: list = []
-    if page > 0:
-        nav.append(inline_button("◀️", callback_data=f"st:an:p:{page - 1}"))
-    if page < total_pages - 1:
-        nav.append(inline_button("▶️", callback_data=f"st:an:p:{page + 1}"))
-    if nav:
-        rows.append(nav)
-
-    rows.append(
+def _common_footer_rows(settings) -> list[list]:
+    rows: list[list] = [
         [
             inline_button("✏️ Telegram ID", callback_data="st:an:ask:tgid"),
             inline_button("📱 Мой ID", callback_data="st:an:me"),
         ]
-    )
+    ]
     if settings.telegram_id and settings.bot_token_set:
         rows.append([inline_button("📤 Тест", callback_data="st:an:test")])
+    return rows
+
+
+def _admin_notify_keyboard(settings, *, group: str | None = None) -> dict:
+    events = _events_map(settings)
+
+    rows: list[list] = []
+    if group is not None and group in _GROUP_META:
+        _title, _icon, keys = _GROUP_META[group]
+        for key in keys:
+            enabled = events.get(key, False)
+            label = _EVENT_LABELS.get(key, key)
+            mark = "✓" if enabled else "✗"
+            rows.append([inline_button(f"{mark} {label}", callback_data=f"st:an:e:{key}")])
+        rows.append(
+            [
+                inline_button("✅ Всё в группе ВКЛ", callback_data=f"st:an:ge:{group}:1"),
+                inline_button("❌ Всё в группе ВЫКЛ", callback_data=f"st:an:ge:{group}:0"),
+            ]
+        )
+        rows.extend(_common_footer_rows(settings))
+        rows.extend(
+            [
+                [inline_button("🔄 Обновить", callback_data=f"st:an:g:{group}")],
+                [inline_button("◀️ Группы", callback_data="st:an")],
+                [inline_button("◀️ Настройки", callback_data="st:root")],
+            ]
+        )
+        return inline_keyboard(rows)
+
+    for group_id in _GROUP_ORDER:
+        title, icon, _keys = _GROUP_META[group_id]
+        enabled, total = _group_counts(events, group_id)
+        mark = _group_mark(enabled, total)
+        rows.append(
+            [
+                inline_button(
+                    f"{mark} {icon} {title} ({enabled}/{total})",
+                    callback_data=f"st:an:g:{group_id}",
+                )
+            ]
+        )
+    rows.extend(_common_footer_rows(settings))
     rows.append(
         [
             inline_button("✅ Все ВКЛ", callback_data="st:an:all:1"),
@@ -112,21 +144,27 @@ def _admin_notify_keyboard(settings, *, page: int) -> dict:
     )
     rows.extend(
         [
-            [inline_button("🔄 Обновить", callback_data=f"st:an:p:{page}")],
+            [inline_button("🔄 Обновить", callback_data="st:an")],
             [inline_button("◀️ Настройки", callback_data="st:root")],
         ]
     )
     return inline_keyboard(rows)
 
 
-async def handle_settings_admin_notify(ctx: BotContext, *, page: int = 0, message_id: int | None = None) -> None:
+async def handle_settings_admin_notify(
+    ctx: BotContext,
+    *,
+    group: str | None = None,
+    page: int = 0,
+    message_id: int | None = None,
+) -> None:
     if not await _require_admin_ctx(ctx):
         return
     settings = _get_admin_notify(ctx)
     await _send_or_edit(
         ctx,
-        _format_admin_notify_menu(settings, page=page),
-        markup=_admin_notify_keyboard(settings, page=page),
+        _format_admin_notify_menu(settings, group=group),
+        markup=_admin_notify_keyboard(settings, group=group),
         message_id=message_id,
     )
 
@@ -138,13 +176,31 @@ async def handle_admin_notify_callback(ctx: BotContext, data: str, *, message_id
     rest = data[len("st:an") :].lstrip(":")
 
     try:
-        if rest.startswith("p:"):
-            page = int(rest.split(":", 1)[1]) if rest.split(":", 1)[1].isdigit() else 0
-            await handle_settings_admin_notify(ctx, page=page, message_id=message_id)
+        if rest == "" or rest.startswith("p:"):
+            await handle_settings_admin_notify(ctx, message_id=message_id)
             return
 
-        if rest == "" or rest == "p:0":
-            await handle_settings_admin_notify(ctx, page=0, message_id=message_id)
+        if rest.startswith("ge:"):
+            parts = rest.split(":")
+            if len(parts) != 3 or parts[1] not in _GROUP_META or parts[2] not in {"0", "1"}:
+                await send_message(ctx.bot_token, ctx.chat_id, "❌ Неизвестная группа.")
+                return
+            group_id, enabled = parts[1], parts[2] == "1"
+            keys = _GROUP_META[group_id][2]
+            _apply_admin_notify_patch(
+                ctx,
+                AdminNotifySettingsUpdate(events={key: enabled for key in keys}),
+                log_details=f"field=events_group:{group_id}; value={enabled}",
+            )
+            await handle_settings_admin_notify(ctx, group=group_id, message_id=message_id)
+            return
+
+        if rest.startswith("g:"):
+            group_id = rest.split(":", 1)[1]
+            if group_id not in _GROUP_META:
+                await send_message(ctx.bot_token, ctx.chat_id, "❌ Неизвестная группа.")
+                return
+            await handle_settings_admin_notify(ctx, group=group_id, message_id=message_id)
             return
 
         if rest.startswith("e:"):
@@ -155,13 +211,14 @@ async def handle_admin_notify_callback(ctx: BotContext, data: str, *, message_id
             settings = _get_admin_notify(ctx)
             events = _events_map(settings)
             new_value = not events.get(key, False)
-            page = _EVENT_KEYS.index(key) // _EVENTS_PER_PAGE
             _apply_admin_notify_patch(
                 ctx,
                 AdminNotifySettingsUpdate(events={key: new_value}),
                 log_details=f"field=event:{key}; value={new_value}",
             )
-            await handle_settings_admin_notify(ctx, page=page, message_id=message_id)
+            await handle_settings_admin_notify(
+                ctx, group=_GROUP_OF_KEY.get(key), message_id=message_id
+            )
             return
 
         if rest.startswith("all:"):
@@ -172,7 +229,7 @@ async def handle_admin_notify_callback(ctx: BotContext, data: str, *, message_id
                 AdminNotifySettingsUpdate(events=events),
                 log_details=f"field=events_all; value={enabled}",
             )
-            await handle_settings_admin_notify(ctx, page=0, message_id=message_id)
+            await handle_settings_admin_notify(ctx, message_id=message_id)
             return
 
         if rest == "ask:tgid":
