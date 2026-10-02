@@ -92,6 +92,8 @@
 
 ### 🔒 Security
 
+- **Frontend / зависимости** — override `brace-expansion` поднят `5.0.9` → `5.0.12` (GHSA-q2hr-2g5m-vwhr, GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p: DoS при раскрытии фигурных скобок; dev-зависимость eslint/`minimatch`), `npm audit --audit-level=high` снова зелёный (`frontend/package.json`, `package-lock.json`).
+
 ### 🧪 Tests
 
 ---
