@@ -399,7 +399,7 @@ export default function NodesPage() {
         closeDialog()
         await load()
         await refresh()
-        success(editing.is_local ? 'Имя узла обновлено' : 'Узел обновлён')
+        success('Узел обновлён')
       } else {
         const kind = proxyNodesEnabled && nodeKind === 'proxy' ? 'proxy' : 'vpn'
         const created = await createNode({
@@ -1525,12 +1525,13 @@ export default function NodesPage() {
                       <Label htmlFor="node-portal-label">Название в портале</Label>
                       <Input
                         id="node-portal-label"
+                        aria-describedby="node-portal-label-hint"
                         value={portalLabel}
                         maxLength={128}
                         onChange={(e) => setPortalLabel(e.target.value)}
                         placeholder={name.trim() || 'Нидерланды'}
                       />
-                      <p className="text-xs text-muted-foreground">
+                      <p id="node-portal-label-hint" className="text-xs text-muted-foreground">
                         Так узел увидят клиенты. Если пусто — используется имя
                       </p>
                     </div>
