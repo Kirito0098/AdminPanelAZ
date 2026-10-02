@@ -9,9 +9,10 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 from urllib.parse import quote, urlencode
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,7 @@ from app.models import (
     AppSetting,
     ClientPortalToken,
     Node,
+    NodeStatus,
     OpenVpnAccessPolicy,
     User,
     UserPortalToken,
@@ -993,11 +995,19 @@ def portal_node_label(node: Node) -> str:
     return label or str(node.name)
 
 
-def _portal_node_labels(db: Session, node_ids: list[int]) -> dict[int, str]:
+class PortalNodeInfo(NamedTuple):
+    label: str
+    offline: bool
+
+
+_EXPECTED_PORTAL_NODE_ERRORS = (HTTPException, httpx.HTTPError, OSError)
+
+
+def _portal_node_info(db: Session, node_ids: list[int]) -> dict[int, PortalNodeInfo]:
     if not node_ids:
         return {}
     rows = db.query(Node).filter(Node.id.in_(node_ids)).all()
-    return {int(row.id): portal_node_label(row) for row in rows}
+    return {int(row.id): PortalNodeInfo(portal_node_label(row), row.status == NodeStatus.offline) for row in rows}
 
 
 def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
@@ -1008,9 +1018,13 @@ def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
     from app.services.feature_guards import get_feature_service
 
     targets = _owned_portal_targets(db, user_id=user.id)
-    labels = _portal_node_labels(db, sorted({node_id for node_id, _ in targets}))
+    node_info = _portal_node_info(db, sorted({node_id for node_id, _ in targets}))
     clients_by_node: dict[int, list[dict]] = {}
+    failed_nodes: set[int] = set()
     for node_id, client_name in targets:
+        info = node_info.get(node_id)
+        if node_id in failed_nodes or (info is not None and info.offline):
+            continue
         try:
             entry = _build_client_portal_entry(
                 db,
@@ -1022,11 +1036,13 @@ def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
                 download_client_name=client_name,
             )
         except Exception as exc:
+            failed_nodes.add(node_id)
             logger.warning(
                 "User portal: skipping node_id=%s client=%s (%s)",
                 node_id,
                 client_name,
                 type(exc).__name__,
+                exc_info=not isinstance(exc, _EXPECTED_PORTAL_NODE_ERRORS),
             )
             continue
         if not entry["files"]:
@@ -1037,7 +1053,7 @@ def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
     nodes = [
         {
             "node_id": node_id,
-            "label": labels.get(node_id) or f"Сервер {node_id}",
+            "label": (node_info[node_id].label if node_id in node_info else "") or f"Сервер {node_id}",
             "clients": sorted(entries, key=lambda entry: entry["client_name"]),
         }
         for node_id, entries in clients_by_node.items()
