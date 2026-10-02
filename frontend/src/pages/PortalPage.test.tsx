@@ -46,7 +46,7 @@ async function renderPortal(meta: PortalMetaResponse) {
       </Routes>
     </MemoryRouter>,
   )
-  await screen.findByText('Подключение')
+  await screen.findByText('Статус')
 }
 
 describe('PortalPage node picker', () => {
@@ -98,8 +98,44 @@ describe('PortalPage node picker', () => {
     expect(screen.queryByText('Профили пользователя')).toBeNull()
   })
 
+  it('keeps the selected profile when the active server is clicked again', async () => {
+    await renderPortal(
+      userMeta([
+        { node_id: 1, label: 'Германия', clients: [client(1, 'alice'), client(1, 'bob')] },
+        { node_id: 2, label: 'Финляндия', clients: [client(2, 'carol')] },
+      ]),
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'bob' }))
+    expect(screen.getByText('Германия · bob')).toBeTruthy()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Германия' }))
+
+    expect(screen.getByText('Германия · bob')).toBeTruthy()
+  })
+
+  it('labels the switcher button groups by their headings', async () => {
+    await renderPortal(
+      userMeta([
+        { node_id: 1, label: 'Германия', clients: [client(1, 'alice'), client(1, 'bob')] },
+        { node_id: 2, label: 'Финляндия', clients: [client(2, 'carol')] },
+      ]),
+    )
+    expect(screen.getByRole('group', { name: 'Сервер' })).toBeTruthy()
+    expect(screen.getByRole('group', { name: 'Профили пользователя' })).toBeTruthy()
+  })
+
   it('shows the empty state when there are no nodes', async () => {
     await renderPortal(userMeta([]))
     expect(screen.getByText('Нет профилей')).toBeTruthy()
+    expect(
+      screen.getByText('Сейчас нет доступных профилей. Попробуйте позже или обратитесь к администратору.'),
+    ).toBeTruthy()
+    expect(screen.queryByText('Подключение')).toBeNull()
+  })
+
+  it('keeps the unlock code form when there are no nodes', async () => {
+    await renderPortal({ ...userMeta([]), unlock_codes_enabled: true })
+    expect(screen.getByRole('heading', { name: 'Активировать ключ' })).toBeTruthy()
+    expect(screen.queryByText('Подключение')).toBeNull()
   })
 })

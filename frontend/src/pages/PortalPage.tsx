@@ -626,10 +626,12 @@ export default function PortalPage() {
         {nodes.length > 1 && (
           <section className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
             <div>
-              <h2 className="text-base font-semibold">Сервер</h2>
+              <h2 id="portal-node-picker-title" className="text-base font-semibold">
+                Сервер
+              </h2>
               <p className="text-xs text-slate-400">Выберите сервер, через который хотите подключаться.</p>
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div role="group" aria-labelledby="portal-node-picker-title" className="flex flex-wrap gap-1.5">
               {nodes.map((node) => {
                 const selected = node.node_id === activeNode?.node_id
                 return (
@@ -638,6 +640,7 @@ export default function PortalPage() {
                     type="button"
                     aria-pressed={selected}
                     onClick={() => {
+                      if (selected) return
                       const first = node.clients[0] ?? null
                       setSelectedNodeId(node.node_id)
                       setSelectedClientKey(first ? portalClientKey(first) : '')
@@ -662,12 +665,14 @@ export default function PortalPage() {
         {nodeClients.length > 1 && (
           <section className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
             <div>
-              <h2 className="text-base font-semibold">Профили пользователя</h2>
+              <h2 id="portal-profile-picker-title" className="text-base font-semibold">
+                Профили пользователя
+              </h2>
               <p className="text-xs text-slate-400">
                 Доступно профилей: {nodeClients.length}. Выберите нужный профиль для скачивания конфигурации.
               </p>
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div role="group" aria-labelledby="portal-profile-picker-title" className="flex flex-wrap gap-1.5">
               {nodeClients.map((client) => {
                 const key = portalClientKey(client)
                 const selected = activeClient !== null && key === portalClientKey(activeClient)
@@ -722,110 +727,120 @@ export default function PortalPage() {
           </section>
         )}
 
-        <section className="space-y-4 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-base font-semibold">Подключение</h2>
-              <p className="text-xs text-slate-400">Три шага: приложение → профиль → соединение</p>
-            </div>
-            {activeClient && activeClient.protocols.length > 1 && (
-              <div className="flex flex-wrap gap-1.5">
-                {[...activeClient.protocols].sort((a, b) => {
-                  const order = ['openvpn', 'amneziawg2', 'amneziawg', 'wireguard']
-                  const ia = order.indexOf(a)
-                  const ib = order.indexOf(b)
-                  return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
-                }).map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => {
-                      setProtocol(p)
-                      setOpenStep('install')
-                    }}
-                    className={cn(
-                      'rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors',
-                      protocol === p
-                        ? 'border-cyan-400/50 bg-cyan-400/15 text-cyan-200'
-                        : 'border-white/10 text-slate-300 hover:bg-white/5',
-                    )}
-                  >
-                    {protocolTitle(p)}
-                  </button>
-                ))}
+        {!activeClient && (
+          <section className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
+            <p className="text-sm text-slate-300">
+              Сейчас нет доступных профилей. Попробуйте позже или обратитесь к администратору.
+            </p>
+          </section>
+        )}
+
+        {activeClient && (
+          <section className="space-y-4 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-base font-semibold">Подключение</h2>
+                <p className="text-xs text-slate-400">Три шага: приложение → профиль → соединение</p>
               </div>
-            )}
-          </div>
-
-          <div className="flex flex-wrap gap-1.5">
-            {OS_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => setOs(opt.id)}
-                className={cn(
-                  'rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors',
-                  os === opt.id
-                    ? 'border-white/25 bg-white/10 text-white'
-                    : 'border-transparent text-slate-400 hover:bg-white/5 hover:text-slate-200',
-                )}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="space-y-2.5">
-            <KitPanel
-              open={openStep === 'install'}
-              onToggle={() => setOpenStep('install')}
-              step={1}
-              title="Установить приложение"
-            >
-              <p className="text-sm text-slate-300">
-                Установите официальный клиент для {OS_OPTIONS.find((o) => o.id === os)?.label} и{' '}
-                {protocolTitle(protocol || preferredClientProtocol(activeClient) || 'openvpn')}.
-              </p>
-              {appLink ? (
-                <Button asChild className="gap-1.5 bg-cyan-400 text-slate-950 hover:bg-cyan-300">
-                  <a href={appLink.url} target="_blank" rel="noreferrer">
-                    <ExternalLink size={16} />
-                    Скачать {appLink.label}
-                  </a>
-                </Button>
-              ) : (
-                <p className="text-sm text-slate-400">Ссылка на приложение для этой ОС появится после выбора протокола.</p>
+              {activeClient.protocols.length > 1 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {[...activeClient.protocols].sort((a, b) => {
+                    const order = ['openvpn', 'amneziawg2', 'amneziawg', 'wireguard']
+                    const ia = order.indexOf(a)
+                    const ib = order.indexOf(b)
+                    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
+                  }).map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => {
+                        setProtocol(p)
+                        setOpenStep('install')
+                      }}
+                      className={cn(
+                        'rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors',
+                        protocol === p
+                          ? 'border-cyan-400/50 bg-cyan-400/15 text-cyan-200'
+                          : 'border-white/10 text-slate-300 hover:bg-white/5',
+                      )}
+                    >
+                      {protocolTitle(p)}
+                    </button>
+                  ))}
+                </div>
               )}
-            </KitPanel>
+            </div>
 
-            <KitPanel
-              open={openStep === 'profile'}
-              onToggle={() => setOpenStep('profile')}
-              step={2}
-              title="Получить профиль"
-            >
-              <p className="text-sm text-slate-300">{profileHint(protocol || 'openvpn')}</p>
-              <ProfileFileList
-                files={filesForProtocol}
-                protocol={protocol || 'openvpn'}
-                onCopied={(ok) => setToast(ok ? 'Ссылка на файл скопирована' : 'Не удалось скопировать')}
-              />
-            </KitPanel>
+            <div className="flex flex-wrap gap-1.5">
+              {OS_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setOs(opt.id)}
+                  className={cn(
+                    'rounded-lg border px-2.5 py-1 text-xs font-medium transition-colors',
+                    os === opt.id
+                      ? 'border-white/25 bg-white/10 text-white'
+                      : 'border-transparent text-slate-400 hover:bg-white/5 hover:text-slate-200',
+                  )}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
 
-            <KitPanel
-              open={openStep === 'connect'}
-              onToggle={() => setOpenStep('connect')}
-              step={3}
-              title="Подключиться"
-            >
-              <p className="text-sm text-slate-300">{connectHint(protocol || 'openvpn', os)}</p>
-              <p className="text-xs text-slate-500">
-                Если соединение не поднимается — проверьте, что выбран правильный протокол и приложение
-                установлено из официального источника.
-              </p>
-            </KitPanel>
-          </div>
-        </section>
+            <div className="space-y-2.5">
+              <KitPanel
+                open={openStep === 'install'}
+                onToggle={() => setOpenStep('install')}
+                step={1}
+                title="Установить приложение"
+              >
+                <p className="text-sm text-slate-300">
+                  Установите официальный клиент для {OS_OPTIONS.find((o) => o.id === os)?.label} и{' '}
+                  {protocolTitle(protocol || preferredClientProtocol(activeClient) || 'openvpn')}.
+                </p>
+                {appLink ? (
+                  <Button asChild className="gap-1.5 bg-cyan-400 text-slate-950 hover:bg-cyan-300">
+                    <a href={appLink.url} target="_blank" rel="noreferrer">
+                      <ExternalLink size={16} />
+                      Скачать {appLink.label}
+                    </a>
+                  </Button>
+                ) : (
+                  <p className="text-sm text-slate-400">Ссылка на приложение для этой ОС появится после выбора протокола.</p>
+                )}
+              </KitPanel>
+
+              <KitPanel
+                open={openStep === 'profile'}
+                onToggle={() => setOpenStep('profile')}
+                step={2}
+                title="Получить профиль"
+              >
+                <p className="text-sm text-slate-300">{profileHint(protocol || 'openvpn')}</p>
+                <ProfileFileList
+                  files={filesForProtocol}
+                  protocol={protocol || 'openvpn'}
+                  onCopied={(ok) => setToast(ok ? 'Ссылка на файл скопирована' : 'Не удалось скопировать')}
+                />
+              </KitPanel>
+
+              <KitPanel
+                open={openStep === 'connect'}
+                onToggle={() => setOpenStep('connect')}
+                step={3}
+                title="Подключиться"
+              >
+                <p className="text-sm text-slate-300">{connectHint(protocol || 'openvpn', os)}</p>
+                <p className="text-xs text-slate-500">
+                  Если соединение не поднимается — проверьте, что выбран правильный протокол и приложение
+                  установлено из официального источника.
+                </p>
+              </KitPanel>
+            </div>
+          </section>
+        )}
 
         {activeClient && activeClient.files.length === 0 && (
           <p className="text-center text-sm text-slate-400">Для этого клиента пока нет файлов профиля.</p>
