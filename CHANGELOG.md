@@ -81,8 +81,12 @@
 - **Документация / StatusOpenVPN на одном домене** — второй способ: панель остаётся на корне домена, Status ставится без своего nginx и подключается блоком `location /status/` в nginx-сайт панели. Пошагово с блоком nginx, строками Cloudflare, когда блок нужно добавлять заново (**Адрес сайта и HTTPS → Применить**, `nginx-repair.sh`, переустановка) и почему при этом способе не включать «Интегрировать с StatusOpenVPN» (`docs/nastrojki/set-i-publikaciya.md`, `diagnostika.md`, README).
 - **TG-уведомления / HA-расхождение отдельным событием** — `node_sync_drift` выделен из `settings_change` в отдельное событие со своей карточкой и тумблером; при выключенном тумблере наследует состояние `settings_change`, текст события убран из общего списка настроек (`models.py`, `admin_notify.py`, `admin_notify_settings_text.py`, `node_sync/reconcile_worker.py`).
 - **TG-уведомления / группы событий** — 27 событий сгруппированы в 9 групп с групповыми тумблерами в панели (аккордеон), Telegram-боте (меню групп) и Mini App (аккордеон): выключение группы гасит все её события разом, включение возвращает прежние индивидуальные настройки (`routers/settings_telegram.py`, `routers/tg_mini/settings.py`, `schemas.py`, `services/admin_notify.py`, `telegram_bot_handlers/settings_admin_notify.py`, `components/telegram/TelegramSettingsPanel.tsx`, `components/telegram/notifyGroups.ts`, `tg-mini/pages/Settings.tsx`).
+- **TG-уведомления / облегчённая вкладка в панели** — группы событий плоскими блоками с иконками `lucide-react` вместо карточек, строки событий плотнее и раскладываются в 2–3 колонки по ширине экрана, счётчики включённых событий — бейджи (`components/telegram/TelegramSettingsPanel.tsx`).
+- **Mini App / узкие экраны** — пары полей ввода в настройках и кодах разблокировки на узких экранах встают в одну колонку (`tg-mini/pages/Settings.tsx`, `tg-mini/pages/UnlockCodes.tsx`).
 
 ### 🐛 Fixed
+
+- **Узлы / алерты offline при выключенном Telegram** — карточка настройки Telegram-алертов offline скрывается, если модуль `telegram` выключен; вместо неё подсказка, что алерты не отправляются, со ссылкой на включение модуля (`pages/NodesPage.tsx`).
 
 ### 🗑️ Removed
 
