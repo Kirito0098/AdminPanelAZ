@@ -35,6 +35,7 @@ export interface NodeTransportPreflightResult {
 export interface Node {
   id: number
   name: string
+  portal_label?: string | null
   host: string
   port: number
   status: NodeStatus

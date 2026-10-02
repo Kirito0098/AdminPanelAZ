@@ -113,6 +113,7 @@ export async function updateNode(
     api_key: string
     destination_ip: string | null
     linked_vpn_node_id: number | null
+    portal_label: string | null
   }>,
 ) {
   return apiFetch<Node>(`/nodes/${id}`, {
