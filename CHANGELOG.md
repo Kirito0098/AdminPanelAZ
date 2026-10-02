@@ -93,6 +93,7 @@
 ### 🔒 Security
 
 - **Frontend / зависимости** — override `brace-expansion` поднят `5.0.9` → `5.0.12` (GHSA-q2hr-2g5m-vwhr, GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p: DoS при раскрытии фигурных скобок; dev-зависимость eslint/`minimatch`), `npm audit --audit-level=high` снова зелёный (`frontend/package.json`, `package-lock.json`).
+- **Backend / PyJWT** — `2.13.0` → `2.15.1`: закрыты 12 advisory, в том числе по `PyJWKClient.get_signing_key_from_jwt` и редиректам при загрузке JWKS (PYSEC-2026-4141, PYSEC-2026-4144), что касается входа через Telegram OIDC. `PYSEC-2026-4146` (без исправленной версии, затрагивает только `decode` с `verify_signature=False`, в панели не используется) — `--ignore-vuln` в `pip-audit` CI (`backend/requirements.txt`, `.github/workflows/ci.yml`).
 
 ### 🧪 Tests
 

@@ -57,8 +57,9 @@ jobs:
           NODE_AGENT_MODE: dev
         run: PYTHONPATH=. pytest tests/ -q --tb=short
 
+      # PYSEC-2026-4146 (PyJWT): no fixed release; only hits decode with verify_signature=False, unused here.
       - name: pip-audit (dependency vulnerabilities)
-        run: pip-audit -r backend/requirements.txt
+        run: pip-audit -r backend/requirements.txt --ignore-vuln PYSEC-2026-4146
 
       - name: Bandit (security scan)
         run: bandit -c backend/bandit.yaml -r backend/app backend/node_agent -ll
