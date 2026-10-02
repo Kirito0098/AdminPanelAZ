@@ -1509,6 +1509,7 @@ class NodeUpdate(BaseModel):
     api_key: str | None = Field(default=None, min_length=8)
     destination_ip: str | None = Field(default=None, max_length=64)
     linked_vpn_node_id: int | None = None
+    portal_label: str | None = Field(default=None, max_length=128)
 
 
 class NodeResponse(NodeBase):
@@ -1525,6 +1526,7 @@ class NodeResponse(NodeBase):
     ssh_remote_agent_port: int | None = None
     destination_ip: str | None = None
     linked_vpn_node_id: int | None = None
+    portal_label: str | None = None
     last_seen_at: datetime | None = None
     metadata: dict[str, Any] = {}
     created_at: datetime

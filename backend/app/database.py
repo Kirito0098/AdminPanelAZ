@@ -1582,6 +1582,7 @@ def _migrate_nodes_columns() -> None:
     _migrate_nodes_openvpn_multihome()
     _migrate_nodes_openvpn_restart_pending()
     _migrate_nodes_proxy_fields()
+    _migrate_nodes_portal_label()
 
 
 def _run_db_migrations() -> None:
@@ -1918,6 +1919,19 @@ def _migrate_nodes_proxy_fields() -> None:
         if "linked_vpn_node_id" not in cols:
             conn.execute(text("ALTER TABLE nodes ADD COLUMN linked_vpn_node_id INTEGER REFERENCES nodes(id)"))
             logger.info("DB migration: added nodes.linked_vpn_node_id")
+
+
+def _migrate_nodes_portal_label() -> None:
+    """Add optional client-facing node name for the user portal."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    if "portal_label" in cols:
+        return
+    with _migration_transaction() as conn:
+        conn.execute(text("ALTER TABLE nodes ADD COLUMN portal_label VARCHAR(128)"))
+        logger.info("DB migration: added nodes.portal_label")
 
 
 _POLICY_DEADLINE_BY_VPN_TYPE = {

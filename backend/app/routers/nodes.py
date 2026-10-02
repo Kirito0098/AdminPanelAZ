@@ -186,6 +186,7 @@ def _to_response(node: Node) -> NodeResponse:
         ssh_remote_agent_port=getattr(node, "ssh_remote_agent_port", None),
         destination_ip=getattr(node, "destination_ip", None),
         linked_vpn_node_id=getattr(node, "linked_vpn_node_id", None),
+        portal_label=getattr(node, "portal_label", None),
         last_seen_at=node.last_seen_at,
         metadata=node_metadata_dict(node),
         created_at=node.created_at,
@@ -601,6 +602,9 @@ def update_node(
             linked_vpn_node_id=updates["linked_vpn_node_id"],
             node_kind=kind,
         )
+    if "portal_label" in updates:
+        label = (updates["portal_label"] or "").strip()
+        node.portal_label = label or None
     if "destination_ip" in updates and kind == NODE_KIND_PROXY:
         dest = updates["destination_ip"]
         if dest is None or (isinstance(dest, str) and not dest.strip()):

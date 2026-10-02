@@ -278,6 +278,7 @@ class Node(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(128))
+    portal_label: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
     host: Mapped[str] = mapped_column(String(255))
     port: Mapped[int] = mapped_column(Integer, default=9100)
     api_key_hash: Mapped[str] = mapped_column(String(255), default="")
