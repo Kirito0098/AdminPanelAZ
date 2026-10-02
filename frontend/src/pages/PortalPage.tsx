@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import Spinner from '@/components/ui/Spinner'
 import { parseTimestamp } from '@/lib/datetime'
+import { normalizePortalNodes, pickPortalSelection, portalClientKey, portalProfileLabel } from '@/lib/portalNodes'
 import { cn } from '@/lib/utils'
 
 type OsId = 'windows' | 'android' | 'ios' | 'mac' | 'linux'
@@ -415,23 +416,6 @@ function ProfileFileList({
   )
 }
 
-function normalizePortalClients(data: PortalMetaResponse): PortalClientEntry[] {
-  if (data.kind === 'user') return data.clients
-  return [
-    {
-      node_id: data.node_id,
-      client_name: data.client_name,
-      protocols: data.protocols,
-      files: data.files,
-      status: data.status,
-    },
-  ]
-}
-
-function portalClientKey(client: PortalClientEntry): string {
-  return `${client.node_id}:${client.client_name}`
-}
-
 function preferredClientProtocol(client: PortalClientEntry | null | undefined): string {
   if (!client) return ''
   return preferredProtocol(client.protocols.length ? client.protocols : client.files.map((file) => file.vpn_type))
@@ -444,6 +428,7 @@ export default function PortalPage() {
   const [loading, setLoading] = useState(true)
   const [os, setOs] = useState<OsId>(() => detectOs())
   const [selectedClientKey, setSelectedClientKey] = useState<string>('')
+  const [selectedNodeId, setSelectedNodeId] = useState<number | null>(null)
   const [protocol, setProtocol] = useState<string>('')
   const [openStep, setOpenStep] = useState<KitStep>('install')
   const [toast, setToast] = useState<string | null>(null)
@@ -460,11 +445,11 @@ export default function PortalPage() {
     setLoading(true)
     fetchPublicPortalMeta(token)
       .then((meta) => {
-        const clients = normalizePortalClients(meta)
-        const firstClient = clients[0] || null
+        const first = pickPortalSelection(normalizePortalNodes(meta), null, '')
         setData(meta)
-        setSelectedClientKey(firstClient ? portalClientKey(firstClient) : '')
-        setProtocol(preferredClientProtocol(firstClient))
+        setSelectedNodeId(first.node?.node_id ?? null)
+        setSelectedClientKey(first.client ? portalClientKey(first.client) : '')
+        setProtocol(preferredClientProtocol(first.client))
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : 'Ошибка загрузки'))
       .finally(() => setLoading(false))
@@ -485,12 +470,11 @@ export default function PortalPage() {
     try {
       const result = await redeemPublicPortalCode(token, code)
       const refreshed = await fetchPublicPortalMeta(token)
-      const nextClients = normalizePortalClients(refreshed)
-      const nextSelected =
-        nextClients.find((client) => portalClientKey(client) === selectedClientKey) ?? nextClients[0] ?? null
+      const next = pickPortalSelection(normalizePortalNodes(refreshed), selectedNodeId, selectedClientKey)
       setData(refreshed)
-      setSelectedClientKey(nextSelected ? portalClientKey(nextSelected) : '')
-      setProtocol(preferredClientProtocol(nextSelected))
+      setSelectedNodeId(next.node?.node_id ?? null)
+      setSelectedClientKey(next.client ? portalClientKey(next.client) : '')
+      setProtocol(preferredClientProtocol(next.client))
       setRedeemCode('')
       const applied = result.protocols_applied || []
       const byProtocol = result.access_until_by_protocol || {}
@@ -528,11 +512,14 @@ export default function PortalPage() {
     }
   }
 
-  const clients = useMemo(() => (data ? normalizePortalClients(data) : []), [data])
-  const activeClient = useMemo(
-    () => clients.find((client) => portalClientKey(client) === selectedClientKey) ?? clients[0] ?? null,
-    [clients, selectedClientKey],
+  const nodes = useMemo(() => (data ? normalizePortalNodes(data) : []), [data])
+  const selection = useMemo(
+    () => pickPortalSelection(nodes, selectedNodeId, selectedClientKey),
+    [nodes, selectedNodeId, selectedClientKey],
   )
+  const activeNode = selection.node
+  const activeClient = selection.client
+  const nodeClients = activeNode?.clients ?? []
 
   const filesForProtocol = useMemo(() => {
     if (!activeClient) return []
@@ -612,7 +599,7 @@ export default function PortalPage() {
         <section className="grid grid-cols-2 gap-3">
           <StatCard
             label={data.kind === 'user' ? 'Профиль' : 'Клиент'}
-            value={activeClient?.client_name || 'Нет профилей'}
+            value={portalProfileLabel(nodes, selection)}
             icon={<UserRound size={14} />}
             tone="border-sky-400/30 bg-sky-400/10 text-sky-300"
           />
@@ -636,22 +623,59 @@ export default function PortalPage() {
           />
         </section>
 
-        {data.kind === 'user' && clients.length > 0 && (
+        {nodes.length > 1 && (
+          <section className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
+            <div>
+              <h2 className="text-base font-semibold">Сервер</h2>
+              <p className="text-xs text-slate-400">Выберите сервер, через который хотите подключаться.</p>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {nodes.map((node) => {
+                const selected = node.node_id === activeNode?.node_id
+                return (
+                  <button
+                    key={node.node_id}
+                    type="button"
+                    aria-pressed={selected}
+                    onClick={() => {
+                      const first = node.clients[0] ?? null
+                      setSelectedNodeId(node.node_id)
+                      setSelectedClientKey(first ? portalClientKey(first) : '')
+                      setProtocol(preferredClientProtocol(first))
+                      setOpenStep('profile')
+                    }}
+                    className={cn(
+                      'rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors',
+                      selected
+                        ? 'border-cyan-400/50 bg-cyan-400/15 text-cyan-200'
+                        : 'border-white/10 text-slate-300 hover:bg-white/5',
+                    )}
+                  >
+                    {node.label}
+                  </button>
+                )
+              })}
+            </div>
+          </section>
+        )}
+
+        {nodeClients.length > 1 && (
           <section className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
             <div>
               <h2 className="text-base font-semibold">Профили пользователя</h2>
               <p className="text-xs text-slate-400">
-                Доступно профилей: {clients.length}. Выберите нужный профиль для скачивания конфигурации.
+                Доступно профилей: {nodeClients.length}. Выберите нужный профиль для скачивания конфигурации.
               </p>
             </div>
             <div className="flex flex-wrap gap-1.5">
-              {clients.map((client) => {
+              {nodeClients.map((client) => {
                 const key = portalClientKey(client)
-                const selected = key === portalClientKey(activeClient ?? client)
+                const selected = activeClient !== null && key === portalClientKey(activeClient)
                 return (
                   <button
                     key={key}
                     type="button"
+                    aria-pressed={selected}
                     onClick={() => {
                       setSelectedClientKey(key)
                       setProtocol(preferredClientProtocol(client))

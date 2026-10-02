@@ -28,6 +28,12 @@ export interface PortalClientEntry {
   status?: PortalStatusMeta
 }
 
+export interface PortalNodeEntry {
+  node_id: number
+  label: string
+  clients: PortalClientEntry[]
+}
+
 export interface ClientPortalMetaResponse extends PortalClientEntry {
   kind?: 'client'
   brand_title: string
@@ -38,7 +44,7 @@ export interface UserPortalMetaResponse {
   kind: 'user'
   brand_title: string
   unlock_codes_enabled: boolean
-  clients: PortalClientEntry[]
+  nodes: PortalNodeEntry[]
 }
 
 export type PortalMetaResponse = ClientPortalMetaResponse | UserPortalMetaResponse
