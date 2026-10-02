@@ -11,7 +11,7 @@
 ## Важно: локальные настройки Cursor не в git
 
 Каталог **`.cursor/`** (MCP, rules, hooks) и **`.codebase-memory/`** в репозиторий **не коммитятся**.  
-Skills мейнтейнера лежат вне репо (`~/.agents/skills/`, `~/.cursor/skills-cursor` и т.п.).
+Skills мейнтейнера лежат вне репо (`~/.agents/skills/`, `~/.cursor/skills-cursor`, плагины в `~/.cursor/plugins/cache/` и т.п.).
 
 Подключайте инструменты **у себя локально** по этому файлу — не копируйте чужие токены и `mcp.json` с секретами в PR.
 
@@ -137,11 +137,19 @@ gh auth login
 
 ## Superpowers ([obra/superpowers](https://github.com/obra/superpowers)) — зачем каждый
 
-**Что это:** методология *как вести разработку с агентом* (не security-библиотека). ~14 skills. Ставится глобально, не в git репо:
+**Что это:** методология *как вести разработку с агентом* (не security-библиотека). ~14 skills. Ставится глобально, не в git репо — **плагином Cursor** `superpowers` из Marketplace (**Settings → Plugins**). Плагин обновляется вместе с Cursor и кладёт skills в `~/.cursor/plugins/cache/…`.
+
+Если плагин уже стоит, **не** ставьте пакет ещё и через `npx skills add obra/superpowers`: каждый skill окажется в списке агента дважды, и он хуже выбирает нужный. Остался старый дубль в `~/.agents/skills/` — удалите его:
 
 ```bash
-npx skills add obra/superpowers -g -a cursor -s '*' -y
+npx skills remove -g -y brainstorming dispatching-parallel-agents executing-plans \
+  finishing-a-development-branch receiving-code-review requesting-code-review \
+  subagent-driven-development systematic-debugging test-driven-development \
+  using-git-worktrees using-superpowers verification-before-completion \
+  writing-plans writing-skills
 ```
+
+Без плагина (другой агент, не Cursor) — `npx skills add obra/superpowers -g -a cursor -s '*' -y`, но только один из двух способов.
 
 **Зачем пакет в целом:** чтобы агент не прыгал сразу в код, а проходил цикл: понять задачу → дизайн → план → TDD → ревью → доказательства → закрытие ветки. Для крупных фич AdminPanelAZ (HA, HTTPS, Telegram, multi-node) это снижает «сломали соседний модуль».
 

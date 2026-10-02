@@ -60,6 +60,8 @@
 
 ### 🔄 Changed
 
+- **Документация / Superpowers плагином Cursor** — основной способ установки Superpowers теперь плагин Cursor из Marketplace; `npx skills add obra/superpowers` оставлен только для агентов без плагина. Добавлено предупреждение не ставить оба способа сразу (skills дублируются в списке агента) и команда удаления старого дубля из `~/.agents/skills/` (`CONTRIBUTING.md`).
+
 ### 🐛 Fixed
 
 ### 🗑️ Removed
