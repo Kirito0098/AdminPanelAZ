@@ -45,7 +45,7 @@ export const featureModulesModule = { useFeatureModules: () => featureModules }
 export const authModule = { useAuth: () => auth }
 
 export function TestRouter({ children }: { children: ReactNode }) {
-  return <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>{children}</MemoryRouter>
+  return <MemoryRouter>{children}</MemoryRouter>
 }
 
 /** Renders while NodeContext is still loading, then applies `resolved` (active node by default) and re-renders. */
