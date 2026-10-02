@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
 import re
 import secrets
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -28,7 +29,7 @@ from app.models import (
     VpnType,
     WgAccessPolicy,
 )
-from app.services.node_manager import get_adapter_for_node, get_active_node
+from app.services.node_manager import get_active_node, get_adapter_for_node
 from app.services.node_sync.groups import find_sync_group_containing_node
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
@@ -40,6 +41,7 @@ from app.services.vpn_profile_visibility import (
     resolve_effective_visible_vpn_profiles,
 )
 
+logger = logging.getLogger(__name__)
 
 _HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$"
@@ -986,6 +988,18 @@ def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
     }
 
 
+def portal_node_label(node: Node) -> str:
+    label = (getattr(node, "portal_label", None) or "").strip()
+    return label or str(node.name)
+
+
+def _portal_node_labels(db: Session, node_ids: list[int]) -> dict[int, str]:
+    if not node_ids:
+        return {}
+    rows = db.query(Node).filter(Node.id.in_(node_ids)).all()
+    return {int(row.id): portal_node_label(row) for row in rows}
+
+
 def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
     base = resolve_portal_base_url(db)
     if not base:
@@ -993,24 +1007,47 @@ def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
     user = ensure_portal_user(db, token_row.user_id)
     from app.services.feature_guards import get_feature_service
 
-    clients = []
-    for node_id, client_name in _owned_portal_targets(db, user_id=user.id):
-        entry = _build_client_portal_entry(
-            db,
-            token=token_row.token,
-            node_id=node_id,
-            client_name=client_name,
-            base=base,
-            download_node_id=node_id,
-            download_client_name=client_name,
-        )
+    targets = _owned_portal_targets(db, user_id=user.id)
+    labels = _portal_node_labels(db, sorted({node_id for node_id, _ in targets}))
+    clients_by_node: dict[int, list[dict]] = {}
+    for node_id, client_name in targets:
+        try:
+            entry = _build_client_portal_entry(
+                db,
+                token=token_row.token,
+                node_id=node_id,
+                client_name=client_name,
+                base=base,
+                download_node_id=node_id,
+                download_client_name=client_name,
+            )
+        except Exception as exc:
+            logger.warning(
+                "User portal: skipping node_id=%s client=%s (%s)",
+                node_id,
+                client_name,
+                type(exc).__name__,
+            )
+            continue
+        if not entry["files"]:
+            continue
         entry["status"] = _apply_user_subscription_status(entry["status"], user)
-        clients.append(entry)
+        clients_by_node.setdefault(node_id, []).append(entry)
+
+    nodes = [
+        {
+            "node_id": node_id,
+            "label": labels.get(node_id) or f"Сервер {node_id}",
+            "clients": sorted(entries, key=lambda entry: entry["client_name"]),
+        }
+        for node_id, entries in clients_by_node.items()
+    ]
+    nodes.sort(key=lambda node: (node["label"].casefold(), node["node_id"]))
     return {
         "kind": "user",
         "brand_title": _portal_brand_title(db),
         "unlock_codes_enabled": get_feature_service().is_enabled("unlock_codes"),
-        "clients": clients,
+        "nodes": nodes,
     }
 
 
