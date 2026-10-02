@@ -1283,18 +1283,23 @@ def test_user_payload_skips_offline_nodes_without_calling_builder():
 
 
 def test_user_payload_logs_traceback_only_for_unexpected_errors(caplog):
+    from app.services.ssh_tunnel_pool import SshTunnelError
+
     caplog.set_level("WARNING", logger="app.services.client_portal")
     _run_user_payload(
-        targets=[(1, "a"), (2, "b")],
+        targets=[(1, "a"), (2, "b"), (3, "c")],
         entries={
             (1, "a"): HTTPException(status_code=502, detail="secret-host 10.0.0.1"),
             (2, "b"): KeyError("secret-key"),
+            (3, "c"): SshTunnelError("ssh_unreachable", "secret-ssh 10.0.0.2"),
         },
-        labels={1: "DE", 2: "NL"},
+        labels={1: "DE", 2: "NL", 3: "FI"},
     )
     records = {r.getMessage().split("node_id=")[1].split()[0]: r for r in caplog.records}
     assert not records["1"].exc_info
     assert records["2"].exc_info
+    assert not records["3"].exc_info
+    assert "SshTunnelError" in records["3"].getMessage()
     assert "HTTPException" in records["1"].getMessage()
     assert "KeyError" in records["2"].getMessage()
     for record in caplog.records:

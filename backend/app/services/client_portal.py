@@ -35,6 +35,7 @@ from app.services.node_manager import get_active_node, get_adapter_for_node
 from app.services.node_sync.groups import find_sync_group_containing_node
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
+from app.services.ssh_tunnel_pool import SshTunnelError
 from app.services.vpn_profile_visibility import (
     feature_flags_from_service,
     get_default_visible_vpn_profiles,
@@ -1000,7 +1001,7 @@ class PortalNodeInfo(NamedTuple):
     offline: bool
 
 
-_EXPECTED_PORTAL_NODE_ERRORS = (HTTPException, httpx.HTTPError, OSError)
+_EXPECTED_PORTAL_NODE_ERRORS = (HTTPException, httpx.HTTPError, OSError, SshTunnelError)
 
 
 def _portal_node_info(db: Session, node_ids: list[int]) -> dict[int, PortalNodeInfo]:
