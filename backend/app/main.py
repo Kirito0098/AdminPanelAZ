@@ -8,7 +8,13 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 from app.middleware.api_rate_limit import ApiRateLimitMiddleware
-from app.middleware.http_security import HttpSecurityMiddleware, build_robots_txt, build_security_txt, get_panel_branding
+from app.middleware.http_security import (
+    HttpSecurityMiddleware,
+    build_robots_txt,
+    build_security_txt,
+    get_panel_branding,
+    is_scanner_probe_path,
+)
 from app.middleware.active_session import ActiveSessionMiddleware
 from app.services.expected_node import EXPECTED_NODE_HEADER, ExpectedNodeMiddleware
 from app.services.security_bootstrap import (
@@ -385,7 +391,6 @@ async def ip_restriction_middleware(request, call_next):
         in (
             f"{api}/health",
             f"{api}/health/deep",
-            with_access_path(settings, "/metrics"),
             with_access_path(settings, "/ip-blocked"),
         )
     )
@@ -477,21 +482,6 @@ def health_deep(request: Request):
         db.close()
 
 
-@app.get(f"{with_access_path(settings, '/metrics')}", include_in_schema=False)
-def metrics():
-    from fastapi.responses import Response
-
-    from app.database import SessionLocal
-    from app.services.prometheus_metrics import render_metrics
-
-    db = SessionLocal()
-    try:
-        body, content_type = render_metrics(db)
-        return Response(content=body, media_type=content_type)
-    finally:
-        db.close()
-
-
 @app.get(f"{with_access_path(settings, '/robots.txt')}", include_in_schema=False)
 def robots_txt():
     from fastapi.responses import PlainTextResponse
@@ -560,7 +550,7 @@ def _mount_frontend(app: FastAPI) -> None:
         from app.services.html_csp import serve_html_with_nonce
 
         api_segment = _API_PREFIX.lstrip("/")
-        if full_path.startswith(f"{api_segment}/") or full_path == api_segment:
+        if full_path.startswith(f"{api_segment}/") or full_path == api_segment or is_scanner_probe_path(full_path):
             from fastapi import HTTPException
 
             raise HTTPException(status_code=404)

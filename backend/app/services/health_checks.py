@@ -48,14 +48,7 @@ def assert_health_deep_access(request) -> None:
 
 
 def build_light_health() -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "status": "ok",
-        "app": settings.app_name,
-        "env": settings.app_env,
-        "resource_profile": settings.resource_profile,
-        "started_at": _APP_STARTED_AT,
-    }
-    return payload
+    return {"status": "ok", "started_at": _APP_STARTED_AT}
 
 
 def _sqlite_ok(engine, label: str) -> dict[str, Any]:
@@ -77,6 +70,9 @@ def _db_path_from_url(db_url: str, app_root: Path) -> Path:
 def build_deep_health(db: Session, *, app_root: Path) -> dict[str, Any]:
     payload: dict[str, Any] = {
         **build_light_health(),
+        "app": settings.app_name,
+        "env": settings.app_env,
+        "resource_profile": settings.resource_profile,
         "checks": {},
         "timestamp": _utcnow_iso(),
     }

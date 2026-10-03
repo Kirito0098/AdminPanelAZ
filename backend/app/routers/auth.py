@@ -385,6 +385,7 @@ def telegram_login_config(request: Request, db: Session = Depends(get_db)):
 
     if not get_feature_service().is_enabled("telegram"):
         return {
+            "module_enabled": False,
             "enabled": False,
             "bot_username": "",
             "max_age_seconds": 300,
@@ -402,6 +403,7 @@ def telegram_login_config(request: Request, db: Session = Depends(get_db)):
     auth_method = "oidc" if oidc_enabled else ("legacy" if legacy_enabled else "none")
     root = resolve_request_url_root(request, behind_nginx=settings.behind_nginx).rstrip("/")
     return {
+        "module_enabled": True,
         "enabled": oidc_ready or legacy_ready,
         "auth_method": auth_method,
         "bot_username": username if legacy_ready else "",

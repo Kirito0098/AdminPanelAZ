@@ -935,10 +935,6 @@ $(nginx_origin_lock_include_line)
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        add_header Strict-Transport-Security "max-age=63072000" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
     }
 
     # API, SPA, WebSocket (/api/server-monitor/ws)
@@ -1052,7 +1048,6 @@ nginx_panel_location_blocks() {
     nginx_subpath_root_guard_blocks "$access_path"
   fi
 }
-
 
 nginx_is_our_panel_vhost_file() {
   local path="$1"
@@ -1940,7 +1935,6 @@ nginx_install_site() {
     systemctl restart nginx || nginx_die "Не удалось запустить nginx"
   fi
 }
-
 
 PORT80_NAT_RULES=()
 
