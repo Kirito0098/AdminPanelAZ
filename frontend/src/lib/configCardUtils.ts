@@ -94,7 +94,7 @@ export function configMatchesTab(config: VpnConfig, tab: ProtocolTab): boolean {
   return hasProtocolProfiles(config, 'wireguard')
 }
 
-export function parseAccessExpiresAt(value?: string | null): Date | null {
+function parseAccessExpiresAt(value?: string | null): Date | null {
   if (!value) return null
   const raw = value.trim()
   if (!raw) return null
@@ -107,7 +107,7 @@ export function parseAccessExpiresAt(value?: string | null): Date | null {
   return Number.isNaN(parsed) ? null : new Date(parsed)
 }
 
-export function formatAccessRemaining(accessExpiresAt?: string | null): string | null {
+function formatAccessRemaining(accessExpiresAt?: string | null): string | null {
   const expiresAt = parseAccessExpiresAt(accessExpiresAt)
   if (!expiresAt) return null
 
@@ -168,7 +168,7 @@ export function formatCertExpiry(config: VpnConfig): string {
   return until ? `${daysLeft} дн. (до ${until})` : `${daysLeft} дн.`
 }
 
-export interface AccessMetaLine {
+interface AccessMetaLine {
   text: string
 }
 
@@ -373,7 +373,7 @@ export function getPolicyForConfig(
   return entry.wireguard
 }
 
-export type ConfigStatusVariant = 'success' | 'destructive' | 'warning' | 'secondary'
+type ConfigStatusVariant = 'success' | 'destructive' | 'warning' | 'secondary'
 
 export function getConfigStatus(
   config: VpnConfig,

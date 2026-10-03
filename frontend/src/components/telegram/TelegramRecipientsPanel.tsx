@@ -9,7 +9,7 @@ import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
 import type { User } from '@/types'
 
-export interface TelegramRecipientsPanelProps {
+interface TelegramRecipientsPanelProps {
   admins: User[]
   notifyRecipientIds: number[]
   onNotifyRecipientIdsChange: (ids: number[]) => void

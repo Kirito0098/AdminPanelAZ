@@ -1070,4 +1070,3 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
   )
 }
 
-export type { TelegramSection }

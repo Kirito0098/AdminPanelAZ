@@ -8,9 +8,6 @@
 # Тесты: REBOOT_CHECK_RUN_DIR, REBOOT_CHECK_BOOT_DIR, REBOOT_CHECK_UNAME,
 #        REBOOT_CHECK_IN_CONTAINER, INSTALL_SKIP_REBOOT_CHECK.
 
-reboot_check_run_dir() {
-  printf '%s' "${REBOOT_CHECK_RUN_DIR:-/var/run}"
-}
 
 reboot_check_boot_dir() {
   printf '%s' "${REBOOT_CHECK_BOOT_DIR:-/boot}"

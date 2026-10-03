@@ -344,17 +344,3 @@ proxy.sh на RU — отдельно; install.sh --proxy-only ставит то
 EOF
 }
 
-ui_show_success_screen() {
-  local title="$1"
-  shift
-  echo
-  echo "$(ui_green "+$(ui_border_h)+")"
-  printf "%s %s %s\n" "$(ui_green "|")" "$(ui_bold "$title")" "$(ui_green "$(printf '%*s|' $((UI_BOX_WIDTH - ${#title} - 1)) '')")"
-  echo "$(ui_green "+$(ui_border_h)+")"
-  local line
-  for line in "$@"; do
-    ui_box_line "$line"
-  done
-  ui_box_bottom
-  echo
-}

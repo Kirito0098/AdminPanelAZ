@@ -11,9 +11,6 @@ log() {
   echo "[ddns] $*"
 }
 
-warn() {
-  echo "[ddns] ВНИМАНИЕ: $*" >&2
-}
 
 die() {
   echo "[ddns] ОШИБКА: $*" >&2

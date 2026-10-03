@@ -5,15 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.auth import get_active_user_from_access_token, get_current_user, require_admin
+from app.auth import get_active_user_from_access_token, require_admin
 from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models import User
-from app.models import VpnConfig, VpnType
 from app.schemas import (
     ConnectionHistoryPoint,
     ConnectionHistoryResponse,
-    DashboardSummary,
     MonitoringOverview,
     NocIncidentsResponse,
     PanelResourceCurrentResponse,
@@ -29,8 +27,7 @@ from app.services.monitoring_overview import (
     build_monitoring_overview_for_node,
 )
 from app.services.noc_incidents import build_noc_incidents
-from app.services.node_manager import get_active_adapter, get_active_node
-from app.services.wireguard_status import wireguard_peer_is_online
+from app.services.node_manager import get_active_node
 from app.services.node_remote_cache import (
     FEDERATED_OVERVIEW_CACHE_KEY,
     get_cached_monitoring_overview,
@@ -273,43 +270,3 @@ def panel_resource_current(_: User = Depends(require_admin)):
     return PanelResourceCurrentResponse(**collect_panel_metrics())
 
 
-@router.get("/summary", response_model=DashboardSummary)
-def dashboard_summary(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    adapter = get_active_adapter(db)
-    node = get_active_node(db)
-    is_admin = current_user.role.value == "admin"
-
-    query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id)
-    if not is_admin:
-        query = query.filter(VpnConfig.owner_id == current_user.id)
-    configs = query.all()
-
-    if not is_admin:
-        return DashboardSummary(
-            total_configs=len(configs),
-            openvpn_configs=sum(1 for c in configs if c.vpn_type == VpnType.openvpn),
-            wireguard_configs=sum(1 for c in configs if c.vpn_type == VpnType.wireguard),
-            connected_openvpn=0,
-            connected_wireguard=0,
-            active_services=0,
-            total_services=0,
-            server_ip="",
-            node_name=node.name,
-        )
-
-    services = adapter.get_service_status()
-    ovpn_clients = adapter.parse_openvpn_status()
-    wg_peers = adapter.parse_wireguard_status()
-    wg_active = sum(1 for p in wg_peers if wireguard_peer_is_online(p))
-
-    return DashboardSummary(
-        total_configs=len(configs),
-        openvpn_configs=sum(1 for c in configs if c.vpn_type == VpnType.openvpn),
-        wireguard_configs=sum(1 for c in configs if c.vpn_type == VpnType.wireguard),
-        connected_openvpn=len(ovpn_clients),
-        connected_wireguard=wg_active,
-        active_services=sum(1 for s in services if s.active),
-        total_services=len(services),
-        server_ip=adapter.get_server_ip(),
-        node_name=node.name,
-    )

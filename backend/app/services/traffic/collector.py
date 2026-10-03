@@ -42,11 +42,6 @@ def clear_recent_usage_cache() -> None:
         _recent_usage_cache.clear()
 
 
-def _profile_from_log_name(log_name: str) -> str:
-    base = log_name.replace("-status.log", "")
-    return base
-
-
 def protocol_type_from_profile(profile: str | None) -> str:
     """Derive persisted ``protocol_type`` from a collector profile name.
 

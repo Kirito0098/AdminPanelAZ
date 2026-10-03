@@ -6,7 +6,7 @@ import { STAGE_BUILD, STAGE_DEPLOY, STAGE_LOAD } from '@/components/routing/rout
 import { formatDateTime } from '@/lib/datetime'
 import type { TgMiniCidrStatus } from '@/types'
 
-export type CidrRefreshTone = 'success' | 'warning' | 'error' | 'running' | 'idle'
+type CidrRefreshTone = 'success' | 'warning' | 'error' | 'running' | 'idle'
 
 export function cidrRefreshMeta(status?: string | null): { label: string; tone: CidrRefreshTone } {
   switch (status) {

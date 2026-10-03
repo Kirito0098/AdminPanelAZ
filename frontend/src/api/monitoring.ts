@@ -11,7 +11,6 @@ import type {
   ResourceHistory,
   PanelResourceHistory,
   PanelResourceCurrent,
-  DashboardSummary,
 } from '../types'
 
 export async function getMonitoring(
@@ -88,8 +87,4 @@ export async function getPanelResourceHistory(period: '1d' | '7d' | '30d' = '1d'
 
 export async function getPanelResourceCurrent() {
   return apiFetch<PanelResourceCurrent>('/monitoring/panel-resource-current')
-}
-
-export async function getDashboardSummary() {
-  return apiFetch<DashboardSummary>('/monitoring/summary')
 }

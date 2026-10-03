@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from app.models import Node, NodeStatus, NodeSyncGroup, VpnConfig, VpnType
 from app.schemas import (
-    GlobalDashboardSummary,
     HaNodePresence,
     MonitoringNodeSummary,
     MonitoringOverview,
@@ -196,35 +195,6 @@ def _build_node_summary(payload: dict) -> MonitoringNodeSummary:
         error=payload["error"],
         health_score=health_score,
         health_level=health_level,
-    )
-
-
-def build_global_dashboard_summary(db: Session) -> GlobalDashboardSummary:
-    node_payloads = _collect_nodes_monitoring_data(db)
-    nodes_summary: list[MonitoringNodeSummary] = []
-    nodes_online = 0
-    total_connected_openvpn = 0
-    total_connected_wireguard = 0
-    total_connected_amneziawg2 = 0
-
-    for payload in node_payloads:
-        node: Node = payload["node"]
-        summary = _build_node_summary(payload)
-        if node.status == NodeStatus.online:
-            nodes_online += 1
-        total_connected_openvpn += summary.connected_openvpn
-        total_connected_wireguard += summary.connected_wireguard
-        total_connected_amneziawg2 += summary.connected_amneziawg2
-        nodes_summary.append(summary)
-
-    return GlobalDashboardSummary(
-        timestamp=datetime.utcnow(),
-        nodes_summary=nodes_summary,
-        nodes_online=nodes_online,
-        nodes_total=len(node_payloads),
-        total_connected_openvpn=total_connected_openvpn,
-        total_connected_wireguard=total_connected_wireguard,
-        total_connected_amneziawg2=total_connected_amneziawg2,
     )
 
 
@@ -515,11 +485,6 @@ def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOve
         geoip_mode=resolve_geoip_mode(),
         ha_mode="dedupe",
     )
-
-
-def build_monitoring_overview(db: Session) -> MonitoringOverview:
-    node = get_active_node(db)
-    return build_monitoring_overview_for_node(db, node)
 
 
 _HaLookupKey = tuple[int, str, str]

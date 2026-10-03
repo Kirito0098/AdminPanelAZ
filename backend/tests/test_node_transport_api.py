@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -390,36 +389,6 @@ def test_delete_node_drops_ssh_tunnel(db, monkeypatch):
 
     assert "удалён" in resp.message
     pool.drop.assert_called_once_with(node.id)
-
-
-def test_enable_mtls_endpoint_rejects_ssh_transport(db, monkeypatch):
-    from app.routers import nodes as nodes_router
-
-    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
-    node = _add_node(db, transport="ssh")
-    admin = SimpleNamespace(id=1, username="admin")
-
-    with pytest.raises(HTTPException) as exc:
-        nodes_router.enable_node_mtls(node.id, admin=admin, db=db)
-
-    assert exc.value.status_code == 400
-    assert "transport" in str(exc.value.detail).lower()
-    assert "picker" in str(exc.value.detail).lower()
-
-
-def test_disable_mtls_endpoint_rejects_ssh_transport(db, monkeypatch):
-    from app.routers import nodes as nodes_router
-
-    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
-    node = _add_node(db, transport="ssh")
-    admin = SimpleNamespace(id=1, username="admin")
-
-    with pytest.raises(HTTPException) as exc:
-        nodes_router.disable_node_mtls(node.id, admin=admin, db=db)
-
-    assert exc.value.status_code == 400
-    assert "transport" in str(exc.value.detail).lower()
-    assert "picker" in str(exc.value.detail).lower()
 
 
 def test_create_node_with_ssh_transport(db, monkeypatch):
@@ -811,4 +780,3 @@ def test_patch_blocked_when_preflight_fails(db, monkeypatch):
     disable.assert_not_called()
     db.refresh(node)
     assert node.transport == "ssh"
-

@@ -80,10 +80,6 @@ SOURCE_FETCH_WORKERS = _read_positive_int_env(
     "CIDR_DB_SOURCE_FETCH_WORKERS",
     4,
 )
-PROVIDER_FETCH_WORKERS = _read_positive_int_env(
-    "CIDR_DB_PROVIDER_WORKERS",
-    4,
-)
 SOURCE_CACHE_TTL_SECONDS = _read_positive_int_env(
     "CIDR_DB_SOURCE_CACHE_TTL_SECONDS",
     900,
@@ -151,9 +147,6 @@ class CidrDbUpdaterService:
     def _current_source_fetch_workers():
         return _read_positive_int_env("CIDR_DB_SOURCE_FETCH_WORKERS", SOURCE_FETCH_WORKERS)
 
-    @staticmethod
-    def _current_provider_fetch_workers():
-        return _read_positive_int_env("CIDR_DB_PROVIDER_WORKERS", PROVIDER_FETCH_WORKERS)
 
     @staticmethod
     def _current_source_cache_ttl_seconds():
@@ -174,18 +167,6 @@ class CidrDbUpdaterService:
         workers = min(workers, 32)
         return min(workers, total)
 
-    @staticmethod
-    def _resolve_provider_fetch_workers(total_providers, configured_workers=None):
-        total = max(0, int(total_providers or 0))
-        if total <= 1:
-            return total
-
-        if configured_workers is None:
-            configured_workers = CidrDbUpdaterService._current_provider_fetch_workers()
-
-        workers = max(1, int(configured_workers or 1))
-        workers = min(workers, 16)
-        return min(workers, total)
 
     @staticmethod
     def _build_partial_reasons_by_source(source_details, asn_discovery_errors, asn_fetch_errors, fallback_applied):
@@ -996,35 +977,6 @@ class CidrDbUpdaterService:
             "triggered_by": triggered_by,
         }
 
-    def cleanup_retired_provider_data(self):
-        """Remove provider rows that are no longer present in IP_FILES."""
-        from app.services.cidr.constants import IP_FILES
-
-        m = _get_models()
-        valid_provider_keys = set(IP_FILES.keys())
-        if not valid_provider_keys:
-            return {
-                "success": False,
-                "message": "Пустой список валидных провайдеров",
-                "deleted": {},
-            }
-
-        valid_list = sorted(valid_provider_keys)
-        deleted = {
-            "provider_cidr": self.cidr_db.query(m.ProviderCidr).filter(~m.ProviderCidr.provider_key.in_(valid_list)).delete(synchronize_session=False),
-            "provider_meta": self.db.query(m.ProviderMeta).filter(~m.ProviderMeta.provider_key.in_(valid_list)).delete(synchronize_session=False),
-            "provider_asn": self.db.query(m.ProviderAsn).filter(~m.ProviderAsn.provider_key.in_(valid_list)).delete(synchronize_session=False),
-            "provider_asn_snapshot": self.db.query(m.ProviderAsnSnapshot).filter(~m.ProviderAsnSnapshot.provider_key.in_(valid_list)).delete(synchronize_session=False),
-        }
-
-        self.cidr_db.commit()
-        self.db.commit()
-
-        return {
-            "success": True,
-            "message": "Очистка устаревших провайдеров завершена",
-            "deleted": deleted,
-        }
 
     # ── Private helpers ───────────────────────────────────────────────
 

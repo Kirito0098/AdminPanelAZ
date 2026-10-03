@@ -137,12 +137,6 @@ def _openvpn_verbose_log_enabled(db: Session) -> bool:
     return enabled
 
 
-def clear_openvpn_log_enabled_cache() -> None:
-    """Test helper — drop TTL cache for OpenVPN verbose-log probe."""
-    global _openvpn_log_cache
-    _openvpn_log_cache = None
-
-
 @router.get("/active-clients")
 def traffic_active_clients(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     node = get_active_node(db)

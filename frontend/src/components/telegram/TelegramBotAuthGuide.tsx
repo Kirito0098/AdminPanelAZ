@@ -30,7 +30,7 @@ function GuideStep({
   )
 }
 
-export interface TelegramBotAuthGuideProps {
+interface TelegramBotAuthGuideProps {
   panelDomain: string
   authMethod: TelegramAuthMethod
   loginConfigured?: boolean

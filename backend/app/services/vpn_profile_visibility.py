@@ -387,12 +387,3 @@ def resolve_openvpn_group_for_user(
     return POLICY_GROUP_TO_SETTING[allowed_policy[0]]
 
 
-def policy_is_empty(policy: Mapping[str, Any]) -> bool:
-    routes = policy.get("routes") or []
-    protocols = policy.get("protocols") or []
-    if not routes or not protocols:
-        return True
-    if "openvpn" in protocols and not (policy.get("openvpn_groups") or []):
-        protocols_without_ovpn = [p for p in protocols if p != "openvpn"]
-        return not protocols_without_ovpn
-    return False

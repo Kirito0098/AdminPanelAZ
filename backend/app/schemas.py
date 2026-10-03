@@ -162,19 +162,6 @@ class NodeRotateKeyResponse(BaseModel):
     node_id: int
 
 
-class NodeMtlsEnableResponse(BaseModel):
-    message: str
-    node_id: int
-    mtls_enabled: bool = True
-
-
-class NodeMtlsDisableResponse(BaseModel):
-    message: str
-    node_id: int
-    mtls_enabled: bool = False
-    warning: str | None = None
-
-
 class NodeMtlsStatusResponse(BaseModel):
     ready: bool
     writable: bool
@@ -520,14 +507,6 @@ class BulkConfigOpQueuedResponse(BaseModel):
     status_url: str
 
 
-class ProfileFile(BaseModel):
-    protocol: str
-    variant: str
-    filename: str
-    path: str
-    content: str | None = None
-
-
 class MonitoringService(BaseModel):
     name: str
     status: str
@@ -632,16 +611,6 @@ class GeoRoutingHintResponse(BaseModel):
     recommended_node_name: str | None = None
     hint_message: str | None = None
     nodes: list[GeoRoutingNodeHint] = Field(default_factory=list)
-
-
-class GlobalDashboardSummary(BaseModel):
-    timestamp: datetime
-    nodes_summary: list[MonitoringNodeSummary] = Field(default_factory=list)
-    nodes_online: int = 0
-    nodes_total: int = 0
-    total_connected_openvpn: int = 0
-    total_connected_wireguard: int = 0
-    total_connected_amneziawg2: int = 0
 
 
 class MonitoringOverview(BaseModel):
@@ -802,18 +771,6 @@ class AppSettingsUpdate(BaseModel):
     include_ips: str | None = None
     exclude_ips: str | None = None
     allow_ips: str | None = None
-
-
-class DashboardSummary(BaseModel):
-    total_configs: int
-    openvpn_configs: int
-    wireguard_configs: int
-    connected_openvpn: int
-    connected_wireguard: int
-    active_services: int
-    total_services: int
-    server_ip: str | None = None
-    node_name: str | None = None
 
 
 class BackupEntry(BaseModel):
@@ -1558,10 +1515,6 @@ class ProxyMappingItem(BaseModel):
     proxy_sport: int | None = None
     dest_ip: str | None = None
     dest_port: int | None = None
-
-
-class ProxyMappingsResponse(BaseModel):
-    mappings: list[ProxyMappingItem] = []
 
 
 class ActiveNodeResponse(BaseModel):

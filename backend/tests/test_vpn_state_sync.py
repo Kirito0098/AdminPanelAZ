@@ -1,7 +1,6 @@
 import io
 import tarfile
 from datetime import datetime, timedelta
-from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import pytest

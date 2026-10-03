@@ -82,10 +82,6 @@ def resolve_transport_id(node: Any) -> str:
     raise ValueError(f"unsupported node transport: {raw}")
 
 
-def sync_mtls_flag(node: Any) -> None:
-    node.mtls_enabled = resolve_transport_id(node) == TRANSPORT_MTLS
-
-
 def get_transport(node: Any) -> NodeTransport:
     tid = resolve_transport_id(node)
     if tid == TRANSPORT_HTTP:

@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from zoneinfo import ZoneInfo
 
 from app.services.noc_schedule import (
     parse_hhmm,

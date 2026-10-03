@@ -35,13 +35,3 @@ def get_cached_inline_results(
         with _lock:
             _cache[cache_key] = (now + ttl, results)
     return results
-
-
-def invalidate_inline_results(cache_key: str) -> None:
-    with _lock:
-        _cache.pop(cache_key, None)
-
-
-def clear_inline_results_cache() -> None:
-    with _lock:
-        _cache.clear()

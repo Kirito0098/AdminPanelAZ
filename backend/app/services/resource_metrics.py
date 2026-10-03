@@ -118,21 +118,6 @@ def get_resource_stats_by_node(
     }
 
 
-def get_avg_metrics_by_node(
-    db: Session,
-    *,
-    since: datetime,
-    until: datetime,
-) -> dict[int, dict[str, float | None]]:
-    return {
-        node_id: {
-            "cpu_percent": stats.get("cpu_percent"),
-            "memory_percent": stats.get("memory_percent"),
-        }
-        for node_id, stats in get_resource_stats_by_node(db, since=since, until=until).items()
-    }
-
-
 def purge_old_samples(db: Session) -> int:
     cutoff = _utcnow() - timedelta(days=settings.resource_metrics_retention_days)
     deleted = (

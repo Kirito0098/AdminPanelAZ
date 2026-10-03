@@ -13,10 +13,7 @@ import type {
   Awg2HealthResponse,
   Awg2StatusResponse,
   Awg2ObfuscationResponse,
-  Awg2MonitoringResponse,
-  Awg2ClientStats,
   Awg2InstallStreamEvent,
-  Awg2RestoreResponse,
 } from '../types'
 
 export async function getAwg2Health() {
@@ -50,14 +47,6 @@ export async function applyAwg2Obfuscation(payload: {
   })
 }
 
-export async function getAwg2Monitoring() {
-  return apiFetch<Awg2MonitoringResponse>('/awg2/monitoring')
-}
-
-export async function getAwg2ClientStats(clientName: string) {
-  return apiFetch<Awg2ClientStats>(`/awg2/clients/${encodeURIComponent(clientName)}/stats`)
-}
-
 export function openAwg2InstallStream(
   options: {
     mode: 'install' | 'update'
@@ -89,15 +78,6 @@ export function openAwg2InstallStream(
     onError?.('Соединение с потоком установки прервано')
   }
   return source
-}
-
-export async function restoreAwg2Backup(file: File) {
-  const form = new FormData()
-  form.append('archive', file)
-  return apiFetch<Awg2RestoreResponse>('/awg2/restore', {
-    method: 'POST',
-    body: form,
-  })
 }
 
 export async function downloadAwg2Backup(retry = true): Promise<Response> {

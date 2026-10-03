@@ -5,7 +5,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from app.models import NodeStatus
 
 from app.services import cert_sync_worker as cert_sync
 from app.services import geo_routing_hint as geo_hint

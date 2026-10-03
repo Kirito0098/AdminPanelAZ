@@ -664,8 +664,6 @@ class WarperService:
             )
         return method
 
-    def is_installed(self) -> bool:
-        return is_warper_installed()
 
     def get_health(self) -> dict[str, Any]:
         detection = detect_warper_installation()

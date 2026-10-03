@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from app.services.feature_toggles import (
-    FEATURE_TOGGLE_BY_ENV,
     FEATURE_TOGGLE_BY_KEY,
     FEATURE_TOGGLES,
     FRONTEND_PATH_TO_MODULE,

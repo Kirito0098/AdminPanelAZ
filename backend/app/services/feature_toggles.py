@@ -940,13 +940,6 @@ class FeatureToggleService:
         self._env_map()
         return {definition.key: self.is_enabled(definition.key) for definition in FEATURE_TOGGLES}
 
-    def get_app_module_states(self) -> dict[str, bool]:
-        self._env_map()
-        return {
-            definition.key: self.is_enabled(definition.key)
-            for definition in FEATURE_TOGGLES
-            if definition.group == "app_module"
-        }
 
     def list_toggles(self) -> dict:
         self._env_map()

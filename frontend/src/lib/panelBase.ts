@@ -56,7 +56,7 @@ function readAccessPath(): string {
   })
 }
 
-export const accessPath = readAccessPath()
+const accessPath = readAccessPath()
 export const routerBasename = accessPath || undefined
 export const apiBase = accessPath ? `${accessPath}/api` : '/api'
 

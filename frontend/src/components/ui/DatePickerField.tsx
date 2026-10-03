@@ -24,7 +24,7 @@ function formatDisplayDate(iso: string): string {
   return `${dd}.${mm}.${parsed.getFullYear()}`
 }
 
-export type DatePickerFieldProps = {
+type DatePickerFieldProps = {
   id?: string
   value: string
   onChange: (value: string) => void

@@ -119,7 +119,7 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
   },
 ]
 
-export function isNavItemVisible(
+function isNavItemVisible(
   item: SettingsNavItem,
   group: SettingsNavGroup,
   isAdmin: boolean,

@@ -749,8 +749,6 @@ def _lookup_local_geo_for_endpoint(endpoint: str | None) -> dict[str, str | None
 
 
 class Awg2Service:
-    def ensure_installed(self) -> None:
-        _ensure_installed()
 
     def validate_client_name(self, name: str) -> str:
         value = (name or "").strip()

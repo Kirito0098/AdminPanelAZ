@@ -4,7 +4,7 @@ import type { Node, NodeSyncGroup } from '@/types'
 
 export const PROXY_LINK_NONE = 'none'
 
-export type ProxyLinkTarget = {
+type ProxyLinkTarget = {
   kind: 'ha' | 'vpn' | 'missing'
   /** e.g. HA «Europe» or vpn-eu-1 */
   label: string

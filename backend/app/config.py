@@ -130,7 +130,6 @@ class Settings(BaseSettings):
     cloudflare_ips_update_interval_days: int = 7
     trusted_proxy_ips: str = "127.0.0.1"
     forwarded_allow_ips: str = "127.0.0.1"
-    node_agent_allowed_ips: str = ""
     node_agent_mtls_enabled: bool = False
     node_agent_mtls_dir: Path = Path("/etc/adminpanelaz/mtls")
     node_agent_mtls_ca_cert: str = "/etc/adminpanelaz/mtls/ca.crt"
@@ -246,9 +245,6 @@ class Settings(BaseSettings):
     def trusted_proxy_ip_list(self) -> list[str]:
         return [ip.strip() for ip in self.trusted_proxy_ips.split(",") if ip.strip()]
 
-    @property
-    def node_agent_allowed_ip_list(self) -> list[str]:
-        return [ip.strip() for ip in self.node_agent_allowed_ips.split(",") if ip.strip()]
 
     @property
     def openapi_docs_allowed_ip_list(self) -> list[str]:

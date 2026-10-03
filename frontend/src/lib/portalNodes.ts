@@ -1,6 +1,6 @@
 import type { PortalClientEntry, PortalMetaResponse, PortalNodeEntry } from '@/api/portal'
 
-export interface PortalSelection {
+interface PortalSelection {
   node: PortalNodeEntry | null
   client: PortalClientEntry | null
 }

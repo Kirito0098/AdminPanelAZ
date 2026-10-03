@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
@@ -71,19 +71,6 @@ def _assert_can_manage_client(user: User, db: Session, client_name: str) -> None
         return
     if not any(can_view_config(user, c, db) for c in configs):
         raise HTTPException(status_code=403, detail="Недостаточно прав")
-
-
-@router.get("/clients/{client_name}/link")
-def get_portal_link(
-    client_name: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    _require_portal_enabled()
-    _require_portal_domain(db)
-    _assert_can_manage_client(current_user, db, client_name)
-    row = get_or_create_portal_token(db, client_name=client_name, creator=current_user)
-    return link_response(db, row)
 
 
 @router.post("/clients/{client_name}/link")

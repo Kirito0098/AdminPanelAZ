@@ -2,7 +2,7 @@ import type { SettingsSection } from '@/components/settings/SettingsNav'
 import type { UserRole } from '@/types'
 import { DOCS } from '@/lib/docsUrls'
 
-export interface SectionMeta {
+interface SectionMeta {
   title: string
   description: string
   hint?: string

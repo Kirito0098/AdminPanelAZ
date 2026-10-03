@@ -1,7 +1,7 @@
 import { BookOpen, ExternalLink } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-export interface DocsLinkProps {
+interface DocsLinkProps {
   href: string
   label?: string
   /** `inline` — text link; `button` — outline chip for headers */

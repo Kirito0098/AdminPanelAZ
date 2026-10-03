@@ -16,7 +16,6 @@ import type {
   VisibleVpnProfilesPolicy,
   VpnType,
   ConfigTag,
-  ClientTemplate,
   ConfigCsvImportResponse,
   OneTimeLinkResponse,
 } from '../types'
@@ -114,20 +113,6 @@ export async function setConfigTags(configId: number, tagIds: number[]) {
   })
 }
 
-export async function getClientTemplates() {
-  return apiFetch<ClientTemplate[]>('/client-templates')
-}
-
-export async function applyClientTemplate(
-  templateId: number,
-  data: { client_name: string; owner_id?: number },
-) {
-  return apiFetch<VpnConfig>(`/client-templates/${templateId}/apply`, {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
-}
-
 export async function bulkConfigOp(data: {
   operation: 'block_temp' | 'block_perm' | 'unblock' | 'delete' | 'renew_cert' | 'change_owner'
   config_ids?: number[]
@@ -175,7 +160,7 @@ export async function createOneTimeLink(configId: number, path: string) {
 
 export type QrContentMode = 'profile' | 'download-link'
 
-export type QrBlobResult = {
+type QrBlobResult = {
   blob: Blob
   contentMode: QrContentMode
   downloadUrl?: string

@@ -810,23 +810,6 @@ ensure_backend_data_dirs() {
     "${WIZ_BACKUP_ROOT:-/var/backups/adminpanelaz}"
 }
 
-backend_health_check_scheme() {
-  BHC_ENV_FILE="$ENV_FILE"
-  BHC_WIZ_NGINX_MODE="${WIZ_NGINX_MODE:-}"
-  BHC_BACKEND_LOG="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-/var/lib/adminpanelaz}}/logs/backend.log"
-  # shellcheck source=scripts/backend-health-check.sh
-  source "$ROOT_DIR/scripts/backend-health-check.sh"
-  bhc_primary_scheme
-}
-
-backend_health_check_port() {
-  BHC_ENV_FILE="$ENV_FILE"
-  BHC_BACKEND_PORT="${BACKEND_PORT:-}"
-  BHC_WIZ_BACKEND_PORT="${WIZ_BACKEND_PORT:-}"
-  # shellcheck source=scripts/backend-health-check.sh
-  source "$ROOT_DIR/scripts/backend-health-check.sh"
-  bhc_resolve_port
-}
 
 init_backend_health_check() {
   BHC_ENV_FILE="$ENV_FILE"
@@ -838,26 +821,6 @@ init_backend_health_check() {
   source "$ROOT_DIR/scripts/backend-health-check.sh"
 }
 
-curl_backend_health_url() {
-  init_backend_health_check
-  bhc_curl_url "$1"
-}
-
-wait_for_backend_health() {
-  init_backend_health_check
-  local port attempts="${2:-90}"
-  port="$(bhc_resolve_port)"
-  [[ -n "${1:-}" ]] && port="$1"
-  bhc_wait_health "$port" "/api/health" "$attempts"
-}
-
-wait_for_backend_health_deep() {
-  init_backend_health_check
-  local port attempts="${2:-30}"
-  port="$(bhc_resolve_port)"
-  [[ -n "${1:-}" ]] && port="$1"
-  bhc_wait_health_deep "$port" "$attempts"
-}
 
 verify_controller_running() {
   if ! install_controller_selected; then

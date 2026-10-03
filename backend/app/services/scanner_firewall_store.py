@@ -427,20 +427,6 @@ class ScannerFirewallStore:
         active.sort(key=lambda item: item["ban_until"], reverse=True)
         return active
 
-    def release_firewall_only(self, ip: str) -> bool:
-        ip_key = (ip or "").strip()
-        if not ip_key:
-            return False
-        with self._lock:
-            record = (self._data.get("entries") or {}).get(ip_key)
-            if isinstance(record, dict):
-                record["ban_until"] = 0.0
-                record["long_term"] = False
-                record["recent_attempts"] = []
-                record["ip_blocked_since"] = None
-                self._save_unlocked()
-        self._firewall_remove(ip_key)
-        return True
 
     def unban_ip(self, ip: str, *, clear_strikes: bool = True, grace_seconds: int | None = None) -> bool:
         ip_key = (ip or "").strip()

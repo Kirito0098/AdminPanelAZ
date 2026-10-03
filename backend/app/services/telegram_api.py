@@ -365,18 +365,6 @@ def set_webhook_sync(bot_token: str, url: str, *, secret_token: str | None = Non
         )
 
 
-async def get_webhook_info(bot_token: str) -> dict[str, Any]:
-    res = await get_webhook_info_result(bot_token)
-    if res.ok and isinstance(res.result, dict):
-        return res.result
-    return {}
-
-
-async def set_my_commands(bot_token: str, commands: list[dict[str, str]]) -> bool:
-    payload = {"commands": commands}
-    return (await call_bot_api(bot_token, "setMyCommands", payload=payload)) is not None
-
-
 def set_my_commands_sync(bot_token: str, commands: list[dict[str, str]]) -> tuple[bool, str]:
     payload = {"commands": commands}
     client = _get_bot_api_sync_client()

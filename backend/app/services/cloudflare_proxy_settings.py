@@ -39,22 +39,6 @@ _APPLY_SCRIPT = _PROJECT_ROOT / "scripts" / "nginx-cloudflare-realip-apply.sh"
 _REPAIR_SCRIPT = _PROJECT_ROOT / "scripts" / "nginx-repair.sh"
 
 
-def _env_default_enabled() -> bool:
-    return bool(get_settings().cloudflare_proxy_enabled)
-
-
-def _env_default_origin_lock() -> bool:
-    return bool(get_settings().cloudflare_origin_lock)
-
-
-def _env_default_auto_update() -> bool:
-    return bool(get_settings().cloudflare_ips_auto_update)
-
-
-def _env_default_interval_days() -> int:
-    return int(get_settings().cloudflare_ips_update_interval_days)
-
-
 def _get_setting(db: Session, key: str, default: str = "") -> str:
     row = db.query(AppSetting).filter(AppSetting.key == key).first()
     return row.value if row else default

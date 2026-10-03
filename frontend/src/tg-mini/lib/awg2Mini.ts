@@ -1,6 +1,6 @@
 import type { TgMiniAwg2Status } from '@/types'
 
-export type Awg2StatusTone = 'success' | 'warning' | 'destructive' | 'secondary'
+type Awg2StatusTone = 'success' | 'warning' | 'destructive' | 'secondary'
 
 export function awg2StatusMeta(data: TgMiniAwg2Status | null): {
   label: string

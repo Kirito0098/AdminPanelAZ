@@ -1,6 +1,6 @@
 export type ClientPortalAction = 'rotate' | 'revoke'
 
-export interface ClientPortalActionConfirm {
+interface ClientPortalActionConfirm {
   title: string
   description: string
   confirmLabel: string

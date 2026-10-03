@@ -96,14 +96,6 @@ def is_geoip_db_loaded() -> bool:
         return _city_reader is not None
 
 
-def reset_geoip_readers() -> None:
-    """Close readers and allow reload (tests)."""
-    global _init_attempted
-    with _readers_lock:
-        _close_readers()
-        _init_attempted = False
-
-
 def lookup_geo_local(ip: str) -> dict[str, str | None] | None:
     """Lookup geo from local MMDB. Returns None when city DB is not loaded."""
     with _readers_lock:

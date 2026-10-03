@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 import httpx
-from fastapi import HTTPException, status
 
 from app.services.node_mtls import (
     build_node_agent_ssl_context,

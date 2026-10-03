@@ -24,7 +24,7 @@ export function createLatestRequest<S>(initialScope: S) {
 
 export type LatestRequest<S> = ReturnType<typeof createLatestRequest<S>>
 
-export interface LatestRequestHandlers<T> {
+interface LatestRequestHandlers<T> {
   apply: (value: T) => void
   fail: (err: unknown) => void
   /** Clears the loading flag; a newer request set it again and clears it itself. */

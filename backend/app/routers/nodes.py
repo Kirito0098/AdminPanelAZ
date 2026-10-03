@@ -15,8 +15,6 @@ from app.schemas import (
     NodeCreate,
     NodeHaContext,
     NodeHealthResponse,
-    NodeMtlsDisableResponse,
-    NodeMtlsEnableResponse,
     NodeMtlsStatusResponse,
     NodeOpenVpnMultihomeBody,
     NodeOpenVpnMultihomeResponse,
@@ -34,7 +32,6 @@ from app.schemas import (
     NodeUpdatesResponse,
     GeoRoutingHintResponse,
     ProxyDestinationBody,
-    ProxyMappingsResponse,
     ProxyStatusResponse,
     ResourceHistoryPoint,
     ResourceHistoryResponse,
@@ -830,21 +827,6 @@ def put_proxy_destination(
     )
 
 
-@router.get("/{node_id}/proxy/mappings", response_model=ProxyMappingsResponse)
-def get_proxy_mappings(
-    node_id: int,
-    _: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    node = _require_proxy_node(node_id, db)
-    adapter = get_proxy_adapter(node)
-    payload = adapter.mappings()
-    raw = payload.get("mappings") if isinstance(payload, dict) else []
-    if not isinstance(raw, list):
-        raw = []
-    return ProxyMappingsResponse(mappings=raw)
-
-
 @router.patch("/{node_id}/transport", response_model=NodeResponse)
 def patch_node_transport(
     node_id: int,
@@ -937,81 +919,6 @@ def preflight_node_transport(
         hint=result.hint,
         probe_status=result.probe_status,
         probe_error=result.probe_error,
-    )
-
-
-@router.post("/{node_id}/enable-mtls", response_model=NodeMtlsEnableResponse)
-def enable_node_mtls(
-    node_id: int,
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    _require_nodes_module(db)
-    node = db.query(Node).filter(Node.id == node_id).first()
-    if not node:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
-    kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
-    current = _node_transport_value(node)
-    if current == TRANSPORT_SSH:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="SSH transport уже включён. Смените transport через picker узла.",
-        )
-    try:
-        node = enable_mtls(db, node, admin)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Не удалось включить mTLS на узле: {exc}",
-        ) from exc
-    _drop_ssh_tunnel_if_needed(node.id, current)
-    message = (
-        "Флаг mTLS отмечен — сертификаты на proxy_agent настройте вручную (docs/proxy-agent.md)"
-        if kind == NODE_KIND_PROXY
-        else "mTLS успешно включён"
-    )
-    return NodeMtlsEnableResponse(
-        message=message,
-        node_id=node.id,
-        mtls_enabled=True,
-    )
-
-
-@router.post("/{node_id}/disable-mtls", response_model=NodeMtlsDisableResponse)
-def disable_node_mtls(
-    node_id: int,
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    _require_nodes_module(db)
-    node = db.query(Node).filter(Node.id == node_id).first()
-    if not node:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
-    kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
-    current = _node_transport_value(node)
-    if current == TRANSPORT_SSH:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="SSH transport уже включён. Смените transport через picker узла.",
-        )
-    try:
-        node = disable_mtls(db, node, admin)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    _drop_ssh_tunnel_if_needed(node.id, current)
-    agent_name = "proxy_agent" if kind == NODE_KIND_PROXY else "Node agent"
-    return NodeMtlsDisableResponse(
-        message="Флаг mTLS в панели сброшен",
-        node_id=node.id,
-        mtls_enabled=False,
-        warning=(
-            f"{agent_name} по-прежнему может работать с mTLS. Для полного отключения настройте "
-            "узел вручную или переустановите агент без mTLS."
-        ),
     )
 
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import Node, User, UserRole, VpnConfig, VpnType
+from app.models import Node, User, VpnConfig, VpnType
 from app.services.app_setting_store import _get_setting
 from app.services.access_policy import AccessPolicyService
 from app.services.admin_notify import admin_notify_service

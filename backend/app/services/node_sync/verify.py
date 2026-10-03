@@ -331,8 +331,3 @@ def verify_sync_group(
     return result
 
 
-def verify_sync_group_by_id(db: Session, group_id: int) -> dict[str, Any]:
-    group = db.get(NodeSyncGroup, group_id)
-    if not group:
-        raise ValueError(f"Sync group {group_id} not found")
-    return verify_sync_group(db, group)

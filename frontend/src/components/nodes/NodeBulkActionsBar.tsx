@@ -18,7 +18,7 @@ import type { Node } from '@/types'
 import { getSelectedNodes } from './nodeHelpers'
 import { isProxyNode } from './nodeKind'
 
-export type NodeBulkActionsBarProps = {
+type NodeBulkActionsBarProps = {
   nodes: Node[]
   selectedNodeIds: number[]
   bulkBusy: boolean

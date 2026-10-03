@@ -28,7 +28,6 @@ from app.models import (
     UserPortalToken,
     UserTrafficStatProtocol,
     VpnConfig,
-    VpnType,
     WgAccessPolicy,
 )
 from app.services.node_manager import get_active_node, get_adapter_for_node

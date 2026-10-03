@@ -8,7 +8,6 @@ from app.services.openvpn_cert import (
     days_remaining_until,
     parse_easyrsa_expiry,
     refresh_config_cert_expiry,
-    to_naive_utc,
 )
 from app.services.openvpn_pki import cert_expiry_map_by_cn, parse_easyrsa_index
 

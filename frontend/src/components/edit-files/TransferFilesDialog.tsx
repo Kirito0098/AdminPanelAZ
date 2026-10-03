@@ -29,7 +29,7 @@ import { ALL_NODES_ONLINE_PHRASE, NODES_ONLINE_PHRASE } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import type { EditFileEntry, Node } from '@/types'
 
-export interface TransferFilesDialogProps {
+interface TransferFilesDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   sourceNode: Node | null

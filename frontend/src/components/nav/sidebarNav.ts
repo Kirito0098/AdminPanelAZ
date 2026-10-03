@@ -28,7 +28,7 @@ export type SidebarNavItem = {
   featureAnyOf?: readonly string[]
 }
 
-export type SidebarNavGroup = {
+type SidebarNavGroup = {
   label: string
   items: SidebarNavItem[]
 }

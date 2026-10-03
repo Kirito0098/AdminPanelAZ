@@ -1,8 +1,8 @@
 import type { ActiveWebSession } from '@/types'
 
-export type WebSessionSummary = Pick<ActiveWebSession, 'username' | 'remote_addr' | 'user_agent' | 'is_current'>
+type WebSessionSummary = Pick<ActiveWebSession, 'username' | 'remote_addr' | 'user_agent' | 'is_current'>
 
-export interface WebSessionRevokeConfirm {
+interface WebSessionRevokeConfirm {
   title: string
   description: string
   confirmLabel: string

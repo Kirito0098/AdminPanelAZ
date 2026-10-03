@@ -1053,17 +1053,6 @@ nginx_panel_location_blocks() {
   fi
 }
 
-nginx_has_vhost_for_domain() {
-  local domain="$1"
-  [[ -n "$domain" ]] || return 1
-  local base path
-  base="$(nginx_conf_basename "$domain")"
-  [[ -f "$(nginx_sites_enabled_dir)/${base}" || -f "$(nginx_sites_available_dir)/${base}" ]] && return 0
-  if grep -Rsl "server_name[^;]*\b${domain}\b" "$(nginx_sites_enabled_dir)" "$(nginx_sites_available_dir)" 2>/dev/null | grep -q .; then
-    return 0
-  fi
-  return 1
-}
 
 nginx_is_our_panel_vhost_file() {
   local path="$1"
@@ -1952,20 +1941,6 @@ nginx_install_site() {
   fi
 }
 
-nginx_update_proxy_port() {
-  local new_port="$1"
-  local domain
-  domain="$(nginx_env_get DOMAIN)"
-  [ -n "$domain" ] || return 0
-  nginx_conf_paths "$domain"
-  [ -f "$NGINX_CONF_FILE" ] || return 0
-  if grep -q "proxy_pass http://127.0.0.1:" "$NGINX_CONF_FILE"; then
-    sed -i -E "s|proxy_pass http://127.0.0.1:[0-9]+;|proxy_pass http://127.0.0.1:${new_port};|" "$NGINX_CONF_FILE"
-    nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null && \
-      nginx_log "Nginx proxy_pass обновлён на порт $new_port" || \
-      nginx_warn "Порт в .env изменён, но nginx не перезагружен — проверьте $NGINX_CONF_FILE"
-  fi
-}
 
 PORT80_NAT_RULES=()
 

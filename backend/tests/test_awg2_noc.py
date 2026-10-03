@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
-from app.services.awg2_noc import awg2_client_to_peer, fetch_awg2_peers_for_adapter, peers_from_awg2_monitoring
+from app.services.awg2_noc import awg2_client_to_peer, fetch_awg2_peers_for_adapter
 from app.services.wireguard_status import wireguard_peer_is_online
 
 

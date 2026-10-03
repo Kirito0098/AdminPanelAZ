@@ -102,10 +102,6 @@ wiz_set_total_steps() {
   esac
 }
 
-wiz_title() {
-  echo
-  ui_section "$*"
-}
 
 wiz_summary_section() {
   echo
@@ -275,17 +271,6 @@ wiz_prompt_port_no_conflict() {
   done
 }
 
-wizard_show_redis_rate_limit_hint() {
-  echo
-  ui_info_box "Rate limit и несколько воркеров uvicorn" \
-    "Uvicorn workers — отдельные процессы, обрабатывающие запросы." \
-    "In-memory счётчик лимита входа хранится в каждом процессе отдельно:" \
-    "атакующий может обойти лимит, попадая на разные workers." \
-    "Redis — общее хранилище счётчиков для всех workers." \
-    "При 1 worker достаточно AUTH_RATE_LIMIT_BACKEND=memory (по умолчанию)." \
-    "При workers > 1 задайте AUTH_RATE_LIMIT_BACKEND=redis и REDIS_URL."
-  echo
-}
 
 wiz_prompt_choice() {
   local prompt="$1"
@@ -406,16 +391,6 @@ wizard_derive_cors_origins() {
   WIZ_CORS_ORIGINS="$origins"
 }
 
-wizard_build_nginx_cors_origins() {
-  local domain="$1"
-  local https_port="$2"
-  local backend_port="$3"
-  local public_host="$domain"
-  if [[ "$https_port" != "443" ]]; then
-    public_host="${domain}:${https_port}"
-  fi
-  WIZ_CORS_ORIGINS="https://${public_host},http://${public_host},http://127.0.0.1:${backend_port},http://localhost:${backend_port}"
-}
 
 # Нормализованный ACCESS_PATH: '' или '/segment' (без хвостового /).
 wizard_normalized_access_path() {
@@ -441,131 +416,8 @@ wizard_access_path_url_suffix() {
   fi
 }
 
-wizard_access_path_is_reserved() {
-  local normalized="$1"
-  local first
-  [[ -n "$normalized" ]] || return 1
-  first="${normalized#/}"
-  first="${first%%/*}"
-  first="${first,,}"
-  case "$first" in
-    status|api|assets|metrics) return 0 ;;
-  esac
-  case "$normalized" in
-    /.well-known|/.well-known/*|/robots.txt|/robots.txt/*) return 0 ;;
-  esac
-  return 1
-}
-
-wizard_prompt_custom_access_path() {
-  local reply normalized
-  while true; do
-    wiz_prompt "Подпуть панели (без слэша, например panel)" "panel"
-    reply="${REPLY// /}"
-    reply="${reply#/}"
-    reply="${reply%/}"
-    if [[ -z "$reply" ]]; then
-      print_warn "Пустой подпуть — выберите «Корень домена» в меню выше."
-      continue
-    fi
-    if [[ "$reply" == *".."* ]]; then
-      print_warn "Подпуть не должен содержать '..'"
-      continue
-    fi
-    if [[ ! "$reply" =~ ^[a-zA-Z0-9][a-zA-Z0-9_-]*(/[a-zA-Z0-9][a-zA-Z0-9_-]*)*$ ]]; then
-      print_warn "Допустимы буквы, цифры, _ и - (сегменты через /)."
-      continue
-    fi
-    normalized="/${reply}"
-    if wizard_access_path_is_reserved "$normalized"; then
-      print_warn "Путь ${normalized} зарезервирован (нельзя: status, api, assets, …)."
-      continue
-    fi
-    WIZ_ACCESS_PATH="$reply"
-    return 0
-  done
-}
-
-wizard_ask_maybe_subpath_integrate() {
-  local domain="${1:-$WIZ_NGINX_DOMAIN}"
-  WIZ_NGINX_SUBPATH_INTEGRATE="false"
-  [[ -n "$(wizard_normalized_access_path)" ]] || return 0
-  [[ -n "$domain" ]] || return 0
-  if ! nginx_has_foreign_vhost_for_domain "$domain" 2>/dev/null; then
-    return 0
-  fi
-  echo
-  if nginx_has_status_openvpn_vhost_for_domain "$domain" 2>/dev/null; then
-    ui_info_box "Чужой nginx vhost" \
-      "На домене ${domain} найден StatusOpenVPN или другой сайт." \
-      "Можно автоматически добавить include сниппета панели в существующий vhost."
-  else
-    ui_info_box "Чужой nginx vhost" \
-      "На домене ${domain} уже есть nginx-сайт." \
-      "Можно автоматически добавить include сниппета панели в существующий vhost."
-  fi
-  echo
-  wiz_prompt_yesno "Автоматически добавить include в существующий vhost?" "y"
-  if [[ "$REPLY" == "y" ]]; then
-    WIZ_NGINX_SUBPATH_INTEGRATE="true"
-  fi
-}
 
 # Подпуть ACCESS_PATH и интеграция со StatusOpenVPN / чужим vhost (только nginx-режимы).
-wizard_ask_access_path_and_status() {
-  local domain="${WIZ_NGINX_DOMAIN:-}"
-
-  if [[ "${WIZ_ACCEPT_DEFAULTS}" == true ]]; then
-    WIZ_ACCESS_PATH="${WIZ_ACCESS_PATH:-}"
-    WIZ_NGINX_SUBPATH_INTEGRATE="${WIZ_NGINX_SUBPATH_INTEGRATE:-false}"
-    return 0
-  fi
-
-  WIZ_ACCESS_PATH=""
-  WIZ_NGINX_SUBPATH_INTEGRATE="false"
-
-  # shellcheck source=scripts/nginx-common.sh
-  source "$ROOT_DIR/scripts/nginx-common.sh"
-  nginx_common_init
-
-  echo
-  ui_info_box "Общий домен / подпуть" \
-    "Оставьте корень, если панель одна на домене." \
-    "/panel — если рядом другие сайты или StatusOpenVPN." \
-    "Подпуть — дополнительная мера, не замена 2FA."
-  echo
-
-  if [[ -n "$domain" ]] && nginx_has_status_openvpn_vhost_for_domain "$domain" 2>/dev/null; then
-    print_success "Обнаружен StatusOpenVPN на ${domain} (/status/)."
-    echo
-    wiz_prompt_yesno "Установить панель рядом со StatusOpenVPN (подпуть /panel)?" "y"
-    if [[ "$REPLY" == "y" ]]; then
-      WIZ_ACCESS_PATH="panel"
-      WIZ_NGINX_SUBPATH_INTEGRATE="true"
-      print_info "Панель: https://${domain}/panel/ · Status: https://${domain}/status/"
-      return 0
-    fi
-  fi
-
-  wiz_prompt_choice "Где открывать панель на домене?" 1 \
-    "Корень домена (https://${domain:-example.com}/)" \
-    "Подпуть /panel (https://${domain:-example.com}/panel/)" \
-    "Свой подпуть"
-
-  case "$REPLY" in
-    1)
-      WIZ_ACCESS_PATH=""
-      ;;
-    2)
-      WIZ_ACCESS_PATH="panel"
-      ;;
-    3)
-      wizard_prompt_custom_access_path
-      ;;
-  esac
-
-  wizard_ask_maybe_subpath_integrate "$domain"
-}
 
 wizard_check_antizapret() {
   if [[ -d "$WIZ_ANTIZAPRET_PATH" && -f "$WIZ_ANTIZAPRET_PATH/client.sh" ]]; then
@@ -775,9 +627,6 @@ wizard_apply_default_publish_http_direct() {
 
 # Совместимость: интерактивный выбор публикации удалён; HTTPS — только в UI / nginx-setup.
 # Env-override WIZ_NGINX_MODE уважается внутри wizard_apply_default_publish_http_direct.
-wizard_ask_https() {
-  wizard_apply_default_publish_http_direct
-}
 
 wizard_ask_admin() {
   if [[ "$WIZ_INSTALL_TYPE" == "node" || "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
@@ -928,9 +777,6 @@ wizard_ask_security_hardening() {
 }
 
 # Firewall из мастера не настраиваем (устаревшие правила под nginx+127.0.0.1).
-wizard_ask_firewall() {
-  WIZ_CONFIGURE_FIREWALL="false"
-}
 
 # Запуск всегда systemd, workers=1 (без выбора manual/daemon и без prompt workers).
 wizard_ask_services() {
@@ -952,9 +798,6 @@ wizard_ask_resource_profile() {
 
 # Опциональные функции (Telegram/CIDR/backup) — не спрашиваем в install.
 # Telegram token не сеем; CIDR/traffic задаёт full profile; автобэкап — дефолт выше.
-wizard_ask_optional() {
-  return 0
-}
 
 wizard_ask_paths() {
   local default_state="$ROOT_DIR/.runtime"

@@ -36,11 +36,6 @@ def _use_memory_backend() -> bool:
     return _USE_MEMORY
 
 
-def enable_memory_backend_for_tests(enabled: bool = True) -> None:
-    global _USE_MEMORY
-    _USE_MEMORY = enabled
-
-
 def _now_utc() -> datetime:
     return datetime.now(timezone.utc)
 

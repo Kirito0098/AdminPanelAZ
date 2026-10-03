@@ -1,4 +1,4 @@
-export { ApiError, apiFetch, apiFetchAtBase } from './http'
+export { ApiError } from './http'
 export * from './auth'
 export * from './configs'
 export * from './nodes'

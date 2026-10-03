@@ -1,4 +1,4 @@
-export interface PasskeyDeleteConfirm {
+interface PasskeyDeleteConfirm {
   title: string
   description: string
   confirmLabel: string

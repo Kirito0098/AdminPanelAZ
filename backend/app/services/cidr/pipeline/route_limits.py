@@ -4,17 +4,13 @@ import logging
 
 from app.services.cidr.constants import IP_FILES
 from app.services.cidr.pipeline.constants import (
-    OPENVPN_ROUTE_TOTAL_CIDR_LIMIT_MAX_IOS,
     SOURCE_FORMATS_WITH_GEO,
 )
-from app.services.cidr.pipeline.facade_compat import call as _facade_call, get_attr as _cfg
-from app.services.cidr.pipeline.geo import _normalize_region_scopes
+from app.services.cidr.pipeline.facade_compat import call as _facade_call
 from app.services.cidr.pipeline.parsers import _normalize_cidrs
 
 logger = logging.getLogger(__name__)
 
-def _supports_geo_scope(sources):
-    return any((src.get("format") in SOURCE_FORMATS_WITH_GEO) for src in (sources or []))
 
 def _collect_cidrs_from_sources(sources, effective_scopes, strict_geo_filter=False):
     merged_cidrs = set()
@@ -54,49 +50,6 @@ def _collect_cidrs_from_sources(sources, effective_scopes, strict_geo_filter=Fal
 
     return [], "", (errors[-1] if errors else "unknown error")
 
-def _has_non_geo_sources(sources):
-    return any((src.get("format") not in SOURCE_FORMATS_WITH_GEO) for src in (sources or []))
-
-def _optimize_cidrs_for_openvpn_routes(
-    *,
-    sources,
-    effective_scopes,
-    cidrs,
-    source_name,
-    strict_geo_filter=False,
-):
-    if not cidrs:
-        return cidrs, source_name, None
-
-    scopes = _normalize_region_scopes(effective_scopes)
-    if "all" in scopes:
-        return cidrs, source_name, None
-
-    if len(cidrs) <= _cfg("OPENVPN_ROUTE_CIDR_LIMIT"):
-        return cidrs, source_name, None
-
-    if not _has_non_geo_sources(sources):
-        return cidrs, source_name, None
-
-    optimized_cidrs, optimized_source_name, _ = _facade_call(
-        "_collect_cidrs_from_sources",
-        sources,
-        ["all"],
-        strict_geo_filter=bool(strict_geo_filter),
-    )
-    if not optimized_cidrs:
-        return cidrs, source_name, None
-
-    if len(optimized_cidrs) >= len(cidrs):
-        return cidrs, source_name, None
-
-    optimization_meta = {
-        "strategy": "route_limit_non_geo_fallback",
-        "original_cidr_count": len(cidrs),
-        "optimized_cidr_count": len(optimized_cidrs),
-        "scope": ",".join(scopes),
-    }
-    return optimized_cidrs, f"{optimized_source_name} [route-optimized]", optimization_meta
 
 def _compress_cidrs_to_limit(cidrs, limit):
     normalized = _normalize_cidrs(cidrs)
@@ -459,25 +412,3 @@ def _apply_total_route_limit(
             "priority_min_budget": priority_min_budget,
         }
     return adjusted_entries, meta
-
-
-def clamp_openvpn_route_total_cidr_limit(value, *, default=OPENVPN_ROUTE_TOTAL_CIDR_LIMIT_MAX_IOS):
-    try:
-        parsed = int(str(value).strip())
-    except (TypeError, ValueError, AttributeError):
-        return int(default)
-    if parsed <= 0:
-        return int(default)
-    return min(parsed, OPENVPN_ROUTE_TOTAL_CIDR_LIMIT_MAX_IOS)
-
-
-def resolve_openvpn_route_total_cidr_limit(get_env_value):
-    raw = str(
-        get_env_value(
-            "OPENVPN_ROUTE_TOTAL_CIDR_LIMIT",
-            str(OPENVPN_ROUTE_TOTAL_CIDR_LIMIT_MAX_IOS),
-        )
-        or str(OPENVPN_ROUTE_TOTAL_CIDR_LIMIT_MAX_IOS)
-    ).strip()
-    return str(clamp_openvpn_route_total_cidr_limit(raw))
-

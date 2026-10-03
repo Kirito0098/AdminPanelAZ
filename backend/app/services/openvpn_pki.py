@@ -142,13 +142,6 @@ def serial_status(serial_hex: str, entries: list[EasyRsaIndexEntry]) -> str | No
     return None
 
 
-def read_easyrsa_index_from_path(path: Path | None = None) -> str:
-    file_path = path or EASYRSA_INDEX_PATH
-    if not file_path.is_file():
-        return ""
-    return file_path.read_text(encoding="utf-8", errors="replace")
-
-
 def load_easyrsa_index(adapter) -> list[EasyRsaIndexEntry]:
     """Always read through the adapter — never the panel-local disk for remote nodes."""
     if not hasattr(adapter, "read_easyrsa_index"):
@@ -297,10 +290,6 @@ def validate_all_openvpn_profiles(
         )
         all_issues.extend(result.issues)
     return ProfileValidationResult(ready=not all_issues, issues=tuple(all_issues))
-
-
-def clients_with_profile_issues(result: ProfileValidationResult) -> list[str]:
-    return sorted({issue.client_name for issue in result.issues})
 
 
 def profile_issues_payload(result: ProfileValidationResult) -> list[dict[str, str | None]]:

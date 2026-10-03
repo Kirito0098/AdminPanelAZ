@@ -7,12 +7,11 @@ import ipaddress
 from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-import jwt
 
 from app.auth import get_active_user_from_access_token
 from app.config import get_settings
 from app.database import SessionLocal
-from app.models import User, UserRole
+from app.models import UserRole
 from app.services.ip_restriction import ip_restriction_service
 
 

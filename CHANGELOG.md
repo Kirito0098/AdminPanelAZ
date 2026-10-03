@@ -69,6 +69,9 @@
 ### 🗑️ Removed
 
 - **Backend / мёртвый код** — удалён код, который вызывали только тесты: `clear_access_expired_for_user` (последний вызов убран в фиксе промокодов), `list_vpn_nodes`, `apply_transport_value`, `base_scheme` и `SshTransport.local_base_url`, `protocol_types_for_openvpn_group`, `find_valid_serials` / `is_serial_revoked`, `read_domains_file_payload`, `_format_ssl_error` в адаптерах узлов; поля `Settings.node_agent_port` и `Settings.wg_policy_sync_enabled` (переменные окружения по-прежнему читают node agent и `feature_toggles`).
+- **Backend / мёртвый код, круги 1–2** — удалены ~60 функций и методов без вызовов (включая транзитивно мёртвые после первой волны), неиспользуемые поля и Pydantic-схемы, 49 неиспользуемых импортов; мёртвое чтение `CIDR_DB_PROVIDER_WORKERS` (переменная ни на что не влияла); поле `Settings.node_agent_allowed_ips`.
+- **API без клиентов** — удалены эндпоинты, которые не вызывали ни веб-интерфейс, ни Mini App, ни бот: `GET /api/monitoring/summary`, `GET /api/portal/clients/{name}/link` (POST по тому же пути остаётся), `GET /api/nodes/{id}/proxy/mappings`, `POST /api/nodes/{id}/enable-mtls`, `POST /api/nodes/{id}/disable-mtls`, `GET /api/awg2/monitoring`, `GET /api/awg2/clients/{name}/stats`. Транспорт узла по-прежнему переключается через preflight и `PATCH` транспорта. `POST /api/awg2/restore` сохранён.
+- **Установщик и фронтенд** — удалены неиспользуемые shell-функции `install.sh` / `scripts/` (в том числе так и не подключённый с 0.7.3 цветной режим `site-diagnostics.sh`) и неиспользуемые экспорты, API-обёртки и типы фронтенда.
 
 ### 🔒 Security
 

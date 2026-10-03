@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, object_session
 
-from app.auth import get_password_hash, verify_password
+from app.auth import get_password_hash
 from app.config import get_settings
 from app.models import (
     AmneziaWg2AccessPolicy,
@@ -575,7 +575,3 @@ def update_node_from_health(node: Node, health: dict, db: Session) -> None:
     )
 
 
-def verify_node_api_key(node: Node, api_key: str) -> bool:
-    if not node.api_key_hash:
-        return False
-    return verify_password(api_key, node.api_key_hash)

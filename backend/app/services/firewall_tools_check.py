@@ -34,9 +34,6 @@ class FirewallToolsStatus:
     def binaries_available(self) -> bool:
         return not self.missing_commands
 
-    @property
-    def packages_installed(self) -> bool:
-        return not self.missing_packages
 
     @property
     def fully_ready(self) -> bool:

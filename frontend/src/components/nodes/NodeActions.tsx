@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import type { Node, NodeTransportId } from '@/types'
 import NodeTransportSelect from './NodeTransportSelect'
 
-export type NodeActionsProps = {
+type NodeActionsProps = {
   node: Node
   isActive: boolean
   isProxy: boolean

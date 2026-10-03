@@ -1,4 +1,4 @@
-export interface TwoFactorBackupCodesConfirm {
+interface TwoFactorBackupCodesConfirm {
   title: string
   description: string
   confirmLabel: string

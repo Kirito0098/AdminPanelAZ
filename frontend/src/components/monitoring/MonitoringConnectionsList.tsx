@@ -41,9 +41,9 @@ const PAGE_SIZE = 25
 type SortKey = NocSortKey
 type SortDir = 'asc' | 'desc'
 
-export type MonitoringConnectionProtocol = 'openvpn' | 'wireguard' | 'amneziawg2'
+type MonitoringConnectionProtocol = 'openvpn' | 'wireguard' | 'amneziawg2'
 
-export type MonitoringConnectionRow = {
+type MonitoringConnectionRow = {
   key: string
   protocol: MonitoringConnectionProtocol
   clientName: string

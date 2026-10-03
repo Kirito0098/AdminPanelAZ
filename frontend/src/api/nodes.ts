@@ -1,6 +1,5 @@
 import { apiFetch } from './http'
 import type {
-  NodeMtlsDisableResult,
   NodeTransportOption,
   NodeTransportId,
   NodeTransportPatchBody,
@@ -10,7 +9,6 @@ import type {
   ActiveNode,
   NodeKind,
   ProxyStatusResponse,
-  ProxyMappingsResponse,
   NodeStatus,
   NodeRemoteHostsResponse,
   NodeOpenVpnMultihomeResponse,
@@ -23,19 +21,6 @@ export async function rotateNodeApiKey(nodeId: number) {
   return apiFetch<{ message: string; node_id: number }>(`/nodes/${nodeId}/rotate-key`, {
     method: 'POST',
   })
-}
-
-export async function disableNodeMtls(nodeId: number) {
-  return apiFetch<NodeMtlsDisableResult>(`/nodes/${nodeId}/disable-mtls`, {
-    method: 'POST',
-  })
-}
-
-export async function enableNodeMtls(nodeId: number) {
-  return apiFetch<{ message: string; node_id: number; mtls_enabled: boolean }>(
-    `/nodes/${nodeId}/enable-mtls`,
-    { method: 'POST' },
-  )
 }
 
 export async function listNodeTransports() {
@@ -137,10 +122,6 @@ export async function putProxyDestination(nodeId: number, destinationIp: string)
     method: 'PUT',
     body: JSON.stringify({ destination_ip: destinationIp }),
   })
-}
-
-export async function getProxyMappings(nodeId: number) {
-  return apiFetch<ProxyMappingsResponse>(`/nodes/${nodeId}/proxy/mappings`)
 }
 
 export async function deleteNode(id: number) {

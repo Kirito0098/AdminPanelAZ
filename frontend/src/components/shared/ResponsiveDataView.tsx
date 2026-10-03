@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
-export type ResponsiveBreakpoint = 'md' | 'lg' | 'xl'
+type ResponsiveBreakpoint = 'md' | 'lg' | 'xl'
 
 /** Tailwind default min-widths for `md` / `lg` / `xl`. */
 const MIN_WIDTH_PX: Record<ResponsiveBreakpoint, number> = {
@@ -10,7 +10,7 @@ const MIN_WIDTH_PX: Record<ResponsiveBreakpoint, number> = {
   xl: 1280,
 }
 
-export interface ResponsiveDataViewProps {
+interface ResponsiveDataViewProps {
   /** Tailwind breakpoint at which the desktop slot is shown. Defaults to `lg` (1024px). */
   breakpoint?: ResponsiveBreakpoint
   /** Card/list layout shown below the breakpoint. */

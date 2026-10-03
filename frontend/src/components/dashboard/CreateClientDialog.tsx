@@ -73,7 +73,7 @@ async function setTrafficLimitForProtocol(
   await wgSetTrafficLimit(clientName, value, unit, periodDays)
 }
 
-export interface CreateClientDialogProps {
+interface CreateClientDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   openvpnEnabled: boolean

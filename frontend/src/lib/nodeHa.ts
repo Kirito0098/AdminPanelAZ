@@ -1,6 +1,6 @@
 import type { Node, NodeSyncGroup } from '@/types'
 
-export type NodeHaMembership = {
+type NodeHaMembership = {
   groupId: number
   groupName: string
 }

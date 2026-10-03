@@ -394,15 +394,6 @@ async def handle_webhook_health(ctx: BotContext, *, message_id: int | None = Non
     )
 
 
-async def handle_settings_stub(ctx: BotContext, section: str, *, message_id: int | None = None) -> None:
-    if not await _require_admin_ctx(ctx):
-        return
-    label = _SECTION_LABELS.get(section, section)
-    text = f"📋 <b>{label}</b>\n\nРаздел будет доступен в следующем обновлении."
-    markup = inline_keyboard([[inline_button("◀️ Настройки", callback_data="st:root")]])
-    await _send_or_edit(ctx, text, markup=markup, message_id=message_id)
-
-
 async def _ask_text_input(ctx: BotContext, field: settings_fsm.FieldKind, prompt: str) -> None:
     settings_fsm.set_pending(ctx.telegram_user_id, field)
     await send_message(

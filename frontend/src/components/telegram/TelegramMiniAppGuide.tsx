@@ -81,7 +81,7 @@ function FeatureTable() {
   )
 }
 
-export interface TelegramMiniAppGuideProps {
+interface TelegramMiniAppGuideProps {
   miniAppUrl?: string
   loginConfigured?: boolean
 }

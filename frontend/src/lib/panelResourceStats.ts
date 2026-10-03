@@ -16,7 +16,7 @@ export interface PanelResourceSummary {
   hostDiskNow: number | null
 }
 
-export interface ProfileLiveCopy {
+interface ProfileLiveCopy {
   subtitle: string
   description: string
   ram: string

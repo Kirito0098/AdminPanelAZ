@@ -541,10 +541,6 @@ def nginx_listens_on_https_port(port: int = 443) -> bool:
         return False
 
 
-def nginx_listens_on_443() -> bool:
-    return nginx_listens_on_https_port(443)
-
-
 def nginx_config_test_ok() -> bool:
     """True when ``nginx -t`` succeeds (config on disk is loadable)."""
     if not is_nginx_installed():

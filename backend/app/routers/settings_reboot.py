@@ -72,7 +72,6 @@ def schedule_server_reboot(
 
     def _execute(pending: PendingReboot) -> None:
         from app.database import SessionLocal
-        from app.services.ip_restriction import ip_restriction_service
 
         worker_db = SessionLocal()
         output: str | None = None

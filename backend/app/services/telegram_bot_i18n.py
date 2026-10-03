@@ -37,10 +37,6 @@ def settings_root_secret_state(webhook_secret_set: bool) -> str:
     return "не задан"
 
 
-def firewall_active(value: bool) -> str:
-    return "активен" if value else "нет"
-
-
 # --- Common ---
 
 UNLINKED = (

@@ -257,22 +257,6 @@ def _protocol_emoji(target_type: str | None) -> str:
     return "📄"
 
 
-def _fmt_config_object(target_type: str | None, target_name: str | None) -> str:
-    protocol = _fmt_protocol(target_type)
-    emoji = _protocol_emoji(target_type)
-    name = _fmt_code(target_name)
-    if protocol:
-        return f"{emoji} {protocol} 📁 {name}"
-    return f"📁 {name}"
-
-
-def _fmt_action_config(verb: str, target_type: str | None, target_name: str | None) -> str:
-    verb_text = (verb or "").strip()
-    if verb_text:
-        verb_text = verb_text[0].upper() + verb_text[1:]
-    return f"{verb_text} конфигурацию {_fmt_config_object(target_type, target_name)}"
-
-
 def _format_notify_card(
     title: str,
     when: str,
@@ -369,16 +353,6 @@ def _login_context_lines(
 
 def _fmt_when(now: str) -> str:
     return f"🕐 {now}"
-
-
-def _prepend_node_context(
-    text: str,
-    *,
-    node_id: int | None = None,
-    node_name: str | None = None,
-) -> str:
-    """Legacy wrapper — node is now embedded in notify cards."""
-    return text
 
 
 def _resolve_client_block_action(details: str | None) -> str:
@@ -523,7 +497,6 @@ class AdminNotifyService:
 
     def __init__(self, *, logger_instance: logging.Logger | None = None):
         self.logger = logger_instance or logger
-        self._monitor_cooldowns: dict[str, datetime] = {}
         self._resource_alert_cooldowns: dict[tuple[str, int | None], datetime] = {}
         self._unlinked_login_cooldowns: dict[str, datetime] = {}
         self._monitor_lock = threading.Lock()
@@ -698,27 +671,6 @@ class AdminNotifyService:
             client_timezone=client_timezone,
         )
 
-    def send_config_recreate(
-        self,
-        db: Session,
-        *,
-        actor_username: str,
-        target_name: str,
-        target_type: str,
-        node_id: int | None = None,
-        node_name: str | None = None,
-        client_timezone: str | None = None,
-    ) -> None:
-        self.send(
-            db,
-            "config_recreate",
-            actor_username=actor_username,
-            target_name=target_name,
-            target_type=target_type,
-            node_id=node_id,
-            node_name=node_name,
-            client_timezone=client_timezone,
-        )
 
     def send_config_delete(
         self,

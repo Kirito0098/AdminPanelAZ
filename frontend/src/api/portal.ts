@@ -49,16 +49,12 @@ export interface UserPortalMetaResponse {
 
 export type PortalMetaResponse = ClientPortalMetaResponse | UserPortalMetaResponse
 
-export interface PortalRedeemResponse {
+interface PortalRedeemResponse {
   ok: boolean
   grant_days: number
   protocols_applied: string[]
   access_until: string | null
   access_until_by_protocol?: Record<string, string | null>
-}
-
-export async function getPortalLink(clientName: string) {
-  return apiFetch<PortalLinkResponse>(`/portal/clients/${encodeURIComponent(clientName)}/link`)
 }
 
 export async function createPortalLink(clientName: string) {
