@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_tg_mini_user, require_tg_mini_admin
 from app.database import get_db
 from app.models import DEFAULT_TG_NOTIFY_EVENTS, User, UserRole
+from app.routers.settings import get_self_service_limits_settings, update_self_service_limits_settings
 from app.routers.settings_telegram import (
     _admin_notify_settings_response,
     _send_test_message_to_recipients,
@@ -24,6 +25,8 @@ from app.schemas import (
     AdminNotifySettingsUpdate,
     EffectiveVisibleVpnProfilesResponse,
     MessageResponse,
+    SelfServiceLimitsResponse,
+    SelfServiceLimitsUpdate,
     TelegramSettingsResponse,
     TelegramSettingsUpdate,
     VisibleVpnProfilesPolicy,
@@ -214,6 +217,24 @@ def mini_update_telegram_settings(
     admin: User = Depends(require_tg_mini_admin),
 ):
     return update_telegram_settings(payload, request, db, admin)
+
+
+@router.get("/self-service", response_model=SelfServiceLimitsResponse)
+def mini_get_self_service_limits(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_tg_mini_admin),
+):
+    return get_self_service_limits_settings(db, _)
+
+
+@router.patch("/self-service", response_model=SelfServiceLimitsResponse)
+def mini_update_self_service_limits(
+    payload: SelfServiceLimitsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_tg_mini_admin),
+):
+    return update_self_service_limits_settings(payload, request, db, admin)
 
 
 @router.post("/telegram-settings/test", response_model=MessageResponse)

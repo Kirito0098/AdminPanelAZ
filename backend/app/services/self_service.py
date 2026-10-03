@@ -19,12 +19,24 @@ DEFAULT_CONFIG_QUOTA = 5
 DEFAULT_CREATE_RATE_MAX = 3
 DEFAULT_CREATE_RATE_WINDOW_SECONDS = 3600
 
+QUOTA_DEFAULT_BOUNDS = (0, 1000)
+CREATE_RATE_MAX_BOUNDS = (0, 100)
+CREATE_RATE_WINDOW_BOUNDS = (60, 86400)
+
 REMINDER_DEDUP_SECONDS = 86400
 
 
 def _get_setting(db: Session, key: str, default: str = "") -> str:
     row = db.query(AppSetting).filter(AppSetting.key == key).first()
     return row.value if row else default
+
+
+def _set_setting(db: Session, key: str, value: str) -> None:
+    row = db.query(AppSetting).filter(AppSetting.key == key).first()
+    if row:
+        row.value = value
+    else:
+        db.add(AppSetting(key=key, value=value))
 
 
 def _get_setting_int(db: Session, key: str, default: int) -> int:
@@ -35,13 +47,66 @@ def _get_setting_int(db: Session, key: str, default: int) -> int:
         return default
 
 
+def clamp_int(value: int, bounds: tuple[int, int]) -> int:
+    low, high = bounds
+    return max(low, min(high, int(value)))
+
+
+def _get_bounded_int(db: Session, key: str, default: int, bounds: tuple[int, int]) -> int:
+    return clamp_int(_get_setting_int(db, key, default), bounds)
+
+
+def _quota_default(db: Session) -> int:
+    return _get_bounded_int(db, SETTING_QUOTA_DEFAULT, DEFAULT_CONFIG_QUOTA, QUOTA_DEFAULT_BOUNDS)
+
+
+def _create_rate_max(db: Session) -> int:
+    return _get_bounded_int(db, SETTING_CREATE_RATE_MAX, DEFAULT_CREATE_RATE_MAX, CREATE_RATE_MAX_BOUNDS)
+
+
+def _create_rate_window(db: Session) -> int:
+    return _get_bounded_int(
+        db, SETTING_CREATE_RATE_WINDOW, DEFAULT_CREATE_RATE_WINDOW_SECONDS, CREATE_RATE_WINDOW_BOUNDS
+    )
+
+
+def get_self_service_limits(db: Session) -> dict[str, int]:
+    return {
+        "quota_default": _quota_default(db),
+        "create_rate_max": _create_rate_max(db),
+        "create_rate_window_seconds": _create_rate_window(db),
+    }
+
+
+def set_self_service_limits(
+    db: Session,
+    *,
+    quota_default: int | None = None,
+    create_rate_max: int | None = None,
+    create_rate_window_seconds: int | None = None,
+) -> dict[str, int]:
+    """Store limits (clamped). Caller commits."""
+    if quota_default is not None:
+        _set_setting(db, SETTING_QUOTA_DEFAULT, str(clamp_int(quota_default, QUOTA_DEFAULT_BOUNDS)))
+    if create_rate_max is not None:
+        _set_setting(db, SETTING_CREATE_RATE_MAX, str(clamp_int(create_rate_max, CREATE_RATE_MAX_BOUNDS)))
+    if create_rate_window_seconds is not None:
+        _set_setting(
+            db,
+            SETTING_CREATE_RATE_WINDOW,
+            str(clamp_int(create_rate_window_seconds, CREATE_RATE_WINDOW_BOUNDS)),
+        )
+    db.flush()
+    return get_self_service_limits(db)
+
+
 def get_user_config_quota_limit(db: Session, user: User) -> int | None:
     """Return max configs for user, or None if unlimited."""
     if user.role == UserRole.admin:
         return None
     if user.config_quota is not None:
         return None if user.config_quota <= 0 else user.config_quota
-    default = _get_setting_int(db, SETTING_QUOTA_DEFAULT, DEFAULT_CONFIG_QUOTA)
+    default = _quota_default(db)
     return None if default <= 0 else default
 
 
@@ -73,8 +138,8 @@ def build_quota_payload(db: Session, user: User) -> dict:
     limit = get_user_config_quota_limit(db, user)
     used = count_user_configs(db, user.id)
     remaining = None if limit is None else max(0, limit - used)
-    rate_max = _get_setting_int(db, SETTING_CREATE_RATE_MAX, DEFAULT_CREATE_RATE_MAX)
-    rate_window = _get_setting_int(db, SETTING_CREATE_RATE_WINDOW, DEFAULT_CREATE_RATE_WINDOW_SECONDS)
+    rate_max = _create_rate_max(db)
+    rate_window = _create_rate_window(db)
     return {
         "used": used,
         "limit": limit,
@@ -91,10 +156,10 @@ class UserConfigCreateRateLimitService:
         self._limiter = SlidingWindowLimiter(MemoryRateLimitBackend())
 
     def consume(self, db: Session, user_id: int) -> None:
-        max_requests = _get_setting_int(db, SETTING_CREATE_RATE_MAX, DEFAULT_CREATE_RATE_MAX)
+        max_requests = _create_rate_max(db)
         if max_requests <= 0:
             return
-        window = float(_get_setting_int(db, SETTING_CREATE_RATE_WINDOW, DEFAULT_CREATE_RATE_WINDOW_SECONDS))
+        window = float(_create_rate_window(db))
         detail = "Превышен лимит создания конфигов. Повторите позже."
         try:
             self._limiter.consume(

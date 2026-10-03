@@ -6,6 +6,7 @@ import TelegramBotAuthGuide from '@/components/telegram/TelegramBotAuthGuide'
 import TelegramLinkedAccountsPanel from '@/components/telegram/TelegramLinkedAccountsPanel'
 import TelegramMiniAppGuide from '@/components/telegram/TelegramMiniAppGuide'
 import TelegramBotCommandsGuide from '@/components/telegram/TelegramBotCommandsGuide'
+import TelegramBotRateLimitFields from '@/components/telegram/TelegramBotRateLimitFields'
 import TelegramRecipientsPanel from '@/components/telegram/TelegramRecipientsPanel'
 import { formatDateTime } from '@/lib/datetime'
 import Spinner from '@/components/ui/Spinner'
@@ -832,6 +833,8 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               доступ сервера из интернета. При ошибке «сеть недоступна» проверьте исходящий доступ сервера к
               api.telegram.org (команда на сервере: curl -4 https://api.telegram.org/).
             </p>
+
+            {tg.settings ? <TelegramBotRateLimitFields settings={tg.settings} onSaved={tg.setSettings} /> : null}
 
             <TelegramBotCommandsGuide />
 

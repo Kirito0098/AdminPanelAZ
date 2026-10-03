@@ -233,6 +233,12 @@ export interface VisibleVpnProfilesDefaultResponse {
   policy: VisibleVpnProfilesPolicy
 }
 
+export interface SelfServiceLimits {
+  quota_default: number
+  create_rate_max: number
+  create_rate_window_seconds: number
+}
+
 export interface EffectiveVisibleVpnProfilesResponse {
   policy: VisibleVpnProfilesPolicy
   inherited: boolean
@@ -685,6 +691,9 @@ export interface TelegramSettings {
   legacy_login_enabled: boolean
   auth_method: 'oidc' | 'legacy' | 'none'
   login_ready: boolean
+  bot_command_rate_max: number
+  bot_command_rate_window_seconds: number
+  bot_command_rate_limit_enabled: boolean
 }
 
 export interface TelegramLinkCode {

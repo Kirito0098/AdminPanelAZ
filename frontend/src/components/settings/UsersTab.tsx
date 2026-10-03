@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
+  Gauge,
   MoreHorizontal,
   Pencil,
   Save,
@@ -16,6 +17,7 @@ import {
 import { ApiError, getConfigs, getUserConfigAccess, getUserVpnVisibilityDefault, setUserConfigAccess, setUserVpnVisibilityDefault, updateUser } from '@/api/client'
 import AppDialog from '@/components/shared/AppDialog'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
+import SelfServiceLimitsSection from '@/components/settings/SelfServiceLimitsSection'
 import VpnVisibilityPolicyEditor, {
   copyVisibleVpnPolicy,
   FULL_VISIBLE_VPN_POLICY,
@@ -204,6 +206,7 @@ export default function UsersTab({
   const [userQuery, setUserQuery] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [policyOpen, setPolicyOpen] = useState(false)
+  const [limitsOpen, setLimitsOpen] = useState(false)
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [activeEditor, setActiveEditor] = useState<PanelUser | null>(null)
   const [draftRole, setDraftRole] = useState<UserRole>('user')
@@ -713,6 +716,16 @@ export default function UsersTab({
             </div>
           </>
         )}
+      </SettingsCollapsible>
+
+      <SettingsCollapsible
+        open={limitsOpen}
+        onOpenChange={setLimitsOpen}
+        title="Лимиты создания конфигов"
+        description="Квота по умолчанию и защита от массового создания"
+        icon={<Gauge size={16} />}
+      >
+        {limitsOpen ? <SelfServiceLimitsSection /> : null}
       </SettingsCollapsible>
 
       <AppDialog

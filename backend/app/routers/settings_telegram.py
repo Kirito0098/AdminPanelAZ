@@ -35,6 +35,7 @@ from app.services.notify_time import get_client_timezone_from_request
 from app.services.panel_publish_info import resolve_request_url_root
 from app.services.telegram import send_tg_message
 from app.services.telegram_api import delete_webhook_sync, set_webhook_sync
+from app.services.telegram_bot_command_rate_limit import get_bot_command_rate_limits, set_bot_command_rate_limits
 from app.services.telegram_recipients import (
     get_notify_recipient_user_ids,
     get_setting_chat_ids,
@@ -81,6 +82,7 @@ def _telegram_settings_response(db: Session, request: Request) -> TelegramSettin
     legacy_ready = legacy_login_enabled and bot_token_set and bool(bot_username)
     auth_method: str = "oidc" if oidc_enabled else ("legacy" if legacy_login_enabled else "none")
     chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
+    bot_limits = get_bot_command_rate_limits(db)
     return TelegramSettingsResponse(
         bot_token_set=bot_token_set,
         bot_username=bot_username,
@@ -102,6 +104,9 @@ def _telegram_settings_response(db: Session, request: Request) -> TelegramSettin
         legacy_login_enabled=legacy_login_enabled,
         auth_method=auth_method,
         login_ready=oidc_ready or legacy_ready,
+        bot_command_rate_max=bot_limits["max_requests"],
+        bot_command_rate_window_seconds=bot_limits["window_seconds"],
+        bot_command_rate_limit_enabled=get_settings().telegram_bot_command_rate_limit_enabled,
     )
 
 
@@ -165,6 +170,12 @@ def update_telegram_settings(
             _set_setting(db, "telegram_legacy_login_enabled", "true")
         else:
             _set_setting(db, "telegram_legacy_login_enabled", "false")
+    if payload.bot_command_rate_max is not None or payload.bot_command_rate_window_seconds is not None:
+        set_bot_command_rate_limits(
+            db,
+            max_requests=payload.bot_command_rate_max,
+            window_seconds=payload.bot_command_rate_window_seconds,
+        )
     db.commit()
     admin_notify_service.send_settings_change(
         db,

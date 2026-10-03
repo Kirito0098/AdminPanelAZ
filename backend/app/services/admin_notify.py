@@ -154,11 +154,13 @@ SETTINGS_CHANGE_NOTIFY = frozenset({
     "settings_reboot_schedule",
     "settings_reboot_cancel",
     "settings_reboot_execute",
+    "settings_self_service_limits_update",
 })
 
 SETTINGS_TG_TITLES = {
     "settings_port_update": "Порт панели",
     "settings_telegram_auth_update": "Авторизация Telegram",
+    "settings_self_service_limits_update": "Лимиты самообслуживания",
     "settings_nightly_update": "Ночной рестарт",
     "settings_backup_update": "Бэкапы",
     "settings_backup_create": "Бэкапы",

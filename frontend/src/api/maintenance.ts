@@ -183,6 +183,8 @@ export async function updateTelegramSettings(data: {
   oidc_client_id?: string
   oidc_client_secret?: string
   legacy_login_enabled?: boolean
+  bot_command_rate_max?: number
+  bot_command_rate_window_seconds?: number
 }) {
   return apiFetch<TelegramSettings>('/settings/telegram', {
     method: 'PATCH',

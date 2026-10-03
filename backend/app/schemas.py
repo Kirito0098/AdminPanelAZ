@@ -1115,6 +1115,9 @@ class TelegramSettingsResponse(BaseModel):
     legacy_login_enabled: bool = True
     auth_method: Literal["oidc", "legacy", "none"] = "legacy"
     login_ready: bool = False
+    bot_command_rate_max: int = 30
+    bot_command_rate_window_seconds: int = 60
+    bot_command_rate_limit_enabled: bool = True
 
 
 class TelegramSettingsUpdate(BaseModel):
@@ -1131,6 +1134,20 @@ class TelegramSettingsUpdate(BaseModel):
     oidc_client_id: str | None = None
     oidc_client_secret: str | None = None
     legacy_login_enabled: bool | None = None
+    bot_command_rate_max: int | None = Field(default=None, ge=0, le=1000)
+    bot_command_rate_window_seconds: int | None = Field(default=None, ge=10, le=3600)
+
+
+class SelfServiceLimitsResponse(BaseModel):
+    quota_default: int
+    create_rate_max: int
+    create_rate_window_seconds: int
+
+
+class SelfServiceLimitsUpdate(BaseModel):
+    quota_default: int | None = Field(default=None, ge=0, le=1000)
+    create_rate_max: int | None = Field(default=None, ge=0, le=100)
+    create_rate_window_seconds: int | None = Field(default=None, ge=60, le=86400)
 
 
 class TelegramLinkCodeResponse(BaseModel):

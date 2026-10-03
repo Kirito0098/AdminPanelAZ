@@ -11,6 +11,7 @@ import {
 import type {
   VpnConfig,
   SelfServiceQuota,
+  SelfServiceLimits,
   EffectiveVisibleVpnProfilesResponse,
   VisibleVpnProfilesDefaultResponse,
   VisibleVpnProfilesPolicy,
@@ -50,6 +51,17 @@ export async function setUserVpnVisibilityDefault(policy: VisibleVpnProfilesPoli
       body: JSON.stringify({ policy }),
     },
   )
+}
+
+export async function getSelfServiceLimits() {
+  return apiFetch<SelfServiceLimits>('/settings/self-service')
+}
+
+export async function updateSelfServiceLimits(data: Partial<SelfServiceLimits>) {
+  return apiFetch<SelfServiceLimits>('/settings/self-service', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
 }
 
 export async function getConfigProfileFiles(ids?: number[]) {

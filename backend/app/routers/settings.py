@@ -17,6 +17,8 @@ from app.schemas import (
     MonitorSettingsUpdate,
     RetentionSettingsResponse,
     RetentionSettingsUpdate,
+    SelfServiceLimitsResponse,
+    SelfServiceLimitsUpdate,
     VisibleVpnProfilesDefaultResponse,
     VisibleVpnProfilesDefaultUpdate,
     VisibleVpnProfilesPolicy,
@@ -35,6 +37,7 @@ from app.services.notify_time import (
 )
 from app.services.openvpn_profile_repair import recreate_openvpn_profiles
 from app.services.profile_delivery import load_node_remote_hosts
+from app.services.self_service import get_self_service_limits, set_self_service_limits
 from app.services.vpn_profile_visibility import (
     get_default_visible_vpn_profiles,
     set_default_visible_vpn_profiles,
@@ -421,3 +424,32 @@ def put_user_vpn_visibility_default(
         client_timezone=get_client_timezone_from_request(request),
     )
     return VisibleVpnProfilesDefaultResponse(policy=VisibleVpnProfilesPolicy(**policy))
+
+
+@router.get("/self-service", response_model=SelfServiceLimitsResponse)
+def get_self_service_limits_settings(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    return SelfServiceLimitsResponse(**get_self_service_limits(db))
+
+
+@router.patch("/self-service", response_model=SelfServiceLimitsResponse)
+def update_self_service_limits_settings(
+    payload: SelfServiceLimitsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    before = get_self_service_limits(db)
+    after = set_self_service_limits(db, **payload.model_dump(exclude_none=True))
+    db.commit()
+    changed = " ".join(f"{key}={before[key]}→{after[key]}" for key in after if before[key] != after[key])
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_self_service_limits_update",
+        details=changed or None,
+        client_timezone=get_client_timezone_from_request(request),
+    )
+    return SelfServiceLimitsResponse(**after)

@@ -75,6 +75,7 @@ const ACTION_LOG_LABELS: Record<string, string> = {
   settings_change: 'Изменение настроек',
   settings_port_update: 'Изменение порта панели',
   settings_telegram_auth_update: 'Изменение авторизации Telegram',
+  settings_self_service_limits_update: 'Изменение лимитов самообслуживания',
   settings_telegram_update: 'Изменение настроек Telegram',
   settings_telegram_token: 'Изменение токена Telegram-бота',
   settings_telegram_test: 'Тест Telegram-уведомлений',

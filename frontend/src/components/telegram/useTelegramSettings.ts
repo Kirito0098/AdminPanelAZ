@@ -339,6 +339,7 @@ export function useTelegramSettings() {
 
   return {
     settings,
+    setSettings,
     adminNotify,
     botToken,
     setBotToken,
