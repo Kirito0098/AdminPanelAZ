@@ -11,14 +11,11 @@ from app.schemas import NocIncidentItem, NocIncidentsResponse
 from app.services.alert_rules import format_rule_condition
 from app.services.monitoring_overview import _build_node_summary, _collect_nodes_monitoring_data
 from app.services.node_manager import is_vpn_node, get_active_node
+from app.services.shared_helpers import utcnow_naive as _utcnow
 
 _CIDR_OK_STATUSES = frozenset({"ok", "success"})
 _ALERT_WINDOW_DAYS = 7
 _CIDR_WINDOW_HOURS = 48
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _as_naive_utc(dt: datetime | None) -> datetime | None:

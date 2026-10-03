@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.database import SessionLocal
-from app.models import AppSetting
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.cidr.pipeline.deploy import compute_artifact_stamp
 from app.services.cidr.pipeline.orchestrator import run_compile, run_ingest, run_multi_deploy
@@ -26,19 +26,6 @@ def _seconds_until_next_run(hour: int, minute: int) -> float:
     if target <= now:
         target += timedelta(days=1)
     return (target - now).total_seconds()
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
 
 
 def get_last_cron_run_at(db: Session) -> datetime | None:

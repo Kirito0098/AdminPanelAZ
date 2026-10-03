@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, WgAccessPolicy
 from app.services.access_policy import AccessPolicyService
 from app.services.node_manager import get_adapter_for_node, node_metadata_dict
+from app.services.shared_helpers import as_utc as _as_utc
 
 Protocol = Literal["openvpn", "wireguard", "amneziawg2"]
 
@@ -20,14 +21,6 @@ Protocol = Literal["openvpn", "wireguard", "amneziawg2"]
 def _deadline_column(protocol: Protocol):
     model = _policy_model(protocol)
     return model.expires_at if protocol == "wireguard" else model.access_until
-
-
-def _as_utc(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
 
 
 def _to_db_datetime(dt: datetime | None) -> datetime | None:

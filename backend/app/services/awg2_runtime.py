@@ -9,15 +9,12 @@ import tempfile
 from pathlib import Path
 
 from app.services.runtime_peer_batch import block_peers_batch, group_peers_by_client
+from app.services.shared_helpers import normalize_client_name as _normalize_client_name
 
 AWG2_CONFIG_DIR = Path("/etc/amnezia/amneziawg")
 DEFAULT_AZ_IFACE = "antizapret-awg"
 DEFAULT_VPN_IFACE = "vpn-awg"
 COMMAND_TIMEOUT_SECONDS = 10
-
-
-def _normalize_client_name(client_name: str) -> str:
-    return (client_name or "").strip().lower()
 
 
 def _read_kv_file(path: Path) -> dict[str, str]:

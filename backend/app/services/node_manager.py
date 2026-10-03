@@ -13,7 +13,6 @@ from app.config import get_settings
 from app.models import (
     AmneziaWg2AccessPolicy,
     AlertRule,
-    AppSetting,
     ClientPortalToken,
     ClientTemplate,
     ConfigTag,
@@ -34,6 +33,7 @@ from app.models import (
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.expected_node import confirmed_node_id, ensure_expected_node, forget_expected_node
 from app.services.antizapret import AntiZapretService
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.node_adapter import LocalNodeAdapter, NodeAdapter, RemoteNodeAdapter
 from app.services.node_health import HEALTH_METADATA_KEYS
 from app.services.node_transport import TRANSPORT_SSH, get_transport, node_uses_tls, resolve_transport_id
@@ -43,19 +43,6 @@ settings = get_settings()
 ACTIVE_NODE_KEY = "active_node_id"
 NODE_KIND_VPN = "vpn"
 NODE_KIND_PROXY = "proxy"
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
 
 
 def validate_node_host(host: str) -> str:

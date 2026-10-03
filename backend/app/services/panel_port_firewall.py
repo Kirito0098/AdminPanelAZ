@@ -8,6 +8,8 @@ import os
 import subprocess
 from typing import Iterable
 
+from app.services.shared_helpers import env_bool as _env_bool
+
 logger = logging.getLogger(__name__)
 
 CHAIN_V4 = "AA_PANEL_WHITELIST"
@@ -16,13 +18,6 @@ COMMENT_JUMP_V4 = "aa-panel-port-jump-v4"
 CHAIN_V6_LEGACY = "AA_PANEL_WHITELIST6"
 IPSET_ALLOW_V6_LEGACY = "aa_panel_allow_v6"
 COMMENT_JUMP_V6_LEGACY = "aa-panel-port-jump-v6"
-
-
-def _env_bool(name: str, default: bool = False) -> bool:
-    raw = (os.getenv(name, "") or "").strip().lower()
-    if not raw:
-        return default
-    return raw in {"1", "true", "yes", "y", "on"}
 
 
 def _panel_port() -> int:

@@ -152,7 +152,6 @@ class Settings(BaseSettings):
     action_log_retention_days: int = 365
     retention_batch_size: int = 5000
     health_deep_node_ping: bool = True
-    health_deep_node_ping_timeout_seconds: float = 3.0
     bulk_config_op_max_workers: int = 4
     telegram_bot_command_rate_limit_enabled: bool = True
     geoip_city_mmdb_path: Path = Path("data/geoip/GeoLite2-City.mmdb")

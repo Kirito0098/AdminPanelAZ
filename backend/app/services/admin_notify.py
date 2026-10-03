@@ -13,7 +13,8 @@ import psutil
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AppSetting, User, UserRole
+from app.models import User, UserRole
+from app.services.app_setting_store import _get_setting
 from app.services.admin_notify_settings_text import (
     parse_mini_details_kv,
     user_action_tg_action_line,
@@ -213,11 +214,6 @@ _PREF_KEY_MAP = {
     "node_online": "node_offline",
     "openvpn_buffer_guard": "openvpn_buffer_guard_triggered",
 }
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
 
 
 def _mini_protocol_label(raw_value: str | None) -> str:

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.database import SessionLocal
-from app.models import AppSetting
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.admin_notify import admin_notify_service
 from app.services.backup_manager import BackupManager
 from app.services.cidr.pipeline.file_pipeline import _prune_runtime_backups
@@ -25,19 +25,6 @@ def _is_backups_enabled() -> bool:
     from app.services.feature_guards import get_feature_service
 
     return get_feature_service().is_enabled("backups")
-
-
-def _get_setting(db, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
-
-
-def _set_setting(db, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
 
 
 _LAST_ERROR_KEY = "backup_auto_last_error"

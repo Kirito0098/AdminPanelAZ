@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.services.env_file import EnvFileService
+from app.services.shared_helpers import parse_bool as _parse_bool
 
 RESOURCE_IMPACT_LEVELS = {
     "minimal": {"label": "минимальная"},
@@ -868,12 +869,6 @@ for _item in FEATURE_TOGGLES:
         FRONTEND_PATH_TO_MODULE[_path] = _item.key
     for _tab in _item.settings_tabs:
         SETTINGS_TAB_TO_MODULE[_tab] = _item.key
-
-
-def _parse_bool(raw: str | None, *, default: bool) -> bool:
-    if raw is None:
-        return default
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 class FeatureToggleService:

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import AppSetting, User
+from app.models import User
 from app.schemas import (
     MessageResponse,
     TrafficClientSessionsResponse,
@@ -46,19 +46,6 @@ class TrafficResetRequest(BaseModel):
 
 class TrafficDeleteClientRequest(BaseModel):
     client_name: str = Field(..., min_length=1)
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
 
 
 def _active_traffic_client_names(db: Session, node_id: int) -> set[str]:

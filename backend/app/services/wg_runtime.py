@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 
 from app.services.runtime_peer_batch import block_peers_batch, group_peers_by_client
+from app.services.shared_helpers import normalize_client_name as _normalize_client_name
 
 WG_CONFIG_FILES = {
     "antizapret": Path("/etc/wireguard/antizapret.conf"),
@@ -14,10 +15,6 @@ WG_CONFIG_FILES = {
 }
 
 COMMAND_TIMEOUT_SECONDS = 10
-
-
-def _normalize_client_name(client_name: str) -> str:
-    return (client_name or "").strip().lower()
 
 
 def _parse_peers(config_path: Path, interface_name: str, client_name: str | None) -> list[dict]:

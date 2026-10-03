@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from enum import Enum
 
 from sqlalchemy.orm import Session
 
 from app.models import NodeResourceSample, PanelResourceSample
+from app.services.shared_helpers import utcnow_naive as _utcnow
 
 
 class SustainedMetricSource(str, Enum):
@@ -16,10 +17,6 @@ class SustainedMetricSource(str, Enum):
     panel_host_cpu = "panel_host_cpu"
     panel_host_ram = "panel_host_ram"
     panel_backend_cpu = "panel_backend_cpu"
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _min_samples(sustained_seconds: int, sample_interval_seconds: int) -> int:

@@ -16,7 +16,8 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import SessionLocal
-from app.models import AppSetting, UserActionLog, WebhookDelivery
+from app.models import UserActionLog, WebhookDelivery
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.audit_stream import AUDIT_STREAM_KEYS, audit_stream_service
 
 logger = logging.getLogger(__name__)
@@ -59,19 +60,6 @@ WEBHOOK_EVENT_LABELS: dict[str, str] = {
     "wg_temp_block": "Временная блокировка WG",
     "wg_perm_block": "Постоянная блокировка WG",
 }
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row and row.value is not None else default
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
 
 
 class EventWebhookService:

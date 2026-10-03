@@ -12,6 +12,7 @@ from app.models import ConnectionCountSample, Node, NodeStatus
 from app.services.awg2_noc import fetch_awg2_peers_for_adapter
 from app.services.feature_toggles import is_awg2_enabled
 from app.services.node_manager import is_vpn_node, get_active_node, get_adapter_for_node
+from app.services.shared_helpers import utcnow_naive as _utcnow
 from app.services.wireguard_status import wireguard_peer_is_online
 
 VALID_PERIODS = frozenset({"1h", "6h", "24h"})
@@ -25,10 +26,6 @@ BUCKET_SECONDS = {
     "6h": 300,
     "24h": 900,
 }
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def persist_connection_sample(

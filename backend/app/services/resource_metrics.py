@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import NodeResourceSample
+from app.services.shared_helpers import utcnow_naive as _utcnow
 
 settings = get_settings()
 
@@ -24,10 +25,6 @@ BUCKET_SECONDS = {
     "7d": 1800,
     "30d": 7200,
 }
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _bytes_to_mb(value: int | float | None) -> int:

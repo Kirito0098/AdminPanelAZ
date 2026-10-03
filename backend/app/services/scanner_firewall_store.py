@@ -15,6 +15,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from app.services.shared_helpers import env_bool as _env_bool
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_DATA_VERSION = 2
@@ -79,13 +81,6 @@ def check_scanner_firewall(*, run_cmd: Runner | None = None) -> list[str]:
         if run(_drop_rule(tool, "-C", ipset_name), 10.0).returncode != 0:
             issues.append(f"нет правила {tool} INPUT DROP для {ipset_name}")
     return issues
-
-
-def _env_bool(name: str, default: bool = False) -> bool:
-    raw = (os.getenv(name, "") or "").strip().lower()
-    if not raw:
-        return default
-    return raw in {"1", "true", "yes", "y", "on"}
 
 
 def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 10**9) -> int:

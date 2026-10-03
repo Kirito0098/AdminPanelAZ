@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_admin
 from app.config import get_settings as load_app_config
 from app.database import get_db
-from app.models import AppSetting, User
+from app.models import User
+from app.services.app_setting_store import _get_setting
 from app.schemas import (
     AppSettingsResponse,
     AppSettingsUpdate,
@@ -45,19 +46,6 @@ from app.services.vpn_profile_visibility import (
 router = APIRouter(prefix="/settings", tags=["settings"])
 settings = load_app_config()
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
 
 
 _CONFIG_FILE_NAMES = (

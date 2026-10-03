@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from app.database import SessionLocal
 from app.models import ServerRebootRecord
 from app.services.process_identity import current_process_owner, is_owner_alive
+from app.services.shared_helpers import utcnow_naive as _utcnow
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +53,6 @@ class PendingReboot:
 _lock = threading.Lock()
 _timers: dict[str, threading.Timer] = {}
 _execute_fns: dict[str, ExecuteFn] = {}
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _to_pending(row: ServerRebootRecord) -> PendingReboot:

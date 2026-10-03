@@ -11,7 +11,8 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
-from app.models import AppSetting, UserActionLog, WebhookDelivery
+from app.models import UserActionLog, WebhookDelivery
+from app.services.app_setting_store import _get_setting, _set_setting
 
 logger = logging.getLogger(__name__)
 
@@ -25,19 +26,6 @@ AUDIT_STREAM_KEYS = {
     "syslog_protocol": "audit_stream_syslog_protocol",
     "format": "audit_stream_format",
 }
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row and row.value is not None else default
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
 
 
 def _truthy(value: str) -> bool:

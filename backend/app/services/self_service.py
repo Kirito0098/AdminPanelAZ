@@ -6,7 +6,8 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AppSetting, User, UserRole, VpnConfig
+from app.models import User, UserRole, VpnConfig
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.rate_limit.backends import MemoryRateLimitBackend
 from app.services.rate_limit.sliding_window import RateLimitExceeded, SlidingWindowLimiter
 from app.services.user_subscription import user_subscription_expired
@@ -24,19 +25,6 @@ CREATE_RATE_MAX_BOUNDS = (0, 100)
 CREATE_RATE_WINDOW_BOUNDS = (60, 86400)
 
 REMINDER_DEDUP_SECONDS = 86400
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
 
 
 def _get_setting_int(db: Session, key: str, default: int) -> int:

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import AppSetting
+from app.services.app_setting_store import _get_setting
 from app.services.noc_report import send_noc_report, send_weekly_image_report
 from app.services.noc_schedule import (
     local_now_for_user,
@@ -32,11 +33,6 @@ def _is_telegram_enabled() -> bool:
 
 def _last_run_key(period: str, user_id: int) -> str:
     return f"noc_report_{period}_last_run:{user_id}"
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
 
 
 def _set_setting(db: Session, key: str, value: str) -> None:

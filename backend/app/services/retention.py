@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
@@ -22,15 +22,12 @@ from app.models import (
 
 from app.services.server_reboot import ACTIVE_STATUSES as REBOOT_ACTIVE_STATUSES
 from app.services.telegram_update_dedup import PROCESSED_UPDATE_RETENTION
+from app.services.shared_helpers import utcnow_naive as _utcnow
 
 # An expired refresh token is rejected on its own; the grace only keeps it around for audit.
 REFRESH_TOKEN_EXPIRED_GRACE_DAYS = 7
 REBOOT_REQUEST_RETENTION_DAYS = 30
 BUFFER_GUARD_EVENT_RETENTION_DAYS = 30
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _purge_where(db: Session, model, *criteria, batch_size: int) -> int:

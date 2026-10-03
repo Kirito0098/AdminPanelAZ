@@ -24,6 +24,8 @@ from app.models import (
     VpnType,
     WgAccessPolicy,
 )
+from app.services.shared_helpers import as_utc as _as_utc
+from app.services.shared_helpers import normalize_client_name as _normalize_client_name
 from app.services.access_until import _policy_service_for_node, _reconcile_access_until, get_access_until, set_access_until
 from app.services.feature_guards import get_feature_service, module_disabled_message
 
@@ -63,20 +65,8 @@ def _to_db_datetime(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def _as_utc(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
 def _normalize_code(code: str) -> str:
     return (code or "").strip().upper()
-
-
-def _normalize_client_name(client_name: str) -> str:
-    return (client_name or "").strip().lower()
 
 
 def _normalize_protocols(protocols: list[str]) -> list[str]:

@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from fastapi import Request
 
 from app.config import Settings
+from app.services.shared_helpers import parse_bool as _parse_bool
 
 PublishModeKey = str
 GetEnvValue = Callable[[str, str], str]
@@ -65,12 +66,6 @@ NGINX_PROCESS_RE = re.compile(r"nginx", re.I)
 PORT_ROLE_BACKEND = "backend"
 PORT_ROLE_NGINX_HTTPS = "nginx_https"
 PORT_ROLE_NGINX_HTTP = "nginx_http"
-
-
-def _parse_bool(raw: str | None, *, default: bool = False) -> bool:
-    if raw is None:
-        return default
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _is_loopback_bind(bind: str) -> bool:

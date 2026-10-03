@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, User, VpnConfig, VpnType, WgAccessPolicy
 from app.services.access_until import _policy_service_for_node, _reconcile_access_until, _row_access_until, set_access_until
+from app.services.shared_helpers import as_utc as _as_utc
 from app.services.unlock_codes import _is_manual_admin_block
 
 logger = logging.getLogger(__name__)
@@ -17,14 +18,6 @@ _VPN_PROTOCOLS = {
     VpnType.amneziawg2: "amneziawg2",
 }
 _PROTOCOL_VPN_TYPE = {protocol: vpn_type for vpn_type, protocol in _VPN_PROTOCOLS.items()}
-
-
-def _as_utc(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
 
 
 def _to_db_datetime(dt: datetime | None) -> datetime | None:

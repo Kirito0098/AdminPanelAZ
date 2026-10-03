@@ -12,15 +12,11 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import AppSetting
+from app.services.app_setting_store import _get_setting
 from app.services.active_web_session import active_web_session_service
 from app.services.background_gate import run_background_step
 
 logger = logging.getLogger(__name__)
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
 
 
 def _set_setting(db: Session, key: str, value: str) -> None:

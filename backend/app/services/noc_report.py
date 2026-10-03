@@ -26,6 +26,8 @@ from app.models import (
     UserTrafficSample,
     WgAccessPolicy,
 )
+from app.services.app_setting_store import _get_setting
+from app.services.shared_helpers import as_utc as _as_utc
 from app.services.feature_guards import get_feature_service
 from app.services.feature_toggles import is_awg2_enabled
 from app.services.node_compare_metrics import get_traffic_totals_by_node
@@ -44,11 +46,6 @@ WEEKLY_TOP_CLIENTS_LIMIT = 5
 _CIDR_OK_STATUSES = frozenset({"ok", "success"})
 
 
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
-
-
 def _set_setting(db: Session, key: str, value: str) -> None:
     row = db.query(AppSetting).filter(AppSetting.key == key).first()
     if row:
@@ -60,14 +57,6 @@ def _set_setting(db: Session, key: str, value: str) -> None:
 
 def _wg_profile(profile: str | None) -> bool:
     return "-wg" in (profile or "").lower()
-
-
-def _as_utc(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
 
 
 def _to_naive_utc(dt: datetime) -> datetime:
