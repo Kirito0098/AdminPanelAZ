@@ -15,7 +15,7 @@ extract() {
   done
 }
 
-INSTALL_FNS="$(extract "$ROOT_DIR/install.sh" env_escape_for_sed node_env_set proxy_env_set is_placeholder_secret \
+INSTALL_FNS="$(extract "$ROOT_DIR/install.sh" env_escape_for_sed env_file_set node_env_set proxy_env_set is_placeholder_secret \
   agent_env_value agent_mtls_bundle_valid agent_env_preserve setup_node_env setup_proxy_env)"
 
 fail() {

@@ -292,16 +292,16 @@ def update_monitor_settings(
         else cfg.monitor_sustained_seconds
     )
 
-    env_service.set_env_value("MONITOR_CPU_THRESHOLD", str(cpu))
-    env_service.set_env_value("MONITOR_RAM_THRESHOLD", str(ram))
-    env_service.set_env_value("MONITOR_CHECK_INTERVAL_SECONDS", str(interval))
-    env_service.set_env_value("MONITOR_COOLDOWN_MINUTES", str(cooldown))
-    env_service.set_env_value("MONITOR_SUSTAINED_SECONDS", str(sustained))
-    os.environ["MONITOR_CPU_THRESHOLD"] = str(cpu)
-    os.environ["MONITOR_RAM_THRESHOLD"] = str(ram)
-    os.environ["MONITOR_CHECK_INTERVAL_SECONDS"] = str(interval)
-    os.environ["MONITOR_COOLDOWN_MINUTES"] = str(cooldown)
-    os.environ["MONITOR_SUSTAINED_SECONDS"] = str(sustained)
+    env_values = {
+        "MONITOR_CPU_THRESHOLD": str(cpu),
+        "MONITOR_RAM_THRESHOLD": str(ram),
+        "MONITOR_CHECK_INTERVAL_SECONDS": str(interval),
+        "MONITOR_COOLDOWN_MINUTES": str(cooldown),
+        "MONITOR_SUSTAINED_SECONDS": str(sustained),
+    }
+    for key, value in env_values.items():
+        env_service.set_env_value(key, value)
+    os.environ.update(env_values)
     load_app_config.cache_clear()
 
     admin_notify_service.send_settings_change(

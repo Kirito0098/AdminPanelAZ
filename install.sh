@@ -952,40 +952,29 @@ env_escape_for_sed() {
   printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
 }
 
-env_set() {
-  local key="$1"
-  local value="$2"
+env_file_set() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
   local escaped
   escaped="$(env_escape_for_sed "$value")"
-  if grep -qE "^${key}=" "$ENV_FILE" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "$ENV_FILE"
+  if grep -qE "^${key}=" "$file" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${escaped}|" "$file"
   else
-    printf '%s=%s\n' "$key" "$value" >>"$ENV_FILE"
+    printf '%s=%s\n' "$key" "$value" >>"$file"
   fi
+}
+
+env_set() {
+  env_file_set "$ENV_FILE" "$1" "$2"
 }
 
 node_env_set() {
-  local key="$1"
-  local value="$2"
-  local escaped
-  escaped="$(env_escape_for_sed "$value")"
-  if grep -qE "^${key}=" "$NODE_ENV_FILE" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "$NODE_ENV_FILE"
-  else
-    printf '%s=%s\n' "$key" "$value" >>"$NODE_ENV_FILE"
-  fi
+  env_file_set "$NODE_ENV_FILE" "$1" "$2"
 }
 
 proxy_env_set() {
-  local key="$1"
-  local value="$2"
-  local escaped
-  escaped="$(env_escape_for_sed "$value")"
-  if grep -qE "^${key}=" "$PROXY_ENV_FILE" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "$PROXY_ENV_FILE"
-  else
-    printf '%s=%s\n' "$key" "$value" >>"$PROXY_ENV_FILE"
-  fi
+  env_file_set "$PROXY_ENV_FILE" "$1" "$2"
 }
 
 agent_env_value() {

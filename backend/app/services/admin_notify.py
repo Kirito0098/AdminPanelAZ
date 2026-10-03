@@ -940,69 +940,51 @@ class AdminNotifyService:
         cfg = get_settings()
         now = datetime.now(timezone.utc)
         cooldown = timedelta(minutes=cfg.monitor_cooldown_minutes)
+        is_node = node_id is not None
+        metrics = (
+            (
+                "high_cpu",
+                cpu_percent,
+                cfg.monitor_cpu_threshold,
+                cpu_source
+                or (SustainedMetricSource.node_cpu if is_node else SustainedMetricSource.panel_host_cpu),
+                self.send_high_cpu,
+            ),
+            (
+                "high_ram",
+                ram_percent,
+                cfg.monitor_ram_threshold,
+                ram_source
+                or (SustainedMetricSource.node_ram if is_node else SustainedMetricSource.panel_host_ram),
+                self.send_high_ram,
+            ),
+        )
         with self._monitor_lock:
-            if cpu_percent is not None and cpu_percent >= cfg.monitor_cpu_threshold:
-                source = cpu_source or (
-                    SustainedMetricSource.node_cpu
-                    if node_id is not None
-                    else SustainedMetricSource.panel_host_cpu
-                )
-                interval = self._sustained_sample_interval(source)
+            for alert, value, threshold, source, send in metrics:
+                if value is None or value < threshold:
+                    continue
                 sustained_ok, sustained_detail = is_sustained_high(
                     db,
                     source=source,
                     node_id=node_id,
-                    threshold=float(cfg.monitor_cpu_threshold),
-                    current_value=float(cpu_percent),
+                    threshold=float(threshold),
+                    current_value=float(value),
                     sustained_seconds=cfg.monitor_sustained_seconds,
-                    sample_interval_seconds=interval,
+                    sample_interval_seconds=self._sustained_sample_interval(source),
                 )
-                if sustained_ok:
-                    key = ("high_cpu", node_id)
-                    last = self._resource_alert_cooldowns.get(key)
-                    if last is None or (now - last) >= cooldown:
-                        self._resource_alert_cooldowns[key] = now
-                        self.send_high_cpu(
-                            db,
-                            details=format_alert_details(
-                                float(cpu_percent),
-                                float(cfg.monitor_cpu_threshold),
-                                sustained_detail,
-                            ),
-                            node_id=node_id,
-                            node_name=node_name,
-                        )
-            if ram_percent is not None and ram_percent >= cfg.monitor_ram_threshold:
-                source = ram_source or (
-                    SustainedMetricSource.node_ram
-                    if node_id is not None
-                    else SustainedMetricSource.panel_host_ram
-                )
-                interval = self._sustained_sample_interval(source)
-                sustained_ok, sustained_detail = is_sustained_high(
+                if not sustained_ok:
+                    continue
+                key = (alert, node_id)
+                last = self._resource_alert_cooldowns.get(key)
+                if last is not None and (now - last) < cooldown:
+                    continue
+                self._resource_alert_cooldowns[key] = now
+                send(
                     db,
-                    source=source,
+                    details=format_alert_details(float(value), float(threshold), sustained_detail),
                     node_id=node_id,
-                    threshold=float(cfg.monitor_ram_threshold),
-                    current_value=float(ram_percent),
-                    sustained_seconds=cfg.monitor_sustained_seconds,
-                    sample_interval_seconds=interval,
+                    node_name=node_name,
                 )
-                if sustained_ok:
-                    key = ("high_ram", node_id)
-                    last = self._resource_alert_cooldowns.get(key)
-                    if last is None or (now - last) >= cooldown:
-                        self._resource_alert_cooldowns[key] = now
-                        self.send_high_ram(
-                            db,
-                            details=format_alert_details(
-                                float(ram_percent),
-                                float(cfg.monitor_ram_threshold),
-                                sustained_detail,
-                            ),
-                            node_id=node_id,
-                            node_name=node_name,
-                        )
 
     @staticmethod
     def _sustained_sample_interval(source: SustainedMetricSource) -> int:
