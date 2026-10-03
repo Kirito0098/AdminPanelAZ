@@ -115,18 +115,21 @@ export default defineConfig(({ mode }) => {
       emptyOutDir: true,
       cssCodeSplit: !isTgMini,
       modulePreload: !isTgMini,
+      manifest: !isTgMini,
       rollupOptions: {
         input: isTgMini ? 'tg-mini.html' : 'index.html',
-        ...(isTgMini
+        output: isTgMini
           ? {
-              output: {
-                format: 'iife',
-                inlineDynamicImports: true,
-                entryFileNames: 'assets/tg-mini-[hash].js',
-                assetFileNames: 'assets/tg-mini-[hash][extname]',
-              },
+              format: 'iife',
+              inlineDynamicImports: true,
+              entryFileNames: 'assets/tg-mini-[hash].js',
+              assetFileNames: 'assets/tg-mini-[hash][extname]',
             }
-          : {}),
+          : {
+              entryFileNames: 'assets/[hash].js',
+              chunkFileNames: 'assets/[hash].js',
+              assetFileNames: 'assets/[hash][extname]',
+            },
       },
     },
     server: {

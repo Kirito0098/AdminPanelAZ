@@ -3,7 +3,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { eagerChartChunks, eagerChunks, pagesWithChartCode } from '../../scripts/check-entry-chunks.mjs'
+import {
+  eagerChartChunks,
+  eagerChunks,
+  pagesWithChartCode,
+  publicWordLeaks,
+} from '../../scripts/check-entry-chunks.mjs'
 
 let dist: string
 
@@ -57,15 +62,49 @@ describe('check-entry-chunks', () => {
   })
 
   it('flags pages that import chart code statically, except the chart pages', () => {
-    write('assets/charts-Ab_1.js', 'recharts-surface')
-    write('assets/TrafficPage-Xy-9.js', 'import{C}from"./charts-Ab_1.js"')
-    write('assets/WarperPage-Qw12.js', 'const C=()=>import("./charts-Ab_1.js")')
-    write('assets/MonitoringPage-Zz12.js', 'import{C}from"./charts-Ab_1.js"')
-    write('assets/ServerMonitorPage-Zz12.js', 'import{C}from"./charts-Ab_1.js"')
-    write('assets/SettingsPage-Aa12.js', 'import"./shared-Bb12.js"')
-    write('assets/shared-Bb12.js', 'import"./charts-Ab_1.js"')
-    write('assets/pageHelpers-Cc12.js', 'import"./charts-Ab_1.js"')
+    mkdirSync(join(dist, '.vite'))
+    write(
+      '.vite/manifest.json',
+      JSON.stringify({
+        'src/pages/TrafficPage.tsx': { file: 'assets/Xy-9.js' },
+        'src/pages/WarperPage.tsx': { file: 'assets/Qw12.js' },
+        'src/pages/MonitoringPage.tsx': { file: 'assets/Zz12.js' },
+        'src/pages/ServerMonitorPage.tsx': { file: 'assets/Zz13.js' },
+        'src/pages/SettingsPage.tsx': { file: 'assets/Aa12.js' },
+        'src/lib/pageHelpers.ts': { file: 'assets/Cc12.js' },
+      }),
+    )
+    write('assets/Ab_1.js', 'recharts-surface')
+    write('assets/Xy-9.js', 'import{C}from"./Ab_1.js"')
+    write('assets/Qw12.js', 'const C=()=>import("./Ab_1.js")')
+    write('assets/Zz12.js', 'import{C}from"./Ab_1.js"')
+    write('assets/Zz13.js', 'import{C}from"./Ab_1.js"')
+    write('assets/Aa12.js', 'import"./Bb12.js"')
+    write('assets/Bb12.js', 'import"./Ab_1.js"')
+    write('assets/Cc12.js', 'import"./Ab_1.js"')
 
     expect(pagesWithChartCode(dist)).toEqual(['SettingsPage', 'TrafficPage'])
+  })
+
+  it('reports stop words in the page, eager chunks and any asset file name', () => {
+    write('index.html', '<title>AntiZapret</title><script type="module" src="./assets/index.js"></script>')
+    write('assets/index.js', 'import"./shared.js";const p=()=>import("./lazy.js")')
+    write('assets/shared.js', 'const label="WireGuard"')
+    write('assets/lazy.js', 'const label="OpenVPN"')
+    write('assets/vpnAccess-Ab12.js', '')
+
+    expect(publicWordLeaks(dist)).toEqual([
+      { where: 'index.html', word: 'antizapret' },
+      { where: 'assets/shared.js', word: 'wireguard' },
+      { where: 'assets/vpnAccess-Ab12.js (file name)', word: 'vpn' },
+    ])
+  })
+
+  it('finds no leaks in a neutral build', () => {
+    write('index.html', '<title>Admin Panel</title><script type="module" src="./assets/Qx1.js"></script>')
+    write('assets/Qx1.js', 'const p=()=>import("./Zz9.js")')
+    write('assets/Zz9.js', 'const label="OpenVPN"')
+
+    expect(publicWordLeaks(dist)).toEqual([])
   })
 })

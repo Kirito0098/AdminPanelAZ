@@ -30,6 +30,7 @@ def test_robots_txt_does_not_list_panel_paths():
     [
         ".env",
         ".git/config",
+        ".vite/manifest.json",
         "app/.htaccess",
         "wp-login.php",
         "backup.sql",

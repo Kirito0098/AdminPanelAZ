@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Fails the build check when chart code (recharts) is loaded eagerly by index.html,
-// i.e. on every page including /login, or by a page whose charts are not its main content.
+// i.e. on every page including /login, or by a page whose charts are not its main content;
+// and when words revealing a VPN panel are visible without login (page, eager chunks, asset names).
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join, posix } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,7 +10,21 @@ const CHART_MARKER = 'recharts-surface'
 const CHART_PAGES = new Set(['MonitoringPage', 'ServerMonitorPage'])
 const HTML_CHUNK_RE = /(?:src|href)="\.\/([^"]+\.js)"/g
 const STATIC_IMPORT_RE = /(?:\bfrom|\bimport)\s*["']\.\/([^"']+\.js)["']/g
-const PAGE_CHUNK_RE = /^([A-Z][A-Za-z0-9]*Page)-[A-Za-z0-9_-]+\.js$/
+const PAGE_SOURCE_RE = /^src\/pages\/([A-Z][A-Za-z0-9]*Page)\.tsx$/
+// Words that tell an anonymous visitor what the server is for; first match per place is reported.
+const STOP_WORDS = [
+  ['antizapret', /anti-?zapret|антизапрет/i],
+  ['zapret', /zapret/i],
+  ['openvpn', /openvpn/i],
+  ['vpn', /vpn/i],
+  ['wireguard', /wireguard/i],
+  ['amnezia', /amnezia/i],
+  ['awg', /(?<![a-z0-9])awg/i],
+  ['warp', /(?<![a-z0-9])warp(?![a-z])|warper/i],
+  ['xray', /(?<![a-z0-9])xray/i],
+  ['proxy', /(?<![A-Za-z0-9])proxy(?![A-Za-z0-9])|прокси/],
+  ['tunnel', /tunnel|туннел/i],
+]
 
 /** The given chunks plus everything they import statically (dynamic import() is not followed). */
 export function staticClosure(distDir, roots) {
@@ -51,14 +66,38 @@ export function eagerChartChunks(distDir) {
 
 /** Route chunks, other than the chart pages, that pull chart code as soon as they open. */
 export function pagesWithChartCode(distDir) {
-  const assets = join(distDir, 'assets')
-  if (!existsSync(assets)) return []
-  return readdirSync(assets)
-    .map((name) => ({ name, page: PAGE_CHUNK_RE.exec(name)?.[1] }))
+  const manifestFile = join(distDir, '.vite', 'manifest.json')
+  if (!existsSync(manifestFile)) return []
+  const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'))
+  return Object.entries(manifest)
+    .map(([src, entry]) => ({ file: entry.file, page: PAGE_SOURCE_RE.exec(src)?.[1] }))
     .filter(({ page }) => page && !CHART_PAGES.has(page))
-    .filter(({ name }) => withChartCode(distDir, staticClosure(distDir, [`assets/${name}`])).length > 0)
+    .filter(({ file }) => withChartCode(distDir, staticClosure(distDir, [file])).length > 0)
     .map(({ page }) => page)
     .sort()
+}
+
+function firstStopWord(text) {
+  return STOP_WORDS.find(([, re]) => re.test(text))?.[0]
+}
+
+/** Stop words an anonymous visitor can see: index.html, eager chunks, and every asset file name. */
+export function publicWordLeaks(distDir) {
+  const leaks = []
+  const check = (where, text) => {
+    const word = firstStopWord(text)
+    if (word) leaks.push({ where, word })
+  }
+  check('index.html', readFileSync(join(distDir, 'index.html'), 'utf8'))
+  for (const chunk of eagerChunks(distDir)) {
+    const file = join(distDir, chunk)
+    if (existsSync(file)) check(chunk, readFileSync(file, 'utf8'))
+  }
+  const assets = join(distDir, 'assets')
+  if (existsSync(assets)) {
+    for (const name of readdirSync(assets).sort()) check(`assets/${name} (file name)`, name)
+  }
+  return leaks
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
@@ -67,6 +106,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   const pages = pagesWithChartCode(distDir)
   if (eager.length > 0) console.error(`recharts is loaded on every page via: ${eager.join(', ')}`)
   if (pages.length > 0) console.error(`recharts is loaded up front by: ${pages.join(', ')} (lazy-load the chart)`)
-  if (eager.length > 0 || pages.length > 0) process.exit(1)
-  console.log(`ok: ${eagerChunks(distDir).length} eager chunks, no chart code outside ${[...CHART_PAGES].join(', ')}`)
+  const leaks = publicWordLeaks(distDir)
+  for (const { where, word } of leaks) console.error(`"${word}" is visible without login in ${where}`)
+  if (eager.length > 0 || pages.length > 0 || leaks.length > 0) process.exit(1)
+  console.log(
+    `ok: ${eagerChunks(distDir).length} eager chunks, no chart code outside ${[...CHART_PAGES].join(', ')}, no stop words without login`,
+  )
 }
