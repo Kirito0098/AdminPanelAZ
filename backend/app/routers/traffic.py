@@ -1,5 +1,4 @@
 from datetime import datetime
-import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -33,22 +32,12 @@ from app.services.traffic.ha_aggregate import resolve_traffic_scope
 from app.services.traffic.sessions import fetch_client_sessions
 from app.services.traffic.maintenance import (
     TrafficMaintenanceService,
-    cleanup_openvpn_status_logs_now,
     normalize_traffic_client_identity,
     normalize_traffic_protocol_scope,
 )
-from app.services.antizapret_settings import is_openvpn_verbose_log_enabled
-from app.services.node_adapter import LocalNodeAdapter
 
 router = APIRouter(prefix="/traffic", tags=["traffic"])
 settings = get_settings()
-
-STATUS_CLEANUP_PERIODS = {
-    "none": "Выключено",
-    "daily": "Ежедневно",
-    "weekly": "Еженедельно",
-    "monthly": "Ежемесячно",
-}
 
 
 class TrafficResetRequest(BaseModel):
@@ -57,10 +46,6 @@ class TrafficResetRequest(BaseModel):
 
 class TrafficDeleteClientRequest(BaseModel):
     client_name: str = Field(..., min_length=1)
-
-
-class TrafficCleanupScheduleRequest(BaseModel):
-    period: str = "none"
 
 
 def _get_setting(db: Session, key: str, default: str = "") -> str:
@@ -103,38 +88,6 @@ def _filter_client_names(names: set[str], allowed: set[str] | None) -> set[str]:
     if allowed is None:
         return names
     return {name for name in names if name in allowed}
-
-
-_OPENVPN_LOG_TTL_SECONDS = 30.0
-_openvpn_log_cache: tuple[float, bool] | None = None
-
-
-def _openvpn_verbose_log_enabled(db: Session) -> bool:
-    """Whether OpenVPN verbose .log files are enabled on the active node.
-
-    Cached briefly — TrafficPage loads cleanup schedule on every node switch and
-    the probe may hit local FS or a remote node-agent round-trip.
-    """
-    global _openvpn_log_cache
-    now = time.monotonic()
-    if _openvpn_log_cache is not None:
-        cached_at, cached_ok = _openvpn_log_cache
-        if now - cached_at < _OPENVPN_LOG_TTL_SECONDS:
-            return cached_ok
-
-    enabled = False
-    try:
-        adapter = get_active_adapter(db)
-        if isinstance(adapter, LocalNodeAdapter):
-            enabled = is_openvpn_verbose_log_enabled(adapter._service.base_path / "setup")
-        else:
-            data = adapter._request("GET", "/traffic/setup-openvpn-log")
-            enabled = bool(data.get("enabled"))
-    except Exception:
-        enabled = False
-
-    _openvpn_log_cache = (now, enabled)
-    return enabled
 
 
 @router.get("/active-clients")
@@ -357,42 +310,3 @@ def delete_deleted_client_traffic(
     if not ok:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=message)
     return MessageResponse(message=message)
-
-
-@router.post("/cleanup-status-logs", response_model=MessageResponse)
-def cleanup_status_logs_now(_: User = Depends(require_admin)):
-    ok, message = cleanup_openvpn_status_logs_now()
-    if not ok:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=message)
-    return MessageResponse(message=message)
-
-
-@router.get("/cleanup-status-schedule")
-def get_cleanup_status_schedule(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    period = _get_setting(db, "traffic_status_log_cleanup_period", "none")
-    if period not in STATUS_CLEANUP_PERIODS:
-        period = "none"
-    openvpn_log_enabled = _openvpn_verbose_log_enabled(db)
-    return {
-        "period": period,
-        "label": STATUS_CLEANUP_PERIODS[period],
-        "available_periods": STATUS_CLEANUP_PERIODS,
-        "openvpn_log_enabled": openvpn_log_enabled,
-    }
-
-
-@router.post("/cleanup-status-schedule", response_model=MessageResponse)
-def set_cleanup_status_schedule(
-    payload: TrafficCleanupScheduleRequest,
-    _: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
-    period = (payload.period or "none").strip().lower()
-    if period not in STATUS_CLEANUP_PERIODS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="period: none, daily, weekly, monthly")
-    _set_setting(db, "traffic_status_log_cleanup_period", period)
-    db.commit()
-    label = STATUS_CLEANUP_PERIODS[period]
-    if period == "none":
-        return MessageResponse(message="Расписание очистки *.log (кроме *-status.log) отключено")
-    return MessageResponse(message=f"Расписание очистки *.log сохранено: {label}")

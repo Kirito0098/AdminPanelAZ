@@ -20,7 +20,7 @@ from app.paths import get_cidr_list_dir
 from app.services.antizapret import AntiZapretService
 from app.services.atomic_file import atomic_write_text
 from app.services.antizapret_backup import resolve_backup_archive
-from app.services.antizapret_settings import build_schema, filter_known_keys, is_openvpn_verbose_log_enabled, read_antizapret_settings, update_antizapret_settings
+from app.services.antizapret_settings import build_schema, filter_known_keys, read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_agent_provision import provision_mtls
@@ -714,11 +714,6 @@ def routing_result_content(key: str, _: None = Depends(verify_api_key)):
 def routing_antizapret_settings_get(_: None = Depends(verify_api_key)):
     settings_data = read_antizapret_settings(ANTIZAPRET_PATH / "setup")
     return {"settings": settings_data, "schema": build_schema()}
-
-
-@app.get("/traffic/setup-openvpn-log")
-def traffic_setup_openvpn_log(_: None = Depends(verify_api_key)):
-    return {"enabled": is_openvpn_verbose_log_enabled(ANTIZAPRET_PATH / "setup")}
 
 
 @app.put("/routing/antizapret-settings")

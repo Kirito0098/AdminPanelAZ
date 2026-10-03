@@ -76,23 +76,3 @@ export async function deleteDeletedClientTraffic(clientName: string) {
     body: JSON.stringify({ client_name: clientName }),
   })
 }
-
-export async function cleanupTrafficStatusLogs() {
-  return apiFetch<{ message: string }>('/traffic/cleanup-status-logs', { method: 'POST' })
-}
-
-export async function getTrafficCleanupSchedule() {
-  return apiFetch<{
-    period: string
-    label: string
-    available_periods: Record<string, string>
-    openvpn_log_enabled: boolean
-  }>('/traffic/cleanup-status-schedule')
-}
-
-export async function setTrafficCleanupSchedule(period: string) {
-  return apiFetch<{ message: string }>('/traffic/cleanup-status-schedule', {
-    method: 'POST',
-    body: JSON.stringify({ period }),
-  })
-}

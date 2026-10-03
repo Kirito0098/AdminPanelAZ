@@ -10,7 +10,6 @@ const api = vi.hoisted(() => ({
   getTrafficActiveClients: vi.fn(),
   getDeletedClientTraffic: vi.fn(),
   getNeverConnectedClientTraffic: vi.fn(),
-  getTrafficCleanupSchedule: vi.fn(),
 }))
 const settingsApi = vi.hoisted(() => ({ getRetentionSettings: vi.fn() }))
 
@@ -39,7 +38,6 @@ describe('TrafficPage initial load', () => {
     api.getTrafficActiveClients.mockResolvedValue({ active_clients: [] })
     api.getDeletedClientTraffic.mockResolvedValue({ rows: [], summary: { users_count: 0, total_bytes: 0 } })
     api.getNeverConnectedClientTraffic.mockResolvedValue({ rows: [], summary: { users_count: 0, rows_count: 0 } })
-    api.getTrafficCleanupSchedule.mockResolvedValue({ period: 'none', openvpn_log_enabled: false })
     settingsApi.getRetentionSettings.mockResolvedValue({ traffic_sample_retention_days: 30 })
   })
 
@@ -56,14 +54,12 @@ describe('TrafficPage initial load', () => {
       activeClients: api.getTrafficActiveClients.mock.calls.length,
       deleted: api.getDeletedClientTraffic.mock.calls.length,
       neverConnected: api.getNeverConnectedClientTraffic.mock.calls.length,
-      cleanupSchedule: api.getTrafficCleanupSchedule.mock.calls.length,
       retention: settingsApi.getRetentionSettings.mock.calls.length,
     }).toEqual({
       overview: 1,
       activeClients: 1,
       deleted: 1,
       neverConnected: 1,
-      cleanupSchedule: 1,
       retention: 1,
     })
   })

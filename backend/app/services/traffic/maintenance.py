@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import glob
-import os
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -687,21 +685,3 @@ def purge_traffic_history_for_reused_name(db: Session, *, node_id: int, client_n
         [identity],
     )
     return deleted_samples + deleted_sessions + deleted_protocol_stats
-
-
-def cleanup_openvpn_status_logs_now(logs_dir: str = "/etc/openvpn/server/logs") -> tuple[bool, str]:
-    pattern = os.path.join(logs_dir, "*.log")
-    deleted = 0
-    failed: list[str] = []
-
-    for file_path in glob.glob(pattern):
-        try:
-            if os.path.isfile(file_path) and not file_path.endswith("-status.log"):
-                os.remove(file_path)
-                deleted += 1
-        except OSError:
-            failed.append(os.path.basename(file_path))
-
-    if failed:
-        return False, f"Удалено обычных .log: {deleted}. Ошибки: {', '.join(failed)}"
-    return True, f"Удалено обычных .log (без *-status.log): {deleted}"

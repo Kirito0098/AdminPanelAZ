@@ -72,6 +72,7 @@
 - **Backend / мёртвый код, круги 1–2** — удалены ~60 функций и методов без вызовов (включая транзитивно мёртвые после первой волны), неиспользуемые поля и Pydantic-схемы, 49 неиспользуемых импортов; мёртвое чтение `CIDR_DB_PROVIDER_WORKERS` (переменная ни на что не влияла); поле `Settings.node_agent_allowed_ips`.
 - **API без клиентов** — удалены эндпоинты, которые не вызывали ни веб-интерфейс, ни Mini App, ни бот: `GET /api/monitoring/summary`, `GET /api/portal/clients/{name}/link` (POST по тому же пути остаётся), `GET /api/nodes/{id}/proxy/mappings`, `POST /api/nodes/{id}/enable-mtls`, `POST /api/nodes/{id}/disable-mtls`, `GET /api/awg2/monitoring`, `GET /api/awg2/clients/{name}/stats`. Транспорт узла по-прежнему переключается через preflight и `PATCH` транспорта. `POST /api/awg2/restore` сохранён.
 - **Установщик и фронтенд** — удалены неиспользуемые shell-функции `install.sh` / `scripts/` (в том числе так и не подключённый с 0.7.3 цветной режим `site-diagnostics.sh`) и неиспользуемые экспорты, API-обёртки и типы фронтенда.
+- **Трафик / очистка OpenVPN .log** — убраны расписание и кнопка «Очистить .log сейчас» на странице трафика: остаток сбора трафика по логам OpenVPN (сейчас данные идут через management-сокет). Расписание сохранялось, но никогда не выполнялось, а ручная очистка работала только на сервере панели. Удалены `POST /api/traffic/cleanup-status-logs`, `GET/POST /api/traffic/cleanup-status-schedule` и метод node agent `GET /traffic/setup-openvpn-log`.
 
 ### 🔒 Security
 
