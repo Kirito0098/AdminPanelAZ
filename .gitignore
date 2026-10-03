@@ -99,6 +99,9 @@ scripts/capture-readme-screenshots.mjs
 .superpowers/
 docs/superpowers/
 
+# --- OpenCode agent workspace (local config, memory, plans; not for repo) ---
+.opencode/
+
 # --- Local implementation plans (owner-only; not for public repo) ---
 docs/plans/
 
