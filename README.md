@@ -308,7 +308,7 @@ CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|
 
 **LAN-ноды / mTLS / SSH:** приватные IP узлов — `ALLOW_INTERNAL_NODES=true` в `.env`; mTLS и SSH — per-node в UI **Узлы** (SSH — модуль **SSH transport узлов**). Подробнее: [docs/uzly.md](docs/uzly.md) · [docs/node-ssh-transport.md](docs/node-ssh-transport.md).
 
-- **Health** — `GET /api/health`, `GET /api/health/deep`
+- **Health** — `GET /api/health`, `GET /api/health/deep` (только с сервера или с JWT админа)
 - **Метрики** — `GET /metrics` (Prometheus)
 - **Node agent** — **1.11.1** (для HA: ≥ 1.3.0; byte-copy `.ovpn` при Push full: ≥ 1.5.0; сроки сертификатов: ≥ 1.6.0; AZ-AWG2 / reboot: ≥ 1.7.0; uptime / `listen_tls` в `/health`: ≥ 1.8.0; AZ-WARP 1.5, файлы WARP/RPZ/Lua, OpenVPN Buffer Guard, `block-batch`: ≥ 1.11.0; без лишнего перезапуска OpenVPN после doall при multihome: ≥ 1.11.1)
 

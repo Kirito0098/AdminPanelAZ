@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import Node, NodeStatus, User
+from app.models import Node, NodeStatus, User, UserRole
 from app.schemas import (
     ActiveNodeResponse,
     MessageResponse,
@@ -338,10 +338,23 @@ def _apply_ssh_transport_update(node: Node, body: NodeTransportUpdate, db: Sessi
     return node
 
 
-def _active_node_response(db: Session, node: Node) -> ActiveNodeResponse:
+def _active_node_response(db: Session, node: Node, current_user: User) -> ActiveNodeResponse:
     ha_data = build_ha_node_context(db, node.id)
+    node_response = _to_response(node)
+    if current_user.role != UserRole.admin:
+        node_response = node_response.model_copy(
+            update={
+                "ssh_host": None,
+                "ssh_username": None,
+                "ssh_key_configured": False,
+                "ssh_remote_agent_host": None,
+                "ssh_remote_agent_port": None,
+                "destination_ip": None,
+                "metadata": {},
+            }
+        )
     return ActiveNodeResponse(
-        node=_to_response(node),
+        node=node_response,
         ha=NodeHaContext(**ha_data) if ha_data else None,
     )
 
@@ -536,7 +549,7 @@ def get_active(
         health = check_node_health(node)
         update_node_from_health(node, health, db)
         db.refresh(node)
-    return _active_node_response(db, node)
+    return _active_node_response(db, node, current_user)
 
 
 @router.get("/mtls/status", response_model=NodeMtlsStatusResponse)
@@ -1174,7 +1187,7 @@ def activate_node(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"name={node.name}, id={node.id}",
         )
-    return _active_node_response(db, node)
+    return _active_node_response(db, node, admin)
 
 
 def _get_node_or_404(node_id: int, db: Session) -> Node:

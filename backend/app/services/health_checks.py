@@ -26,6 +26,27 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
+def assert_health_deep_access(request) -> None:
+    """Deep health lists nodes and pings them: only loopback callers (install scripts) or admins."""
+    import ipaddress
+
+    from fastapi import HTTPException, status
+
+    from app.services.ip_restriction import ip_restriction_service
+    from app.services.openapi_docs_gate import has_admin_bearer
+
+    try:
+        is_loopback = ipaddress.ip_address(ip_restriction_service.get_client_ip(request)).is_loopback
+    except ValueError:
+        is_loopback = False
+    if is_loopback or has_admin_bearer(request):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Deep health is available from localhost or with admin JWT",
+    )
+
+
 def build_light_health() -> dict[str, Any]:
     payload: dict[str, Any] = {
         "status": "ok",

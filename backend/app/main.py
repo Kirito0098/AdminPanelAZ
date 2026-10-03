@@ -462,12 +462,13 @@ def health():
 
 
 @app.get(f"{_API_PREFIX}/health/deep")
-def health_deep():
+def health_deep(request: Request):
     from pathlib import Path
 
     from app.database import SessionLocal
-    from app.services.health_checks import build_deep_health
+    from app.services.health_checks import assert_health_deep_access, build_deep_health
 
+    assert_health_deep_access(request)
     app_root = Path(__file__).resolve().parents[1]
     db = SessionLocal()
     try:

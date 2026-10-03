@@ -42,6 +42,20 @@ def _is_admin_token(token: str, db: Session) -> bool:
     return bool(user and user.role == UserRole.admin)
 
 
+def has_admin_bearer(request: Request) -> bool:
+    auth_header = (request.headers.get("authorization") or "").strip()
+    if not auth_header.lower().startswith("bearer "):
+        return False
+    token = auth_header[7:].strip()
+    if not token:
+        return False
+    db = SessionLocal()
+    try:
+        return _is_admin_token(token, db)
+    finally:
+        db.close()
+
+
 def assert_openapi_docs_access(request: Request) -> None:
     """Raise HTTPException when OpenAPI docs must not be served."""
     settings = get_settings()
@@ -52,16 +66,8 @@ def assert_openapi_docs_access(request: Request) -> None:
     if _ip_matches_allowlist(client_ip, settings.openapi_docs_allowed_ip_list):
         return
 
-    auth_header = (request.headers.get("authorization") or "").strip()
-    if auth_header.lower().startswith("bearer "):
-        token = auth_header[7:].strip()
-        if token:
-            db = SessionLocal()
-            try:
-                if _is_admin_token(token, db):
-                    return
-            finally:
-                db.close()
+    if has_admin_bearer(request):
+        return
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
