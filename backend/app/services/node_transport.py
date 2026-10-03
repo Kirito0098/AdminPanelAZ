@@ -22,8 +22,6 @@ class NodeTransport(Protocol):
     display_name: str
     is_tls: bool
 
-    def base_scheme(self) -> str: ...
-
     def ssl_context(self) -> ssl.SSLContext | bool | None: ...
 
 
@@ -32,9 +30,6 @@ class HttpTransport:
     id: str = TRANSPORT_HTTP
     display_name: str = "HTTP"
     is_tls: bool = False
-
-    def base_scheme(self) -> str:
-        return "http"
 
     def ssl_context(self) -> ssl.SSLContext | bool | None:
         return None
@@ -45,11 +40,6 @@ class MtlsTransport:
     id: str = TRANSPORT_MTLS
     display_name: str = "HTTPS + mTLS"
     is_tls: bool = True
-
-    def base_scheme(self) -> str:
-        from app.services.node_mtls import node_agent_base_scheme
-
-        return node_agent_base_scheme(mtls_enabled=True)
 
     def ssl_context(self) -> ssl.SSLContext | bool | None:
         from app.services.node_mtls import build_node_agent_ssl_context
@@ -63,16 +53,8 @@ class SshTransport:
     display_name: str = "SSH tunnel"
     is_tls: bool = False
 
-    def base_scheme(self) -> str:
-        return "http"
-
     def ssl_context(self) -> ssl.SSLContext | bool | None:
         return None
-
-    def local_base_url(self, node: Any) -> str:
-        ensured = get_ssh_tunnel_pool().ensure(node)
-        port = ensured.local_port if hasattr(ensured, "local_port") else int(ensured)
-        return f"http://127.0.0.1:{port}"
 
 
 def list_transports() -> list[dict[str, Any]]:
@@ -113,16 +95,6 @@ def get_transport(node: Any) -> NodeTransport:
     if tid == TRANSPORT_SSH:
         return SshTransport()
     raise ValueError(f"unsupported node transport: {tid}")
-
-
-def apply_transport_value(node: Any, transport: str) -> None:
-    t = (transport or "").strip().lower()
-    if t not in SUPPORTED_WRITABLE:
-        raise ValueError(f"unsupported transport: {t}")
-    if t == TRANSPORT_SSH and not _has_ssh_credentials(node):
-        raise ValueError("ssh transport requires configured credentials")
-    node.transport = t
-    node.mtls_enabled = t == TRANSPORT_MTLS
 
 
 def _has_ssh_credentials(node: Any) -> bool:

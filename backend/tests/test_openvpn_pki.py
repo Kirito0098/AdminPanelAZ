@@ -6,8 +6,6 @@ from unittest.mock import MagicMock
 from app.models import VpnType
 from app.services.openvpn_pki import (
     cert_serial_hex_from_pem,
-    find_valid_serials,
-    is_serial_revoked,
     parse_easyrsa_index,
     profile_issues_payload,
     validate_client_profiles,
@@ -47,19 +45,6 @@ def test_parse_easyrsa_index_real_empty_revocation_column():
     assert by_cn["123"].serial_hex == "3C3C88E19A7CFF7C27F34645E0EC40CD"
     assert by_cn["old"].status == "E"
     assert by_cn["old"].serial_hex == "AABBCCDDEEFF00112233445566778899"
-
-
-def test_is_serial_revoked_matches_index():
-    entries = parse_easyrsa_index(SAMPLE_INDEX)
-    assert is_serial_revoked("F401806F35A8048BA0941A9F085EF9C2", entries)
-    assert not is_serial_revoked("C9014ACA2099B8A6FB3F856105979E79", entries)
-
-
-def test_find_valid_serials_for_cn():
-    entries = parse_easyrsa_index(SAMPLE_INDEX)
-    serials = find_valid_serials("AN_Office", entries)
-    assert "C9014ACA2099B8A6FB3F856105979E79" in serials
-    assert "F401806F35A8048BA0941A9F085EF9C2" not in serials
 
 
 def test_cert_serial_hex_from_pem_normalizes_decimal_output(monkeypatch):

@@ -150,11 +150,6 @@ def is_vpn_node(node: Node) -> bool:
     return (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower() == NODE_KIND_VPN
 
 
-def list_vpn_nodes(db: Session) -> list[Node]:
-    """All nodes that speak node_agent (OpenVPN/WG). Excludes proxy_agent cards."""
-    return [node for node in db.query(Node).order_by(Node.id.asc()).all() if is_vpn_node(node)]
-
-
 def proxy_is_not_vpn_message(node: Node) -> str:
     name = getattr(node, "name", None) or "без имени"
     return (

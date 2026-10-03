@@ -241,61 +241,6 @@ def test_sync_client_access_until_from_owner_updates_only_requested_client(db):
     assert bob_ovpn.access_until == other.replace(tzinfo=None)
 
 
-def test_clear_access_expired_skips_permanent_block(db):
-    node = _make_node(db)
-    user = User(
-        username="owner-clear",
-        password_hash="x",
-        role=UserRole.user,
-        is_active=True,
-        access_until=(datetime.now(timezone.utc) + timedelta(days=30)).replace(tzinfo=None),
-    )
-    db.add(user)
-    db.commit()
-    db.refresh(user)
-    _make_owned_client(
-        db,
-        node_id=node.id,
-        owner_id=user.id,
-        client_name="Alice",
-        protocols=[VpnType.wireguard, VpnType.amneziawg2],
-    )
-    past = datetime.now(timezone.utc) - timedelta(days=1)
-    db.add(
-        WgAccessPolicy(
-            node_id=node.id,
-            client_name="alice",
-            expires_at=past.replace(tzinfo=None),
-            is_temp_blocked=False,
-            is_permanent_blocked=True,
-            block_reason="access_expired",
-        )
-    )
-    db.add(
-        AmneziaWg2AccessPolicy(
-            node_id=node.id,
-            client_name="alice",
-            access_until=past.replace(tzinfo=None),
-            is_temp_blocked=False,
-            is_permanent_blocked=False,
-            block_reason="access_expired",
-        )
-    )
-    db.commit()
-
-    with patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()):
-        result = usub.clear_access_expired_for_user(db, user, actor="admin")
-
-    wg = db.query(WgAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
-    awg2 = db.query(AmneziaWg2AccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
-    assert wg.is_permanent_blocked is True
-    assert wg.block_reason == "access_expired"
-    assert awg2.block_reason is None
-    assert awg2.access_until == user.access_until
-    assert result["cleared"] >= 1
-    assert result["skipped_manual"] >= 1
-
-
 def test_apply_user_subscription_expiry_blocks_owned(db):
     node = _make_node(db)
     past = datetime.now(timezone.utc) - timedelta(days=1)

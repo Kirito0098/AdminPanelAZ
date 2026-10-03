@@ -339,12 +339,3 @@ def test_enable_mtls_proxy_already_enabled(db, monkeypatch):
     actor = SimpleNamespace(id=1, username="admin")
     with pytest.raises(ValueError, match="уже включён"):
         provision.enable_mtls(db, node, actor)
-
-
-def test_proxy_adapter_ssl_hint_mentions_mark_mtls():
-    adapter = ProxyNodeAdapter("10.0.0.9", 9101, "k" * 32, mtls_enabled=False)
-    hint = adapter._format_ssl_error("ssl wrong version number")
-    assert hint is not None
-    assert "Отметьте mTLS" in hint
-    assert "proxy-agent.md" in hint
-    assert "Включите mTLS" not in hint

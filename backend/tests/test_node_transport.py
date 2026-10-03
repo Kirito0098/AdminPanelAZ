@@ -51,50 +51,6 @@ def test_get_transport_ssh_in_db_returns_ssh_transport():
     transport = nt.get_transport(N())
     assert transport.id == "ssh"
     assert transport.is_tls is False
-    assert transport.base_scheme() == "http"
-
-
-def test_apply_transport_sets_ssh_when_credentials_exist():
-    class N:
-        transport = "http"
-        mtls_enabled = False
-        ssh_host = "203.0.113.10"
-        ssh_username = "root"
-        ssh_private_key_encrypted = "enc"
-
-    node = N()
-    nt.apply_transport_value(node, "ssh")
-    assert node.transport == "ssh"
-    assert node.mtls_enabled is False
-
-
-def test_apply_transport_rejects_ssh_without_credentials():
-    class N:
-        transport = "http"
-        mtls_enabled = False
-        ssh_host = ""
-        ssh_username = ""
-        ssh_private_key_encrypted = ""
-
-    try:
-        nt.apply_transport_value(N(), "ssh")
-        assert False
-    except ValueError as e:
-        assert "credentials" in str(e).lower() or "ssh" in str(e).lower()
-
-
-def test_apply_transport_syncs_mtls_flag():
-    class N:
-        transport = "http"
-        mtls_enabled = False
-
-    n = N()
-    nt.apply_transport_value(n, "mtls")
-    assert n.transport == "mtls"
-    assert n.mtls_enabled is True
-    nt.apply_transport_value(n, "http")
-    assert n.transport == "http"
-    assert n.mtls_enabled is False
 
 
 def test_node_uses_tls_follows_transport():
@@ -145,14 +101,3 @@ def test_remote_adapter_defaults_to_http_not_global_flag(monkeypatch):
     adapter = RemoteNodeAdapter("10.0.0.2", 9100, "k" * 32)
     assert adapter.base_url.startswith("http://")
     assert adapter._mtls_enabled is False
-
-
-def test_ssh_transport_local_base_url_uses_pool(monkeypatch):
-    transport = nt.SshTransport()
-
-    class _Pool:
-        def ensure(self, _node):
-            return 45123
-
-    monkeypatch.setattr(nt, "get_ssh_tunnel_pool", lambda: _Pool())
-    assert transport.local_base_url(object()) == "http://127.0.0.1:45123"

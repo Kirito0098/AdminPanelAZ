@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import app.services.warper as warper_mod
-from app.services.warper import WarperService, domains_payload_from_text, read_domains_file_payload
+from app.services.warper import WarperService, domains_payload_from_text
 
 
 SAMPLE = """# Пользовательские домены:
@@ -30,27 +30,6 @@ def test_domains_payload_from_text_derives_lists_domains_and_user_text():
     assert "example.com" in payload["user_text"]
     assert "gemini.google.com" not in payload["user_text"]
     assert "chatgpt.com" not in payload["user_text"]
-
-
-def test_read_domains_file_payload_reads_once(tmp_path: Path, monkeypatch):
-    domains_file = tmp_path / "domains.txt"
-    domains_file.write_text(SAMPLE, encoding="utf-8")
-    monkeypatch.setattr(warper_mod, "WARPER_DOMAINS_FILE", domains_file)
-
-    opens: list[str] = []
-    real_open = Path.open
-
-    def tracking_open(self, *args, **kwargs):
-        opens.append(str(self))
-        return real_open(self, *args, **kwargs)
-
-    monkeypatch.setattr(Path, "open", tracking_open)
-
-    payload = read_domains_file_payload()
-    assert len(opens) == 1
-    assert payload["lists"]["gemini"] is True
-    assert any(item["domain"] == "example.com" for item in payload["domains"])
-    assert "example.com" in payload["user_text"]
 
 
 def test_get_domains_bundle_uses_single_file_read_when_api_unavailable(tmp_path: Path, monkeypatch):

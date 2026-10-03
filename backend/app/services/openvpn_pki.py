@@ -142,19 +142,6 @@ def serial_status(serial_hex: str, entries: list[EasyRsaIndexEntry]) -> str | No
     return None
 
 
-def find_valid_serials(cn: str, entries: list[EasyRsaIndexEntry]) -> list[str]:
-    name = (cn or "").strip()
-    return [
-        entry.serial_hex
-        for entry in entries
-        if entry.common_name == name and entry.status == "V"
-    ]
-
-
-def is_serial_revoked(serial_hex: str, entries: list[EasyRsaIndexEntry]) -> bool:
-    return serial_status(serial_hex, entries) == "R"
-
-
 def read_easyrsa_index_from_path(path: Path | None = None) -> str:
     file_path = path or EASYRSA_INDEX_PATH
     if not file_path.is_file():

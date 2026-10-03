@@ -27,15 +27,6 @@ def _vpn(**kwargs):
     return SimpleNamespace(**defaults)
 
 
-def test_list_vpn_nodes_drops_proxy():
-    from app.services.node_manager import list_vpn_nodes
-
-    db = MagicMock()
-    db.query.return_value.order_by.return_value.all.return_value = [_vpn(), _proxy()]
-    names = [n.name for n in list_vpn_nodes(db)]
-    assert names == ["vpn1"]
-
-
 def test_traffic_limit_reconcile_skips_proxy(monkeypatch):
     db = MagicMock()
     db.query.return_value.all.return_value = [_proxy()]

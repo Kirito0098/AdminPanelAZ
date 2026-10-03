@@ -1151,11 +1151,6 @@ class RemoteNodeAdapter(NodeAdapter):
             kwargs["verify"] = self._verify
         return kwargs
 
-    def _format_ssl_error(self, msg: str) -> str | None:
-        from app.services.node_link_errors import _ssl_message
-
-        return _ssl_message(msg, mtls_enabled=self._mtls_enabled)
-
     def _format_connection_error(self, exc: httpx.RequestError) -> str:
         from app.services.node_link_errors import classify_request_error
 

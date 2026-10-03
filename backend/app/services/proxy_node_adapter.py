@@ -56,23 +56,6 @@ class ProxyNodeAdapter:
             kwargs["verify"] = self._verify
         return kwargs
 
-    def _format_ssl_error(self, msg: str) -> str | None:
-        from app.services.node_link_errors import _ssl_message
-
-        # Prefer shared classifier wording; keep proxy-specific mTLS mark hint in TLS mismatch paths.
-        base = _ssl_message(msg, mtls_enabled=self._mtls_enabled)
-        if base is None:
-            return None
-        if "Включите mTLS для узла" in base:
-            return (
-                base.replace(
-                    "Включите mTLS для узла на странице «Узлы».",
-                    "Отметьте mTLS для прокси-узла на странице «Узлы» "
-                    "(сертификаты proxy_agent — вручную, см. docs/proxy-agent.md).",
-                )
-            )
-        return base.replace("node agent", "proxy_agent").replace("агенту узла", "proxy_agent")
-
     def _format_connection_error(self, exc: httpx.RequestError) -> str:
         from app.services.node_link_errors import classify_request_error
 

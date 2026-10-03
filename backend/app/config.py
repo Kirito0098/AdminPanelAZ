@@ -60,7 +60,6 @@ class Settings(BaseSettings):
     default_admin_must_change_password: bool = True
     allow_internal_nodes: bool = False
     local_antizapret_enabled: bool = True
-    node_agent_port: int = 9100
     backup_root: Path = Path("/var/backups/adminpanelaz")
     cidr_list_dir: Path = Path("data/cidr/list")
     cidr_db_staging_dir: Path = Path("data/cidr/staging")
@@ -70,7 +69,6 @@ class Settings(BaseSettings):
     traffic_sync_enabled: bool = True
     traffic_sync_interval_seconds: int = 60
     traffic_limit_reconcile_after_sync: bool = True
-    wg_policy_sync_enabled: bool = True
     wg_policy_sync_interval_seconds: int = 120
     node_sync_reconcile_enabled: bool = True
     node_sync_reconcile_interval_seconds: int = 600

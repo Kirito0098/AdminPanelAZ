@@ -68,6 +68,8 @@
 
 ### 🗑️ Removed
 
+- **Backend / мёртвый код** — удалён код, который вызывали только тесты: `clear_access_expired_for_user` (последний вызов убран в фиксе промокодов), `list_vpn_nodes`, `apply_transport_value`, `base_scheme` и `SshTransport.local_base_url`, `protocol_types_for_openvpn_group`, `find_valid_serials` / `is_serial_revoked`, `read_domains_file_payload`, `_format_ssl_error` в адаптерах узлов; поля `Settings.node_agent_port` и `Settings.wg_policy_sync_enabled` (переменные окружения по-прежнему читают node agent и `feature_toggles`).
+
 ### 🔒 Security
 
 ### 🧪 Tests
