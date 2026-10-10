@@ -27,13 +27,13 @@ function readHashParams(hash: string): Map<string, string> {
 }
 
 /**
- * Token, web session id and Telegram login error the server appends to /login. URLSearchParams
+ * Token and web session id from the /login fragment, Telegram login error from the query. URLSearchParams
  * already decodes query values; only the hash values are still percent-encoded.
  */
 export function readLoginRedirectParams(hash: string, search: URLSearchParams): LoginRedirectParams {
   const hashParams = readHashParams(hash)
   const hashToken = hashParams.get('token') || null
-  const token = hashToken ?? (search.get('token') || null)
+  const token = hashToken
   const session = hashParams.get('session') ?? ''
   const webSessionId = hashToken && WEB_SESSION_ID_RE.test(session) ? session : null
   const tgError = (search.get('tg_error') || '').trim().slice(0, TG_ERROR_MAX_LENGTH)
