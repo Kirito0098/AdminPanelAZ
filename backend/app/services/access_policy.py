@@ -5,12 +5,15 @@ import time
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import (
     AmneziaWg2AccessPolicy,
     OpenVpnAccessPolicy,
     OpenVpnBufferGuardEvent,
+    VpnConfig,
+    VpnType,
     WgAccessPolicy,
 )
 from app.services.awg2_runtime import (
@@ -99,6 +102,39 @@ def _policy_access_expired(row, now: datetime | None = None) -> bool:
     current = _as_utc(now) or _now()
     access_until = _policy_access_until(row)
     return bool(access_until and access_until <= current)
+
+
+def delete_client_access_policies(db: Session, config: VpnConfig) -> int:
+    """Delete the access policy row of a client being removed; returns the number of deleted rows.
+
+    WireGuard and AmneziaWG2 policies are keyed by the lower-cased name, so a row still used by
+    another config of the same type on the node is kept.
+    """
+    if config.vpn_type == VpnType.openvpn:
+        model = OpenVpnAccessPolicy
+        policy_name = config.client_name
+        same_name = VpnConfig.client_name == config.client_name
+    else:
+        model = AmneziaWg2AccessPolicy if config.vpn_type == VpnType.amneziawg2 else WgAccessPolicy
+        policy_name = config.client_name.strip().lower()
+        same_name = func.lower(VpnConfig.client_name) == policy_name
+    still_used = (
+        db.query(VpnConfig.id)
+        .filter(
+            VpnConfig.node_id == config.node_id,
+            VpnConfig.vpn_type == config.vpn_type,
+            VpnConfig.id != config.id,
+            same_name,
+        )
+        .first()
+    )
+    if still_used is not None:
+        return 0
+    return (
+        db.query(model)
+        .filter(model.node_id == config.node_id, model.client_name == policy_name)
+        .delete(synchronize_session=False)
+    )
 
 
 class AccessPolicyService:

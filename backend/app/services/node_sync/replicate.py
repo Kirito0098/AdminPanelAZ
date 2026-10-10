@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import Node, NodeSyncGroup, SyncStatus, VpnConfig, VpnType
 from app.services.action_log import log_action
+from app.services.access_policy import delete_client_access_policies
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.groups import get_replica_nodes, is_auto_sync_enabled
 from app.services.node_sync.vpn_state_sync import (
@@ -192,6 +193,7 @@ def _handle_client_delete(db: Session, group: NodeSyncGroup, payload: dict[str, 
             )
             continue
         result.successes.append({"node_id": replica_node.id, "config_id": shadow.id})
+        delete_client_access_policies(db, shadow)
         db.delete(shadow)
 
     return result

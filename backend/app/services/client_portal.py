@@ -475,7 +475,10 @@ def revoke_portal_token(db: Session, *, client_name: str) -> None:
 
 def cleanup_deleted_client_records(db: Session, config: VpnConfig) -> None:
     """Run after the VpnConfig row is deleted, before commit; the caller commits."""
+    from app.services.access_policy import delete_client_access_policies
+
     _revoke_orphaned_client_portal_links(db, config)
+    delete_client_access_policies(db, config)
 
 
 def _revoke_orphaned_client_portal_links(db: Session, config: VpnConfig) -> None:
