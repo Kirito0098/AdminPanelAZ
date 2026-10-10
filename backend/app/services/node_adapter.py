@@ -2,6 +2,7 @@ import tempfile
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,36 @@ from app.services.awg2 import Awg2Service, is_awg2_profile_path
 _settings = get_settings()
 
 HTTP_TIMEOUT = 120.0
+
+_request_timeout_cap: ContextVar[float | None] = ContextVar("node_request_timeout_cap", default=None)
+
+
+@contextmanager
+def node_request_timeout_cap(seconds: float) -> Iterator[None]:
+    """Caps every agent request timeout in this context, explicit ``timeout=`` included."""
+    token = _request_timeout_cap.set(seconds)
+    try:
+        yield
+    finally:
+        _request_timeout_cap.reset(token)
+
+
+def _capped(value: float | None, cap: float) -> float:
+    return cap if value is None else min(float(value), cap)
+
+
+def _effective_timeout(timeout: float | httpx.Timeout | None) -> float | httpx.Timeout | None:
+    cap = _request_timeout_cap.get()
+    if cap is None:
+        return timeout
+    if isinstance(timeout, httpx.Timeout):
+        return httpx.Timeout(
+            connect=_capped(timeout.connect, cap),
+            read=_capped(timeout.read, cap),
+            write=_capped(timeout.write, cap),
+            pool=_capped(timeout.pool, cap),
+        )
+    return _capped(timeout, cap)
 
 
 class NodeAdapter(ABC):
@@ -1165,7 +1196,7 @@ class RemoteNodeAdapter(NodeAdapter):
         )
 
         url = f"{self.base_url}{path}"
-        timeout = kwargs.pop("timeout", HTTP_TIMEOUT)
+        timeout = _effective_timeout(kwargs.pop("timeout", HTTP_TIMEOUT))
         try:
             client = self._get_http_client()
             response = client.request(
@@ -1203,7 +1234,7 @@ class RemoteNodeAdapter(NodeAdapter):
         )
 
         url = f"{self.base_url}{path}"
-        timeout = kwargs.pop("timeout", HTTP_TIMEOUT)
+        timeout = _effective_timeout(kwargs.pop("timeout", HTTP_TIMEOUT))
         try:
             client = self._get_http_client()
             response = client.request(
