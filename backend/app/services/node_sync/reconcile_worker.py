@@ -13,7 +13,7 @@ from app.database import SessionLocal
 from app.models import NodeSyncGroup, SyncStatus
 from app.services.node_sync.antizapret_sync import heal_antizapret_drift
 from app.services.node_sync.config_sync import heal_config_drift
-from app.services.node_sync.group_status import recover_stuck_pending_groups
+from app.services.node_sync.group_status import group_is_pending, recover_stuck_pending_groups
 from app.services.node_sync.groups import (
     AUTO_HEAL_SUSPENDED_PREFIX,
     auto_heal_max_failures,
@@ -157,6 +157,8 @@ def reconcile_sync_groups_once() -> dict:
 
             if result.get("ready"):
                 continue
+            if group_is_pending(db, group):
+                continue
 
             max_failures = auto_heal_max_failures(settings)
             auto_heal = settings.node_sync_auto_heal and is_auto_sync_enabled(group)
@@ -186,6 +188,9 @@ def reconcile_sync_groups_once() -> dict:
             # Suspended cycles stay silent: the attempt that reached the limit already notified.
             just_suspended = heal_attempted and heal_failures >= max_failures
             notify = not auto_heal or just_suspended
+            if group_is_pending(db, group):
+                db.commit()
+                continue
             group.sync_status = SyncStatus.failed
             summary = str(result.get("summary") or "parity mismatch")
             if just_suspended:

@@ -494,6 +494,7 @@ def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str,
     """Copy VPN crypto state from primary to every replica (any sync_mode)."""
     from app.models import SyncStatus
     from app.services.node_manager import get_adapter_for_node
+    from app.services.node_sync.group_status import group_is_pending
     from app.services.node_sync.groups import get_replica_nodes
     from app.services.node_sync.replicate import _primary_adapter
 
@@ -533,12 +534,13 @@ def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str,
             continue
         successes.append({"node_id": replica_node.id, "node_name": replica_node.name})
 
-    if errors:
-        group.sync_status = SyncStatus.failed
-        group.last_sync_error = str(errors[0].get("error") or "crypto sync failed")
-    elif successes:
-        group.sync_status = SyncStatus.synced
-        group.last_sync_error = None
+    if not group_is_pending(db, group):
+        if errors:
+            group.sync_status = SyncStatus.failed
+            group.last_sync_error = str(errors[0].get("error") or "crypto sync failed")
+        elif successes:
+            group.sync_status = SyncStatus.synced
+            group.last_sync_error = None
     db.commit()
 
     return {"successes": successes, "errors": errors, "skipped": False}

@@ -67,6 +67,14 @@ def _normalize_wireguard_domain(raw: str | None) -> str | None:
     return stripped or None
 
 
+def _reject_if_pending(group: NodeSyncGroup) -> None:
+    if group.sync_status == SyncStatus.pending:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Идёт синхронизация, повторите после её окончания",
+        )
+
+
 @router.get("", response_model=list[NodeSyncGroupResponse])
 def list_sync_groups(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     groups = db.query(NodeSyncGroup).order_by(NodeSyncGroup.name).all()
@@ -130,6 +138,7 @@ def update_sync_group(
     group = db.get(NodeSyncGroup, group_id)
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sync group не найдена")
+    _reject_if_pending(group)
 
     primary_id = payload.primary_node_id if payload.primary_node_id is not None else group.primary_node_id
     replica_ids = payload.replica_node_ids
@@ -186,6 +195,7 @@ def delete_sync_group(
     group = db.get(NodeSyncGroup, group_id)
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sync group не найдена")
+    _reject_if_pending(group)
     dissolve_sync_group(db, group)
     db.delete(group)
     db.commit()

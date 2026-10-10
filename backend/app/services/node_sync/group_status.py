@@ -30,6 +30,12 @@ def mark_group_sync_failed(db: Session, group_id: int, error: str) -> None:
     db.commit()
 
 
+def group_is_pending(db: Session, group: NodeSyncGroup) -> bool:
+    """Committed status, not the loaded copy: a setup / Push full may have started meanwhile."""
+    status = db.query(NodeSyncGroup.sync_status).filter(NodeSyncGroup.id == group.id).scalar()
+    return status == SyncStatus.pending
+
+
 @contextmanager
 def fail_group_on_error(db: Session, group_id: int) -> Iterator[None]:
     """Mark the group failed if the block raises; the exception still fails the task."""

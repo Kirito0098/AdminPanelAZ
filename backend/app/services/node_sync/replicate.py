@@ -16,6 +16,7 @@ from app.services.action_log import log_action
 from app.services.access_policy import delete_client_access_policies, forget_deleted_openvpn_client
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.groups import get_replica_nodes, is_auto_sync_enabled
+from app.services.node_sync.group_status import group_is_pending
 from app.services.node_sync.vpn_state_sync import (
     _error_detail,
     sync_openvpn_pki_from_primary,
@@ -369,14 +370,15 @@ def finalize_replicate_outcome(
     """Apply sync_status, commit, and optional partial-failure audit."""
     payload = payload or {}
 
-    if result.errors:
-        group.sync_status = SyncStatus.failed
-        group.last_sync_error = result.errors[0]["error"]
-    elif set_synced_on_success:
-        group.sync_status = SyncStatus.synced
-        group.last_sync_error = None
-    else:
-        group.last_sync_error = None
+    if not group_is_pending(db, group):
+        if result.errors:
+            group.sync_status = SyncStatus.failed
+            group.last_sync_error = result.errors[0]["error"]
+        elif set_synced_on_success:
+            group.sync_status = SyncStatus.synced
+            group.last_sync_error = None
+        else:
+            group.last_sync_error = None
 
     db.commit()
 
