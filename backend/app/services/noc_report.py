@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import tempfile
 from collections import defaultdict
@@ -697,7 +698,7 @@ def _format_incident_line(incident: dict, *, tz_name: str | None = None) -> str:
         tz = local.tzinfo
         suffix = _timezone_suffix(tz, local) if isinstance(tz, ZoneInfo) else "UTC"
         when = f"{local.strftime('%d.%m %H:%M')} {suffix}"
-    name = str(incident.get("name") or "Алерт")
+    name = html.escape(str(incident.get("name") or "Алерт"))
     return f"• {name} · {when}"
 
 
@@ -794,7 +795,7 @@ def format_noc_report_message(
         lines.append(f"🚫 Лимит трафика: {' · '.join(limit_parts)}")
 
     offline_nodes = [
-        node.get("name")
+        html.escape(str(node.get("name")))
         for node in summary.get("nodes") or []
         if node.get("status") != NodeStatus.online.value and node.get("name")
     ]
@@ -823,7 +824,7 @@ def format_noc_report_message(
         lines.append(f"<b>Топ клиентов ({traffic_window}):</b>")
         for idx, client in enumerate(top_clients, start=1):
             client_label = human_bytes(client.get("traffic_bytes")) or "0 B"
-            lines.append(f"{idx}. {client.get('common_name') or '—'} — {client_label}")
+            lines.append(f"{idx}. {html.escape(str(client.get('common_name') or '—'))} — {client_label}")
 
     nodes = summary.get("nodes") or []
     multi_node = int(summary.get("nodes_total") or 0) > 1
@@ -862,7 +863,7 @@ def format_noc_report_message(
             if node_period:
                 parts.append(f"{node_period}/{traffic_window}")
         lines.append(
-            f"{status_icon} <b>{node.get('name')}</b>, {average_label} · {' · '.join(parts)}"
+            f"{status_icon} <b>{html.escape(str(node.get('name')))}</b>, {average_label} · {' · '.join(parts)}"
         )
 
     return "\n".join(lines)
