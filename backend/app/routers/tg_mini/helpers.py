@@ -48,7 +48,7 @@ def _verify_telegram_init_data(init_data: str, bot_token: str, *, max_age: int =
     data_check = "\n".join(f"{k}={v}" for k, v in sorted(parsed.items()))
     secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     computed = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
-    if computed != received_hash:
+    if not hmac.compare_digest(computed.encode(), received_hash.encode()):
         raise ValueError("Неверная подпись init_data")
     return json.loads(parsed.get("user", "{}"))
 
