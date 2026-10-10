@@ -1193,8 +1193,9 @@ nginx_install_subpath_snippet() {
 _nginx_integrate_subpath_into_vhost_file() {
   local target="$1"
   local include_line="$2"
+  local domain="$3"
   local backup stamp
-  [[ -n "$target" && -f "$target" && -n "$include_line" ]] || return 1
+  [[ -n "$target" && -f "$target" && -n "$include_line" && -n "$domain" ]] || return 1
   if grep -qF "include ${include_line}" "$target"; then
     nginx_log "Include уже присутствует в ${target}"
     return 0
@@ -1203,22 +1204,54 @@ _nginx_integrate_subpath_into_vhost_file() {
   backup="$(nginx_backups_dir)/$(basename "$target").${stamp}.bak"
   cp "$target" "$backup"
   nginx_install_txn_remember_contents "$target"
-  INCLUDE_LINE="$include_line" TARGET_FILE="$target" python3 - <<'PY'
+  if ! INCLUDE_LINE="$include_line" TARGET_FILE="$target" DOMAIN_NAME="$domain" python3 - <<'PY'
 import os
 import re
 
 path = os.environ["TARGET_FILE"]
 include = os.environ["INCLUDE_LINE"]
+domain = os.environ["DOMAIN_NAME"].lower()
 text = open(path, encoding="utf-8").read()
 if f"include {include}" in text:
     raise SystemExit(0)
-match = re.search(r"listen\s+443[^\n]*", text)
-if not match:
-    raise SystemExit(1)
-insert_at = match.end()
-text = text[:insert_at] + f"\n\n    include {include};" + text[insert_at:]
-open(path, "w", encoding="utf-8").write(text)
+
+# Comments become spaces of the same length, so offsets in code match offsets in text.
+code = re.sub(r"#[^\n]*", lambda m: " " * len(m.group()), text)
+
+
+def server_directives(start):
+    """Top-level directives of the server block opened before start: (words, offset after ';')."""
+    depth, pos, stmt = 1, start, start
+    while pos < len(code) and depth:
+        ch = code[pos]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            stmt = pos + 1
+        elif ch == ";" and depth == 1:
+            yield code[stmt:pos].split(), pos + 1
+            stmt = pos + 1
+        pos += 1
+
+
+for block in re.finditer(r"(?<![\w$])server\s*\{", code):
+    directives = list(server_directives(block.end()))
+    names = {w.lower() for words, _ in directives if words[:1] == ["server_name"] for w in words[1:]}
+    if domain not in names:
+        continue
+    for words, end in directives:
+        if words[:1] == ["listen"] and len(words) > 1 and (
+            re.search(r"(^|:)443$", words[1]) or "ssl" in words[2:]
+        ):
+            open(path, "w", encoding="utf-8").write(text[:end] + f"\n\n    include {include};" + text[end:])
+            raise SystemExit(0)
+raise SystemExit(1)
 PY
+  then
+    nginx_warn "В ${target} нет блока server для ${domain} с HTTPS — include не добавлен"
+    return 1
+  fi
   nginx_log "Include добавлен в ${target} (бэкап: ${backup})"
 }
 
@@ -1235,7 +1268,7 @@ nginx_integrate_subpath_snippet_status_openvpn() {
   [[ -n "$domain" && -n "$include_line" ]] || return 1
   while IFS= read -r target; do
     [[ -n "$target" && -f "$target" ]] || continue
-    _nginx_integrate_subpath_into_vhost_file "$target" "$include_line" || continue
+    _nginx_integrate_subpath_into_vhost_file "$target" "$include_line" "$domain" || continue
     if ! _nginx_assert_status_openvpn_vhost_intact "$target"; then
       nginx_install_txn_abort "Интеграция нарушила конфиг StatusOpenVPN (${target})"
     fi
@@ -1255,7 +1288,7 @@ nginx_integrate_subpath_snippet() {
   [[ -n "$domain" && -n "$include_line" ]] || return 1
   while IFS= read -r target; do
     [[ -n "$target" && -f "$target" ]] || continue
-    _nginx_integrate_subpath_into_vhost_file "$target" "$include_line" && integrated=1
+    _nginx_integrate_subpath_into_vhost_file "$target" "$include_line" "$domain" && integrated=1
   done < <(nginx_list_foreign_vhosts_for_domain "$domain")
   if [[ "$integrated" -eq 0 ]]; then
     nginx_warn "Не найден сторонний vhost для ${domain} — добавьте include вручную: include ${include_line};"
