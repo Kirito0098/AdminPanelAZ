@@ -1490,6 +1490,51 @@ def _migrate_client_portal_tokens_active_unique() -> None:
     logger.info("DB migration: unique active client_portal_tokens per node+client")
 
 
+_PORTAL_LINK_CREATOR_CLEANUP_MARKER = "migration_client_portal_links_creator_cleanup_done"
+
+
+def _migrate_revoke_unmanaged_client_portal_links() -> None:
+    """One-shot: links issued under view-only access lose meaning once only owners and admins manage them.
+
+    Links without a creator stay: an admin's links survive the admin's deletion.
+    """
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if not {"client_portal_tokens", "users", "vpn_configs", "app_settings"} <= tables:
+        return
+    with _migration_transaction() as conn:
+        if conn.execute(
+            text("SELECT value FROM app_settings WHERE key = :key"),
+            {"key": _PORTAL_LINK_CREATOR_CLEANUP_MARKER},
+        ).scalar():
+            return
+        revoked = conn.execute(
+            text(
+                """
+                UPDATE client_portal_tokens
+                SET revoked_at = CURRENT_TIMESTAMP
+                WHERE revoked_at IS NULL
+                  AND created_by_user_id IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM vpn_configs vc
+                    JOIN users u ON u.id = client_portal_tokens.created_by_user_id
+                    WHERE vc.node_id = client_portal_tokens.node_id
+                      AND vc.client_name = client_portal_tokens.client_name
+                      AND vc.ha_primary_config_id IS NULL
+                      AND (u.role = 'admin' OR vc.owner_id = u.id)
+                  )
+                """
+            )
+        ).rowcount
+        conn.execute(
+            text("INSERT INTO app_settings (key, value) VALUES (:key, '1')"),
+            {"key": _PORTAL_LINK_CREATOR_CLEANUP_MARKER},
+        )
+    if revoked:
+        logger.info("DB migration: revoked client portal links without manage rights rows=%s", revoked)
+
+
 def _migrate_user_portal_tokens_table() -> None:
     """Create user_portal_tokens and enforce one active token per user."""
     inspector = inspect(engine)
@@ -1696,6 +1741,7 @@ def _run_db_migrations() -> None:
     _migrate_viewer_role_to_user()
     _migrate_user_telegram_backfill()
     _migrate_user_access_until_backfill()
+    _migrate_revoke_unmanaged_client_portal_links()
     _seed_client_templates_for_nodes()
 
 
