@@ -204,8 +204,11 @@ export async function deleteTelegramWebhook() {
   })
 }
 
-export async function getTelegramLinkCode() {
-  return apiFetch<TelegramLinkCode>('/telegram/link-code')
+export async function getTelegramLinkCode(currentPassword: string) {
+  return apiFetch<TelegramLinkCode>('/telegram/link-code', {
+    method: 'POST',
+    body: JSON.stringify({ current_password: currentPassword }),
+  })
 }
 
 export async function getTelegramBotInfo() {
