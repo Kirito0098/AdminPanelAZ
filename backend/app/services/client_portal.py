@@ -975,13 +975,14 @@ def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     from app.services.feature_guards import get_feature_service
 
-    entry = _build_client_portal_entry(
-        db,
-        token=token_row.token,
-        node_id=token_row.node_id,
-        client_name=token_row.client_name,
-        base=base,
-    )
+    with node_request_timeout_cap(PORTAL_NODE_TIMEOUT_SECONDS):
+        entry = _build_client_portal_entry(
+            db,
+            token=token_row.token,
+            node_id=token_row.node_id,
+            client_name=token_row.client_name,
+            base=base,
+        )
     return {
         "kind": "client",
         "node_id": token_row.node_id,
@@ -1101,12 +1102,13 @@ def _read_client_portal_profile(
         )
         .all()
     )
-    allowed = {item["path"] for item in _list_files_for_configs(db, configs)}
-    if path not in allowed:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
-    adapter = _adapter_for_node_id(db, node_id)
-    hosts = load_node_remote_hosts(db, node_id)
-    content = read_profile_file_for_delivery(adapter, path, hosts)
+    with node_request_timeout_cap(PORTAL_NODE_TIMEOUT_SECONDS):
+        allowed = {item["path"] for item in _list_files_for_configs(db, configs)}
+        if path not in allowed:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
+        adapter = _adapter_for_node_id(db, node_id)
+        hosts = load_node_remote_hosts(db, node_id)
+        content = read_profile_file_for_delivery(adapter, path, hosts)
     filename = build_profile_download_filename(client_name, path=path)
     return filename, content
 

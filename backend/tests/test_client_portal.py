@@ -1300,6 +1300,59 @@ def test_user_payload_caps_node_request_timeout_only_inside_portal():
     assert node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT) == node_adapter.HTTP_TIMEOUT
 
 
+def test_client_portal_payload_caps_node_request_timeout():
+    seen: list = []
+
+    def fake_entry(_db, **kwargs):
+        seen.append(node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT))
+        return _user_entry(kwargs["node_id"], kwargs["client_name"])
+
+    with (
+        patch("app.services.client_portal.resolve_portal_base_url", return_value="https://portal.example.com"),
+        patch("app.services.client_portal._build_client_portal_entry", side_effect=fake_entry),
+        patch("app.services.client_portal._portal_brand_title", return_value="VPN"),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        payload = portal.build_portal_payload(
+            MagicMock(),
+            ClientPortalToken(id=1, token="tok", node_id=1, client_name="alice", revoked_at=None),
+        )
+
+    assert seen == [10.0]
+    assert payload["client_name"] == "alice"
+    assert node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT) == node_adapter.HTTP_TIMEOUT
+
+
+def test_portal_download_caps_node_request_timeout():
+    seen: list = []
+
+    def fake_list(_db, _configs):
+        seen.append(node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT))
+        return [{"path": "/tmp/alice.conf"}]
+
+    def fake_read(_adapter, _path, _hosts):
+        seen.append(node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT))
+        return "[Interface]\n"
+
+    with (
+        patch("app.services.client_portal._list_files_for_configs", side_effect=fake_list),
+        patch("app.services.client_portal._adapter_for_node_id", return_value=MagicMock()),
+        patch("app.services.client_portal.load_node_remote_hosts", return_value=[]),
+        patch("app.services.client_portal.read_profile_file_for_delivery", side_effect=fake_read),
+    ):
+        _filename, content = portal._read_client_portal_profile(
+            MagicMock(),
+            node_id=1,
+            client_name="alice",
+            path="/tmp/alice.conf",
+        )
+
+    assert content == "[Interface]\n"
+    assert seen == [10.0, 10.0]
+    assert node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT) == node_adapter.HTTP_TIMEOUT
+
+
 def test_user_payload_logs_traceback_only_for_unexpected_errors(caplog):
     from app.services.ssh_tunnel_pool import SshTunnelError
 
