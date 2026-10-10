@@ -68,6 +68,8 @@
 
 ### 🐛 Fixed
 
+- **Портал / зависший узел** — публичный портал ждёт ответа узла не больше 10 с (как проверка здоровья узла) вместо 120 с. В портале пользователя (`u_…`) узел, который не помечен offline, но не отвечает, просто не попадает в список серверов, и страница открывается с остальными; страница портала клиента (`c_…`) и скачивание профиля по обеим ссылкам при таком узле быстро завершаются ошибкой, а не висят две минуты. Остальные запросы панели к узлам по-прежнему ждут до 120 с; кэша «узел не отвечает» нет — на каждый запрос портала узел опрашивается заново (`client_portal.py`, `node_adapter.py`).
+
 ### 🗑️ Removed
 
 - **Backend / мёртвый код** — удалён код, который вызывали только тесты: `clear_access_expired_for_user` (последний вызов убран в фиксе промокодов), `list_vpn_nodes`, `apply_transport_value`, `base_scheme` и `SshTransport.local_base_url`, `protocol_types_for_openvpn_group`, `find_valid_serials` / `is_serial_revoked`, `read_domains_file_payload`, `_format_ssl_error` в адаптерах узлов; поля `Settings.node_agent_port` и `Settings.wg_policy_sync_enabled` (переменные окружения по-прежнему читают node agent и `feature_toggles`).
