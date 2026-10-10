@@ -132,7 +132,7 @@ jobs:
 
       - name: ShellCheck
         run: |
-          shellcheck -S error -x install.sh scripts/*.sh
+          shellcheck -S warning -x install.sh scripts/*.sh
 
       - name: Shell tests (all scripts/test-*.sh, host calls blocked)
         run: ./scripts/run-shell-tests.sh

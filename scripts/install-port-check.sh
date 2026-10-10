@@ -374,6 +374,7 @@ install_preflight_ports() {
   else
     echo "[port-check] ОШИБКА: заняты порты ${conflicts[*]}." >&2
   fi
+  # shellcheck disable=SC2034 # читает обработчик ошибок install.sh
   INSTALL_FATAL_HANDLED=true
   exit 1
 }

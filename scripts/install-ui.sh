@@ -86,11 +86,10 @@ ui_box_bottom() {
 }
 
 ui_separator() {
-  local char="${1:--}"
   if [[ "$UI_USE_COLOR" == true ]]; then
-    echo "$(ui_cyan "$(printf '%*s' "$UI_BOX_WIDTH" '' | tr ' ' "$char")")"
+    echo "$(ui_cyan "$(printf '%*s' "$UI_BOX_WIDTH" '' | tr ' ' '-')")"
   else
-    printf '%*s\n' "$UI_BOX_WIDTH" '' | tr ' ' "$char"
+    printf '%*s\n' "$UI_BOX_WIDTH" '' | tr ' ' '-'
   fi
 }
 

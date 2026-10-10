@@ -126,7 +126,6 @@ GENERATED_NODE_KEY=""
 GENERATED_PROXY_KEY=""
 WIZARD_RAN=false
 ACTION="install"
-FULL_PURGE=false
 PURGE_REPO=false
 ENV_BACKUP_DIR=""
 RESTORE_ENV_AFTER_INSTALL=false
@@ -337,7 +336,6 @@ parse_args() {
         ;;
       --purge-all)
         ACTION="purge-all"
-        FULL_PURGE=true
         ;;
       --purge)
         PURGE_REPO=true
@@ -470,8 +468,8 @@ run_uninstall_action() {
 }
 
 collect_full_purge_uninstall_args() {
-  local -n _out_args=$1
-  _out_args=(
+  local -n _purge_args=$1
+  _purge_args=(
     --remove-system-config
     --purge-state
     --remove-nginx
@@ -1963,7 +1961,6 @@ setup_firewall_if_selected() {
   local has_node=false
   local has_proxy=false
   local has_controller=false
-  local fw_backend_port="${WIZ_BACKEND_PORT:-8000}"
   local fw_https_port="${WIZ_HTTPS_PUBLIC_PORT:-443}"
   local fw_http_port="${WIZ_HTTP_ACME_PORT:-80}"
 
@@ -1982,12 +1979,10 @@ setup_firewall_if_selected() {
     has_nginx=true
     fw_https_port="${WIZ_BACKEND_PORT:-8000}"
     fw_http_port="0"
-    fw_backend_port="0"
   elif is_direct_public_http_mode; then
     has_nginx=true
     fw_https_port="${WIZ_BACKEND_PORT:-8000}"
     fw_http_port="0"
-    fw_backend_port="0"
   fi
 
   local panel_ip="${WIZ_NODE_AGENT_ALLOWED_IPS:-${WIZ_PROXY_AGENT_ALLOWED_IPS:-}}"

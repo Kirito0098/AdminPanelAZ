@@ -183,7 +183,7 @@ panel_unpushed_count() {
   log="$(git -C "$INSTALL_DIR" rev-parse --git-path "logs/refs/remotes/$1" 2>/dev/null)" || log=""
   [[ -z "$log" || "$log" == /* ]] || log="$INSTALL_DIR/$log"
   if [[ -f "$log" ]]; then
-    mapfile -t seen < <(awk '{ print $1; print $2 }' "$log" | grep -Ex '[0-9a-f]{40}|[0-9a-f]{64}' | grep -vx '0*' | sort -u || true)
+    mapfile -t seen < <(awk '{ print $1; print $2 }' "$log" | grep -Ex '[0-9a-f]{40}|[0-9a-f]{64}' | grep -vxE '0+' | sort -u || true)
   fi
   git -C "$INSTALL_DIR" rev-list --count HEAD --not --remotes ${seen[@]+"${seen[@]}"} 2>/dev/null || echo '?'
 }

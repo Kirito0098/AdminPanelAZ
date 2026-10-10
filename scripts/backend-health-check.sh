@@ -236,6 +236,7 @@ bhc_wait_health_deep() {
       while read -r url; do
         [[ -z "$url" ]] && continue
         if bhc_curl_url "$url" 2>/dev/null | grep -qE '"status"[[:space:]]*:[[:space:]]*"(ok|degraded)"'; then
+          # shellcheck disable=SC2034 # читает install.sh (verify_controller_running)
           BHC_LAST_HEALTH_URL="$url"
           return 0
         fi

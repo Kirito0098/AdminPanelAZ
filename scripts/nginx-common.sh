@@ -1186,7 +1186,6 @@ nginx_install_subpath_snippet() {
   printf '%s\n' "$content" >"$snippet_path"
   nginx_log "Snippet subpath: ${snippet_path}"
   nginx_log "Добавьте в server { } для ${domain}: include snippets/${snippet_name}.conf;"
-  NGINX_SUBPATH_SNIPPET_PATH="$snippet_path"
   NGINX_SUBPATH_SNIPPET_INCLUDE="snippets/${snippet_name}.conf"
 }
 
@@ -1605,6 +1604,7 @@ nginx_remove_all_vhosts_for_domain() {
   done < <(nginx_list_vhosts_for_domain "$domain")
 }
 
+# shellcheck disable=SC2034 # NGINX_SSL_CERT / NGINX_SSL_KEY читает вызывающий (nginx-repair.sh)
 nginx_resolve_panel_ssl_cert_paths() {
   local domain="$1"
   local le_cert="/etc/letsencrypt/live/${domain}/fullchain.pem"

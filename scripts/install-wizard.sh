@@ -408,7 +408,7 @@ wizard_normalized_access_path() {
 # Суффикс для URL: '/' или '/panel/'.
 wizard_access_path_url_suffix() {
   local p
-  p="$(wizard_normalized_access_path "${1:-${WIZ_ACCESS_PATH:-}}")"
+  p="$(wizard_normalized_access_path "${WIZ_ACCESS_PATH:-}")"
   if [[ -z "$p" ]]; then
     printf '/'
   else
@@ -847,6 +847,7 @@ wizard_apply_run_mode_flags() {
     WITH_SYSTEMD=false
   fi
 
+  # shellcheck disable=SC2034 # WITH_NODE_AGENT читает install.sh (install_node_selected)
   case "$WIZ_INSTALL_TYPE" in
     node) WITH_NODE_AGENT=true ;;
     proxy) ;;
