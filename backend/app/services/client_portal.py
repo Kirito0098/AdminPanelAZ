@@ -30,6 +30,7 @@ from app.models import (
     VpnConfig,
     WgAccessPolicy,
 )
+from app.services.node_adapter import node_request_timeout_cap
 from app.services.node_manager import get_active_node, get_adapter_for_node
 from app.services.node_sync.groups import find_sync_group_containing_node
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
@@ -44,6 +45,9 @@ from app.services.vpn_profile_visibility import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Same as the node health check: a hung node must not hold the portal for HTTP_TIMEOUT.
+PORTAL_NODE_TIMEOUT_SECONDS = 10.0
 
 _HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$"
@@ -1021,34 +1025,35 @@ def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
     node_info = _portal_node_info(db, sorted({node_id for node_id, _ in targets}))
     clients_by_node: dict[int, list[dict]] = {}
     failed_nodes: set[int] = set()
-    for node_id, client_name in targets:
-        info = node_info.get(node_id)
-        if node_id in failed_nodes or (info is not None and info.offline):
-            continue
-        try:
-            entry = _build_client_portal_entry(
-                db,
-                token=token_row.token,
-                node_id=node_id,
-                client_name=client_name,
-                base=base,
-                download_node_id=node_id,
-                download_client_name=client_name,
-            )
-        except Exception as exc:
-            failed_nodes.add(node_id)
-            logger.warning(
-                "User portal: skipping node_id=%s client=%s (%s)",
-                node_id,
-                client_name,
-                type(exc).__name__,
-                exc_info=not isinstance(exc, _EXPECTED_PORTAL_NODE_ERRORS),
-            )
-            continue
-        if not entry["files"]:
-            continue
-        entry["status"] = _apply_user_subscription_status(entry["status"], user)
-        clients_by_node.setdefault(node_id, []).append(entry)
+    with node_request_timeout_cap(PORTAL_NODE_TIMEOUT_SECONDS):
+        for node_id, client_name in targets:
+            info = node_info.get(node_id)
+            if node_id in failed_nodes or (info is not None and info.offline):
+                continue
+            try:
+                entry = _build_client_portal_entry(
+                    db,
+                    token=token_row.token,
+                    node_id=node_id,
+                    client_name=client_name,
+                    base=base,
+                    download_node_id=node_id,
+                    download_client_name=client_name,
+                )
+            except Exception as exc:
+                failed_nodes.add(node_id)
+                logger.warning(
+                    "User portal: skipping node_id=%s client=%s (%s)",
+                    node_id,
+                    client_name,
+                    type(exc).__name__,
+                    exc_info=not isinstance(exc, _EXPECTED_PORTAL_NODE_ERRORS),
+                )
+                continue
+            if not entry["files"]:
+                continue
+            entry["status"] = _apply_user_subscription_status(entry["status"], user)
+            clients_by_node.setdefault(node_id, []).append(entry)
 
     nodes = [
         {

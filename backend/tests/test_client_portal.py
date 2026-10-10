@@ -15,6 +15,7 @@ from app.models import ClientPortalToken, UserPortalToken, VpnConfig, VpnType
 from app.routers import client_portal as client_portal_router
 from app.routers import public_portal as public_portal_router
 from app.services import client_portal as portal
+from app.services import node_adapter
 from app.services import unlock_codes
 
 
@@ -1178,6 +1179,8 @@ def _run_user_payload(targets, entries: dict, labels: dict, offline=(), calls: l
         if calls is not None:
             calls.append((kwargs["node_id"], kwargs["client_name"]))
         value = entries[(kwargs["node_id"], kwargs["client_name"])]
+        if callable(value):
+            value = value()
         if isinstance(value, Exception):
             raise value
         return value
@@ -1280,6 +1283,21 @@ def test_user_payload_skips_offline_nodes_without_calling_builder():
     )
     assert calls == [(2, "b")]
     assert [n["node_id"] for n in payload["nodes"]] == [2]
+
+
+def test_user_payload_caps_node_request_timeout_only_inside_portal():
+    seen: list = []
+
+    def entry():
+        seen.append(node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT))
+        return _user_entry(1, "a")
+
+    payload = _run_user_payload(targets=[(1, "a")], entries={(1, "a"): entry}, labels={1: "DE"})
+
+    assert seen == [10.0]
+    assert portal.PORTAL_NODE_TIMEOUT_SECONDS == 10.0
+    assert [n["node_id"] for n in payload["nodes"]] == [1]
+    assert node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT) == node_adapter.HTTP_TIMEOUT
 
 
 def test_user_payload_logs_traceback_only_for_unexpected_errors(caplog):
