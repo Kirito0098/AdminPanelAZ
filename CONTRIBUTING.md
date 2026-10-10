@@ -227,6 +227,7 @@ Security диффа PR          → review-security
 4. **Фичи:** учитывать feature toggles и активный узел (`FeatureModulesContext`, `NodeContext`).
 5. **Секреты:** `.env`, ключи, `*.pem`, GeoIP `*.mmdb`, граф `.codebase-memory/` — только локально.
 6. **Проверки:** как в CI / pre-commit — ruff, bandit, eslint (advisory), shellcheck для `install.sh` и `scripts/*.sh`.
+7. **Ключ NodeSource:** `install.sh` принимает ключ репозитория NodeSource только с отпечатком `NODESOURCE_KEY_FINGERPRINT`. Если NodeSource сменит ключ, установка Node.js остановится с ошибкой «Ключ NodeSource не совпал». Тогда сверить новый отпечаток с [инструкцией NodeSource](https://github.com/nodesource/distributions) и обновить `NODESOURCE_KEY_FINGERPRINT` в `install.sh` и `NODESOURCE_FPR` в `scripts/test-install-nodejs-lts.sh`.
 
 Security-критичные зоны (auth, middleware, public download, telegram webhook, rate limit): перед «готово» — **review-security**.
 

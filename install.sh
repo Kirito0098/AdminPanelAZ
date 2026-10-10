@@ -746,6 +746,11 @@ random_hex() {
 # Node 20 больше не поддерживается; ставим актуальную LTS.
 NODE_MIN_MAJOR=22
 NODE_INSTALL_MAJOR=24
+NODESOURCE_KEY_URL="https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
+NODESOURCE_KEY_FINGERPRINT="6F71F525282841EEDAF851B42F59B5F99B1BE0B4"
+NODESOURCE_KEYRING="${NODESOURCE_KEYRING:-/usr/share/keyrings/nodesource.gpg}"
+NODESOURCE_APT_SOURCES="${NODESOURCE_APT_SOURCES:-/etc/apt/sources.list.d/nodesource.sources}"
+NODESOURCE_APT_PIN="${NODESOURCE_APT_PIN:-/etc/apt/preferences.d/nodejs}"
 
 node_major_version() {
   if ! command -v node >/dev/null 2>&1; then
@@ -765,6 +770,39 @@ node_apt_candidate_major() {
   else
     echo 0
   fi
+}
+
+# Репозиторий NodeSource для apt вместо их setup-скрипта через curl | bash: скачанный ключ принимается
+# только с известным отпечатком, apt проверяет им пакеты (Signed-By).
+nodesource_add_repo() {
+  local tmp fingerprint
+  command -v gpg >/dev/null 2>&1 || apt-get install -y gnupg
+  tmp="$(mktemp -d)"
+  if ! curl -fsSL "$NODESOURCE_KEY_URL" >"$tmp/key.asc"; then
+    rm -rf "$tmp"
+    die "Не удалось скачать ключ NodeSource: $NODESOURCE_KEY_URL"
+  fi
+  mkdir -m 700 "$tmp/gnupg"
+  fingerprint="$(GNUPGHOME="$tmp/gnupg" gpg --batch --with-colons --show-keys "$tmp/key.asc" 2>/dev/null \
+    | awk -F: '$1 == "fpr" {print $10; exit}')"
+  if [[ "$fingerprint" != "$NODESOURCE_KEY_FINGERPRINT" ]]; then
+    rm -rf "$tmp"
+    die "Ключ NodeSource не совпал с ожидаемым (${NODESOURCE_KEY_FINGERPRINT}, получен: ${fingerprint:-нет}) — репозиторий не подключён"
+  fi
+  mkdir -p "$(dirname "$NODESOURCE_KEYRING")"
+  GNUPGHOME="$tmp/gnupg" gpg --batch --yes --dearmor -o "$NODESOURCE_KEYRING" "$tmp/key.asc"
+  chmod 644 "$NODESOURCE_KEYRING"
+  rm -rf "$tmp"
+  rm -f "$(dirname "$NODESOURCE_APT_SOURCES")/nodesource.list"
+  cat >"$NODESOURCE_APT_SOURCES" <<EOF
+Types: deb
+URIs: https://deb.nodesource.com/node_${NODE_INSTALL_MAJOR}.x
+Suites: nodistro
+Components: main
+Signed-By: ${NODESOURCE_KEYRING}
+EOF
+  printf 'Package: nodejs\nPin: origin deb.nodesource.com\nPin-Priority: 600\n' >"$NODESOURCE_APT_PIN"
+  apt-get update -qq
 }
 
 install_nodejs() {
@@ -792,8 +830,8 @@ install_nodejs() {
     fi
   fi
 
-  log "Подключение NodeSource (Node.js ${NODE_INSTALL_MAJOR}.x)..."
-  curl -fsSL "https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" | bash -
+  log "Подключение репозитория NodeSource (Node.js ${NODE_INSTALL_MAJOR}.x)..."
+  nodesource_add_repo
   apt-get install -y nodejs
   major="$(node_major_version)"
   if [[ "$major" -lt "$NODE_MIN_MAJOR" ]]; then
