@@ -6,6 +6,7 @@ import logging
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Node
+from app.services.node_key_rotation import complete_pending_key_rotation
 from app.services.node_manager import check_node_health, update_node_from_health
 from app.services.background_gate import run_background_step
 
@@ -41,8 +42,23 @@ def _poll_all_nodes():
         for node in nodes:
             try:
                 health = check_node_health(node)
+                if node.api_key_pending_encrypted and (
+                    health.get("status") == "online" or health.get("error_code") == "node_auth"
+                ):
+                    health = _finish_key_rotation(db, node, health)
                 update_node_from_health(node, health, db)
             except Exception as exc:
                 logger.debug("Node health poll failed for %s: %s", node.name, exc)
     finally:
         db.close()
+
+
+def _finish_key_rotation(db, node: Node, health: dict) -> dict:
+    try:
+        if complete_pending_key_rotation(db, node):
+            logger.info("Node %s: finished interrupted API key rotation", node.name)
+            return check_node_health(node)
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Node %s: API key rotation still pending: %s", node.name, exc)
+    return health

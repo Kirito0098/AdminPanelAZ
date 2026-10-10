@@ -16,10 +16,13 @@ from app.models import Node
 from app.services.action_log import log_action
 from app.services.node_manager import (
     NODE_KIND_VPN,
+    check_node_health,
     get_adapter_for_node,
     get_api_key_plain,
+    get_pending_api_key_plain,
     is_vpn_node,
     store_api_key,
+    store_pending_api_key,
 )
 from app.services.background_gate import run_background_step
 
@@ -40,17 +43,13 @@ def rotate_node_api_key(db: Session, node: Node, *, actor_username: str | None =
     if not old_key:
         raise ValueError("API-ключ узла недоступен")
 
-    new_key = generate_api_key()
-    get_adapter_for_node(node).rotate_api_key(new_key)
-
-    key_hash, key_encrypted = store_api_key("", new_key)
-    node.api_key_hash = key_hash
-    node.api_key_encrypted = key_encrypted
-    node.api_key_rotated_at = datetime.utcnow()
-    node.updated_at = node.api_key_rotated_at
+    # Reusing an unfinished key keeps a retry idempotent if the agent already switched to it.
+    new_key = get_pending_api_key_plain(node) or generate_api_key()
+    store_pending_api_key(node, new_key)
     db.add(node)
     db.commit()
-    db.refresh(node)
+
+    _deliver_pending_key(db, node, new_key)
 
     settings = get_settings()
     if settings.audit_log_enabled:
@@ -61,6 +60,53 @@ def rotate_node_api_key(db: Session, node: Node, *, actor_username: str | None =
             details=f"name={node.name}, id={node.id}",
         )
     return new_key
+
+
+def complete_pending_key_rotation(db: Session, node: Node) -> bool:
+    """Finish a rotation whose outcome the panel never saw; False when none is in flight."""
+    pending_key = get_pending_api_key_plain(node)
+    if not pending_key:
+        return False
+    if _agent_accepts_key(node, pending_key):
+        _promote_pending_key(db, node, pending_key)
+    else:
+        _deliver_pending_key(db, node, pending_key)
+
+    settings = get_settings()
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="node_api_key_rotate",
+            username="system",
+            details=f"name={node.name}, id={node.id}, resumed=1",
+        )
+    return True
+
+
+def _agent_accepts_key(node: Node, api_key: str) -> bool:
+    return check_node_health(node, api_key_override=api_key).get("status") == "online"
+
+
+def _deliver_pending_key(db: Session, node: Node, new_key: str) -> None:
+    try:
+        get_adapter_for_node(node).rotate_api_key(new_key)
+    except Exception:
+        # The agent may have switched keys before its reply was lost.
+        if not _agent_accepts_key(node, new_key):
+            raise
+    _promote_pending_key(db, node, new_key)
+
+
+def _promote_pending_key(db: Session, node: Node, new_key: str) -> None:
+    key_hash, key_encrypted = store_api_key("", new_key)
+    node.api_key_hash = key_hash
+    node.api_key_encrypted = key_encrypted
+    node.api_key_pending_encrypted = ""
+    node.api_key_rotated_at = datetime.utcnow()
+    node.updated_at = node.api_key_rotated_at
+    db.add(node)
+    db.commit()
+    db.refresh(node)
 
 
 def _nodes_due_for_rotation(db: Session) -> list[Node]:
