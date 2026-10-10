@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from html import escape
 
 from sqlalchemy.orm import Session
 
@@ -51,20 +52,20 @@ def _node_meta_lines(node: Node) -> list[str]:
     lines: list[str] = []
     server_ip = meta.get("server_ip")
     if server_ip:
-        lines.append(i18n.NODES_LINE_SERVER_IP.format(value=server_ip))
+        lines.append(i18n.NODES_LINE_SERVER_IP.format(value=escape(str(server_ip))))
     services_active = meta.get("services_active")
     services_total = meta.get("services_total")
     if isinstance(services_active, int) and isinstance(services_total, int):
         lines.append(i18n.NODES_LINE_SERVICES.format(active=services_active, total=services_total))
     agent_version = meta.get("agent_version")
     if agent_version:
-        lines.append(i18n.NODES_LINE_AGENT.format(value=agent_version))
+        lines.append(i18n.NODES_LINE_AGENT.format(value=escape(str(agent_version))))
     az_version = meta.get("antizapret_version")
     if az_version:
-        lines.append(i18n.NODES_LINE_AZ.format(value=az_version))
+        lines.append(i18n.NODES_LINE_AZ.format(value=escape(str(az_version))))
     last_error = meta.get("last_error")
     if last_error:
-        lines.append(i18n.NODES_LINE_ERROR.format(value=str(last_error)[:200]))
+        lines.append(i18n.NODES_LINE_ERROR.format(value=escape(str(last_error)[:200])))
     return lines
 
 
@@ -81,10 +82,10 @@ def _format_node_card(node: Node, *, active_id: int | None) -> str:
     lines = [
         i18n.NODES_CARD.format(
             title=i18n.NODES_CARD_TITLE,
-            name=node.name,
+            name=escape(node.name or ""),
             active_mark=active_mark,
             local_mark=local_mark,
-            host=node.host,
+            host=escape(node.host or ""),
             port=node.port,
             status_icon=icon,
             status=status.value,

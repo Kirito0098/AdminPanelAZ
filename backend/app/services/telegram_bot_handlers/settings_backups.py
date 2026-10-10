@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+from html import escape
 
 from fastapi import HTTPException
 
@@ -484,7 +485,7 @@ async def handle_backups_callback(ctx: BotContext, data: str, *, message_id: int
         return
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {detail}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(detail)}")
         return
 
 

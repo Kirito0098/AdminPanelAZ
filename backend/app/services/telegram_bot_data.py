@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from html import escape
 
 from sqlalchemy.orm import Session
 
@@ -45,7 +46,7 @@ def build_server_status_block(db: Session) -> str | None:
         metrics = adapter.get_server_metrics(accurate_cpu=True)
         live = adapter.get_server_live_throughput(interval=0.8, max_interfaces=6)
     except Exception:
-        return i18n.STATUS_SERVER_UNAVAILABLE.format(node_name=node.name)
+        return i18n.STATUS_SERVER_UNAVAILABLE.format(node_name=escape(node.name or ""))
 
     mem_used = human_bytes(int(metrics.get("memory_used") or 0)) or "—"
     mem_total = human_bytes(int(metrics.get("memory_total") or 0)) or "—"
