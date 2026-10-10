@@ -101,6 +101,8 @@ ui_init
 source "$ROOT_DIR/scripts/install-port-check.sh"
 # shellcheck source=scripts/install-reboot-check.sh
 source "$ROOT_DIR/scripts/install-reboot-check.sh"
+# shellcheck source=scripts/node-agent-mtls-check.sh
+source "$ROOT_DIR/scripts/node-agent-mtls-check.sh"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 VENV_DIR="$BACKEND_DIR/.venv"
@@ -1436,6 +1438,11 @@ setup_node_env() {
   for line in "${AGENT_PRESERVED_MTLS[@]}"; do
     node_env_set "${line%%=*}" "${line#*=}"
   done
+  local mtls_warning
+  mtls_warning="$(node_agent_mtls_warning "$NODE_ENV_FILE")"
+  if [[ -n "$mtls_warning" ]]; then
+    warn "$mtls_warning"
+  fi
 
   GENERATED_NODE_KEY="$api_key"
   export NODE_AGENT_API_KEY="$api_key"
