@@ -30,6 +30,7 @@ settings = get_settings()
 
 _PKI_FP_PREFIX = "easyrsa3/"
 _CLIENT_DRIFT_KINDS = frozenset({"openvpn_clients", "wireguard_clients"})
+_CRYPTO_DRIFT_KINDS = frozenset({"openvpn_restart_pending", "wireguard_peers", "awg2_clients"})
 
 
 def classify_heal_actions(verify_result: dict[str, Any]) -> tuple[set[str], bool]:
@@ -49,7 +50,7 @@ def classify_heal_actions(verify_result: dict[str, Any]) -> tuple[set[str], bool
                 actions.add("policy")
                 has_healable = True
                 continue
-            if kind == "openvpn_restart_pending":
+            if kind in _CRYPTO_DRIFT_KINDS:
                 actions.add("crypto_sync")
                 has_healable = True
                 continue

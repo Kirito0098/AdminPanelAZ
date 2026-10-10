@@ -91,3 +91,13 @@ def test_auto_heal_exhausted_notifies_with_push_full_hint():
     assert drift[0]["auto_heal_failures"] == 3
     assert drift[0]["notify"] is True
     assert "Push full" in drift[0]["hint"]
+
+
+def test_live_runtime_mismatches_heal_through_crypto_sync():
+    verify_result = {
+        "replicas": [
+            {"mismatches": [{"kind": "wireguard_peers"}, {"kind": "awg2_clients"}]},
+        ]
+    }
+
+    assert reconcile_worker.classify_heal_actions(verify_result) == ({"crypto_sync"}, False)
