@@ -31,6 +31,7 @@ from app.schemas import (
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
 from app.services.active_web_session import active_web_session_service
+from app.services.client_portal import revoke_creator_portal_links
 from app.services.config_access import get_user_config_grants, set_user_config_access
 from app.services.ip_restriction import ip_restriction_service
 from app.services.notify_time import get_client_timezone_from_request
@@ -167,6 +168,7 @@ def update_user(
                     detail="Нельзя снять роль у последнего администратора",
                 )
         user.role = payload.role
+        revoke_creator_portal_links(db, user.id)
     if payload.theme is not None:
         user.theme = payload.theme
     if payload.is_active is not None:
@@ -341,6 +343,9 @@ def delete_user(
                 detail="Нельзя удалить последнего администратора",
             )
     deleted_username = user.username
+    if user.role != UserRole.admin:
+        revoke_creator_portal_links(db, user.id, keep_accessible=False)
+        db.flush()
     _purge_user_before_delete(db, user, current_user)
     db.delete(user)
     db.commit()

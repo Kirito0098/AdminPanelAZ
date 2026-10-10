@@ -30,6 +30,7 @@ from app.models import (
     VpnConfig,
     WgAccessPolicy,
 )
+from app.services.config_access import can_mutate_config
 from app.services.node_adapter import node_request_timeout_cap
 from app.services.node_manager import get_active_node, get_adapter_for_node
 from app.services.node_sync.groups import find_sync_group_containing_node
@@ -495,6 +496,40 @@ def _revoke_orphaned_client_portal_links(db: Session, config: VpnConfig) -> None
     if remaining is not None:
         return
     revoke_client_portal_links(db, node_id=node_id, client_name=client_name)
+
+
+def revoke_creator_portal_links(db: Session, creator_id: int, *, keep_accessible: bool = True) -> int:
+    """Revoke active client links the user created and may no longer manage; the caller commits."""
+    rows = (
+        db.query(ClientPortalToken)
+        .filter(
+            ClientPortalToken.created_by_user_id == creator_id,
+            ClientPortalToken.revoked_at.is_(None),
+        )
+        .all()
+    )
+    creator = db.get(User, creator_id) if keep_accessible else None
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    revoked = 0
+    for row in rows:
+        if creator is not None and _creator_still_manages(db, creator, row):
+            continue
+        row.revoked_at = now
+        revoked += 1
+    return revoked
+
+
+def _creator_still_manages(db: Session, creator: User, row: ClientPortalToken) -> bool:
+    configs = (
+        db.query(VpnConfig)
+        .filter(
+            VpnConfig.node_id == row.node_id,
+            VpnConfig.client_name == row.client_name,
+            VpnConfig.ha_primary_config_id.is_(None),
+        )
+        .all()
+    )
+    return any(can_mutate_config(creator, config) for config in configs)
 
 
 def revoke_client_portal_links(db: Session, *, node_id: int, client_name: str) -> int:

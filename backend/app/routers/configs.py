@@ -24,7 +24,7 @@ from app.schemas import (
 )
 from app.services.self_service import build_quota_payload, enforce_user_can_create_config
 from app.services.user_subscription import apply_owner_access_until_to_config, replicate_inherited_access_until
-from app.services.client_portal import cleanup_deleted_client_records
+from app.services.client_portal import cleanup_deleted_client_records, revoke_client_portal_links
 from app.services.config_access import can_mutate_config, can_view_config, list_accessible_configs
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
@@ -687,7 +687,10 @@ def update_config(
         owner = db.query(User).filter(User.id == payload.owner_id).first()
         if not owner:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Владелец не найден")
+        previous_owner_id = config.owner_id
         config.owner_id = payload.owner_id
+        if previous_owner_id != payload.owner_id:
+            revoke_client_portal_links(db, node_id=config.node_id, client_name=config.client_name)
         metadata_changed = True
     if payload.cert_expire_days is not None and config.vpn_type == VpnType.openvpn:
         adapter = get_active_adapter(db)

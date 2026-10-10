@@ -15,7 +15,7 @@ from app.models import User, VpnConfig, VpnType
 from app.services.access_policy import AccessPolicyService
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
-from app.services.client_portal import cleanup_deleted_client_records
+from app.services.client_portal import cleanup_deleted_client_records, revoke_client_portal_links
 from app.services.config_tags import resolve_config_ids_by_tags
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
 from app.services.node_sync.client_sync import (
@@ -132,7 +132,10 @@ def _run_single_op(
             owner = db.query(User).filter(User.id == owner_id).first()
             if not owner:
                 return {"config_id": config_id, "ok": False, "error": "владелец не найден"}
+            previous_owner_id = config.owner_id
             config.owner_id = owner_id
+            if previous_owner_id != owner_id:
+                revoke_client_portal_links(db, node_id=config.node_id, client_name=config.client_name)
             db.commit()
             maybe_replicate_config_metadata(db, node_id=node_id, primary_config=config)
         elif operation == "delete":
