@@ -72,7 +72,7 @@ from app.services.profile_files import profile_files_batch_key
 from app.services.panel_publish_info import resolve_public_base_url
 from app.services.qr_download import QrDownloadService
 from app.services.qr_generator import generate_qr_png, prefers_download_link_qr
-from app.services.awg2 import AWG2_INSTALL_CMD, compute_expires_at
+from app.services.awg2 import compute_expires_at, require_awg2_installed
 from app.services.security import SecurityService
 from app.services.vpn_profile_visibility import (
     POLICY_GROUP_TO_SETTING,
@@ -555,22 +555,7 @@ def create_config(
     elif payload.vpn_type == VpnType.wireguard:
         adapter.add_wireguard_client(payload.client_name)
     elif payload.vpn_type == VpnType.amneziawg2:
-        try:
-            health = adapter.get_awg2_health()
-        except HTTPException as exc:
-            if exc.status_code not in {status.HTTP_404_NOT_FOUND} and exc.status_code < 500:
-                raise
-            health = {"installed": False, "install_command": AWG2_INSTALL_CMD}
-        except (ConnectionError, OSError):
-            health = {"installed": False, "install_command": AWG2_INSTALL_CMD}
-        if not health.get("installed"):
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail={
-                    "message": "AZ-AWG2 не установлен на узле",
-                    "install_command": health.get("install_command") or AWG2_INSTALL_CMD,
-                },
-            )
+        require_awg2_installed(adapter)
         try:
             awg2_expires_at = compute_expires_at(payload.ttl)
         except ValueError as exc:

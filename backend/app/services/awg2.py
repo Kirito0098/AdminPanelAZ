@@ -80,6 +80,26 @@ def compute_expires_at(ttl: str | None) -> datetime | None:
     return datetime.utcnow() + timedelta(seconds=parse_ttl_to_seconds(ttl))
 
 
+def require_awg2_installed(adapter: Any) -> None:
+    """Raise 409 with the install command when the node has no AZ-AWG2 layer or does not answer."""
+    try:
+        health = adapter.get_awg2_health()
+    except HTTPException as exc:
+        if exc.status_code not in {status.HTTP_404_NOT_FOUND} and exc.status_code < 500:
+            raise
+        health = {"installed": False, "install_command": AWG2_INSTALL_CMD}
+    except (ConnectionError, OSError):
+        health = {"installed": False, "install_command": AWG2_INSTALL_CMD}
+    if not health.get("installed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "AZ-AWG2 не установлен на узле",
+                "install_command": health.get("install_command") or AWG2_INSTALL_CMD,
+            },
+        )
+
+
 def read_expiry_map() -> dict[str, datetime]:
     """Parse `expiry.tsv` (`name<TAB>tunnel<TAB>unix_ts`) into `{name: expires_at}` (naive UTC).
 
