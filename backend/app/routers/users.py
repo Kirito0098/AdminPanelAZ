@@ -30,6 +30,7 @@ from app.schemas import (
 )
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
+from app.services.active_web_session import active_web_session_service
 from app.services.config_access import get_user_config_grants, set_user_config_access
 from app.services.ip_restriction import ip_restriction_service
 from app.services.notify_time import get_client_timezone_from_request
@@ -169,6 +170,9 @@ def update_user(
     if payload.is_active is not None:
         if not is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять статус")
+        if user.is_active and not payload.is_active:
+            invalidate_user_sessions(db, user, reason="disabled", commit=False)
+            active_web_session_service.revoke_user_sessions(db, user.username, commit=False)
         user.is_active = payload.is_active
     if "access_until" in payload.model_fields_set:
         if not is_admin:
