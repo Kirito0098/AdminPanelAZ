@@ -96,16 +96,22 @@ def _run_single_op(
         if operation == "block_temp":
             if config.vpn_type == VpnType.openvpn:
                 svc.openvpn_temp_block(name, block_days, actor=actor_username)
+            elif config.vpn_type == VpnType.amneziawg2:
+                svc.awg2_temp_block(name, block_days, actor=actor_username)
             else:
                 svc.wg_temp_block(name, block_days, actor=actor_username)
         elif operation == "block_perm":
             if config.vpn_type == VpnType.openvpn:
                 svc.openvpn_permanent_block(name, actor=actor_username)
+            elif config.vpn_type == VpnType.amneziawg2:
+                svc.awg2_permanent_block(name, actor=actor_username)
             else:
                 svc.wg_permanent_block(name, actor=actor_username)
         elif operation == "unblock":
             if config.vpn_type == VpnType.openvpn:
                 svc.openvpn_unblock(name, actor=actor_username)
+            elif config.vpn_type == VpnType.amneziawg2:
+                svc.awg2_unblock(name, actor=actor_username)
             else:
                 svc.wg_unblock(name, actor=actor_username)
         elif operation == "renew_cert":
@@ -141,6 +147,8 @@ def _run_single_op(
         elif operation == "delete":
             if config.vpn_type == VpnType.openvpn:
                 adapter.delete_openvpn_client(name)
+            elif config.vpn_type == VpnType.amneziawg2:
+                adapter.awg2_delete_client(name)
             else:
                 adapter.delete_wireguard_client(name)
             node = get_active_node(db)
