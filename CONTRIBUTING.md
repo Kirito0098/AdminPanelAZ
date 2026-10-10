@@ -226,7 +226,7 @@ Security диффа PR          → review-security
 3. **API:** тонкие роутеры, логика в `backend/app/services/`; фронт ходит в API через `frontend/src/api/client.ts`.
 4. **Фичи:** учитывать feature toggles и активный узел (`FeatureModulesContext`, `NodeContext`).
 5. **Секреты:** `.env`, ключи, `*.pem`, GeoIP `*.mmdb`, граф `.codebase-memory/` — только локально.
-6. **Проверки:** как в CI / pre-commit — ruff, bandit, eslint (advisory), shellcheck для `install.sh` и `scripts/*.sh`.
+6. **Проверки:** как в CI / pre-commit — ruff, bandit, eslint (advisory), shellcheck `-S warning` для `install.sh` и `scripts/*.sh`.
 7. **Ключ NodeSource:** `install.sh` принимает ключ репозитория NodeSource только с отпечатком `NODESOURCE_KEY_FINGERPRINT`. Если NodeSource сменит ключ, установка Node.js остановится с ошибкой «Ключ NodeSource не совпал». Тогда сверить новый отпечаток с [инструкцией NodeSource](https://github.com/nodesource/distributions) и обновить `NODESOURCE_KEY_FINGERPRINT` в `install.sh` и `NODESOURCE_FPR` в `scripts/test-install-nodejs-lts.sh`.
 8. **Ветки релиза и Dependabot:** изменения идут в `release/X.Y.Z`, в `main` — одним PR, когда релиз готов. Создав новую `release/X.Y.Z`, первым коммитом в ней переключите `target-branch` в `.github/dependabot.yml` на эту ветку. Dependabot читает файл только из `main`, поэтому новое значение заработает после merge этой ветки в `main`; до этого его PR в старую ветку релиза закрывайте без merge.
 
