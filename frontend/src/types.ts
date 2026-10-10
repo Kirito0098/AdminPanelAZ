@@ -81,7 +81,7 @@ export interface NodeHaContext {
   sync_status: SyncStatus
 }
 
-export type SyncStatus = 'unknown' | 'synced' | 'pending' | 'failed'
+export type SyncStatus = 'unknown' | 'synced' | 'pending' | 'failed' | 'drift'
 
 export interface NodeSyncMismatch {
   kind: string
