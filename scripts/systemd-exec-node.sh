@@ -16,21 +16,28 @@ if [[ ! -x "$UVICORN" ]]; then
 fi
 
 mtls_args=()
-if [[ "${NODE_AGENT_MTLS_ENABLED:-false}" == "true" ]]; then
-  cert="${NODE_AGENT_MTLS_SERVER_CERT:-/etc/adminpanelaz/mtls/agent.crt}"
-  key="${NODE_AGENT_MTLS_SERVER_KEY:-/etc/adminpanelaz/mtls/agent.key}"
-  ca="${NODE_AGENT_MTLS_CA_CERT:-/etc/adminpanelaz/mtls/ca.crt}"
-  if [[ -f "$cert" && -f "$key" && -f "$ca" ]]; then
+mtls_flag="${NODE_AGENT_MTLS_ENABLED:-false}"
+case "${mtls_flag,,}" in
+  1|true|yes)
+    cert="${NODE_AGENT_MTLS_SERVER_CERT:-/etc/adminpanelaz/mtls/agent.crt}"
+    key="${NODE_AGENT_MTLS_SERVER_KEY:-/etc/adminpanelaz/mtls/agent.key}"
+    ca="${NODE_AGENT_MTLS_CA_CERT:-/etc/adminpanelaz/mtls/ca.crt}"
+    missing=()
+    for file in "$cert" "$key" "$ca"; do
+      [[ -f "$file" ]] || missing+=("$file")
+    done
+    if (( ${#missing[@]} > 0 )); then
+      echo "[systemd-exec-node] mTLS включён (NODE_AGENT_MTLS_ENABLED=${mtls_flag}), сертификатов нет: ${missing[*]}. Агент не запущен: верните файлы в /etc/adminpanelaz/mtls или выключите mTLS в backend/node_agent.env" >&2
+      exit 1
+    fi
     mtls_args=(
       --ssl-certfile "$cert"
       --ssl-keyfile "$key"
       --ssl-ca-certs "$ca"
       --ssl-cert-reqs 2
     )
-  else
-    echo "[systemd-exec-node] NODE_AGENT_MTLS_ENABLED=true, но cert/key/ca не найдены — без mTLS" >&2
-  fi
-fi
+    ;;
+esac
 
 export PYTHONPATH="${BACKEND_DIR}${PYTHONPATH:+:$PYTHONPATH}"
 export NODE_AGENT_API_KEY="${NODE_AGENT_API_KEY:-change-me-node-agent-key}"

@@ -229,7 +229,7 @@ def health(_: None = Depends(verify_api_key)):
     payload = build_health_payload(
         service,
         agent_version=app.version,
-        listen_tls=bool(_uvicorn_ssl_kwargs()),
+        listen_tls=NODE_AGENT_MTLS_ENABLED,
     )
     payload["status"] = "online"
     payload["timestamp"] = datetime.utcnow().isoformat()
@@ -1376,8 +1376,15 @@ def _uvicorn_ssl_kwargs() -> dict:
     cert = Path(NODE_AGENT_MTLS_SERVER_CERT)
     key = Path(NODE_AGENT_MTLS_SERVER_KEY)
     ca = Path(NODE_AGENT_MTLS_CA_CERT)
-    if not all(p.is_file() for p in (cert, key, ca)):
-        return {}
+    missing = [str(p) for p in (cert, key, ca) if not p.is_file()]
+    if missing:
+        # Falling back to plain HTTP would expose the API key and agent API without TLS.
+        raise SystemExit(
+            "node agent: mTLS включён (NODE_AGENT_MTLS_ENABLED=true), сертификатов нет: "
+            + ", ".join(missing)
+            + ". Агент не запущен: верните файлы в /etc/adminpanelaz/mtls "
+            "или выключите mTLS в backend/node_agent.env."
+        )
     return {
         "ssl_certfile": str(cert),
         "ssl_keyfile": str(key),
