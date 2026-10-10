@@ -253,19 +253,17 @@ def _clear_refresh_cookie(response: Response, request: Request | None = None) ->
     )
 
 
-def _admin_requires_2fa(db: Session, user: User) -> bool:
-    if user.role != UserRole.admin:
-        return False
+def _requires_2fa(db: Session, user: User) -> bool:
     return bool(user.totp_enabled or user_has_passkeys(db, user.id))
 
 
 def _user_from_2fa_token(db: Session, temp_token: str, client_ip: str) -> User:
     username = decode_2fa_pending_token(temp_token)
     user = db.query(User).filter(User.username == username).first()
-    if not user or not user.is_active or user.role != UserRole.admin:
+    if not user or not user.is_active:
         auth_rate_limit_service.record_failure(client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный код 2FA")
-    if not _admin_requires_2fa(db, user):
+    if not _requires_2fa(db, user):
         auth_rate_limit_service.record_failure(client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="2FA не настроена")
     return user
@@ -337,7 +335,7 @@ def _login_with_checks(
             detail += " (требуется капча)"
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
 
-    if _admin_requires_2fa(db, user):
+    if _requires_2fa(db, user):
         return Login2FARequired(
             temp_token=create_2fa_pending_token(user.username),
             passkey_available=user_has_passkeys(db, user.id),
