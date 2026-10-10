@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import Node, VpnConfig, VpnType
+from app.services.client_portal import cleanup_deleted_client_records
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.client_sync import purge_ha_shadow_configs
 from app.services.openvpn_cert import (
@@ -56,6 +57,7 @@ def _remove_stale_configs(
         if config.ha_primary_config_id is None:
             purge_ha_shadow_configs(db, config.id)
         db.delete(config)
+        cleanup_deleted_client_records(db, config)
         removed += 1
     return removed
 

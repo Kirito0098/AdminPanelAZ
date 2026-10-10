@@ -304,6 +304,7 @@ def test_delete_amneziawg2_calls_replicate_and_awg2():
         patch.object(configs_router, "find_sync_group_for_primary", return_value=SimpleNamespace(id=7)),
         patch.object(configs_router, "maybe_replicate_delete") as replicate,
         patch.object(configs_router, "purge_ha_shadow_configs"),
+        patch.object(configs_router, "cleanup_deleted_client_records"),
         patch.object(configs_router.admin_notify_service, "send_config_delete"),
         patch.object(configs_router, "get_client_timezone_from_request", return_value="UTC"),
     ):

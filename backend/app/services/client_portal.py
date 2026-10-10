@@ -472,6 +472,45 @@ def revoke_portal_token(db: Session, *, client_name: str) -> None:
     db.commit()
 
 
+def cleanup_deleted_client_records(db: Session, config: VpnConfig) -> None:
+    """Run after the VpnConfig row is deleted, before commit; the caller commits."""
+    _revoke_orphaned_client_portal_links(db, config)
+
+
+def _revoke_orphaned_client_portal_links(db: Session, config: VpnConfig) -> None:
+    node_id = config.node_id
+    client_name = config.client_name
+    config_id = config.id
+    db.flush()
+    remaining = (
+        db.query(VpnConfig.id)
+        .filter(
+            VpnConfig.node_id == node_id,
+            VpnConfig.client_name == client_name,
+            VpnConfig.ha_primary_config_id.is_(None),
+            VpnConfig.id != config_id,
+        )
+        .first()
+    )
+    if remaining is not None:
+        return
+    revoke_client_portal_links(db, node_id=node_id, client_name=client_name)
+
+
+def revoke_client_portal_links(db: Session, *, node_id: int, client_name: str) -> int:
+    """Revoke every active link of the client, whoever created it; the caller commits."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return (
+        db.query(ClientPortalToken)
+        .filter(
+            ClientPortalToken.node_id == node_id,
+            ClientPortalToken.client_name == client_name,
+            ClientPortalToken.revoked_at.is_(None),
+        )
+        .update({ClientPortalToken.revoked_at: now}, synchronize_session=False)
+    )
+
+
 def get_or_create_user_portal_token(
     db: Session,
     *,

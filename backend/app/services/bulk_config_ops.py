@@ -15,6 +15,7 @@ from app.models import User, VpnConfig, VpnType
 from app.services.access_policy import AccessPolicyService
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
+from app.services.client_portal import cleanup_deleted_client_records
 from app.services.config_tags import resolve_config_ids_by_tags
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
 from app.services.node_sync.client_sync import (
@@ -153,6 +154,7 @@ def _run_single_op(
                 node_name=node.name,
             )
             db.query(VpnConfig).filter(VpnConfig.id == config.id).delete(synchronize_session=False)
+            cleanup_deleted_client_records(db, config)
             db.commit()
         else:
             return {"config_id": config_id, "ok": False, "error": f"unknown op {operation}"}

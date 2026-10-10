@@ -24,6 +24,7 @@ from app.schemas import (
 )
 from app.services.self_service import build_quota_payload, enforce_user_can_create_config
 from app.services.user_subscription import apply_owner_access_until_to_config, replicate_inherited_access_until
+from app.services.client_portal import cleanup_deleted_client_records
 from app.services.config_access import can_mutate_config, can_view_config, list_accessible_configs
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
@@ -758,6 +759,7 @@ def delete_config(
 
     purge_ha_shadow_configs(db, config.id)
     db.delete(config)
+    cleanup_deleted_client_records(db, config)
     db.commit()
     admin_notify_service.send_config_delete(
         db,
