@@ -118,6 +118,7 @@ def test_both_redirect_endpoints_open_a_session(db, user, monkeypatch, endpoint)
         monkeypatch.setattr(auth_router, "telegram_id_from_claims", lambda _c: "777")
         request = _request()
         request.scope["query_string"] = b"code=c&state=s"
+        request.scope["headers"] = [*request.scope["headers"], (b"cookie", b"tg_oidc_state=s")]
         response = auth_router.telegram_oidc_callback(request, db)
 
     params = parse_qs(urlsplit(response.headers["location"]).fragment)

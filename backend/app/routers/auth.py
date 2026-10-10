@@ -73,6 +73,7 @@ from app.services.panel_paths import auth_cookie_path, with_access_path
 from app.services.auth_cookies import refresh_token_cookie_secure
 from app.services.panel_publish_info import resolve_request_url_root
 from app.services.telegram_oidc import (
+    OIDC_STATE_TTL,
     build_authorization_url,
     exchange_authorization_code,
     pkce_verifier,
@@ -94,6 +95,8 @@ from app.services.webauthn_service import list_passkeys, user_has_passkeys, weba
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
+
+OIDC_STATE_COOKIE = "tg_oidc_state"
 
 
 def _get_telegram_auth_settings(db: Session) -> tuple[str, str, int]:
@@ -184,6 +187,29 @@ def _complete_telegram_login(
 
 def _oidc_login_error_redirect(message: str) -> RedirectResponse:
     return RedirectResponse(url=f"{with_access_path(settings, '/login')}?tg_error={quote(message)}", status_code=302)
+
+
+def _set_oidc_state_cookie(response: Response, state: str, request: Request) -> None:
+    # Lax: the callback is a top-level navigation from oauth.telegram.org.
+    response.set_cookie(
+        key=OIDC_STATE_COOKIE,
+        value=state,
+        httponly=True,
+        secure=refresh_token_cookie_secure(settings, request),
+        samesite="lax",
+        max_age=OIDC_STATE_TTL,
+        path=auth_cookie_path(settings),
+    )
+
+
+def _clear_oidc_state_cookie(response: Response, request: Request) -> None:
+    response.delete_cookie(
+        key=OIDC_STATE_COOKIE,
+        path=auth_cookie_path(settings),
+        httponly=True,
+        secure=refresh_token_cookie_secure(settings, request),
+        samesite="lax",
+    )
 
 
 def _verify_telegram_login(payload: dict[str, str], bot_token: str, max_age: int) -> tuple[bool, str]:
@@ -431,11 +457,19 @@ def telegram_oidc_start(request: Request, db: Session = Depends(get_db)):
         state=state,
         code_verifier=code_verifier,
     )
-    return RedirectResponse(url=auth_url, status_code=302)
+    response = RedirectResponse(url=auth_url, status_code=302)
+    _set_oidc_state_cookie(response, state, request)
+    return response
 
 
 @router.get("/telegram/oidc/callback")
 def telegram_oidc_callback(request: Request, db: Session = Depends(get_db)):
+    response = _telegram_oidc_callback_response(request, db)
+    _clear_oidc_state_cookie(response, request)
+    return response
+
+
+def _telegram_oidc_callback_response(request: Request, db: Session) -> RedirectResponse:
     from app.services.feature_guards import get_feature_service
 
     if not get_feature_service().is_enabled("telegram"):
@@ -455,6 +489,9 @@ def telegram_oidc_callback(request: Request, db: Session = Depends(get_db)):
     if not code or not state:
         return _oidc_login_error_redirect("Некорректный ответ Telegram OIDC")
 
+    cookie_state = request.cookies.get(OIDC_STATE_COOKIE) or ""
+    if not cookie_state or not hmac.compare_digest(cookie_state.encode(), state.encode()):
+        return _oidc_login_error_redirect("Вход через Telegram начат в другом браузере — попробуйте снова")
     stored = pop_oidc_state(state)
     if not stored:
         return _oidc_login_error_redirect("Сессия Telegram OIDC истекла — попробуйте снова")
