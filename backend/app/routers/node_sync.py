@@ -164,6 +164,11 @@ def update_sync_group(
         _reject_shared_domains_panel_conflict(wg or ovpn)
 
     previous_sync_mode = group.sync_mode
+    membership_changed = primary_id != group.primary_node_id or sorted(set(replica_ids)) != sorted(
+        set(parse_replica_node_ids(group.replica_node_ids))
+    )
+    if membership_changed:
+        dissolve_sync_group(db, group)
     apply_group_fields(
         group,
         name=payload.name,
@@ -175,6 +180,13 @@ def update_sync_group(
     )
     db.commit()
     db.refresh(group)
+    if membership_changed:
+        if is_auto_sync_enabled(group):
+            link_shadow_configs_for_group(db, group)
+            db.commit()
+        else:
+            link_primary_configs_to_group(db, group)
+        return _to_response(group, db)
     new_mode = str(group.sync_mode or "").strip().lower()
     prev_mode = str(previous_sync_mode or "").strip().lower()
     if prev_mode == "auto" and new_mode == "manual_full":

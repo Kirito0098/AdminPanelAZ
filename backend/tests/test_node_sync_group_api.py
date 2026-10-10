@@ -12,7 +12,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
-from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus, User, UserRole
+from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus, User, UserRole, VpnConfig, VpnType
 from app.routers import node_sync
 from app.schemas import NodeSyncGroupUpdate
 
@@ -77,3 +77,77 @@ def test_update_allowed_when_group_not_pending(db):
     response = node_sync.update_sync_group(group.id, NodeSyncGroupUpdate(name="renamed"), ADMIN, db)
 
     assert response.name == "renamed"
+
+
+def _config(db, node_id: int, name: str, *, group_id: int | None = None, primary_id: int | None = None) -> VpnConfig:
+    config = VpnConfig(
+        node_id=node_id,
+        client_name=name,
+        vpn_type=VpnType.wireguard,
+        owner_id=1,
+        sync_group_id=group_id,
+        ha_primary_config_id=primary_id,
+    )
+    db.add(config)
+    db.commit()
+    return config
+
+
+def test_swapping_primary_relinks_shadows_to_new_primary(db):
+    group = _group(db, sync_mode="auto", primary=1, replicas=(2,))
+    old_primary = _config(db, 1, "alice", group_id=group.id)
+    old_shadow = _config(db, 2, "alice", group_id=group.id, primary_id=old_primary.id)
+
+    node_sync.update_sync_group(
+        group.id, NodeSyncGroupUpdate(primary_node_id=2, replica_node_ids=[1]), ADMIN, db
+    )
+
+    db.refresh(old_primary)
+    db.refresh(old_shadow)
+    assert old_shadow.ha_primary_config_id is None
+    assert old_shadow.sync_group_id == group.id
+    assert old_primary.ha_primary_config_id == old_shadow.id
+    assert old_primary.sync_group_id == group.id
+
+
+def test_replacing_replica_moves_shadow_links(db):
+    group = _group(db, sync_mode="auto", primary=1, replicas=(2,))
+    primary = _config(db, 1, "alice", group_id=group.id)
+    shadow = _config(db, 2, "alice", group_id=group.id, primary_id=primary.id)
+    _config(db, 3, "alice")
+
+    node_sync.update_sync_group(group.id, NodeSyncGroupUpdate(replica_node_ids=[3]), ADMIN, db)
+
+    db.refresh(shadow)
+    assert shadow.sync_group_id is None
+    assert shadow.ha_primary_config_id is None
+    new_shadow = db.query(VpnConfig).filter_by(node_id=3, client_name="alice").one()
+    assert new_shadow.ha_primary_config_id == primary.id
+    assert new_shadow.sync_group_id == group.id
+
+
+def test_manual_full_primary_change_tags_new_primary_configs(db):
+    group = _group(db, sync_mode="manual_full", primary=1, replicas=(2,))
+    old = _config(db, 1, "alice", group_id=group.id)
+    new = _config(db, 2, "bob")
+
+    node_sync.update_sync_group(
+        group.id, NodeSyncGroupUpdate(primary_node_id=2, replica_node_ids=[1]), ADMIN, db
+    )
+
+    db.refresh(old)
+    db.refresh(new)
+    assert old.sync_group_id is None
+    assert new.sync_group_id == group.id
+
+
+def test_rename_keeps_existing_links(db):
+    group = _group(db, sync_mode="auto", primary=1, replicas=(2,))
+    primary = _config(db, 1, "alice", group_id=group.id)
+    shadow = _config(db, 2, "alice", group_id=group.id, primary_id=primary.id)
+
+    node_sync.update_sync_group(group.id, NodeSyncGroupUpdate(name="renamed"), ADMIN, db)
+
+    db.refresh(shadow)
+    assert shadow.ha_primary_config_id == primary.id
+    assert shadow.sync_group_id == group.id
