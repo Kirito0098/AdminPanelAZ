@@ -10,6 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.models import QrDownloadAuditLog, QrDownloadToken
 
+MAX_PIN_FAILURES = 5
+PIN_LOCKED_DETAIL = "Ссылка заблокирована после 5 неверных PIN — запросите новую"
+DOWNLOADS_EXHAUSTED_DETAIL = "Лимит скачиваний исчерпан"
+
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
@@ -92,13 +96,19 @@ class QrDownloadService:
         row = self.peek_token(token)
         if row.expires_at.replace(tzinfo=timezone.utc) < now:
             raise HTTPException(status_code=status.HTTP_410_GONE, detail="Ссылка истекла")
+        if (row.pin_failures or 0) >= MAX_PIN_FAILURES:
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail=PIN_LOCKED_DETAIL)
         if row.download_count >= row.max_downloads:
-            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Лимит скачиваний исчерпан")
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail=DOWNLOADS_EXHAUSTED_DETAIL)
 
         # Token PIN if set; otherwise fall back to current global PIN (protects older unpinned links
         # after an admin enables a global PIN).
         required_hash = row.pin_hash or self.pin_hash
         if required_hash and not _pins_match(pin, required_hash):
+            self.db.query(QrDownloadToken).filter(QrDownloadToken.id == row.id).update(
+                {QrDownloadToken.pin_failures: QrDownloadToken.pin_failures + 1},
+                synchronize_session=False,
+            )
             self.db.add(
                 QrDownloadAuditLog(
                     token_id=row.id,
@@ -108,9 +118,27 @@ class QrDownloadService:
                 )
             )
             self.db.commit()
+            self.db.refresh(row)
+            if row.pin_failures >= MAX_PIN_FAILURES:
+                raise HTTPException(status_code=status.HTTP_410_GONE, detail=PIN_LOCKED_DETAIL)
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Неверный PIN")
 
-        row.download_count += 1
+        claimed = (
+            self.db.query(QrDownloadToken)
+            .filter(
+                QrDownloadToken.id == row.id,
+                QrDownloadToken.download_count < QrDownloadToken.max_downloads,
+                QrDownloadToken.pin_failures < MAX_PIN_FAILURES,
+            )
+            .update(
+                {QrDownloadToken.download_count: QrDownloadToken.download_count + 1},
+                synchronize_session=False,
+            )
+        )
+        if not claimed:
+            self.db.rollback()
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail=DOWNLOADS_EXHAUSTED_DETAIL)
+        self.db.refresh(row)
         if row.download_count >= row.max_downloads:
             row.used_at = now
         self.db.add(
