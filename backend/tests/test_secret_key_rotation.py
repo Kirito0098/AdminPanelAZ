@@ -80,6 +80,23 @@ def test_rotation_reencrypts_ssh_transport_credentials(db, rotate):
     assert decrypt_secret(node.ssh_passphrase_encrypted, NEW_KEY) == "phrase"
 
 
+def test_rotation_reencrypts_pending_agent_key(db, rotate):
+    node = Node(
+        name="rotating",
+        host="203.0.113.7",
+        api_key_hash="h",
+        api_key_encrypted=encrypt_secret("agent-key", OLD_KEY),
+        api_key_pending_encrypted=encrypt_secret("next-agent-key", OLD_KEY),
+    )
+    db.add(node)
+    db.commit()
+
+    rotate()
+
+    db.refresh(node)
+    assert decrypt_secret(node.api_key_pending_encrypted, NEW_KEY) == "next-agent-key"
+
+
 def test_rotation_keeps_empty_ssh_fields_empty(db, rotate):
     node = Node(name="plain", host="203.0.113.6", api_key_hash="h", api_key_encrypted=encrypt_secret("k", OLD_KEY))
     db.add(node)

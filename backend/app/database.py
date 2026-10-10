@@ -1628,6 +1628,7 @@ def _migrate_nodes_columns() -> None:
     _migrate_nodes_openvpn_restart_pending()
     _migrate_nodes_proxy_fields()
     _migrate_nodes_portal_label()
+    _migrate_nodes_api_key_pending()
 
 
 def _run_db_migrations() -> None:
@@ -1979,6 +1980,19 @@ def _migrate_nodes_portal_label() -> None:
     with _migration_transaction() as conn:
         conn.execute(text("ALTER TABLE nodes ADD COLUMN portal_label VARCHAR(128)"))
         logger.info("DB migration: added nodes.portal_label")
+
+
+def _migrate_nodes_api_key_pending() -> None:
+    """Add the in-flight API key slot used by node key rotation."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    if "api_key_pending_encrypted" in cols:
+        return
+    with _migration_transaction() as conn:
+        conn.execute(text("ALTER TABLE nodes ADD COLUMN api_key_pending_encrypted VARCHAR(512) NOT NULL DEFAULT ''"))
+        logger.info("DB migration: added nodes.api_key_pending_encrypted")
 
 
 def _migrate_qr_download_tokens_columns() -> None:

@@ -285,6 +285,8 @@ class Node(Base):
     port: Mapped[int] = mapped_column(Integer, default=9100)
     api_key_hash: Mapped[str] = mapped_column(String(255), default="")
     api_key_encrypted: Mapped[str] = mapped_column(String(512), default="")
+    # Saved before the agent is told, so a lost reply cannot strand the node on an unknown key.
+    api_key_pending_encrypted: Mapped[str] = mapped_column(String(512), default="")
     status: Mapped[NodeStatus] = mapped_column(Enum(NodeStatus), default=NodeStatus.unknown)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_local: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -188,7 +188,12 @@ def _build_warnings(defn: SecretDefinition, settings: Settings) -> list[str]:
     return warnings
 
 
-_NODE_ENCRYPTED_FIELDS = ("api_key_encrypted", "ssh_private_key_encrypted", "ssh_passphrase_encrypted")
+_NODE_ENCRYPTED_FIELDS = (
+    "api_key_encrypted",
+    "api_key_pending_encrypted",
+    "ssh_private_key_encrypted",
+    "ssh_passphrase_encrypted",
+)
 
 
 def _reencrypt_secrets_with_new_key(db: Session, old_key: str, new_key: str) -> dict[str, int]:

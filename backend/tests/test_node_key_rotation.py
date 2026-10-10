@@ -9,13 +9,16 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 import app.services.node_key_rotation as rotation
+from app import database
 from app.database import Base
 from app.models import Node
-from app.services.node_manager import store_api_key
+from app.services.node_manager import get_pending_api_key_plain, store_api_key, store_pending_api_key
+
+PENDING = "pending-key-0123456789abcdef0123456789"
 
 
 @pytest.fixture()
@@ -205,3 +208,30 @@ def test_loop_rotates_off_the_event_loop_thread(monkeypatch):
     _run_loop(monkeypatch, 1, lambda: threads.append(threading.get_ident()))
 
     assert threads and threads[0] != main_thread
+
+
+def test_migration_adds_pending_api_key_column(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'm.db'}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE nodes (id INTEGER PRIMARY KEY, name VARCHAR(128))"))
+        conn.execute(text("INSERT INTO nodes (id, name) VALUES (1, 'old')"))
+    monkeypatch.setattr(database, "engine", engine)
+
+    database._migrate_nodes_api_key_pending()
+    database._migrate_nodes_api_key_pending()
+
+    with engine.connect() as conn:
+        value = conn.execute(text("SELECT api_key_pending_encrypted FROM nodes WHERE id = 1")).scalar()
+    assert value == ""
+    engine.dispose()
+
+
+def test_pending_key_is_stored_encrypted(db):
+    node = _node("vpn", created_days_ago=1)
+    assert get_pending_api_key_plain(node) is None
+
+    store_pending_api_key(node, PENDING)
+
+    assert node.api_key_pending_encrypted
+    assert PENDING not in node.api_key_pending_encrypted
+    assert get_pending_api_key_plain(node) == PENDING

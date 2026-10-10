@@ -116,6 +116,19 @@ def get_api_key_plain(node: Node) -> str | None:
         return None
 
 
+def store_pending_api_key(node: Node, api_key: str) -> None:
+    node.api_key_pending_encrypted = encrypt_secret(api_key, settings.secret_key)
+
+
+def get_pending_api_key_plain(node: Node) -> str | None:
+    if not node.api_key_pending_encrypted:
+        return None
+    try:
+        return decrypt_secret(node.api_key_pending_encrypted, settings.secret_key)
+    except Exception:
+        return None
+
+
 def node_metadata_dict(node: Node) -> dict:
     try:
         return json.loads(node.node_metadata or "{}")
