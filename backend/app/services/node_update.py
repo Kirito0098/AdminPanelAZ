@@ -329,6 +329,12 @@ def check_agent_updates(*, repo_root: Path | None = None) -> dict[str, Any]:
     }
 
 
+def _missing_mtls_files_for_restart() -> list[str]:
+    from app.services.node_agent_env import missing_mtls_files, resolve_node_agent_env_file
+
+    return missing_mtls_files(resolve_node_agent_env_file())
+
+
 def apply_node_update(
     *,
     agent_version: str | None = None,
@@ -346,8 +352,16 @@ def apply_node_update(
     errors: list[str] = []
     restarting = False
 
+    missing_mtls = _missing_mtls_files_for_restart()
     if not repo_root:
         errors.append("Репозиторий панели (node agent) не найден")
+    elif missing_mtls:
+        errors.append(
+            "Обновление node agent отменено: mTLS включён (NODE_AGENT_MTLS_ENABLED=true), сертификатов нет: "
+            + ", ".join(missing_mtls)
+            + ". После перезапуска агент без них не запустится. Верните файлы в /etc/adminpanelaz/mtls "
+            "или выключите mTLS в backend/node_agent.env, затем повторите обновление. Работающий агент не тронут."
+        )
     else:
         pull = git_pull(repo_root)
         detail["agent_pull"] = pull
