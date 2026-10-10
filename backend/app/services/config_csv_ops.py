@@ -15,6 +15,7 @@ from app.database import SessionLocal
 from app.models import OpenVpnAccessPolicy, User, VpnConfig, VpnType, WgAccessPolicy
 from app.services.access_policy import AccessPolicyService
 from app.services.background_tasks import background_task_service
+from app.services.client_names import validate_new_client_name
 from app.services.feature_guards import get_feature_service, require_vpn_type
 from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node, get_node_antizapret_path
 from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes, require_ha_primary_for_client_ops
@@ -329,6 +330,8 @@ def _import_single_row(
             cert_expire_days = int(cert_raw)
         except ValueError:
             return {"line": row.get("_line"), "ok": False, "error": "cert_expire_days должен быть числом"}
+        if not 1 <= cert_expire_days <= 3650:
+            return {"line": row.get("_line"), "ok": False, "error": "cert_expire_days должен быть от 1 до 3650"}
 
     existing = (
         db.query(VpnConfig)
@@ -341,6 +344,10 @@ def _import_single_row(
     )
     if existing:
         return {"line": row.get("_line"), "client_name": client_name, "ok": False, "error": "уже существует"}
+    try:
+        validate_new_client_name(db, node_id=node_id, client_name=client_name)
+    except ValueError as exc:
+        return {"line": row.get("_line"), "client_name": client_name, "ok": False, "error": str(exc)}
 
     try:
         require_vpn_type(vpn_type.value, service=get_feature_service())
