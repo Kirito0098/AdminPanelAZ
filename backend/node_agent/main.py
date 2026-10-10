@@ -1,5 +1,6 @@
 """Lightweight AntiZapret node agent — runs on each VPN server node."""
 
+import asyncio
 import ipaddress
 import io
 import json
@@ -473,7 +474,7 @@ async def import_easyrsa3(
     _: None = Depends(verify_api_key),
 ):
     content = await archive.read()
-    service.import_easyrsa3_archive(content)
+    await asyncio.to_thread(service.import_easyrsa3_archive, content)
     return {"message": "easyrsa3 импортирован"}
 
 
@@ -535,9 +536,9 @@ async def restore_antizapret_backup(
         tmp_path = tmp.name
     try:
         if ha_replica:
-            result = service.restore_antizapret_backup_for_ha_replica(tmp_path)
+            result = await asyncio.to_thread(service.restore_antizapret_backup_for_ha_replica, tmp_path)
         else:
-            result = service.restore_antizapret_backup(tmp_path)
+            result = await asyncio.to_thread(service.restore_antizapret_backup, tmp_path)
     finally:
         Path(tmp_path).unlink(missing_ok=True)
     return {
@@ -631,7 +632,7 @@ async def import_wireguard_profiles(
     _: None = Depends(verify_api_key),
 ):
     content = await archive.read()
-    service.import_wireguard_client_profiles_archive(content)
+    await asyncio.to_thread(service.import_wireguard_client_profiles_archive, content)
     return {"message": "Профили WireGuard/AmneziaWG импортированы"}
 
 
@@ -662,7 +663,7 @@ async def import_openvpn_profiles(
     _: None = Depends(verify_api_key),
 ):
     content = await archive.read()
-    service.import_openvpn_client_profiles_archive(content)
+    await asyncio.to_thread(service.import_openvpn_client_profiles_archive, content)
     return {"message": "Профили OpenVPN импортированы"}
 
 
@@ -838,12 +839,17 @@ def awg2_backup(_: None = Depends(verify_api_key)):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
+def _restore_awg2_backup(data: bytes) -> dict:
+    awg2 = Awg2Service()
+    awg2.import_narrow_backup(data)
+    return awg2.apply_runtime()
+
+
 @app.post("/awg2/restore")
 async def awg2_restore(archive: UploadFile = File(...), _: None = Depends(verify_api_key)):
+    data = await archive.read()
     try:
-        service = Awg2Service()
-        service.import_narrow_backup(await archive.read())
-        return service.apply_runtime()
+        return await asyncio.to_thread(_restore_awg2_backup, data)
     except Awg2NotInstalledError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
@@ -864,7 +870,7 @@ def awg2_export_archive(_: None = Depends(verify_api_key)):
 async def awg2_import_archive(request: Request, _: None = Depends(verify_api_key)):
     try:
         data = await request.body()
-        Awg2Service().import_state_archive(data)
+        await asyncio.to_thread(Awg2Service().import_state_archive, data)
     except Awg2NotInstalledError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return {"success": True}
