@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import ActiveWebSession, User, UserRole
+from app.services.auth_rate_limit import auth_rate_limit_service
 
 # bcrypt accepts at most 72 bytes; passlib historically truncated — keep that behaviour
 # so existing hashes and long passwords remain verifiable under bcrypt 5.x.
@@ -29,6 +30,18 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return bcrypt.checkpw(_password_bytes(plain_password), hashed_password.encode("utf-8"))
     except (ValueError, TypeError):
         return False
+
+
+_CURRENT_PASSWORD_LOCKED = "Слишком много попыток ввода пароля. Повторите позже."
+
+
+def verify_current_password(user: User, password: str) -> None:
+    key = f"current_password:{user.id}"
+    auth_rate_limit_service.check(key, detail=_CURRENT_PASSWORD_LOCKED)
+    if not verify_password(password, user.password_hash):
+        auth_rate_limit_service.record_failure(key)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный текущий пароль")
+    auth_rate_limit_service.record_success(key)
 
 
 def get_password_hash(password: str) -> str:

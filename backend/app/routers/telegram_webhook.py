@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user, verify_password
+from app.auth import get_current_user, verify_current_password
 from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models import User
@@ -142,7 +142,6 @@ def telegram_link_code(
             status_code=status.HTTP_409_CONFLICT,
             detail="Telegram уже привязан — сначала отвяжите его",
         )
-    if not verify_password(payload.current_password, current_user.password_hash):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный текущий пароль")
+    verify_current_password(current_user, payload.current_password)
     code, ttl = create_link_code(db, current_user)
     return TelegramLinkCodeResponse(code=code, expires_in_seconds=ttl)

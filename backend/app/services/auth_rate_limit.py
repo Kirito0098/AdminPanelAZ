@@ -25,13 +25,13 @@ class AuthRateLimitService:
             self._limiter = SlidingWindowLimiter(backend)
         return self._limiter
 
-    def check(self, client_ip: str) -> None:
+    def check(self, client_ip: str, *, detail: str = _AUTH_DETAIL) -> None:
         settings = get_settings()
         if not settings.auth_rate_limit_enabled:
             return
         window = float(settings.auth_rate_limit_window_seconds)
         max_attempts = int(settings.auth_rate_limit_max_attempts)
-        self._get_limiter().check(client_ip, max_attempts, window, detail=_AUTH_DETAIL)
+        self._get_limiter().check(client_ip, max_attempts, window, detail=detail)
 
     def record_failure(self, client_ip: str) -> None:
         settings = get_settings()
