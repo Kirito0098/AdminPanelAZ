@@ -492,7 +492,7 @@ run_full_purge_action() {
     ui_section "Удалить всё без следов"
     ui_warn_box "Внимание — необратимо" \
       "Будут удалены systemd-сервисы, state dirs, nginx, firewall," \
-      "backend/.env, /etc/adminpanelaz, каталог бэкапов," \
+      "backend/.env, /etc/adminpanelaz, архивы бэкапов панели," \
       "каталог проекта $ROOT_DIR (код, БД, CIDR)." \
       "Данные AntiZapret (/root/antizapret и др.) НЕ удаляются."
     echo
