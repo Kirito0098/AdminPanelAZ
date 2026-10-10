@@ -72,6 +72,8 @@ sudo ./scripts/adminpanel-menu.sh --restart
 
 Если сборка не удалась: «Код уже обновлён, интерфейс — нет». Повторный `--update` попробует собрать снова; вручную — `cd frontend && npm ci && npm run build:all`, затем `--restart`.
 
+Если не удалась установка Python-зависимостей (`pip install`), обновление останавливается: интерфейс не собирается, systemd units не обновляются, панель перезапускать нельзя — новый код без зависимостей не запустится. Исправьте причину (текст ошибки pip выше), затем `backend/.venv/bin/pip install -r backend/requirements.txt && sudo ./scripts/adminpanel-menu.sh --after-pull` и `--restart`.
+
 ---
 
 ## Обновление с 2.25.1 до 2.26.0

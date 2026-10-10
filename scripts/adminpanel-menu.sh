@@ -268,11 +268,12 @@ panel_update() {
 panel_after_pull() {
   if [[ -x "$VENV_PATH/bin/pip" && -f "$ROOT_DIR/backend/requirements.txt" ]]; then
     ui_info "Обновление Python-зависимостей…"
-    if "$VENV_PATH/bin/pip" install -q -r "$ROOT_DIR/backend/requirements.txt"; then
-      ui_ok "Зависимости обновлены"
-    else
-      ui_warn "pip install завершился с ошибкой — проверьте вручную"
+    if ! "$VENV_PATH/bin/pip" install -q -r "$ROOT_DIR/backend/requirements.txt"; then
+      ui_fail "pip install завершился с ошибкой — обновление остановлено: интерфейс не собран, systemd units не обновлены, панель не перезапускайте"
+      ui_fail "Исправьте ошибку, затем: $VENV_PATH/bin/pip install -r $ROOT_DIR/backend/requirements.txt && $0 --after-pull"
+      return 1
     fi
+    ui_ok "Зависимости обновлены"
   fi
 
   # Интерфейс собирается только там, где его уже собирали: на сервере с одним агентом нет npm.
