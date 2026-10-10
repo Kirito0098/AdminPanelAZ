@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -106,7 +106,8 @@ class NodeAgentIpAllowlistMiddleware(BaseHTTPMiddleware):
         try:
             addr = ipaddress.ip_address(client_ip)
         except ValueError:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён") from None
+            # BaseHTTPMiddleware turns a raised HTTPException into 500.
+            return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": "Доступ запрещён"})
         for entry in NODE_AGENT_ALLOWED_IPS:
             try:
                 if "/" in entry:
@@ -116,7 +117,7 @@ class NodeAgentIpAllowlistMiddleware(BaseHTTPMiddleware):
                     return await call_next(request)
             except ValueError:
                 continue
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён с вашего IP")
+        return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": "Доступ запрещён с вашего IP"})
 
 
 app.add_middleware(NodeAgentIpAllowlistMiddleware)
