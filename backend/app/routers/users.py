@@ -40,6 +40,7 @@ from app.services.admin_bootstrap import (
 )
 from app.services.password_policy import validate_password
 from app.services.refresh_token import invalidate_user_sessions
+from app.services.telegram_link import notify_telegram_unlinked
 from app.services.user_subscription import (
     get_user_access_until,
     normalize_access_until,
@@ -147,6 +148,7 @@ def update_user(
             detail="Свой пароль меняется в настройках профиля с вводом текущего пароля",
         )
 
+    old_telegram_id = user.telegram_id
     access_until_updated = False
     pending_access_until = None
 
@@ -255,6 +257,13 @@ def update_user(
     else:
         db.commit()
         db.refresh(user)
+    if payload.telegram_id is not None:
+        notify_telegram_unlinked(
+            db,
+            old_telegram_id=old_telegram_id,
+            new_telegram_id=user.telegram_id,
+            username=user.username,
+        )
     if payload.password and should_scrub_env_after_password_change(user.username):
         scrub_admin_bootstrap_secret_from_env()
     if settings.audit_log_enabled and (

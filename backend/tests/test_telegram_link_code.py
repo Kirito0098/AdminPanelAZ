@@ -130,3 +130,56 @@ def test_redeem_same_telegram_succeeds_and_escapes_name(db_factory):
         assert "dave&lt;b&gt;" in message
     finally:
         db.close()
+
+
+def _users_client(db_factory):
+    from app.routers import users as users_router
+
+    app = FastAPI()
+    app.include_router(users_router.router, prefix="/api")
+
+    def _get_db():
+        db = db_factory()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = _get_db
+    return TestClient(app)
+
+
+def test_self_unlink_notifies_old_telegram(db_factory, monkeypatch):
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "app.services.telegram.send_tg_message",
+        lambda _token, chat_id, text, **_k: sent.append((chat_id, text)) or True,
+    )
+    db = db_factory()
+    dave_id = db.query(User).filter(User.username == "dave<b>").one().id
+    db.close()
+
+    response = _users_client(db_factory).patch(
+        f"/api/users/{dave_id}", json={"telegram_id": ""}, headers=_auth(db_factory, "dave<b>")
+    )
+
+    assert response.status_code == 200
+    assert len(sent) == 1
+    chat_id, text = sent[0]
+    assert chat_id == "555"
+    assert "dave&lt;b&gt;" in text
+
+
+def test_saving_same_telegram_id_sends_nothing(db_factory, monkeypatch):
+    from app.services.telegram_link import notify_telegram_unlinked
+
+    sent: list = []
+    monkeypatch.setattr("app.services.telegram.send_tg_message", lambda *a, **k: sent.append(a) or True)
+    db = db_factory()
+    try:
+        notify_telegram_unlinked(db, old_telegram_id="555", new_telegram_id="555", username="dave")
+        notify_telegram_unlinked(db, old_telegram_id=None, new_telegram_id="555", username="dave")
+    finally:
+        db.close()
+
+    assert sent == []

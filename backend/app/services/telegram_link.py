@@ -95,3 +95,27 @@ def redeem_link_code(db: Session, code: str, telegram_id: str) -> tuple[bool, st
     db.commit()
     db.refresh(user)
     return True, f"Аккаунт привязан: <code>{escape(user.username)}</code> ({user.role.value})", user
+
+
+def notify_telegram_unlinked(
+    db: Session,
+    *,
+    old_telegram_id: str | None,
+    new_telegram_id: str | None,
+    username: str,
+) -> None:
+    old = (old_telegram_id or "").strip()
+    if not old or old == (new_telegram_id or "").strip():
+        return
+    from app.services.app_setting_store import _get_setting
+    from app.services.telegram import send_tg_message
+
+    bot_token = _get_setting(db, "telegram_bot_token")
+    if not bot_token:
+        return
+    send_tg_message(
+        bot_token,
+        old,
+        f"Telegram отвязан от аккаунта панели <code>{escape(username)}</code>. "
+        "Если это сделали не вы — сообщите администратору.",
+    )

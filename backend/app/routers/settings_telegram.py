@@ -36,6 +36,7 @@ from app.services.panel_publish_info import resolve_request_url_root
 from app.services.telegram import send_tg_message
 from app.services.telegram_api import delete_webhook_sync, set_webhook_sync
 from app.services.telegram_bot_command_rate_limit import get_bot_command_rate_limits, set_bot_command_rate_limits
+from app.services.telegram_link import notify_telegram_unlinked
 from app.services.telegram_recipients import (
     get_notify_recipient_user_ids,
     get_setting_chat_ids,
@@ -255,6 +256,7 @@ def update_admin_notify_settings(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    old_telegram_id = admin.telegram_id
     if payload.recipient_user_ids is not None:
         _set_setting(db, "telegram_notify_recipient_user_ids", join_user_ids(payload.recipient_user_ids))
     if payload.telegram_id is not None:
@@ -281,6 +283,13 @@ def update_admin_notify_settings(
         set_node_offline_grace_seconds(db, payload.node_offline_grace_seconds)
     db.commit()
     db.refresh(admin)
+    if payload.telegram_id is not None:
+        notify_telegram_unlinked(
+            db,
+            old_telegram_id=old_telegram_id,
+            new_telegram_id=admin.telegram_id,
+            username=admin.username,
+        )
     return _admin_notify_settings_response(db, admin)
 
 
