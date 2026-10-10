@@ -209,8 +209,7 @@ class ProvisionMtlsRequest(BaseModel):
 
 def _persist_api_key(new_key: str) -> None:
     global NODE_AGENT_API_KEY
-    NODE_AGENT_API_KEY = new_key
-    # The unit no longer carries the key: without the file a restart would lose the rotated key.
+    # The unit no longer carries the key: switching before the file is written could lose it on restart.
     existing = NODE_AGENT_ENV_FILE.read_text(encoding="utf-8") if NODE_AGENT_ENV_FILE.is_file() else ""
     lines: list[str] = []
     replaced = False
@@ -223,6 +222,7 @@ def _persist_api_key(new_key: str) -> None:
     if not replaced:
         lines.append(f"NODE_AGENT_API_KEY={new_key}")
     atomic_write_text(NODE_AGENT_ENV_FILE, "\n".join(lines) + "\n")
+    NODE_AGENT_API_KEY = new_key
 
 
 @app.get("/health")
@@ -1321,7 +1321,13 @@ def system_ensure_openvpn_ban_check(_: None = Depends(verify_api_key)):
 
 @app.post("/system/rotate-api-key")
 def rotate_api_key(payload: RotateApiKeyRequest, _: None = Depends(verify_api_key)):
-    _persist_api_key(payload.new_api_key)
+    try:
+        _persist_api_key(payload.new_api_key)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Не удалось записать новый API-ключ в {NODE_AGENT_ENV_FILE}: {exc}. Ключ не изменён.",
+        ) from exc
     return {"message": "API-ключ обновлён", "success": True}
 
 
