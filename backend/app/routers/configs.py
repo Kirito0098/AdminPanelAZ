@@ -26,6 +26,7 @@ from app.services.self_service import build_quota_payload, enforce_user_can_crea
 from app.services.user_subscription import apply_owner_access_until_to_config, replicate_inherited_access_until
 from app.services.client_portal import cleanup_deleted_client_records, revoke_client_portal_links
 from app.services.config_access import can_mutate_config, can_view_config, list_accessible_configs
+from app.services.client_names import validate_new_client_name
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
 from app.services.config_csv_ops import (
@@ -535,6 +536,10 @@ def create_config(
     )
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Конфигурация уже существует")
+    try:
+        validate_new_client_name(db, node_id=node_id, client_name=payload.client_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     require_vpn_type(payload.vpn_type.value, service=get_feature_service())
     enforce_can_create_vpn_type(db, current_user, payload.vpn_type)
