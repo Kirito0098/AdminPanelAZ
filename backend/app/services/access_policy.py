@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import (
     AmneziaWg2AccessPolicy,
     OpenVpnAccessPolicy,
@@ -135,6 +136,28 @@ def delete_client_access_policies(db: Session, config: VpnConfig) -> int:
         .filter(model.node_id == config.node_id, model.client_name == policy_name)
         .delete(synchronize_session=False)
     )
+
+
+def forget_deleted_openvpn_client(db: Session, adapter: NodeAdapter, *, node_id: int, client_name: str) -> None:
+    """Remove a deleted OpenVPN client from the node's banned_clients so a new client with that name can connect.
+
+    The client is already gone on the node, so a node error is logged instead of failing the deletion.
+    """
+    clear_cooldown_ban(node_id, client_name)
+    svc = AccessPolicyService(db, antizapret_path=get_settings().antizapret_path, node_id=node_id, adapter=adapter)
+    try:
+        banned = svc.read_banned_clients()
+        if client_name not in banned:
+            return
+        banned.discard(client_name)
+        svc.write_banned_clients(banned)
+    except Exception:
+        logger.warning(
+            "Failed to remove deleted OpenVPN client %s from banned_clients on node %s",
+            client_name,
+            node_id,
+            exc_info=True,
+        )
 
 
 class AccessPolicyService:

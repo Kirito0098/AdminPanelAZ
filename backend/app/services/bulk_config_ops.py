@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import User, VpnConfig, VpnType
-from app.services.access_policy import AccessPolicyService
+from app.services.access_policy import AccessPolicyService, forget_deleted_openvpn_client
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
 from app.services.client_portal import cleanup_deleted_client_records, revoke_client_portal_links
@@ -147,6 +147,7 @@ def _run_single_op(
         elif operation == "delete":
             if config.vpn_type == VpnType.openvpn:
                 adapter.delete_openvpn_client(name)
+                forget_deleted_openvpn_client(db, adapter, node_id=node_id, client_name=name)
             elif config.vpn_type == VpnType.amneziawg2:
                 adapter.awg2_delete_client(name)
             else:

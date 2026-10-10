@@ -72,6 +72,7 @@ from app.services.profile_files import profile_files_batch_key
 from app.services.panel_publish_info import resolve_public_base_url
 from app.services.qr_download import QrDownloadService
 from app.services.qr_generator import generate_qr_png, prefers_download_link_qr
+from app.services.access_policy import forget_deleted_openvpn_client
 from app.services.awg2 import compute_expires_at, require_awg2_installed
 from app.services.security import SecurityService
 from app.services.vpn_profile_visibility import (
@@ -737,6 +738,7 @@ def delete_config(
     adapter = get_active_adapter(db)
     if config.vpn_type == VpnType.openvpn:
         adapter.delete_openvpn_client(config.client_name)
+        forget_deleted_openvpn_client(db, adapter, node_id=config.node_id, client_name=config.client_name)
     elif config.vpn_type == VpnType.amneziawg2:
         adapter.awg2_delete_client(config.client_name)
     else:
