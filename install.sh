@@ -1611,7 +1611,7 @@ start_daemon() {
   fi
   warn "--with-daemon устарел: используйте --with-systemd (systemctl start adminpanelaz)"
   setup_systemd
-  systemctl start adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz"
+  systemctl restart adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz"
 }
 
 ddns_config_quote() {
@@ -1907,7 +1907,7 @@ restart_services_after_nginx() {
   fi
   if [[ "$WITH_SYSTEMD" == true ]] || [[ "$WITH_DAEMON" == true ]]; then
     setup_systemd
-    systemctl restart adminpanelaz 2>/dev/null || true
+    systemctl restart adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz (проверьте: systemctl status adminpanelaz)"
   fi
 }
 
@@ -2011,7 +2011,7 @@ start_node_via_systemd() {
   fi
   warn "--with-daemon устарел: используйте --with-systemd (systemctl start adminpanelaz-node)"
   setup_node_agent_systemd
-  systemctl start adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
+  systemctl restart adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
 }
 
 print_post_install() {
@@ -2317,8 +2317,9 @@ run_install_flow() {
 
   if [[ "$WITH_SYSTEMD" == true ]]; then
     setup_systemd
-    if install_controller_selected; then
-      systemctl start adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz (проверьте: systemctl status adminpanelaz)"
+    # При публикации .env меняется позже — панель перезапускает restart_services_after_nginx.
+    if install_controller_selected && [[ "${WIZ_NGINX_MODE:-none}" == "none" ]]; then
+      systemctl restart adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz (проверьте: systemctl status adminpanelaz)"
     fi
   elif [[ "$WITH_DAEMON" == true ]]; then
     install_set_step "Запуск daemon панели"
@@ -2334,7 +2335,7 @@ run_install_flow() {
   if install_node_selected; then
     if [[ "$WITH_SYSTEMD" == true ]]; then
       setup_node_agent_systemd
-      systemctl start adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
+      systemctl restart adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
     elif [[ "$WITH_DAEMON" == true ]]; then
       install_set_step "Запуск daemon node agent"
       start_node_via_systemd "$GENERATED_NODE_KEY"
@@ -2344,7 +2345,7 @@ run_install_flow() {
   if install_proxy_selected; then
     if [[ "$WITH_SYSTEMD" == true ]] || [[ "$WITH_DAEMON" == true ]]; then
       setup_proxy_agent_systemd
-      systemctl start adminpanelaz-proxy 2>/dev/null || warn "Не удалось запустить adminpanelaz-proxy"
+      systemctl restart adminpanelaz-proxy 2>/dev/null || warn "Не удалось запустить adminpanelaz-proxy"
     else
       setup_proxy_agent_systemd
       warn "Unit установлен, но не запущен: sudo systemctl start adminpanelaz-proxy"
