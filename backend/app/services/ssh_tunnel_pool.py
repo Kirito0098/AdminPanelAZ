@@ -421,6 +421,20 @@ class SshTunnelPool:
         return True
 
 
+def forget_ssh_host_key(node: Any) -> None:
+    """Drop the pinned server key so the next connection pins the new endpoint (TOFU)."""
+    node.ssh_host_key = ""
+    raw_metadata = str(getattr(node, "node_metadata", "") or "").strip()
+    if not raw_metadata:
+        return
+    try:
+        metadata = json.loads(raw_metadata)
+    except json.JSONDecodeError:
+        return
+    if isinstance(metadata, dict) and metadata.pop(_SSH_HOST_KEY_METADATA_KEY, None) is not None:
+        node.node_metadata = json.dumps(metadata)
+
+
 _pool_singleton: SshTunnelPool | None = None
 _pool_singleton_lock = threading.Lock()
 

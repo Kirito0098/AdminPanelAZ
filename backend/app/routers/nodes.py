@@ -70,7 +70,7 @@ from app.services.ip_restriction import ip_restriction_service
 from app.services.node_update_roll import enqueue_node_update_roll
 from app.services.background_tasks import background_task_service
 from app.services.geo_routing_hint import build_geo_routing_hint
-from app.services.ssh_tunnel_pool import get_ssh_tunnel_pool
+from app.services.ssh_tunnel_pool import forget_ssh_host_key, get_ssh_tunnel_pool
 from app.services.node_transport_preflight import preflight_transport_switch
 from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import build_ha_node_context, find_group_for_node
@@ -321,13 +321,14 @@ def _apply_ssh_transport_update(node: Node, body: NodeTransportUpdate, db: Sessi
             node.ssh_passphrase_encrypted = encrypt_secret(ssh_passphrase, settings.secret_key)
 
     previous_ssh_host = _normalize_optional_text(getattr(node, "ssh_host", None))
+    previous_ssh_port = int(getattr(node, "ssh_port", None) or 22)
     node.ssh_host = ssh_host
     node.ssh_port = ssh_port
     node.ssh_username = ssh_username
     node.ssh_remote_agent_host = ssh_remote_agent_host
     node.ssh_remote_agent_port = ssh_remote_agent_port
-    if previous_ssh_host and previous_ssh_host != ssh_host:
-        node.ssh_host_key = ""
+    if previous_ssh_host and (previous_ssh_host, previous_ssh_port) != (ssh_host, ssh_port):
+        forget_ssh_host_key(node)
     node.transport = TRANSPORT_SSH
     node.mtls_enabled = False
     node.updated_at = datetime.utcnow()
