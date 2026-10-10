@@ -15,9 +15,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 import app.database as database_module
-from app.auth import create_access_token, require_admin
+from app.auth import require_admin
 from app.database import Base, get_db
 from app.models import User, UserRole
+from app.services.stream_ticket import issue_stream_ticket
 
 
 def _on_event_loop() -> bool:
@@ -129,12 +130,12 @@ def test_awg2_install_stream_reads_agent_off_loop(monkeypatch):
                 yield {"event": step}
 
     monkeypatch.setattr(awg2, "SessionLocal", MagicMock)
-    monkeypatch.setattr(awg2, "_admin_from_stream_token", lambda _t, _db: None)
+    monkeypatch.setattr(awg2, "admin_from_stream_ticket", lambda _db, _t, _s: None)
     monkeypatch.setattr(awg2, "get_active_adapter", lambda _db: Adapter())
 
     async def scenario():
         response = await awg2.awg2_install_stream(
-            _Request(), token="t", mode="install", preset=None, template=None, mtu=None
+            _Request(), ticket="t", mode="install", preset=None, template=None, mtu=None
         )
         return await _first_chunks(response, 2)
 
@@ -154,11 +155,11 @@ def test_warper_update_stream_reads_agent_off_loop(monkeypatch):
             yield {"event": "done"}
 
     monkeypatch.setattr(warper, "SessionLocal", MagicMock)
-    monkeypatch.setattr(warper, "_admin_from_stream_token", lambda _t, _db: None)
+    monkeypatch.setattr(warper, "admin_from_stream_ticket", lambda _db, _t, _s: None)
     monkeypatch.setattr(warper, "get_active_adapter", lambda _db: Adapter())
 
     async def scenario():
-        response = await warper.warper_updates_stream(_Request(), token="t")
+        response = await warper.warper_updates_stream(_Request(), ticket="t")
         return await _first_chunks(response, 1)
 
     assert "done" in asyncio.run(scenario())[0]
@@ -175,14 +176,12 @@ def test_monitoring_stream_builds_overview_off_loop(monkeypatch):
         return SimpleNamespace(model_dump=lambda mode: {"ok": True})
 
     monkeypatch.setattr(monitoring, "SessionLocal", MagicMock)
-    monkeypatch.setattr(
-        monitoring, "_user_from_access_token", lambda _t, _db: SimpleNamespace(role=SimpleNamespace(value="admin"))
-    )
+    monkeypatch.setattr(monitoring, "admin_from_stream_ticket", lambda _db, _t, _s: None)
     monkeypatch.setattr(monitoring, "_build_monitoring_overview", build)
     monkeypatch.setattr(monitoring, "_stream_interval_seconds", lambda: 0)
 
     async def scenario():
-        response = await monitoring.monitoring_stream(_Request(), token="t", scope="node", ha_mode="dedupe")
+        response = await monitoring.monitoring_stream(_Request(), ticket="t", scope="node", ha_mode="dedupe")
         return await _first_chunks(response, 2)
 
     chunks = asyncio.run(scenario())
@@ -219,9 +218,10 @@ def test_server_monitor_ws_reads_metrics_off_loop(monkeypatch):
 
     app = FastAPI()
     app.include_router(server_monitor.router)
-    token = create_access_token({"sub": "admin"})
+    with factory() as session:
+        ticket = issue_stream_ticket(session.query(User).filter(User.username == "admin").one(), "server_monitor")
     try:
-        with TestClient(app).websocket_connect(f"/server-monitor/ws?token={token}") as ws:
+        with TestClient(app).websocket_connect(f"/server-monitor/ws?ticket={ticket}") as ws:
             assert ws.receive_json()["cpu_percent"] == 1.0
     finally:
         engine.dispose()

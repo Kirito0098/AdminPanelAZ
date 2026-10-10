@@ -128,10 +128,10 @@ def test_awg2_install_stream_rejects_non_admin_token():
     viewer = SimpleNamespace(username="viewer", is_active=True, role=UserRole.user)
 
     with (
-        patch.object(awg2_router, "get_active_user_from_access_token", return_value=viewer),
+        patch("app.services.stream_ticket.redeem_stream_ticket", return_value=viewer),
         patch.object(awg2_router, "SessionLocal", return_value=_FakeDb(owner=viewer)),
     ):
-        response = client.get("/api/awg2/install/stream", params={"token": "jwt", "mode": "install"})
+        response = client.get("/api/awg2/install/stream", params={"ticket": "t", "mode": "install"})
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Admin only"
@@ -140,7 +140,7 @@ def test_awg2_install_stream_rejects_non_admin_token():
 def test_awg2_install_stream_validates_mode():
     client = _stream_test_client()
 
-    response = client.get("/api/awg2/install/stream", params={"token": "jwt", "mode": "broken"})
+    response = client.get("/api/awg2/install/stream", params={"ticket": "t", "mode": "broken"})
 
     assert response.status_code == 422
 
@@ -158,7 +158,7 @@ def test_awg2_install_stream_returns_json_sse_events():
     )
 
     with (
-        patch.object(awg2_router, "get_active_user_from_access_token", return_value=admin),
+        patch("app.services.stream_ticket.redeem_stream_ticket", return_value=admin),
         patch.object(
             awg2_router,
             "SessionLocal",
@@ -170,7 +170,7 @@ def test_awg2_install_stream_returns_json_sse_events():
             "GET",
             "/api/awg2/install/stream",
             params={
-                "token": "jwt",
+                "ticket": "t",
                 "mode": "install",
                 "preset": "high",
                 "template": "web",

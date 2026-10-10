@@ -2148,3 +2148,12 @@ class Awg2ObfuscationApply(BaseModel):
     mtu: int | None = Field(default=None, ge=576, le=1500)
     host: str | None = Field(default=None, max_length=253)
     fp: Literal["chrome", "firefox", "safari"] | None = None
+
+
+class StreamTicketRequest(BaseModel):
+    stream: Literal["monitoring", "warper_update", "awg2_install", "server_monitor"]
+
+
+class StreamTicketResponse(BaseModel):
+    ticket: str
+    expires_in_seconds: int

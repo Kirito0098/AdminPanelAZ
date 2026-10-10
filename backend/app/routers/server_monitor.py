@@ -1,14 +1,15 @@
 import asyncio
 import json
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.orm import Session
 
-from app.auth import get_active_user_from_access_token, require_admin
+from app.auth import require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import User, UserRole
+from app.models import User
 from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.stream_ticket import admin_from_stream_ticket
 
 router = APIRouter(prefix="/server-monitor", tags=["server-monitor"])
 settings = get_settings()
@@ -69,16 +70,15 @@ async def monitor_ws(websocket: WebSocket):
 
     from app.database import SessionLocal
 
-    token = websocket.query_params.get("token", "")
+    ticket = websocket.query_params.get("ticket", "")
     auth_db = SessionLocal()
     try:
-        user = get_active_user_from_access_token(auth_db, token)
-        is_admin = user is not None and user.role == UserRole.admin
-    finally:
-        auth_db.close()
-    if not is_admin:
+        admin_from_stream_ticket(auth_db, ticket, "server_monitor")
+    except HTTPException:
         await websocket.close(code=1008)
         return
+    finally:
+        auth_db.close()
     iface = (websocket.query_params.get("iface") or "eth0").strip() or "eth0"
 
     def _read_metrics() -> tuple[dict, dict]:

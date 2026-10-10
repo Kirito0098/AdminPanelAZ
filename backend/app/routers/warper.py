@@ -8,8 +8,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import SessionLocal, get_db
-from app.auth import get_active_user_from_access_token, require_admin
-from app.models import User, UserRole
+from app.auth import require_admin
+from app.models import User
 from app.schemas import (
     WarperActionResponse,
     WarperAutoResolveResponse,
@@ -54,6 +54,7 @@ from app.schemas import (
 from app.services.async_iter import iterate_in_thread
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.chart_timezone import resolve_chart_timezone
+from app.services.stream_ticket import admin_from_stream_ticket
 from app.services.warper import SINGBOX_ACTIONS, enrich_warper_traffic_payload, extract_proxy_link
 
 router = APIRouter(prefix="/warper", tags=["warper"])
@@ -636,15 +637,6 @@ def warper_updates_check(
     return WarperUpdatesCheckResponse(**data, **_node_meta(node))
 
 
-def _admin_from_stream_token(token: str, db: Session) -> User:
-    user = get_active_user_from_access_token(db, token)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    if user.role != UserRole.admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
-    return user
-
-
 def _iter_warper_update_sse(adapter) -> Iterator[str]:
     for event in adapter.warper_iter_update_stream():
         yield f"data: {json.dumps(event, default=str)}\n\n"
@@ -653,11 +645,11 @@ def _iter_warper_update_sse(adapter) -> Iterator[str]:
 @router.get("/updates/stream")
 async def warper_updates_stream(
     request: Request,
-    token: str = Query(..., description="JWT access token"),
+    ticket: str = Query(..., description="One-time ticket from POST /api/stream-ticket"),
 ):
     db = SessionLocal()
     try:
-        _admin_from_stream_token(token, db)
+        admin_from_stream_ticket(db, ticket, "warper_update")
     finally:
         db.close()
 

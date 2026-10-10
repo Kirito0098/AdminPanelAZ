@@ -11,30 +11,22 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.auth import get_active_user_from_access_token, require_admin
+from app.auth import require_admin
 from app.database import SessionLocal, get_db
-from app.models import User, UserRole
+from app.models import User
 from app.schemas import Awg2ObfuscationApply
 from app.services.async_iter import iterate_in_thread
 from app.services.awg2 import Awg2ClientNotFoundError, Awg2NotInstalledError
 from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node
 from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes
 from app.services.node_sync.vpn_state_sync import sync_amneziawg2_state_from_primary
+from app.services.stream_ticket import admin_from_stream_ticket
 
 router = APIRouter(prefix="/awg2", tags=["awg2"])
 
 
 def _node_meta(node) -> dict:
     return {"node_id": node.id, "node_name": node.name, "node_host": node.host}
-
-
-def _admin_from_stream_token(token: str, db: Session) -> User:
-    user = get_active_user_from_access_token(db, token)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    if user.role != UserRole.admin:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
-    return user
 
 
 def _iter_awg2_install_sse(
@@ -193,7 +185,7 @@ def apply_obfuscation(
 @router.get("/install/stream")
 async def awg2_install_stream(
     request: Request,
-    token: str = Query(..., description="JWT access token"),
+    ticket: str = Query(..., description="One-time ticket from POST /api/stream-ticket"),
     mode: str = Query(..., pattern="^(install|update)$"),
     preset: str | None = Query(None),
     template: str | None = Query(None),
@@ -201,7 +193,7 @@ async def awg2_install_stream(
 ):
     db = SessionLocal()
     try:
-        _admin_from_stream_token(token, db)
+        admin_from_stream_ticket(db, ticket, "awg2_install")
     finally:
         db.close()
 

@@ -29,7 +29,14 @@ import ResourceHistoryCharts from '@/components/monitoring/ResourceHistoryCharts
 import DocsLink from '@/components/shared/DocsLink'
 import { DOCS } from '@/lib/docsUrls'
 import { Navigate } from 'react-router-dom'
-import { ApiError, getBandwidthChart, getResourceHistory, getServerInterfaces, getServerMetrics } from '@/api/client'
+import {
+  ApiError,
+  getBandwidthChart,
+  getResourceHistory,
+  getServerInterfaces,
+  getServerMetrics,
+  getStreamTicket,
+} from '@/api/client'
 import { NodeBadge } from '@/components/NodeSelector'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import EmptyState from '@/components/ui/EmptyState'
@@ -51,7 +58,6 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { formatDate, formatDateTime, formatTime } from '@/lib/datetime'
-import { getAccessToken } from '@/lib/accessToken'
 import { cn } from '@/lib/utils'
 import type { BandwidthChart, ResourceHistory, ServerMetrics } from '@/types'
 
@@ -332,22 +338,28 @@ export default function ServerMonitorPage() {
     if (user?.role !== 'admin' || !iface) return
 
     let ws: WebSocket | null = null
+    let attempt = 0
 
     const disconnect = () => {
+      attempt += 1
       ws?.close()
       ws = null
       wsRef.current = null
       setWsConnected(false)
     }
 
-    const connect = () => {
+    const connect = async () => {
       disconnect()
-      const fresh = getAccessToken()
-      if (!fresh) return
-      const wsUrl = `${API_BASE.replace('/api', '')}/api/server-monitor/ws?token=${fresh}&iface=${encodeURIComponent(iface)}`.replace(
-        'http',
-        'ws',
-      )
+      const current = attempt
+      let ticket: string
+      try {
+        ticket = await getStreamTicket('server_monitor')
+      } catch {
+        return
+      }
+      if (current !== attempt) return
+      const query = new URLSearchParams({ ticket, iface })
+      const wsUrl = `${API_BASE.replace('/api', '')}/api/server-monitor/ws?${query.toString()}`.replace('http', 'ws')
       ws = new WebSocket(wsUrl)
       wsRef.current = ws
 
@@ -373,11 +385,11 @@ export default function ServerMonitorPage() {
         disconnect()
         return
       }
-      connect()
+      void connect()
     }
 
     if (typeof document === 'undefined' || !document.hidden) {
-      connect()
+      void connect()
     }
     document.addEventListener('visibilitychange', onVisibility)
 

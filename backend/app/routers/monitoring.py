@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.auth import get_active_user_from_access_token, require_admin
+from app.auth import require_admin
 from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models import User
@@ -36,6 +36,7 @@ from app.services.panel_resource_collector import collect_panel_metrics
 from app.services.panel_resource_metrics import VALID_PERIODS as PANEL_VALID_PERIODS
 from app.services.panel_resource_metrics import query_history as query_panel_history
 from app.services.resource_metrics import VALID_PERIODS, query_history
+from app.services.stream_ticket import admin_from_stream_ticket
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
@@ -135,28 +136,16 @@ def monitoring_incidents(
         ) from exc
 
 
-def _user_from_access_token(token: str, db: Session) -> User:
-    user = get_active_user_from_access_token(db, token)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный токен авторизации",
-        )
-    return user
-
-
 @router.get("/stream")
 async def monitoring_stream(
     request: Request,
-    token: str = Query(..., description="JWT access token"),
+    ticket: str = Query(..., description="One-time ticket from POST /api/stream-ticket"),
     scope: str = Query(default="node", pattern="^(node|all)$"),
     ha_mode: str = Query(default="dedupe", pattern="^(dedupe|raw)$"),
 ):
     db = SessionLocal()
     try:
-        user = _user_from_access_token(token, db)
-        if user.role.value != "admin":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Требуются права администратора")
+        admin_from_stream_ticket(db, ticket, "monitoring")
     finally:
         db.close()
 

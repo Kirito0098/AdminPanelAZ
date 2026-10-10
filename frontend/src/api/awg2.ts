@@ -9,6 +9,7 @@ import {
   parseApiError,
   refreshAccessToken,
 } from './http'
+import { openTicketEventSource, type StreamHandle } from './streamTicket'
 import type {
   Awg2HealthResponse,
   Awg2StatusResponse,
@@ -56,28 +57,27 @@ export function openAwg2InstallStream(
   },
   onEvent: (event: Awg2InstallStreamEvent) => void,
   onError?: (message: string) => void,
-): EventSource | null {
-  const token = getToken()
-  if (!token) return null
-  const params = new URLSearchParams({
-    token,
-    mode: options.mode,
+): StreamHandle {
+  const params: Record<string, string> = { mode: options.mode }
+  if (options.preset?.trim()) params.preset = options.preset.trim()
+  if (options.template?.trim()) params.template = options.template.trim()
+  if (options.mtu != null && Number.isFinite(options.mtu)) params.mtu = String(options.mtu)
+  return openTicketEventSource({
+    stream: 'awg2_install',
+    path: '/awg2/install/stream',
+    params,
+    onError,
+    connectionLostMessage: 'Соединение с потоком установки прервано',
+    attach: (source) => {
+      source.onmessage = (event) => {
+        try {
+          onEvent(JSON.parse(event.data) as Awg2InstallStreamEvent)
+        } catch {
+          onError?.('Ошибка разбора потока установки AZ-AWG2')
+        }
+      }
+    },
   })
-  if (options.preset?.trim()) params.set('preset', options.preset.trim())
-  if (options.template?.trim()) params.set('template', options.template.trim())
-  if (options.mtu != null && Number.isFinite(options.mtu)) params.set('mtu', String(options.mtu))
-  const source = new EventSource(`${API_BASE}/awg2/install/stream?${params.toString()}`)
-  source.onmessage = (event) => {
-    try {
-      onEvent(JSON.parse(event.data) as Awg2InstallStreamEvent)
-    } catch {
-      onError?.('Ошибка разбора потока установки AZ-AWG2')
-    }
-  }
-  source.onerror = () => {
-    onError?.('Соединение с потоком установки прервано')
-  }
-  return source
 }
 
 export async function downloadAwg2Backup(retry = true): Promise<Response> {
