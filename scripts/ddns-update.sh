@@ -115,11 +115,14 @@ update_noip() {
     && user_opt="$(curl_config_value "${username}:${password}")" \
     || die "No-IP: DDNS_HOSTNAME, DDNS_USERNAME и DDNS_PASSWORD не должны содержать перевод строки ($CONFIG_FILE)"
   response="$(printf 'url = %s\nuser = %s\n' "$url_opt" "$user_opt" | curl -fsS --max-time 15 -K - 2>/dev/null || echo "911")"
-  response="$(echo "$response" | head -1 | tr -d '[:space:]')"
+  local first_line status
+  IFS= read -r first_line <<<"$response"
+  first_line="${first_line%$'\r'}"
+  read -r status _ <<<"$first_line"
 
-  case "$response" in
+  case "$status" in
     good|nochg)
-      log "No-IP: $hostname обновлён ($response)"
+      log "No-IP: $hostname обновлён ($first_line)"
       return 0
       ;;
     badauth)
@@ -132,7 +135,7 @@ update_noip() {
       die "No-IP: неверное имя хоста (notfqdn)"
       ;;
     *)
-      die "No-IP: неожиданный ответ: $response"
+      die "No-IP: неожиданный ответ: $first_line"
       ;;
   esac
 }
