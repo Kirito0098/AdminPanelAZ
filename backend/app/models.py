@@ -249,6 +249,8 @@ class SyncStatus(str, enum.Enum):
     synced = "synced"
     pending = "pending"
     failed = "failed"
+    # Files reached the replica, but its WireGuard / AWG2 runtime did not take them.
+    drift = "drift"
 
 
 class NodeSyncGroup(Base):

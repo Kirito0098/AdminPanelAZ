@@ -31,6 +31,10 @@ class Awg2NotInstalledError(RuntimeError):
     """AZ-AWG2 is missing on the replica; its state was not touched."""
 
 
+class ReplicaRuntimeError(RuntimeError):
+    """Files reached the replica, but its WireGuard / AWG2 runtime did not apply them."""
+
+
 def _error_detail(exc: Exception) -> str:
     detail = getattr(exc, "detail", None)
     if detail is not None:
@@ -164,19 +168,20 @@ def sync_wireguard_state_from_primary(
     """Copy WireGuard server configs and all WG/AWG profile files from primary to replica."""
     # Blocks are runtime-only (peer removed); syncconf from primary configs brings them back.
     reblock = db is not None and replica_node is not None
+    runtime_error: str | None = None
     try:
         _mirror_wireguard_server_configs(primary_adapter, replica_adapter)
 
         runtime = replica_adapter.apply_wireguard_runtime()
         if not runtime.get("success"):
             errors = runtime.get("errors") or []
-            detail = "; ".join(
+            runtime_error = "; ".join(
                 str(entry.get("stderr") or entry.get("error") or entry)
                 for entry in errors
             ) or "WireGuard runtime apply failed"
             logger.warning(
                 "HA crypto sync: wg syncconf partial failure on replica (configs copied): %s",
-                detail,
+                runtime_error,
             )
 
         _copy_all_wireguard_profiles_from_primary(
@@ -191,6 +196,8 @@ def sync_wireguard_state_from_primary(
 
     if reblock:
         _reapply_blocked_wireguard_policies(db, replica_node, replica_adapter)
+    if runtime_error is not None:
+        raise ReplicaRuntimeError(f"WireGuard на реплике не применён (файлы скопированы): {runtime_error}")
 
 
 def copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter) -> None:
@@ -410,13 +417,14 @@ def sync_amneziawg2_state_from_primary(
         if reblock:
             _reapply_blocks_after_failure(_reapply_blocked_awg2_policies, db, replica_node, replica_adapter)
         raise
+    runtime_error: str | None = None
     if not runtime.get("success"):
-        logger.warning(
-            "HA AWG2 runtime apply partial: %s",
-            runtime.get("errors") or [],
-        )
+        runtime_error = "; ".join(str(entry) for entry in runtime.get("errors") or []) or "AWG2 runtime apply failed"
+        logger.warning("HA AWG2 runtime apply partial: %s", runtime_error)
     if reblock:
         _reapply_blocked_awg2_policies(db, replica_node, replica_adapter)
+    if runtime_error is not None:
+        raise ReplicaRuntimeError(f"AZ-AWG2 на реплике не применён (файлы скопированы): {runtime_error}")
 
 
 def sync_vpn_crypto_from_primary(
@@ -465,12 +473,16 @@ def sync_all_vpn_crypto_from_primary(
     openvpn_multihome: bool = False,
 ) -> None:
     """Copy both WireGuard and OpenVPN crypto state from primary to replica."""
-    sync_wireguard_state_from_primary(
-        primary_adapter,
-        replica_adapter,
-        db=db,
-        replica_node=replica_node,
-    )
+    runtime_errors: list[str] = []
+    try:
+        sync_wireguard_state_from_primary(
+            primary_adapter,
+            replica_adapter,
+            db=db,
+            replica_node=replica_node,
+        )
+    except ReplicaRuntimeError as exc:
+        runtime_errors.append(str(exc))
     sync_openvpn_pki_from_primary(
         primary_adapter,
         replica_adapter,
@@ -479,28 +491,38 @@ def sync_all_vpn_crypto_from_primary(
         replica_node=replica_node,
     )
     try:
-        if primary_adapter.get_awg2_health().get("installed"):
+        primary_has_awg2 = bool(primary_adapter.get_awg2_health().get("installed"))
+    except Exception as exc:
+        logger.warning("HA full crypto: AWG2 health on primary unavailable: %s", exc)
+        primary_has_awg2 = False
+    if primary_has_awg2:
+        try:
             sync_amneziawg2_state_from_primary(
                 primary_adapter,
                 replica_adapter,
                 db=db,
                 replica_node=replica_node,
             )
-    except Exception as exc:
-        logger.warning("HA full crypto: AWG2 sync skipped/failed: %s", exc)
+        except Awg2NotInstalledError as exc:
+            logger.warning("HA full crypto: AWG2 skipped: %s", exc)
+        except ReplicaRuntimeError as exc:
+            runtime_errors.append(str(exc))
+    if runtime_errors:
+        raise ReplicaRuntimeError("; ".join(runtime_errors))
 
 
 def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str, object]:
     """Copy VPN crypto state from primary to every replica (any sync_mode)."""
     from app.models import SyncStatus
     from app.services.node_manager import get_adapter_for_node
-    from app.services.node_sync.group_status import group_is_pending
+    from app.services.node_sync.group_status import group_is_pending, notify_replica_drift
     from app.services.node_sync.groups import get_replica_nodes
     from app.services.node_sync.replicate import _primary_adapter
 
     primary_adapter = _primary_adapter(db, group)
     successes: list[dict[str, object]] = []
     errors: list[dict[str, object]] = []
+    drifts: list[dict[str, object]] = []
     client_name = (
         primary_config.client_name
         if primary_config.vpn_type != VpnType.openvpn
@@ -518,6 +540,9 @@ def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str,
                 client_name=client_name,
                 openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
             )
+        except ReplicaRuntimeError as exc:
+            logger.warning("HA crypto sync: runtime not applied on replica %s: %s", replica_node.name, exc)
+            drifts.append({"node_id": replica_node.id, "node_name": replica_node.name, "error": _error_detail(exc)})
         except Exception as exc:
             logger.warning(
                 "HA crypto sync failed on replica %s: %s",
@@ -534,16 +559,23 @@ def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str,
             continue
         successes.append({"node_id": replica_node.id, "node_name": replica_node.name})
 
+    notify_drift = False
     if not group_is_pending(db, group):
         if errors:
             group.sync_status = SyncStatus.failed
             group.last_sync_error = str(errors[0].get("error") or "crypto sync failed")
+        elif drifts:
+            notify_drift = group.sync_status != SyncStatus.drift
+            group.sync_status = SyncStatus.drift
+            group.last_sync_error = str(drifts[0]["error"])
         elif successes:
             group.sync_status = SyncStatus.synced
             group.last_sync_error = None
     db.commit()
+    if notify_drift:
+        notify_replica_drift(db, group, drifts)
 
-    return {"successes": successes, "errors": errors, "skipped": False}
+    return {"successes": successes, "errors": errors, "drifts": drifts, "skipped": False}
 
 
 def heal_crypto_drift(db, group) -> dict[str, object]:
