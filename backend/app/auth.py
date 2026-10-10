@@ -119,14 +119,19 @@ def create_tg_mini_token(username: str, telegram_id: str, *, token_version: int 
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
+def _endpoint_in_tg_mini_router(request: Request) -> bool:
+    endpoint = request.scope.get("endpoint")
+    if endpoint is None:
+        return False
+    module = getattr(endpoint, "__module__", "") or ""
+    return module == _TG_MINI_ROUTER_PACKAGE or module.startswith(f"{_TG_MINI_ROUTER_PACKAGE}.")
+
+
 def _tg_mini_token_allowed(request: Request) -> bool:
     endpoint = request.scope.get("endpoint")
     if endpoint is None:
         return False
-    if getattr(endpoint, _TG_MINI_ENDPOINT_ATTR, False):
-        return True
-    module = getattr(endpoint, "__module__", "") or ""
-    return module == _TG_MINI_ROUTER_PACKAGE or module.startswith(f"{_TG_MINI_ROUTER_PACKAGE}.")
+    return bool(getattr(endpoint, _TG_MINI_ENDPOINT_ATTR, False)) or _endpoint_in_tg_mini_router(request)
 
 
 def create_2fa_pending_token(username: str) -> str:
@@ -200,9 +205,12 @@ def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-    user = get_active_user_from_access_token(db, token)
-    if user is None and _tg_mini_token_allowed(request):
+    if _endpoint_in_tg_mini_router(request):
         user = _get_active_user_from_tg_mini_token(db, token)
+    else:
+        user = get_active_user_from_access_token(db, token)
+        if user is None and _tg_mini_token_allowed(request):
+            user = _get_active_user_from_tg_mini_token(db, token)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
