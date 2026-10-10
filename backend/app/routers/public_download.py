@@ -4,13 +4,13 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
-from app.models import AppSetting
+from app.models import AppSetting, Node, QrDownloadToken
 from app.constants.public_routes import PUBLIC_ROUTE_ROUTERS
 from app.services.action_log import log_action
 from app.services.file_download import attachment_response
 from app.services.feature_guards import require_openvpn_and_security
 from app.services.ip_restriction import ip_restriction_service
-from app.services.node_manager import get_active_adapter, get_active_node
+from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.public_download_settings import is_public_download_enabled
 from app.services.public_download_rate_limit import public_download_rate_limit_service
@@ -40,6 +40,16 @@ def _global_pin_set(db: Session) -> bool:
     return bool(pin_row and pin_row.value)
 
 
+def _qr_delivery_source(db: Session, row: QrDownloadToken):
+    if row.node_id is None:
+        node = get_active_node(db)
+    else:
+        node = db.get(Node, row.node_id)
+        if node is None:
+            raise HTTPException(status_code=410, detail="Сервер этой ссылки удалён — запросите новую ссылку")
+    return get_adapter_for_node(node), load_node_remote_hosts(db, node.id)
+
+
 @router.get("/qr-download/{token}")
 def qr_download_get(token: str, request: Request, db: Session = Depends(get_db)):
     client_ip = ip_restriction_service.get_client_ip(request)
@@ -51,12 +61,10 @@ def qr_download_get(token: str, request: Request, db: Session = Depends(get_db))
     if row.pin_hash or _global_pin_set(db):
         raise HTTPException(status_code=428, detail="Требуется PIN")
 
+    adapter, hosts = _qr_delivery_source(db, row)
     row = svc.redeem_token(token, remote_addr=client_ip)
-    node = get_active_node(db)
-    hosts = load_node_remote_hosts(db, node.id)
-    content = read_profile_file_for_delivery(get_active_adapter(db), row.file_path, hosts)
-    filename = row.config_name
-    return attachment_response(content, filename)
+    content = read_profile_file_for_delivery(adapter, row.file_path, hosts)
+    return attachment_response(content, row.config_name)
 
 
 @router.post("/qr-download/{token}")
@@ -66,10 +74,9 @@ def qr_download_post(token: str, payload: PinRequest, request: Request, db: Sess
 
     cfg = _qr_settings(db)
     svc = QrDownloadService(db, **cfg)
+    adapter, hosts = _qr_delivery_source(db, svc.peek_token(token))
     row = svc.redeem_token(token, pin=payload.pin or None, remote_addr=client_ip)
-    node = get_active_node(db)
-    hosts = load_node_remote_hosts(db, node.id)
-    content = read_profile_file_for_delivery(get_active_adapter(db), row.file_path, hosts)
+    content = read_profile_file_for_delivery(adapter, row.file_path, hosts)
     return attachment_response(content, row.config_name)
 
 

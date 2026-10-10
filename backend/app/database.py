@@ -1659,6 +1659,7 @@ def _run_db_migrations() -> None:
     _migrate_traffic_session_state_active_index()
     _migrate_user_traffic_sample_name_index()
     _migrate_user_traffic_sample_node_client_index()
+    _migrate_qr_download_tokens_columns()
     inspector = inspect(engine)
     migrations = {
         "wg_access_policy": [
@@ -1978,6 +1979,25 @@ def _migrate_nodes_portal_label() -> None:
     with _migration_transaction() as conn:
         conn.execute(text("ALTER TABLE nodes ADD COLUMN portal_label VARCHAR(128)"))
         logger.info("DB migration: added nodes.portal_label")
+
+
+def _migrate_qr_download_tokens_columns() -> None:
+    """Bind one-time links to their node and count wrong PIN attempts."""
+    inspector = inspect(engine)
+    if "qr_download_tokens" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("qr_download_tokens")}
+    if {"node_id", "pin_failures"} <= cols:
+        return
+    with _migration_transaction() as conn:
+        if "node_id" not in cols:
+            conn.execute(text("ALTER TABLE qr_download_tokens ADD COLUMN node_id INTEGER"))
+            logger.info("DB migration: added qr_download_tokens.node_id")
+        if "pin_failures" not in cols:
+            conn.execute(
+                text("ALTER TABLE qr_download_tokens ADD COLUMN pin_failures INTEGER NOT NULL DEFAULT 0")
+            )
+            logger.info("DB migration: added qr_download_tokens.pin_failures")
 
 
 _POLICY_DEADLINE_BY_VPN_TYPE = {

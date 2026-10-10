@@ -127,6 +127,7 @@ def test_qr_download_post_redeems_with_pin(client):
     row = MagicMock()
     row.file_path = "/tmp/alice.ovpn"
     row.config_name = "alice.ovpn"
+    row.node_id = None
     node = MagicMock()
     node.id = 1
     adapter = MagicMock()
@@ -139,10 +140,11 @@ def test_qr_download_post_redeems_with_pin(client):
         patch("app.routers.public_download.get_active_node", return_value=node),
         patch("app.routers.public_download.load_node_remote_hosts", return_value=[]),
         patch("app.routers.public_download.read_profile_file_for_delivery", return_value="client\n"),
-        patch("app.routers.public_download.get_active_adapter", return_value=adapter),
+        patch("app.routers.public_download.get_adapter_for_node", return_value=adapter),
     ):
         ip_svc.get_client_ip.return_value = "198.51.100.9"
         Svc.return_value.redeem_token.return_value = row
+        Svc.return_value.peek_token.return_value = row
         resp = client.post("/api/public/qr-download/tok-xyz", json={"pin": "9999"})
 
     assert resp.status_code == 200

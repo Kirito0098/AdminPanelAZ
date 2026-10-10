@@ -90,6 +90,7 @@ def _create_download_url(ctx: BotContext, config: VpnConfig, path: str) -> str |
         file_path=path,
         config_type=config.vpn_type.value,
         config_name=build_profile_download_filename(config.client_name, path=path),
+        node_id=config.node_id,
         creator_id=ctx.user.id,
         creator_username=ctx.user.username,
     )

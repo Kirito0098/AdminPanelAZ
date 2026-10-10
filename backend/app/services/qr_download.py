@@ -41,6 +41,7 @@ class QrDownloadService:
         file_path: str,
         config_type: str,
         config_name: str,
+        node_id: int | None,
         creator_id: int | None = None,
         creator_username: str | None = None,
         remote_addr: str | None = None,
@@ -56,6 +57,7 @@ class QrDownloadService:
             expires_at=now + timedelta(seconds=self.ttl_seconds),
             max_downloads=self.max_downloads,
             pin_hash=self.pin_hash,
+            node_id=node_id,
         )
         self.db.add(row)
         self.db.flush()

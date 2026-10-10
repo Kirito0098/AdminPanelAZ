@@ -121,6 +121,7 @@ def mini_qr_link(
         file_path=path,
         config_type=config.vpn_type.value,
         config_name=build_profile_download_filename(config.client_name, path=path),
+        node_id=config.node_id,
         creator_id=current_user.id,
         creator_username=current_user.username,
         remote_addr=request.client.host if request.client else None,

@@ -496,6 +496,8 @@ class QrDownloadToken(Base):
     max_downloads: Mapped[int] = mapped_column(Integer, default=1)
     download_count: Mapped[int] = mapped_column(Integer, default=0)
     pin_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    node_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pin_failures: Mapped[int] = mapped_column(Integer, default=0)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
