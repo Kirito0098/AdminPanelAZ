@@ -473,6 +473,16 @@ nginx_acme_default_stash_paths() {
   NGINX_ACME_DEFAULT_STASH_COPY="${NGINX_ACME_DEFAULT_STASH}.copy"
 }
 
+# Стоковый sites-enabled/default пакета nginx: симлинк на sites-available/default (Debian ставит абсолютный путь).
+# Изменённый default — чужой сайт, его не убираем.
+nginx_enabled_default_is_stock() {
+  local link target
+  link="$(nginx_sites_enabled_dir)/default"
+  [[ -L "$link" ]] || return 1
+  target="$(readlink -- "$link")"
+  [[ "$target" == "../sites-available/default" || "$target" == "$(nginx_sites_available_dir)/default" ]]
+}
+
 # Remember sites-enabled/default before temp ACME removes it (restore on failure or remove helper).
 nginx_acme_stash_enabled_default() {
   local base="$1"
@@ -557,8 +567,10 @@ EOF
 )"
   printf '%s\n' "$conf" >"$conf_file"
   ln -sf "$conf_file" "$enabled_link"
-  nginx_acme_stash_enabled_default "$base"
-  rm -f "${enabled_dir}/default"
+  if nginx_enabled_default_is_stock; then
+    nginx_acme_stash_enabled_default "$base"
+    rm -f "${enabled_dir}/default"
+  fi
 
   if ! nginx -t >/dev/null 2>&1; then
     rm -f "$enabled_link" "$conf_file"
@@ -1915,7 +1927,10 @@ nginx_install_site() {
   printf '%s\n' "$conf_content" >"$NGINX_CONF_FILE"
   ln -sf "$NGINX_CONF_FILE" "$NGINX_ENABLED_LINK"
   # Стандартный default мешает: на корне домена показывается «Welcome to nginx».
-  rm -f "${enabled_dir}/default"
+  if nginx_enabled_default_is_stock; then
+    nginx_install_txn_remember "${enabled_dir}/default"
+    rm -f "${enabled_dir}/default"
+  fi
 
   if ! nginx -t; then
     nginx_rollback_site_install "$bak" "$created_enabled"
