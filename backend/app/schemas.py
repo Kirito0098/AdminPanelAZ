@@ -1150,6 +1150,10 @@ class SelfServiceLimitsUpdate(BaseModel):
     create_rate_window_seconds: int | None = Field(default=None, ge=60, le=86400)
 
 
+class TelegramLinkCodeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
+
+
 class TelegramLinkCodeResponse(BaseModel):
     code: str
     expires_in_seconds: int

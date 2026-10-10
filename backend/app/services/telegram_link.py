@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
+from html import escape
 
 from sqlalchemy.orm import Session
 
@@ -85,7 +86,12 @@ def redeem_link_code(db: Session, code: str, telegram_id: str) -> tuple[bool, st
         db.commit()
         return False, "Этот Telegram ID уже привязан к другому пользователю.", None
 
+    current = (user.telegram_id or "").strip()
+    if current and current != telegram_id:
+        db.commit()
+        return False, "К аккаунту уже привязан другой Telegram. Сначала отвяжите его в панели.", None
+
     user.telegram_id = telegram_id
     db.commit()
     db.refresh(user)
-    return True, f"Аккаунт привязан: <code>{user.username}</code> ({user.role.value})", user
+    return True, f"Аккаунт привязан: <code>{escape(user.username)}</code> ({user.role.value})", user
