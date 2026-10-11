@@ -428,6 +428,25 @@ class OpenVpnAccessPolicy(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class TrafficLimitNotifyState(Base):
+    """Traffic-limit block state the admin was last told about, per client."""
+
+    __tablename__ = "traffic_limit_notify_state"
+    __table_args__ = (
+        UniqueConstraint("node_id", "protocol", "client_name", name="uq_traffic_limit_notify_state"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
+    protocol: Mapped[str] = mapped_column(String(16))
+    client_name: Mapped[str] = mapped_column(String(64))
+    traffic_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_period_start: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    notified_block_period: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    notified_unblock_period: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class UnlockCode(Base):
     __tablename__ = "unlock_codes"
     __table_args__ = (

@@ -224,6 +224,8 @@ def _mini_protocol_label(raw_value: str | None) -> str:
         return "WireGuard"
     if value in {"amneziawg", "amnezia"}:
         return "AmneziaWG"
+    if value in {"amneziawg2", "awg2"}:
+        return "AmneziaWG 2.0"
     return "неизвестно"
 
 
@@ -250,7 +252,7 @@ def _protocol_emoji(target_type: str | None) -> str:
         return "🔐"
     if kind in {"wireguard", "wg"}:
         return "🛡️"
-    if kind in {"amneziawg", "amnezia"}:
+    if kind in {"amneziawg", "amnezia", "amneziawg2", "awg2"}:
         return "🌀"
     return "📄"
 
