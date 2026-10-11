@@ -23,6 +23,10 @@ nginx_die() {
   exit 1
 }
 
+nginx_require_root() {
+  [[ "$(id -u)" -eq 0 ]] || nginx_die "Запустите от root: sudo $0"
+}
+
 # Путь к setup AntiZapret (OPENVPN_HOST / WIREGUARD_HOST).
 nginx_az_setup_path() {
   echo "${ANTIZAPRET_PATH:-/root/antizapret}/setup"

@@ -41,10 +41,6 @@ is_non_interactive() {
   [[ "$NON_INTERACTIVE" == "true" || "$NON_INTERACTIVE" == "1" ]] || [[ ! -t 0 ]]
 }
 
-require_root() {
-  [[ "$(id -u)" -eq 0 ]] || nginx_die "Запустите от root: sudo $0"
-}
-
 validate_domain() {
   local value="$1"
   [[ "$value" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] || nginx_die "Неверный формат домена: $value"
@@ -206,7 +202,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-require_root
+nginx_require_root
 [[ -f "$ENV_FILE" ]] || nginx_die "Не найден файл настроек: ${ENV_FILE}"
 
 nginx_log "Восстановление nginx для AdminPanelAZ"

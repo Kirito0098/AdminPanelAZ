@@ -73,12 +73,6 @@ require_safe_ssl_paths() {
   done
 }
 
-require_root() {
-  if [[ "$(id -u)" -ne 0 ]]; then
-    nginx_die "Запустите от root: sudo $0"
-  fi
-}
-
 resolve_public_ports() {
   if is_non_interactive; then
     validate_port "$BACKEND_PORT" "BACKEND_PORT"
@@ -558,7 +552,7 @@ choose_installation_type() {
 }
 
 main() {
-  require_root
+  nginx_require_root
   mkdir -p "$(dirname "$ENV_FILE")"
   touch "$ENV_FILE"
 
