@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import escape
+
 from app.models import VpnConfig, VpnType
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.profile_download_name import enrich_profile_files
@@ -177,7 +179,7 @@ def _configs_preview(
     for offset, config in enumerate(chunk):
         groups = protocol_map.get(config.id, frozenset())
         emoji, tag = format_config_protocol_badge_for_filter(groups, filter_key)
-        lines.append(f"{start_index + offset}. {emoji}{tag} <code>{config.client_name}</code>")
+        lines.append(f"{start_index + offset}. {emoji}{tag} <code>{escape(config.client_name)}</code>")
     return "\n".join(lines)
 
 
@@ -326,7 +328,7 @@ async def _show_config_group_picker(
 
     preview = "\n".join(file_preview_line(offset, entry.file) for offset, entry in enumerate(group.files, start=1))
     text = i18n.CONFIG_PICK_FILE.format(
-        name=config.client_name,
+        name=escape(config.client_name),
         protocol=f"{group.emoji} <b>{group.title}</b>",
         preview=preview,
     )
@@ -364,7 +366,7 @@ async def _show_config_picker(
         return
 
     text = i18n.CONFIG_PICK_PROTOCOL.format(
-        name=config.client_name,
+        name=escape(config.client_name),
         vpn_type=config.vpn_type.value,
     )
     await send_or_edit(
@@ -442,7 +444,7 @@ async def handle_config(ctx: BotContext, name: str) -> None:
 
     config = find_config_by_name(ctx.db, ctx.user, name)
     if not config:
-        await send_message(ctx.bot_token, ctx.chat_id, i18n.CONFIG_NOT_FOUND.format(name=name))
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.CONFIG_NOT_FOUND.format(name=escape(name)))
         return
 
     await _show_config_picker(ctx, config)
@@ -540,13 +542,13 @@ async def handle_config_file_send(
         await send_message(
             ctx.bot_token,
             ctx.chat_id,
-            i18n.CONFIG_SEND_FAILED.format(detail=error or i18n.CONFIG_SEND_UNKNOWN),
+            i18n.CONFIG_SEND_FAILED.format(detail=escape(error or i18n.CONFIG_SEND_UNKNOWN)),
         )
         return
 
     await send_or_edit(
         ctx,
-        i18n.CONFIG_SEND_OK_ONE.format(name=config.client_name),
+        i18n.CONFIG_SEND_OK_ONE.format(name=escape(config.client_name)),
         markup=_after_send_keyboard(config_id, filter_key=filter_key),
         message_id=message_id,
     )

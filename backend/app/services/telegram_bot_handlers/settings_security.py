@@ -272,7 +272,7 @@ async def handle_security_callback(ctx: BotContext, data: str, *, message_id: in
             return
 
     except ValueError as exc:
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {exc}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(str(exc))}")
         return
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)

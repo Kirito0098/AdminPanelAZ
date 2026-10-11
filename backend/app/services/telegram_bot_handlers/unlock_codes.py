@@ -248,7 +248,7 @@ async def handle_unlock_codes_callback(ctx: BotContext, data: str, *, message_id
         await send_or_edit(ctx, _success_text(created), markup=None, message_id=message_id)
         return True
     except ValueError as exc:
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {exc}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(str(exc))}")
         return True
 
 
@@ -314,7 +314,7 @@ async def handle_unlock_codes_text(ctx: BotContext, text: str) -> bool:
             await send_message(ctx.bot_token, ctx.chat_id, _success_text(created))
             return True
     except ValueError as exc:
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {exc}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(str(exc))}")
         return True
 
     return False
