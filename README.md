@@ -231,12 +231,12 @@ sudo ./install.sh --proxy-only --with-systemd -y
 - До первой смены пароль хранится в `backend/.env` (права `600`) как `DEFAULT_ADMIN_PASSWORD`. После смены он остаётся только в БД, а `DEFAULT_ADMIN_PASSWORD` в `.env` очищается.
 - В production панель не запустится со слабым `DEFAULT_ADMIN_PASSWORD` (`admin`, `password`, `123456`).
 - Повторный запуск мастера задаёт пароль администратора заново (введённый или новый случайный). Если ставили без мастера (через `WIZ_*`) поверх существующей БД и пароль не задали, он не меняется — в сводке будет «Пароль администратора не менялся».
-- Забыли пароль или потеряли 2FA: `sudo ./scripts/reset-password.py` (интерактивно) или `sudo ./scripts/reset-password.py -u admin --disable-2fa` — задаёт случайный пароль и при флаге отключает 2FA и passkey.
+- Забыли пароль или потеряли 2FA: `sudo ./scripts/reset-password.py` (интерактивно; то же — `sudo adminpanelaz` → **7 Сброс пароля / 2FA**) или `sudo ./scripts/reset-password.py -u admin --disable-2fa` — задаёт случайный пароль и при флаге отключает 2FA и passkey.
 
 ### 🔄 Обновление
 
 - **Из панели:** **Настройки → Обновление панели** → «Применить обновление» (панель перезапустится сама) — [инструкция](docs/nastrojki/obnovleniya.md)
-- **С сервера:** `sudo ./scripts/adminpanel-menu.sh --update` (код, Python-зависимости, сборка интерфейса), затем `sudo ./scripts/adminpanel-menu.sh --restart`
+- **С сервера:** `sudo adminpanelaz` → **1 Обновить и перезапустить**: код, Python-зависимости, сборка интерфейса, затем вопрос «Перезапустить панель сейчас? [Y/n]» и ожидание ответа панели до 30 с. Без меню: `sudo adminpanelaz --update`, затем `sudo adminpanelaz --restart`
 
 > [!IMPORTANT]
 > **С 2.25.1 на 2.26.0** нужны дополнительные шаги: `--update` из меню дважды, Node.js 22+, node agent 1.11.0, смена ключей агентов, перегенерация nginx и др. — [Обновление с 2.25.1 до 2.26.0](docs/nastrojki/obnovleniya.md#обновление-с-2251-до-2260).
@@ -328,16 +328,19 @@ CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|
 ## 💻 Полезные команды на сервере
 
 ```bash
+sudo adminpanelaz                   # меню: обновление, журнал, диагностика, сервисы, бэкап и восстановление, сброс пароля
+sudo adminpanelaz --status          # состояние для скриптов: код 0 — панель работает и отвечает
+sudo adminpanelaz --update          # обновить из upstream текущей ветки: код, pip, сборка интерфейса
+sudo adminpanelaz --restart         # перезапуск панели после --update
 cd /opt/AdminPanelAZ
-sudo ./scripts/adminpanel-menu.sh   # меню: перезапуск, бэкап, обновление
-sudo ./scripts/adminpanel-menu.sh --update   # обновить из upstream текущей ветки: код, pip, сборка интерфейса
-sudo ./scripts/adminpanel-menu.sh --restart  # перезапуск панели после --update
 sudo systemctl restart adminpanelaz # перезапуск панели
 sudo ./scripts/reset-password.py    # сброс пароля пользователя панели (--disable-2fa — снять 2FA)
 sudo systemctl restart adminpanelaz-proxy  # proxy_agent на RU (порт 9101)
 sudo ./scripts/nginx-setup.sh       # сменить HTTPS после установки
 sudo ./scripts/nginx-repair.sh      # восстановить nginx (например после uninstall StatusOpenVPN)
 ```
+
+Команду `adminpanelaz` ставит `install.sh` (панель, `--node-only`, `--proxy-only`), на уже установленных серверах — первое обновление из меню. Если её нет — `sudo ./scripts/adminpanel-menu.sh`. На сервере только с агентом та же команда открывает меню агента: обновление и перезапуск, журнал, проверка mTLS, статус. Коды выхода: 0 — успех, 1 — ошибка действия (для `--status` — что-то не работает), 2 — неверный аргумент или меню без терминала, 130 — Ctrl+C. Цвет выключается переменной `NO_COLOR=1`.
 
 ## 📝 История изменений
 

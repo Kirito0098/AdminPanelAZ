@@ -27,7 +27,7 @@
 
 > Диагностика проверяет сервер панели, не VPN-узлы и не клиентов на телефонах. Для узлов и WARP используйте разделы NOC.
 
-То же по SSH: `sudo ./scripts/site-diagnostics.sh` или меню `sudo ./scripts/adminpanel-menu.sh` → **Диагностика** → **Диагностика запуска сайта**.
+То же по SSH: `sudo ./scripts/site-diagnostics.sh` или меню `sudo adminpanelaz` → **3 Диагностика сайта**.
 
 ### Проверить баны сканеров в firewall
 
@@ -87,7 +87,7 @@ cd /opt/AdminPanelAZ
 sudo ./scripts/nginx-repair.sh
 ```
 
-Либо из меню на сервере: `sudo ./scripts/adminpanel-menu.sh` → **Диагностика** → **Восстановить nginx для панели**.
+Либо из меню на сервере: `sudo adminpanelaz` → **8 Аварийно** → **1 Восстановить nginx для панели**.
 
 Скрипт восстановит выделенный vhost панели по настройкам `backend/.env`. После этого снова откройте панель и при необходимости настройте публикацию. Если Status был подключён блоком `location /status/` в сайт панели (способ 2), скрипт этот блок уберёт — добавьте его снова. Совместная работа со Status на одном домене: [set-i-publikaciya.md](set-i-publikaciya.md#совместно-со-statusopenvpn-на-одном-домене).
 

@@ -52,12 +52,11 @@
 ### Обновить через SSH (меню)
 
 ```bash
-cd /opt/AdminPanelAZ
-sudo ./scripts/adminpanel-menu.sh --update
-sudo ./scripts/adminpanel-menu.sh --restart
+sudo adminpanelaz --update
+sudo adminpanelaz --restart
 ```
 
-В интерактивном меню (`sudo ./scripts/adminpanel-menu.sh`) то же самое — **2. Резервные копии и обновления** → **1. Проверить обновления (git)**, перезапуск — **1. Сервис панели** → **1. Перезапустить**.
+В интерактивном меню (`sudo adminpanelaz`; если команды ещё нет — `sudo ./scripts/adminpanel-menu.sh`) — **1 Обновить и перезапустить**. Если код обновился или интерфейс пересобран, меню спросит «Перезапустить панель сейчас? [Y/n]» и после перезапуска до 30 с ждёт ответа панели. Перезапуск отдельно — **4 Перезапустить панель**.
 
 Что делает `--update`:
 
