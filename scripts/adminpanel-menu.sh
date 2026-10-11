@@ -21,6 +21,7 @@ SITE_DIAGNOSTICS="$ROOT_DIR/scripts/site-diagnostics.sh"
 PANEL_UPDATE_CHANGED=false
 PANEL_LAST_BACKUP=""
 MENU_CHOICE=""
+MENU_AGENT=""
 MENU_CODE=""
 MENU_PANEL_STATE=""
 MENU_HEALTH=""
@@ -956,16 +957,22 @@ menu_render_main() {
   menu_item 6 "Бэкап и восстановление"
   menu_item 7 "Сброс пароля / 2FA"
   menu_item 8 "Аварийно: nginx, белый список IP"
+  if [[ "$1" == both ]]; then
+    menu_item 9 "Агент узла"
+  fi
   printf '\n'
   menu_item 0 "Выход"
 }
 
 main_menu() {
-  local mode="${1:-panel}"
+  local mode="${1:-panel}" last=8
+  if [[ "$mode" == both ]]; then
+    last=9
+  fi
   while true; do
     menu_probe_screen "$mode"
     menu_render_main "$mode"
-    menu_read 8 выход
+    menu_read "$last" выход
     case "$MENU_CHOICE" in
       1) menu_action panel_update_interactive ;;
       2) menu_logs "$SERVICE_NAME" ;;
@@ -975,6 +982,13 @@ main_menu() {
       6) menu_backups ;;
       7) menu_action panel_reset_password ;;
       8) menu_emergency ;;
+      9)
+        if [[ "$mode" == both ]]; then
+          menu_agent
+        else
+          menu_invalid
+        fi
+        ;;
       0) exit 0 ;;
       *) menu_invalid ;;
     esac
@@ -1008,6 +1022,118 @@ menu_mode() {
   fi
 }
 
+# Агент с неверными настройками (например, mTLS без сертификатов) падает сразу после старта — смотрим через 5 с.
+agent_restart() {
+  require_root
+  local unit="$1"
+  systemctl restart "$unit"
+  ui_info "Перезапуск $unit, проверка через 5 с…"
+  sleep 5
+  if [[ "$(_menu_unit_state "$unit")" == "работает" ]]; then
+    ui_ok "$unit работает"
+    return 0
+  fi
+  ui_fail "$unit не запустился — посмотрите журнал агента"
+  return 1
+}
+
+agent_update() {
+  local unit="$1"
+  PANEL_UPDATE_CHANGED=false
+  panel_update
+  [[ "$PANEL_UPDATE_CHANGED" == true ]] || return 0
+  if ! menu_confirm "Перезапустить $unit сейчас?" y; then
+    ui_info "Агент не перезапущен: systemctl restart $unit"
+    return 0
+  fi
+  agent_restart "$unit"
+}
+
+agent_mtls_check() {
+  local env_file="$INSTALL_DIR/backend/node_agent.env" warning flag
+  if [[ ! -f "$UNIT_DIR/adminpanelaz-node.service" ]]; then
+    ui_info "mTLS проверяется для node agent — на этом сервере его нет"
+    return 0
+  fi
+  # shellcheck source=scripts/node-agent-mtls-check.sh
+  source "$ROOT_DIR/scripts/node-agent-mtls-check.sh"
+  warning="$(node_agent_mtls_warning "$env_file")"
+  if [[ -n "$warning" ]]; then
+    ui_fail "$warning"
+    return 1
+  fi
+  flag="$(sed -n 's/^NODE_AGENT_MTLS_ENABLED=//p' "$env_file" 2>/dev/null | tail -1)" || true
+  case "${flag,,}" in
+    1 | true | yes) ui_ok "mTLS включён, сертификаты на месте" ;;
+    *) ui_info "mTLS выключен (NODE_AGENT_MTLS_ENABLED в $env_file)" ;;
+  esac
+}
+
+# Агент для действия — в MENU_AGENT. Если стоят node и proxy, спросить; 0 или неверный ввод — код 1.
+menu_pick_agent() {
+  local i
+  local -a units=()
+  mapfile -t units < <(menu_agent_units)
+  if [[ "${#units[@]}" -eq 1 ]]; then
+    MENU_AGENT="${units[0]}"
+    return 0
+  fi
+  printf '\nКакой агент?\n'
+  for i in "${!units[@]}"; do
+    menu_item "$((i + 1))" "${units[i]#adminpanelaz-}"
+  done
+  menu_item 0 "Назад"
+  menu_read "${#units[@]}" назад
+  if menu_valid_choice "${#units[@]}"; then
+    MENU_AGENT="${units[MENU_CHOICE - 1]}"
+    return 0
+  fi
+  if [[ "$MENU_CHOICE" != 0 ]]; then
+    menu_invalid
+  fi
+  return 1
+}
+
+menu_render_agent() {
+  menu_header agent
+  printf '\n'
+  menu_item 1 "Обновить и перезапустить агент"
+  menu_item 2 "Журнал"
+  menu_item 3 "Проверка mTLS"
+  menu_item 4 "Перезапустить агент"
+  menu_item 5 "Статус"
+  printf '\n'
+  menu_item 0 "$1"
+}
+
+# menu_agent [top]: top — сервер без панели, меню агента главное («0 Выход»).
+menu_agent() {
+  local zero=Назад quit=назад
+  if [[ "${1:-}" == top ]]; then
+    zero=Выход
+    quit=выход
+  fi
+  while true; do
+    menu_probe_screen agent
+    menu_render_agent "$zero"
+    menu_read 5 "$quit"
+    case "$MENU_CHOICE" in
+      1) if menu_pick_agent; then menu_action agent_update "$MENU_AGENT"; fi ;;
+      2) if menu_pick_agent; then menu_logs "$MENU_AGENT"; fi ;;
+      3) menu_action agent_mtls_check ;;
+      4) if menu_pick_agent; then menu_action agent_restart "$MENU_AGENT"; fi ;;
+      5) if menu_pick_agent; then menu_action unit_status "$MENU_AGENT"; fi ;;
+      0)
+        if [[ "$zero" == Выход ]]; then
+          exit 0
+        fi
+        return 0
+        ;;
+      *) menu_invalid ;;
+    esac
+  done
+}
+
 menu_start() {
   local mode
   mode="$(menu_mode)"
@@ -1017,7 +1143,11 @@ menu_start() {
     return 1
   fi
   trap 'menu_interrupted' INT
-  main_menu "$mode"
+  if [[ "$mode" == agent ]]; then
+    menu_agent top
+  else
+    main_menu "$mode"
+  fi
 }
 
 usage() {

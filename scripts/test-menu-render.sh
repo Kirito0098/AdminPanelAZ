@@ -210,5 +210,44 @@ echo "[test] прежних рамок и подменю нет"
 ! grep -nE '_m_(top|bot|sep|border|title|item)|menu_service_panel|menu_backups_updates|menu_diagnostics|panel_logs|──' \
   "$ROOT_DIR/scripts/adminpanel-menu.sh" && ok "нет _m_*, старых подменю и разделителей" || bad "остались прежние элементы"
 
+echo "[test] golden: главное меню, панель и агент — пункт 9 и строка «Агент»"
+with_units adminpanelaz.service adminpanelaz-node.service adminpanelaz-proxy.service
+render 80 'systemctl() { if [[ "$2" == adminpanelaz-proxy ]]; then echo inactive; else echo active; fi; }
+  menu_probe both; menu_render_main both'
+golden "главное меню с агентом, 80" <<'EOF'
+AdminPanelAZ 2.26.4 · feature/console-menu-redesign @ cef39ac
+  Панель   работает · health отвечает
+  Адрес    https://panel-with-a-long-name.example.com:8443/secret-path/
+  Агент    работает (node) · остановлен (proxy)
+
+  1  Обновить и перезапустить
+  2  Журнал
+  3  Диагностика сайта
+  4  Перезапустить панель
+  5  Сервисы: nginx, агент, DDNS
+  6  Бэкап и восстановление
+  7  Сброс пароля / 2FA
+  8  Аварийно: nginx, белый список IP
+  9  Агент узла
+
+  0  Выход
+EOF
+
+echo "[test] golden: меню агента без панели, 60 колонок"
+with_units adminpanelaz-node.service
+render 60 'menu_probe agent; menu_render_agent Выход'
+golden "меню агента, 60" <<'EOF'
+AdminPanelAZ 2.26.4 · feature/console-menu-redesign @ cef39…
+  Агент    работает (node)
+
+  1  Обновить и перезапустить агент
+  2  Журнал
+  3  Проверка mTLS
+  4  Перезапустить агент
+  5  Статус
+
+  0  Выход
+EOF
+
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]
