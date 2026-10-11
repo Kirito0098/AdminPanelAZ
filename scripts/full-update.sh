@@ -12,6 +12,10 @@ source "$FU_DIR/adminpanel-menu.sh"
 source "$FU_DIR/python-runtime.sh"
 # shellcheck source=scripts/system-packages.sh
 source "$FU_DIR/system-packages.sh"
+ENV_FILE="$INSTALL_DIR/backend/.env"
+# shellcheck source=scripts/nginx-common.sh
+source "$FU_DIR/nginx-common.sh"
+nginx_common_init
 
 FU_STEPS=(backup code apt pip frontend systemd nginx firewall ddns restart)
 declare -A FU_LABELS=(
@@ -243,4 +247,116 @@ fu_step_systemd() {
   fu_refresh_units
   ui_ok "Unit'ы обновлены из шаблонов: $(fu_units_list)"
   fu_row systemd ok "$(fu_units_list)"
+}
+
+# Как scripts/nginx-repair.sh: nginx-режимы публикации, у старых установок без PUBLISH_MODE — BEHIND_NGINX.
+fu_nginx_published() {
+  [[ -n "$(nginx_env_get DOMAIN)" ]] || return 1
+  case "$(nginx_env_get PUBLISH_MODE)" in
+    nginx_le | nginx_selfsigned | nginx_custom) return 0 ;;
+    "") _menu_env_true "$(nginx_env_get BEHIND_NGINX)" ;;
+    *) return 1 ;;
+  esac
+}
+
+fu_vhost_ssl_value() {
+  sed -n "s/^[[:space:]]*$1[[:space:]]\{1,\}\([^;[:space:]]\{1,\}\);.*/\1/p" "$2" | sed -n 1p
+}
+
+# Сертификаты — из действующего vhost: полное обновление их не выбирает заново и не выпускает.
+fu_nginx_render() {
+  local kind="$1" host="$2" file="$3" cert key backend https http
+  cert="$(fu_vhost_ssl_value ssl_certificate "$file")"
+  key="$(fu_vhost_ssl_value ssl_certificate_key "$file")"
+  if [[ -z "$cert" || -z "$key" ]]; then
+    nginx_warn "В $file нет ssl_certificate / ssl_certificate_key"
+    return 1
+  fi
+  backend="$(nginx_env_get BACKEND_PORT)"
+  https="$(nginx_env_get HTTPS_PUBLIC_PORT)"
+  http="$(nginx_env_get HTTP_ACME_PORT)"
+  if [[ "$kind" == portal ]]; then
+    nginx_render_portal_template "$host" "${backend:-8000}" "$cert" "$key" "${https:-443}" "${http:-80}"
+  else
+    ACCESS_PATH="$(nginx_env_get ACCESS_PATH)" nginx_render_template "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
+      "$host" "${backend:-8000}" "$cert" "$key" "${https:-443}" "${http:-80}"
+  fi
+}
+
+# Пересобираются только свои файлы sites-available/<домен>; панель в подпути чужого сайта — nginx-repair.sh.
+# Все vhost собираются до записи, копии .bak-* делаются до первой записи: откат возвращает всё сразу.
+fu_step_nginx() {
+  local domain portal kind host stamp file err line list i
+  local -a kinds=() hosts=() files=() confs=()
+  if ! panel_uses_systemd; then
+    fu_row nginx пропущен "нет панели"
+    return 0
+  fi
+  if ! fu_nginx_published; then
+    fu_row nginx пропущен "публикация без nginx"
+    return 0
+  fi
+  domain="$(nginx_normalize_host "$(nginx_env_get DOMAIN)")"
+  portal="$(nginx_normalize_host "$(nginx_env_get PORTAL_DOMAIN)")"
+  for kind in panel portal; do
+    host="$domain"
+    if [[ "$kind" == portal ]]; then
+      host="$portal"
+    fi
+    [[ -n "$host" ]] || continue
+    nginx_conf_paths "$host"
+    if nginx_is_our_panel_vhost_file "$NGINX_CONF_FILE"; then
+      kinds+=("$kind")
+      hosts+=("$host")
+      files+=("$NGINX_CONF_FILE")
+    fi
+  done
+  if [[ "${#files[@]}" -eq 0 ]]; then
+    ui_warn "Свой vhost панели не найден (панель в подпути чужого сайта?) — nginx не менялся; пересборка: sudo ./scripts/nginx-repair.sh"
+    fu_row nginx пропущен "нет своего vhost в $(nginx_sites_available_dir) — nginx не менялся"
+    return 0
+  fi
+  for i in "${!files[@]}"; do
+    if ! confs[i]="$(fu_nginx_render "${kinds[i]}" "${hosts[i]}" "${files[i]}")"; then
+      nginx_install_txn_rollback
+      ui_fail "Не удалось собрать vhost ${hosts[i]} — nginx не менялся"
+      fu_row nginx ошибка "не удалось собрать vhost ${hosts[i]} — nginx не менялся"
+      return 1
+    fi
+  done
+  stamp="$(date +%Y%m%d-%H%M%S)"
+  for file in "${files[@]}"; do
+    cp -a -- "$file" "$file.bak-$stamp"
+    ui_info "Копия: $file.bak-$stamp"
+  done
+  for i in "${!files[@]}"; do
+    printf '%s\n' "${confs[i]}" >"${files[i]}"
+  done
+  if err="$(nginx -t 2>&1)"; then
+    nginx_install_txn_commit
+    if ! systemctl reload nginx; then
+      ui_fail "systemctl reload nginx не прошёл"
+      fu_row nginx ошибка "конфиг обновлён, но systemctl reload nginx не прошёл"
+      return 1
+    fi
+    printf -v list '%s, ' "${hosts[@]}"
+    ui_ok "nginx -t прошёл, nginx перезагружен"
+    fu_row nginx ok "${list%, }"
+    return 0
+  fi
+  for file in "${files[@]}"; do
+    cp -a -- "$file.bak-$stamp" "$file"
+  done
+  nginx_install_txn_rollback
+  if ! nginx -t >/dev/null 2>&1; then
+    ui_warn "nginx -t не проходит и со старым конфигом — проверьте: sudo nginx -t"
+  fi
+  line="$(grep -m1 -E '\[(emerg|error)\]' <<<"$err" || true)"
+  if [[ -z "$line" ]]; then
+    line="$(head -n1 <<<"$err")"
+  fi
+  printf '%s\n' "$err" >&2
+  ui_fail "nginx -t не прошёл — старый конфиг восстановлен, копии: *.bak-$stamp"
+  fu_row nginx ошибка "конфиг не обновлён, старый восстановлен (nginx -t: ${line#nginx: })"
+  return 1
 }
