@@ -19,6 +19,7 @@ UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 BACKUP_CLI="$ROOT_DIR/scripts/backup-cli.py"
 SITE_DIAGNOSTICS="$ROOT_DIR/scripts/site-diagnostics.sh"
 PANEL_UPDATE_CHANGED=false
+PANEL_LAST_BACKUP=""
 MENU_CHOICE=""
 MENU_CODE=""
 MENU_PANEL_STATE=""
@@ -822,16 +823,117 @@ panel_backup() {
   local archive code
   set +e
   archive="$(INSTALL_DIR="$INSTALL_DIR" SERVICE_NAME="$SERVICE_NAME" \
-    "$py" "$BACKUP_CLI" create 2>&1)"
+    "$py" "$BACKUP_CLI" create "$@" 2>&1)"
   code=$?
   set -e
   if [[ "$code" -eq 0 && -n "$archive" ]]; then
+    PANEL_LAST_BACKUP="${archive##*$'\n'}"
     ui_ok "Архив: $archive"
   else
     ui_fail "Бэкап не создан"
     [[ -n "$archive" ]] && printf '%s\n' "$archive" >&2
     return "$code"
   fi
+}
+
+_menu_size_mb() {
+  awk -v bytes="$1" 'BEGIN { printf "%.1f МБ", bytes / 1048576 }'
+}
+
+_menu_backup_components() {
+  local item out=""
+  local -a items=()
+  IFS=, read -ra items <<<"$1"
+  for item in "${items[@]}"; do
+    case "$item" in
+      db) item="база" ;;
+      cidr_db) item="база CIDR" ;;
+      env) item=".env" ;;
+      configs) item="списки AntiZapret" ;;
+      awg2) item="AZ-AWG2" ;;
+    esac
+    out+="${out:+, }$item"
+  done
+  printf '%s' "${out:-состав неизвестен}"
+}
+
+panel_restore() {
+  require_root
+  local py listing name created size components answer safety i
+  local -a lines=() names=()
+  py="$(_menu_python)" || {
+    ui_fail "Python не найден ($VENV_PATH/bin/python или python3)"
+    return 1
+  }
+  if ! listing="$(INSTALL_DIR="$INSTALL_DIR" "$py" "$BACKUP_CLI" list)"; then
+    ui_fail "Не удалось получить список резервных копий"
+    return 1
+  fi
+  if [[ -n "$listing" ]]; then
+    mapfile -t lines <<<"$listing"
+  fi
+  if [[ "${#lines[@]}" -eq 0 ]]; then
+    ui_warn "Резервных копий нет"
+    return 0
+  fi
+
+  ui_section "Восстановление из резервной копии"
+  for i in "${!lines[@]}"; do
+    IFS=$'\t' read -r name created size components <<<"${lines[i]}"
+    names+=("$name")
+    created="${created%Z}"
+    menu_item "$((i + 1))" "${created/T/ } UTC $MENU_DOT $(_menu_size_mb "$size") $MENU_DOT $(_menu_backup_components "$components")"
+  done
+  printf '\n'
+  menu_item 0 "Отмена"
+  menu_read "${#names[@]}" отмена
+  if [[ "$MENU_CHOICE" == 0 ]]; then
+    ui_info "Восстановление отменено"
+    return 0
+  fi
+  if ! menu_valid_choice "${#names[@]}"; then
+    ui_warn "Неверный выбор"
+    return 1
+  fi
+  name="${names[MENU_CHOICE - 1]}"
+
+  ui_warn "Панель будет остановлена, база и backend/.env — перезаписаны из $name"
+  ui_info "Перед восстановлением будет сделана копия текущего состояния"
+  printf '  Восстановить из %s? Введите «да»: ' "$name"
+  if ! read -r answer; then
+    answer=""
+    printf '\n'
+  fi
+  if [[ "$answer" != "да" ]]; then
+    ui_info "Восстановление отменено, ничего не изменено"
+    return 0
+  fi
+
+  if ! panel_backup --no-prune; then
+    ui_fail "Копия текущего состояния не создана — восстановление отменено, панель не останавливалась"
+    return 1
+  fi
+  safety="$PANEL_LAST_BACKUP"
+  if ! INSTALL_DIR="$INSTALL_DIR" SERVICE_NAME="$SERVICE_NAME" "$py" "$BACKUP_CLI" restore "$name"; then
+    ui_fail "Восстановление не удалось. Копия состояния до восстановления: $safety"
+    return 1
+  fi
+  ui_ok "Восстановлено из $name"
+  ui_info "Копия состояния до восстановления: $safety"
+  panel_wait_health
+}
+
+menu_backups() {
+  while true; do
+    menu_screen "Бэкап и восстановление" "Назад" "Создать резервную копию" "Восстановить из резервной копии"
+    menu_read 2 назад
+    case "$MENU_CHOICE" in
+      1) menu_action panel_backup ;;
+      2) menu_action panel_restore ;;
+      0) return 0 ;;
+      *) menu_invalid ;;
+    esac
+  done
 }
 
 panel_diagnose() {
