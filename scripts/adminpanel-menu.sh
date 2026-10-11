@@ -502,6 +502,139 @@ panel_logs() {
   fi
 }
 
+unit_status() {
+  printf "\n"
+  systemctl status "$1" --no-pager -l || true
+}
+
+unit_restart() {
+  require_root
+  local unit="$1"
+  if [[ "$unit" == nginx ]] && ! nginx -t; then
+    ui_fail "nginx -t не прошёл — перезапуск отменён, исправьте конфигурацию"
+    return 1
+  fi
+  systemctl restart "$unit"
+  ui_ok "systemctl restart $unit"
+}
+
+unit_logs_tail() {
+  printf "\n"
+  journalctl -u "$1" -n 50 --no-pager || true
+}
+
+unit_logs_follow() {
+  ui_info "Журнал $1 в реальном времени. Ctrl+C — вернуться в меню"
+  journalctl -u "$1" -f -n 20 --no-pager || true
+}
+
+unit_logs_errors() {
+  local unit="$1" since lines
+  local -a range=(-b)
+  since="$(systemctl show -p ActiveEnterTimestamp --value --timestamp=unix "$unit" 2>/dev/null)" || true
+  if [[ "$since" == @* && "$since" != @0 ]]; then
+    range=(--since "$since")
+  fi
+  lines="$(journalctl -u "$unit" "${range[@]}" --no-pager -o short-iso 2>/dev/null \
+    | grep -Ei 'error|exception|traceback|critical' | tail -n 100)" || true
+  ui_info "Ошибки $unit с последнего запуска (не больше 100 строк):"
+  if [[ -z "$lines" ]]; then
+    ui_ok "Ошибок нет"
+  else
+    printf '%s\n' "$lines"
+  fi
+}
+
+menu_logs() {
+  local unit="$1" saved
+  while true; do
+    menu_screen "Журнал $MENU_DOT $unit" "Назад" \
+      "Последние 50 строк" "В реальном времени (Ctrl+C — назад)" "Только ошибки с последнего запуска"
+    menu_read 3 назад
+    case "$MENU_CHOICE" in
+      1) menu_action unit_logs_tail "$unit" ;;
+      2)
+        # Ctrl+C должен остановить только journalctl, а не выйти из меню.
+        saved="$(trap -p INT)"
+        trap ':' INT
+        menu_action unit_logs_follow "$unit"
+        eval "${saved:-trap - INT}"
+        ;;
+      3) menu_action unit_logs_errors "$unit" ;;
+      0) return 0 ;;
+      *) menu_invalid ;;
+    esac
+  done
+}
+
+panel_reset_password() {
+  require_root
+  local py
+  py="$(_menu_python)" || {
+    ui_fail "Python не найден ($VENV_PATH/bin/python или python3)"
+    return 1
+  }
+  "$py" "$ROOT_DIR/scripts/reset-password.py"
+}
+
+# nginx ставится пакетом в /lib/systemd/system, поэтому кроме $UNIT_DIR спрашиваем systemd.
+neighbor_units() {
+  local unit file
+  for unit in nginx adminpanelaz-node adminpanelaz-proxy adminpanelaz-ddns.timer; do
+    file="$unit"
+    [[ "$file" == *.* ]] || file="$unit.service"
+    if [[ -f "$UNIT_DIR/$file" || -n "$(systemctl list-unit-files --no-legend "$file" 2>/dev/null)" ]]; then
+      printf '%s\n' "$unit"
+    fi
+  done
+  return 0
+}
+
+menu_unit_actions() {
+  local unit="$1"
+  while true; do
+    menu_screen "$unit $MENU_DOT $(_menu_unit_state "$unit")" "Назад" "Статус" "Перезапустить"
+    menu_read 2 назад
+    case "$MENU_CHOICE" in
+      1) menu_action unit_status "$unit" ;;
+      2)
+        if menu_confirm "Перезапустить $unit?" n; then
+          menu_action unit_restart "$unit"
+        fi
+        ;;
+      0) return 0 ;;
+      *) menu_invalid ;;
+    esac
+  done
+}
+
+menu_services() {
+  local i
+  local -a units=() labels=()
+  while true; do
+    mapfile -t units < <(neighbor_units)
+    if [[ "${#units[@]}" -eq 0 ]]; then
+      ui_info "nginx, агенты и DDNS на этом сервере не установлены"
+      press_any_key
+      return 0
+    fi
+    labels=()
+    for i in "${!units[@]}"; do
+      labels+=("$(printf '%-24s %s' "${units[i]}" "$(menu_state_word "$(_menu_unit_state "${units[i]}")")")")
+    done
+    menu_screen "Сервисы" "Назад" "${labels[@]}"
+    menu_read "${#units[@]}" назад
+    if [[ "$MENU_CHOICE" == 0 ]]; then
+      return 0
+    fi
+    if ! menu_valid_choice "${#units[@]}"; then
+      menu_invalid
+      continue
+    fi
+    menu_unit_actions "${units[MENU_CHOICE - 1]}"
+  done
+}
+
 # Ветка, с которой обновляется рабочая копия, — те же правила, что у обновления из панели
 # (resolve_update_ref в backend/app/services/node_update.py): upstream текущей ветки, для main без upstream —
 # origin/main. Ветку релиза нельзя двигать на историю другой ветки.
