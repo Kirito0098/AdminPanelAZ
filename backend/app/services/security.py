@@ -86,6 +86,7 @@ class SecurityService:
             "qr_download_pin_set": bool(_get(db, "qr_download_pin", "")),
             "public_download_enabled": is_public_download_enabled(db),
             "portal_domain": _get(db, "portal_domain", ""),
+            "portal_title": _get(db, "portal_title", ""),
             "whitelist_firewall": whitelist_firewall,
             "whitelist_firewall_applicable": applicable,
             "whitelist_firewall_active": False,
@@ -153,6 +154,8 @@ class SecurityService:
                 set_portal_domain(db, payload.get("portal_domain"))
             except ValueError as exc:
                 raise ValueError(str(exc)) from exc
+        if "portal_title" in payload:
+            _set(db, "portal_title", (payload["portal_title"] or "").strip())
         if "whitelist_firewall" in payload:
             requested = bool(payload["whitelist_firewall"])
             if requested and not self.is_whitelist_port_firewall_applicable():

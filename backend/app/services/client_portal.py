@@ -928,10 +928,7 @@ def build_portal_status(db: Session, *, node_id: int, client_name: str, configs:
 
 
 def _portal_brand_title(db: Session) -> str:
-    brand = _setting_value(db, "app_name") or "VPN"
-    if brand.lower().startswith("adminpanel"):
-        brand = "VPN"
-    return brand
+    return _setting_value(db, "portal_title") or "Подключение"
 
 
 def _portal_download_url(

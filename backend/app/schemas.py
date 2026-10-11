@@ -749,7 +749,6 @@ class AppSettingsResponse(BaseModel):
     noc_daily_time: str = ""
     noc_weekly_dow: str = ""
     noc_weekly_time: str = ""
-    app_name: str
     antizapret_path: str
     include_hosts: str = ""
     exclude_hosts: str = ""

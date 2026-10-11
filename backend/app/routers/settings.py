@@ -9,7 +9,6 @@ from app.auth import get_current_user, require_admin
 from app.config import get_settings as load_app_config
 from app.database import get_db
 from app.models import User
-from app.services.app_setting_store import _get_setting
 from app.schemas import (
     AppSettingsResponse,
     AppSettingsUpdate,
@@ -44,7 +43,6 @@ from app.services.vpn_profile_visibility import (
     set_default_visible_vpn_profiles,
 )
 router = APIRouter(prefix="/settings", tags=["settings"])
-settings = load_app_config()
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
@@ -95,7 +93,6 @@ def get_settings(current_user: User = Depends(get_current_user), db: Session = D
         noc_daily_time=current_user.noc_daily_time or "",
         noc_weekly_dow=current_user.noc_weekly_dow or "",
         noc_weekly_time=current_user.noc_weekly_time or "",
-        app_name=_get_setting(db, "app_name", settings.app_name),
         antizapret_path=str(get_node_antizapret_path(db)),
         include_hosts=include_hosts,
         exclude_hosts=exclude_hosts,
