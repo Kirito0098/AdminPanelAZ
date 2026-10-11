@@ -505,7 +505,6 @@ export interface AppSettings {
   noc_daily_time?: string
   noc_weekly_dow?: string
   noc_weekly_time?: string
-  app_name: string
   antizapret_path: string
   include_hosts: string
   exclude_hosts: string
@@ -1602,6 +1601,7 @@ export interface SecuritySettings {
   qr_download_pin_set: boolean
   public_download_enabled: boolean
   portal_domain: string
+  portal_title: string
 }
 
 export interface SecretRotationItem {
