@@ -124,12 +124,12 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, retry
   return apiFetchAtBase<T>(API_BASE, path, options, retry)
 }
 
-export async function apiFetchAtBase<T>(
+async function requestAtBase(
   base: string,
   path: string,
-  options: RequestInit = {},
-  retry = true,
-): Promise<T> {
+  options: RequestInit,
+  retry: boolean,
+): Promise<Response> {
   const headers = new Headers(options.headers)
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
@@ -169,7 +169,7 @@ export async function apiFetchAtBase<T>(
     }
     const newToken = await refreshAccessToken()
     if (newToken) {
-      return apiFetchAtBase<T>(base, path, options, false)
+      return requestAtBase(base, path, options, false)
     }
     clearAccessToken()
     const message = parseHttpErrorBody(body, 401)
@@ -189,8 +189,23 @@ export async function apiFetchAtBase<T>(
     const detail = parseHttpErrorBody(body, response.status)
     throw new ApiError(detail, response.status, payload)
   }
+  return response
+}
+
+export async function apiFetchAtBase<T>(
+  base: string,
+  path: string,
+  options: RequestInit = {},
+  retry = true,
+): Promise<T> {
+  const response = await requestAtBase(base, path, options, retry)
   if (response.status === 204) return undefined as T
   return response.json()
+}
+
+/** For files and other non-JSON answers: the successful Response comes back unread. */
+export function apiFetchResponse(path: string, options: RequestInit = {}): Promise<Response> {
+  return requestAtBase(API_BASE, path, options, true)
 }
 
 export { API_BASE }
