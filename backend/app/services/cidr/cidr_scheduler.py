@@ -18,6 +18,9 @@ from app.services.background_gate import run_long_background_step
 logger = logging.getLogger(__name__)
 
 LAST_RUN_SETTING_KEY = "cidr_db_refresh_last_run"
+# The loop wakes at HH:MM:00 and a run is stamped a few seconds later; without slack the
+# slot N days later is those seconds short and the refresh slips by a whole day.
+_INTERVAL_SLACK = timedelta(hours=1)
 
 
 def _seconds_until_next_run(hour: int, minute: int) -> float:
@@ -45,8 +48,7 @@ def _should_run_interval(db: Session, interval_days: int) -> bool:
         return True
     if last.tzinfo is None:
         last = last.replace(tzinfo=timezone.utc)
-    elapsed = (datetime.now(timezone.utc) - last).total_seconds()
-    return elapsed >= days * 86400
+    return datetime.now(timezone.utc) - last >= timedelta(days=days) - _INTERVAL_SLACK
 
 
 def mark_cron_run(db: Session, when: datetime | None = None) -> None:
@@ -77,7 +79,7 @@ def compute_next_run_at(
 
     if last_run is not None:
         lr = last_run if last_run.tzinfo else last_run.replace(tzinfo=timezone.utc)
-        earliest = lr + timedelta(days=days)
+        earliest = lr + timedelta(days=days) - _INTERVAL_SLACK
         while candidate < earliest:
             candidate += timedelta(days=1)
     return candidate
@@ -266,10 +268,11 @@ def _run_scheduled_refresh(settings: Settings) -> None:
                 last.isoformat() if last else "never",
             )
             return
+        started_at = datetime.now(timezone.utc)
         summary = run_nightly_cidr_pipeline(db, settings)
         refresh_status = str((summary.get("refresh") or {}).get("status") or "")
         if refresh_status in ("ok", "partial"):
-            mark_cron_run(db)
+            mark_cron_run(db, started_at)
             db.commit()
         else:
             logger.warning(
