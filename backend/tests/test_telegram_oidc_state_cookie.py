@@ -5,7 +5,9 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 from urllib.parse import parse_qs, urlsplit
 
+import httpx
 import pytest
+from fastapi import HTTPException
 from fastapi.responses import RedirectResponse
 from starlette.requests import Request
 
@@ -94,4 +96,35 @@ def test_callback_with_matching_cookie_logs_in_and_clears_it(monkeypatch):
     )
 
     assert response.headers["location"] == "/login#token=t"
+    assert any(c.startswith('tg_oidc_state=""') for c in _set_cookies(response))
+
+
+def test_callback_clears_cookie_when_token_exchange_raises_http_exception(monkeypatch):
+    def _exchange(**_k):
+        raise HTTPException(status_code=502, detail="Telegram недоступен")
+
+    monkeypatch.setattr(auth_router, "pop_oidc_state", lambda _s: {"redirect_uri": "x", "code_verifier": "v"})
+    monkeypatch.setattr(auth_router, "exchange_authorization_code", _exchange)
+
+    response = auth_router.telegram_oidc_callback(
+        _request(b"code=c&state=s", "tg_oidc_state=s"), MagicMock()
+    )
+
+    assert response.status_code == 502
+    assert response.body == '{"detail":"Telegram недоступен"}'.encode()
+    assert any(c.startswith('tg_oidc_state=""') for c in _set_cookies(response))
+
+
+def test_callback_clears_cookie_when_token_exchange_fails_on_network(monkeypatch):
+    def _exchange(**_k):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr(auth_router, "pop_oidc_state", lambda _s: {"redirect_uri": "x", "code_verifier": "v"})
+    monkeypatch.setattr(auth_router, "exchange_authorization_code", _exchange)
+
+    response = auth_router.telegram_oidc_callback(
+        _request(b"code=c&state=s", "tg_oidc_state=s"), MagicMock()
+    )
+
+    assert "tg_error" in parse_qs(urlsplit(response.headers["location"]).query)
     assert any(c.startswith('tg_oidc_state=""') for c in _set_cookies(response))

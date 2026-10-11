@@ -468,7 +468,10 @@ def telegram_oidc_start(request: Request, db: Session = Depends(get_db)):
 
 @router.get("/telegram/oidc/callback")
 def telegram_oidc_callback(request: Request, db: Session = Depends(get_db)):
-    response = _telegram_oidc_callback_response(request, db)
+    try:
+        response: Response = _telegram_oidc_callback_response(request, db)
+    except HTTPException as exc:
+        response = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
     _clear_oidc_state_cookie(response, request)
     return response
 
