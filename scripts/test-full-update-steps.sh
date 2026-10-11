@@ -44,7 +44,7 @@ with_units() {
 
 # run <код>: код в bash -c с подключённым scripts/full-update.sh; строки итога — в $TMP/state (см. row),
 # вывод — $TMP/out. INSTALLED — пакеты, которые dpkg -s видит установленными; APT_FAIL=1 — apt-get install
-# с ошибкой; UFW_ADDED — вывод ufw show added; VENV — каталог venv (по умолчанию $TMP/venv).
+# с ошибкой; UFW_ADDED — вывод ufw show added, UFW_STATUS — active|inactive; VENV — каталог venv (по умолчанию $TMP/venv).
 run() {
   : >"$CALLS"
   : >"$TMP/state"
@@ -73,7 +73,7 @@ run() {
     ufw() {
       case "$1" in
         show) printf "%s\n" "${UFW_ADDED:-}" ;;
-        status) echo "Status: active" ;;
+        status) echo "Status: ${UFW_STATUS:-active}" ;;
         *) echo "ufw $*" >>"$CALLS" ;;
       esac
     }
@@ -141,6 +141,83 @@ run 'fu_run systemd fu_step_systemd'
 REFRESH_FAIL=1 run 'fu_run systemd fu_step_systemd; echo "stopped=$FU_STOPPED"'
 [[ "$(row systemd)" == "ошибка|refresh-systemd-units.sh завершился с ошибкой — проверьте unit'ы вручную" ]] \
   && grep -qx "stopped=false" "$TMP/out" && ok "ошибка без стопа" || bad "итог: $(row systemd); $(cat "$TMP/out")"
+
+PANEL_NGINX_ENV='DOMAIN=panel.example.com
+PUBLISH_MODE=nginx_le
+BACKEND_PORT=8000
+HTTPS_PUBLIC_PORT=443
+HTTP_ACME_PORT=80'
+
+echo "[test] firewall: в ufw только правило SSH — не настроен, правила не трогаются"
+with_units adminpanelaz.service
+printf '%s\n' "$PANEL_NGINX_ENV" >"$INSTALL/backend/.env"
+UFW_ADDED="ufw allow 22/tcp comment 'SSH (AdminPanelAZ)'" run 'fu_run firewall fu_step_firewall'
+[[ "$(row firewall)" == "пропущен|не настроен" && "$(calls)" == "" ]] && ok "ufw без своих правил — пропущен" \
+  || bad "итог: $(row firewall), вызовы: $(calls)"
+
+echo "[test] firewall: iptables без своих правил — не настроен, ни -A, ни -D"
+run 'firewall_detect_tool() { echo iptables; }
+  iptables() { echo "iptables $*" >>"$CALLS"; [[ "$1" != -C ]]; }
+  fu_run firewall fu_step_firewall'
+[[ "$(row firewall)" == "пропущен|не настроен" ]] && ok "iptables — пропущен" || bad "итог: $(row firewall); $(cat "$TMP/out")"
+grep -qF "iptables -C INPUT -p tcp --dport 8000 ! -s 127.0.0.1 -j DROP" "$CALLS" && ok "проверено правило backend" \
+  || bad "вызовы: $(calls)"
+! grep -qE '^iptables -(A|D) ' "$CALLS" && ok "правила не менялись" || bad "вызовы: $(calls)"
+
+echo "[test] firewall: ufw настроен — правила панели за nginx заново, ufw не включается"
+UFW_ADDED="ufw deny 8000/tcp comment 'AdminPanelAZ backend'" run 'fu_run firewall fu_step_firewall'
+[[ "$(row firewall)" == "ok|ufw: правила AdminPanelAZ применены заново" ]] && ok "итог ok" \
+  || bad "итог: $(row firewall); $(cat "$TMP/out")"
+grep -qxF "ufw deny 8000/tcp comment AdminPanelAZ backend" "$CALLS" && ok "backend закрыт" || bad "вызовы: $(calls)"
+grep -qxF "ufw allow 443/tcp comment AdminPanelAZ HTTPS" "$CALLS" \
+  && grep -qxF "ufw allow 80/tcp comment AdminPanelAZ HTTP (ACME)" "$CALLS" && ok "443 и 80 открыты" || bad "вызовы: $(calls)"
+grep -qxF "ufw reload" "$CALLS" && ok "ufw reload" || bad "вызовы: $(calls)"
+UFW_STATUS=inactive UFW_ADDED="ufw deny 8000/tcp comment 'AdminPanelAZ backend'" run 'fu_run firewall fu_step_firewall'
+grep -qxF "ufw allow 22/tcp comment SSH (AdminPanelAZ)" "$CALLS" && ! grep -qE '^ufw (--force )?enable' "$CALLS" \
+  && ok "неактивный ufw: SSH разрешён, ufw не включён" || bad "вызовы: $(calls)"
+
+echo "[test] firewall: агент без IP панели в node_agent.env — правила не менялись"
+with_units adminpanelaz-node.service
+printf 'NODE_AGENT_PORT=9100\n' >"$INSTALL/backend/node_agent.env"
+UFW_ADDED="ufw deny 9100/tcp comment 'AdminPanelAZ node agent'" run 'fu_run firewall fu_step_firewall'
+[[ "$(row firewall)" == "пропущен|IP панели не записан в node_agent.env / proxy_agent.env — правила не менялись" \
+  && "$(calls)" == "" ]] && ok "пропущен без IP панели" || bad "итог: $(row firewall), вызовы: $(calls)"
+
+echo "[test] firewall: агент с IP панели — доступ только с панели, порт панели не трогается"
+printf 'NODE_AGENT_PORT=9100\nNODE_AGENT_ALLOWED_IPS=203.0.113.10/32\n' >"$INSTALL/backend/node_agent.env"
+UFW_ADDED="ufw deny 9100/tcp comment 'AdminPanelAZ node agent'" run 'fu_run firewall fu_step_firewall'
+grep -qxF "ufw allow from 203.0.113.10 to any port 9100 proto tcp comment AdminPanelAZ node agent" "$CALLS" \
+  && ok "allow с IP панели" || bad "вызовы: $(calls)"
+grep -qxF "ufw deny 9100/tcp comment AdminPanelAZ node agent" "$CALLS" && ok "deny остальным" || bad "вызовы: $(calls)"
+! grep -qE ' (8000|443|80)/tcp' "$CALLS" && ok "порты панели не трогаются" || bad "вызовы: $(calls)"
+[[ "$(row firewall)" == "ok|ufw: правила AdminPanelAZ применены заново" ]] && ok "итог ok" || bad "итог: $(row firewall)"
+rm -f "$INSTALL/backend/node_agent.env"
+
+echo "[test] DDNS: нет ddns.env — пропущен"
+rm -f "$TMP/ddns.env"
+run 'fu_run ddns fu_step_ddns'
+[[ "$(row ddns)" == "пропущен|не настроен" && "$(calls)" == "" ]] && ok "пропущен" || bad "итог: $(row ddns), вызовы: $(calls)"
+
+# Без SYSTEMD_UNIT_DIR в ddns-update.sh install-timer писал бы в /etc/systemd/system хоста.
+if grep -qF '"$UNIT_DIR/${SERVICE_NAME}.service"' "$ROOT_DIR/scripts/ddns-update.sh"; then
+  echo "[test] DDNS: ddns.env есть — unit и таймер из systemd/ в SYSTEMD_UNIT_DIR, enable --now"
+  printf 'DDNS_PROVIDER=duckdns\n' >"$TMP/ddns.env"
+  run 'id() { echo 0; }; export -f id systemctl; fu_run ddns fu_step_ddns'
+  [[ "$(calls)" == "systemctl daemon-reload;systemctl enable --now adminpanelaz-ddns.timer;" ]] && ok "daemon-reload, enable --now" \
+    || bad "вызовы: $(calls); $(cat "$TMP/out")"
+  grep -qxF "ExecStart=$ROOT_DIR/scripts/ddns-update.sh update" "$TMP/units/adminpanelaz-ddns.service" \
+    && ok "unit — путь установки" || bad "unit: $(cat "$TMP/units/adminpanelaz-ddns.service" 2>&1)"
+  cmp -s "$ROOT_DIR/systemd/adminpanelaz-ddns.timer" "$TMP/units/adminpanelaz-ddns.timer" && ok "таймер скопирован" \
+    || bad "таймера нет в $TMP/units"
+  [[ "$(row ddns)" == "ok|adminpanelaz-ddns.timer" ]] && ok "итог ok" || bad "итог: $(row ddns)"
+
+  echo "[test] DDNS: install-timer с ошибкой — «ошибка» без стопа"
+  run 'id() { echo 1000; }; export -f id; fu_run ddns fu_step_ddns; echo "stopped=$FU_STOPPED"'
+  [[ "$(row ddns)" == "ошибка|ddns-update.sh install-timer не прошёл — см. вывод выше" ]] && grep -qx "stopped=false" "$TMP/out" \
+    && ok "ошибка без стопа" || bad "итог: $(row ddns); $(cat "$TMP/out")"
+else
+  bad "ddns-update.sh пишет unit'ы мимо SYSTEMD_UNIT_DIR — тесты install-timer не запускались"
+fi
 
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]

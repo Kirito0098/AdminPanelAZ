@@ -6,6 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_FILE="${DDNS_CONFIG:-/etc/adminpanelaz/ddns.env}"
 SERVICE_NAME="adminpanelaz-ddns"
 TIMER_NAME="${SERVICE_NAME}.timer"
+UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 
 log() {
   echo "[ddns] $*"
@@ -176,8 +177,8 @@ install_timer() {
   local timer_src="$ROOT_DIR/systemd/${TIMER_NAME}"
   [[ -f "$service_src" && -f "$timer_src" ]] || die "Не найдены unit-файлы в $ROOT_DIR/systemd/"
 
-  sed "s|/opt/AdminPanelAZ|$ROOT_DIR|g" "$service_src" >"/etc/systemd/system/${SERVICE_NAME}.service"
-  cp "$timer_src" "/etc/systemd/system/${TIMER_NAME}"
+  sed "s|/opt/AdminPanelAZ|$ROOT_DIR|g" "$service_src" >"$UNIT_DIR/${SERVICE_NAME}.service"
+  cp "$timer_src" "$UNIT_DIR/${TIMER_NAME}"
 
   systemctl daemon-reload
   systemctl enable --now "$TIMER_NAME"
@@ -191,7 +192,7 @@ remove_timer() {
 
   systemctl stop "$TIMER_NAME" 2>/dev/null || true
   systemctl disable "$TIMER_NAME" 2>/dev/null || true
-  rm -f "/etc/systemd/system/${SERVICE_NAME}.service" "/etc/systemd/system/${TIMER_NAME}"
+  rm -f "$UNIT_DIR/${SERVICE_NAME}.service" "$UNIT_DIR/${TIMER_NAME}"
   systemctl daemon-reload
   log "Systemd timer удалён"
 }

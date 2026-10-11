@@ -16,6 +16,9 @@ ENV_FILE="$INSTALL_DIR/backend/.env"
 # shellcheck source=scripts/nginx-common.sh
 source "$FU_DIR/nginx-common.sh"
 nginx_common_init
+# shellcheck source=scripts/firewall-setup.sh
+source "$FU_DIR/firewall-setup.sh"
+FU_FW_ARGS=()
 
 FU_STEPS=(backup code apt pip frontend systemd nginx firewall ddns restart)
 declare -A FU_LABELS=(
@@ -359,4 +362,132 @@ fu_step_nginx() {
   ui_fail "nginx -t не прошёл — старый конфиг восстановлен, копии: *.bak-$stamp"
   fu_row nginx ошибка "конфиг не обновлён, старый восстановлен (nginx -t: ${line#nginx: })"
   return 1
+}
+
+fu_publish_kind() {
+  if fu_nginx_published; then
+    echo nginx
+    return 0
+  fi
+  case "$(nginx_env_get PUBLISH_MODE)" in
+    uvicorn_* | http_direct)
+      echo direct
+      return 0
+      ;;
+  esac
+  case "$(nginx_env_get BACKEND_HOST)" in
+    "" | 127.0.0.1 | localhost | ::1) echo none ;;
+    *) echo direct ;;
+  esac
+}
+
+# ACCEPT 80/443 не признак: такие правила мог добавить кто угодно.
+fu_iptables_has_own_rules() {
+  local backend="$1" node="$2" proxy="$3" ip="$4" port
+  if [[ "$backend" != 0 ]] && iptables -C INPUT -p tcp --dport "$backend" ! -s 127.0.0.1 -j DROP 2>/dev/null; then
+    return 0
+  fi
+  for port in "$node" "$proxy"; do
+    if [[ -z "$port" || "$port" == 0 ]]; then
+      continue
+    fi
+    if iptables -C INPUT -p tcp --dport "$port" -j DROP 2>/dev/null; then
+      return 0
+    fi
+    if [[ -n "$ip" ]] && iptables -C INPUT -p tcp --dport "$port" ! -s "$ip" -j DROP 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Свои правила — как их находит uninstall.sh --remove-firewall; правило SSH остаётся и после удаления панели.
+fu_firewall_configured() {
+  local added backend=0 node="" proxy=""
+  case "$(firewall_detect_tool)" in
+    ufw)
+      added="$(ufw show added 2>/dev/null || true)"
+      grep "comment '[^']*AdminPanelAZ" <<<"$added" | grep -vF "comment '${FIREWALL_UFW_SSH_COMMENT}'" >/dev/null
+      ;;
+    iptables)
+      firewall_resolve_uninstall_params "$INSTALL_DIR"
+      if panel_uses_systemd; then
+        backend="$FIREWALL_UNINSTALL_BACKEND_PORT"
+      fi
+      if [[ -f "$UNIT_DIR/adminpanelaz-node.service" ]]; then
+        node="$FIREWALL_UNINSTALL_NODE_PORT"
+      fi
+      if [[ -f "$UNIT_DIR/adminpanelaz-proxy.service" ]]; then
+        proxy="$FIREWALL_UNINSTALL_PROXY_PORT"
+      fi
+      fu_iptables_has_own_rules "$backend" "$node" "$proxy" "$FIREWALL_UNINSTALL_PANEL_IP"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+# Агенту без IP панели правило DROP закрыло бы порт и от панели — тогда правила не трогаем.
+fu_firewall_args() {
+  local backend=0 https http node=false proxy=false nginx=false
+  firewall_resolve_uninstall_params "$INSTALL_DIR"
+  if [[ -f "$UNIT_DIR/adminpanelaz-node.service" ]]; then
+    node=true
+  fi
+  if [[ -f "$UNIT_DIR/adminpanelaz-proxy.service" ]]; then
+    proxy=true
+  fi
+  if [[ "$node" == true || "$proxy" == true ]] && [[ -z "$FIREWALL_UNINSTALL_PANEL_IP" ]]; then
+    return 1
+  fi
+  https="$FIREWALL_UNINSTALL_HTTPS_PORT"
+  http="$FIREWALL_UNINSTALL_HTTP_PORT"
+  if panel_uses_systemd; then
+    case "$(fu_publish_kind)" in
+      nginx)
+        nginx=true
+        backend="$FIREWALL_UNINSTALL_BACKEND_PORT"
+        ;;
+      direct)
+        nginx=true
+        https="$FIREWALL_UNINSTALL_BACKEND_PORT"
+        http=0
+        ;;
+      *) backend="$FIREWALL_UNINSTALL_BACKEND_PORT" ;;
+    esac
+  fi
+  FU_FW_ARGS=("$backend" "$FIREWALL_UNINSTALL_NODE_PORT" "$https" "$http" "$node" "$nginx"
+    "$FIREWALL_UNINSTALL_PANEL_IP" "$proxy" "$FIREWALL_UNINSTALL_PROXY_PORT")
+}
+
+fu_step_firewall() {
+  local tool
+  if ! fu_firewall_configured; then
+    fu_row firewall пропущен "не настроен"
+    return 0
+  fi
+  tool="$(firewall_detect_tool)"
+  if ! fu_firewall_args; then
+    ui_warn "IP панели не записан в node_agent.env / proxy_agent.env — правила firewall не менялись"
+    fu_row firewall пропущен "IP панели не записан в node_agent.env / proxy_agent.env — правила не менялись"
+    return 0
+  fi
+  if FIREWALL_ENABLE_UFW=false firewall_apply_rules "${FU_FW_ARGS[@]}"; then
+    fu_row firewall ok "$tool: правила AdminPanelAZ применены заново"
+    return 0
+  fi
+  ui_warn "Правила firewall не применены — обновление продолжается"
+  fu_row firewall ошибка "$tool: правила не применены, см. вывод выше"
+}
+
+fu_step_ddns() {
+  if [[ ! -f "${DDNS_CONFIG:-/etc/adminpanelaz/ddns.env}" ]]; then
+    fu_row ddns пропущен "не настроен"
+    return 0
+  fi
+  if SYSTEMD_UNIT_DIR="$UNIT_DIR" bash "$FU_DIR/ddns-update.sh" install-timer; then
+    fu_row ddns ok "adminpanelaz-ddns.timer"
+    return 0
+  fi
+  ui_warn "Таймер DDNS не обновлён — обновление продолжается"
+  fu_row ddns ошибка "ddns-update.sh install-timer не прошёл — см. вывод выше"
 }
