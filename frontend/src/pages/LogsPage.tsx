@@ -800,16 +800,6 @@ export default function LogsPage() {
     setExportingActions(true)
     try {
       const res = await downloadActionLogsExport()
-      if (!res.ok) {
-        let detail = 'Ошибка экспорта журнала'
-        try {
-          const data = await res.json()
-          detail = typeof data.detail === 'string' ? data.detail : detail
-        } catch {
-          /* non-JSON error body */
-        }
-        throw new ApiError(detail, res.status)
-      }
       const blob = await res.blob()
       const disposition = res.headers.get('Content-Disposition') ?? ''
       const match = disposition.match(/filename="([^"]+)"/)

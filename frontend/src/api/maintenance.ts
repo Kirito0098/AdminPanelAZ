@@ -1,7 +1,6 @@
 import {
-  API_BASE,
   apiFetch,
-  getToken,
+  apiFetchResponse,
 } from './http'
 import type {
   BackupEntry,
@@ -350,7 +349,5 @@ export async function checkSystemUpdates() {
 }
 
 export function downloadBackup(fileName: string) {
-  const token = getToken()
-  const url = `${API_BASE}/backups/${encodeURIComponent(fileName)}/download`
-  return fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  return apiFetchResponse(`/backups/${encodeURIComponent(fileName)}/download`)
 }

@@ -209,9 +209,3 @@ export function apiFetchResponse(path: string, options: RequestInit = {}): Promi
 }
 
 export { API_BASE }
-
-export async function parseApiError(response: Response, fallback: string): Promise<ApiError> {
-  const body = await response.text()
-  const detail = parseHttpErrorBody(body, response.status, fallback)
-  return new ApiError(detail, response.status)
-}

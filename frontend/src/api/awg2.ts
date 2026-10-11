@@ -1,13 +1,6 @@
-import { getWebSessionId } from '@/lib/webSession'
-import { clearAccessToken } from '@/lib/accessToken'
-import { applyExpectedNodeHeader } from '@/lib/expectedNode'
 import {
-  API_BASE,
   apiFetch,
-  getToken,
-  isNodeAgentAuthFailureDetail,
-  parseApiError,
-  refreshAccessToken,
+  apiFetchResponse,
 } from './http'
 import { openTicketEventSource, type StreamHandle } from './streamTicket'
 import type {
@@ -80,33 +73,6 @@ export function openAwg2InstallStream(
   })
 }
 
-export async function downloadAwg2Backup(retry = true): Promise<Response> {
-  const headers = new Headers()
-  const token = getToken()
-  if (token) headers.set('Authorization', `Bearer ${token}`)
-  const sessionId = getWebSessionId()
-  if (sessionId) headers.set('X-Web-Session-Id', sessionId)
-  applyExpectedNodeHeader(headers, 'POST')
-
-  const response = await fetch(`${API_BASE}/awg2/backup`, {
-    method: 'POST',
-    headers,
-    credentials: 'include',
-  })
-  if (response.status === 401 && retry) {
-    const peek = await response.clone().json().catch(() => null)
-    const detail = peek && typeof peek === 'object' ? (peek as { detail?: unknown }).detail : undefined
-    if (isNodeAgentAuthFailureDetail(detail)) {
-      throw await parseApiError(response, 'Ошибка скачивания бэкапа AZ-AWG2')
-    }
-    const newToken = await refreshAccessToken()
-    if (newToken) {
-      return downloadAwg2Backup(false)
-    }
-    clearAccessToken()
-  }
-  if (!response.ok) {
-    throw await parseApiError(response, 'Ошибка скачивания бэкапа AZ-AWG2')
-  }
-  return response
+export function downloadAwg2Backup() {
+  return apiFetchResponse('/awg2/backup', { method: 'POST' })
 }
