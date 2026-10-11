@@ -55,6 +55,14 @@ function isServerUnavailableStatus(status: number): boolean {
   return status >= 500 || status === 408 || status === 429
 }
 
+const NO_REFRESH_AUTH_PATHS = ['/auth/login', '/auth/logout', '/auth/refresh']
+
+/** Sign-in (password, 2FA, passkey), logout and refresh answer 401 for bad credentials, not for an expired session. */
+function refreshesSessionOn401(path: string): boolean {
+  const pathname = path.split('?', 1)[0]
+  return !NO_REFRESH_AUTH_PATHS.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
+}
+
 /**
  * Tabs share one refresh cookie: overlapping rotations answered out of order leave a revoked token in it,
  * which the server treats as reuse once the grace window has passed.
@@ -143,7 +151,7 @@ export async function apiFetchAtBase<T>(
   } catch {
     throw new ApiError(SERVER_UNREACHABLE_MESSAGE, 0)
   }
-  if (response.status === 401 && retry && !path.startsWith('/auth/') && normalizedBase === API_BASE) {
+  if (response.status === 401 && retry && refreshesSessionOn401(path) && normalizedBase === API_BASE) {
     const body = await response.text()
     let payload: unknown
     try {

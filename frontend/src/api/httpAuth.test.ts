@@ -286,3 +286,57 @@ describe('final session loss is reported once for every caller', () => {
     expect(listener).not.toHaveBeenCalled()
   })
 })
+
+describe('apiFetch renews the session on /auth paths except the sign-in flow', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  function json(body: unknown, status: number): Response {
+    return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+  }
+
+  it.each(['/auth/me', '/auth/2fa/status', '/auth/passkeys', '/auth/change-password'])(
+    'refreshes and retries %s after a session 401',
+    async (path) => {
+      vi.spyOn(accessToken, 'getAccessToken').mockReturnValue('old-jwt')
+      vi.spyOn(accessToken, 'setAccessToken')
+      vi.spyOn(webSession, 'getWebSessionId').mockReturnValue(null)
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(json({ detail: 'Неверный токен авторизации' }, 401))
+        .mockResolvedValueOnce(json({ access_token: 'new-jwt' }, 200))
+        .mockResolvedValueOnce(json({ ok: true }, 200))
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(apiFetchAtBase('/api', path, {}, true)).resolves.toEqual({ ok: true })
+      expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+        `/api${path}`,
+        '/api/auth/refresh',
+        `/api${path}`,
+      ])
+    },
+  )
+
+  it.each([
+    '/auth/login',
+    '/auth/login/json',
+    '/auth/login/2fa',
+    '/auth/login/passkey/options',
+    '/auth/login/passkey/verify',
+    '/auth/logout',
+    '/auth/refresh',
+  ])('does not refresh on a 401 from %s', async (path) => {
+    vi.spyOn(accessToken, 'getAccessToken').mockReturnValue(null)
+    vi.spyOn(webSession, 'getWebSessionId').mockReturnValue(null)
+    const fetchMock = vi.fn().mockResolvedValue(json({ detail: 'Неверный логин или пароль' }, 401))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiFetchAtBase('/api', path, {}, true)).rejects.toMatchObject({
+      status: 401,
+      message: 'Неверный логин или пароль',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
