@@ -500,7 +500,8 @@ def _mount_frontend(app: FastAPI) -> None:
     from pathlib import Path
 
     from fastapi.responses import FileResponse, RedirectResponse
-    from fastapi.staticfiles import StaticFiles
+
+    from app.services.frontend_assets import FrontendAssets
 
     dist = settings.frontend_dist_path
     if not dist.is_absolute():
@@ -511,10 +512,10 @@ def _mount_frontend(app: FastAPI) -> None:
     assets_dir = dist / "assets"
     assets_mount = f"{_ACCESS_PREFIX}/assets" if _ACCESS_PREFIX else "/assets"
     if assets_dir.is_dir():
-        app.mount(assets_mount, StaticFiles(directory=assets_dir), name="frontend-assets")
+        app.mount(assets_mount, FrontendAssets(dist=dist), name="frontend-assets")
         # Portal host serves /p/… at domain root and must load /assets without ACCESS_PATH.
         if _ACCESS_PREFIX:
-            app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets-portal-root")
+            app.mount("/assets", FrontendAssets(dist=dist), name="frontend-assets-portal-root")
 
     dist_root = dist.resolve()
     index_file = dist / "index.html"
