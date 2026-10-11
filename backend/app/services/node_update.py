@@ -367,8 +367,7 @@ def apply_node_update(
         detail["agent_pull"] = pull
         if pull["success"]:
             detail["pip"] = _pip_install(repo_root)
-            # 2.19+: rewrite unit before restart — old ExecStart=…/start_node_agent.sh breaks after pull.
-            # Soft-fail on refresh: compat start_node_agent.sh shim still boots; migrate on startup.
+            # Rewrite unit before restart: a unit with legacy ExecStart=…/start_node_agent.sh no longer boots.
             systemd_refresh = refresh_installed_systemd_units(repo_root, panel=False, node=True)
             detail["systemd_refresh"] = systemd_refresh
             if not systemd_refresh.get("success"):

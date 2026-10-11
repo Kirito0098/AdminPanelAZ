@@ -46,7 +46,7 @@ def refresh_installed_systemd_units(
 ) -> dict[str, Any]:
     """Rewrite /etc/systemd unit(s) from repo templates; daemon-reload via install scripts.
 
-    Critical for 2.19+: old ExecStart=…/start.sh breaks after start.sh is removed/replaced.
+    Units with legacy ExecStart=…/start.sh do not boot: the script is gone from the repo.
     No service restart — caller schedules systemctl restart.
     """
     script = repo_root / "scripts" / "refresh-systemd-units.sh"
@@ -107,11 +107,7 @@ def migrate_stale_systemd_units_on_startup(
     node: bool = False,
     proxy: bool = False,
 ) -> dict[str, Any]:
-    """If installed unit still references start.sh, rewrite from repo (no restart).
-
-    Covers the chicken-egg of UI update: old in-memory code restarts via legacy ExecStart;
-    compat start.sh shim boots new code; this migrates the unit for the next restart.
-    """
+    """If installed unit still references start.sh or holds an API key, rewrite from repo (no restart)."""
     if not repo_root:
         return {"success": True, "skipped": True, "output": "no repo", "error": None}
 

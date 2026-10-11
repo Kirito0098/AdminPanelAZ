@@ -635,7 +635,7 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
 
             {geoIpStatus && !geoLoaded && (
               <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
-                Для офлайн-режима: GeoLite2 в <code className="text-foreground">data/geoip/</code>, затем перезапуск
+                Для офлайн-режима: GeoLite2 в <code className="text-foreground">backend/data/geoip/</code>, затем перезапуск
                 панели.{' '}
                 <a
                   href={DOCS.geoIp}

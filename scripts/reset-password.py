@@ -10,7 +10,7 @@ import string
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parent.parent
 VENV_DIR = ROOT / "backend" / ".venv"
 VENV_PYTHON = VENV_DIR / "bin" / "python"
 if VENV_PYTHON.is_file() and Path(sys.prefix).resolve() != VENV_DIR.resolve():

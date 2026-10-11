@@ -177,7 +177,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
   ([инструкция](docs/noc-monitoring.md))
 - **Трафик** — расход по клиентам и доля в общем объёме, лимиты, окна 1д / 7д / 30д ([инструкция](docs/traffic-monitoring.md))
 - **Сервер** — live CPU/RAM/диск, **история ресурсов** за 1 / 7 / 30 дней, vnStat ([инструкция](docs/server-monitor.md))
-- **Локальная GeoIP** — MaxMind GeoLite2 в `data/geoip/` ([инструкция](docs/GeoIP.md))
+- **Локальная GeoIP** — MaxMind GeoLite2 в `backend/data/geoip/` ([инструкция](docs/GeoIP.md))
 
 ### 🔐 Безопасность и администрирование
 
@@ -231,6 +231,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
 - До первой смены пароль хранится в `backend/.env` (права `600`) как `DEFAULT_ADMIN_PASSWORD`. После смены он остаётся только в БД, а `DEFAULT_ADMIN_PASSWORD` в `.env` очищается.
 - В production панель не запустится со слабым `DEFAULT_ADMIN_PASSWORD` (`admin`, `password`, `123456`).
 - Повторный запуск мастера задаёт пароль администратора заново (введённый или новый случайный). Если ставили без мастера (через `WIZ_*`) поверх существующей БД и пароль не задали, он не меняется — в сводке будет «Пароль администратора не менялся».
+- Забыли пароль или потеряли 2FA: `sudo ./scripts/reset-password.py` (интерактивно) или `sudo ./scripts/reset-password.py -u admin --disable-2fa` — задаёт случайный пароль и при флаге отключает 2FA и passkey.
 
 ### 🔄 Обновление
 
@@ -332,6 +333,7 @@ sudo ./scripts/adminpanel-menu.sh   # меню: перезапуск, бэкап
 sudo ./scripts/adminpanel-menu.sh --update   # обновить из upstream текущей ветки: код, pip, сборка интерфейса
 sudo ./scripts/adminpanel-menu.sh --restart  # перезапуск панели после --update
 sudo systemctl restart adminpanelaz # перезапуск панели
+sudo ./scripts/reset-password.py    # сброс пароля пользователя панели (--disable-2fa — снять 2FA)
 sudo systemctl restart adminpanelaz-proxy  # proxy_agent на RU (порт 9101)
 sudo ./scripts/nginx-setup.sh       # сменить HTTPS после установки
 sudo ./scripts/nginx-repair.sh      # восстановить nginx (например после uninstall StatusOpenVPN)

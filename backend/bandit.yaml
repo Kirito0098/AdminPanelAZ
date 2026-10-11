@@ -1,4 +1,4 @@
-# Bandit config for CI/pre-commit. Skips are intentional server/panel patterns, not secrets.
+# Bandit config for CI. Skips are intentional server/panel patterns, not secrets.
 exclude_dirs:
   - .venv
   - data

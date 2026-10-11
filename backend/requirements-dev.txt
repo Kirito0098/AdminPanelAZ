@@ -3,17 +3,14 @@
 # Usage: pip install -r backend/requirements-dev.txt
 -r requirements.txt
 
-# Linter (matches CI and pre-commit).
+# Linter (matches CI).
 ruff>=0.11,<1.0
 
 # Unit tests (CI + local).
 pytest>=8.0,<10.0
 
-# Security static analysis (CI/pre-commit: advisory).
+# Security static analysis (CI).
 bandit>=1.7,<2.0
 
-# Dependency vulnerability audit (CI: advisory via continue-on-error).
+# Dependency vulnerability audit (CI).
 pip-audit>=2.7,<3.0
-
-# Git hook runner.
-pre-commit>=4.0,<5.0
