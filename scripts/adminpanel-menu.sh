@@ -4,13 +4,17 @@
 
 set -euo pipefail
 
+# Локаль пользователя запоминается до переключения на C.UTF-8: её получает sudo, по ней выбираются значки.
+MENU_USER_LC_ALL="${LC_ALL-}"
+MENU_USER_LANG="${LANG-}"
 export LC_ALL="${LC_ALL:-C.UTF-8}"
 export LANG="${LANG:-C.UTF-8}"
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 INSTALL_DIR="${INSTALL_DIR:-$ROOT_DIR}"
 SERVICE_NAME="${SERVICE_NAME:-adminpanelaz}"
 VENV_PATH="${VENV_PATH:-$ROOT_DIR/backend/.venv}"
+UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 BACKUP_CLI="$ROOT_DIR/scripts/backup-cli.py"
 SITE_DIAGNOSTICS="$ROOT_DIR/scripts/site-diagnostics.sh"
 
@@ -61,14 +65,31 @@ menu_action() {
 }
 
 require_root() {
-  if [[ "$(id -u)" -ne 0 ]]; then
+  if [[ "$(id -u)" != 0 ]]; then
     ui_fail "Нужны права root (sudo)."
     exit 1
   fi
 }
 
+# sudo сбрасывает окружение: NO_COLOR передаётся явно, локаль сохраняет env_keep по умолчанию.
+menu_ensure_root() {
+  if [[ "$(id -u)" == 0 ]]; then
+    return 0
+  fi
+  if ! command -v sudo >/dev/null 2>&1; then
+    ui_fail "Нужны права root (sudo не найден)"
+    exit 1
+  fi
+  local sudo_env=()
+  if [[ -n "${NO_COLOR:-}" ]]; then
+    sudo_env=("NO_COLOR=$NO_COLOR")
+  fi
+  LC_ALL="$MENU_USER_LC_ALL" LANG="$MENU_USER_LANG" \
+    exec sudo ${sudo_env[@]+"${sudo_env[@]}"} -- "$(readlink -f "${BASH_SOURCE[0]}")" "$@"
+}
+
 panel_uses_systemd() {
-  [[ -f "/etc/systemd/system/${SERVICE_NAME}.service" ]]
+  [[ -f "$UNIT_DIR/${SERVICE_NAME}.service" ]]
 }
 
 _menu_python() {
@@ -467,38 +488,106 @@ main_menu() {
   done
 }
 
+# Установленные агенты узла — имена unit'ов без .service.
+menu_agent_units() {
+  local unit
+  for unit in adminpanelaz-node adminpanelaz-proxy; do
+    if [[ -f "$UNIT_DIR/$unit.service" ]]; then
+      printf '%s\n' "$unit"
+    fi
+  done
+  return 0
+}
+
+menu_mode() {
+  local agents
+  agents="$(menu_agent_units)"
+  if panel_uses_systemd; then
+    if [[ -n "$agents" ]]; then
+      echo both
+    else
+      echo panel
+    fi
+  elif [[ -n "$agents" ]]; then
+    echo agent
+  else
+    echo none
+  fi
+}
+
+menu_start() {
+  local mode
+  mode="$(menu_mode)"
+  if [[ "$mode" == none ]]; then
+    ui_fail "AdminPanelAZ не установлена через systemd"
+    usage >&2
+    return 1
+  fi
+  main_menu "$mode"
+}
+
 usage() {
   cat <<EOF
-Использование: sudo ./scripts/adminpanel-menu.sh [опция]
+Использование: sudo adminpanelaz [опция]   (или sudo ./scripts/adminpanel-menu.sh [опция])
 
-Интерактивное ops-меню (без мастера install.sh):
-  restart, update, backup, site diagnostics, disable IP whitelist.
+Ops-меню сервера без веб-интерфейса (не мастер install.sh): состояние, журнал, обновление
+с перезапуском, бэкап и восстановление, сброс пароля, сервисы. На сервере только с агентом
+(--node-only / --proxy-only) — меню агента. Без root меню перезапускается через sudo.
 
-Опции (как adminpanel.sh в AA):
+Опции:
   --restart              Перезапустить панель (systemctl restart adminpanelaz)
   --update               git fetch + fast-forward из upstream текущей ветки (main без upstream —
                          origin/main) + pip + сборка интерфейса (если есть обновления
-                         или интерфейс собран до последнего обновления кода)
+                         или интерфейс собран до последнего обновления кода); без перезапуска
   --backup               Создать резервную копию (scripts/backup-cli.py)
   --diagnose             Диагностика запуска (scripts/site-diagnostics.sh)
   --disable-ip-whitelist Аварийно выключить IP-whitelist панели
-  --help                 Эта справка
+  --help                 Эта справка (без root)
 
-Без опций — интерактивное меню.
+Без опций — интерактивное меню (нужен терминал).
+
+Коды выхода:
+  0    успех
+  1    ошибка действия
+  2    неверный аргумент или меню без терминала
+  130  прервано Ctrl+C
+
 Установка / переустановка: sudo ./install.sh
 EOF
 }
 
 main() {
   case "${1:-}" in
+    --help | -h)
+      usage
+      return 0
+      ;;
+    --after-pull)
+      # Шаг panel_update, уже запущенного от root: повторный sudo сбросил бы INSTALL_DIR, VENV_PATH и PATH.
+      panel_after_pull
+      return
+      ;;
+    --restart | --update | --backup | --diagnose | --disable-ip-whitelist) ;;
+    "")
+      if [[ ! -t 0 || ! -t 1 ]]; then
+        usage >&2
+        exit 2
+      fi
+      ;;
+    *)
+      ui_fail "Неизвестный аргумент: $1"
+      usage >&2
+      exit 2
+      ;;
+  esac
+  menu_ensure_root "$@"
+
+  case "${1:-}" in
     --restart)
       panel_restart
       ;;
     --update)
       panel_update
-      ;;
-    --after-pull)
-      panel_after_pull
       ;;
     --backup)
       panel_backup
@@ -511,20 +600,8 @@ main() {
       panel_disable_ip_whitelist
       exit $?
       ;;
-    --help|-h)
-      usage
-      ;;
     "")
-      if [[ ! -t 0 ]]; then
-        usage >&2
-        exit 1
-      fi
-      main_menu
-      ;;
-    *)
-      ui_fail "Неизвестный аргумент: $1"
-      usage >&2
-      exit 1
+      menu_start
       ;;
   esac
 }

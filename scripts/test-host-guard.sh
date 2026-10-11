@@ -24,12 +24,14 @@ cat >"$TMP/test-writes.sh" <<'EOF'
 systemctl restart adminpanelaz-guard-selftest-missing.service 2>/dev/null || true
 iptables -A AZ_GUARD_SELFTEST_MISSING -j RETURN 2>/dev/null || true
 nginx -s reload -c /etc/nginx/adminpanelaz-guard-selftest-missing.conf 2>/dev/null || true
+sudo -n true 2>/dev/null || true
 exit 0
 EOF
 run_guarded "$TMP/test-writes.sh" && fail "тест с вызовами на хосте прошёл"
 grep -qF "systemctl restart adminpanelaz-guard-selftest-missing.service" "$TMP/out" || fail "systemctl restart не пойман"
 grep -qF "iptables -A AZ_GUARD_SELFTEST_MISSING" "$TMP/out" || fail "iptables -A не пойман"
 grep -qF "nginx -s reload" "$TMP/out" || fail "nginx -s reload не пойман"
+grep -qF "sudo -n true" "$TMP/out" || fail "sudo не пойман"
 echo "  OK"
 
 echo "[test] читающие вызовы, свой nginx на временном конфиге и подменённые команды проходят"
