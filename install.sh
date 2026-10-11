@@ -96,6 +96,8 @@ ROOT_DIR="${_script_dir:-$(pwd)}"
 source "$ROOT_DIR/scripts/install-ui.sh"
 # shellcheck source=scripts/python-runtime.sh
 source "$ROOT_DIR/scripts/python-runtime.sh"
+# shellcheck source=scripts/system-packages.sh
+source "$ROOT_DIR/scripts/system-packages.sh"
 ui_init
 # shellcheck source=scripts/install-port-check.sh
 source "$ROOT_DIR/scripts/install-port-check.sh"
@@ -910,16 +912,7 @@ install_system_deps() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   # Backend: Ubuntu 24.04 → python3.12; Debian 13 → python3.13 (см. scripts/python-runtime.sh)
-  apt-get install -y \
-    python3-pip \
-    git \
-    curl \
-    build-essential \
-    ca-certificates \
-    pkg-config \
-    libffi-dev \
-    libssl-dev \
-    vnstat
+  apt-get install -y "${ADMINPANELAZ_APT_PACKAGES[@]}"
 
   if ! py_mm="$(ap_apt_install_python)"; then
     die "Не удалось установить Python из apt (нужен 3.12 на Ubuntu 24.04 или 3.13 на Debian 13: python3.XX{,-venv,-dev}). Либо задайте ADMINPANELAZ_PYTHON_BIN"

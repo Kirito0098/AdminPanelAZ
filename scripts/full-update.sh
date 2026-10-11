@@ -8,6 +8,10 @@ set -euo pipefail
 FU_DIR="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
 # shellcheck source=scripts/adminpanel-menu.sh
 source "$FU_DIR/adminpanel-menu.sh"
+# shellcheck source=scripts/python-runtime.sh
+source "$FU_DIR/python-runtime.sh"
+# shellcheck source=scripts/system-packages.sh
+source "$FU_DIR/system-packages.sh"
 
 FU_STEPS=(backup code apt pip frontend systemd nginx firewall ddns restart)
 declare -A FU_LABELS=(
@@ -157,4 +161,86 @@ full_update_reexec() {
   ui_info "Код обновлён — дальше работает обновлённый install.sh"
   exec env LC_ALL="$MENU_USER_LC_ALL" LANG="$MENU_USER_LANG" \
     "${BASH:-bash}" "$INSTALL_DIR/install.sh" --update -y --update-resume="$FU_STATE"
+}
+
+fu_apt_packages() {
+  local mm
+  printf '%s\n' "${ADMINPANELAZ_APT_PACKAGES[@]}"
+  mm="$(ap_python_mm "$(ap_venv_report_version "$VENV_PATH" || true)" || true)"
+  if [[ -n "$mm" ]]; then
+    ap_python_apt_packages_for "$mm" | tr ' ' '\n'
+  fi
+}
+
+fu_pkg_installed() {
+  local status
+  status="$(dpkg -s "$1" 2>/dev/null)" || return 1
+  grep -qx 'Status: install ok installed' <<<"$status"
+}
+
+# Уже установленные пакеты не обновляются (--no-upgrade); ошибка apt не останавливает обновление.
+fu_step_apt() {
+  local pkg
+  local -a missing=()
+  while IFS= read -r pkg; do
+    if [[ -n "$pkg" ]] && ! fu_pkg_installed "$pkg"; then
+      missing+=("$pkg")
+    fi
+  done < <(fu_apt_packages)
+  if [[ "${#missing[@]}" -eq 0 ]]; then
+    ui_ok "Все пакеты apt на месте"
+    fu_row apt ok "доустановлено: 0"
+    return 0
+  fi
+  ui_info "Доустановка: ${missing[*]}"
+  if DEBIAN_FRONTEND=noninteractive apt-get update -qq \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-upgrade "${missing[@]}"; then
+    fu_row apt ok "доустановлено: ${#missing[@]} (${missing[*]})"
+    return 0
+  fi
+  ui_warn "apt-get не доустановил пакеты — обновление продолжается"
+  fu_row apt ошибка "не доустановлено: ${missing[*]}"
+}
+
+fu_step_pip() {
+  local pip="$VENV_PATH/bin/pip"
+  if [[ ! -x "$pip" ]]; then
+    ui_fail "Нет $pip — виртуальное окружение Python не найдено"
+    fu_row pip ошибка "нет $pip"
+    return 1
+  fi
+  ui_info "pip install -r backend/requirements.txt…"
+  "$pip" install -q -r "$INSTALL_DIR/backend/requirements.txt"
+  ui_ok "Python-зависимости обновлены"
+  fu_row pip ok
+}
+
+fu_step_frontend() {
+  if ! panel_uses_systemd; then
+    fu_row frontend пропущен "нет панели"
+    return 0
+  fi
+  panel_build_frontend
+  fu_row frontend ok
+}
+
+fu_refresh_units() {
+  SYSTEMD_UNIT_DIR="$UNIT_DIR" bash "$INSTALL_DIR/scripts/refresh-systemd-units.sh"
+}
+
+fu_units_list() {
+  local list="" unit
+  if panel_uses_systemd; then
+    list="$SERVICE_NAME"
+  fi
+  while IFS= read -r unit; do
+    list+="${list:+, }$unit"
+  done < <(menu_agent_units)
+  printf '%s' "$list"
+}
+
+fu_step_systemd() {
+  fu_refresh_units
+  ui_ok "Unit'ы обновлены из шаблонов: $(fu_units_list)"
+  fu_row systemd ok "$(fu_units_list)"
 }
