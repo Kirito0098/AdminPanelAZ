@@ -300,3 +300,83 @@ def test_access_expiry_events_are_exposed_in_notify_metadata():
     assert "Доступ пользователя" in admin_preview
     assert "👤 Пользователь" in admin_preview
     assert "📁 Клиент" not in admin_preview
+
+
+def test_process_user_reminders_reads_awg2_policy_for_awg2_profile(db, monkeypatch):
+    owner = _make_user(db, username="owner-awg2")
+    node = _make_node(db)
+    db.add(
+        VpnConfig(
+            node_id=node.id,
+            client_name="phone-awg2",
+            vpn_type=VpnType.amneziawg2,
+            owner_id=owner.id,
+        )
+    )
+    db.commit()
+    owner_messages, admin_calls = _patch_reminder_runtime(monkeypatch)
+    monkeypatch.setattr(reminders, "get_adapter_for_node", lambda _node: MagicMock())
+
+    class DummyPolicyService:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def get_openvpn_policy(self, _client_name: str) -> dict:
+            return {}
+
+        def get_wg_policy(self, _client_name: str) -> dict:
+            return {}
+
+        def get_awg2_policy(self, _client_name: str) -> dict:
+            return {"block_mode": "temp", "block_until": "2026-10-20 00:00:00"}
+
+    monkeypatch.setattr(reminders, "AccessPolicyService", DummyPolicyService)
+
+    assert reminders.process_user_reminders(db) == 1
+    assert [(call["event_type"], call["target_type"]) for call in admin_calls] == [
+        ("user_temp_block_reminder", "amneziawg2")
+    ]
+    assert len(owner_messages) == 1
+
+
+def test_process_user_reminders_skips_only_the_failing_profile(db, monkeypatch):
+    owner = _make_user(db, username="owner-mixed")
+    node = _make_node(db)
+    db.add_all(
+        [
+            VpnConfig(
+                node_id=node.id,
+                client_name="broken-ovpn",
+                vpn_type=VpnType.openvpn,
+                owner_id=owner.id,
+            ),
+            VpnConfig(
+                node_id=node.id,
+                client_name="ok-wg",
+                vpn_type=VpnType.wireguard,
+                owner_id=owner.id,
+            ),
+        ]
+    )
+    db.commit()
+    owner_messages, admin_calls = _patch_reminder_runtime(monkeypatch)
+    monkeypatch.setattr(reminders, "get_adapter_for_node", lambda _node: MagicMock())
+
+    class FlakyPolicyService:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def get_openvpn_policy(self, _client_name: str) -> dict:
+            raise RuntimeError("agent timeout")
+
+        def get_wg_policy(self, _client_name: str) -> dict:
+            return {"block_mode": "temp", "block_until": "2026-10-20 00:00:00"}
+
+        def get_awg2_policy(self, _client_name: str) -> dict:
+            return {}
+
+    monkeypatch.setattr(reminders, "AccessPolicyService", FlakyPolicyService)
+
+    assert reminders.process_user_reminders(db) == 1
+    assert [call["target_name"] for call in admin_calls] == ["ok-wg"]
+    assert len(owner_messages) == 1
