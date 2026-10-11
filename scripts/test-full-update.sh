@@ -180,5 +180,40 @@ grep -qx "stopped=false" "$TMP/out" && ok "не остановлено" || bad "
 grep -qxF $'nginx\tошибка\tнепредвиденная ошибка (код 1), см. вывод выше' "$TMP/out" \
   && grep -qxF $'systemd\tok\t' "$TMP/out" && ok "строки итога" || bad "вывод: $(cat "$TMP/out")"
 
+echo "[test] бэкап и код на сервере с панелью: create --no-prune --keep-running, затем только git"
+with_units adminpanelaz.service
+run '' "$INIT_STATE"'fu_run backup fu_step_backup; fu_run code fu_step_code; cat "$FU_STATE"'
+[[ "$(calls)" == "backup --no-prune --keep-running;update code_only=true;" ]] && ok "бэкап, затем код" \
+  || bad "вызовы: $(calls)"
+grep -qxF $'backup\tok\tadminpanelaz_20261011-1230.tar.gz' "$TMP/out" && ok "имя архива" || bad "вывод: $(cat "$TMP/out")"
+grep -qxF $'code\tok\tактуально, cef39ac' "$TMP/out" && ok "код актуален" || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] код обновился: «до → после»"
+UPDATE_RESULT=changed run '' "$INIT_STATE"'fu_run backup fu_step_backup; fu_run code fu_step_code; cat "$FU_STATE"'
+grep -qxF $'code\tok\tcef39ac → 1a2b3c4' "$TMP/out" && ok "cef39ac → 1a2b3c4" || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] сервер-узел: бэкапа нет, код обновляется"
+with_units adminpanelaz-node.service
+run '' "$INIT_STATE"'fu_run backup fu_step_backup; fu_run code fu_step_code; cat "$FU_STATE"'
+[[ "$(calls)" == "update code_only=true;" ]] && ok "только код" || bad "вызовы: $(calls)"
+grep -qxF $'backup\tпропущен\tнет панели' "$TMP/out" && ok "бэкап пропущен" || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] бэкап не создан: стоп до обновления кода"
+with_units adminpanelaz.service
+BACKUP_FAIL=1 run '' "$INIT_STATE"'fu_run backup fu_step_backup; fu_run code fu_step_code; echo "stopped=$FU_STOPPED"; cat "$FU_STATE"'
+[[ "$(calls)" == "backup --no-prune --keep-running;" ]] && ok "код не трогали" || bad "вызовы: $(calls)"
+grep -qx "stopped=true" "$TMP/out" && grep -qxF $'backup\tошибка\tбэкап не создан — обновление не начиналось' "$TMP/out" \
+  && ok "стоп с причиной" || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] код не обновился: стоп"
+UPDATE_RESULT=fail run '' "$INIT_STATE"'fu_run backup fu_step_backup; fu_run code fu_step_code; echo "stopped=$FU_STOPPED"; cat "$FU_STATE"'
+grep -qx "stopped=true" "$TMP/out" && grep -qxF $'code\tошибка\tкод не обновлён — подробности выше' "$TMP/out" \
+  && ok "стоп с причиной" || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] re-exec: обновлённый install.sh с --update -y --update-resume=<итог> и исходной локалью"
+REAL_REEXEC=1 run '' 'FU_STATE="$TMPDIR/adminpanelaz-update.abc"; full_update_reexec; echo "not reached" >>"$CALLS"'
+[[ "$(calls)" == "install.sh --update -y --update-resume=$TMP/adminpanelaz-update.abc LC_ALL= LANG=C.UTF-8;" ]] \
+  && ok "exec install.sh" || bad "вызовы: $(calls); вывод: $(cat "$TMP/out")"
+
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]

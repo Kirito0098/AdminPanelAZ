@@ -53,7 +53,7 @@ build_dist() {
   fi
 }
 
-# run_update [npm-доступен] [функция] — функция меню (по умолчанию panel_update) в отдельном bash.
+# run_update [npm-доступен] [код] — код с функциями меню (по умолчанию panel_update) в отдельном bash.
 run_update() {
   local npm_available="${1:-true}" fn="${2:-panel_update}" path="$TMP/npm-bin:$PATH"
   [[ "$npm_available" == true ]] || path="$TMP/git-only-bin"
@@ -64,7 +64,7 @@ run_update() {
     panel_uses_systemd() { return 0; }
     systemctl() { echo "systemctl $*"; }
     PATH="$TEST_PATH"
-    "$FN"
+    eval "$FN"
     echo "changed=$PANEL_UPDATE_CHANGED"
   ' bash "$ROOT_DIR"
 }
@@ -190,6 +190,26 @@ rc=$?
 set -e
 [[ "$rc" != 0 ]] || fail "без npm обновление прошло молча"
 grep -q "npm" "$TMP/out" || fail "нет объяснения про npm: $(cat "$TMP/out")"
+echo "  OK"
+
+echo "[test] полное обновление (PANEL_UPDATE_CODE_ONLY=true): только git — без --after-pull и без пересборки"
+setup_repos
+build_dist
+printf '#!/usr/bin/env bash\necho "new-menu $*" >>"$NPM_LOG"\nexit 7\n' >"$TMP/dev/scripts/adminpanel-menu.sh"
+new_upstream_commit
+: >"$NPM_LOG"
+run_update true 'PANEL_UPDATE_CODE_ONLY=true; panel_update' >"$TMP/out" 2>&1 \
+  || fail "обновление кода завершилось ошибкой: $(cat "$TMP/out")"
+[[ ! -s "$NPM_LOG" ]] || fail "после git pull запущены шаги обновления: $(cat "$NPM_LOG")"
+cmp -s "$TMP/install/version" "$TMP/dev/version" || fail "код не обновлён"
+grep -qx "changed=true" "$TMP/out" || fail "обновление кода не отмечено"
+setup_repos
+build_dist '-2 hours'
+: >"$NPM_LOG"
+run_update true 'PANEL_UPDATE_CODE_ONLY=true; panel_update' >"$TMP/out" 2>&1 \
+  || fail "обновление завершилось ошибкой: $(cat "$TMP/out")"
+[[ ! -s "$NPM_LOG" ]] || fail "устаревший интерфейс пересобран в шаге «Код»: $(cat "$NPM_LOG")"
+grep -qx "changed=false" "$TMP/out" || fail "без обновлений отмечено изменение: $(cat "$TMP/out")"
 echo "  OK"
 
 echo "All menu update checks passed."

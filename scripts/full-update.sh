@@ -124,3 +124,37 @@ fu_finish() {
   fi
   rm -f "$FU_STATE"
 }
+
+fu_head() {
+  git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null || true
+}
+
+fu_step_backup() {
+  if ! panel_uses_systemd; then
+    fu_row backup пропущен "нет панели"
+    return 0
+  fi
+  panel_backup --no-prune --keep-running
+  fu_row backup ok "${PANEL_LAST_BACKUP##*/}"
+}
+
+# Код — функцией меню: fast-forward из upstream текущей ветки, reset после force-push только при чистом дереве.
+fu_step_code() {
+  local before after
+  before="$(fu_head)"
+  PANEL_UPDATE_CODE_ONLY=true
+  panel_update
+  after="$(fu_head)"
+  if [[ "$before" == "$after" ]]; then
+    fu_row code ok "актуально, $after"
+  else
+    fu_row code ok "$before $FU_ARROW $after"
+  fi
+}
+
+# Остальные шаги — уже обновлённым установщиком: новые шаблоны и новый код шагов. Исходная локаль — для значков.
+full_update_reexec() {
+  ui_info "Код обновлён — дальше работает обновлённый install.sh"
+  exec env LC_ALL="$MENU_USER_LC_ALL" LANG="$MENU_USER_LANG" \
+    "${BASH:-bash}" "$INSTALL_DIR/install.sh" --update -y --update-resume="$FU_STATE"
+}

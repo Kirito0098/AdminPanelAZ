@@ -19,6 +19,8 @@ UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 BACKUP_CLI="$ROOT_DIR/scripts/backup-cli.py"
 SITE_DIAGNOSTICS="$ROOT_DIR/scripts/site-diagnostics.sh"
 PANEL_UPDATE_CHANGED=false
+# true — только git (полное обновление, scripts/full-update.sh): pip, интерфейс и unit'ы оно делает своими шагами.
+PANEL_UPDATE_CODE_ONLY=false
 PANEL_LAST_BACKUP=""
 MENU_CHOICE=""
 MENU_AGENT=""
@@ -679,7 +681,7 @@ panel_update() {
       ui_info "Локальных коммитов, которых нет в $ref: $ahead"
     fi
     # Так досборка доходит до обновившихся меню 2.25.1: оно делало git pull без сборки интерфейса.
-    if frontend_build_stale; then
+    if [[ "$PANEL_UPDATE_CODE_ONLY" != true ]] && frontend_build_stale; then
       ui_warn "Интерфейс собран до последнего обновления кода"
       if ! panel_build_frontend; then
         panel_frontend_manual_hint
@@ -716,6 +718,9 @@ panel_update() {
   fi
   ui_ok "Код обновлён"
   PANEL_UPDATE_CHANGED=true
+  if [[ "$PANEL_UPDATE_CODE_ONLY" == true ]]; then
+    return 0
+  fi
 
   # bash выполняет версию меню, прочитанную до git pull: остальные шаги — уже обновлённым скриптом.
   local menu="$INSTALL_DIR/scripts/adminpanel-menu.sh"
