@@ -7,6 +7,7 @@ set -euo pipefail
 # Локаль пользователя запоминается до переключения на C.UTF-8: её получает sudo, по ней выбираются значки.
 MENU_USER_LC_ALL="${LC_ALL-}"
 MENU_USER_LANG="${LANG-}"
+MENU_USER_LOCALE="${LC_ALL:-${LC_CTYPE:-${LANG:-}}}"
 export LC_ALL="${LC_ALL:-C.UTF-8}"
 export LANG="${LANG:-C.UTF-8}"
 
@@ -17,18 +18,129 @@ VENV_PATH="${VENV_PATH:-$ROOT_DIR/backend/.venv}"
 UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 BACKUP_CLI="$ROOT_DIR/scripts/backup-cli.py"
 SITE_DIAGNOSTICS="$ROOT_DIR/scripts/site-diagnostics.sh"
+MENU_CHOICE=""
+MENU_CODE=""
+MENU_PANEL_STATE=""
+MENU_HEALTH=""
+MENU_URL=""
+MENU_AGENT_UNITS=()
+MENU_AGENT_STATES=()
 
-GREEN=$(printf '\033[0;32m')
-YELLOW=$(printf '\033[1;33m')
-RED=$(printf '\033[0;31m')
-CYAN=$(printf '\033[0;36m')
-NC=$(printf '\033[0m')
+# Цвет (no-color.org): только если stdout — терминал, NO_COLOR пуст и TERM не dumb.
+C_OK="" C_WARN="" C_ERR="" C_INFO="" C_DIM="" C_BOLD="" C_RESET=""
+if [[ -z "${NO_COLOR:-}" && "${TERM:-}" != dumb && -t 1 ]]; then
+  C_OK=$'\033[32m'
+  C_WARN=$'\033[33m'
+  C_ERR=$'\033[31m'
+  C_INFO=$'\033[36m'
+  C_DIM=$'\033[2m'
+  C_BOLD=$'\033[1m'
+  C_RESET=$'\033[0m'
+fi
 
-ui_ok() { printf "  ${GREEN}✓${NC}  %s\n" "$*"; }
-ui_warn() { printf "  ${YELLOW}!${NC}  %s\n" "$*" >&2; }
-ui_fail() { printf "  ${RED}✗${NC}  %s\n" "$*" >&2; }
-ui_info() { printf "  ${CYAN}i${NC}  %s\n" "$*"; }
-ui_section() { printf "\n${CYAN}── %s ──${NC}\n" "$*"; }
+case "${MENU_USER_LOCALE,,}" in
+  *utf-8* | *utf8*)
+    G_OK="✓" G_WARN="!" G_ERR="✗" G_INFO="i" MENU_DOT="·" MENU_ELLIPSIS="…"
+    ;;
+  *)
+    G_OK="[ok]" G_WARN="[!]" G_ERR="[x]" G_INFO="[i]" MENU_DOT="-" MENU_ELLIPSIS="..."
+    ;;
+esac
+
+ui_ok() { printf '  %s%s%s  %s\n' "$C_OK" "$G_OK" "$C_RESET" "$*"; }
+ui_warn() { printf '  %s%s%s  %s\n' "$C_WARN" "$G_WARN" "$C_RESET" "$*" >&2; }
+ui_fail() { printf '  %s%s%s  %s\n' "$C_ERR" "$G_ERR" "$C_RESET" "$*" >&2; }
+ui_info() { printf '  %s%s%s  %s\n' "$C_INFO" "$G_INFO" "$C_RESET" "$*"; }
+ui_section() { printf '\n%s%s%s\n' "$C_BOLD" "$*" "$C_RESET"; }
+
+# Ширина терминала: COLUMNS, иначе tput cols, иначе 80. Уже 40 колонок не считаем — строки просто переносятся.
+menu_cols() {
+  local cols="${COLUMNS:-}"
+  [[ "$cols" =~ ^[1-9][0-9]*$ ]] || cols="$(tput cols 2>/dev/null)" || cols=""
+  [[ "$cols" =~ ^[1-9][0-9]*$ ]] || cols=80
+  ((cols >= 40)) || cols=40
+  printf '%s' "$cols"
+}
+
+# menu_fit <текст> <ширина>: длинный текст обрезается, последним ставится многоточие.
+menu_fit() {
+  local text="$1" width="$2"
+  if ((${#text} <= width)); then
+    printf '%s' "$text"
+  else
+    printf '%s%s' "${text:0:$((width - ${#MENU_ELLIPSIS}))}" "$MENU_ELLIPSIS"
+  fi
+}
+
+# clear -x сохраняет историю прокрутки; в старых ncurses ключа -x нет. Вне терминала экран не чистим.
+menu_clear() {
+  [[ -t 1 && "${TERM:-dumb}" != dumb ]] || return 0
+  clear -x 2>/dev/null || printf '\033[H\033[2J'
+}
+
+menu_item() { printf '  %s  %s\n' "$1" "$2"; }
+
+# menu_screen <заголовок> <пункт 0> <пункты…>: экран подменю.
+menu_screen() {
+  local title="$1" zero="$2" i
+  shift 2
+  menu_clear
+  printf '%s%s%s\n\n' "$C_BOLD" "$title" "$C_RESET"
+  for ((i = 1; i <= $#; i++)); do
+    menu_item "$i" "${!i}"
+  done
+  printf '\n'
+  menu_item 0 "$zero"
+}
+
+# menu_read <последний номер> <что делает q>: ответ в MENU_CHOICE; q и конец ввода — 0.
+menu_read() {
+  printf 'Выберите [0-%s, q — %s]: ' "$1" "$2"
+  if ! read -r MENU_CHOICE; then
+    MENU_CHOICE=0
+    printf '\n'
+  fi
+  if [[ "$MENU_CHOICE" == [qQ] ]]; then
+    MENU_CHOICE=0
+  fi
+}
+
+menu_valid_choice() {
+  [[ "$MENU_CHOICE" =~ ^[1-9][0-9]*$ ]] && ((MENU_CHOICE <= $1))
+}
+
+menu_invalid() {
+  ui_warn "Неверный выбор"
+  sleep 1
+}
+
+# menu_confirm <вопрос> <y|n>: Enter — ответ по умолчанию (второй аргумент), конец ввода — «нет».
+menu_confirm() {
+  local answer hint="[y/N]"
+  if [[ "$2" == y ]]; then
+    hint="[Y/n]"
+  fi
+  printf '  %s %s: ' "$1" "$hint"
+  if ! read -r answer; then
+    printf '\n'
+    return 1
+  fi
+  case "${answer,,}" in
+    "") [[ "$2" == y ]] ;;
+    y | yes | д | да) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+menu_state_word() {
+  local color="$C_DIM"
+  case "$1" in
+    работает | отвечает) color="$C_OK" ;;
+    остановлен | запускается) color="$C_WARN" ;;
+    ошибка | "не отвечает") color="$C_ERR" ;;
+  esac
+  printf '%s%s%s' "$color" "$1" "$C_RESET"
+}
 
 _m_border() {
   printf -- '-%.0s' $(seq 1 58)
@@ -51,7 +163,7 @@ _m_item() {
 press_any_key() {
   if [[ -t 0 ]]; then
     printf "\n"
-    read -r -p "  Нажмите Enter…" _ || true
+    read -r -p "  Нажмите Enter, чтобы вернуться" _ || true
   fi
 }
 
@@ -101,6 +213,222 @@ _menu_python() {
     command -v python3
     return 0
   fi
+  return 1
+}
+
+# Значение из backend/.env: последнее присваивание (как читает панель), без кавычек; пусто — нет файла или ключа.
+_menu_env_get() {
+  local file="$INSTALL_DIR/backend/.env" line val
+  [[ -r "$file" ]] || return 0
+  line="$(grep -E "^$1=" "$file" 2>/dev/null | tail -1)" || true
+  val="${line#*=}"
+  val="${val%$'\r'}"
+  if [[ "${#val}" -ge 2 && ( "$val" == \"*\" || "$val" == \'*\' ) ]]; then
+    val="${val:1:-1}"
+  fi
+  printf '%s' "$val"
+}
+
+_menu_env_true() {
+  case "${1,,}" in
+    1 | true | yes | on) return 0 ;;
+  esac
+  return 1
+}
+
+# ACCESS_PATH как normalize_access_path (backend/app/services/panel_paths.py): "" или "/a/b".
+_menu_access_path() {
+  local seg out=""
+  local -a segs=()
+  IFS=/ read -ra segs <<<"$(_menu_env_get ACCESS_PATH)"
+  for seg in "${segs[@]}"; do
+    seg="${seg//[[:space:]]/}"
+    if [[ -n "$seg" ]]; then
+      out+="/$seg"
+    fi
+  done
+  printf '%s' "$out"
+}
+
+_menu_backend_port() {
+  local port
+  port="$(_menu_env_get BACKEND_PORT)"
+  [[ -n "$port" ]] || port="$(_menu_env_get APP_PORT)"
+  printf '%s' "${port:-8000}"
+}
+
+_menu_uvicorn_https() {
+  local cert
+  cert="$(_menu_env_get SSL_CERT)"
+  _menu_env_true "$(_menu_env_get USE_HTTPS)" && [[ -n "${cert//[[:space:]]/}" ]]
+}
+
+# Как _health_probe_url в backend/app/services/site_diagnostics.py.
+panel_health_url() {
+  local scheme=http
+  if _menu_uvicorn_https; then
+    scheme=https
+  fi
+  printf '%s://127.0.0.1:%s%s/api/health\n' "$scheme" "$(_menu_backend_port)" "$(_menu_access_path)"
+}
+
+panel_health_ok() {
+  local url
+  local -a opts=(-fsS -m 2 -o /dev/null)
+  url="$(panel_health_url)"
+  if [[ "$url" == https://* ]]; then
+    opts+=(-k)
+  fi
+  curl "${opts[@]}" "$url" >/dev/null 2>&1
+}
+
+panel_health_state() {
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "неизвестно"
+  elif panel_health_ok; then
+    echo "отвечает"
+  else
+    echo "не отвечает"
+  fi
+}
+
+# Адрес для браузера: домен за nginx — https и HTTPS_PUBLIC_PORT; иначе порт backend; без домена — IP сервера.
+panel_public_url() {
+  local host scheme=http port note=""
+  host="$(_menu_env_get DOMAIN)"
+  host="${host//[[:space:]]/}"
+  host="${host%%:*}"
+  port="$(_menu_backend_port)"
+  if [[ -n "$host" ]] && _menu_env_true "$(_menu_env_get BEHIND_NGINX)"; then
+    scheme=https
+    port="$(_menu_env_get HTTPS_PUBLIC_PORT)"
+    port="${port:-443}"
+  else
+    if _menu_uvicorn_https; then
+      scheme=https
+    fi
+    if [[ -z "$host" ]]; then
+      case "$(_menu_env_get BACKEND_HOST)" in
+        127.0.0.1 | localhost | ::1)
+          host=127.0.0.1
+          note=" (только с этого сервера)"
+          ;;
+        *)
+          host="$(hostname -I 2>/dev/null | awk '{ print $1 }')" || true
+          host="${host:-<IP сервера>}"
+          ;;
+      esac
+    fi
+  fi
+  if [[ "$scheme:$port" == https:443 || "$scheme:$port" == http:80 ]]; then
+    port=""
+  else
+    port=":$port"
+  fi
+  printf '%s://%s%s%s/%s\n' "$scheme" "$host" "$port" "$(_menu_access_path)" "$note"
+}
+
+# systemctl может ждать D-Bus десятки секунд — шапка меню ждать не должна.
+_menu_unit_state() {
+  local state
+  state="$(timeout 3 systemctl is-active "$1" 2>/dev/null)" || true
+  case "$state" in
+    active) echo "работает" ;;
+    inactive) echo "остановлен" ;;
+    failed) echo "ошибка" ;;
+    activating | reloading) echo "запускается" ;;
+    *) echo "неизвестно" ;;
+  esac
+}
+
+menu_code_line() {
+  local version commit branch
+  version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$INSTALL_DIR/frontend/package.json" 2>/dev/null \
+    | head -1)" || true
+  commit="$(timeout 3 git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null)" || true
+  branch="$(timeout 3 git -C "$INSTALL_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null)" || true
+  printf 'AdminPanelAZ %s %s %s @ %s' "${version:-неизвестно}" "$MENU_DOT" "${branch:-неизвестно}" "${commit:-неизвестно}"
+}
+
+# menu_probe <panel|agent|both>: пробы для шапки, результат — в переменных MENU_*.
+menu_probe() {
+  local unit
+  MENU_CODE="$(menu_code_line)"
+  MENU_PANEL_STATE=""
+  MENU_HEALTH=""
+  MENU_URL=""
+  MENU_AGENT_UNITS=()
+  MENU_AGENT_STATES=()
+  if [[ "$1" == panel || "$1" == both ]]; then
+    MENU_PANEL_STATE="$(_menu_unit_state "$SERVICE_NAME")"
+    MENU_HEALTH="$(panel_health_state)"
+    MENU_URL="$(panel_public_url)"
+  fi
+  if [[ "$1" == agent || "$1" == both ]]; then
+    mapfile -t MENU_AGENT_UNITS < <(menu_agent_units)
+    for unit in "${MENU_AGENT_UNITS[@]}"; do
+      MENU_AGENT_STATES+=("$(_menu_unit_state "$unit")")
+    done
+  fi
+}
+
+# menu_header <panel|agent|both>: шапка по результатам menu_probe; адрес и ветка@коммит — по ширине терминала.
+menu_header() {
+  local width i agents=""
+  width="$(menu_cols)"
+  printf '%s%s%s\n' "$C_BOLD" "$(menu_fit "$MENU_CODE" "$width")" "$C_RESET"
+  if [[ "$1" == panel || "$1" == both ]]; then
+    printf '  Панель   %s %s health %s\n' "$(menu_state_word "$MENU_PANEL_STATE")" "$MENU_DOT" \
+      "$(menu_state_word "$MENU_HEALTH")"
+    printf '  Адрес    %s\n' "$(menu_fit "$MENU_URL" $((width - 11)))"
+  fi
+  if [[ "$1" == agent || "$1" == both ]]; then
+    for i in "${!MENU_AGENT_UNITS[@]}"; do
+      agents+="${agents:+ $MENU_DOT }$(menu_state_word "${MENU_AGENT_STATES[i]}") (${MENU_AGENT_UNITS[i]#adminpanelaz-})"
+    done
+    printf '  Агент    %s\n' "$agents"
+  fi
+}
+
+# Всё установленное работает: панель — сервис и health, агенты — active.
+menu_probe_ok() {
+  local state
+  if [[ -n "$MENU_PANEL_STATE" ]]; then
+    [[ "$MENU_PANEL_STATE" == работает && "$MENU_HEALTH" == отвечает ]] || return 1
+  fi
+  for state in "${MENU_AGENT_STATES[@]}"; do
+    [[ "$state" == работает ]] || return 1
+  done
+}
+
+menu_status() {
+  local mode
+  mode="$(menu_mode)"
+  if [[ "$mode" == none ]]; then
+    printf '%s\n' "$(menu_fit "$(menu_code_line)" "$(menu_cols)")"
+    printf '  Панель   не установлена через systemd\n'
+    return 1
+  fi
+  menu_probe "$mode"
+  menu_header "$mode"
+  menu_probe_ok
+}
+
+panel_wait_health() {
+  local i start="$SECONDS"
+  ui_info "Ожидание ответа панели (до 30 с)…"
+  for ((i = 0; i <= 15; i++)); do
+    if panel_health_ok; then
+      ui_ok "Панель запущена и отвечает"
+      return 0
+    fi
+    if ((i == 15 || SECONDS - start >= 30)); then
+      break
+    fi
+    sleep 2
+  done
+  ui_fail "Панель не ответила за 30 с"
+  ui_info "Причина — в меню: 2 Журнал → 3 Только ошибки; 3 Диагностика сайта"
   return 1
 }
 
@@ -535,6 +863,7 @@ Ops-меню сервера без веб-интерфейса (не масте�
 (--node-only / --proxy-only) — меню агента. Без root меню перезапускается через sudo.
 
 Опции:
+  --status               Состояние: версия, сервис, health, адрес (без root, если хватает прав)
   --restart              Перезапустить панель (systemctl restart adminpanelaz)
   --update               git fetch + fast-forward из upstream текущей ветки (main без upstream —
                          origin/main) + pip + сборка интерфейса (если есть обновления
@@ -548,12 +877,17 @@ Ops-меню сервера без веб-интерфейса (не масте�
 
 Коды выхода:
   0    успех
-  1    ошибка действия
+  1    ошибка действия; для --status — панель или агент не работает
   2    неверный аргумент или меню без терминала
   130  прервано Ctrl+C
 
 Установка / переустановка: sudo ./install.sh
 EOF
+}
+
+# Без прав на чтение backend/.env --status не узнает порт health и адрес — тогда через sudo.
+_menu_can_read() {
+  [[ ! -e "$1" || -r "$1" ]]
 }
 
 main() {
@@ -565,6 +899,13 @@ main() {
     --after-pull)
       # Шаг panel_update, уже запущенного от root: повторный sudo сбросил бы INSTALL_DIR, VENV_PATH и PATH.
       panel_after_pull
+      return
+      ;;
+    --status)
+      if ! _menu_can_read "$INSTALL_DIR/backend/.env"; then
+        menu_ensure_root "$@"
+      fi
+      menu_status
       return
       ;;
     --restart | --update | --backup | --diagnose | --disable-ip-whitelist) ;;
