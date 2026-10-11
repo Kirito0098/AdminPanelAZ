@@ -501,5 +501,16 @@ echo "[test] --update в справке и в шапке install.sh"
 grep -qE '^  --update +Полное обновление' "$ROOT_DIR/scripts/install-ui.sh" \
   && grep -qE '^#   --update +полное обновление' "$ROOT_DIR/install.sh" && ok "справка" || bad "--update нет в справке"
 
+echo "[test] меню: «Полное обновление» спрашивает [y/N]; n и конец ввода — ничего; y — install.sh --update -y"
+with_units adminpanelaz.service
+run 'n\n' 'menu_full_update'
+[[ "$(calls)" == "" ]] && grep -qF "Запустить полное обновление? [y/N]:" "$TMP/out" && ok "n — отмена" \
+  || bad "вызовы: $(calls); $(cat "$TMP/out")"
+run '' 'menu_full_update'
+[[ "$(calls)" == "" ]] && ok "конец ввода — отмена" || bad "вызовы: $(calls)"
+run 'y\n' 'menu_full_update'
+[[ "$(calls)" == "install.sh --update -y LC_ALL= LANG=C.UTF-8;" ]] && ok "y — install.sh --update -y в исходной локали" \
+  || bad "вызовы: $(calls); $(cat "$TMP/out")"
+
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]

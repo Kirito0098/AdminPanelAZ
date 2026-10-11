@@ -58,7 +58,7 @@ run() {
 
 calls() { tr '\n' ';' <"$CALLS"; }
 # Действия меню агента — заглушки, которые записывают, с каким агентом их вызвали.
-STUBS='for fn in agent_update agent_restart agent_mtls_check unit_status menu_logs; do
+STUBS='for fn in agent_update agent_restart agent_mtls_check unit_status menu_logs menu_full_update; do
     eval "$fn() { echo \"$fn \$*\" >>\"\$CALLS\"; }"
   done; '
 
@@ -67,13 +67,13 @@ with_units adminpanelaz-node.service
 run '' 'main_menu() { echo "MAIN MENU"; }; menu_agent() { echo "AGENT MENU $*"; }; menu_start'
 grep -q "AGENT MENU top" "$TMP/out" && ! grep -q "MAIN MENU" "$TMP/out" && ok "menu_agent top" || bad "вывод: $(cat "$TMP/out")"
 
-echo "[test] один агент: пункты 1–5 без вопроса «какой»"
-run '1\n2\n3\n4\n5\n0\n' "$STUBS"'menu_agent; echo "back"'
-[[ "$(calls)" == "agent_update adminpanelaz-node;menu_logs adminpanelaz-node;agent_mtls_check ;agent_restart adminpanelaz-node;unit_status adminpanelaz-node;" ]] \
-  && ok "1–5 для node" || bad "вызовы: $(calls)"
+echo "[test] один агент: пункты 1–5 без вопроса «какой», 6 — полное обновление"
+run '1\n2\n3\n4\n5\n6\n0\n' "$STUBS"'menu_agent; echo "back"'
+[[ "$(calls)" == "agent_update adminpanelaz-node;menu_logs adminpanelaz-node;agent_mtls_check ;agent_restart adminpanelaz-node;unit_status adminpanelaz-node;menu_full_update ;" ]] \
+  && ok "1–6 для node" || bad "вызовы: $(calls)"
 ! grep -q "Какой агент" "$TMP/out" && ok "без вопроса" || bad "вывод: $(cat "$TMP/out")"
 grep -q "back" "$TMP/out" && grep -qx "  0  Назад" "$TMP/out" && ok "0 — назад" || bad "вывод: $(cat "$TMP/out")"
-grep -qF "Выберите [0-5, q — назад]: " "$TMP/out" && ok "приглашение" || bad "вывод: $(cat "$TMP/out")"
+grep -qF "Выберите [0-6, q — назад]: " "$TMP/out" && ok "приглашение" || bad "вывод: $(cat "$TMP/out")"
 
 echo "[test] два агента: 1/2/4/5 спрашивают, какой; 3 — нет"
 with_units adminpanelaz-node.service adminpanelaz-proxy.service
@@ -137,7 +137,11 @@ echo "[test] панель и агент: пункт 9 «Агент узла» о
 with_units adminpanelaz.service adminpanelaz-node.service
 run '9\nq\n' 'menu_agent() { echo "agent_menu $*" >>"$CALLS"; }; main_menu both'
 [[ "$rc" -eq 0 && "$(calls)" == "agent_menu ;" ]] && ok "пункт 9" || bad "код $rc, вызовы: $(calls)"
-grep -qF "Выберите [0-9, q — выход]: " "$TMP/out" && ok "приглашение [0-9]" || bad "вывод: $(cat "$TMP/out")"
+grep -qF "Выберите [0-10, q — выход]: " "$TMP/out" && ok "приглашение [0-10]" || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] панель и агент: пункт 10 — полное обновление"
+run '10\nq\n' 'menu_full_update() { echo "full_update" >>"$CALLS"; }; main_menu both'
+[[ "$rc" -eq 0 && "$(calls)" == "full_update;" ]] && ok "пункт 10" || bad "код $rc, вызовы: $(calls)"
 
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]

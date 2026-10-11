@@ -803,6 +803,18 @@ panel_update_interactive() {
   panel_offer_restart
 }
 
+# Полное обновление — режим install.sh: кроме кода заново пакеты, unit'ы, nginx, firewall и DDNS, свой итог по шагам.
+menu_full_update() {
+  ui_section "Полное обновление (код + конфигурация сервера)"
+  ui_info "Бэкап, код из git, пакеты apt, Python, интерфейс, unit'ы systemd, nginx, firewall, DDNS и перезапуск — по текущим настройкам"
+  ui_info "База, backend/.env, сертификаты и mTLS не меняются"
+  if ! menu_confirm "Запустить полное обновление?" n; then
+    ui_info "Полное обновление отменено"
+    return 0
+  fi
+  LC_ALL="$MENU_USER_LC_ALL" LANG="$MENU_USER_LANG" "${BASH:-bash}" "$INSTALL_DIR/install.sh" --update -y
+}
+
 panel_backup() {
   require_root
   local py
@@ -982,20 +994,23 @@ menu_render_main() {
   menu_item 8 "Аварийно: nginx, белый список IP"
   if [[ "$1" == both ]]; then
     menu_item 9 "Агент узла"
+    menu_item 10 "Полное обновление (код + конфигурация сервера)"
+  else
+    menu_item 9 "Полное обновление (код + конфигурация сервера)"
   fi
   printf '\n'
   menu_item 0 "Выход"
 }
 
 main_menu() {
-  local mode="${1:-panel}" last=8
+  local mode="${1:-panel}" full=9
   if [[ "$mode" == both ]]; then
-    last=9
+    full=10
   fi
   while true; do
     menu_probe_screen "$mode"
     menu_render_main "$mode"
-    menu_read "$last" выход
+    menu_read "$full" выход
     case "$MENU_CHOICE" in
       1) menu_action panel_update_interactive ;;
       2) menu_logs "$SERVICE_NAME" ;;
@@ -1005,13 +1020,8 @@ main_menu() {
       6) menu_backups ;;
       7) menu_action panel_reset_password ;;
       8) menu_emergency ;;
-      9)
-        if [[ "$mode" == both ]]; then
-          menu_agent
-        else
-          menu_invalid
-        fi
-        ;;
+      "$full") menu_action menu_full_update ;;
+      9) menu_agent ;;
       0) exit 0 ;;
       *) menu_invalid ;;
     esac
@@ -1125,6 +1135,7 @@ menu_render_agent() {
   menu_item 3 "Проверка mTLS"
   menu_item 4 "Перезапустить агент"
   menu_item 5 "Статус"
+  menu_item 6 "Полное обновление (код + конфигурация сервера)"
   printf '\n'
   menu_item 0 "$1"
 }
@@ -1139,13 +1150,14 @@ menu_agent() {
   while true; do
     menu_probe_screen agent
     menu_render_agent "$zero"
-    menu_read 5 "$quit"
+    menu_read 6 "$quit"
     case "$MENU_CHOICE" in
       1) if menu_pick_agent; then menu_action agent_update "$MENU_AGENT"; fi ;;
       2) if menu_pick_agent; then menu_logs "$MENU_AGENT"; fi ;;
       3) menu_action agent_mtls_check ;;
       4) if menu_pick_agent; then menu_action agent_restart "$MENU_AGENT"; fi ;;
       5) if menu_pick_agent; then menu_action unit_status "$MENU_AGENT"; fi ;;
+      6) menu_action menu_full_update ;;
       0)
         if [[ "$zero" == Выход ]]; then
           exit 0

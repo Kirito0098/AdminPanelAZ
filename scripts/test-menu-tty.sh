@@ -76,7 +76,7 @@ grep -q "Обновить и перезапустить" "$TMP/out" && ! grep -q
 
 echo "[test] Ctrl+C в главном меню — код 130 и перевод строки"
 press_ctrl_c_at_menu() {
-  wait_for "$TMP/out" "Выберите [0-8"
+  wait_for "$TMP/out" "Выберите [0-9"
   printf '\003'
   sleep 1
 }
@@ -89,7 +89,7 @@ pty press_ctrl_c_at_menu 'menu_start' TERM=xterm NO_COLOR=1
 echo "[test] Ctrl+C в журнале реального времени — назад в меню, меню работает дальше"
 rm -f "$TMP/following"
 follow_then_ctrl_c() {
-  wait_for "$TMP/out" "Выберите [0-8"
+  wait_for "$TMP/out" "Выберите [0-9"
   printf '2\n'
   wait_for "$TMP/out" "Последние 50 строк"
   printf '2\n'
@@ -99,7 +99,7 @@ follow_then_ctrl_c() {
   printf '\n'
   wait_for "$TMP/out" "Последние 50 строк" 2
   printf '0\n'
-  wait_for "$TMP/out" "Выберите [0-8" 2
+  wait_for "$TMP/out" "Выберите [0-9" 2
   printf 'q\n'
   sleep 1
 }

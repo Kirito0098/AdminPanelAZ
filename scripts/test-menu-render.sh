@@ -163,6 +163,7 @@ AdminPanelAZ 2.26.4 · feature/console-menu-redesign @ cef39ac
   6  Бэкап и восстановление
   7  Сброс пароля / 2FA
   8  Аварийно: nginx, белый список IP
+  9  Полное обновление (код + конфигурация сервера)
 
   0  Выход
 EOF
@@ -183,21 +184,22 @@ AdminPanelAZ 2.26.4 · feature/console-menu-redesign @ cef39…
   6  Бэкап и восстановление
   7  Сброс пароля / 2FA
   8  Аварийно: nginx, белый список IP
+  9  Полное обновление (код + конфигурация сервера)
 
   0  Выход
 EOF
 
-echo "[test] пункты главного меню вызывают свои действия; 9 без агента — неверный выбор; q — выход"
+echo "[test] пункты главного меню вызывают свои действия; 9 — полное обновление; 10 без агента — неверный выбор; q — выход"
 STUBS='
   for fn in panel_update_interactive panel_diagnose panel_restart_and_wait panel_reset_password \
-    menu_logs menu_services menu_backups menu_emergency menu_agent; do
+    menu_logs menu_services menu_backups menu_emergency menu_agent menu_full_update; do
     eval "$fn() { echo \"$fn \$*\" >>\"\$CALLS\"; }"
   done'
-render 80 "$STUBS"'; main_menu panel <<<"$(printf "%s\n" 1 2 3 4 5 6 7 8 9 q)"'
+render 80 "$STUBS"'; main_menu panel <<<"$(printf "%s\n" 1 2 3 4 5 6 7 8 9 10 q)"'
 [[ "$rc" -eq 0 ]] && ok "код 0" || bad "код $rc"
-[[ "$(tr '\n' ';' <"$CALLS")" == "panel_update_interactive ;menu_logs adminpanelaz;panel_diagnose ;panel_restart_and_wait ;menu_services ;menu_backups ;panel_reset_password ;menu_emergency ;" ]] \
-  && ok "1–8" || bad "вызовы: $(tr '\n' ';' <"$CALLS")"
-grep -q "Неверный выбор" "$TMP/out" && ok "9 — неверный выбор" || bad "вывод: $(cat "$TMP/out")"
+[[ "$(tr '\n' ';' <"$CALLS")" == "panel_update_interactive ;menu_logs adminpanelaz;panel_diagnose ;panel_restart_and_wait ;menu_services ;menu_backups ;panel_reset_password ;menu_emergency ;menu_full_update ;" ]] \
+  && ok "1–9" || bad "вызовы: $(tr '\n' ';' <"$CALLS")"
+grep -q "Неверный выбор" "$TMP/out" && ok "10 — неверный выбор" || bad "вывод: $(cat "$TMP/out")"
 grep -q "Проверка состояния…" "$TMP/out" && ok "строка проб перед шапкой" || bad "нет строки проб"
 
 echo "[test] «Аварийно»: восстановить nginx, отключить белый список IP"
@@ -229,6 +231,7 @@ AdminPanelAZ 2.26.4 · feature/console-menu-redesign @ cef39ac
   7  Сброс пароля / 2FA
   8  Аварийно: nginx, белый список IP
   9  Агент узла
+  10  Полное обновление (код + конфигурация сервера)
 
   0  Выход
 EOF
@@ -245,6 +248,7 @@ AdminPanelAZ 2.26.4 · feature/console-menu-redesign @ cef39…
   3  Проверка mTLS
   4  Перезапустить агент
   5  Статус
+  6  Полное обновление (код + конфигурация сервера)
 
   0  Выход
 EOF
