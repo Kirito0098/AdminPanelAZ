@@ -312,6 +312,8 @@ class Node(Base):
     openvpn_multihome: Mapped[bool] = mapped_column(Boolean, default=False)
     # HA replica got a new OpenVPN server identity on disk; running servers still use the old one.
     openvpn_restart_pending: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Built-in client templates were added once; templates deleted later are not re-created.
+    client_templates_seeded: Mapped[bool] = mapped_column(Boolean, default=False)
     # Key age for automatic rotation; updated_at moves on every health check.
     api_key_rotated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

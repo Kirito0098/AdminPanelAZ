@@ -1028,20 +1028,21 @@ def _seed_client_templates_for_nodes() -> None:
     Session = sessionmaker(bind=engine)
     db = Session()
     try:
-        nodes = db.query(Node).all()
-        for node in nodes:
-            existing = db.query(ClientTemplate).filter(ClientTemplate.node_id == node.id).count()
-            if existing:
-                continue
-            for item in builtins:
-                db.add(
-                    ClientTemplate(
-                        node_id=node.id,
-                        is_builtin=True,
-                        description_template=None,
-                        **item,
+        for node in db.query(Node).filter(Node.client_templates_seeded.is_(False)).all():
+            has_templates = (
+                db.query(ClientTemplate.id).filter(ClientTemplate.node_id == node.id).first() is not None
+            )
+            if not has_templates:
+                for item in builtins:
+                    db.add(
+                        ClientTemplate(
+                            node_id=node.id,
+                            is_builtin=True,
+                            description_template=None,
+                            **item,
+                        )
                     )
-                )
+            node.client_templates_seeded = True
         db.commit()
     finally:
         db.close()
@@ -1629,6 +1630,7 @@ def _migrate_nodes_columns() -> None:
     _migrate_nodes_proxy_fields()
     _migrate_nodes_portal_label()
     _migrate_nodes_api_key_pending()
+    _migrate_nodes_client_templates_seeded()
 
 
 def _run_db_migrations() -> None:
@@ -1993,6 +1995,19 @@ def _migrate_nodes_api_key_pending() -> None:
     with _migration_transaction() as conn:
         conn.execute(text("ALTER TABLE nodes ADD COLUMN api_key_pending_encrypted VARCHAR(512) NOT NULL DEFAULT ''"))
         logger.info("DB migration: added nodes.api_key_pending_encrypted")
+
+
+def _migrate_nodes_client_templates_seeded() -> None:
+    """Add per-node marker: built-in client templates already seeded."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    if "client_templates_seeded" in cols:
+        return
+    with _migration_transaction() as conn:
+        conn.execute(text("ALTER TABLE nodes ADD COLUMN client_templates_seeded INTEGER DEFAULT 0"))
+        logger.info("DB migration: added nodes.client_templates_seeded")
 
 
 def _migrate_qr_download_tokens_columns() -> None:
