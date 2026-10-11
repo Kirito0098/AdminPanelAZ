@@ -132,10 +132,12 @@ def cmd_create(args: argparse.Namespace) -> int:
     if not args.keep_running:
         _service_control("stop", install_dir=install_dir, allow_failure=True)
     try:
+        retention = len(manager.list_backups()) + 1 if args.no_prune else 5
         result = manager.create_backup(
             include_configs=args.include_configs,
             config_contents=_load_config_contents(args.include_configs, install_dir=install_dir),
             awg2_archive=_load_awg2_archive(args.include_awg2),
+            retention=retention,
         )
         print(result.get("file_path", result.get("file_name", "")))
         return 0
@@ -145,6 +147,18 @@ def cmd_create(args: argparse.Namespace) -> int:
     finally:
         if not args.keep_running:
             _service_control("start", install_dir=install_dir, allow_failure=True)
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    try:
+        backups = _build_manager(os.path.abspath(args.install_dir)).list_backups()
+    except Exception as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    for item in backups:
+        fields = (item["file_name"], item["created_at"], str(item["size_bytes"]), ",".join(item["components"]))
+        print("\t".join(fields))
+    return 0
 
 
 def cmd_restore(args: argparse.Namespace) -> int:
@@ -205,7 +219,15 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Не останавливать панель перед бэкапом",
     )
+    create_parser.add_argument(
+        "--no-prune",
+        action="store_true",
+        help="Не удалять старые архивы (по умолчанию после бэкапа остаются 5 последних)",
+    )
     create_parser.set_defaults(func=cmd_create)
+
+    list_parser = subparsers.add_parser("list", help="Список архивов: имя, дата, размер, состав (новые сверху)")
+    list_parser.set_defaults(func=cmd_list)
 
     restore_parser = subparsers.add_parser("restore", help="Восстановить из бэкапа")
     restore_parser.add_argument(
