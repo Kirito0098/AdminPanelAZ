@@ -155,7 +155,7 @@ def cmd_restore(args: argparse.Namespace) -> int:
     try:
         from app.services.client_portal import sync_portal_domain_after_restore
 
-        payload = manager.load_restore_payload(args.backup_name)
+        payload = manager.load_restore_payload(args.backup_name, allow_absolute_path=True)
         result = manager.apply_restore_payload(payload)
         apply_backup_overlays(payload, mode="local", config_root=config_root)
         portal = sync_portal_domain_after_restore(

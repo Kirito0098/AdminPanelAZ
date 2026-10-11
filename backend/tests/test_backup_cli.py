@@ -35,7 +35,7 @@ def test_cli_restore_applies_sqlite_then_local_overlays(tmp_path, monkeypatch, c
         db_path = install_dir / "backend" / "data" / "adminpanel.db"
         env_path = install_dir / "backend" / ".env"
 
-        def load_restore_payload(self, name):
+        def load_restore_payload(self, name, *, allow_absolute_path=False):
             order.append("load")
             return payload
 
@@ -70,7 +70,7 @@ def test_cli_restore_sqlite_failure_still_starts(tmp_path, monkeypatch):
     order: list[str] = []
 
     class Mgr:
-        def load_restore_payload(self, name):
+        def load_restore_payload(self, name, *, allow_absolute_path=False):
             raise HTTPException(status_code=400, detail="нет архива")
 
         def apply_restore_payload(self, data):
@@ -91,3 +91,32 @@ def test_cli_include_configs_help_mentions_antizapret_path(capsys):
         assert exc.code == 0
     out = capsys.readouterr().out
     assert "ANTIZAPRET_PATH" in out
+
+
+def test_cli_restore_allows_absolute_archive_path(tmp_path, monkeypatch):
+    module = _load_cli()
+    seen: list[tuple[str, bool]] = []
+
+    class Mgr:
+        db_path = tmp_path / "adminpanel.db"
+        env_path = tmp_path / ".env"
+
+        def load_restore_payload(self, name, *, allow_absolute_path=False):
+            seen.append((name, allow_absolute_path))
+            return {"restored": ["db"], "file_name": name, "configs": {}, "_files": {}}
+
+        def apply_restore_payload(self, data):
+            return {"file_name": data["file_name"], "restored": data["restored"]}
+
+    monkeypatch.setattr(module, "_build_manager", lambda _install: Mgr())
+    monkeypatch.setattr(module, "_service_control", lambda action, **kw: None)
+    monkeypatch.setattr(module, "apply_backup_overlays", lambda data, mode, db=None, config_root=None: None)
+    monkeypatch.setattr(
+        "app.services.client_portal.sync_portal_domain_after_restore",
+        lambda **_kw: {},
+    )
+    archive = str(tmp_path / "elsewhere" / "adminpanelaz_1.tar.gz")
+    args = types.SimpleNamespace(install_dir=str(tmp_path), backup_name=archive)
+
+    assert module.cmd_restore(args) == 0
+    assert seen == [(archive, True)]
