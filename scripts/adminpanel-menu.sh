@@ -144,24 +144,6 @@ menu_state_word() {
   printf '%s%s%s' "$color" "$1" "$C_RESET"
 }
 
-_m_border() {
-  printf -- '-%.0s' $(seq 1 58)
-}
-
-_m_top() { printf "  +%s+\n" "$(_m_border)"; }
-_m_bot() { printf "  +%s+\n" "$(_m_border)"; }
-_m_sep() { printf "  |%58s|\n" "" | tr ' ' '-'; }
-_m_title() {
-  local title="$1"
-  printf "  | %s" "$title"
-  printf "%*s|\n" $((57 - ${#title})) ""
-}
-_m_item() {
-  local text="$1"
-  printf "  | %s" "$text"
-  printf "%*s|\n" $((57 - ${#text})) ""
-}
-
 press_any_key() {
   if [[ -t 0 ]]; then
     printf "\n"
@@ -176,6 +158,11 @@ menu_action() {
   (set -e; "$@")
   set -e
   press_any_key
+}
+
+menu_interrupted() {
+  printf '\n'
+  exit 130
 }
 
 require_root() {
@@ -416,6 +403,14 @@ menu_status() {
   menu_probe_ok
 }
 
+# Строку «Проверка состояния…» стирает перерисовка экрана после проб.
+menu_probe_screen() {
+  menu_clear
+  printf 'Проверка состояния%s\n' "$MENU_ELLIPSIS"
+  menu_probe "$1"
+  menu_clear
+}
+
 panel_wait_health() {
   local i start="$SECONDS"
   ui_info "Ожидание ответа панели (до 30 с)…"
@@ -477,29 +472,6 @@ panel_restart() {
   else
     ui_fail "Не найден systemd unit $SERVICE_NAME"
     return 1
-  fi
-}
-
-panel_status() {
-  printf "\n"
-  if panel_uses_systemd; then
-    systemctl status "$SERVICE_NAME" --no-pager -l || true
-  else
-    ui_fail "Панель не установлена через systemd ($SERVICE_NAME)"
-    return 1
-  fi
-}
-
-panel_logs() {
-  printf "\n"
-  if panel_uses_systemd; then
-    journalctl -u "$SERVICE_NAME" -n 50 --no-pager || true
-  elif [[ -d "${ADMINPANELAZ_STATE_DIR:-$ROOT_DIR/.runtime}/logs" ]]; then
-    local log_dir="${ADMINPANELAZ_STATE_DIR:-$ROOT_DIR/.runtime}/logs"
-    ui_info "Последние строки из $log_dir:"
-    tail -n 50 "$log_dir"/*.log 2>/dev/null || ui_warn "Логи не найдены"
-  else
-    ui_warn "journalctl недоступен; каталог логов не найден"
   fi
 }
 
@@ -945,60 +917,6 @@ panel_diagnose() {
     bash "$SITE_DIAGNOSTICS"
 }
 
-menu_service_panel() {
-  while true; do
-    clear || true
-    _m_top
-    _m_title "Сервис панели"
-    _m_sep
-    _m_item "1. Перезапустить"
-    _m_item "2. Статус"
-    _m_item "3. Журнал"
-    _m_sep
-    _m_item "0. Назад"
-    _m_bot
-    printf "\n"
-
-    read -r -p "  Выберите действие [0-3]: " choice
-    case "$choice" in
-      1) menu_action panel_restart ;;
-      2) menu_action panel_status ;;
-      3) menu_action panel_logs ;;
-      0) break ;;
-      *)
-        ui_warn "Неверный выбор"
-        sleep 1
-        ;;
-    esac
-  done
-}
-
-menu_backups_updates() {
-  while true; do
-    clear || true
-    _m_top
-    _m_title "Резервные копии и обновления"
-    _m_sep
-    _m_item "1. Проверить обновления (git)"
-    _m_item "2. Создать резервную копию"
-    _m_sep
-    _m_item "0. Назад"
-    _m_bot
-    printf "\n"
-
-    read -r -p "  Выберите действие [0-2]: " choice
-    case "$choice" in
-      1) menu_action panel_update ;;
-      2) menu_action panel_backup ;;
-      0) break ;;
-      *)
-        ui_warn "Неверный выбор"
-        sleep 1
-        ;;
-    esac
-  done
-}
-
 panel_disable_ip_whitelist() {
   require_root
   local script="$ROOT_DIR/scripts/disable-ip-whitelist.sh"
@@ -1014,62 +932,51 @@ panel_nginx_repair() {
   bash "$ROOT_DIR/scripts/nginx-repair.sh"
 }
 
-menu_diagnostics() {
+menu_emergency() {
   while true; do
-    clear || true
-    _m_top
-    _m_title "Диагностика"
-    _m_sep
-    _m_item "1. Диагностика запуска сайта"
-    _m_item "2. Восстановить nginx для панели"
-    _m_item "3. Отключить IP-whitelist (аварийно)"
-    _m_sep
-    _m_item "0. Назад"
-    _m_bot
-    printf "\n"
-
-    read -r -p "  Выберите действие [0-3]: " choice
-    case "$choice" in
-      1) menu_action panel_diagnose ;;
-      2) menu_action panel_nginx_repair ;;
-      3) menu_action panel_disable_ip_whitelist ;;
-      0) break ;;
-      *)
-        ui_warn "Неверный выбор"
-        sleep 1
-        ;;
+    menu_screen "Аварийно" "Назад" "Восстановить nginx для панели" "Отключить белый список IP"
+    menu_read 2 назад
+    case "$MENU_CHOICE" in
+      1) menu_action panel_nginx_repair ;;
+      2) menu_action panel_disable_ip_whitelist ;;
+      0) return 0 ;;
+      *) menu_invalid ;;
     esac
   done
 }
 
-main_menu() {
-  while true; do
-    clear || true
-    _m_top
-    _m_title "AdminPanelAZ — Ops console"
-    _m_sep
-    _m_item "1. Сервис панели"
-    _m_item "2. Резервные копии и обновления"
-    _m_item "3. Диагностика"
-    _m_sep
-    _m_item "7. Диагностика запуска сайта"
-    _m_sep
-    _m_item "0. Выход"
-    _m_bot
-    printf "\n"
-    ui_info "Установка: sudo ./install.sh (не этот скрипт)"
+menu_render_main() {
+  menu_header "$1"
+  printf '\n'
+  menu_item 1 "Обновить и перезапустить"
+  menu_item 2 "Журнал"
+  menu_item 3 "Диагностика сайта"
+  menu_item 4 "Перезапустить панель"
+  menu_item 5 "Сервисы: nginx, агент, DDNS"
+  menu_item 6 "Бэкап и восстановление"
+  menu_item 7 "Сброс пароля / 2FA"
+  menu_item 8 "Аварийно: nginx, белый список IP"
+  printf '\n'
+  menu_item 0 "Выход"
+}
 
-    read -r -p "  Выберите действие [0-7]: " choice
-    case "$choice" in
-      1) menu_service_panel ;;
-      2) menu_backups_updates ;;
-      3) menu_diagnostics ;;
-      7) menu_action panel_diagnose ;;
+main_menu() {
+  local mode="${1:-panel}"
+  while true; do
+    menu_probe_screen "$mode"
+    menu_render_main "$mode"
+    menu_read 8 выход
+    case "$MENU_CHOICE" in
+      1) menu_action panel_update_interactive ;;
+      2) menu_logs "$SERVICE_NAME" ;;
+      3) menu_action panel_diagnose ;;
+      4) menu_action panel_restart_and_wait ;;
+      5) menu_services ;;
+      6) menu_backups ;;
+      7) menu_action panel_reset_password ;;
+      8) menu_emergency ;;
       0) exit 0 ;;
-      *)
-        ui_warn "Неверный выбор"
-        sleep 1
-        ;;
+      *) menu_invalid ;;
     esac
   done
 }
@@ -1109,6 +1016,7 @@ menu_start() {
     usage >&2
     return 1
   fi
+  trap 'menu_interrupted' INT
   main_menu "$mode"
 }
 

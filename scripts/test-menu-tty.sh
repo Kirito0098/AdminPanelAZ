@@ -69,5 +69,43 @@ pty - 'main --status' TERM=xterm NO_COLOR=1
 pty - 'main --status' TERM=dumb
 ! grep -q $'\033' "$TMP/out" && ok "TERM=dumb — без \\033" || bad "есть \\033: $(cat -v "$TMP/out")"
 
+echo "[test] главное меню в терминале при NO_COLOR=1 — без \\033"
+pty - 'menu_probe panel; menu_render_main panel' TERM=xterm NO_COLOR=1
+grep -q "Обновить и перезапустить" "$TMP/out" && ! grep -q $'\033' "$TMP/out" && ok "без \\033" \
+  || bad "вывод: $(cat -v "$TMP/out")"
+
+echo "[test] Ctrl+C в главном меню — код 130 и перевод строки"
+press_ctrl_c_at_menu() {
+  wait_for "$TMP/out" "Выберите [0-8"
+  printf '\003'
+  sleep 1
+}
+pty press_ctrl_c_at_menu 'menu_start' TERM=xterm NO_COLOR=1
+[[ "$rc" -eq 130 ]] && ok "код 130" || bad "код $rc: $(cat -v "$TMP/out")"
+[[ "$(tail -c 1 "$TMP/out" | od -An -c | tr -d ' ')" == '\n' ]] && ok "вывод кончается переводом строки" \
+  || bad "конец вывода: $(tail -c 20 "$TMP/out" | od -An -c)"
+
+# Псевдотерминал сбрасывает непрочитанный ввод по Ctrl+C, поэтому следующие нажатия — после маркеров в выводе.
+echo "[test] Ctrl+C в журнале реального времени — назад в меню, меню работает дальше"
+rm -f "$TMP/following"
+follow_then_ctrl_c() {
+  wait_for "$TMP/out" "Выберите [0-8"
+  printf '2\n'
+  wait_for "$TMP/out" "Последние 50 строк"
+  printf '2\n'
+  wait_for "$TMP/following" follow
+  printf '\003'
+  wait_for "$TMP/out" "Нажмите Enter"
+  printf '\n'
+  wait_for "$TMP/out" "Последние 50 строк" 2
+  printf '0\n'
+  wait_for "$TMP/out" "Выберите [0-8" 2
+  printf 'q\n'
+  sleep 1
+}
+pty follow_then_ctrl_c 'menu_start' TERM=xterm NO_COLOR=1
+[[ "$rc" -eq 0 ]] && ok "выход из меню по q — код 0" || bad "код $rc: $(cat -v "$TMP/out")"
+grep -q "в реальном времени. Ctrl+C" "$TMP/out" && ok "подсказка Ctrl+C" || bad "вывод: $(cat -v "$TMP/out")"
+
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]

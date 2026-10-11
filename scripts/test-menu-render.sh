@@ -147,5 +147,68 @@ render 80 'menu_read 8 выход </dev/null; echo "choice=$MENU_CHOICE"'
 render 80 'menu_read 3 назад <<<q; echo "choice=$MENU_CHOICE"'
 [[ "$(cat "$TMP/out")" == "Выберите [0-3, q — назад]: choice=0" ]] && ok "q — 0" || bad "вывод: $(cat "$TMP/out")"
 
+echo "[test] golden: главное меню панели, 80 колонок"
+with_units adminpanelaz.service
+render 80 'menu_probe panel; menu_render_main panel'
+golden "главное меню, 80" <<'EOF'
+AdminPanelAZ 2.26.4 · feature/console-menu-redesign @ cef39ac
+  Панель   работает · health отвечает
+  Адрес    https://panel-with-a-long-name.example.com:8443/secret-path/
+
+  1  Обновить и перезапустить
+  2  Журнал
+  3  Диагностика сайта
+  4  Перезапустить панель
+  5  Сервисы: nginx, агент, DDNS
+  6  Бэкап и восстановление
+  7  Сброс пароля / 2FA
+  8  Аварийно: nginx, белый список IP
+
+  0  Выход
+EOF
+! grep -q $'\033' "$TMP/out" && ok "NO_COLOR — без \\033" || bad "есть \\033"
+
+echo "[test] golden: главное меню панели, 60 колонок"
+render 60 'menu_probe panel; menu_render_main panel'
+golden "главное меню, 60" <<'EOF'
+AdminPanelAZ 2.26.4 · feature/console-menu-redesign @ cef39…
+  Панель   работает · health отвечает
+  Адрес    https://panel-with-a-long-name.example.com:8443/…
+
+  1  Обновить и перезапустить
+  2  Журнал
+  3  Диагностика сайта
+  4  Перезапустить панель
+  5  Сервисы: nginx, агент, DDNS
+  6  Бэкап и восстановление
+  7  Сброс пароля / 2FA
+  8  Аварийно: nginx, белый список IP
+
+  0  Выход
+EOF
+
+echo "[test] пункты главного меню вызывают свои действия; 9 без агента — неверный выбор; q — выход"
+STUBS='
+  for fn in panel_update_interactive panel_diagnose panel_restart_and_wait panel_reset_password \
+    menu_logs menu_services menu_backups menu_emergency menu_agent; do
+    eval "$fn() { echo \"$fn \$*\" >>\"\$CALLS\"; }"
+  done'
+render 80 "$STUBS"'; main_menu panel <<<"$(printf "%s\n" 1 2 3 4 5 6 7 8 9 q)"'
+[[ "$rc" -eq 0 ]] && ok "код 0" || bad "код $rc"
+[[ "$(tr '\n' ';' <"$CALLS")" == "panel_update_interactive ;menu_logs adminpanelaz;panel_diagnose ;panel_restart_and_wait ;menu_services ;menu_backups ;panel_reset_password ;menu_emergency ;" ]] \
+  && ok "1–8" || bad "вызовы: $(tr '\n' ';' <"$CALLS")"
+grep -q "Неверный выбор" "$TMP/out" && ok "9 — неверный выбор" || bad "вывод: $(cat "$TMP/out")"
+grep -q "Проверка состояния…" "$TMP/out" && ok "строка проб перед шапкой" || bad "нет строки проб"
+
+echo "[test] «Аварийно»: восстановить nginx, отключить белый список IP"
+render 80 'panel_nginx_repair() { echo nginx_repair >>"$CALLS"; }; panel_disable_ip_whitelist() { echo whitelist >>"$CALLS"; }
+  menu_emergency <<<"$(printf "%s\n" 1 2 0)"'
+[[ "$(tr '\n' ';' <"$CALLS")" == "nginx_repair;whitelist;" ]] && ok "1, 2" || bad "вызовы: $(tr '\n' ';' <"$CALLS")"
+grep -q "^Аварийно$" "$TMP/out" && ok "заголовок подменю — одна строка" || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] прежних рамок и подменю нет"
+! grep -nE '_m_(top|bot|sep|border|title|item)|menu_service_panel|menu_backups_updates|menu_diagnostics|panel_logs|──' \
+  "$ROOT_DIR/scripts/adminpanel-menu.sh" && ok "нет _m_*, старых подменю и разделителей" || bad "остались прежние элементы"
+
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]
