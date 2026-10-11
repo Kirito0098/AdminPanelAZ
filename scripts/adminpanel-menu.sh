@@ -723,6 +723,22 @@ panel_update() {
     "${BASH:-bash}" "$menu" --after-pull
 }
 
+# Команду получают и серверы, установленные до неё: её ставит шаг после обновления.
+menu_install_command() {
+  local lib="$ROOT_DIR/scripts/console-command.sh" link rc=0
+  [[ -f "$lib" && -f "$INSTALL_DIR/scripts/adminpanel-menu.sh" ]] || return 0
+  # shellcheck source=scripts/console-command.sh
+  source "$lib"
+  link="$(console_command_path)"
+  console_command_link "$INSTALL_DIR" || rc=$?
+  case "$rc" in
+    0) ui_ok "Консольное меню: sudo adminpanelaz" ;;
+    2) ui_warn "$link уже есть и это не ссылка AdminPanelAZ — команда adminpanelaz не установлена" ;;
+    *) ui_warn "Не удалось создать $link" ;;
+  esac
+  return 0
+}
+
 # Шаги после git pull; вызывается из panel_update уже обновлённым скриптом.
 panel_after_pull() {
   if [[ -x "$VENV_PATH/bin/pip" && -f "$ROOT_DIR/backend/requirements.txt" ]]; then
@@ -750,6 +766,8 @@ panel_after_pull() {
       ui_warn "refresh-systemd-units завершился с ошибкой — проверьте unit вручную"
     fi
   fi
+
+  menu_install_command
 
   if [[ "$frontend_ok" != true ]]; then
     ui_fail "Код уже обновлён, интерфейс — нет. Повторный $0 --update попробует собрать его снова."

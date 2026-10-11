@@ -103,6 +103,8 @@ source "$ROOT_DIR/scripts/install-port-check.sh"
 source "$ROOT_DIR/scripts/install-reboot-check.sh"
 # shellcheck source=scripts/node-agent-mtls-check.sh
 source "$ROOT_DIR/scripts/node-agent-mtls-check.sh"
+# shellcheck source=scripts/console-command.sh
+source "$ROOT_DIR/scripts/console-command.sh"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 VENV_DIR="$BACKEND_DIR/.venv"
@@ -2054,6 +2056,18 @@ start_node_via_systemd() {
   systemctl restart adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
 }
 
+setup_console_command() {
+  install_set_step "Команда adminpanelaz"
+  local link rc=0
+  link="$(console_command_path)"
+  console_command_link "$ROOT_DIR" || rc=$?
+  case "$rc" in
+    0) log "Консольное меню: sudo adminpanelaz" ;;
+    2) warn "$link уже есть и это не ссылка AdminPanelAZ — команда adminpanelaz не установлена. Меню: sudo $ROOT_DIR/scripts/adminpanel-menu.sh" ;;
+    *) warn "Не удалось создать $link. Меню: sudo $ROOT_DIR/scripts/adminpanel-menu.sh" ;;
+  esac
+}
+
 print_post_install() {
   local backend_port="${BACKEND_PORT:-${WIZ_BACKEND_PORT:-8000}}"
   local node_port="${NODE_AGENT_PORT:-${WIZ_NODE_AGENT_PORT:-9100}}"
@@ -2072,6 +2086,9 @@ print_post_install() {
   echo
   ui_summary_title
   ui_summary_row "Каталог проекта" "$ROOT_DIR"
+  if [[ -L "$(console_command_path)" ]]; then
+    ui_summary_row "Консольное меню" "sudo adminpanelaz"
+  fi
 
   if install_controller_selected; then
     ui_separator
@@ -2397,6 +2414,7 @@ run_install_flow() {
     verify_controller_running
   fi
 
+  setup_console_command
   install_set_step "завершение"
   print_post_install "$GENERATED_NODE_KEY"
 }

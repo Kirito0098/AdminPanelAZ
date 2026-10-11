@@ -16,6 +16,8 @@ done
 export HOST_GUARD_LOG="$GUARD_DIR/violations.log"
 : >"$HOST_GUARD_LOG"
 export PATH="$GUARD_DIR/bin:$PATH"
+# Команду adminpanelaz тесты ставят только во временный каталог, не в /usr/local/bin.
+export ADMINPANELAZ_MENU_LINK="$GUARD_DIR/adminpanelaz"
 
 if [[ "$#" -gt 0 ]]; then
   tests=("$@")

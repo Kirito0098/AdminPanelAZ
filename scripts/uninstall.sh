@@ -346,6 +346,16 @@ remove_system_config() {
   fi
 }
 
+remove_console_command() {
+  local lib="$ROOT_DIR/scripts/console-command.sh"
+  [[ -f "$lib" ]] || return 0
+  # shellcheck source=scripts/console-command.sh
+  source "$lib"
+  if console_command_unlink "$ROOT_DIR"; then
+    log "Удалена команда $(console_command_path)"
+  fi
+}
+
 # Каталоги ОС: BACKUP_ROOT из .env, указывающий на них, при удалении бэкапов не трогается.
 backup_root_is_system_path() {
   local dir="$1"
@@ -494,6 +504,7 @@ main() {
   systemctl daemon-reload 2>/dev/null || true
   remove_firewall_rules
   remove_system_config
+  remove_console_command
 
   if [[ "$PURGE_STATE" == true ]]; then
     purge_state_dirs
