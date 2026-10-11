@@ -13,6 +13,7 @@
 #   --proxy-only        только proxy_agent для RU-прокси (без панели и без proxy.sh)
 #   --with-systemd      автозапуск как системный сервис
 #   --reinstall         переустановка с сохранением backend/.env
+#   --update            полное обновление: код + конфигурация сервера (без мастера)
 #   --uninstall         удаление сервисов (каталог проекта остаётся)
 #   --purge-all         удаление без следов
 # ==============================================================================
@@ -125,6 +126,9 @@ PROXY_ONLY=false
 FORCE=false
 NON_INTERACTIVE=false
 ACCEPT_DEFAULTS=false
+UPDATE_REQUESTED=false
+# Внутренний флаг: этап 2 полного обновления в уже обновлённом install.sh (файл итога этапа 1).
+UPDATE_RESUME_STATE=""
 INSTALL_FROM_GIT="${INSTALL_FROM_GIT:-}"
 # Стандартный каталог — /opt/AdminPanelAZ; при запуске из клона resolve_project_dir подставит ROOT_DIR
 INSTALL_TARGET="${INSTALL_TARGET:-$DEFAULT_INSTALL_TARGET}"
@@ -306,6 +310,10 @@ validate_install_flags() {
   if [[ "$PROXY_ONLY" == true && "$WITH_NODE_AGENT" == true ]]; then
     die "--proxy-only и --with-node-agent несовместимы"
   fi
+  if [[ "$UPDATE_REQUESTED" == true ]] \
+    && [[ "$ACTION" != install || "$NODE_ONLY" == true || "$PROXY_ONLY" == true || "$WITH_NODE_AGENT" == true ]]; then
+    die "--update несовместим с --reinstall, --uninstall, --purge-all, --node-only, --proxy-only и --with-node-agent: роли берутся из установленной системы"
+  fi
 }
 
 parse_args() {
@@ -351,6 +359,13 @@ parse_args() {
         ;;
       --reinstall)
         ACTION="reinstall"
+        ;;
+      --update)
+        UPDATE_REQUESTED=true
+        ;;
+      --update-resume=*)
+        UPDATE_REQUESTED=true
+        UPDATE_RESUME_STATE="${1#*=}"
         ;;
       --help|-h)
         usage
@@ -602,6 +617,19 @@ run_reinstall_action() {
   ACTION="install"
   run_install_flow
   offer_restore_env_backup
+}
+
+# Полное обновление (--update): код и конфигурация сервера по текущим настройкам, без мастера.
+# Отдельный процесс: scripts/full-update.sh подключает консольное меню, а у меню и install.sh общие имена функций.
+run_update_action() {
+  local -a args=()
+  if [[ "$ACCEPT_DEFAULTS" == true || "$NON_INTERACTIVE" == true ]]; then
+    args+=(--yes)
+  fi
+  if [[ -n "$UPDATE_RESUME_STATE" ]]; then
+    args+=(--resume "$UPDATE_RESUME_STATE")
+  fi
+  exec env INSTALL_DIR="$ROOT_DIR" "${BASH:-bash}" "$ROOT_DIR/scripts/full-update.sh" "${args[@]}"
 }
 
 should_run_wizard() {
@@ -2309,6 +2337,9 @@ main() {
   parse_args "$@"
   validate_install_flags
   require_root "$@"
+  if [[ "$UPDATE_REQUESTED" == true ]]; then
+    run_update_action
+  fi
 
   if [[ "$ACTION" != "uninstall" && "$ACTION" != "purge-all" ]]; then
     install_set_step "Проверка reboot после обновлений"

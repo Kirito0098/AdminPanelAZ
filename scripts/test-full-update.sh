@@ -414,5 +414,92 @@ run '' 'full_update_main --yes --resume "$TMPDIR/adminpanelaz-update.r"'
 [[ "$rc" -eq 0 ]] && grep -qxF "  Бэкап      пропущен  нет панели" "$TMP/out" && ok "бэкап «пропущен» на узле" \
   || bad "код $rc: $(summary)"
 
+extract() {
+  local file="$1" fn
+  shift
+  for fn in "$@"; do
+    sed -n "/^${fn}() {/,/^}/p" "$file"
+  done
+}
+
+# install_main <аргументы>: main из install.sh, шаги подменены и записывают своё имя; die — «DIE: …», код 1
+install_main() {
+  : >"$CALLS"
+  set +e
+  bash -c '
+    set -euo pipefail
+    WITH_DAEMON=false WITH_SYSTEMD=false WITH_NODE_AGENT=false NODE_ONLY=false PROXY_ONLY=false FORCE=false
+    NON_INTERACTIVE=false ACCEPT_DEFAULTS=false ACTION=install PURGE_REPO=false
+    UPDATE_REQUESTED=false UPDATE_RESUME_STATE=""
+    eval "$1"
+    shift
+    stub() { echo "${FUNCNAME[1]}" >>"$CALLS"; }
+    die() { echo "DIE: $*"; exit 1; }
+    usage() { :; }
+    require_root() { stub; }
+    install_set_step() { stub; }
+    check_reboot_required() { stub; }
+    run_uninstall_action() { stub; }
+    run_full_purge_action() { stub; }
+    run_reinstall_action() { stub; }
+    require_tty_or_explicit_intent() { stub; }
+    show_main_menu() { stub; }
+    run_install_flow() { stub; }
+    run_update_action() { stub; exit 0; }
+    main "$@"
+  ' bash "$(extract "$ROOT_DIR/install.sh" parse_args validate_install_flags main)" "$@" >"$TMP/out" 2>&1
+  rc=$?
+  set -e
+}
+
+echo "[test] install.sh --update -y и --update-resume=: сразу полное обновление, без reboot-проверки и мастера"
+install_main --update -y
+[[ "$rc" -eq 0 && "$(calls)" == "require_root;run_update_action;" ]] && ok "--update -y" || bad "код $rc, вызовы: $(calls)"
+install_main --update -y --update-resume="$TMP/adminpanelaz-update.x"
+[[ "$rc" -eq 0 && "$(calls)" == "require_root;run_update_action;" ]] && ok "--update-resume=" || bad "код $rc, вызовы: $(calls)"
+
+echo "[test] install.sh --update несовместим с действиями и ролями"
+for flag in --reinstall --uninstall --purge --purge-all --node-only --proxy-only --with-node-agent; do
+  install_main --update "$flag"
+  [[ "$rc" -eq 1 && "$(calls)" == "" ]] && grep -qF "DIE: --update несовместим с" "$TMP/out" && ok "--update $flag" \
+    || bad "--update $flag: код $rc, вызовы: $(calls); $(cat "$TMP/out")"
+done
+
+echo "[test] install.sh --reinstall не изменился"
+install_main --reinstall
+[[ "$(calls)" == "require_root;install_set_step;check_reboot_required;run_reinstall_action;" ]] && ok "--reinstall" \
+  || bad "вызовы: $(calls)"
+
+mkdir -p "$TMP/repo/scripts"
+cat >"$TMP/repo/scripts/full-update.sh" <<'EOF'
+echo "full-update.sh $* INSTALL_DIR=$INSTALL_DIR" >>"$CALLS"
+EOF
+# update_action <ACCEPT_DEFAULTS> <NON_INTERACTIVE> <UPDATE_RESUME_STATE>
+update_action() {
+  : >"$CALLS"
+  ROOT_DIR="$TMP/repo" bash -c '
+    set -euo pipefail
+    eval "$1"
+    ACCEPT_DEFAULTS="$2" NON_INTERACTIVE="$3" UPDATE_RESUME_STATE="$4"
+    run_update_action
+    echo "not reached" >>"$CALLS"
+  ' bash "$(extract "$ROOT_DIR/install.sh" run_update_action)" "$@" >"$TMP/out" 2>&1 || true
+}
+
+echo "[test] run_update_action: exec scripts/full-update.sh из каталога установки, --yes при -y/--non-interactive"
+update_action false false ""
+[[ "$(calls)" == "full-update.sh  INSTALL_DIR=$TMP/repo;" ]] && ok "без --yes" || bad "вызовы: $(calls); $(cat "$TMP/out")"
+update_action true false ""
+[[ "$(calls)" == "full-update.sh --yes INSTALL_DIR=$TMP/repo;" ]] && ok "-y → --yes" || bad "вызовы: $(calls)"
+update_action false true ""
+[[ "$(calls)" == "full-update.sh --yes INSTALL_DIR=$TMP/repo;" ]] && ok "--non-interactive → --yes" || bad "вызовы: $(calls)"
+update_action true false "$TMP/adminpanelaz-update.s"
+[[ "$(calls)" == "full-update.sh --yes --resume $TMP/adminpanelaz-update.s INSTALL_DIR=$TMP/repo;" ]] && ok "--resume" \
+  || bad "вызовы: $(calls)"
+
+echo "[test] --update в справке и в шапке install.sh"
+grep -qE '^  --update +Полное обновление' "$ROOT_DIR/scripts/install-ui.sh" \
+  && grep -qE '^#   --update +полное обновление' "$ROOT_DIR/install.sh" && ok "справка" || bad "--update нет в справке"
+
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]
