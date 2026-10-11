@@ -101,6 +101,10 @@ docs/superpowers/
 # --- OpenCode agent workspace (local config, memory, plans; not for repo) ---
 .opencode/
 
+# --- Agent skills installed via `npx skills` (local; not for repo) ---
+.agents/
+/skills-lock.json
+
 # --- Local implementation plans (owner-only; not for public repo) ---
 docs/plans/
 
