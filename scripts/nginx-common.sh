@@ -27,6 +27,16 @@ nginx_require_root() {
   [[ "$(id -u)" -eq 0 ]] || nginx_die "Запустите от root: sudo $0"
 }
 
+nginx_is_non_interactive() {
+  [[ "$NON_INTERACTIVE" == "true" || "$NON_INTERACTIVE" == "1" ]] || [[ ! -t 0 ]]
+}
+
+nginx_validate_port() {
+  local value="$1"
+  local label="$2"
+  [[ "$value" =~ ^[0-9]+$ ]] && ((value >= 1 && value <= 65535)) || nginx_die "${label}: некорректный порт (1-65535)"
+}
+
 # Путь к setup AntiZapret (OPENVPN_HOST / WIREGUARD_HOST).
 nginx_az_setup_path() {
   echo "${ANTIZAPRET_PATH:-/root/antizapret}/setup"
