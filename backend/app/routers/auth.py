@@ -71,6 +71,7 @@ from app.services.admin_notify import admin_notify_service
 from app.services.user_agent_format import user_agent_from_request
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.panel_paths import auth_cookie_path, with_access_path
+from app.services.asset_marker import clear_asset_marker_cookie, set_asset_marker_cookie
 from app.services.auth_cookies import refresh_token_cookie_secure
 from app.services.panel_publish_info import resolve_request_url_root
 from app.services.telegram_oidc import (
@@ -244,6 +245,7 @@ def _set_refresh_cookie(response: Response, raw_token: str, request: Request | N
         max_age=settings.refresh_token_expire_days * 86400,
         path=auth_cookie_path(settings),
     )
+    set_asset_marker_cookie(response, settings, request)
 
 
 def _issue_token_pair(
@@ -278,6 +280,7 @@ def _clear_refresh_cookie(response: Response, request: Request | None = None) ->
         secure=secure,
         samesite=settings.refresh_token_cookie_samesite,
     )
+    clear_asset_marker_cookie(response, settings, request)
 
 
 def _requires_2fa(db: Session, user: User) -> bool:
@@ -653,7 +656,9 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserResponse)
-def me(current_user: User = Depends(get_current_user)):
+def me(request: Request, response: Response, current_user: User = Depends(get_current_user)):
+    # Tabs that start with an access token already in storage never call /refresh before loading the panel.
+    set_asset_marker_cookie(response, settings, request)
     return current_user
 
 
