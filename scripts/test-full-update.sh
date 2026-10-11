@@ -45,14 +45,15 @@ with_units() {
 # run <ввод> <код>: код в bash -c с подключённым scripts/full-update.sh; вывод — $TMP/out, код возврата — rc.
 # LOCALE — исходная локаль (C.UTF-8), COLS — ширина (100). UPDATE_RESULT=same|changed|fail — итог panel_update,
 # BACKUP_FAIL=1, NPM_FAIL=1, PIP_FAIL=1, CURL_OK=no — отказы; full_update_reexec продолжает в том же процессе,
-# как продолжил бы новый install.sh (REAL_REEXEC=1 — настоящий).
+# как продолжил бы новый install.sh (REAL_REEXEC=1 — настоящий). STATE_UID — ожидаемый владелец файла --resume
+# (по умолчанию тот, кто запускает тест; в работе — root).
 run() {
   : >"$CALLS"
   rm -f "$CALLS.pulled"
   set +e
   printf '%b' "$1" | env -u LC_ALL -u LC_CTYPE -u SSH_CONNECTION LANG="${LOCALE:-C.UTF-8}" NO_COLOR=1 \
     COLUMNS="${COLS:-100}" TMPDIR="$TMP" INSTALL_DIR="$INSTALL" VENV_PATH="$TMP/venv" SYSTEMD_UNIT_DIR="$TMP/units" \
-    DDNS_CONFIG="$TMP/ddns.env" bash -c '
+    DDNS_CONFIG="$TMP/ddns.env" ADMINPANELAZ_TEST_STATE_UID="${STATE_UID:-$(id -u)}" bash -c '
     set -euo pipefail
     source "$1/scripts/full-update.sh"
     require_root() { :; }
@@ -214,6 +215,204 @@ echo "[test] re-exec: обновлённый install.sh с --update -y --update-
 REAL_REEXEC=1 run '' 'FU_STATE="$TMPDIR/adminpanelaz-update.abc"; full_update_reexec; echo "not reached" >>"$CALLS"'
 [[ "$(calls)" == "install.sh --update -y --update-resume=$TMP/adminpanelaz-update.abc LC_ALL= LANG=C.UTF-8;" ]] \
   && ok "exec install.sh" || bad "вызовы: $(calls); вывод: $(cat "$TMP/out")"
+
+echo "[test] сервер с панелью: бэкап → код → apt → pip → интерфейс → unit'ы → … → перезапуск и health"
+with_units adminpanelaz.service
+rm -f "$TMP"/adminpanelaz-update.*
+run '' 'full_update_main --yes'
+[[ "$(calls)" == "backup --no-prune --keep-running;update code_only=true;pip install -q -r $INSTALL/backend/requirements.txt;npm;refresh SYSTEMD_UNIT_DIR=$TMP/units;systemctl restart adminpanelaz;curl;" ]] \
+  && ok "порядок шагов" || bad "вызовы: $(calls)"
+[[ "$rc" -eq 0 ]] && ok "код 0" || bad "код $rc: $(cat "$TMP/out")"
+golden "итог на сервере с панелью" <<'EOF'
+Полное обновление
+  Бэкап      ok        adminpanelaz_20261011-1230.tar.gz
+  Код        ok        актуально, cef39ac
+  Пакеты     ok        доустановлено: 0
+  Python     ok
+  Интерфейс  ok
+  systemd    ok        adminpanelaz
+  nginx      пропущен  публикация без nginx
+  firewall   пропущен  не настроен
+  DDNS       пропущен  не настроен
+  Перезапуск ok        панель отвечает
+EOF
+[[ -z "$(find "$TMP" -maxdepth 1 -name 'adminpanelaz-update.*')" ]] && ok "файл итога удалён" \
+  || bad "остался: $(find "$TMP" -maxdepth 1 -name 'adminpanelaz-update.*')"
+
+echo "[test] сервер-узел: без бэкапа, интерфейса и nginx; агент перезапущен и проверен через 5 с"
+with_units adminpanelaz-node.service
+run '' 'full_update_main --yes'
+[[ "$(calls)" == "update code_only=true;pip install -q -r $INSTALL/backend/requirements.txt;refresh SYSTEMD_UNIT_DIR=$TMP/units;systemctl restart adminpanelaz-node;sleep 5;" ]] \
+  && ok "шаги агента" || bad "вызовы: $(calls)"
+[[ "$rc" -eq 0 ]] && ok "код 0" || bad "код $rc: $(cat "$TMP/out")"
+golden "итог на сервере-узле" <<'EOF'
+Полное обновление
+  Бэкап      пропущен  нет панели
+  Код        ok        актуально, cef39ac
+  Пакеты     ok        доустановлено: 0
+  Python     ok
+  Интерфейс  пропущен  нет панели
+  systemd    ok        adminpanelaz-node
+  nginx      пропущен  нет панели
+  firewall   пропущен  не настроен
+  DDNS       пропущен  не настроен
+  Перезапуск ok        adminpanelaz-node работает
+EOF
+
+echo "[test] код обновился: остальные шаги — после re-exec обновлённого install.sh"
+with_units adminpanelaz.service
+UPDATE_RESULT=changed run '' 'full_update_main --yes'
+[[ "$(calls)" == "backup --no-prune --keep-running;update code_only=true;reexec;pip install -q -r $INSTALL/backend/requirements.txt;npm;refresh SYSTEMD_UNIT_DIR=$TMP/units;systemctl restart adminpanelaz;curl;" ]] \
+  && ok "re-exec сразу после кода" || bad "вызовы: $(calls)"
+grep -qxF "  Код        ok        cef39ac → 1a2b3c4" "$TMP/out" && ok "строка «Код»" || bad "итог: $(summary)"
+[[ "$rc" -eq 0 ]] && ok "код 0" || bad "код $rc"
+
+echo "[test] pip с ошибкой: стоп — нет сборки, unit'ов, nginx и перезапуска"
+PIP_FAIL=1 run '' 'fu_step_nginx() { echo "nginx-step" >>"$CALLS"; }; full_update_main --yes'
+[[ "$(calls)" == "backup --no-prune --keep-running;update code_only=true;pip install -q -r $INSTALL/backend/requirements.txt;" ]] \
+  && ok "после pip ничего" || bad "вызовы: $(calls)"
+[[ "$rc" -eq 1 ]] && ok "код 1" || bad "код $rc"
+grep -qxF "  Python     ошибка    pip install не прошёл — панель не перезапускалась" "$TMP/out" && ok "строка «Python»" \
+  || bad "итог: $(summary)"
+grep -qxF "  Перезапуск пропущен  не выполнялся" "$TMP/out" && ok "перезапуска не было" || bad "итог: $(summary)"
+
+echo "[test] бэкап с ошибкой: стоп до кода"
+BACKUP_FAIL=1 run '' 'full_update_main --yes'
+[[ "$(calls)" == "backup --no-prune --keep-running;" ]] && ok "только бэкап" || bad "вызовы: $(calls)"
+[[ "$rc" -eq 1 ]] && ok "код 1" || bad "код $rc"
+grep -qxF "  Код        пропущен  не выполнялся" "$TMP/out" && ok "код не обновлялся" || bad "итог: $(summary)"
+
+echo "[test] код с ошибкой: стоп"
+UPDATE_RESULT=fail run '' 'full_update_main --yes'
+[[ "$(calls)" == "backup --no-prune --keep-running;update code_only=true;" ]] && ok "после кода ничего" || bad "вызовы: $(calls)"
+[[ "$rc" -eq 1 ]] && ok "код 1" || bad "код $rc"
+
+echo "[test] панель не ответила: «ошибка», бэкап и как восстановить"
+CURL_OK=no run '' 'full_update_main --yes'
+[[ "$rc" -eq 1 ]] && ok "код 1" || bad "код $rc"
+grep -qxF "  Перезапуск ошибка    панель не ответила за 30 с" "$TMP/out" && ok "строка «Перезапуск»" || bad "итог: $(summary)"
+grep -qF "Бэкап до обновления: adminpanelaz_20261011-1230.tar.gz" "$TMP/out" && ok "имя бэкапа" || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] локаль не UTF-8: значки и стрелка ASCII"
+LOCALE=C UPDATE_RESULT=changed run '' 'full_update_main --yes'
+grep -qxF "  Код        ok        cef39ac -> 1a2b3c4" "$TMP/out" && ok "стрелка ->" || bad "итог: $(summary)"
+grep -qF "  [ok]  Все пакеты apt на месте" "$TMP/out" && ok "значок [ok]" || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] ничего не установлено — код 1"
+with_units
+run '' 'full_update_main --yes'
+[[ "$rc" -eq 1 && "$(calls)" == "" ]] && grep -qF "AdminPanelAZ не установлена: используйте обычную установку" "$TMP/out" \
+  && ok "не установлена" || bad "код $rc: $(cat "$TMP/out")"
+
+echo "[test] без терминала и без -y — код 2 с подсказкой"
+with_units adminpanelaz.service
+run '' 'full_update_main'
+[[ "$rc" -eq 2 && "$(calls)" == "" ]] && grep -qF "Без вопросов: sudo ./install.sh --update -y" "$TMP/out" \
+  && ok "код 2" || bad "код $rc: $(cat "$TMP/out")"
+
+echo "[test] подтверждение: план, «Продолжить? [y/N]»; n и EOF — ничего не меняется, код 0; y — обновление"
+run 'n\n' 'fu_stdin_is_tty() { :; }; full_update_main'
+[[ "$rc" -eq 0 && "$(calls)" == "" ]] && grep -qF "Полное обновление отменено, ничего не изменено" "$TMP/out" \
+  && ok "n — отмена" || bad "код $rc, вызовы: $(calls); $(cat "$TMP/out")"
+grep -qF "Не меняются: база, backend/.env, *_agent.env, сертификаты, mTLS" "$TMP/out" \
+  && grep -qF "Продолжить? [y/N]:" "$TMP/out" && ok "план и вопрос" || bad "вывод: $(cat "$TMP/out")"
+run '' 'fu_stdin_is_tty() { :; }; full_update_main'
+[[ "$rc" -eq 0 && "$(calls)" == "" ]] && ok "EOF — отмена" || bad "код $rc, вызовы: $(calls)"
+run 'y\n' 'fu_stdin_is_tty() { :; }; full_update_main'
+[[ "$rc" -eq 0 && "$(calls)" == "backup --no-prune --keep-running;"* ]] && ok "y — обновление" \
+  || bad "код $rc, вызовы: $(calls)"
+
+echo "[test] неизвестный аргумент — код 2"
+run '' 'full_update_main --bogus'
+[[ "$rc" -eq 2 ]] && grep -qF "Неизвестный аргумент: --bogus" "$TMP/out" && ok "код 2" || bad "код $rc: $(cat "$TMP/out")"
+
+# state_file <имя> <содержимое printf>: файл итога этапа 1 в TMPDIR, права 600
+state_file() {
+  rm -f "$TMP/$1"
+  printf "$2" >"$TMP/$1"
+  chmod 600 "$TMP/$1"
+}
+STAGE1='backup\tok\tadminpanelaz_20261011-1230.tar.gz\ncode\tok\tcef39ac → 1a2b3c4\n'
+
+# resume_rejected <описание> <путь>: --resume отклонён с кодом 2, шаги не запускались
+resume_rejected() {
+  run '' "full_update_main --yes --resume '$2'"
+  [[ "$rc" -eq 2 && "$(calls)" == "" ]] && grep -qF "Неверный файл итога обновления" "$TMP/out" && ok "отказ: $1" \
+    || bad "$1: код $rc, вызовы: $(calls); $(cat "$TMP/out")"
+}
+
+echo "[test] --resume: только файл adminpanelaz-update.* в TMPDIR, обычный, не symlink"
+state_file target "$STAGE1"
+ln -sf "$TMP/target" "$TMP/adminpanelaz-update.link"
+resume_rejected "чужой путь" /etc/passwd
+resume_rejected "symlink" "$TMP/adminpanelaz-update.link"
+resume_rejected "нет файла" "$TMP/adminpanelaz-update.none"
+mkdir -p "$TMP/sub"
+state_file sub/adminpanelaz-update.n "$STAGE1"
+resume_rejected "подкаталог TMPDIR" "$TMP/sub/adminpanelaz-update.n"
+resume_rejected "путь с .." "$TMP/sub/../adminpanelaz-update.link"
+mkdir "$TMP/adminpanelaz-update.d"
+resume_rejected "каталог" "$TMP/adminpanelaz-update.d"
+rm -rf "$TMP/adminpanelaz-update.link" "$TMP/target" "$TMP/sub" "$TMP/adminpanelaz-update.d"
+
+echo "[test] --resume: файл не root (другой владелец) — отказ, файл не тронут"
+state_file adminpanelaz-update.o "$STAGE1"
+STATE_UID="$(($(id -u) + 1))" resume_rejected "владелец не тот" "$TMP/adminpanelaz-update.o"
+[[ -f "$TMP/adminpanelaz-update.o" ]] && ok "чужой файл не удалён" || bad "чужой файл удалён"
+rm -f "$TMP/adminpanelaz-update.o"
+grep -qE 'ADMINPANELAZ_TEST_STATE_UID:-0\}' "$ROOT_DIR/scripts/full-update.sh" && ok "по умолчанию владелец — root (uid 0)" \
+  || bad "владелец по умолчанию не uid 0"
+
+echo "[test] --resume: файл доступен на запись группе или всем — отказ"
+for mode in 620 602 666; do
+  state_file adminpanelaz-update.w "$STAGE1"
+  chmod "$mode" "$TMP/adminpanelaz-update.w"
+  resume_rejected "права $mode" "$TMP/adminpanelaz-update.w"
+done
+rm -f "$TMP/adminpanelaz-update.w"
+
+echo "[test] --resume: содержимое разбирается строго, ничего не исполняется"
+for bad_rows in \
+  'code\tok\tcef39ac\n$(touch "$TMPDIR/PWNED")\n' \
+  'nginx\tok\t\ncode\tok\tcef39ac\n' \
+  'backup\tok\tx\n' \
+  'code\tошибка\tкод не обновлён\n' \
+  'backup\tошибка\tx\ncode\tok\tcef39ac\n' \
+  'code\tok\tcef39ac\ncode\tok\tcef39ac\n' \
+  'code\tok\tcef39ac\textra\n' \
+  'code\t\tok\n' \
+  'code\tok\tcef\033[31mred\n' \
+  'code ok cef39ac\n'; do
+  state_file adminpanelaz-update.m "$bad_rows"
+  resume_rejected "строки: $bad_rows" "$TMP/adminpanelaz-update.m"
+done
+state_file adminpanelaz-update.m "code\tok\t$(printf 'x%.0s' {1..5000})\n"
+resume_rejected "больше 4 КБ" "$TMP/adminpanelaz-update.m"
+[[ ! -e "$TMP/PWNED" ]] && ok "подстановка не выполнялась" || bad "команда из файла выполнена"
+rm -f "$TMP/adminpanelaz-update.m"
+
+echo "[test] этап 1: файл итога — mktemp в TMPDIR, права 600, владелец — запустивший (root)"
+UPDATE_RESULT=changed run '' 'full_update_reexec() { stat -c "%a %u %n" "$FU_STATE" >"$TMPDIR/state-meta"; exit 0; }
+  full_update_main --yes'
+read -r st_mode st_uid st_name <"$TMP/state-meta" || true
+[[ "$st_mode" == 600 && "$st_uid" == "$(id -u)" && "$st_name" =~ ^$TMP/adminpanelaz-update\.[A-Za-z0-9]{6}$ ]] \
+  && ok "600, $st_name" || bad "файл итога: $(cat "$TMP/state-meta" 2>&1)"
+rm -f "$TMP"/adminpanelaz-update.* "$TMP/state-meta"
+
+echo "[test] --resume: шаги после кода, строки бэкапа и кода — из файла"
+state_file adminpanelaz-update.r "$STAGE1"
+run '' 'full_update_main --yes --resume "$TMPDIR/adminpanelaz-update.r"'
+[[ "$(calls)" == "pip install -q -r $INSTALL/backend/requirements.txt;npm;refresh SYSTEMD_UNIT_DIR=$TMP/units;systemctl restart adminpanelaz;curl;" ]] \
+  && ok "с шага «Пакеты»" || bad "вызовы: $(calls)"
+grep -qxF "  Код        ok        cef39ac → 1a2b3c4" "$TMP/out" \
+  && grep -qxF "  Бэкап      ok        adminpanelaz_20261011-1230.tar.gz" "$TMP/out" && ok "строки этапа 1" || bad "итог: $(summary)"
+[[ -z "$(find "$TMP" -maxdepth 1 -name 'adminpanelaz-update.*')" ]] && ok "файлы итога удалены" \
+  || bad "остались: $(find "$TMP" -maxdepth 1 -name 'adminpanelaz-update.*')"
+[[ "$rc" -eq 0 ]] && ok "код 0" || bad "код $rc: $(cat "$TMP/out")"
+state_file adminpanelaz-update.r 'backup\tпропущен\tнет панели\ncode\tok\tактуально, cef39ac\n'
+run '' 'full_update_main --yes --resume "$TMPDIR/adminpanelaz-update.r"'
+[[ "$rc" -eq 0 ]] && grep -qxF "  Бэкап      пропущен  нет панели" "$TMP/out" && ok "бэкап «пропущен» на узле" \
+  || bad "код $rc: $(summary)"
 
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]

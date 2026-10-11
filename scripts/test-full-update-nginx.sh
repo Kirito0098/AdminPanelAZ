@@ -119,7 +119,6 @@ run() {
     ufw() { :; }
     eval "$2"
   ' bash "$ROOT_DIR" "$1" >"$TMP/out" 2>&1
-  # shellcheck disable=SC2034
   rc=$?
   set -e
 }
@@ -203,6 +202,17 @@ with_units adminpanelaz-node.service
 run 'fu_run nginx fu_step_nginx'
 [[ "$(row nginx)" == "пропущен|нет панели" && "$(calls)" == "" ]] && ok "нет панели" \
   || bad "итог: $(row nginx), вызовы: $(calls)"
+
+echo "[test] полное обновление с ошибкой nginx -t: остальные шаги выполнены, перезапуск был, код 1"
+reset_nginx
+touch "$TMP/nginx-fail"
+run 'full_update_main --yes'
+[[ "$rc" -eq 1 ]] && ok "код 1" || bad "код $rc: $(cat "$TMP/out")"
+[[ "$(calls)" == "backup --no-prune --keep-running;update;pip install -q -r $INSTALL/backend/requirements.txt;npm;refresh SYSTEMD_UNIT_DIR=$TMP/units;nginx -t;nginx -t;systemctl restart adminpanelaz;curl;" ]] \
+  && ok "шаги после nginx выполнены" || bad "вызовы: $(calls)"
+grep -qF '  nginx      ошибка    конфиг не обновлён, старый восстановлен (nginx -t: [emerg] unknown directive "foo"' "$TMP/out" \
+  && grep -qxF "  Перезапуск ok        панель отвечает" "$TMP/out" && ok "итог" || bad "вывод: $(cat "$TMP/out")"
+cmp -s "$SA/panel_example_com" "$TMP/panel_example_com.orig" && ok "старый vhost на месте" || bad "vhost изменён"
 
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]

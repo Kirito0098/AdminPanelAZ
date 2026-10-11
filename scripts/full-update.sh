@@ -124,7 +124,6 @@ fu_finish() {
   fu_summary
   FU_EXIT=0
   if awk -F'\t' '$2 == "ошибка" { found = 1 } END { exit !found }' "$FU_STATE"; then
-    # shellcheck disable=SC2034
     FU_EXIT=1
   fi
   if [[ "$(fu_field restart 3)" == *"панель не ответила"* ]]; then
@@ -491,3 +490,168 @@ fu_step_ddns() {
   ui_warn "Таймер DDNS не обновлён — обновление продолжается"
   fu_row ddns ошибка "ddns-update.sh install-timer не прошёл — см. вывод выше"
 }
+
+fu_step_restart() {
+  local unit detail failed=false
+  local -a parts=()
+  if panel_uses_systemd; then
+    if panel_restart_and_wait; then
+      parts+=("панель отвечает")
+    else
+      parts+=("панель не ответила за 30 с")
+      failed=true
+    fi
+  fi
+  while IFS= read -r unit; do
+    if agent_restart "$unit"; then
+      parts+=("$unit работает")
+    else
+      parts+=("$unit не запустился")
+      failed=true
+    fi
+  done < <(menu_agent_units)
+  printf -v detail '%s, ' "${parts[@]}"
+  if [[ "$failed" == true ]]; then
+    fu_row restart ошибка "${detail%, }"
+    return 1
+  fi
+  fu_row restart ok "${detail%, }"
+}
+
+full_update_apply() {
+  fu_run apt fu_step_apt
+  fu_run pip fu_step_pip
+  fu_run frontend fu_step_frontend
+  fu_run systemd fu_step_systemd
+  fu_run nginx fu_step_nginx
+  fu_run firewall fu_step_firewall
+  fu_run ddns fu_step_ddns
+  fu_run restart fu_step_restart
+}
+
+full_update_run() {
+  local before
+  before="$(fu_head)"
+  fu_run backup fu_step_backup
+  fu_run code fu_step_code
+  if [[ "$FU_STOPPED" != true && "$(fu_head)" != "$before" ]]; then
+    full_update_reexec
+  fi
+  full_update_apply
+}
+
+fu_stdin_is_tty() {
+  [[ -t 0 ]]
+}
+
+fu_print_plan() {
+  ui_section "Полное обновление AdminPanelAZ"
+  ui_info "Сервисы: $(fu_units_list)"
+  ui_info "Шаги: бэкап, код из upstream, пакеты apt, Python, интерфейс, unit'ы systemd, nginx, firewall, DDNS, перезапуск"
+  ui_info "Не меняются: база, backend/.env, *_agent.env, сертификаты, mTLS"
+}
+
+fu_state_dir() {
+  local dir="${TMPDIR:-/tmp}"
+  printf '%s' "${dir%/}"
+}
+
+# Файл итога этапа 1 (--resume) создаёт mktemp этого же скрипта от root с правами 600. Другой каталог, symlink,
+# чужой владелец или запись для группы и всех — не наш файл. ADMINPANELAZ_TEST_STATE_UID задают только тесты.
+fu_state_valid() {
+  local path="$1" meta uid mode
+  [[ "${path%/*}" == "$(fu_state_dir)" && "${path##*/}" =~ ^adminpanelaz-update\.[A-Za-z0-9]+$ ]] || return 1
+  [[ ! -L "$path" && -f "$path" ]] || return 1
+  meta="$(stat -c '%u %a' -- "$path" 2>/dev/null)" || return 1
+  read -r uid mode <<<"$meta"
+  [[ "$uid" == "${ADMINPANELAZ_TEST_STATE_UID:-0}" && "$mode" =~ ^[0-7]{3,4}$ ]] || return 1
+  (((8#$mode & 8#022) == 0))
+}
+
+# Строки этапа 1 разбираются строго и ничем не исполняются: «Бэкап» (ok или пропущен) не больше одной,
+# «Код» — ровно одна ok; подробности без табуляций и управляющих символов; не больше 4 КБ.
+fu_state_rows_valid() {
+  local line backup=0 code=0
+  local re=$'^(backup|code)\t(ok|пропущен)\t([^\t[:cntrl:]]*)$'
+  (($(wc -c <"$1") <= 4096)) || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    [[ "$line" =~ $re ]] || return 1
+    case "${BASH_REMATCH[1]}:${BASH_REMATCH[2]}" in
+      backup:*) backup=$((backup + 1)) ;;
+      code:ok) code=$((code + 1)) ;;
+      *) return 1 ;;
+    esac
+  done <"$1"
+  ((backup <= 1 && code == 1))
+}
+
+# Строки берутся в новый файл mktemp: дальше этап 2 пишет только в свой файл. Проверенный файл этапа 1 удаляется.
+fu_state_resume() {
+  local src="$1" copy
+  fu_state_valid "$src" || return 1
+  copy="$(mktemp "$(fu_state_dir)/adminpanelaz-update.XXXXXX")"
+  head -c 4097 -- "$src" >"$copy" || true
+  rm -f -- "$src"
+  if ! fu_state_rows_valid "$copy"; then
+    rm -f -- "$copy"
+    return 1
+  fi
+  FU_STATE="$copy"
+}
+
+FU_ASSUME_YES=false
+
+full_update_main() {
+  local resume=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --yes) FU_ASSUME_YES=true ;;
+      --resume)
+        if [[ $# -lt 2 ]]; then
+          ui_fail "--resume: нужен файл итога"
+          return 2
+        fi
+        resume="$2"
+        shift
+        ;;
+      *)
+        ui_fail "Неизвестный аргумент: $1 (запуск: sudo ./install.sh --update)"
+        return 2
+        ;;
+    esac
+    shift
+  done
+  require_root
+  if [[ "$(menu_mode)" == none ]]; then
+    ui_fail "AdminPanelAZ не установлена: используйте обычную установку (sudo ./install.sh)"
+    return 1
+  fi
+  if [[ -n "$resume" ]]; then
+    if ! fu_state_resume "$resume"; then
+      ui_fail "Неверный файл итога обновления: ${resume//[[:cntrl:]]/?}"
+      return 2
+    fi
+    full_update_apply
+    fu_finish
+    return "$FU_EXIT"
+  fi
+  if [[ "$FU_ASSUME_YES" != true ]]; then
+    if ! fu_stdin_is_tty; then
+      ui_fail "Нет терминала для подтверждения. Без вопросов: sudo ./install.sh --update -y"
+      return 2
+    fi
+    fu_print_plan
+    if ! menu_confirm "Продолжить?" n; then
+      ui_info "Полное обновление отменено, ничего не изменено"
+      return 0
+    fi
+  fi
+  FU_STATE="$(mktemp "$(fu_state_dir)/adminpanelaz-update.XXXXXX")"
+  full_update_run
+  fu_finish
+  return "$FU_EXIT"
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  full_update_main "$@"
+fi
