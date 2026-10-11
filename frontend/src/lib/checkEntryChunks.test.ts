@@ -7,6 +7,8 @@ import {
   eagerChartChunks,
   eagerChunks,
   pagesWithChartCode,
+  publicAssetFiles,
+  publicGateProblems,
   publicWordLeaks,
 } from '../../scripts/check-entry-chunks.mjs'
 
@@ -106,5 +108,61 @@ describe('check-entry-chunks', () => {
     write('assets/Zz9.js', 'const label="OpenVPN"')
 
     expect(publicWordLeaks(dist)).toEqual([])
+  })
+
+  it('lists the login and portal pages with their static imports as public files', () => {
+    mkdirSync(join(dist, '.vite'))
+    write(
+      '.vite/manifest.json',
+      JSON.stringify({
+        'index.html': {
+          file: 'assets/e1.js',
+          css: ['assets/s1.css'],
+          imports: ['_sh.js'],
+          dynamicImports: ['_shell.js', 'src/pages/PortalPage.tsx'],
+        },
+        '_sh.js': { file: 'assets/sh.js' },
+        'src/pages/PortalPage.tsx': { file: 'assets/p1.js', imports: ['index.html', '_sh.js'], assets: ['assets/logo.svg'] },
+        '_shell.js': { file: 'assets/shell.js', name: 'AppShell', imports: ['index.html'], dynamicImports: ['src/pages/SettingsPage.tsx'] },
+        'src/pages/SettingsPage.tsx': { file: 'assets/set.js', imports: ['_shell.js'] },
+      }),
+    )
+
+    expect(publicAssetFiles(dist)).toEqual([
+      'assets/e1.js',
+      'assets/logo.svg',
+      'assets/p1.js',
+      'assets/s1.css',
+      'assets/sh.js',
+    ])
+    expect(publicGateProblems(dist)).toEqual([])
+  })
+
+  it('reports a public page that lazy-loads a chunk anonymous visitors cannot download', () => {
+    mkdirSync(join(dist, '.vite'))
+    write(
+      '.vite/manifest.json',
+      JSON.stringify({
+        'index.html': { file: 'assets/e1.js', dynamicImports: ['_shell.js', 'src/pages/PortalPage.tsx', '_qr.js'] },
+        'src/pages/PortalPage.tsx': { file: 'assets/p1.js', imports: ['index.html'], dynamicImports: ['_chart.js'] },
+        '_shell.js': { file: 'assets/shell.js', name: 'AppShell' },
+        '_qr.js': { file: 'assets/qr.js' },
+        '_chart.js': { file: 'assets/chart.js' },
+      }),
+    )
+
+    expect(publicGateProblems(dist)).toEqual([
+      'index.html lazy-loads _qr.js, which anonymous visitors cannot download',
+      'src/pages/PortalPage.tsx lazy-loads _chart.js, which anonymous visitors cannot download',
+    ])
+  })
+
+  it('reports a missing manifest or a missing public page', () => {
+    expect(publicGateProblems(dist)).toEqual(['.vite/manifest.json is missing (build.manifest must stay enabled)'])
+
+    mkdirSync(join(dist, '.vite'))
+    write('.vite/manifest.json', JSON.stringify({ 'index.html': { file: 'assets/e1.js' } }))
+
+    expect(publicGateProblems(dist)).toEqual(['src/pages/PortalPage.tsx is missing from .vite/manifest.json'])
   })
 })
