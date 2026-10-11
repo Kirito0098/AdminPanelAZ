@@ -32,15 +32,11 @@ def invalidate_portal_domain_cache() -> None:
     _cached_at_monotonic = 0.0
 
 
-def get_cached_portal_domain(*, force_refresh: bool = False) -> str:
+def get_cached_portal_domain() -> str:
     """Portal host from DB with a short TTL cache (empty string is cached too)."""
     global _cached_portal_host, _cached_at_monotonic
     now = time.monotonic()
-    if (
-        not force_refresh
-        and _cached_portal_host is not None
-        and (now - _cached_at_monotonic) < _CACHE_TTL_SEC
-    ):
+    if _cached_portal_host is not None and (now - _cached_at_monotonic) < _CACHE_TTL_SEC:
         return _cached_portal_host
 
     from app.database import SessionLocal
