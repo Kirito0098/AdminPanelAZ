@@ -18,6 +18,7 @@ VENV_PATH="${VENV_PATH:-$ROOT_DIR/backend/.venv}"
 UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 BACKUP_CLI="$ROOT_DIR/scripts/backup-cli.py"
 SITE_DIAGNOSTICS="$ROOT_DIR/scripts/site-diagnostics.sh"
+PANEL_UPDATE_CHANGED=false
 MENU_CHOICE=""
 MENU_CODE=""
 MENU_PANEL_STATE=""
@@ -577,6 +578,7 @@ panel_update() {
         panel_frontend_manual_hint
         return 1
       fi
+      PANEL_UPDATE_CHANGED=true
       ui_info "Перезапустите панель: $0 --restart"
     fi
     return 0
@@ -606,6 +608,7 @@ panel_update() {
     [[ -n "$merge_out" ]] && printf '%s\n' "$merge_out"
   fi
   ui_ok "Код обновлён"
+  PANEL_UPDATE_CHANGED=true
 
   # bash выполняет версию меню, прочитанную до git pull: остальные шаги — уже обновлённым скриптом.
   local menu="$INSTALL_DIR/scripts/adminpanel-menu.sh"
@@ -648,6 +651,26 @@ panel_after_pull() {
   fi
   ui_info "Перезапустите панель: $0 --restart"
   return 0
+}
+
+panel_restart_and_wait() {
+  panel_restart
+  panel_wait_health
+}
+
+panel_offer_restart() {
+  if ! menu_confirm "Перезапустить панель сейчас?" y; then
+    ui_info "Панель не перезапущена: $0 --restart"
+    return 0
+  fi
+  panel_restart_and_wait
+}
+
+panel_update_interactive() {
+  PANEL_UPDATE_CHANGED=false
+  panel_update
+  [[ "$PANEL_UPDATE_CHANGED" == true ]] || return 0
+  panel_offer_restart
 }
 
 panel_backup() {

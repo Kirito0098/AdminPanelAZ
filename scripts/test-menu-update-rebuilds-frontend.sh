@@ -65,6 +65,7 @@ run_update() {
     systemctl() { echo "systemctl $*"; }
     PATH="$TEST_PATH"
     "$FN"
+    echo "changed=$PANEL_UPDATE_CHANGED"
   ' bash "$ROOT_DIR"
 }
 
@@ -82,6 +83,7 @@ run_update >"$TMP/out" 2>&1 || fail "обновление завершилось
 [[ "$(cat "$NPM_LOG")" == "npm ci @ $TMP/install/frontend"$'\n'"npm run build:all @ $TMP/install/frontend" ]] \
   || fail "вызовы npm: $(cat "$NPM_LOG")"
 grep -q "Перезапустите панель" "$TMP/out" || fail "нет подсказки про перезапуск"
+grep -qx "changed=true" "$TMP/out" || fail "обновление кода не отмечено для вопроса о перезапуске"
 echo "  OK"
 
 echo "[test] интерфейс здесь не собирался (сервер только с агентом): npm не вызывается"
@@ -102,7 +104,8 @@ build_dist
 mkdir -p "$TMP/install/frontend/node_modules/x"
 touch -d '+1 min' "$TMP/install/frontend/node_modules/x/index.js" "$TMP/install/frontend/.eslintcache"
 : >"$NPM_LOG"
-run_update >/dev/null 2>&1 || fail "обновление завершилось ошибкой"
+run_update >"$TMP/out" 2>&1 || fail "обновление завершилось ошибкой"
+grep -qx "changed=false" "$TMP/out" || fail "без обновлений отмечено изменение: $(cat "$TMP/out")"
 [[ ! -s "$NPM_LOG" ]] || fail "npm вызван без обновлений (файлы вне git не считаются): $(cat "$NPM_LOG")"
 echo "  OK"
 
@@ -114,6 +117,7 @@ run_update >"$TMP/out" 2>&1 || fail "обновление завершилось
 [[ "$(cat "$NPM_LOG")" == "npm ci @ $TMP/install/frontend"$'\n'"npm run build:all @ $TMP/install/frontend" ]] \
   || fail "вызовы npm: $(cat "$NPM_LOG")"
 grep -q "Перезапустите панель" "$TMP/out" || fail "нет подсказки про перезапуск"
+grep -qx "changed=true" "$TMP/out" || fail "пересборка интерфейса не отмечена для вопроса о перезапуске"
 rm -f "$TMP/install/frontend/dist/index.html"
 : >"$NPM_LOG"
 run_update >/dev/null 2>&1 || fail "обновление без index.html завершилось ошибкой"
