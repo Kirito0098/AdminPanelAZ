@@ -670,6 +670,13 @@ export interface LatestChangelog {
   pending?: ChangelogBlock | null
 }
 
+export interface TelegramRelayCheck {
+  id: number
+  name: string
+  ok: boolean
+  error: string
+}
+
 export interface TelegramSettings {
   bot_token_set: boolean
   bot_username: string
@@ -694,10 +701,12 @@ export interface TelegramSettings {
   bot_command_rate_max: number
   bot_command_rate_window_seconds: number
   bot_command_rate_limit_enabled: boolean
-  relay_node_id: number | null
-  relay_nodes: { id: number; name: string }[]
+  relay_node_ids: number[]
+  relay_nodes: { id: number; name: string; unavailable_reason: string | null }[]
   relay_last_ok_at: string
   relay_last_error: string
+  relay_last_node: string
+  relay_check: TelegramRelayCheck[]
 }
 
 export interface TelegramLinkCode {

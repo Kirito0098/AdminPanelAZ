@@ -786,7 +786,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               onCheckedChange={(checked) => void tg.handleSaveInteractive(checked)}
             />
 
-            {!tg.settings?.relay_node_id && (
+            {!tg.settings?.relay_node_ids.length && (
               <>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 <div className="rounded-lg border p-3">
