@@ -39,10 +39,6 @@ class _TelegramJwksClient(PyJWKClient):
         return jwk_set
 
 
-_jwks_client: PyJWKClient | None = None
-_jwks_client_lock = threading.Lock()
-
-
 def pkce_verifier() -> str:
     return secrets.token_urlsafe(32)[:64]
 
@@ -84,15 +80,23 @@ def build_authorization_url(*, client_id: str, redirect_uri: str, state: str, co
     return f"{OIDC_AUTH_URL}?{query}"
 
 
+# Keyed by relay node: keys fetched through one node must never verify logins after it is replaced.
+_jwks_clients: dict[str, PyJWKClient] = {}
+_jwks_client_lock = threading.Lock()
+
+
 def _get_jwks_client() -> PyJWKClient:
-    global _jwks_client
-    if _jwks_client is not None:
-        return _jwks_client
+    from app.services.telegram_transport import current_relay_setting
+
+    route = current_relay_setting()
     with _jwks_client_lock:
-        if _jwks_client is None:
+        client = _jwks_clients.get(route)
+        if client is None:
             # lifespan=3600 matches the previous 1h JWKS cache.
-            _jwks_client = _TelegramJwksClient(OIDC_JWKS_URL, cache_keys=True, lifespan=3600, timeout=10)
-        return _jwks_client
+            client = _TelegramJwksClient(OIDC_JWKS_URL, cache_keys=True, lifespan=3600, timeout=10)
+            _jwks_clients.clear()
+            _jwks_clients[route] = client
+        return client
 
 
 def verify_id_token(id_token: str, *, client_id: str) -> dict[str, Any]:

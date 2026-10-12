@@ -32,6 +32,15 @@ def relay_node_ineligible_reason(node) -> str | None:
     return None
 
 
+def current_relay_setting() -> str:
+    """Id of the relay node as stored, or "" when Telegram is reached directly."""
+    from app.database import SessionLocal
+    from app.services.app_setting_store import _get_setting
+
+    with SessionLocal() as db:
+        return _get_setting(db, RELAY_NODE_SETTING).strip()
+
+
 def _relay_adapter():
     """Adapter of the relay node, or None when Telegram is reached directly."""
     from app.database import SessionLocal
