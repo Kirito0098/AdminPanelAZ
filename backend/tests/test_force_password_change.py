@@ -116,6 +116,17 @@ def test_flagged_web_session_is_blocked_until_password_change(client, db_factory
     assert client.get("/api/configs/quota", headers=_auth(new_token)).status_code == 200
 
 
+def test_reusing_admin_set_password_does_not_clear_flag(client, db_factory):
+    response = client.post(
+        "/api/auth/change-password",
+        json={"current_password": ADMIN_SET_PASSWORD, "new_password": ADMIN_SET_PASSWORD},
+        headers=_auth(_token(db_factory, "carol")),
+    )
+
+    assert response.status_code == 400
+    assert _flag(db_factory, "carol") is True
+
+
 def test_flagged_user_keeps_mini_app_access(client):
     response = client.get("/api/configs/quota", headers=_auth(create_tg_mini_token("carol", "777")))
     assert response.status_code == 200
