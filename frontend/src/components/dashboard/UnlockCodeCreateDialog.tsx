@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Copy, KeyRound, Loader2, X } from 'lucide-react'
 import { getConfigs } from '@/api/configs'
 import { createUnlockCode, type UnlockCodeProtocol } from '@/api/unlockCodes'
@@ -97,6 +97,11 @@ export default function UnlockCodeCreateDialog({
   const [clientsLoading, setClientsLoading] = useState(false)
   const [createdCode, setCreatedCode] = useState<UnlockCodeRecord | null>(null)
   const [saving, setSaving] = useState(false)
+  const createdCodeRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (createdCode) createdCodeRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [createdCode])
 
   useEffect(() => {
     if (!open) return
@@ -267,7 +272,7 @@ export default function UnlockCodeCreateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-h-[92dvh] max-w-lg overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <KeyRound size={18} />
@@ -282,7 +287,7 @@ export default function UnlockCodeCreateDialog({
 
         <form className="space-y-4" onSubmit={(event) => void handleSubmit(event)} noValidate>
           {createdCode && (
-            <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+            <div ref={createdCodeRef} className="space-y-3 rounded-xl border bg-muted/20 p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">Сгенерированный код</p>
