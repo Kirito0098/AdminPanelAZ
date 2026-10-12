@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from app.database import SessionLocal
 from app.routers.telegram_webhook import _handle_update
 from app.services.app_setting_store import _get_setting, _set_setting
+from app.services.background_gate import run_background_step
 from app.services.telegram_api import ALLOWED_UPDATES
 from app.services.telegram_bot_loop import run_on_bot_loop
 from app.services.telegram_transport import RELAY_NODE_SETTING, bot_api_post
@@ -47,7 +48,7 @@ def _record(**values: str) -> None:
 
 
 async def poll_once(offset: int) -> int:
-    config = await asyncio.to_thread(_polling_config)
+    config = await run_background_step(_polling_config)
     if config is None:
         await asyncio.sleep(IDLE_SECONDS)
         return offset
@@ -71,7 +72,7 @@ async def poll_once(offset: int) -> int:
             await run_on_bot_loop(_handle_update(update, mini_app_url=mini_app_url))
         except Exception:
             logger.exception("Telegram update %s handling failed", update_id)
-    await asyncio.to_thread(
+    await run_background_step(
         _record,
         telegram_relay_last_ok_at=datetime.now(timezone.utc).isoformat(),
         telegram_relay_last_error="",
@@ -88,5 +89,5 @@ async def run_telegram_polling_loop() -> None:
             raise
         except Exception as exc:
             logger.warning("Telegram polling through relay node failed: %s", exc)
-            await asyncio.to_thread(_record, telegram_relay_last_error=str(exc)[:500])
+            await run_background_step(_record, telegram_relay_last_error=str(exc)[:500])
             await asyncio.sleep(ERROR_PAUSE_SECONDS)
