@@ -4,9 +4,8 @@ import io
 import shutil
 import tarfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from app.services.antizapret_backup import AntizapretBackupService, ha_vpn_crypto_paths
 

@@ -6,6 +6,7 @@ import TelegramBotAuthGuide from '@/components/telegram/TelegramBotAuthGuide'
 import TelegramLinkedAccountsPanel from '@/components/telegram/TelegramLinkedAccountsPanel'
 import TelegramMiniAppGuide from '@/components/telegram/TelegramMiniAppGuide'
 import TelegramBotCommandsGuide from '@/components/telegram/TelegramBotCommandsGuide'
+import TelegramBotRateLimitFields from '@/components/telegram/TelegramBotRateLimitFields'
 import TelegramRecipientsPanel from '@/components/telegram/TelegramRecipientsPanel'
 import { formatDateTime } from '@/lib/datetime'
 import Spinner from '@/components/ui/Spinner'
@@ -18,6 +19,7 @@ import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { applyGroupToggle, enabledCount, isIndeterminate } from './notifyGroups'
+import TelegramLinkCodeForm from './TelegramLinkCodeForm'
 import type { AdminNotifyEventItem } from '@/types'
 import type { TelegramSection, TelegramSettingsHook } from './useTelegramSettings'
 
@@ -833,6 +835,8 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               api.telegram.org (команда на сервере: curl -4 https://api.telegram.org/).
             </p>
 
+            {tg.settings ? <TelegramBotRateLimitFields settings={tg.settings} onSaved={tg.setSettings} /> : null}
+
             <TelegramBotCommandsGuide />
 
             <TelegramLinkedAccountsPanel
@@ -845,7 +849,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               <div>
                 <Label>Привязать Telegram к аккаунту</Label>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Получите одноразовый код и отправьте боту в личные сообщения. Код действует ограниченное время.
+                  Введите свой текущий пароль, получите одноразовый код и отправьте боту в личные сообщения. Код действует ограниченное время.
                 </p>
               </div>
               {tg.linkCode ? (
@@ -864,14 +868,11 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                   </Button>
                 </div>
               ) : (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => void tg.handleGetLinkCode()}
+                <TelegramLinkCodeForm
+                  idPrefix="telegram-settings"
                   disabled={!tg.settings?.bot_token_set}
-                >
-                  Получить код для привязки
-                </Button>
+                  onRequest={tg.handleGetLinkCode}
+                />
               )}
             </div>
           </CardContent>
@@ -1070,4 +1071,3 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
   )
 }
 
-export type { TelegramSection }

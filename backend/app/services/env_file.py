@@ -87,6 +87,3 @@ class EnvFileService:
                 return True
         return False
 
-    def ensure_env_default(self, key: str, value: str) -> None:
-        if self.get_env_value(key, "__missing__") == "__missing__":
-            self.set_env_value(key, value)

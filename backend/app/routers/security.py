@@ -108,6 +108,7 @@ class SecuritySettingsUpdate(BaseModel):
     qr_download_pin: str | None = None
     public_download_enabled: bool | None = None
     portal_domain: str | None = None
+    portal_title: str | None = Field(default=None, max_length=64)
 
 
 class PublicDownloadToggle(BaseModel):
@@ -225,7 +226,7 @@ def post_portal_publish(
     if conflict is not None:
         return conflict
 
-    _maybe_save_portal_domain(db, portal_host, panel_domain, save=bool(payload.save_domain))
+    _maybe_save_portal_domain(db, portal_host, panel_domain, save=payload.save_domain)
 
     task_payload = {
         "portal_domain": portal_host,
@@ -311,7 +312,7 @@ def _post_portal_readiness(
         if "save_domain" in payload.model_fields_set
         else default_save_domain
     )
-    _maybe_save_portal_domain(db, portal_host, panel_domain, save=bool(save_domain))
+    _maybe_save_portal_domain(db, portal_host, panel_domain, save=save_domain)
 
     task_payload = {
         "portal_domain": portal_host,

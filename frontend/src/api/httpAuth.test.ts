@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   REFRESH_TIMEOUT_MS,
   apiFetchAtBase,
+  apiFetchResponse,
   isNodeAgentAuthFailureDetail,
   refreshAccessToken,
 } from './http'
@@ -284,5 +285,129 @@ describe('final session loss is reported once for every caller', () => {
     await refreshAccessToken()
 
     expect(listener).not.toHaveBeenCalled()
+  })
+})
+
+describe('apiFetch renews the session on /auth paths except the sign-in flow', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  function json(body: unknown, status: number): Response {
+    return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+  }
+
+  it.each(['/auth/me', '/auth/2fa/status', '/auth/passkeys', '/auth/change-password'])(
+    'refreshes and retries %s after a session 401',
+    async (path) => {
+      vi.spyOn(accessToken, 'getAccessToken').mockReturnValue('old-jwt')
+      vi.spyOn(accessToken, 'setAccessToken')
+      vi.spyOn(webSession, 'getWebSessionId').mockReturnValue(null)
+      const fetchMock = vi
+        .fn()
+        .mockResolvedValueOnce(json({ detail: 'Неверный токен авторизации' }, 401))
+        .mockResolvedValueOnce(json({ access_token: 'new-jwt' }, 200))
+        .mockResolvedValueOnce(json({ ok: true }, 200))
+      vi.stubGlobal('fetch', fetchMock)
+
+      await expect(apiFetchAtBase('/api', path, {}, true)).resolves.toEqual({ ok: true })
+      expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+        `/api${path}`,
+        '/api/auth/refresh',
+        `/api${path}`,
+      ])
+    },
+  )
+
+  it.each([
+    '/auth/login',
+    '/auth/login/json',
+    '/auth/login/2fa',
+    '/auth/login/passkey/options',
+    '/auth/login/passkey/verify',
+    '/auth/logout',
+    '/auth/refresh',
+  ])('does not refresh on a 401 from %s', async (path) => {
+    vi.spyOn(accessToken, 'getAccessToken').mockReturnValue(null)
+    vi.spyOn(webSession, 'getWebSessionId').mockReturnValue(null)
+    const fetchMock = vi.fn().mockResolvedValue(json({ detail: 'Неверный логин или пароль' }, 401))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiFetchAtBase('/api', path, {}, true)).rejects.toMatchObject({
+      status: 401,
+      message: 'Неверный логин или пароль',
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('apiFetchResponse', () => {
+  beforeEach(() => {
+    accessToken.setAccessToken('old-jwt')
+    vi.spyOn(webSession, 'getWebSessionId').mockReturnValue(null)
+  })
+
+  afterEach(() => {
+    accessToken.clearAccessToken()
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('returns the successful response unread, with its headers', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('client-config', {
+          status: 200,
+          headers: { 'Content-Disposition': 'attachment; filename="a.ovpn"' },
+        }),
+      ),
+    )
+
+    const response = await apiFetchResponse('/configs/1/download?path=a.ovpn')
+
+    expect(response.headers.get('Content-Disposition')).toBe('attachment; filename="a.ovpn"')
+    await expect(response.text()).resolves.toBe('client-config')
+  })
+
+  it('renews the session once on 401 and retries with the new token', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('{"detail":"Неверный токен авторизации"}', { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'new-jwt' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('backup-bytes', { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await apiFetchResponse('/backups/a.tar.gz/download')
+
+    await expect(response.text()).resolves.toBe('backup-bytes')
+    expect(fetchMock.mock.calls.map((call) => String(call[0]))).toEqual([
+      '/api/backups/a.tar.gz/download',
+      '/api/auth/refresh',
+      '/api/backups/a.tar.gz/download',
+    ])
+    expect(new Headers(fetchMock.mock.calls[2][1].headers).get('Authorization')).toBe('Bearer new-jwt')
+  })
+
+  it('gives up after one retry', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('{"detail":"Неверный токен авторизации"}', { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'new-jwt' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response('{"detail":"Неверный токен авторизации"}', { status: 401 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(apiFetchResponse('/logs/action-logs/export')).rejects.toMatchObject({ status: 401 })
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+  })
+
+  it('throws ApiError with the server message on an error answer', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"detail":"Бэкап не найден"}', { status: 404 })))
+
+    await expect(apiFetchResponse('/backups/x.tar.gz/download')).rejects.toMatchObject({
+      status: 404,
+      message: 'Бэкап не найден',
+    })
   })
 })

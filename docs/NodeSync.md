@@ -18,13 +18,14 @@
 - **Create** и **renew** на primary (явное действие админа) вызывают `client.sh 1` на primary, затем `client.sh 7` и crypto sync на replica.
 - **Download / QR / Telegram** читают `.ovpn` с диска без repair; при выдаче панель может подставить multi-remote из списка узла в БД (диск и HA-копия остаются стоковыми). Список remote **не** реплицируется Push full — задаётся на каждом узле отдельно ([antizapret-config.md](antizapret-config.md#несколько-адресов-подключения)).
 - **Verify** сравнивает fingerprint `openvpn/client_profiles` и блок `openvpn_profile_certs` (read-only). При расхождении — **Push full**, не автоматический renew.
+- **Verify** сравнивает и то, что реплика реально запустила: peer WireGuard на интерфейсах `antizapret`/`vpn` (`wg show`, расхождение `wireguard_peers`) и клиентов AZ-AWG2, если он установлен на primary (`awg2_clients`).
 
 ### AWG2 HA crypto-sync
 
 - Для AZ-AWG2 в HA используется crypto-sync через byte-copy, а не `awg-client add` на replica.
 - Архивируются пути `/etc/amnezia/amneziawg` и `/opt/antizapret-awg/clients`; из архива исключаются `stats.db`, `venv/` и `__pycache__/`. Локальный `stats.db` на узле остаётся для мониторинга и в HA не копируется.
 - Если на replica нет слоя `az-awg2`, синхронизация завершается ошибкой и панель показывает `install_command`.
-- После restore на replica выполняется `apply_runtime`, чтобы применить состояние узла.
+- После restore на replica выполняется `apply_runtime`, чтобы применить состояние узла. Если `apply_runtime` не прошёл, файлы на реплике уже новые, а группа получает `sync_status=drift` («есть расхождения») и уведомление админу.
 
 ## API
 
@@ -151,6 +152,9 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 
 - Primary **не откатывается** при ошибке на одной replica.
 - `sync_status=failed`, `last_sync_error` — детали; audit `ha_replicate_partial_failure`.
+- `sync_status=drift` — файлы на реплику скопированы, но WireGuard (`wg syncconf`) или AZ-AWG2 (`apply_runtime`) их не применил. В `last_sync_error` — причина, админ получает уведомление `node_sync_drift` (один раз при переходе в `drift`). Статус снимается проверкой без расхождений или успешной синхронизацией. Автоповтора нет.
+- Пока группа в `pending`, `PUT`/`DELETE /api/nodes/sync-groups/{id}` отвечают `409` «Идёт синхронизация, повторите после её окончания»; репликация клиентов, crypto sync и reconcile worker статус такой группы не меняют.
+- Смена primary или набора реплик через `PUT` снимает старые связи клиентов и строит новые по новому составу (как Push full): `auto` — shadow-строки на репликах, `manual_full` — HA-бейдж у клиентов нового primary.
 - UI: warning-toast при `sync_status=failed` (polling auto-групп) или при `warnings` в API.
 - **Группа не зависает в `pending`.** Если задача настройки группы («Синхронизировать») или применения общего домена упала, группа сразу переходит в `failed` с текстом ошибки. Если задача прервалась перезапуском панели или завершилась без итогового статуса, группу переводит в `failed` старт панели или воркер сверки. Раньше повторная настройка отвечала `409` «синхронизация уже выполняется», а auto-heal группу пропускал.
 - **Auto-heal** (opt-in, `NODE_SYNC_AUTO_HEAL=true`): reconcile worker пытается incremental heal (`crypto_sync` / `policy_sync` / `config_sync` / `antizapret_sync`); **никогда** auto Push full. После N неудач подряд — notify (один раз) + `failed`, и авто-лечение группы приостанавливается: проверка продолжается, `last_sync_error` сообщает о приостановке. Возобновляется после успешной «Синхронизировать» или проверки без расхождений (счётчик сбрасывается).

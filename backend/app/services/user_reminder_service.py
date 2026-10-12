@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import Node, User, UserRole, VpnConfig, VpnType
+from app.models import Node, User, VpnConfig, VpnType
 from app.services.app_setting_store import _get_setting
 from app.services.access_policy import AccessPolicyService
 from app.services.admin_notify import admin_notify_service
@@ -146,7 +146,61 @@ def _send_owner_reminder(
 def _policy_for_config(svc: AccessPolicyService, config: VpnConfig) -> dict:
     if config.vpn_type == VpnType.openvpn:
         return svc.get_openvpn_policy(config.client_name)
+    if config.vpn_type == VpnType.amneziawg2:
+        return svc.get_awg2_policy(config.client_name)
     return svc.get_wg_policy(config.client_name)
+
+
+def _process_config_reminders(
+    db: Session,
+    svc: AccessPolicyService,
+    config: VpnConfig,
+    cert_threshold: int,
+) -> int:
+    owner = db.get(User, config.owner_id)
+    if not owner or owner.role.value == "admin":
+        return 0
+
+    sent = 0
+    policy = _policy_for_config(svc, config)
+
+    if config.vpn_type == VpnType.openvpn:
+        days_left = days_remaining_until(config.cert_expires_at)
+        if (
+            days_left is not None
+            and days_left <= cert_threshold
+            and not _already_expired(config.cert_expires_at)
+        ):
+            dedup_key = f"config:{config.id}"
+            details = f"Осталось <b>{days_left}</b> дн."
+            if _send_owner_reminder(db, owner, REMINDER_CERT, details, dedup_key, config=config):
+                sent += 1
+
+    if policy.get("block_mode") == "temp":
+        dedup_key = f"config:{config.id}:temp"
+        until = policy.get("block_until") or "—"
+        details = f"До: <code>{until}</code>"
+        if _send_owner_reminder(db, owner, REMINDER_TEMP_BLOCK, details, dedup_key, config=config):
+            sent += 1
+
+    traffic_exceeded = bool(policy.get("traffic_limit_exceeded"))
+    limit_human = policy.get("traffic_limit_human")
+    consumed_human = policy.get("traffic_consumed_human")
+    limit_bytes = policy.get("traffic_limit_bytes")
+    consumed_bytes = policy.get("traffic_consumed_bytes")
+    if traffic_exceeded or _traffic_warning(
+        int(limit_bytes) if limit_bytes is not None else None,
+        int(consumed_bytes) if consumed_bytes is not None else None,
+    ):
+        dedup_key = f"config:{config.id}:traffic"
+        if traffic_exceeded:
+            details = f"Превышен лимит: {consumed_human or '—'} / {limit_human or '—'}"
+        else:
+            details = f"Использовано {consumed_human or '—'} из {limit_human or '—'} ({_traffic_warning_percent()}%)"
+        if _send_owner_reminder(db, owner, REMINDER_TRAFFIC, details, dedup_key, config=config):
+            sent += 1
+
+    return sent
 
 
 def process_user_reminders(db: Session) -> int:
@@ -174,6 +228,7 @@ def process_user_reminders(db: Session) -> int:
     for node in nodes:
         if not is_vpn_node(node):
             continue
+        node_id = node.id
         try:
             adapter = get_adapter_for_node(node)
             meta = node_metadata_dict(node)
@@ -186,58 +241,24 @@ def process_user_reminders(db: Session) -> int:
                 adapter=adapter,
             )
         except Exception:
-            logger.exception("user_reminder: skip node %s", node.id)
+            logger.exception("user_reminder: skip node %s", node_id)
             continue
 
         configs = (
             db.query(VpnConfig)
             .filter(
-                VpnConfig.node_id == node.id,
+                VpnConfig.node_id == node_id,
                 VpnConfig.ha_primary_config_id.is_(None),
             )
             .all()
         )
-        for config in configs:
-            owner = db.get(User, config.owner_id)
-            if not owner or owner.role.value == "admin":
-                continue
-
-            policy = _policy_for_config(svc, config)
-
-            if config.vpn_type == VpnType.openvpn:
-                days_left = days_remaining_until(config.cert_expires_at)
-                if (
-                    days_left is not None
-                    and days_left <= threshold
-                    and not _already_expired(config.cert_expires_at)
-                ):
-                    dedup_key = f"config:{config.id}"
-                    details = f"Осталось <b>{days_left}</b> дн."
-                    if _send_owner_reminder(db, owner, REMINDER_CERT, details, dedup_key, config=config):
-                        sent += 1
-
-            if policy.get("block_mode") == "temp":
-                dedup_key = f"config:{config.id}:temp"
-                until = policy.get("block_until") or "—"
-                details = f"До: <code>{until}</code>"
-                if _send_owner_reminder(db, owner, REMINDER_TEMP_BLOCK, details, dedup_key, config=config):
-                    sent += 1
-
-            traffic_exceeded = bool(policy.get("traffic_limit_exceeded"))
-            limit_human = policy.get("traffic_limit_human")
-            consumed_human = policy.get("traffic_consumed_human")
-            limit_bytes = policy.get("traffic_limit_bytes")
-            consumed_bytes = policy.get("traffic_consumed_bytes")
-            if traffic_exceeded or _traffic_warning(
-                int(limit_bytes) if limit_bytes is not None else None,
-                int(consumed_bytes) if consumed_bytes is not None else None,
-            ):
-                dedup_key = f"config:{config.id}:traffic"
-                if traffic_exceeded:
-                    details = f"Превышен лимит: {consumed_human or '—'} / {limit_human or '—'}"
-                else:
-                    details = f"Использовано {consumed_human or '—'} из {limit_human or '—'} ({_traffic_warning_percent()}%)"
-                if _send_owner_reminder(db, owner, REMINDER_TRAFFIC, details, dedup_key, config=config):
-                    sent += 1
+        # Labels are read before the loop: a rollback expires every loaded row.
+        targets = [(config, f"{config.id}:{config.client_name}") for config in configs]
+        for config, label in targets:
+            try:
+                sent += _process_config_reminders(db, svc, config, threshold)
+            except Exception:
+                db.rollback()
+                logger.exception("user_reminder: skip config %s on node %s", label, node_id)
 
     return sent

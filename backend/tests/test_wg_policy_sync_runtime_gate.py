@@ -104,3 +104,32 @@ def test_should_start_wg_policy_sync_always_true():
     from app.services import worker_lifecycle as lifecycle
 
     assert lifecycle.should_start_wg_policy_sync() is True
+
+
+def test_reconcile_skips_failing_node_and_continues(monkeypatch):
+    db = MagicMock()
+    down = MagicMock()
+    down.id = 1
+    down.name = "down"
+    up = MagicMock()
+    up.id = 2
+    up.name = "up"
+    monkeypatch.setattr(worker, "is_vpn_node", lambda _n: True)
+    node_q = MagicMock()
+    node_q.all.return_value = [down, up]
+    db.query.side_effect = lambda arg: node_q if arg is worker.Node else MagicMock()
+
+    def reconcile(_db, node, *, sync_all_runtime):
+        if node is down:
+            raise RuntimeError("node unreachable")
+        return {"wg_policy_reconcile": "ok", "blocked_clients": ["a"]}
+
+    monkeypatch.setattr(worker, "_reconcile_for_node", reconcile)
+
+    result = worker.reconcile_wg_policies_for_all_nodes(db, sync_all_runtime=True)
+
+    assert result["wg_policy_sync"] == "ok"
+    assert result["nodes_processed"] == 1
+    assert result["nodes_failed"] == 1
+    assert result["blocked_clients"] == 1
+    db.rollback.assert_called_once()

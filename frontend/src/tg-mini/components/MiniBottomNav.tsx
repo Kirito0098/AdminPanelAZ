@@ -12,7 +12,7 @@ import type { LucideIcon } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 
-export interface MiniTabItem {
+interface MiniTabItem {
   to: string
   label: string
   shortLabel?: string
@@ -46,7 +46,7 @@ interface MiniBottomNavProps {
   features?: Record<string, boolean>
 }
 
-export function miniTabsForRole(
+function miniTabsForRole(
   isAdmin: boolean,
   features?: Record<string, boolean>,
 ): MiniTabItem[] {

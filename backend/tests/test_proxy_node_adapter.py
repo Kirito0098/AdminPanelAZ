@@ -221,22 +221,6 @@ def test_refresh_proxy_status_syncs_destination(db, monkeypatch):
     assert node.destination_ip == "1.1.1.1"
 
 
-def test_get_proxy_mappings(db, monkeypatch):
-    from app.routers import nodes as nodes_router
-
-    node = _add_node(db)
-    admin = SimpleNamespace(id=1, username="admin")
-    monkeypatch.setattr(nodes_router, "is_proxy_nodes_enabled", lambda _db: True)
-    adapter = MagicMock()
-    adapter.mappings.return_value = {
-        "mappings": [{"client_ip": "10.1.1.1", "client_port": 443}],
-    }
-    monkeypatch.setattr(nodes_router, "get_proxy_adapter", lambda _n: adapter)
-    resp = nodes_router.get_proxy_mappings(node.id, admin, db)
-    assert len(resp.mappings) == 1
-    assert resp.mappings[0].client_ip == "10.1.1.1"
-
-
 def test_check_node_health_uses_proxy_adapter(db, monkeypatch):
     from app.services import node_manager as nm
 
@@ -339,12 +323,3 @@ def test_enable_mtls_proxy_already_enabled(db, monkeypatch):
     actor = SimpleNamespace(id=1, username="admin")
     with pytest.raises(ValueError, match="уже включён"):
         provision.enable_mtls(db, node, actor)
-
-
-def test_proxy_adapter_ssl_hint_mentions_mark_mtls():
-    adapter = ProxyNodeAdapter("10.0.0.9", 9101, "k" * 32, mtls_enabled=False)
-    hint = adapter._format_ssl_error("ssl wrong version number")
-    assert hint is not None
-    assert "Отметьте mTLS" in hint
-    assert "proxy-agent.md" in hint
-    assert "Включите mTLS" not in hint

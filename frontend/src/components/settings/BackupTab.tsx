@@ -757,13 +757,16 @@ export default function BackupTab() {
                         className="gap-1.5"
                         title="Скачать"
                         onClick={async () => {
-                          const res = await downloadBackup(b.file_name)
-                          if (!res.ok) return notifyError('Ошибка скачивания')
-                          const blob = await res.blob()
-                          const a = document.createElement('a')
-                          a.href = URL.createObjectURL(blob)
-                          a.download = b.file_name
-                          a.click()
+                          try {
+                            const res = await downloadBackup(b.file_name)
+                            const blob = await res.blob()
+                            const a = document.createElement('a')
+                            a.href = URL.createObjectURL(blob)
+                            a.download = b.file_name
+                            a.click()
+                          } catch (err) {
+                            notifyError(err instanceof ApiError ? err.message : 'Ошибка скачивания')
+                          }
                         }}
                       >
                         <Download size={14} />

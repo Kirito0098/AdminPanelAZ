@@ -182,7 +182,6 @@ def _build_webhook_health_text(info: dict[str, Any], last_error_value: str) -> s
 
 
 def format_webhook_health_text(info: dict) -> str:
-    info = info or {}
     raw_error = str(info.get("last_error_message") or "").strip()
     if not raw_error:
         return _build_webhook_health_text(info, i18n.TG_WEBHOOK_NONE)
@@ -392,15 +391,6 @@ async def handle_webhook_health(ctx: BotContext, *, message_id: int | None = Non
         markup=_webhook_health_keyboard(),
         message_id=message_id,
     )
-
-
-async def handle_settings_stub(ctx: BotContext, section: str, *, message_id: int | None = None) -> None:
-    if not await _require_admin_ctx(ctx):
-        return
-    label = _SECTION_LABELS.get(section, section)
-    text = f"📋 <b>{label}</b>\n\nРаздел будет доступен в следующем обновлении."
-    markup = inline_keyboard([[inline_button("◀️ Настройки", callback_data="st:root")]])
-    await _send_or_edit(ctx, text, markup=markup, message_id=message_id)
 
 
 async def _ask_text_input(ctx: BotContext, field: settings_fsm.FieldKind, prompt: str) -> None:
@@ -625,11 +615,11 @@ async def handle_settings_callback(ctx: BotContext, data: str, *, message_id: in
             return
 
     except ValueError as exc:
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {exc}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(str(exc))}")
         return
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {detail}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(detail)}")
         return
 
 
@@ -721,7 +711,7 @@ async def handle_settings_text(ctx: BotContext, text: str) -> bool:
             return True
 
     except ValueError as exc:
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {exc}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(str(exc))}")
         return True
 
     return True

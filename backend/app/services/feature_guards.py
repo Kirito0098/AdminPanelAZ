@@ -236,11 +236,6 @@ def require_vpn_type(vpn_type: str, *, service: FeatureToggleService) -> None:
     raise HTTPException(status_code=403, detail=module_disabled_message("wireguard"))
 
 
-def require_qr_downloads(*, service: FeatureToggleService) -> None:
-    if not service.is_enabled("qr_downloads"):
-        raise HTTPException(status_code=403, detail=module_disabled_message("qr_downloads"))
-
-
 def require_openvpn_and_security(*, service: FeatureToggleService | None = None) -> None:
     svc = service or get_feature_service()
     if not svc.is_enabled("security"):

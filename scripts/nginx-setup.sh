@@ -46,16 +46,6 @@ usage() {
 EOF
 }
 
-is_non_interactive() {
-  [[ "$NON_INTERACTIVE" == "true" || "$NON_INTERACTIVE" == "1" ]] || [[ ! -t 0 ]]
-}
-
-validate_port() {
-  local value="$1"
-  local label="$2"
-  [[ "$value" =~ ^[0-9]+$ ]] && ((value >= 1 && value <= 65535)) || nginx_die "${label}: некорректный порт (1-65535)"
-}
-
 validate_domain() {
   local value="$1"
   [[ "$value" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] || nginx_die "Неверный формат домена: $value"
@@ -73,17 +63,11 @@ require_safe_ssl_paths() {
   done
 }
 
-require_root() {
-  if [[ "$(id -u)" -ne 0 ]]; then
-    nginx_die "Запустите от root: sudo $0"
-  fi
-}
-
 resolve_public_ports() {
-  if is_non_interactive; then
-    validate_port "$BACKEND_PORT" "BACKEND_PORT"
-    validate_port "$HTTPS_PUBLIC_PORT" "HTTPS_PUBLIC_PORT"
-    validate_port "$HTTP_ACME_PORT" "HTTP_ACME_PORT"
+  if nginx_is_non_interactive; then
+    nginx_validate_port "$BACKEND_PORT" "BACKEND_PORT"
+    nginx_validate_port "$HTTPS_PUBLIC_PORT" "HTTPS_PUBLIC_PORT"
+    nginx_validate_port "$HTTP_ACME_PORT" "HTTP_ACME_PORT"
     [[ "$HTTPS_PUBLIC_PORT" != "$BACKEND_PORT" ]] || nginx_die "HTTPS_PUBLIC_PORT совпадает с BACKEND_PORT"
     [[ "$HTTP_ACME_PORT" != "$BACKEND_PORT" && "$HTTP_ACME_PORT" != "$HTTPS_PUBLIC_PORT" ]] \
       || nginx_die "HTTP_ACME_PORT конфликтует с другими портами"
@@ -120,13 +104,13 @@ prompt_public_ports() {
 
 resolve_backend_port() {
   if [[ -n "${BACKEND_PORT:-}" ]]; then
-    validate_port "$BACKEND_PORT" "BACKEND_PORT"
+    nginx_validate_port "$BACKEND_PORT" "BACKEND_PORT"
     return 0
   fi
-  if is_non_interactive; then
+  if nginx_is_non_interactive; then
     BACKEND_PORT="$(nginx_env_get BACKEND_PORT)"
     BACKEND_PORT="${BACKEND_PORT:-$DEFAULT_PORT}"
-    validate_port "$BACKEND_PORT" "BACKEND_PORT"
+    nginx_validate_port "$BACKEND_PORT" "BACKEND_PORT"
     return 0
   fi
   prompt_port
@@ -154,10 +138,10 @@ resolve_domain() {
     validate_domain "$DOMAIN"
     return 0
   fi
-  if [[ "$required" == "true" ]] && is_non_interactive; then
+  if [[ "$required" == "true" ]] && nginx_is_non_interactive; then
     nginx_die "DOMAIN обязателен в неинтерактивном режиме"
   fi
-  if is_non_interactive; then
+  if nginx_is_non_interactive; then
     DOMAIN="$(hostname -f 2>/dev/null || hostname)"
     [[ -n "$DOMAIN" ]] || nginx_die "DOMAIN не задан и hostname пуст"
     validate_domain "$DOMAIN"
@@ -267,7 +251,7 @@ setup_http_direct() {
 }
 
 resolve_access_path() {
-  if is_non_interactive; then
+  if nginx_is_non_interactive; then
     if [[ -v ACCESS_PATH ]]; then
       ACCESS_PATH="$(nginx_normalize_access_path "$ACCESS_PATH")"
     else
@@ -288,7 +272,7 @@ setup_nginx_letsencrypt() {
   resolve_domain true
   local domain="$DOMAIN"
   local email="${EMAIL:-}"
-  if [[ -z "${email:-}" ]] && ! is_non_interactive; then
+  if [[ -z "${email:-}" ]] && ! nginx_is_non_interactive; then
     read -r -p "Email для Let's Encrypt (ENTER — пропустить): " email
   fi
   resolve_backend_port
@@ -378,7 +362,7 @@ setup_nginx_custom_certs() {
       cert_path="$SSL_CERT"
       key_path="$SSL_KEY"
       nginx_log "Используются найденные сертификаты: $cert_path"
-    elif is_non_interactive; then
+    elif nginx_is_non_interactive; then
       nginx_die "SSL_CERT обязателен в неинтерактивном режиме (укажите пути или DOMAIN с Let's Encrypt)"
     else
       read -r -p "Путь к сертификату (.crt/.pem): " cert_path
@@ -387,7 +371,7 @@ setup_nginx_custom_certs() {
   if [[ -z "$key_path" ]]; then
     if [[ -n "${SSL_KEY:-}" ]]; then
       key_path="$SSL_KEY"
-    elif is_non_interactive; then
+    elif nginx_is_non_interactive; then
       nginx_die "SSL_KEY обязателен в неинтерактивном режиме"
     else
       read -r -p "Путь к приватному ключу (.key): " key_path
@@ -425,7 +409,7 @@ setup_uvicorn_letsencrypt() {
   resolve_domain true
   local domain="$DOMAIN"
   local email="${EMAIL:-}"
-  if [[ -z "${email:-}" ]] && ! is_non_interactive; then
+  if [[ -z "${email:-}" ]] && ! nginx_is_non_interactive; then
     read -r -p "Email для Let's Encrypt (ENTER — пропустить): " email
   fi
   resolve_backend_port
@@ -494,7 +478,7 @@ setup_uvicorn_custom_certs() {
       cert_path="$SSL_CERT"
       key_path="$SSL_KEY"
       nginx_log "Используются найденные сертификаты: $cert_path"
-    elif is_non_interactive; then
+    elif nginx_is_non_interactive; then
       nginx_die "SSL_CERT обязателен в неинтерактивном режиме (укажите пути или DOMAIN с Let's Encrypt)"
     else
       read -r -p "Путь к сертификату (.crt/.pem): " cert_path
@@ -503,7 +487,7 @@ setup_uvicorn_custom_certs() {
   if [[ -z "$key_path" ]]; then
     if [[ -n "${SSL_KEY:-}" ]]; then
       key_path="$SSL_KEY"
-    elif is_non_interactive; then
+    elif nginx_is_non_interactive; then
       nginx_die "SSL_KEY обязателен в неинтерактивном режиме"
     else
       read -r -p "Путь к приватному ключу (.key): " key_path
@@ -558,7 +542,7 @@ choose_installation_type() {
 }
 
 main() {
-  require_root
+  nginx_require_root
   mkdir -p "$(dirname "$ENV_FILE")"
   touch "$ENV_FILE"
 
@@ -594,7 +578,7 @@ main() {
       setup_uvicorn_custom_certs
       ;;
     --change|"")
-      is_non_interactive && nginx_die "Интерактивный режим недоступен без TTY; укажите --http, --nginx-le, --uvicorn-custom и т.д."
+      nginx_is_non_interactive && nginx_die "Интерактивный режим недоступен без TTY; укажите --http, --nginx-le, --uvicorn-custom и т.д."
       choose_installation_type
       ;;
     --help|-h)

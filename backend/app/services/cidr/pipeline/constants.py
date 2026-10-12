@@ -24,17 +24,18 @@ _BGP_TOOLS_RAW_ALLOC_IPV4_PATTERN = re.compile(
 SOURCE_FORMATS_WITH_GEO = {"aws_json", "google_json", "ripe_geo_json"}
 
 
-def _read_positive_int_env(name, default):
-    raw = os.getenv(name)
+def _parse_positive_int(raw, default):
     if raw is None:
         return int(default)
     try:
-        parsed = int(str(raw).strip())
-    except (TypeError, ValueError):
+        parsed = int(raw.strip())
+    except ValueError:
         return int(default)
-    if parsed <= 0:
-        return int(default)
-    return parsed
+    return parsed if parsed > 0 else int(default)
+
+
+def _read_positive_int_env(name, default):
+    return _parse_positive_int(os.getenv(name), default)
 
 
 def _read_env_file_value(key):
@@ -46,7 +47,7 @@ def _read_env_file_value(key):
     try:
         with open(env_path, "r", encoding="utf-8") as handle:
             for raw_line in handle:
-                line = str(raw_line or "").strip()
+                line = raw_line.strip()
                 if not line or line.startswith("#"):
                     continue
                 if not line.startswith(f"{key}="):
@@ -61,15 +62,7 @@ def _read_positive_int_runtime(name, default):
     raw = _read_env_file_value(name)
     if raw is None:
         raw = os.getenv(name)
-    if raw is None:
-        return int(default)
-    try:
-        parsed = int(str(raw).strip())
-    except (TypeError, ValueError):
-        return int(default)
-    if parsed <= 0:
-        return int(default)
-    return parsed
+    return _parse_positive_int(raw, default)
 
 
 def _get_openvpn_route_total_cidr_limit():

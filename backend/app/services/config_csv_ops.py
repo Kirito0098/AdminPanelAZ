@@ -8,13 +8,16 @@ import json
 import logging
 from typing import Any, Callable
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import SessionLocal
-from app.models import OpenVpnAccessPolicy, User, VpnConfig, VpnType, WgAccessPolicy
+from app.models import AmneziaWg2AccessPolicy, OpenVpnAccessPolicy, User, VpnConfig, VpnType, WgAccessPolicy
 from app.services.access_policy import AccessPolicyService
+from app.services.awg2 import require_awg2_installed
 from app.services.background_tasks import background_task_service
+from app.services.client_names import validate_new_client_name
 from app.services.feature_guards import get_feature_service, require_vpn_type
 from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node, get_node_antizapret_path
 from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes, require_ha_primary_for_client_ops
@@ -57,10 +60,10 @@ IMPORT_HEADERS = IMPORT_REQUIRED_HEADERS + (
 def _encode_block_mode(policy) -> str:
     if policy is None:
         return ""
-    if getattr(policy, "is_permanent_blocked", False):
+    if policy.is_permanent_blocked:
         return "permanent"
-    if getattr(policy, "is_temp_blocked", False):
-        days = getattr(policy, "block_days", None)
+    if policy.is_temp_blocked:
+        days = policy.block_days
         return f"temp:{days}" if days else "temp"
     return ""
 
@@ -73,11 +76,8 @@ def _policy_row(db: Session, *, node_id: int, client_name: str, vpn_type: VpnTyp
             .first()
         )
     lookup_name = client_name.strip().lower()
-    return (
-        db.query(WgAccessPolicy)
-        .filter(WgAccessPolicy.node_id == node_id, WgAccessPolicy.client_name == lookup_name)
-        .first()
-    )
+    model = AmneziaWg2AccessPolicy if vpn_type == VpnType.amneziawg2 else WgAccessPolicy
+    return db.query(model).filter(model.node_id == node_id, model.client_name == lookup_name).first()
 
 
 def _parse_block_mode(raw: str) -> tuple[str | None, int | None]:
@@ -152,29 +152,26 @@ def _apply_csv_policies_on_primary(
 
     if limit_bytes is not None:
         if vpn_type == VpnType.openvpn:
-            svc.openvpn_set_traffic_limit(
-                client_name,
-                limit_bytes,
-                period_days=period_days,
-                actor=actor_username,
-            )
+            set_limit = svc.openvpn_set_traffic_limit
+        elif vpn_type == VpnType.amneziawg2:
+            set_limit = svc.awg2_set_traffic_limit
         else:
-            svc.wg_set_traffic_limit(
-                client_name,
-                limit_bytes,
-                period_days=period_days,
-                actor=actor_username,
-            )
+            set_limit = svc.wg_set_traffic_limit
+        set_limit(client_name, limit_bytes, period_days=period_days, actor=actor_username)
 
     if block_op == "block_temp":
         days = int(block_days or 7)
         if vpn_type == VpnType.openvpn:
             svc.openvpn_temp_block(client_name, days, actor=actor_username)
+        elif vpn_type == VpnType.amneziawg2:
+            svc.awg2_temp_block(client_name, days, actor=actor_username)
         else:
             svc.wg_temp_block(client_name, days, actor=actor_username)
     elif block_op == "block_permanent":
         if vpn_type == VpnType.openvpn:
             svc.openvpn_permanent_block(client_name, actor=actor_username)
+        elif vpn_type == VpnType.amneziawg2:
+            svc.awg2_permanent_block(client_name, actor=actor_username)
         else:
             svc.wg_permanent_block(client_name, actor=actor_username)
 
@@ -230,6 +227,8 @@ def _normalize_vpn_type(raw: str) -> VpnType | None:
     value = (raw or "").strip().lower()
     if value in {"openvpn", "ovpn"}:
         return VpnType.openvpn
+    if value in {"amneziawg2", "awg2"}:
+        return VpnType.amneziawg2
     if value in {"wireguard", "wg", "amneziawg", "awg"}:
         return VpnType.wireguard
     return None
@@ -329,6 +328,8 @@ def _import_single_row(
             cert_expire_days = int(cert_raw)
         except ValueError:
             return {"line": row.get("_line"), "ok": False, "error": "cert_expire_days должен быть числом"}
+        if not 1 <= cert_expire_days <= 3650:
+            return {"line": row.get("_line"), "ok": False, "error": "cert_expire_days должен быть от 1 до 3650"}
 
     existing = (
         db.query(VpnConfig)
@@ -341,6 +342,10 @@ def _import_single_row(
     )
     if existing:
         return {"line": row.get("_line"), "client_name": client_name, "ok": False, "error": "уже существует"}
+    try:
+        validate_new_client_name(db, node_id=node_id, client_name=client_name)
+    except ValueError as exc:
+        return {"line": row.get("_line"), "client_name": client_name, "ok": False, "error": str(exc)}
 
     try:
         require_vpn_type(vpn_type.value, service=get_feature_service())
@@ -351,8 +356,14 @@ def _import_single_row(
     try:
         if vpn_type == VpnType.openvpn:
             adapter.add_openvpn_client(client_name, cert_expire_days or 3650)
+        elif vpn_type == VpnType.amneziawg2:
+            require_awg2_installed(adapter)
+            adapter.awg2_add_client(client_name)
         else:
             adapter.add_wireguard_client(client_name)
+    except HTTPException as exc:
+        detail = exc.detail.get("message", exc.detail) if isinstance(exc.detail, dict) else exc.detail
+        return {"line": row.get("_line"), "client_name": client_name, "ok": False, "error": str(detail)}
     except Exception as exc:
         return {"line": row.get("_line"), "client_name": client_name, "ok": False, "error": str(exc)}
 

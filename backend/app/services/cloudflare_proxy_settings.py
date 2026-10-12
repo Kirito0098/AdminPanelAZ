@@ -11,7 +11,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AppSetting
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.cloudflare_realip import (
     fetch_cloudflare_proxy_snippets,
     is_valid_origin_allow_conf,
@@ -37,35 +37,6 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 _APPLY_SCRIPT = _PROJECT_ROOT / "scripts" / "nginx-cloudflare-realip-apply.sh"
 _REPAIR_SCRIPT = _PROJECT_ROOT / "scripts" / "nginx-repair.sh"
-
-
-def _env_default_enabled() -> bool:
-    return bool(get_settings().cloudflare_proxy_enabled)
-
-
-def _env_default_origin_lock() -> bool:
-    return bool(get_settings().cloudflare_origin_lock)
-
-
-def _env_default_auto_update() -> bool:
-    return bool(get_settings().cloudflare_ips_auto_update)
-
-
-def _env_default_interval_days() -> int:
-    return int(get_settings().cloudflare_ips_update_interval_days)
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
 
 
 def _as_bool(value: str, default: bool) -> bool:

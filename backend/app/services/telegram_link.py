@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
+from html import escape
 
 from sqlalchemy.orm import Session
 
@@ -85,7 +86,36 @@ def redeem_link_code(db: Session, code: str, telegram_id: str) -> tuple[bool, st
         db.commit()
         return False, "Этот Telegram ID уже привязан к другому пользователю.", None
 
+    current = (user.telegram_id or "").strip()
+    if current and current != telegram_id:
+        db.commit()
+        return False, "К аккаунту уже привязан другой Telegram. Сначала отвяжите его в панели.", None
+
     user.telegram_id = telegram_id
     db.commit()
     db.refresh(user)
-    return True, f"Аккаунт привязан: <code>{user.username}</code> ({user.role.value})", user
+    return True, f"Аккаунт привязан: <code>{escape(user.username)}</code> ({user.role.value})", user
+
+
+def notify_telegram_unlinked(
+    db: Session,
+    *,
+    old_telegram_id: str | None,
+    new_telegram_id: str | None,
+    username: str,
+) -> None:
+    old = (old_telegram_id or "").strip()
+    if not old or old == (new_telegram_id or "").strip():
+        return
+    from app.services.app_setting_store import _get_setting
+    from app.services.telegram import send_tg_message
+
+    bot_token = _get_setting(db, "telegram_bot_token")
+    if not bot_token:
+        return
+    send_tg_message(
+        bot_token,
+        old,
+        f"Telegram отвязан от аккаунта панели <code>{escape(username)}</code>. "
+        "Если это сделали не вы — сообщите администратору.",
+    )

@@ -23,6 +23,20 @@ nginx_die() {
   exit 1
 }
 
+nginx_require_root() {
+  [[ "$(id -u)" -eq 0 ]] || nginx_die "Запустите от root: sudo $0"
+}
+
+nginx_is_non_interactive() {
+  [[ "$NON_INTERACTIVE" == "true" || "$NON_INTERACTIVE" == "1" ]] || [[ ! -t 0 ]]
+}
+
+nginx_validate_port() {
+  local value="$1"
+  local label="$2"
+  [[ "$value" =~ ^[0-9]+$ ]] && ((value >= 1 && value <= 65535)) || nginx_die "${label}: некорректный порт (1-65535)"
+}
+
 # Путь к setup AntiZapret (OPENVPN_HOST / WIREGUARD_HOST).
 nginx_az_setup_path() {
   echo "${ANTIZAPRET_PATH:-/root/antizapret}/setup"
@@ -473,6 +487,16 @@ nginx_acme_default_stash_paths() {
   NGINX_ACME_DEFAULT_STASH_COPY="${NGINX_ACME_DEFAULT_STASH}.copy"
 }
 
+# Стоковый sites-enabled/default пакета nginx: симлинк на sites-available/default (Debian ставит абсолютный путь).
+# Изменённый default — чужой сайт, его не убираем.
+nginx_enabled_default_is_stock() {
+  local link target
+  link="$(nginx_sites_enabled_dir)/default"
+  [[ -L "$link" ]] || return 1
+  target="$(readlink -- "$link")"
+  [[ "$target" == "../sites-available/default" || "$target" == "$(nginx_sites_available_dir)/default" ]]
+}
+
 # Remember sites-enabled/default before temp ACME removes it (restore on failure or remove helper).
 nginx_acme_stash_enabled_default() {
   local base="$1"
@@ -557,8 +581,10 @@ EOF
 )"
   printf '%s\n' "$conf" >"$conf_file"
   ln -sf "$conf_file" "$enabled_link"
-  nginx_acme_stash_enabled_default "$base"
-  rm -f "${enabled_dir}/default"
+  if nginx_enabled_default_is_stock; then
+    nginx_acme_stash_enabled_default "$base"
+    rm -f "${enabled_dir}/default"
+  fi
 
   if ! nginx -t >/dev/null 2>&1; then
     rm -f "$enabled_link" "$conf_file"
@@ -935,10 +961,6 @@ $(nginx_origin_lock_include_line)
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
-        add_header Strict-Transport-Security "max-age=63072000" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-        add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
     }
 
     # API, SPA, WebSocket (/api/server-monitor/ws)
@@ -1051,18 +1073,6 @@ nginx_panel_location_blocks() {
     nginx_render_subpath_template "$access_path" "$backend_port"
     nginx_subpath_root_guard_blocks "$access_path"
   fi
-}
-
-nginx_has_vhost_for_domain() {
-  local domain="$1"
-  [[ -n "$domain" ]] || return 1
-  local base path
-  base="$(nginx_conf_basename "$domain")"
-  [[ -f "$(nginx_sites_enabled_dir)/${base}" || -f "$(nginx_sites_available_dir)/${base}" ]] && return 0
-  if grep -Rsl "server_name[^;]*\b${domain}\b" "$(nginx_sites_enabled_dir)" "$(nginx_sites_available_dir)" 2>/dev/null | grep -q .; then
-    return 0
-  fi
-  return 1
 }
 
 nginx_is_our_panel_vhost_file() {
@@ -1190,15 +1200,15 @@ nginx_install_subpath_snippet() {
   printf '%s\n' "$content" >"$snippet_path"
   nginx_log "Snippet subpath: ${snippet_path}"
   nginx_log "Добавьте в server { } для ${domain}: include snippets/${snippet_name}.conf;"
-  NGINX_SUBPATH_SNIPPET_PATH="$snippet_path"
   NGINX_SUBPATH_SNIPPET_INCLUDE="snippets/${snippet_name}.conf"
 }
 
 _nginx_integrate_subpath_into_vhost_file() {
   local target="$1"
   local include_line="$2"
+  local domain="$3"
   local backup stamp
-  [[ -n "$target" && -f "$target" && -n "$include_line" ]] || return 1
+  [[ -n "$target" && -f "$target" && -n "$include_line" && -n "$domain" ]] || return 1
   if grep -qF "include ${include_line}" "$target"; then
     nginx_log "Include уже присутствует в ${target}"
     return 0
@@ -1207,22 +1217,54 @@ _nginx_integrate_subpath_into_vhost_file() {
   backup="$(nginx_backups_dir)/$(basename "$target").${stamp}.bak"
   cp "$target" "$backup"
   nginx_install_txn_remember_contents "$target"
-  INCLUDE_LINE="$include_line" TARGET_FILE="$target" python3 - <<'PY'
+  if ! INCLUDE_LINE="$include_line" TARGET_FILE="$target" DOMAIN_NAME="$domain" python3 - <<'PY'
 import os
 import re
 
 path = os.environ["TARGET_FILE"]
 include = os.environ["INCLUDE_LINE"]
+domain = os.environ["DOMAIN_NAME"].lower()
 text = open(path, encoding="utf-8").read()
 if f"include {include}" in text:
     raise SystemExit(0)
-match = re.search(r"listen\s+443[^\n]*", text)
-if not match:
-    raise SystemExit(1)
-insert_at = match.end()
-text = text[:insert_at] + f"\n\n    include {include};" + text[insert_at:]
-open(path, "w", encoding="utf-8").write(text)
+
+# Comments become spaces of the same length, so offsets in code match offsets in text.
+code = re.sub(r"#[^\n]*", lambda m: " " * len(m.group()), text)
+
+
+def server_directives(start):
+    """Top-level directives of the server block opened before start: (words, offset after ';')."""
+    depth, pos, stmt = 1, start, start
+    while pos < len(code) and depth:
+        ch = code[pos]
+        if ch == "{":
+            depth += 1
+        elif ch == "}":
+            depth -= 1
+            stmt = pos + 1
+        elif ch == ";" and depth == 1:
+            yield code[stmt:pos].split(), pos + 1
+            stmt = pos + 1
+        pos += 1
+
+
+for block in re.finditer(r"(?<![\w$])server\s*\{", code):
+    directives = list(server_directives(block.end()))
+    names = {w.lower() for words, _ in directives if words[:1] == ["server_name"] for w in words[1:]}
+    if domain not in names:
+        continue
+    for words, end in directives:
+        if words[:1] == ["listen"] and len(words) > 1 and (
+            re.search(r"(^|:)443$", words[1]) or "ssl" in words[2:]
+        ):
+            open(path, "w", encoding="utf-8").write(text[:end] + f"\n\n    include {include};" + text[end:])
+            raise SystemExit(0)
+raise SystemExit(1)
 PY
+  then
+    nginx_warn "В ${target} нет блока server для ${domain} с HTTPS — include не добавлен"
+    return 1
+  fi
   nginx_log "Include добавлен в ${target} (бэкап: ${backup})"
 }
 
@@ -1239,7 +1281,7 @@ nginx_integrate_subpath_snippet_status_openvpn() {
   [[ -n "$domain" && -n "$include_line" ]] || return 1
   while IFS= read -r target; do
     [[ -n "$target" && -f "$target" ]] || continue
-    _nginx_integrate_subpath_into_vhost_file "$target" "$include_line" || continue
+    _nginx_integrate_subpath_into_vhost_file "$target" "$include_line" "$domain" || continue
     if ! _nginx_assert_status_openvpn_vhost_intact "$target"; then
       nginx_install_txn_abort "Интеграция нарушила конфиг StatusOpenVPN (${target})"
     fi
@@ -1259,7 +1301,7 @@ nginx_integrate_subpath_snippet() {
   [[ -n "$domain" && -n "$include_line" ]] || return 1
   while IFS= read -r target; do
     [[ -n "$target" && -f "$target" ]] || continue
-    _nginx_integrate_subpath_into_vhost_file "$target" "$include_line" && integrated=1
+    _nginx_integrate_subpath_into_vhost_file "$target" "$include_line" "$domain" && integrated=1
   done < <(nginx_list_foreign_vhosts_for_domain "$domain")
   if [[ "$integrated" -eq 0 ]]; then
     nginx_warn "Не найден сторонний vhost для ${domain} — добавьте include вручную: include ${include_line};"
@@ -1576,6 +1618,7 @@ nginx_remove_all_vhosts_for_domain() {
   done < <(nginx_list_vhosts_for_domain "$domain")
 }
 
+# shellcheck disable=SC2034 # NGINX_SSL_CERT / NGINX_SSL_KEY читает вызывающий (nginx-repair.sh)
 nginx_resolve_panel_ssl_cert_paths() {
   local domain="$1"
   local le_cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
@@ -1931,7 +1974,10 @@ nginx_install_site() {
   printf '%s\n' "$conf_content" >"$NGINX_CONF_FILE"
   ln -sf "$NGINX_CONF_FILE" "$NGINX_ENABLED_LINK"
   # Стандартный default мешает: на корне домена показывается «Welcome to nginx».
-  rm -f "${enabled_dir}/default"
+  if nginx_enabled_default_is_stock; then
+    nginx_install_txn_remember "${enabled_dir}/default"
+    rm -f "${enabled_dir}/default"
+  fi
 
   if ! nginx -t; then
     nginx_rollback_site_install "$bak" "$created_enabled"
@@ -1949,21 +1995,6 @@ nginx_install_site() {
     systemctl reload nginx || nginx_die "Не удалось перезагрузить nginx"
   else
     systemctl restart nginx || nginx_die "Не удалось запустить nginx"
-  fi
-}
-
-nginx_update_proxy_port() {
-  local new_port="$1"
-  local domain
-  domain="$(nginx_env_get DOMAIN)"
-  [ -n "$domain" ] || return 0
-  nginx_conf_paths "$domain"
-  [ -f "$NGINX_CONF_FILE" ] || return 0
-  if grep -q "proxy_pass http://127.0.0.1:" "$NGINX_CONF_FILE"; then
-    sed -i -E "s|proxy_pass http://127.0.0.1:[0-9]+;|proxy_pass http://127.0.0.1:${new_port};|" "$NGINX_CONF_FILE"
-    nginx -t >/dev/null 2>&1 && systemctl reload nginx 2>/dev/null && \
-      nginx_log "Nginx proxy_pass обновлён на порт $new_port" || \
-      nginx_warn "Порт в .env изменён, но nginx не перезагружен — проверьте $NGINX_CONF_FILE"
   fi
 }
 

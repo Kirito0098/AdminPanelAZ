@@ -43,7 +43,7 @@ def _get_node_or_404(db: Session, node_id: int) -> Node:
 
 
 def _settings_to_response(row) -> OpenVpnBufferGuardSettingsOut:
-    watch_units = _parse_watch_units(getattr(row, "watch_units_json", None))
+    watch_units = _parse_watch_units(row.watch_units_json)
     mode = row.mode
     return OpenVpnBufferGuardSettingsOut(
         node_id=row.node_id,

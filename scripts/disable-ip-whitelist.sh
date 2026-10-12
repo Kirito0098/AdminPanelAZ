@@ -6,7 +6,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CLI="$ROOT_DIR/scripts/disable-ip-whitelist.py"
 VENV_PATH="${VENV_PATH:-$ROOT_DIR/backend/.venv}"
 
-GREEN=$(printf '\033[0;32m')
 YELLOW=$(printf '\033[1;33m')
 RED=$(printf '\033[0;31m')
 CYAN=$(printf '\033[0;36m')

@@ -37,7 +37,7 @@ class TransportPreflightResult:
 
 
 def _node_kind(node: Node) -> str:
-    return (getattr(node, "node_kind", None) or "vpn").strip().lower()
+    return (node.node_kind or "vpn").strip().lower()
 
 
 def _normalize(value: str | None) -> str:
@@ -51,8 +51,8 @@ def _probe_direct(
     mtls: bool,
 ) -> tuple[bool, str | None, str | None]:
     """Probe agent on public node.host:node.port (not via SSH)."""
-    host = str(node.host or "").strip()
-    port = int(node.port or 0)
+    host = node.host.strip()
+    port = node.port
     if not host or port <= 0:
         return False, "offline", "У узла не задан host/port"
     try:
@@ -94,31 +94,25 @@ def _build_ssh_probe_node(node: Node, body: NodeTransportUpdate) -> Any:
     settings = get_settings()
     updates = body.model_dump(exclude_unset=True)
 
-    ssh_host = _normalize(body.ssh_host if "ssh_host" in updates else getattr(node, "ssh_host", None))
+    ssh_host = _normalize(body.ssh_host if "ssh_host" in updates else node.ssh_host)
     if not ssh_host:
-        ssh_host = _normalize(getattr(node, "host", None))
+        ssh_host = _normalize(node.host)
     ssh_host = validate_node_host(ssh_host)
 
     ssh_username = _normalize(
-        body.ssh_username if "ssh_username" in updates else getattr(node, "ssh_username", None)
+        body.ssh_username if "ssh_username" in updates else node.ssh_username
     )
-    ssh_port = int(
-        (body.ssh_port if "ssh_port" in updates else getattr(node, "ssh_port", None)) or 22
-    )
+    ssh_port = (body.ssh_port if "ssh_port" in updates else node.ssh_port) or 22
     remote_host = _normalize(
         body.ssh_remote_agent_host
         if "ssh_remote_agent_host" in updates
-        else getattr(node, "ssh_remote_agent_host", None)
+        else node.ssh_remote_agent_host
     ) or "127.0.0.1"
-    remote_port = int(
-        (
-            body.ssh_remote_agent_port
-            if "ssh_remote_agent_port" in updates
-            else getattr(node, "ssh_remote_agent_port", None)
-        )
-        or node.port
-        or 0
-    )
+    remote_port = (
+        body.ssh_remote_agent_port
+        if "ssh_remote_agent_port" in updates
+        else node.ssh_remote_agent_port
+    ) or node.port
 
     if "ssh_private_key" in updates:
         key_plain = _normalize(body.ssh_private_key)
@@ -129,7 +123,7 @@ def _build_ssh_probe_node(node: Node, body: NodeTransportUpdate) -> Any:
             )
         key_enc = encrypt_secret(key_plain, settings.secret_key)
     else:
-        key_enc = str(getattr(node, "ssh_private_key_encrypted", "") or "").strip()
+        key_enc = node.ssh_private_key_encrypted.strip()
         if not key_enc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -140,7 +134,7 @@ def _build_ssh_probe_node(node: Node, body: NodeTransportUpdate) -> Any:
         phrase = _normalize(body.ssh_passphrase)
         phrase_enc = encrypt_secret(phrase, settings.secret_key) if phrase else ""
     else:
-        phrase_enc = str(getattr(node, "ssh_passphrase_encrypted", "") or "")
+        phrase_enc = node.ssh_passphrase_encrypted
 
     if not ssh_username:
         raise HTTPException(
@@ -155,8 +149,8 @@ def _build_ssh_probe_node(node: Node, body: NodeTransportUpdate) -> Any:
 
     # Negative id keeps preflight tunnels out of the live node session map.
     return SimpleNamespace(
-        id=-abs(int(node.id)),
-        port=int(node.port or 0),
+        id=-abs(node.id),
+        port=node.port,
         ssh_host=ssh_host,
         ssh_port=ssh_port,
         ssh_username=ssh_username,
@@ -164,8 +158,8 @@ def _build_ssh_probe_node(node: Node, body: NodeTransportUpdate) -> Any:
         ssh_passphrase_encrypted=phrase_enc,
         ssh_remote_agent_host=remote_host,
         ssh_remote_agent_port=remote_port,
-        ssh_host_key=getattr(node, "ssh_host_key", None) or "",
-        node_metadata=getattr(node, "node_metadata", None) or "{}",
+        ssh_host_key=node.ssh_host_key,
+        node_metadata=node.node_metadata,
     )
 
 
@@ -272,7 +266,7 @@ def preflight_transport_switch(
     if wanted == TRANSPORT_SSH:
         updates = body.model_dump(exclude_unset=True)
         has_key = bool(_normalize(body.ssh_private_key)) if "ssh_private_key" in updates else bool(
-            str(getattr(node, "ssh_private_key_encrypted", "") or "").strip()
+            node.ssh_private_key_encrypted.strip()
         )
         if not has_key:
             return TransportPreflightResult(
@@ -282,7 +276,7 @@ def preflight_transport_switch(
                 message="Для SSH transport сначала задайте приватный ключ",
             )
         username = _normalize(
-            body.ssh_username if "ssh_username" in updates else getattr(node, "ssh_username", None)
+            body.ssh_username if "ssh_username" in updates else node.ssh_username
         )
         if not username:
             return TransportPreflightResult(

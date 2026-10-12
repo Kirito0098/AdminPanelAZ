@@ -1,7 +1,6 @@
 import {
-  API_BASE,
   apiFetch,
-  getToken,
+  apiFetchResponse,
 } from './http'
 import type {
   QrDownloadAuditEntry,
@@ -26,11 +25,7 @@ export async function getActionLogs(limit = 100) {
 }
 
 export function downloadActionLogsExport() {
-  const token = getToken()
-  return fetch(`${API_BASE}/logs/action-logs/export`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    credentials: 'include',
-  })
+  return apiFetchResponse('/logs/action-logs/export')
 }
 
 export async function getConnectionLogs() {

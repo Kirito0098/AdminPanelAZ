@@ -67,6 +67,14 @@ def _normalize_wireguard_domain(raw: str | None) -> str | None:
     return stripped or None
 
 
+def _reject_if_pending(group: NodeSyncGroup) -> None:
+    if group.sync_status == SyncStatus.pending:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Идёт синхронизация, повторите после её окончания",
+        )
+
+
 @router.get("", response_model=list[NodeSyncGroupResponse])
 def list_sync_groups(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     groups = db.query(NodeSyncGroup).order_by(NodeSyncGroup.name).all()
@@ -130,6 +138,7 @@ def update_sync_group(
     group = db.get(NodeSyncGroup, group_id)
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sync group не найдена")
+    _reject_if_pending(group)
 
     primary_id = payload.primary_node_id if payload.primary_node_id is not None else group.primary_node_id
     replica_ids = payload.replica_node_ids
@@ -155,6 +164,11 @@ def update_sync_group(
         _reject_shared_domains_panel_conflict(wg or ovpn)
 
     previous_sync_mode = group.sync_mode
+    membership_changed = primary_id != group.primary_node_id or sorted(set(replica_ids)) != sorted(
+        set(parse_replica_node_ids(group.replica_node_ids))
+    )
+    if membership_changed:
+        dissolve_sync_group(db, group)
     apply_group_fields(
         group,
         name=payload.name,
@@ -166,8 +180,15 @@ def update_sync_group(
     )
     db.commit()
     db.refresh(group)
-    new_mode = str(group.sync_mode or "").strip().lower()
-    prev_mode = str(previous_sync_mode or "").strip().lower()
+    if membership_changed:
+        if is_auto_sync_enabled(group):
+            link_shadow_configs_for_group(db, group)
+            db.commit()
+        else:
+            link_primary_configs_to_group(db, group)
+        return _to_response(group, db)
+    new_mode = group.sync_mode.strip().lower()
+    prev_mode = previous_sync_mode.strip().lower()
     if prev_mode == "auto" and new_mode == "manual_full":
         clear_shadow_links_for_group(db, group)
         db.commit()
@@ -186,6 +207,7 @@ def delete_sync_group(
     group = db.get(NodeSyncGroup, group_id)
     if not group:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sync group не найдена")
+    _reject_if_pending(group)
     dissolve_sync_group(db, group)
     db.delete(group)
     db.commit()
@@ -274,9 +296,9 @@ def setup_sync_group(
     return NodeSyncPushFullResponse(
         task_id=task.id,
         group_id=group.id,
-        message=str(payload.get("message") or "Настройка HA запущена"),
-        queued=bool(payload.get("queued", True)),
-        status_url=payload.get("status_url"),
+        message=payload["message"],
+        queued=payload["queued"],
+        status_url=payload["status_url"],
     )
 
 
@@ -334,9 +356,9 @@ def apply_shared_domain_endpoint(
     return NodeSyncPushFullResponse(
         task_id=task.id,
         group_id=group.id,
-        message=str(payload.get("message") or "Применение shared domain запущено"),
-        queued=bool(payload.get("queued", True)),
-        status_url=payload.get("status_url"),
+        message=payload["message"],
+        queued=payload["queued"],
+        status_url=payload["status_url"],
     )
 
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Download, RefreshCw } from 'lucide-react'
-import { ApiError, checkWarperUpdates, openWarperUpdateStream } from '@/api/client'
+import { ApiError, checkWarperUpdates, openWarperUpdateStream, type StreamHandle } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,7 +23,7 @@ export default function WarperUpdatesSection({ health }: WarperUpdatesSectionPro
   const { success, error: notifyError } = useNotifications()
   const { confirm, dialogProps } = useConfirmDialog()
   const disabled = isWarperDisabled(health)
-  const streamRef = useRef<EventSource | null>(null)
+  const streamRef = useRef<StreamHandle | null>(null)
 
   const [info, setInfo] = useState<WarperUpdatesCheckResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -80,7 +80,7 @@ export default function WarperUpdatesSection({ health }: WarperUpdatesSectionPro
         closeStream()
         setUpdating(true)
         setLogLines([])
-        const source = openWarperUpdateStream(
+        streamRef.current = openWarperUpdateStream(
           (event) => {
             if (event.event === 'log' && event.line) {
               setLogLines((prev) => [...prev, event.line])
@@ -109,12 +109,6 @@ export default function WarperUpdatesSection({ health }: WarperUpdatesSectionPro
             notifyError(message)
           },
         )
-        if (!source) {
-          setUpdating(false)
-          notifyError('Не удалось открыть поток обновления')
-          return
-        }
-        streamRef.current = source
       },
     })
   }

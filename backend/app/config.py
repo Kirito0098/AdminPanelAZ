@@ -60,7 +60,6 @@ class Settings(BaseSettings):
     default_admin_must_change_password: bool = True
     allow_internal_nodes: bool = False
     local_antizapret_enabled: bool = True
-    node_agent_port: int = 9100
     backup_root: Path = Path("/var/backups/adminpanelaz")
     cidr_list_dir: Path = Path("data/cidr/list")
     cidr_db_staging_dir: Path = Path("data/cidr/staging")
@@ -70,7 +69,6 @@ class Settings(BaseSettings):
     traffic_sync_enabled: bool = True
     traffic_sync_interval_seconds: int = 60
     traffic_limit_reconcile_after_sync: bool = True
-    wg_policy_sync_enabled: bool = True
     wg_policy_sync_interval_seconds: int = 120
     node_sync_reconcile_enabled: bool = True
     node_sync_reconcile_interval_seconds: int = 600
@@ -132,7 +130,6 @@ class Settings(BaseSettings):
     cloudflare_ips_update_interval_days: int = 7
     trusted_proxy_ips: str = "127.0.0.1"
     forwarded_allow_ips: str = "127.0.0.1"
-    node_agent_allowed_ips: str = ""
     node_agent_mtls_enabled: bool = False
     node_agent_mtls_dir: Path = Path("/etc/adminpanelaz/mtls")
     node_agent_mtls_ca_cert: str = "/etc/adminpanelaz/mtls/ca.crt"
@@ -155,7 +152,6 @@ class Settings(BaseSettings):
     action_log_retention_days: int = 365
     retention_batch_size: int = 5000
     health_deep_node_ping: bool = True
-    health_deep_node_ping_timeout_seconds: float = 3.0
     bulk_config_op_max_workers: int = 4
     telegram_bot_command_rate_limit_enabled: bool = True
     geoip_city_mmdb_path: Path = Path("data/geoip/GeoLite2-City.mmdb")
@@ -248,9 +244,6 @@ class Settings(BaseSettings):
     def trusted_proxy_ip_list(self) -> list[str]:
         return [ip.strip() for ip in self.trusted_proxy_ips.split(",") if ip.strip()]
 
-    @property
-    def node_agent_allowed_ip_list(self) -> list[str]:
-        return [ip.strip() for ip in self.node_agent_allowed_ips.split(",") if ip.strip()]
 
     @property
     def openapi_docs_allowed_ip_list(self) -> list[str]:

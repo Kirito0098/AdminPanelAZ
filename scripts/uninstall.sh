@@ -34,7 +34,7 @@ usage() {
   --remove-nginx        Удалить конфигурацию nginx сайта (по DOMAIN из backend/.env)
   --remove-firewall     Удалить правила firewall AdminPanelAZ (ufw и iptables)
   --remove-env          Удалить backend/.env, node_agent.env и proxy_agent.env
-  --remove-backups      Удалить каталог бэкапов (BACKUP_ROOT из backend/.env)
+  --remove-backups      Удалить архивы панели из BACKUP_ROOT (backend/.env); каталог — если опустел
   --remove-system-config  Удалить /etc/adminpanelaz (ddns.env, mtls, node_agent.env)
   --keep-agent-pki        С --remove-system-config: оставить /etc/adminpanelaz/mtls (переустановка)
   -y, --yes             Без интерактивных подтверждений
@@ -122,7 +122,7 @@ confirm_destructive() {
     warn "Будет удалён /etc/adminpanelaz (ddns.env, mtls, node_agent.env)."
   fi
   if [[ "$REMOVE_BACKUPS" == true ]]; then
-    warn "Будет удалён каталог бэкапов панели."
+    warn "Будут удалены архивы бэкапов панели (каталог — только если в нём больше ничего нет)."
   fi
   if [[ "$PURGE_REPO" == true ]]; then
     warn "Будет удалён каталог проекта: $ROOT_DIR"
@@ -346,6 +346,28 @@ remove_system_config() {
   fi
 }
 
+remove_console_command() {
+  local lib="$ROOT_DIR/scripts/console-command.sh"
+  [[ -f "$lib" ]] || return 0
+  # shellcheck source=scripts/console-command.sh
+  source "$lib"
+  if console_command_unlink "$ROOT_DIR"; then
+    log "Удалена команда $(console_command_path)"
+  fi
+}
+
+# Каталоги ОС: BACKUP_ROOT из .env, указывающий на них, при удалении бэкапов не трогается.
+backup_root_is_system_path() {
+  local dir="$1"
+  case "$dir" in
+    / | /bin | /boot | /dev | /etc | /home | /lib | /lib32 | /lib64 | /media | /mnt | /opt | /proc | /root | /run \
+      | /sbin | /srv | /sys | /tmp | /usr | /var)
+      return 0
+      ;;
+  esac
+  [[ "${dir%/*}" == /usr || "${dir%/*}" == /var ]]
+}
+
 remove_backup_dir() {
   if [[ "$REMOVE_BACKUPS" != true ]]; then
     return 0
@@ -361,12 +383,36 @@ remove_backup_dir() {
     fi
   fi
 
-  if [[ -d "$backup_root" ]]; then
-    log "Удаление каталога бэкапов $backup_root..."
-    rm -rf "$backup_root"
+  if [[ "$backup_root" != /* ]]; then
+    warn "BACKUP_ROOT не абсолютный путь ($backup_root) — бэкапы не удаляются"
+    return 0
+  fi
+  local dir
+  dir="$(realpath -m -- "$backup_root")"
+  if backup_root_is_system_path "$dir"; then
+    warn "BACKUP_ROOT указывает на системный каталог ($dir) — бэкапы не удаляются"
+    return 0
+  fi
+  if [[ ! -d "$dir" ]]; then
+    log "Каталог бэкапов не найден: $dir"
+    return 0
+  fi
+
+  log "Удаление архивов панели из $dir..."
+  local path
+  for path in "$dir"/adminpanelaz_*.tar.gz "$dir"/adminpanelaz_*.json "$dir"/.adminpanelaz_*.tar.gz.partial \
+    "$dir"/.tmp_{include-hosts,exclude-hosts,include-ips,exclude-ips,allow-ips}.txt "$dir"/.tmp_az-awg2-backup.tar.gz; do
+    if [[ -f "$path" || -L "$path" ]]; then
+      rm -f -- "$path"
+    fi
+  done
+  if [[ -d "$dir/.pre-restore" && ! -L "$dir/.pre-restore" ]]; then
+    rm -rf -- "$dir/.pre-restore"
+  fi
+  if rmdir -- "$dir" 2>/dev/null; then
     log "Каталог бэкапов удалён"
   else
-    log "Каталог бэкапов не найден: $backup_root"
+    log "Каталог бэкапов оставлен: в нём есть другие файлы ($dir)"
   fi
 }
 
@@ -458,6 +504,7 @@ main() {
   systemctl daemon-reload 2>/dev/null || true
   remove_firewall_rules
   remove_system_config
+  remove_console_command
 
   if [[ "$PURGE_STATE" == true ]]; then
     purge_state_dirs

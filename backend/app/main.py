@@ -8,7 +8,13 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 from app.middleware.api_rate_limit import ApiRateLimitMiddleware
-from app.middleware.http_security import HttpSecurityMiddleware, build_robots_txt, build_security_txt, get_panel_branding
+from app.middleware.http_security import (
+    HttpSecurityMiddleware,
+    build_robots_txt,
+    build_security_txt,
+    get_panel_branding,
+    is_scanner_probe_path,
+)
 from app.middleware.active_session import ActiveSessionMiddleware
 from app.services.expected_node import EXPECTED_NODE_HEADER, ExpectedNodeMiddleware
 from app.services.security_bootstrap import (
@@ -104,8 +110,8 @@ def _seed_database():
     try:
         try:
             upsert_bootstrap_admin(db, force=False, settings=settings)
-        except ValueError:
-            pass
+        except ValueError as exc:
+            logger.warning("bootstrap admin skipped: %s", exc)
 
         sync_local_node(db)
 
@@ -385,7 +391,6 @@ async def ip_restriction_middleware(request, call_next):
         in (
             f"{api}/health",
             f"{api}/health/deep",
-            with_access_path(settings, "/metrics"),
             with_access_path(settings, "/ip-blocked"),
         )
     )
@@ -462,31 +467,17 @@ def health():
 
 
 @app.get(f"{_API_PREFIX}/health/deep")
-def health_deep():
+def health_deep(request: Request):
     from pathlib import Path
 
     from app.database import SessionLocal
-    from app.services.health_checks import build_deep_health
+    from app.services.health_checks import assert_health_deep_access, build_deep_health
 
+    assert_health_deep_access(request)
     app_root = Path(__file__).resolve().parents[1]
     db = SessionLocal()
     try:
         return build_deep_health(db, app_root=app_root)
-    finally:
-        db.close()
-
-
-@app.get(f"{with_access_path(settings, '/metrics')}", include_in_schema=False)
-def metrics():
-    from fastapi.responses import Response
-
-    from app.database import SessionLocal
-    from app.services.prometheus_metrics import render_metrics
-
-    db = SessionLocal()
-    try:
-        body, content_type = render_metrics(db)
-        return Response(content=body, media_type=content_type)
     finally:
         db.close()
 
@@ -509,7 +500,8 @@ def _mount_frontend(app: FastAPI) -> None:
     from pathlib import Path
 
     from fastapi.responses import FileResponse, RedirectResponse
-    from fastapi.staticfiles import StaticFiles
+
+    from app.services.frontend_assets import FrontendAssets
 
     dist = settings.frontend_dist_path
     if not dist.is_absolute():
@@ -520,10 +512,10 @@ def _mount_frontend(app: FastAPI) -> None:
     assets_dir = dist / "assets"
     assets_mount = f"{_ACCESS_PREFIX}/assets" if _ACCESS_PREFIX else "/assets"
     if assets_dir.is_dir():
-        app.mount(assets_mount, StaticFiles(directory=assets_dir), name="frontend-assets")
+        app.mount(assets_mount, FrontendAssets(dist=dist), name="frontend-assets")
         # Portal host serves /p/… at domain root and must load /assets without ACCESS_PATH.
         if _ACCESS_PREFIX:
-            app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend-assets-portal-root")
+            app.mount("/assets", FrontendAssets(dist=dist), name="frontend-assets-portal-root")
 
     dist_root = dist.resolve()
     index_file = dist / "index.html"
@@ -559,7 +551,7 @@ def _mount_frontend(app: FastAPI) -> None:
         from app.services.html_csp import serve_html_with_nonce
 
         api_segment = _API_PREFIX.lstrip("/")
-        if full_path.startswith(f"{api_segment}/") or full_path == api_segment:
+        if full_path.startswith(f"{api_segment}/") or full_path == api_segment or is_scanner_probe_path(full_path):
             from fastapi import HTTPException
 
             raise HTTPException(status_code=404)

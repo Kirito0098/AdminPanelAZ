@@ -31,7 +31,7 @@ _MTLS_HEALTH_DELAY_SECONDS = 2.0
 
 
 def _node_kind(node: Node) -> str:
-    return (getattr(node, "node_kind", None) or "vpn").strip().lower()
+    return node.node_kind.strip().lower()
 
 
 def _wait_for_mtls_health(node: Node) -> dict:
@@ -44,6 +44,17 @@ def _wait_for_mtls_health(node: Node) -> dict:
         if last.get("status") == "online":
             return last
     return last
+
+
+def _agent_answers_over_http(node: Node, api_key: str) -> bool:
+    adapter = RemoteNodeAdapter(host=node.host, port=node.port, api_key=api_key, mtls_enabled=False)
+    try:
+        adapter.health_check()
+    except Exception:
+        return False
+    finally:
+        adapter.close()
+    return True
 
 
 def _enable_proxy_mtls_flag(db: Session, node: Node, actor: User) -> Node:
@@ -130,20 +141,33 @@ def enable_mtls(db: Session, node: Node, actor: User) -> Node:
 
     post_health = _wait_for_mtls_health(node)
     if post_health.get("status") != "online":
-        node.transport = "http"
-        node.mtls_enabled = False
-        node.updated_at = datetime.utcnow()
-        db.add(node)
-        db.commit()
-        db.refresh(node)
         error = post_health.get("error") or "Узел не ответил по HTTPS после включения mTLS"
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=(
-                f"Сертификаты отправлены, но проверка по HTTPS не прошла: {error}. "
-                "Флаг mTLS в панели сброшен — повторите попытку или проверьте node agent."
-            ),
-        )
+        if _agent_answers_over_http(node, api_key):
+            node.transport = "http"
+            node.mtls_enabled = False
+            node.updated_at = datetime.utcnow()
+            db.add(node)
+            db.commit()
+            db.refresh(node)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    f"Сертификаты отправлены, но node agent остался на HTTP: {error}. "
+                    "Транспорт в панели — HTTP; проверьте сертификаты на узле и повторите."
+                ),
+            )
+        # The agent restarts to switch to TLS; one more look before declaring it lost.
+        post_health = check_node_health(node)
+        if post_health.get("status") != "online":
+            update_node_from_health(node, post_health, db)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=(
+                    f"Узел не ответил ни по HTTPS, ни по HTTP: {error}. "
+                    "Транспорт оставлен «HTTPS + mTLS» — сертификаты уже на узле. "
+                    "Проверьте journalctl -u adminpanelaz-node на узле и нажмите «Здоровье»."
+                ),
+            )
 
     update_node_from_health(node, post_health, db)
 

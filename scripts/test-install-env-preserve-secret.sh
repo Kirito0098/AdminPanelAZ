@@ -19,7 +19,7 @@ run_reset() {
     log() { :; }
     eval "$1"
     reset_env_from_example
-  ' bash "$(extract_functions env_get env_escape_for_sed env_set is_placeholder_secret reset_env_from_example)"
+  ' bash "$(extract_functions env_get env_escape_for_sed env_file_set env_set is_placeholder_secret reset_env_from_example)"
 }
 
 printf 'SECRET_KEY=change-me-in-production-use-long-random-string\nAPP_ENV=development\n' >"$TMP_DIR/.env.example"

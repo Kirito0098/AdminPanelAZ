@@ -68,6 +68,7 @@ run_update() {
     source "$1/scripts/adminpanel-menu.sh"
     shift
     require_root() { :; }
+    menu_ensure_root() { :; }
     if [[ -n "$GIT_STATUS_FAILS" ]]; then
       git() { if [[ " $* " == *" status "* ]]; then return 128; fi; command git "$@"; }
     fi

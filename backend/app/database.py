@@ -1028,20 +1028,21 @@ def _seed_client_templates_for_nodes() -> None:
     Session = sessionmaker(bind=engine)
     db = Session()
     try:
-        nodes = db.query(Node).all()
-        for node in nodes:
-            existing = db.query(ClientTemplate).filter(ClientTemplate.node_id == node.id).count()
-            if existing:
-                continue
-            for item in builtins:
-                db.add(
-                    ClientTemplate(
-                        node_id=node.id,
-                        is_builtin=True,
-                        description_template=None,
-                        **item,
+        for node in db.query(Node).filter(Node.client_templates_seeded.is_(False)).all():
+            has_templates = (
+                db.query(ClientTemplate.id).filter(ClientTemplate.node_id == node.id).first() is not None
+            )
+            if not has_templates:
+                for item in builtins:
+                    db.add(
+                        ClientTemplate(
+                            node_id=node.id,
+                            is_builtin=True,
+                            description_template=None,
+                            **item,
+                        )
                     )
-                )
+            node.client_templates_seeded = True
         db.commit()
     finally:
         db.close()
@@ -1315,7 +1316,7 @@ def migrate_factory_buffer_guard_thresholds(conn) -> int:
     ).fetchall()
     updated = 0
     for row_id, mode in rows:
-        new_thr = int(recommended_threshold(mode))
+        new_thr = recommended_threshold(mode)
         conn.execute(
             text(
                 "UPDATE openvpn_buffer_guard_settings "
@@ -1490,6 +1491,51 @@ def _migrate_client_portal_tokens_active_unique() -> None:
     logger.info("DB migration: unique active client_portal_tokens per node+client")
 
 
+_PORTAL_LINK_CREATOR_CLEANUP_MARKER = "migration_client_portal_links_creator_cleanup_done"
+
+
+def _migrate_revoke_unmanaged_client_portal_links() -> None:
+    """One-shot: links issued under view-only access lose meaning once only owners and admins manage them.
+
+    Links without a creator stay: an admin's links survive the admin's deletion.
+    """
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    if not {"client_portal_tokens", "users", "vpn_configs", "app_settings"} <= tables:
+        return
+    with _migration_transaction() as conn:
+        if conn.execute(
+            text("SELECT value FROM app_settings WHERE key = :key"),
+            {"key": _PORTAL_LINK_CREATOR_CLEANUP_MARKER},
+        ).scalar():
+            return
+        revoked = conn.execute(
+            text(
+                """
+                UPDATE client_portal_tokens
+                SET revoked_at = CURRENT_TIMESTAMP
+                WHERE revoked_at IS NULL
+                  AND created_by_user_id IS NOT NULL
+                  AND NOT EXISTS (
+                    SELECT 1
+                    FROM vpn_configs vc
+                    JOIN users u ON u.id = client_portal_tokens.created_by_user_id
+                    WHERE vc.node_id = client_portal_tokens.node_id
+                      AND vc.client_name = client_portal_tokens.client_name
+                      AND vc.ha_primary_config_id IS NULL
+                      AND (u.role = 'admin' OR vc.owner_id = u.id)
+                  )
+                """
+            )
+        ).rowcount
+        conn.execute(
+            text("INSERT INTO app_settings (key, value) VALUES (:key, '1')"),
+            {"key": _PORTAL_LINK_CREATOR_CLEANUP_MARKER},
+        )
+    if revoked:
+        logger.info("DB migration: revoked client portal links without manage rights rows=%s", revoked)
+
+
 def _migrate_user_portal_tokens_table() -> None:
     """Create user_portal_tokens and enforce one active token per user."""
     inspector = inspect(engine)
@@ -1582,6 +1628,9 @@ def _migrate_nodes_columns() -> None:
     _migrate_nodes_openvpn_multihome()
     _migrate_nodes_openvpn_restart_pending()
     _migrate_nodes_proxy_fields()
+    _migrate_nodes_portal_label()
+    _migrate_nodes_api_key_pending()
+    _migrate_nodes_client_templates_seeded()
 
 
 def _run_db_migrations() -> None:
@@ -1613,6 +1662,7 @@ def _run_db_migrations() -> None:
     _migrate_traffic_session_state_active_index()
     _migrate_user_traffic_sample_name_index()
     _migrate_user_traffic_sample_node_client_index()
+    _migrate_qr_download_tokens_columns()
     inspector = inspect(engine)
     migrations = {
         "wg_access_policy": [
@@ -1695,6 +1745,7 @@ def _run_db_migrations() -> None:
     _migrate_viewer_role_to_user()
     _migrate_user_telegram_backfill()
     _migrate_user_access_until_backfill()
+    _migrate_revoke_unmanaged_client_portal_links()
     _seed_client_templates_for_nodes()
 
 
@@ -1920,6 +1971,64 @@ def _migrate_nodes_proxy_fields() -> None:
             logger.info("DB migration: added nodes.linked_vpn_node_id")
 
 
+def _migrate_nodes_portal_label() -> None:
+    """Add optional client-facing node name for the user portal."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    if "portal_label" in cols:
+        return
+    with _migration_transaction() as conn:
+        conn.execute(text("ALTER TABLE nodes ADD COLUMN portal_label VARCHAR(128)"))
+        logger.info("DB migration: added nodes.portal_label")
+
+
+def _migrate_nodes_api_key_pending() -> None:
+    """Add the in-flight API key slot used by node key rotation."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    if "api_key_pending_encrypted" in cols:
+        return
+    with _migration_transaction() as conn:
+        conn.execute(text("ALTER TABLE nodes ADD COLUMN api_key_pending_encrypted VARCHAR(512) NOT NULL DEFAULT ''"))
+        logger.info("DB migration: added nodes.api_key_pending_encrypted")
+
+
+def _migrate_nodes_client_templates_seeded() -> None:
+    """Add per-node marker: built-in client templates already seeded."""
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("nodes")}
+    if "client_templates_seeded" in cols:
+        return
+    with _migration_transaction() as conn:
+        conn.execute(text("ALTER TABLE nodes ADD COLUMN client_templates_seeded INTEGER DEFAULT 0"))
+        logger.info("DB migration: added nodes.client_templates_seeded")
+
+
+def _migrate_qr_download_tokens_columns() -> None:
+    """Bind one-time links to their node and count wrong PIN attempts."""
+    inspector = inspect(engine)
+    if "qr_download_tokens" not in inspector.get_table_names():
+        return
+    cols = {col["name"] for col in inspector.get_columns("qr_download_tokens")}
+    if {"node_id", "pin_failures"} <= cols:
+        return
+    with _migration_transaction() as conn:
+        if "node_id" not in cols:
+            conn.execute(text("ALTER TABLE qr_download_tokens ADD COLUMN node_id INTEGER"))
+            logger.info("DB migration: added qr_download_tokens.node_id")
+        if "pin_failures" not in cols:
+            conn.execute(
+                text("ALTER TABLE qr_download_tokens ADD COLUMN pin_failures INTEGER NOT NULL DEFAULT 0")
+            )
+            logger.info("DB migration: added qr_download_tokens.pin_failures")
+
+
 _POLICY_DEADLINE_BY_VPN_TYPE = {
     "openvpn": ("openvpn_access_policy", "access_until", False),
     "wireguard": ("wg_access_policy", "expires_at", True),
@@ -1946,8 +2055,8 @@ def _backfill_subscription_deadline(conn, user_id: int, now: datetime) -> object
     latest_raw = None
     latest = None
     for config in configs:
-        spec = _POLICY_DEADLINE_BY_VPN_TYPE.get(str(config["vpn_type"] or "").lower())
-        raw_name = (config["client_name"] or "").strip()
+        spec = _POLICY_DEADLINE_BY_VPN_TYPE.get(config["vpn_type"].lower())
+        raw_name = config["client_name"].strip()
         if spec is None or not raw_name:
             continue
         table, column, lowercase = spec
@@ -2033,7 +2142,7 @@ def _migrate_user_telegram_backfill() -> None:
         for row in rows:
             if row["telegram_id"]:
                 continue
-            username = str(row["username"] or "")
+            username = row["username"]
             if not username.startswith("tg_"):
                 continue
             tg_id = username[3:].strip()

@@ -2,6 +2,7 @@
 
 import ipaddress
 import json
+import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
@@ -12,6 +13,8 @@ from app.services.firewall_tools_check import cached_firewall_tools_status
 from app.services.panel_port_firewall import panel_port_firewall
 from app.services.panel_publish_info import is_whitelist_port_firewall_applicable
 from app.services.public_download_settings import is_public_download_enabled, set_public_download_enabled
+
+logger = logging.getLogger(__name__)
 
 
 def _get(db: Session, key: str, default: str = "") -> str:
@@ -86,6 +89,7 @@ class SecurityService:
             "qr_download_pin_set": bool(_get(db, "qr_download_pin", "")),
             "public_download_enabled": is_public_download_enabled(db),
             "portal_domain": _get(db, "portal_domain", ""),
+            "portal_title": _get(db, "portal_title", ""),
             "whitelist_firewall": whitelist_firewall,
             "whitelist_firewall_applicable": applicable,
             "whitelist_firewall_active": False,
@@ -149,10 +153,9 @@ class SecurityService:
         if "portal_domain" in payload:
             from app.services.client_portal import set_portal_domain
 
-            try:
-                set_portal_domain(db, payload.get("portal_domain"))
-            except ValueError as exc:
-                raise ValueError(str(exc)) from exc
+            set_portal_domain(db, payload.get("portal_domain"))
+        if "portal_title" in payload:
+            _set(db, "portal_title", (payload["portal_title"] or "").strip())
         if "whitelist_firewall" in payload:
             requested = bool(payload["whitelist_firewall"])
             if requested and not self.is_whitelist_port_firewall_applicable():
@@ -178,6 +181,7 @@ class SecurityService:
             entries = self._firewall_whitelist_entries(settings)
             return panel_port_firewall.sync(entries)
         except Exception:
+            logger.exception("whitelist port firewall sync failed")
             return False
 
     def add_temp_whitelist(self, db: Session, ip: str, hours: int) -> dict:

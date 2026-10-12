@@ -281,9 +281,8 @@ def apply_controller_update(
             "detail": detail,
         }
 
-    # 2.19+: rewrite units before restart — old ExecStart=…/start.sh fails after pull removes start.sh.
-    # Soft-fail: pull/build already succeeded; compat start.sh shims still boot via systemctl restart,
-    # and migrate_stale_systemd_units_on_startup rewrites units on next boot if refresh lacked root.
+    # Rewrite units before restart: a unit with legacy ExecStart=…/start.sh no longer boots.
+    # Soft-fail: pull/build already succeeded; units on systemd-exec-*.sh restart fine without refresh.
     report(85, "Обновление: systemd units…")
     systemd_refresh = refresh_installed_systemd_units(repo_root, panel=True, node=True)
     detail["systemd_refresh"] = systemd_refresh
@@ -293,7 +292,7 @@ def apply_controller_update(
         warn = systemd_refresh.get("error") or "Ошибка обновления systemd units"
         output_parts.append(
             f"[systemd] Предупреждение: {warn}. "
-            "Перезапуск всё равно запланирован (compat start.sh / миграция unit при старте)."
+            "Перезапуск всё равно запланирован."
         )
 
     report(90, "Обновление: перезапуск панели…")

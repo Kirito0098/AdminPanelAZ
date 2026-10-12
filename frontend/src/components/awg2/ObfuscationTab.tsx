@@ -5,6 +5,7 @@ import {
   getAwg2Obfuscation,
   regenerateAwg2Obfuscation,
 } from '@/api/client'
+import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -21,6 +22,7 @@ import {
 import Spinner from '@/components/ui/Spinner'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { formatDateTime } from '@/lib/datetime'
 import type { Awg2HealthResponse, Awg2ObfuscationResponse } from '@/types'
 import { AWG2_PRESETS, AWG2_TEMPLATES } from './utils'
@@ -44,7 +46,12 @@ function paramPreview(params?: Record<string, string>) {
 
 export default function ObfuscationTab({ health }: ObfuscationTabProps) {
   const { activeNode } = useNode()
+  return <ObfuscationPanel key={activeNode?.id ?? 'none'} health={health} />
+}
+
+function ObfuscationPanel({ health }: ObfuscationTabProps) {
   const { success, error: notifyError } = useNotifications()
+  const { confirm, dialogProps } = useConfirmDialog()
   const disabled = !health?.installed
 
   const [profile, setProfile] = useState<Awg2ObfuscationResponse | null>(null)
@@ -87,7 +94,7 @@ export default function ObfuscationTab({ health }: ObfuscationTabProps) {
 
   useEffect(() => {
     void load()
-  }, [load, activeNode?.id])
+  }, [load])
 
   function handleMutateResult(data: Awg2ObfuscationResponse, message: string) {
     setProfile(data)
@@ -109,14 +116,9 @@ export default function ObfuscationTab({ health }: ObfuscationTabProps) {
     }
   }
 
-  async function onApply() {
+  async function onApply(mtuValue: number | undefined) {
     setBusy(true)
     try {
-      const mtuValue = mtu.trim() ? Number(mtu) : undefined
-      if (mtu.trim() && !Number.isFinite(mtuValue)) {
-        notifyError('MTU должен быть числом')
-        return
-      }
       const data = await applyAwg2Obfuscation({
         preset,
         template,
@@ -132,6 +134,32 @@ export default function ObfuscationTab({ health }: ObfuscationTabProps) {
     }
   }
 
+  function askRegenerate() {
+    confirm({
+      title: 'Перегенерировать профиль обфускации?',
+      description:
+        'Узел создаст новые случайные параметры обфускации. Клиенты AmneziaWG 2.0 не подключатся, пока не переимпортируют конфиги на устройствах.',
+      confirmLabel: 'Перегенерировать',
+      destructive: true,
+      onConfirm: onRegenerate,
+    })
+  }
+
+  function askApply() {
+    const mtuValue = mtu.trim() ? Number(mtu) : undefined
+    if (mtu.trim() && !Number.isFinite(mtuValue)) {
+      notifyError('MTU должен быть числом')
+      return
+    }
+    confirm({
+      title: `Применить preset ${preset}?`,
+      description:
+        'Параметры обфускации на узле изменятся. Клиенты AmneziaWG 2.0 не подключатся, пока не переимпортируют конфиги на устройствах.',
+      confirmLabel: 'Применить',
+      onConfirm: () => onApply(mtuValue),
+    })
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -145,6 +173,7 @@ export default function ObfuscationTab({ health }: ObfuscationTabProps) {
 
   return (
     <div className="space-y-4">
+      <ConfirmDialogHost dialogProps={dialogProps} />
       {reimportAlert && (
         <SettingsAlert variant="warning" title="Требуется re-import">
           Параметры обфускации изменились. Переимпортируйте клиентские конфиги AmneziaWG 2.0 на устройствах.
@@ -272,12 +301,12 @@ export default function ObfuscationTab({ health }: ObfuscationTabProps) {
               size="sm"
               variant="outline"
               disabled={busy || disabled}
-              onClick={() => void onRegenerate()}
+              onClick={askRegenerate}
             >
               <Sparkles className="mr-1.5 h-4 w-4" />
               Regenerate
             </Button>
-            <Button type="button" size="sm" disabled={disabled || busy} onClick={() => void onApply()}>
+            <Button type="button" size="sm" disabled={disabled || busy} onClick={askApply}>
               Применить
             </Button>
           </div>

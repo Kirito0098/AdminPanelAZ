@@ -67,6 +67,7 @@ if declare -f nginx_finalize_nginx_site repair_nginx_for_panel nginx_cleanup_sub
 fi
 print_access_url() { :; }
 nginx_ensure_nginx() { :; }
+# shellcheck disable=SC2034 # читает repair_nginx_for_panel (из nginx-repair.sh через eval)
 nginx_resolve_panel_ssl_cert_paths() { NGINX_SSL_CERT=/cert.pem; NGINX_SSL_KEY=/key.pem; }
 BACKEND_PORT=8000
 HTTPS_PUBLIC_PORT=443

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import io
+import logging
 import os
 import re
 import shlex
@@ -21,6 +22,8 @@ from typing import Any, Iterator, Literal
 from fastapi import HTTPException, status
 
 from app.services.ip_geo import is_local_geoip_loaded, parse_client_endpoint
+
+logger = logging.getLogger(__name__)
 
 AWG2_CLIENT_BIN = Path(os.environ.get("AWG2_CLIENT_BIN", "/usr/local/bin/awg-client"))
 AWG2_OBFUSCATION_BIN = Path(os.environ.get("AWG2_OBFUSCATION_BIN", "/usr/local/bin/awg-obfuscation"))
@@ -78,6 +81,26 @@ def compute_expires_at(ttl: str | None) -> datetime | None:
     if ttl is None or not ttl.strip():
         return None
     return datetime.utcnow() + timedelta(seconds=parse_ttl_to_seconds(ttl))
+
+
+def require_awg2_installed(adapter: Any) -> None:
+    """Raise 409 with the install command when the node has no AZ-AWG2 layer or does not answer."""
+    try:
+        health = adapter.get_awg2_health()
+    except HTTPException as exc:
+        if exc.status_code not in {status.HTTP_404_NOT_FOUND} and exc.status_code < 500:
+            raise
+        health = {"installed": False, "install_command": AWG2_INSTALL_CMD}
+    except (ConnectionError, OSError):
+        health = {"installed": False, "install_command": AWG2_INSTALL_CMD}
+    if not health.get("installed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "message": "AZ-AWG2 не установлен на узле",
+                "install_command": health.get("install_command") or AWG2_INSTALL_CMD,
+            },
+        )
 
 
 def read_expiry_map() -> dict[str, datetime]:
@@ -314,10 +337,6 @@ def iter_install_stream_events(
         if proc and proc.poll() is None:
             proc.kill()
         if lock_handle is not None:
-            try:
-                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
-            except Exception:
-                pass
             lock_handle.close()
 
 
@@ -749,8 +768,6 @@ def _lookup_local_geo_for_endpoint(endpoint: str | None) -> dict[str, str | None
 
 
 class Awg2Service:
-    def ensure_installed(self) -> None:
-        _ensure_installed()
 
     def validate_client_name(self, name: str) -> str:
         value = (name or "").strip()
@@ -893,7 +910,7 @@ class Awg2Service:
                 try:
                     self._run_awg_client("del", name, tunnel)
                 except Exception:
-                    pass
+                    logger.debug("awg2: rollback del failed name=%s tunnel=%s", name, tunnel, exc_info=True)
             raise
         return "\n".join(outputs)
 

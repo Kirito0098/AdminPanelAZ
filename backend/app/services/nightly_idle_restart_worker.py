@@ -12,15 +12,12 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import AppSetting
+from app.services.app_setting_store import _get_setting
 from app.services.active_web_session import active_web_session_service
 from app.services.background_gate import run_background_step
+from app.services.cron_schedule import cron_matches_now
 
 logger = logging.getLogger(__name__)
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
 
 
 def _set_setting(db: Session, key: str, value: str) -> None:
@@ -32,7 +29,6 @@ def _set_setting(db: Session, key: str, value: str) -> None:
     db.commit()
 
 
-from app.services.cron_schedule import cron_matches_now
 def _already_ran_this_minute(db: Session, now: datetime) -> bool:
     last_raw = _get_setting(db, "nightly_idle_restart_last_run", "")
     if not last_raw:
@@ -40,7 +36,7 @@ def _already_ran_this_minute(db: Session, now: datetime) -> bool:
     try:
         last = datetime.fromisoformat(last_raw.replace("Z", "+00:00"))
         if last.tzinfo is None:
-            last = last.replace(tinfo=timezone.utc)
+            last = last.replace(tzinfo=timezone.utc)
         return (
             last.year == now.year
             and last.month == now.month
@@ -84,6 +80,8 @@ def run_nightly_idle_restart_once() -> dict:
             return {"status": "skipped", "reason": "active_sessions", "active_count": active_count}
 
         service_name = settings.admin_panel_az_service_name.strip() or "adminpanelaz.service"
+        # The restart kills this process: anything after it never runs.
+        _set_setting(db, "nightly_idle_restart_last_run", now.isoformat())
         subprocess.run(
             ["systemctl", "restart", service_name],
             capture_output=True,
@@ -91,7 +89,6 @@ def run_nightly_idle_restart_once() -> dict:
             check=True,
             timeout=120,
         )
-        _set_setting(db, "nightly_idle_restart_last_run", now.isoformat())
         logger.info("Nightly idle restart: service restarted (%s)", service_name)
         return {"status": "restarted", "service": service_name}
     except subprocess.CalledProcessError as exc:

@@ -111,13 +111,13 @@ class User(Base):
 
     def has_tg_notify_event(self, event_type: str) -> bool:
         events = self.get_tg_notify_events()
-        if not self.tg_notify_events or not events:
+        if not events:
             return bool(DEFAULT_TG_NOTIFY_EVENTS.get(event_type, False))
         return _stored_tg_notify_event(events, event_type)
 
     def merged_tg_notify_events(self) -> dict[str, bool]:
         stored = self.get_tg_notify_events()
-        if not self.tg_notify_events or not stored:
+        if not stored:
             return dict(DEFAULT_TG_NOTIFY_EVENTS)
         return {key: _stored_tg_notify_event(stored, key) for key in DEFAULT_TG_NOTIFY_EVENTS}
 
@@ -249,6 +249,8 @@ class SyncStatus(str, enum.Enum):
     synced = "synced"
     pending = "pending"
     failed = "failed"
+    # Files reached the replica, but its WireGuard / AWG2 runtime did not take them.
+    drift = "drift"
 
 
 class NodeSyncGroup(Base):
@@ -278,10 +280,13 @@ class Node(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     name: Mapped[str] = mapped_column(String(128))
+    portal_label: Mapped[str | None] = mapped_column(String(128), nullable=True, default=None)
     host: Mapped[str] = mapped_column(String(255))
     port: Mapped[int] = mapped_column(Integer, default=9100)
     api_key_hash: Mapped[str] = mapped_column(String(255), default="")
     api_key_encrypted: Mapped[str] = mapped_column(String(512), default="")
+    # Saved before the agent is told, so a lost reply cannot strand the node on an unknown key.
+    api_key_pending_encrypted: Mapped[str] = mapped_column(String(512), default="")
     status: Mapped[NodeStatus] = mapped_column(Enum(NodeStatus), default=NodeStatus.unknown)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     is_local: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -307,6 +312,8 @@ class Node(Base):
     openvpn_multihome: Mapped[bool] = mapped_column(Boolean, default=False)
     # HA replica got a new OpenVPN server identity on disk; running servers still use the old one.
     openvpn_restart_pending: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Built-in client templates were added once; templates deleted later are not re-created.
+    client_templates_seeded: Mapped[bool] = mapped_column(Boolean, default=False)
     # Key age for automatic rotation; updated_at moves on every health check.
     api_key_rotated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -423,6 +430,25 @@ class OpenVpnAccessPolicy(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class TrafficLimitNotifyState(Base):
+    """Traffic-limit block state the admin was last told about, per client."""
+
+    __tablename__ = "traffic_limit_notify_state"
+    __table_args__ = (
+        UniqueConstraint("node_id", "protocol", "client_name", name="uq_traffic_limit_notify_state"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
+    protocol: Mapped[str] = mapped_column(String(16))
+    client_name: Mapped[str] = mapped_column(String(64))
+    traffic_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_period_start: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    notified_block_period: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    notified_unblock_period: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class UnlockCode(Base):
     __tablename__ = "unlock_codes"
     __table_args__ = (
@@ -495,6 +521,8 @@ class QrDownloadToken(Base):
     max_downloads: Mapped[int] = mapped_column(Integer, default=1)
     download_count: Mapped[int] = mapped_column(Integer, default=0)
     pin_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    node_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pin_failures: Mapped[int] = mapped_column(Integer, default=0)
     used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

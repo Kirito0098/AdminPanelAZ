@@ -104,21 +104,6 @@ def build_more_inline_menu(ctx: BotContext) -> dict:
     return inline_keyboard(rows)
 
 
-def build_main_inline_menu(ctx: BotContext) -> dict:
-    """Full inline menu (same sections as «Ещё» + primary actions)."""
-    if not _linked_user_menu_visible(ctx):
-        return inline_keyboard([[inline_button(i18n.BTN_MENU_HELP, callback_data="nav:help")]])
-
-    rows = [
-        [
-            inline_button(i18n.BTN_MENU_CONFIGS, callback_data="nav:configs"),
-            inline_button(i18n.BTN_MENU_STATUS, callback_data="nav:status"),
-        ],
-    ]
-    rows.extend(build_more_inline_menu(ctx)["inline_keyboard"])
-    return inline_keyboard(rows)
-
-
 def build_bot_commands() -> list[dict[str, str]]:
     if not get_feature_service().is_enabled("unlock_codes"):
         return [{"command": cmd, "description": desc} for cmd, desc in i18n.BOT_COMMANDS if cmd != "unlock"]

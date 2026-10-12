@@ -16,7 +16,7 @@ const TARGETS: Array<{ id: DnsAaaaTarget; label: string; resolver: string; file:
   { id: 'vpn', label: 'Полный VPN', resolver: 'kresd@2', file: 'custom2.lua' },
 ]
 
-export type DnsAaaaCardProps = {
+type DnsAaaaCardProps = {
   activeNodeId: number | null
   disabled?: boolean
 }

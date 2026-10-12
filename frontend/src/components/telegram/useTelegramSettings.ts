@@ -229,9 +229,9 @@ export function useTelegramSettings() {
     }
   }
 
-  const handleGetLinkCode = async () => {
+  const handleGetLinkCode = async (currentPassword: string) => {
     try {
-      const result = await getTelegramLinkCode()
+      const result = await getTelegramLinkCode(currentPassword)
       setLinkCode(result.code)
       const command = `/link ${result.code}`
       try {
@@ -240,8 +240,10 @@ export function useTelegramSettings() {
       } catch {
         success(`Код привязки создан (действует ${result.expires_in_seconds} сек)`)
       }
+      return true
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка получения кода')
+      return false
     }
   }
 
@@ -339,6 +341,7 @@ export function useTelegramSettings() {
 
   return {
     settings,
+    setSettings,
     adminNotify,
     botToken,
     setBotToken,

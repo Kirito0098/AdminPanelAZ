@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_admin
 from app.config import get_settings as load_app_config
 from app.database import get_db
-from app.models import AppSetting, User
+from app.models import User
 from app.schemas import (
     AppSettingsResponse,
     AppSettingsUpdate,
@@ -17,6 +17,8 @@ from app.schemas import (
     MonitorSettingsUpdate,
     RetentionSettingsResponse,
     RetentionSettingsUpdate,
+    SelfServiceLimitsResponse,
+    SelfServiceLimitsUpdate,
     VisibleVpnProfilesDefaultResponse,
     VisibleVpnProfilesDefaultUpdate,
     VisibleVpnProfilesPolicy,
@@ -35,26 +37,13 @@ from app.services.notify_time import (
 )
 from app.services.openvpn_profile_repair import recreate_openvpn_profiles
 from app.services.profile_delivery import load_node_remote_hosts
+from app.services.self_service import get_self_service_limits, set_self_service_limits
 from app.services.vpn_profile_visibility import (
     get_default_visible_vpn_profiles,
     set_default_visible_vpn_profiles,
 )
 router = APIRouter(prefix="/settings", tags=["settings"])
-settings = load_app_config()
 ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
 
 
 _CONFIG_FILE_NAMES = (
@@ -100,11 +89,10 @@ def get_settings(current_user: User = Depends(get_current_user), db: Session = D
 
     return AppSettingsResponse(
         theme=current_user.theme,
-        timezone=current_user.timezone or "",
-        noc_daily_time=current_user.noc_daily_time or "",
-        noc_weekly_dow=current_user.noc_weekly_dow or "",
-        noc_weekly_time=current_user.noc_weekly_time or "",
-        app_name=_get_setting(db, "app_name", settings.app_name),
+        timezone=current_user.timezone,
+        noc_daily_time=current_user.noc_daily_time,
+        noc_weekly_dow=current_user.noc_weekly_dow,
+        noc_weekly_time=current_user.noc_weekly_time,
         antizapret_path=str(get_node_antizapret_path(db)),
         include_hosts=include_hosts,
         exclude_hosts=exclude_hosts,
@@ -301,16 +289,16 @@ def update_monitor_settings(
         else cfg.monitor_sustained_seconds
     )
 
-    env_service.set_env_value("MONITOR_CPU_THRESHOLD", str(cpu))
-    env_service.set_env_value("MONITOR_RAM_THRESHOLD", str(ram))
-    env_service.set_env_value("MONITOR_CHECK_INTERVAL_SECONDS", str(interval))
-    env_service.set_env_value("MONITOR_COOLDOWN_MINUTES", str(cooldown))
-    env_service.set_env_value("MONITOR_SUSTAINED_SECONDS", str(sustained))
-    os.environ["MONITOR_CPU_THRESHOLD"] = str(cpu)
-    os.environ["MONITOR_RAM_THRESHOLD"] = str(ram)
-    os.environ["MONITOR_CHECK_INTERVAL_SECONDS"] = str(interval)
-    os.environ["MONITOR_COOLDOWN_MINUTES"] = str(cooldown)
-    os.environ["MONITOR_SUSTAINED_SECONDS"] = str(sustained)
+    env_values = {
+        "MONITOR_CPU_THRESHOLD": str(cpu),
+        "MONITOR_RAM_THRESHOLD": str(ram),
+        "MONITOR_CHECK_INTERVAL_SECONDS": str(interval),
+        "MONITOR_COOLDOWN_MINUTES": str(cooldown),
+        "MONITOR_SUSTAINED_SECONDS": str(sustained),
+    }
+    for key, value in env_values.items():
+        env_service.set_env_value(key, value)
+    os.environ.update(env_values)
     load_app_config.cache_clear()
 
     admin_notify_service.send_settings_change(
@@ -421,3 +409,32 @@ def put_user_vpn_visibility_default(
         client_timezone=get_client_timezone_from_request(request),
     )
     return VisibleVpnProfilesDefaultResponse(policy=VisibleVpnProfilesPolicy(**policy))
+
+
+@router.get("/self-service", response_model=SelfServiceLimitsResponse)
+def get_self_service_limits_settings(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    return SelfServiceLimitsResponse(**get_self_service_limits(db))
+
+
+@router.patch("/self-service", response_model=SelfServiceLimitsResponse)
+def update_self_service_limits_settings(
+    payload: SelfServiceLimitsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    before = get_self_service_limits(db)
+    after = set_self_service_limits(db, **payload.model_dump(exclude_none=True))
+    db.commit()
+    changed = " ".join(f"{key}={before[key]}→{after[key]}" for key in after if before[key] != after[key])
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_self_service_limits_update",
+        details=changed or None,
+        client_timezone=get_client_timezone_from_request(request),
+    )
+    return SelfServiceLimitsResponse(**after)

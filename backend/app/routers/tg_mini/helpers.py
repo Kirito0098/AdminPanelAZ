@@ -48,7 +48,7 @@ def _verify_telegram_init_data(init_data: str, bot_token: str, *, max_age: int =
     data_check = "\n".join(f"{k}={v}" for k, v in sorted(parsed.items()))
     secret = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
     computed = hmac.new(secret, data_check.encode(), hashlib.sha256).hexdigest()
-    if computed != received_hash:
+    if not hmac.compare_digest(computed.encode(), received_hash.encode()):
         raise ValueError("Неверная подпись init_data")
     return json.loads(parsed.get("user", "{}"))
 
@@ -160,11 +160,11 @@ def _serialize_tg_node(node, *, active_id: int | None) -> dict:
         "name": node.name,
         "host": node.host,
         "port": node.port,
-        "status": node.status.value if hasattr(node.status, "value") else str(node.status),
-        "is_local": bool(node.is_local),
+        "status": node.status.value,
+        "is_local": node.is_local,
         "transport": transport,
         "mtls_enabled": False if node.is_local else (transport == TRANSPORT_MTLS),
-        "node_kind": (getattr(node, "node_kind", None) or "vpn"),
+        "node_kind": node.node_kind,
         "is_active": node.id == active_id,
         "last_seen_at": node.last_seen_at.isoformat() if node.last_seen_at else None,
         "metadata": {

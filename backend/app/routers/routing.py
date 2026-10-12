@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -36,6 +37,7 @@ from app.services.profile_delivery import load_node_remote_hosts
 
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/routing", tags=["routing"])
 
 
@@ -200,8 +202,6 @@ def put_antizapret_settings(
     db: Session = Depends(get_db),
 ):
     require_ha_primary_for_config_ops(db)
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Ожидается JSON-объект")
     filtered = filter_known_keys(payload)
     env = EnvFileService(_ENV_FILE)
     host_conflict = az_host_updates_conflict_with_panel_domain(
@@ -223,8 +223,8 @@ def put_antizapret_settings(
     if any(field["type"] in VERIFIED_WRITE_TYPES and field["key"] in filtered for field in build_schema()):
         try:
             warnings.extend(setting_write_mismatch_warnings(filtered, adapter.get_antizapret_settings()))
-        except Exception:  # noqa: BLE001 — best-effort verification
-            pass
+        except Exception as exc:  # noqa: BLE001 — best-effort verification
+            logger.warning("antizapret settings write verification failed: %s", exc)
     for warning in openvpn_backup_tcp_conflict_warnings(filtered, https_public_port=https_public_port):
         if warning not in warnings:
             warnings.append(warning)

@@ -8,6 +8,8 @@ import os
 import subprocess
 from typing import Iterable
 
+from app.services.shared_helpers import env_bool as _env_bool
+
 logger = logging.getLogger(__name__)
 
 CHAIN_V4 = "AA_PANEL_WHITELIST"
@@ -16,13 +18,6 @@ COMMENT_JUMP_V4 = "aa-panel-port-jump-v4"
 CHAIN_V6_LEGACY = "AA_PANEL_WHITELIST6"
 IPSET_ALLOW_V6_LEGACY = "aa_panel_allow_v6"
 COMMENT_JUMP_V6_LEGACY = "aa-panel-port-jump-v6"
-
-
-def _env_bool(name: str, default: bool = False) -> bool:
-    raw = (os.getenv(name, "") or "").strip().lower()
-    if not raw:
-        return default
-    return raw in {"1", "true", "yes", "y", "on"}
 
 
 def _panel_port() -> int:
@@ -121,10 +116,12 @@ class PanelPortFirewall:
             if not ok:
                 logger.warning("ipset add %s -> %s failed: %s", IPSET_ALLOW_V4, entry, err)
 
-    def _ensure_chain(self) -> None:
+    def _ensure_chain(self) -> bool:
+        # -N падает, если цепочка уже есть — это нормально.
         self._run_command(["iptables", "-N", CHAIN_V4])
-        self._run_command(["iptables", "-F", CHAIN_V4])
-        self._run_command(
+        # DROP только после успешного RETURN, иначе панель закроется для всех.
+        steps = (
+            ["iptables", "-F", CHAIN_V4],
             [
                 "iptables",
                 "-A",
@@ -136,14 +133,20 @@ class PanelPortFirewall:
                 "src",
                 "-j",
                 "RETURN",
-            ]
+            ],
+            ["iptables", "-A", CHAIN_V4, "-j", "DROP"],
         )
-        self._run_command(["iptables", "-A", CHAIN_V4, "-j", "DROP"])
+        for args in steps:
+            ok, err = self._run_command(args)
+            if not ok:
+                logger.error("panel firewall: %s failed: %s", " ".join(args), err)
+                return False
+        return True
 
-    def _remove_jump_rules(self, table_cmd: str, comment: str) -> None:
+    def _remove_jump_rules(self, table_cmd: str, comment: str) -> bool:
         ok, out = self._run_command([table_cmd, "-S", "INPUT"])
         if not ok:
-            return
+            return False
         for line in (out or "").splitlines():
             if comment not in line or "-j" not in line:
                 continue
@@ -153,9 +156,13 @@ class PanelPortFirewall:
             if not rule:
                 continue
             parts = ["-D", "INPUT"] + rule.split()
-            self._run_command([table_cmd] + parts)
+            deleted, err = self._run_command([table_cmd] + parts)
+            if not deleted:
+                logger.error("panel firewall: %s -D INPUT %s failed: %s", table_cmd, rule, err)
+                ok = False
+        return ok
 
-    def _ensure_jump(self, *, port: int) -> None:
+    def _ensure_jump(self, *, port: int) -> bool:
         check = [
             "iptables",
             "-C",
@@ -173,9 +180,9 @@ class PanelPortFirewall:
         ]
         exists, _ = self._run_command(check)
         if exists:
-            return
+            return True
         self._remove_jump_rules("iptables", COMMENT_JUMP_V4)
-        self._run_command(
+        ok, err = self._run_command(
             [
                 "iptables",
                 "-I",
@@ -192,6 +199,9 @@ class PanelPortFirewall:
                 CHAIN_V4,
             ]
         )
+        if not ok:
+            logger.error("panel firewall: jump INPUT tcp/%s -> %s failed: %s", port, CHAIN_V4, err)
+        return ok
 
     def _cleanup_legacy_ipv6(self) -> None:
         self._remove_jump_rules("ip6tables", COMMENT_JUMP_V6_LEGACY)
@@ -206,7 +216,10 @@ class PanelPortFirewall:
         if not self.firewall_enabled:
             return True
 
-        self._remove_jump_rules("iptables", COMMENT_JUMP_V4)
+        if not self._remove_jump_rules("iptables", COMMENT_JUMP_V4):
+            # Пустой ipset при живом переходе = DROP для всех.
+            logger.error("panel firewall: failed to remove whitelist jump for port %s, ipset kept", port)
+            return False
         self._flush_ipset(IPSET_ALLOW_V4)
         self._cleanup_legacy_ipv6()
         self._active_port = None
@@ -235,8 +248,8 @@ class PanelPortFirewall:
             return False
 
         self._populate_ipset(v4_entries)
-        self._ensure_chain()
-        self._ensure_jump(port=port)
+        if not self._ensure_chain() or not self._ensure_jump(port=port):
+            return False
         self._cleanup_legacy_ipv6()
         self._active_port = port
         return True

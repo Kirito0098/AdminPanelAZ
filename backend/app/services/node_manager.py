@@ -1,19 +1,20 @@
 import ipaddress
 import json
+import logging
 import socket
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
+from cryptography.fernet import InvalidToken
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, object_session
 
-from app.auth import get_password_hash, verify_password
+from app.auth import get_password_hash
 from app.config import get_settings
 from app.models import (
     AmneziaWg2AccessPolicy,
     AlertRule,
-    AppSetting,
     ClientPortalToken,
     ClientTemplate,
     ConfigTag,
@@ -24,6 +25,7 @@ from app.models import (
     OpenVpnAccessPolicy,
     OpenVpnBufferGuardEvent,
     OpenVpnBufferGuardSettings,
+    TrafficLimitNotifyState,
     TrafficSessionState,
     UnlockCodeRedemption,
     UserTrafficSample,
@@ -34,28 +36,17 @@ from app.models import (
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.expected_node import confirmed_node_id, ensure_expected_node, forget_expected_node
 from app.services.antizapret import AntiZapretService
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.node_adapter import LocalNodeAdapter, NodeAdapter, RemoteNodeAdapter
 from app.services.node_health import HEALTH_METADATA_KEYS
 from app.services.node_transport import TRANSPORT_SSH, get_transport, node_uses_tls, resolve_transport_id
 from app.services.proxy_node_adapter import ProxyNodeAdapter
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 ACTIVE_NODE_KEY = "active_node_id"
 NODE_KIND_VPN = "vpn"
 NODE_KIND_PROXY = "proxy"
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
 
 
 def validate_node_host(host: str) -> str:
@@ -125,7 +116,22 @@ def get_api_key_plain(node: Node) -> str | None:
         return None
     try:
         return decrypt_secret(node.api_key_encrypted, settings.secret_key)
-    except Exception:
+    except InvalidToken:
+        logger.warning("node %s: api key does not decrypt with current SECRET_KEY", node.id)
+        return None
+
+
+def store_pending_api_key(node: Node, api_key: str) -> None:
+    node.api_key_pending_encrypted = encrypt_secret(api_key, settings.secret_key)
+
+
+def get_pending_api_key_plain(node: Node) -> str | None:
+    if not node.api_key_pending_encrypted:
+        return None
+    try:
+        return decrypt_secret(node.api_key_pending_encrypted, settings.secret_key)
+    except InvalidToken:
+        logger.warning("node %s: pending api key does not decrypt with current SECRET_KEY", node.id)
         return None
 
 
@@ -147,16 +153,11 @@ def get_active_node_id(db: Session) -> int | None:
 
 
 def is_vpn_node(node: Node) -> bool:
-    return (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower() == NODE_KIND_VPN
-
-
-def list_vpn_nodes(db: Session) -> list[Node]:
-    """All nodes that speak node_agent (OpenVPN/WG). Excludes proxy_agent cards."""
-    return [node for node in db.query(Node).order_by(Node.id.asc()).all() if is_vpn_node(node)]
+    return _node_kind(node) == NODE_KIND_VPN
 
 
 def proxy_is_not_vpn_message(node: Node) -> str:
-    name = getattr(node, "name", None) or "без имени"
+    name = node.name or "без имени"
     return (
         f"«{name}» — прокси-узел (российский вход, proxy_agent), а не VPN-сервер. "
         "OpenVPN и WireGuard на нём не запускаются. "
@@ -165,7 +166,7 @@ def proxy_is_not_vpn_message(node: Node) -> str:
 
 
 def vpn_is_not_proxy_message(node: Node) -> str:
-    name = getattr(node, "name", None) or "без имени"
+    name = node.name or "без имени"
     return (
         f"«{name}» — VPN-узел (node_agent), а не прокси. "
         "DESTINATION и таблица прокси-подключений доступны только у прокси-узлов."
@@ -249,7 +250,7 @@ def _resolve_active_node(db: Session) -> Node:
 
 
 def _node_kind(node: Node) -> str:
-    return (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
+    return (node.node_kind or NODE_KIND_VPN).strip().lower()
 
 
 def _remote_http_endpoint(node: Node) -> tuple[str, int, bool]:
@@ -376,6 +377,7 @@ def purge_node_related(db: Session, node_id: int) -> None:
         OpenVpnBufferGuardSettings,
         VpnConfig,
         TrafficSessionState,
+        TrafficLimitNotifyState,
         UserTrafficStatProtocol,
         WgAccessPolicy,
         OpenVpnAccessPolicy,
@@ -580,7 +582,3 @@ def update_node_from_health(node: Node, health: dict, db: Session) -> None:
     )
 
 
-def verify_node_api_key(node: Node, api_key: str) -> bool:
-    if not node.api_key_hash:
-        return False
-    return verify_password(api_key, node.api_key_hash)

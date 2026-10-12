@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import secrets
@@ -22,6 +23,8 @@ from app.services.env_file import EnvFileService
 from app.services.node_agent_env import resolve_node_agent_env_file
 from app.services.panel_publish_info import panel_restart_command
 from app.services.refresh_token import invalidate_user_sessions
+
+logger = logging.getLogger(__name__)
 
 CONFIRM_PHRASE = "ROTATE"
 PREVIEW_TTL_SECONDS = 600
@@ -188,7 +191,12 @@ def _build_warnings(defn: SecretDefinition, settings: Settings) -> list[str]:
     return warnings
 
 
-_NODE_ENCRYPTED_FIELDS = ("api_key_encrypted", "ssh_private_key_encrypted", "ssh_passphrase_encrypted")
+_NODE_ENCRYPTED_FIELDS = (
+    "api_key_encrypted",
+    "api_key_pending_encrypted",
+    "ssh_private_key_encrypted",
+    "ssh_passphrase_encrypted",
+)
 
 
 def _reencrypt_secrets_with_new_key(db: Session, old_key: str, new_key: str) -> dict[str, int]:
@@ -205,6 +213,7 @@ def _reencrypt_secrets_with_new_key(db: Session, old_key: str, new_key: str) -> 
             db.add(node)
             stats["nodes"] += 1
         except Exception:
+            logger.exception("secrets rotation: re-encrypt failed node_id=%s fields=%s", node.id, fields)
             stats["errors"] += 1
 
     for user in db.query(User).all():
@@ -220,6 +229,7 @@ def _reencrypt_secrets_with_new_key(db: Session, old_key: str, new_key: str) -> 
             db.add(user)
             stats["totp_users"] += 1
         except Exception:
+            logger.exception("secrets rotation: re-encrypt TOTP failed user_id=%s", user.id)
             stats["errors"] += 1
 
     return stats

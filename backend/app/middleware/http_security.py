@@ -51,24 +51,28 @@ def should_noindex_path(path: str) -> bool:
 
 
 def build_robots_txt() -> str:
-    return """User-agent: *
-Disallow: /
-Disallow: /login
-Disallow: /settings
-Disallow: /routing
-Disallow: /antizapret
-Disallow: /server-monitor
-Disallow: /logs
-Disallow: /edit-files
-Disallow: /feature-disabled
-Disallow: /api/public/qr-download/
-Disallow: /api/public/route-download/
-Disallow: /api/auth/
-Disallow: /ip-blocked
-Disallow: /api/ip-blocked
-Disallow: /tg-mini
-Disallow: /api/
-"""
+    return "User-agent: *\nDisallow: /\n"
+
+
+_PROBE_EXTENSIONS = frozenset(
+    {"php", "asp", "aspx", "jsp", "cgi", "env", "sql", "bak", "old", "ini", "conf", "yml", "yaml", "log", "sh"}
+)
+_PROBE_FIRST_SEGMENTS = frozenset(
+    {"phpmyadmin", "server-status", "server-info", "wp-admin", "wp-includes", "cgi-bin", "actuator"}
+)
+
+
+def is_scanner_probe_path(path: str) -> bool:
+    """Paths no SPA route uses; answering them with index.html (200) reads as an exposed file to scanners."""
+    segments = [s for s in path.split("/") if s]
+    if not segments:
+        return False
+    if any(s.startswith(".") for s in segments):
+        return True
+    if segments[0].lower() in _PROBE_FIRST_SEGMENTS:
+        return True
+    _, dot, ext = segments[-1].rpartition(".")
+    return bool(dot) and ext.lower() in _PROBE_EXTENSIONS
 
 
 def get_panel_branding(environ: Mapping[str, str] | None = None) -> dict[str, Any]:
@@ -182,7 +186,7 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         if settings.security_headers_enabled:
-            self._apply_headers(response, settings, request.url.path or "", request)
+            self._apply_headers(response, settings, request.url.path, request)
 
         return response
 
@@ -194,7 +198,7 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
         return proto == "https"
 
     @staticmethod
-    def _apply_headers(response: Response, settings, path: str, request: Request | None = None) -> None:
+    def _apply_headers(response: Response, settings, path: str, request: Request) -> None:
         tg_mini = is_tg_mini_path(path)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         if not tg_mini:
@@ -202,7 +206,7 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         if not tg_mini:
             response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
-        if request is not None and HttpSecurityMiddleware._is_secure(request):
+        if HttpSecurityMiddleware._is_secure(request):
             from app.services.panel_paths import access_path as panel_access_path, with_access_path
 
             login_path = with_access_path(settings, "/login").rstrip("/")
@@ -220,11 +224,10 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
                 f"max-age={settings.hsts_max_age}; includeSubDomains",
             )
         if settings.content_security_policy:
-            nonce = getattr(request.state, "csp_nonce", None) if request is not None else None
             csp = csp_for_path(
                 path,
                 settings.content_security_policy,
-                nonce,
+                request.state.csp_nonce,
                 relaxed=settings.csp_relaxed_dev,
             )
             response.headers["Content-Security-Policy"] = csp

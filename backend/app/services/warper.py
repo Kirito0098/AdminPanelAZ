@@ -342,11 +342,6 @@ def domains_payload_from_text(text: str) -> dict[str, Any]:
     }
 
 
-def read_domains_file_payload() -> dict[str, Any]:
-    """One read_text of domains.txt → lists, domains, user_text."""
-    return domains_payload_from_text(_read_domains_file_text())
-
-
 def _text_from_api_result(result: Any, *, fallback: str = "") -> str:
     if isinstance(result, str):
         return result
@@ -669,8 +664,6 @@ class WarperService:
             )
         return method
 
-    def is_installed(self) -> bool:
-        return is_warper_installed()
 
     def get_health(self) -> dict[str, Any]:
         detection = detect_warper_installation()

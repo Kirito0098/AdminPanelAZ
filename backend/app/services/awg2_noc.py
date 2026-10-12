@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 from typing import Any
 
 from app.schemas import WireGuardPeer
+
+logger = logging.getLogger(__name__)
 
 
 def awg2_client_to_peer(client: dict, *, now: datetime | None = None) -> WireGuardPeer:
@@ -51,5 +54,6 @@ def fetch_awg2_peers_for_adapter(adapter: Any) -> list[WireGuardPeer]:
     """
     try:
         return peers_from_awg2_monitoring(adapter.get_awg2_monitoring())
-    except Exception:
+    except Exception as exc:
+        logger.warning("awg2 monitoring failed for %s: %s", adapter, exc)
         return []

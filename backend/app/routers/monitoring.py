@@ -5,15 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.auth import get_active_user_from_access_token, get_current_user, require_admin
+from app.auth import require_admin
 from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models import User
-from app.models import VpnConfig, VpnType
 from app.schemas import (
     ConnectionHistoryPoint,
     ConnectionHistoryResponse,
-    DashboardSummary,
     MonitoringOverview,
     NocIncidentsResponse,
     PanelResourceCurrentResponse,
@@ -22,15 +20,13 @@ from app.schemas import (
     ResourceHistoryPoint,
     ResourceHistoryResponse,
 )
-from app.services.connection_history import VALID_PERIODS as CONNECTION_VALID_PERIODS
 from app.services.connection_history import query_connection_history
 from app.services.monitoring_overview import (
     build_federated_monitoring_overview,
     build_monitoring_overview_for_node,
 )
 from app.services.noc_incidents import build_noc_incidents
-from app.services.node_manager import get_active_adapter, get_active_node
-from app.services.wireguard_status import wireguard_peer_is_online
+from app.services.node_manager import get_active_node
 from app.services.node_remote_cache import (
     FEDERATED_OVERVIEW_CACHE_KEY,
     get_cached_monitoring_overview,
@@ -39,6 +35,7 @@ from app.services.panel_resource_collector import collect_panel_metrics
 from app.services.panel_resource_metrics import VALID_PERIODS as PANEL_VALID_PERIODS
 from app.services.panel_resource_metrics import query_history as query_panel_history
 from app.services.resource_metrics import VALID_PERIODS, query_history
+from app.services.stream_ticket import admin_from_stream_ticket
 
 router = APIRouter(prefix="/monitoring", tags=["monitoring"])
 
@@ -60,7 +57,7 @@ def _stream_coalesce_ttl(interval: int) -> int:
     cache_ttl = _monitoring_cache_ttl()
     if cache_ttl <= 0:
         return 0
-    return min(cache_ttl, max(1, int(interval) - 1))
+    return min(cache_ttl, max(1, interval - 1))
 
 
 def _mark_cache_hit(overview: MonitoringOverview, served_from_cache: bool) -> MonitoringOverview:
@@ -76,7 +73,7 @@ def _federated_cache_key(ha_mode: str) -> str:
 
 
 def _node_overview_cache_key(node_id: int) -> str:
-    return f"node:overview:{int(node_id)}"
+    return f"node:overview:{node_id}"
 
 
 def _build_monitoring_overview(
@@ -90,17 +87,16 @@ def _build_monitoring_overview(
 ) -> MonitoringOverview:
     """Build overview; optional ``cache_key_prefix`` isolates SSE coalesce from REST TTL."""
     ttl = 0 if bypass_cache else (cache_ttl if cache_ttl is not None else _monitoring_cache_ttl())
-    prefix = cache_key_prefix or ""
     if scope == "all":
         overview, from_cache = get_cached_monitoring_overview(
-            f"{prefix}{_federated_cache_key(ha_mode)}",
+            f"{cache_key_prefix}{_federated_cache_key(ha_mode)}",
             ttl,
             lambda: build_federated_monitoring_overview(db, ha_mode=ha_mode),  # type: ignore[arg-type]
         )
         return _mark_cache_hit(overview, from_cache and ttl > 0)
     node = get_active_node(db)
     overview, from_cache = get_cached_monitoring_overview(
-        f"{prefix}{_node_overview_cache_key(node.id)}",
+        f"{cache_key_prefix}{_node_overview_cache_key(node.id)}",
         ttl,
         lambda: build_monitoring_overview_for_node(db, node),
     )
@@ -138,28 +134,16 @@ def monitoring_incidents(
         ) from exc
 
 
-def _user_from_access_token(token: str, db: Session) -> User:
-    user = get_active_user_from_access_token(db, token)
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Неверный токен авторизации",
-        )
-    return user
-
-
 @router.get("/stream")
 async def monitoring_stream(
     request: Request,
-    token: str = Query(..., description="JWT access token"),
+    ticket: str = Query(..., description="One-time ticket from POST /api/stream-ticket"),
     scope: str = Query(default="node", pattern="^(node|all)$"),
     ha_mode: str = Query(default="dedupe", pattern="^(dedupe|raw)$"),
 ):
     db = SessionLocal()
     try:
-        user = _user_from_access_token(token, db)
-        if user.role.value != "admin":
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Требуются права администратора")
+        admin_from_stream_ticket(db, ticket, "monitoring")
     finally:
         db.close()
 
@@ -229,11 +213,6 @@ def connection_history(
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    if period not in CONNECTION_VALID_PERIODS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="period должен быть 1h, 6h или 24h",
-        )
     try:
         points, sample_count = query_connection_history(db, period=period, scope=scope)
     except Exception as exc:
@@ -273,43 +252,3 @@ def panel_resource_current(_: User = Depends(require_admin)):
     return PanelResourceCurrentResponse(**collect_panel_metrics())
 
 
-@router.get("/summary", response_model=DashboardSummary)
-def dashboard_summary(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    adapter = get_active_adapter(db)
-    node = get_active_node(db)
-    is_admin = current_user.role.value == "admin"
-
-    query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id)
-    if not is_admin:
-        query = query.filter(VpnConfig.owner_id == current_user.id)
-    configs = query.all()
-
-    if not is_admin:
-        return DashboardSummary(
-            total_configs=len(configs),
-            openvpn_configs=sum(1 for c in configs if c.vpn_type == VpnType.openvpn),
-            wireguard_configs=sum(1 for c in configs if c.vpn_type == VpnType.wireguard),
-            connected_openvpn=0,
-            connected_wireguard=0,
-            active_services=0,
-            total_services=0,
-            server_ip="",
-            node_name=node.name,
-        )
-
-    services = adapter.get_service_status()
-    ovpn_clients = adapter.parse_openvpn_status()
-    wg_peers = adapter.parse_wireguard_status()
-    wg_active = sum(1 for p in wg_peers if wireguard_peer_is_online(p))
-
-    return DashboardSummary(
-        total_configs=len(configs),
-        openvpn_configs=sum(1 for c in configs if c.vpn_type == VpnType.openvpn),
-        wireguard_configs=sum(1 for c in configs if c.vpn_type == VpnType.wireguard),
-        connected_openvpn=len(ovpn_clients),
-        connected_wireguard=wg_active,
-        active_services=sum(1 for s in services if s.active),
-        total_services=len(services),
-        server_ip=adapter.get_server_ip(),
-        node_name=node.name,
-    )

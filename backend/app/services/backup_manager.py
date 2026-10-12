@@ -315,8 +315,8 @@ class BackupManager:
             "summary": metadata["summary"],
         }
 
-    def load_restore_payload(self, file_name: str) -> dict:
-        archive_path = self._resolve_archive(file_name)
+    def load_restore_payload(self, file_name: str, *, allow_absolute_path: bool = False) -> dict:
+        archive_path = self._resolve_archive(file_name, allow_absolute_path=allow_absolute_path)
         restored: list[str] = []
         restored_configs: dict[str, str] = {}
         files: dict[str, bytes] = {}
@@ -579,18 +579,23 @@ class BackupManager:
     def get_backup_path(self, file_name: str) -> Path:
         return self._resolve_archive(file_name)
 
-    def _resolve_archive(self, file_name: str) -> Path:
+    def _resolve_archive(self, file_name: str, *, allow_absolute_path: bool = False) -> Path:
         safe_name = os.path.basename(file_name)
         if not safe_name.endswith(".tar.gz"):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимое имя архива")
 
         if os.path.isabs(file_name):
+            if not allow_absolute_path:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Укажите имя архива из каталога резервных копий",
+                )
             candidate = Path(file_name).resolve()
             if candidate.is_file():
                 return candidate
 
         path = (self.backup_root / safe_name).resolve()
-        if not str(path).startswith(str(self.backup_root)):
+        if path.parent != self.backup_root:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимый путь")
         if not path.exists():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Архив не найден")
@@ -679,5 +684,5 @@ class BackupManager:
                 old_path = Path(old)
                 backup_meta_path(old_path).unlink(missing_ok=True)
                 old_path.with_suffix(".json").unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.warning("Backup rotation failed to remove %s: %s", old, exc)

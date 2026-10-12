@@ -44,6 +44,8 @@ const VERIFY_CHECKS = [
   'доступность узлов (online)',
   'список клиентов OpenVPN',
   'список клиентов WireGuard',
+  'работающие peer WireGuard',
+  'клиенты AZ-AWG2',
   'сертификаты PKI и файлы WireGuard',
   'сертификаты в файлах .ovpn (не отозваны)',
   'OpenVPN перезапущен после смены сертификата сервера',
@@ -166,6 +168,17 @@ function shortHash(value?: string | null): string {
   return `${value.slice(0, 8)}…${value.slice(-4)}`
 }
 
+function setDiffDetails(mismatch: NodeSyncMismatch): string[] {
+  const details: string[] = []
+  if (mismatch.only_primary?.length) {
+    details.push(`Есть только на основном (${mismatch.only_primary.length}): ${mismatch.only_primary.join(', ')}`)
+  }
+  if (mismatch.only_replica?.length) {
+    details.push(`Есть только на реплике (${mismatch.only_replica.length}): ${mismatch.only_replica.join(', ')}`)
+  }
+  return details
+}
+
 function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismatchView {
   if (mismatch.kind === 'node_status') {
     return {
@@ -238,6 +251,24 @@ function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismatchView 
       title: 'Разные клиенты WireGuard',
       details: details.length ? details : ['Наборы имён peer на узлах не совпадают.'],
       hint: 'Выровняйте клиентов через основной узел или выполните полную синхронизацию HA.',
+    }
+  }
+
+  if (mismatch.kind === 'wireguard_peers') {
+    const details = setDiffDetails(mismatch)
+    return {
+      title: 'Работающий WireGuard на реплике отличается',
+      details: details.length ? details : ['Активные peer WireGuard на узлах не совпадают.'],
+      hint: 'Файлы могли скопироваться, но WireGuard на реплике их не применил. Проверьте WireGuard на реплике и нажмите «Синхронизировать».',
+    }
+  }
+
+  if (mismatch.kind === 'awg2_clients') {
+    const details = setDiffDetails(mismatch)
+    return {
+      title: 'Разные клиенты AZ-AWG2',
+      details: details.length ? details : ['Наборы клиентов AZ-AWG2 на узлах не совпадают.'],
+      hint: 'Проверьте AZ-AWG2 на реплике (установлен ли, применилось ли состояние) и нажмите «Синхронизировать».',
     }
   }
 

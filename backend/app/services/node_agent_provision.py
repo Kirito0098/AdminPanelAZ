@@ -36,12 +36,6 @@ def _mtls_paths() -> dict[str, Path]:
     }
 
 
-def _node_agent_env_file() -> Path:
-    from app.services.node_agent_env import resolve_node_agent_env_file
-
-    return resolve_node_agent_env_file()
-
-
 def _validate_pem(name: str, content: str, *, marker_pairs: tuple[tuple[str, str], ...]) -> None:
     text = (content or "").strip()
     if len(text) < _MIN_PEM_LEN:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Запуск shell-тестов (по умолчанию все scripts/test-*.sh) с охраной хоста: изменяющие вызовы systemctl, nginx,
 # iptables, ipset, ufw и certbot, которые тест не подменил сам, блокируются (scripts/host-guard-cmd.sh),
-# и такой тест считается упавшим, даже если сам он прошёл.
+# как и любой sudo (меню перезапускает себя через sudo), и такой тест считается упавшим, даже если сам он прошёл.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -10,12 +10,14 @@ trap 'rm -rf "$GUARD_DIR"' EXIT
 
 mkdir "$GUARD_DIR/bin"
 for cmd in systemctl nginx iptables ip6tables iptables-save ip6tables-save iptables-restore ip6tables-restore \
-  ipset ufw certbot; do
+  ipset ufw certbot sudo; do
   ln -s "$ROOT_DIR/scripts/host-guard-cmd.sh" "$GUARD_DIR/bin/$cmd"
 done
 export HOST_GUARD_LOG="$GUARD_DIR/violations.log"
 : >"$HOST_GUARD_LOG"
 export PATH="$GUARD_DIR/bin:$PATH"
+# Команду adminpanelaz тесты ставят только во временный каталог, не в /usr/local/bin.
+export ADMINPANELAZ_MENU_LINK="$GUARD_DIR/adminpanelaz"
 
 if [[ "$#" -gt 0 ]]; then
   tests=("$@")

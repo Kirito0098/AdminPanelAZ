@@ -13,9 +13,12 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import Node, NodeSyncGroup, SyncStatus, VpnConfig, VpnType
 from app.services.action_log import log_action
+from app.services.access_policy import delete_client_access_policies, forget_deleted_openvpn_client
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.groups import get_replica_nodes, is_auto_sync_enabled
+from app.services.node_sync.group_status import group_is_pending, notify_replica_drift
 from app.services.node_sync.vpn_state_sync import (
+    ReplicaRuntimeError,
     _error_detail,
     sync_openvpn_pki_from_primary,
     sync_vpn_crypto_from_primary,
@@ -44,6 +47,7 @@ class ReplicateResult:
     skipped: bool = False
     successes: list[dict[str, Any]] = field(default_factory=list)
     errors: list[dict[str, Any]] = field(default_factory=list)
+    drifts: list[dict[str, Any]] = field(default_factory=list)
 
     def to_legacy_dict(self) -> dict[str, Any]:
         if self.operation == ReplicateOperation.CLIENT_CREATE:
@@ -135,6 +139,11 @@ def _handle_client_create(db: Session, group: NodeSyncGroup, payload: dict[str, 
                 replica_node=replica_node,
                 client_name=primary_config.client_name,
             )
+        except ReplicaRuntimeError as exc:
+            logger.warning("HA auto-sync create: runtime not applied on replica %s: %s", replica_node.name, exc)
+            result.drifts.append(
+                {"node_id": replica_node.id, "node_name": replica_node.name, "error": _error_detail(exc)}
+            )
         except Exception as exc:
             logger.warning(
                 "HA auto-sync create failed on replica %s: %s",
@@ -174,12 +183,18 @@ def _handle_client_delete(db: Session, group: NodeSyncGroup, payload: dict[str, 
             db.delete(shadow)
             continue
         try:
+            replica_adapter = get_adapter_for_node(replica_node)
             sync_vpn_crypto_from_primary(
                 primary_adapter,
-                get_adapter_for_node(replica_node),
+                replica_adapter,
                 shadow.vpn_type,
                 db=db,
                 replica_node=replica_node,
+            )
+        except ReplicaRuntimeError as exc:
+            logger.warning("HA auto-sync delete: runtime not applied on replica %s: %s", replica_node.name, exc)
+            result.drifts.append(
+                {"node_id": replica_node.id, "node_name": replica_node.name, "error": _error_detail(exc)}
             )
         except Exception as exc:
             logger.warning(
@@ -192,6 +207,11 @@ def _handle_client_delete(db: Session, group: NodeSyncGroup, payload: dict[str, 
             )
             continue
         result.successes.append({"node_id": replica_node.id, "config_id": shadow.id})
+        if shadow.vpn_type == VpnType.openvpn:
+            forget_deleted_openvpn_client(
+                db, replica_adapter, node_id=replica_node.id, client_name=shadow.client_name
+            )
+        delete_client_access_policies(db, shadow)
         db.delete(shadow)
 
     return result
@@ -214,7 +234,7 @@ def _handle_client_renew_cert(db: Session, group: NodeSyncGroup, payload: dict[s
             sync_openvpn_pki_from_primary(
                 primary_adapter,
                 get_adapter_for_node(replica_node),
-                openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
+                openvpn_multihome=replica_node.openvpn_multihome,
                 db=db,
                 replica_node=replica_node,
             )
@@ -361,17 +381,26 @@ def finalize_replicate_outcome(
 ) -> None:
     """Apply sync_status, commit, and optional partial-failure audit."""
     payload = payload or {}
+    notify_drift = False
 
-    if result.errors:
-        group.sync_status = SyncStatus.failed
-        group.last_sync_error = result.errors[0]["error"]
-    elif set_synced_on_success:
-        group.sync_status = SyncStatus.synced
-        group.last_sync_error = None
-    else:
-        group.last_sync_error = None
+    if not group_is_pending(db, group):
+        if result.errors:
+            group.sync_status = SyncStatus.failed
+            group.last_sync_error = result.errors[0]["error"]
+        elif result.drifts:
+            notify_drift = group.sync_status != SyncStatus.drift
+            group.sync_status = SyncStatus.drift
+            group.last_sync_error = result.drifts[0]["error"]
+        elif set_synced_on_success:
+            group.sync_status = SyncStatus.synced
+            group.last_sync_error = None
+        else:
+            group.last_sync_error = None
 
     db.commit()
+
+    if notify_drift:
+        notify_replica_drift(db, group, result.drifts)
 
     if not result.errors or not audit_on_partial_failure or not get_settings().audit_log_enabled:
         return

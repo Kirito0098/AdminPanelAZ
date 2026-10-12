@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ChevronDown, type LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-export interface TelegramInstructionPanelProps {
+interface TelegramInstructionPanelProps {
   title?: string
   description?: string
   icon?: LucideIcon

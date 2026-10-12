@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from html import escape
+
 from app.services.feature_guards import get_feature_service
 from app.services.tg_mini_status import build_warper_status_payload
 from app.services.telegram_bot_handlers.base import BotContext, is_admin, unlinked_message
@@ -30,14 +32,14 @@ async def handle_warper_status(ctx: BotContext, *, message_id: int | None = None
         payload = build_warper_status_payload(ctx.db)
         text = i18n.WARPER_BODY.format(
             title=i18n.WARPER_TITLE,
-            node_name=payload["node_name"],
-            node_host=payload["node_host"],
-            status=payload["status"],
+            node_name=escape(str(payload["node_name"])),
+            node_host=escape(str(payload["node_host"])),
+            status=escape(str(payload["status"])),
         )
     except Exception as exc:
         from app.services.telegram_api import send_message
 
-        await send_message(ctx.bot_token, ctx.chat_id, i18n.WARPER_ERROR.format(detail=exc))
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.WARPER_ERROR.format(detail=escape(str(exc))))
         return
 
     markup = nav_footer_keyboard(refresh="nav:warper")

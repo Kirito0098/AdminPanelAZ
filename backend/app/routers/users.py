@@ -30,6 +30,8 @@ from app.schemas import (
 )
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
+from app.services.active_web_session import active_web_session_service
+from app.services.client_portal import revoke_creator_portal_links
 from app.services.config_access import get_user_config_grants, set_user_config_access
 from app.services.ip_restriction import ip_restriction_service
 from app.services.notify_time import get_client_timezone_from_request
@@ -39,6 +41,7 @@ from app.services.admin_bootstrap import (
 )
 from app.services.password_policy import validate_password
 from app.services.refresh_token import invalidate_user_sessions
+from app.services.telegram_link import notify_telegram_unlinked
 from app.services.user_subscription import (
     get_user_access_until,
     normalize_access_until,
@@ -146,6 +149,7 @@ def update_user(
             detail="Свой пароль меняется в настройках профиля с вводом текущего пароля",
         )
 
+    old_telegram_id = user.telegram_id
     access_until_updated = False
     pending_access_until = None
 
@@ -164,11 +168,15 @@ def update_user(
                     detail="Нельзя снять роль у последнего администратора",
                 )
         user.role = payload.role
+        revoke_creator_portal_links(db, user.id)
     if payload.theme is not None:
         user.theme = payload.theme
     if payload.is_active is not None:
         if not is_admin:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять статус")
+        if user.is_active and not payload.is_active:
+            invalidate_user_sessions(db, user, reason="disabled", commit=False)
+            active_web_session_service.revoke_user_sessions(db, user.username, commit=False)
         user.is_active = payload.is_active
     if "access_until" in payload.model_fields_set:
         if not is_admin:
@@ -251,6 +259,13 @@ def update_user(
     else:
         db.commit()
         db.refresh(user)
+    if payload.telegram_id is not None:
+        notify_telegram_unlinked(
+            db,
+            old_telegram_id=old_telegram_id,
+            new_telegram_id=user.telegram_id,
+            username=user.username,
+        )
     if payload.password and should_scrub_env_after_password_change(user.username):
         scrub_admin_bootstrap_secret_from_env()
     if settings.audit_log_enabled and (
@@ -328,6 +343,9 @@ def delete_user(
                 detail="Нельзя удалить последнего администратора",
             )
     deleted_username = user.username
+    if user.role != UserRole.admin:
+        revoke_creator_portal_links(db, user.id, keep_accessible=False)
+        db.flush()
     _purge_user_before_delete(db, user, current_user)
     db.delete(user)
     db.commit()

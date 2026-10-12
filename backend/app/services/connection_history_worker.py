@@ -9,15 +9,9 @@ from app.config import get_settings
 from app.database import SessionLocal
 from app.services.connection_history import collect_connection_samples, purge_old_connection_samples
 from app.services.background_gate import run_background_step
+from app.services.shared_helpers import is_resource_monitor_enabled as _is_resource_monitor_enabled
 
 logger = logging.getLogger(__name__)
-
-
-def _is_resource_monitor_enabled() -> bool:
-    """Runtime gate — MONITOR_ENABLED / resource_monitor can flip without restart."""
-    from app.services.feature_guards import get_feature_service
-
-    return get_feature_service().is_enabled("resource_monitor")
 
 
 def _is_connection_history_enabled() -> bool:

@@ -33,10 +33,6 @@ usage() {
 EOF
 }
 
-require_root() {
-  [[ "$(id -u)" -eq 0 ]] || nginx_die "Запустите от root: sudo $0"
-}
-
 # dd_ports_json <план> → JSON-массив портов
 dd_ports_json() {
   local port kind action rest item out=""
@@ -195,7 +191,7 @@ case "$MODE" in
     ;;
 esac
 
-require_root
+nginx_require_root
 command -v nginx >/dev/null 2>&1 || nginx_die "nginx не установлен"
 
 if [[ "$MODE" == --check ]]; then

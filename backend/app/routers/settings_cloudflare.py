@@ -78,6 +78,6 @@ def refresh_cloudflare_proxy(
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    force = bool(payload.force) if payload is not None else False
+    force = payload.force if payload is not None else False
     result = cloudflare_proxy_settings_service.refresh_cloudflare_ips(db, force=force)
     return CloudflareProxyRefreshResponse(**result)

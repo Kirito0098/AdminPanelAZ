@@ -51,7 +51,7 @@ setup_overlay() {
   REBOOT_CHECK_UNAME="6.8.0-71-generic"
   REBOOT_CHECK_IN_CONTAINER="0"
   unset INSTALL_SKIP_REBOOT_CHECK
-  rm -rf "$TMP/run" "$TMP/boot"
+  rm -rf "${TMP:?}/run" "${TMP:?}/boot"
   mkdir -p "$TMP/run" "$TMP/boot"
 }
 
@@ -147,6 +147,38 @@ if reboot_check_kernel_pending; then
 else
   assert_rc 0 0 "same kernel not pending"
 fi
+
+echo "[test] systemctl reboot не сработал — пробуем reboot, затем ошибка"
+mkdir -p "$TMP/bin"
+cat >"$TMP/bin/systemctl" <<'EOF'
+#!/usr/bin/env bash
+echo "systemctl $*" >>"$REBOOT_LOG"
+exit 1
+EOF
+cat >"$TMP/bin/reboot" <<'EOF'
+#!/usr/bin/env bash
+echo "reboot" >>"$REBOOT_LOG"
+exit "${FAKE_REBOOT_RC:-0}"
+EOF
+chmod +x "$TMP/bin/systemctl" "$TMP/bin/reboot"
+export REBOOT_LOG="$TMP/reboot.log"
+for want_rc in 0 1; do
+  : >"$REBOOT_LOG"
+  set +e
+  out="$(
+    PATH="$TMP/bin:$PATH"
+    unset REBOOT_CHECK_DRY_RUN
+    export FAKE_REBOOT_RC="$want_rc"
+    # Предохранитель: настоящие systemctl или reboot перезагрузили бы сервер.
+    [[ "$(command -v systemctl)" == "$TMP/bin/systemctl" && "$(command -v reboot)" == "$TMP/bin/reboot" ]] || exit 99
+    install_reboot_now 2>&1
+  )"
+  rc=$?
+  set -e
+  assert_rc "$rc" "$want_rc" "reboot rc=$want_rc"
+  assert_eq "$(tr '\n' ';' <"$REBOOT_LOG")" "systemctl reboot;reboot;" "после systemctl пробуем reboot (rc=$want_rc)"
+done
+assert_contains "$out" "не удалось выполнить reboot" "ошибка, если reboot не сработал"
 
 echo
 echo "Passed: $pass  Failed: $fail"

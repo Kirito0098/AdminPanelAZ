@@ -114,8 +114,6 @@ def is_vnstat_available(*, force: bool = False) -> bool:
                 check=False,
             )
             ok = proc.returncode == 0
-    except FileNotFoundError:
-        ok = False
     except Exception:
         ok = False
 

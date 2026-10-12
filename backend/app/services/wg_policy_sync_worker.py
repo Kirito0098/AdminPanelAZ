@@ -32,6 +32,7 @@ def reconcile_wg_policies_for_all_nodes(db: Session, *, sync_all_runtime: bool =
     total_wg_runtime_calls = 0
     total_clients_changed = 0
     nodes_skipped_empty = 0
+    nodes_failed = 0
     for node in db.query(Node).all():
         if not is_vpn_node(node):
             continue
@@ -46,7 +47,13 @@ def reconcile_wg_policies_for_all_nodes(db: Session, *, sync_all_runtime: bool =
             if has_policy is None:
                 nodes_skipped_empty += 1
                 continue
-        result = _reconcile_for_node(db, node, sync_all_runtime=sync_all_runtime)
+        try:
+            result = _reconcile_for_node(db, node, sync_all_runtime=sync_all_runtime)
+        except Exception as exc:
+            db.rollback()
+            nodes_failed += 1
+            logger.warning("WG policy sync skipped node %s: %s", node.name, exc)
+            continue
         if result.get("wg_policy_reconcile") == "ok":
             nodes_processed += 1
             total_blocked += len(result.get("blocked_clients") or [])
@@ -57,6 +64,7 @@ def reconcile_wg_policies_for_all_nodes(db: Session, *, sync_all_runtime: bool =
         "wg_policy_sync": "ok",
         "nodes_processed": nodes_processed,
         "nodes_skipped_empty": nodes_skipped_empty,
+        "nodes_failed": nodes_failed,
         "blocked_clients": total_blocked,
         "unblocked_clients": total_unblocked,
         "wg_runtime_calls": total_wg_runtime_calls,
@@ -96,10 +104,11 @@ def _reconcile_all_nodes_once(*, sync_all_runtime: bool = False) -> None:
         result = reconcile_wg_policies_safe(db, sync_all_runtime=sync_all_runtime)
         if result.get("wg_policy_sync") == "ok":
             logger.info(
-                "WG policy sync: nodes=%d skipped_empty=%d blocked=%d unblocked=%d "
+                "WG policy sync: nodes=%d skipped_empty=%d failed=%d blocked=%d unblocked=%d "
                 "clients_changed=%d wg_runtime_calls=%d duration_ms=%d sync_all_runtime=%s",
                 result.get("nodes_processed", 0),
                 result.get("nodes_skipped_empty", 0),
+                result.get("nodes_failed", 0),
                 result.get("blocked_clients", 0),
                 result.get("unblocked_clients", 0),
                 result.get("clients_changed", 0),

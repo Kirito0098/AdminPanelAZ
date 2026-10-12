@@ -109,7 +109,7 @@ function FormSection({
   )
 }
 
-export type PublishAccessWizardProps = {
+type PublishAccessWizardProps = {
   settings: VpnNetworkSettings
   publishModes: VpnNetworkPublishMode[]
   selectedMode: string

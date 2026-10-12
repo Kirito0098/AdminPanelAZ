@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import logging
+from html import escape
+
 from app.models import VpnConfig, VpnType
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.profile_download_name import enrich_profile_files
@@ -26,6 +29,8 @@ from app.services.vpn_profile_visibility import (
     filter_profile_files,
     resolve_effective_visible_vpn_profiles,
 )
+
+logger = logging.getLogger(__name__)
 _PAGE_SIZE = 12
 _COLUMNS = 2
 _NAME_MAX_LEN = 20
@@ -75,10 +80,10 @@ def _load_config_protocol_map(ctx: BotContext, configs: list[VpnConfig]) -> dict
     adapter = get_active_adapter(ctx.db)
     policy = resolve_effective_visible_vpn_profiles(ctx.db, ctx.user)
     clients = [(config.client_name, config.vpn_type) for config in configs]
-    files_by_key: dict[str, list[dict[str, str]]] = {}
     try:
-        files_by_key = adapter.get_profile_files_batch(clients)
+        files_by_key: dict[str, list[dict[str, str]]] = adapter.get_profile_files_batch(clients)
     except Exception:
+        logger.debug("bot configs: profile files batch failed", exc_info=True)
         files_by_key = {}
 
     protocol_map: dict[int, frozenset[str]] = {}
@@ -89,6 +94,7 @@ def _load_config_protocol_map(ctx: BotContext, configs: list[VpnConfig]) -> dict
             try:
                 files = adapter.get_profile_files(config.client_name, config.vpn_type)
             except Exception:
+                logger.debug("bot configs: profile files failed client=%s", config.client_name, exc_info=True)
                 files = []
         files = filter_profile_files(files or [], policy)
         protocol_map[config.id] = classify_config_profile_groups(files, config.vpn_type)
@@ -177,7 +183,7 @@ def _configs_preview(
     for offset, config in enumerate(chunk):
         groups = protocol_map.get(config.id, frozenset())
         emoji, tag = format_config_protocol_badge_for_filter(groups, filter_key)
-        lines.append(f"{start_index + offset}. {emoji}{tag} <code>{config.client_name}</code>")
+        lines.append(f"{start_index + offset}. {emoji}{tag} <code>{escape(config.client_name)}</code>")
     return "\n".join(lines)
 
 
@@ -326,7 +332,7 @@ async def _show_config_group_picker(
 
     preview = "\n".join(file_preview_line(offset, entry.file) for offset, entry in enumerate(group.files, start=1))
     text = i18n.CONFIG_PICK_FILE.format(
-        name=config.client_name,
+        name=escape(config.client_name),
         protocol=f"{group.emoji} <b>{group.title}</b>",
         preview=preview,
     )
@@ -364,7 +370,7 @@ async def _show_config_picker(
         return
 
     text = i18n.CONFIG_PICK_PROTOCOL.format(
-        name=config.client_name,
+        name=escape(config.client_name),
         vpn_type=config.vpn_type.value,
     )
     await send_or_edit(
@@ -442,7 +448,7 @@ async def handle_config(ctx: BotContext, name: str) -> None:
 
     config = find_config_by_name(ctx.db, ctx.user, name)
     if not config:
-        await send_message(ctx.bot_token, ctx.chat_id, i18n.CONFIG_NOT_FOUND.format(name=name))
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.CONFIG_NOT_FOUND.format(name=escape(name)))
         return
 
     await _show_config_picker(ctx, config)
@@ -540,13 +546,13 @@ async def handle_config_file_send(
         await send_message(
             ctx.bot_token,
             ctx.chat_id,
-            i18n.CONFIG_SEND_FAILED.format(detail=error or i18n.CONFIG_SEND_UNKNOWN),
+            i18n.CONFIG_SEND_FAILED.format(detail=escape(error or i18n.CONFIG_SEND_UNKNOWN)),
         )
         return
 
     await send_or_edit(
         ctx,
-        i18n.CONFIG_SEND_OK_ONE.format(name=config.client_name),
+        i18n.CONFIG_SEND_OK_ONE.format(name=escape(config.client_name)),
         markup=_after_send_keyboard(config_id, filter_key=filter_key),
         message_id=message_id,
     )

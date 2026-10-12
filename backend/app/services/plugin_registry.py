@@ -22,8 +22,6 @@ class HookRegistry:
             raise ValueError(f"Hook {hook_point!r}/{name!r} already registered")
         handlers.append((name, handler))
 
-    def list_handlers(self, hook_point: str) -> list[str]:
-        return [name for name, _ in self._hooks.get(hook_point, [])]
 
     def call(self, hook_point: str, **kwargs: Any) -> None:
         for name, handler in self._hooks.get(hook_point, []):

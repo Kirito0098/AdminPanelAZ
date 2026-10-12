@@ -48,7 +48,7 @@ def set_node_offline_grace_seconds(db: Session, seconds: int) -> int:
 
 
 def _host_label(node: Node) -> str:
-    host = (node.host or "").strip() or "—"
+    host = node.host.strip() or "—"
     port = node.port
     if port:
         return f"{host}:{port}"
@@ -57,7 +57,7 @@ def _host_label(node: Node) -> str:
 
 def _meta(node: Node) -> dict:
     try:
-        data = json.loads(node.node_metadata or "{}")
+        data = json.loads(node.node_metadata)
         return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
         return {}
@@ -239,7 +239,7 @@ def evaluate_node_offline_notify(
     except Exception as exc:
         logger.warning(
             "Node status notify failed for node_id=%s: %s",
-            getattr(node, "id", None),
+            node.id,
             exc,
         )
 

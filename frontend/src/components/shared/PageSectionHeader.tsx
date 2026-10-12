@@ -3,7 +3,7 @@ import type { ReactNode } from 'react'
 import DocsLink from '@/components/shared/DocsLink'
 import { cn } from '@/lib/utils'
 
-export interface PageSectionHeaderProps {
+interface PageSectionHeaderProps {
   icon: LucideIcon
   title: ReactNode
   description?: ReactNode

@@ -767,7 +767,10 @@ export default function ConfigCardsSection({
                         }}
                         onCopyName={() => void copyName(config.client_name)}
                         onCopyPortalLink={
-                          clientPortalEnabled ? () => void copyPortalLink(config) : undefined
+                          clientPortalEnabled &&
+                          (isAdmin || (currentUserId != null && config.owner_id === currentUserId))
+                            ? () => void copyPortalLink(config)
+                            : undefined
                         }
                         onDownload={(path, filename) => void handleCardDownload(config, path, filename)}
                         onQr={(path, filename) => void handleCardQr(config, path, filename)}

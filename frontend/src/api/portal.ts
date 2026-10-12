@@ -28,6 +28,12 @@ export interface PortalClientEntry {
   status?: PortalStatusMeta
 }
 
+export interface PortalNodeEntry {
+  node_id: number
+  label: string
+  clients: PortalClientEntry[]
+}
+
 export interface ClientPortalMetaResponse extends PortalClientEntry {
   kind?: 'client'
   brand_title: string
@@ -38,21 +44,17 @@ export interface UserPortalMetaResponse {
   kind: 'user'
   brand_title: string
   unlock_codes_enabled: boolean
-  clients: PortalClientEntry[]
+  nodes: PortalNodeEntry[]
 }
 
 export type PortalMetaResponse = ClientPortalMetaResponse | UserPortalMetaResponse
 
-export interface PortalRedeemResponse {
+interface PortalRedeemResponse {
   ok: boolean
   grant_days: number
   protocols_applied: string[]
   access_until: string | null
   access_until_by_protocol?: Record<string, string | null>
-}
-
-export async function getPortalLink(clientName: string) {
-  return apiFetch<PortalLinkResponse>(`/portal/clients/${encodeURIComponent(clientName)}/link`)
 }
 
 export async function createPortalLink(clientName: string) {

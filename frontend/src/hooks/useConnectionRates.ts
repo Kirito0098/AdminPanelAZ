@@ -3,7 +3,7 @@ import { parseTimestamp } from '@/lib/datetime'
 
 type RateSample = { rx: number; tx: number; at: number }
 
-export type ConnectionRate = {
+type ConnectionRate = {
   rxBps: number | null
   txBps: number | null
   /** True after first sample while waiting for a second tick (or after counter reset). */

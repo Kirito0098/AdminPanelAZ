@@ -6,18 +6,25 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CONFIG_FILE="${DDNS_CONFIG:-/etc/adminpanelaz/ddns.env}"
 SERVICE_NAME="adminpanelaz-ddns"
 TIMER_NAME="${SERVICE_NAME}.timer"
+UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 
 log() {
   echo "[ddns] $*"
 }
 
-warn() {
-  echo "[ddns] ВНИМАНИЕ: $*" >&2
-}
 
 die() {
   echo "[ddns] ОШИБКА: $*" >&2
   exit 1
+}
+
+# Значение для конфигурации curl (-K) в кавычках. Перевод строки начал бы новую опцию curl — отказ.
+curl_config_value() {
+  local value="$1"
+  [[ "$value" != *[$'\r\n']* ]] || return 1
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  printf '"%s"' "$value"
 }
 
 usage() {
@@ -76,9 +83,10 @@ update_duckdns() {
 
   [[ -n "$subdomain" && -n "$token" ]] || die "DuckDNS: задайте DDNS_SUBDOMAIN и DDNS_TOKEN в $CONFIG_FILE"
 
-  local url="https://www.duckdns.org/update?domains=${subdomain}&token=${token}&ip="
-  local response
-  response="$(curl -fsS --max-time 15 "$url" 2>/dev/null || echo "KO")"
+  local url_opt response
+  url_opt="$(curl_config_value "https://www.duckdns.org/update?domains=${subdomain}&token=${token}&ip=")" \
+    || die "DuckDNS: DDNS_SUBDOMAIN и DDNS_TOKEN не должны содержать перевод строки ($CONFIG_FILE)"
+  response="$(printf 'url = %s\n' "$url_opt" | curl -fsS --max-time 15 -K - 2>/dev/null || echo "KO")"
   response="$(echo "$response" | tr -d '[:space:]')"
 
   case "$response" in
@@ -103,14 +111,19 @@ update_noip() {
   [[ -n "$hostname" && -n "$username" && -n "$password" ]] || \
     die "No-IP: задайте DDNS_HOSTNAME, DDNS_USERNAME и DDNS_PASSWORD в $CONFIG_FILE"
 
-  local url="https://dynupdate.no-ip.com/nic/update?hostname=${hostname}"
-  local response
-  response="$(curl -fsS --max-time 15 -u "${username}:${password}" "$url" 2>/dev/null || echo "911")"
-  response="$(echo "$response" | head -1 | tr -d '[:space:]')"
+  local url_opt user_opt response
+  url_opt="$(curl_config_value "https://dynupdate.no-ip.com/nic/update?hostname=${hostname}")" \
+    && user_opt="$(curl_config_value "${username}:${password}")" \
+    || die "No-IP: DDNS_HOSTNAME, DDNS_USERNAME и DDNS_PASSWORD не должны содержать перевод строки ($CONFIG_FILE)"
+  response="$(printf 'url = %s\nuser = %s\n' "$url_opt" "$user_opt" | curl -fsS --max-time 15 -K - 2>/dev/null || echo "911")"
+  local first_line status
+  IFS= read -r first_line <<<"$response"
+  first_line="${first_line%$'\r'}"
+  read -r status _ <<<"$first_line"
 
-  case "$response" in
+  case "$status" in
     good|nochg)
-      log "No-IP: $hostname обновлён ($response)"
+      log "No-IP: $hostname обновлён ($first_line)"
       return 0
       ;;
     badauth)
@@ -123,7 +136,7 @@ update_noip() {
       die "No-IP: неверное имя хоста (notfqdn)"
       ;;
     *)
-      die "No-IP: неожиданный ответ: $response"
+      die "No-IP: неожиданный ответ: $first_line"
       ;;
   esac
 }
@@ -164,8 +177,8 @@ install_timer() {
   local timer_src="$ROOT_DIR/systemd/${TIMER_NAME}"
   [[ -f "$service_src" && -f "$timer_src" ]] || die "Не найдены unit-файлы в $ROOT_DIR/systemd/"
 
-  sed "s|/opt/AdminPanelAZ|$ROOT_DIR|g" "$service_src" >"/etc/systemd/system/${SERVICE_NAME}.service"
-  cp "$timer_src" "/etc/systemd/system/${TIMER_NAME}"
+  sed "s|/opt/AdminPanelAZ|$ROOT_DIR|g" "$service_src" >"$UNIT_DIR/${SERVICE_NAME}.service"
+  cp "$timer_src" "$UNIT_DIR/${TIMER_NAME}"
 
   systemctl daemon-reload
   systemctl enable --now "$TIMER_NAME"
@@ -179,7 +192,7 @@ remove_timer() {
 
   systemctl stop "$TIMER_NAME" 2>/dev/null || true
   systemctl disable "$TIMER_NAME" 2>/dev/null || true
-  rm -f "/etc/systemd/system/${SERVICE_NAME}.service" "/etc/systemd/system/${TIMER_NAME}"
+  rm -f "$UNIT_DIR/${SERVICE_NAME}.service" "$UNIT_DIR/${TIMER_NAME}"
   systemctl daemon-reload
   log "Systemd timer удалён"
 }

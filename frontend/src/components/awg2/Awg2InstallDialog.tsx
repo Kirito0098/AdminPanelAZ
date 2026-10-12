@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, TerminalSquare } from 'lucide-react'
-import { openAwg2InstallStream } from '@/api/client'
+import { openAwg2InstallStream, type StreamHandle } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { Button, type ButtonProps } from '@/components/ui/button'
 import {
@@ -40,7 +40,7 @@ export default function Awg2InstallDialog({
   onCompleted,
 }: Awg2InstallDialogProps) {
   const { success, error: notifyError } = useNotifications()
-  const streamRef = useRef<EventSource | null>(null)
+  const streamRef = useRef<StreamHandle | null>(null)
   const [open, setOpen] = useState(false)
   const [running, setRunning] = useState(false)
   const [preset, setPreset] = useState<string>('medium')
@@ -73,7 +73,7 @@ export default function Awg2InstallDialog({
     setLogLines([])
     setRunning(true)
 
-    const source = openAwg2InstallStream(
+    streamRef.current = openAwg2InstallStream(
       mode === 'install'
         ? {
             mode,
@@ -122,15 +122,6 @@ export default function Awg2InstallDialog({
         notifyError(message)
       },
     )
-
-    if (!source) {
-      setRunning(false)
-      setLastError('Не удалось открыть поток установки AZ-AWG2')
-      notifyError('Не удалось открыть поток установки AZ-AWG2')
-      return
-    }
-
-    streamRef.current = source
   }
 
   return (

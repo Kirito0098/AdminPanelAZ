@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import NodeResourceSample
+from app.services.shared_helpers import utcnow_naive as _utcnow
 
 settings = get_settings()
 
@@ -24,10 +25,6 @@ BUCKET_SECONDS = {
     "7d": 1800,
     "30d": 7200,
 }
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _bytes_to_mb(value: int | float | None) -> int:
@@ -115,21 +112,6 @@ def get_resource_stats_by_node(
             "disk_peak": round(float(disk_peak), 1) if disk_peak is not None else None,
         }
         for node_id, cpu_avg, cpu_peak, mem_avg, mem_peak, disk_avg, disk_peak in rows
-    }
-
-
-def get_avg_metrics_by_node(
-    db: Session,
-    *,
-    since: datetime,
-    until: datetime,
-) -> dict[int, dict[str, float | None]]:
-    return {
-        node_id: {
-            "cpu_percent": stats.get("cpu_percent"),
-            "memory_percent": stats.get("memory_percent"),
-        }
-        for node_id, stats in get_resource_stats_by_node(db, since=since, until=until).items()
     }
 
 

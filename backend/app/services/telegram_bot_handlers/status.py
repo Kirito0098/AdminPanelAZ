@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import escape
+
 from app.services.telegram_bot_data import build_dashboard_summary, build_server_status_block
 from app.services.telegram_bot_handlers.base import BotContext, inline_button, is_admin, unlinked_message
 from app.services.telegram_bot_handlers.ui import format_bot_timestamp, nav_footer_keyboard, send_or_edit
@@ -16,11 +18,11 @@ async def handle_status(ctx: BotContext, *, message_id: int | None = None) -> No
     summary = build_dashboard_summary(ctx.db, ctx.user)
     text = i18n.STATUS_BODY.format(
         title=i18n.STATUS_TITLE,
-        node_name=summary["node_name"],
+        node_name=escape(str(summary["node_name"])),
         total_configs=summary["total_configs"],
         connected_openvpn=summary["connected_openvpn"],
         connected_wireguard=summary["connected_wireguard"],
-        server_ip=summary["server_ip"] or "—",
+        server_ip=escape(str(summary["server_ip"] or "—")),
     )
 
     if is_admin(ctx.user):

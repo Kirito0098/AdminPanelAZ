@@ -142,6 +142,23 @@ class ActiveWebSessionService:
             _touch_cache.pop(session_id, None)
         return True
 
+    def revoke_user_sessions(self, db: Session, username: str, *, commit: bool = True) -> int:
+        """Mark every web session of ``username`` revoked; the caller revokes the refresh tokens."""
+        rows = (
+            db.query(ActiveWebSession)
+            .filter(ActiveWebSession.username == username, ActiveWebSession.revoked_at.is_(None))
+            .all()
+        )
+        now = datetime.utcnow()
+        for row in rows:
+            row.revoked_at = now
+        if commit:
+            db.commit()
+        with _touch_cache_lock:
+            for row in rows:
+                _touch_cache.pop(row.session_id, None)
+        return len(rows)
+
     def count_active_sessions(self, db: Session) -> int:
         if not self.is_enabled():
             return 0

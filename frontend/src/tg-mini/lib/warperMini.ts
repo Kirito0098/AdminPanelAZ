@@ -1,6 +1,6 @@
 import type { TgMiniWarperStatus } from '@/types'
 
-export type WarperStatusTone = 'success' | 'warning' | 'destructive' | 'secondary'
+type WarperStatusTone = 'success' | 'warning' | 'destructive' | 'secondary'
 
 export function warperStatusMeta(data: TgMiniWarperStatus | null): {
   label: string

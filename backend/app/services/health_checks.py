@@ -26,15 +26,29 @@ def _utcnow_iso() -> str:
     return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
+def assert_health_deep_access(request) -> None:
+    """Deep health lists nodes and pings them: only loopback callers (install scripts) or admins."""
+    import ipaddress
+
+    from fastapi import HTTPException, status
+
+    from app.services.ip_restriction import ip_restriction_service
+    from app.services.openapi_docs_gate import has_admin_bearer
+
+    try:
+        is_loopback = ipaddress.ip_address(ip_restriction_service.get_client_ip(request)).is_loopback
+    except ValueError:
+        is_loopback = False
+    if is_loopback or has_admin_bearer(request):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Deep health is available from localhost or with admin JWT",
+    )
+
+
 def build_light_health() -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "status": "ok",
-        "app": settings.app_name,
-        "env": settings.app_env,
-        "resource_profile": settings.resource_profile,
-        "started_at": _APP_STARTED_AT,
-    }
-    return payload
+    return {"status": "ok", "started_at": _APP_STARTED_AT}
 
 
 def _sqlite_ok(engine, label: str) -> dict[str, Any]:
@@ -56,6 +70,9 @@ def _db_path_from_url(db_url: str, app_root: Path) -> Path:
 def build_deep_health(db: Session, *, app_root: Path) -> dict[str, Any]:
     payload: dict[str, Any] = {
         **build_light_health(),
+        "app": settings.app_name,
+        "env": settings.app_env,
+        "resource_profile": settings.resource_profile,
         "checks": {},
         "timestamp": _utcnow_iso(),
     }

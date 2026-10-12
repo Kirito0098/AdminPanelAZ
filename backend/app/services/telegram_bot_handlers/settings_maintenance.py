@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from html import escape
 
 from fastapi import HTTPException
 from fastapi.responses import JSONResponse
@@ -86,7 +87,7 @@ def _get_node(db, node_id: int) -> Node | None:
 def _reboot_nodes_keyboard(nodes: list[Node]) -> dict:
     rows: list[list] = []
     for node in nodes:
-        status = node.status if isinstance(node.status, NodeStatus) else NodeStatus.unknown
+        status = node.status
         icon = _REBOOT_STATUS_ICON.get(status, "🟡")
         rows.append([inline_button(f"{icon} {node.name}", callback_data=f"st:mnt:reboot:n:{node.id}")])
     rows.append([inline_button("◀️ Назад", callback_data="st:mnt")])
@@ -121,7 +122,7 @@ async def _show_reboot_confirm(ctx: BotContext, node_id: int, *, message_id: int
     )
     await _send_or_edit(
         ctx,
-        i18n.MNT_REBOOT_CONFIRM.format(node_name=node.name),
+        i18n.MNT_REBOOT_CONFIRM.format(node_name=escape(node.name)),
         markup=markup,
         message_id=message_id,
     )
@@ -144,7 +145,7 @@ async def _show_reboot_execute_confirm(
     )
     await _send_or_edit(
         ctx,
-        i18n.MNT_REBOOT_FINAL_CONFIRM.format(node_name=node.name),
+        i18n.MNT_REBOOT_FINAL_CONFIRM.format(node_name=escape(node.name)),
         markup=markup,
         message_id=message_id,
     )
@@ -170,13 +171,13 @@ async def _schedule_reboot(ctx: BotContext, node_id: int) -> None:
         await send_message(
             ctx.bot_token,
             ctx.chat_id,
-            f"✅ Перезагрузка <b>{result.node_name}</b> через {result.delay_seconds} с.{warning}\n"
+            f"✅ Перезагрузка <b>{escape(result.node_name)}</b> через {result.delay_seconds} с.{escape(warning)}\n"
             f"Выполнение: <code>{result.execute_at.isoformat()}</code>",
             reply_markup=markup,
         )
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {detail}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(detail)}")
 
 
 async def handle_settings_maintenance(ctx: BotContext, *, message_id: int | None = None) -> None:
@@ -234,7 +235,7 @@ async def handle_maintenance_callback(ctx: BotContext, data: str, *, message_id:
             if isinstance(result, JSONResponse):
                 body = json.loads(result.body.decode())
                 detail = body.get("detail", "doall уже выполняется")
-                await send_message(ctx.bot_token, ctx.chat_id, f"❌ {detail}")
+                await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(detail)}")
                 return
             _log_bot_action(ctx, "settings_run_doall", "action=doall")
             message = result.get("message", "doall поставлен в очередь")
@@ -354,14 +355,14 @@ async def handle_maintenance_callback(ctx: BotContext, data: str, *, message_id:
             await send_message(
                 ctx.bot_token,
                 ctx.chat_id,
-                f"✅ Перезагрузка <b>{result.node_name}</b> отменена.",
+                f"✅ Перезагрузка <b>{escape(result.node_name)}</b> отменена.",
             )
             return
 
     except ValueError as exc:
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {exc}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(str(exc))}")
         return
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {detail}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(detail)}")
         return

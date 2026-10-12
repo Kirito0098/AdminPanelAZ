@@ -3,7 +3,7 @@ import type { VpnNetworkPublishMode, VpnNetworkSettings, VpnNetworkSslCertSugges
 
 type AlertVariant = 'info' | 'warning' | 'danger'
 
-export interface PublishConfirmPlan {
+interface PublishConfirmPlan {
   alertVariant: AlertVariant
   alertTitle: string
   bullets: string[]
@@ -16,7 +16,7 @@ function domainHost(domain: string): string {
 }
 
 /** Normalize hostname for AZ ↔ panel domain equality checks. */
-export function normalizePublishHostname(value: string): string {
+function normalizePublishHostname(value: string): string {
   let host = value.trim().toLowerCase()
   if (!host) return ''
   if (host.includes('://')) {

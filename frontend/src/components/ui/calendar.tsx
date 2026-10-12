@@ -12,7 +12,7 @@ type CalendarBaseProps = {
   className?: string
 }
 
-export type CalendarProps =
+type CalendarProps =
   | (CalendarBaseProps & {
       mode: 'range'
       selected?: DateRange
@@ -208,4 +208,3 @@ export function Calendar(props: CalendarProps) {
   )
 }
 
-export default Calendar

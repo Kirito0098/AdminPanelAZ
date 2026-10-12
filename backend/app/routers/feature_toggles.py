@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.auth import require_admin
+from app.auth import get_current_user, require_admin, tg_mini_token_allowed
 from app.config import get_settings
 from app.database import get_db
 from app.models import User
@@ -85,7 +85,8 @@ def get_current_resource_profile(_: User = Depends(require_admin)):
 
 
 @feature_modules_router.get("")
-def get_feature_modules():
+@tg_mini_token_allowed
+def get_feature_modules(_: User = Depends(get_current_user)):
     service = _service()
     return {
         "features": service.get_feature_states(),

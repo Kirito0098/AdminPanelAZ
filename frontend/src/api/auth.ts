@@ -150,6 +150,7 @@ export async function getCaptchaRequired() {
 
 export async function getTelegramLoginConfig() {
   return apiFetch<{
+    module_enabled?: boolean
     enabled: boolean
     auth_method?: 'oidc' | 'legacy' | 'none'
     bot_username: string

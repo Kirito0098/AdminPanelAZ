@@ -16,13 +16,13 @@ import { AZ_PROXY_SH_DOCS_URL } from '@/components/nodes/ProxyNodePanel'
 import { ArrowDown, ArrowUp, Cable, Plus, RefreshCw, Save, Shield, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
-export const MAX_REMOTE_HOSTS = 8
+const MAX_REMOTE_HOSTS = 8
 
 export function firstNonEmptyRemoteHost(hosts: string[]): string | undefined {
   return hosts.find((host) => host.trim().length > 0)
 }
 
-export type RemoteHostsCardProps = {
+type RemoteHostsCardProps = {
   nodeId: number | null
   disabled?: boolean
   /** Standalone card vs list block embedded in AntiZapret «OpenVPN (панель)». */

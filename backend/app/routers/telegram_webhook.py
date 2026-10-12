@@ -7,12 +7,12 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.auth import get_current_user, verify_current_password
 from app.config import get_settings
 from app.database import SessionLocal, get_db
 from app.models import User
 from app.services.app_setting_store import _get_setting
-from app.schemas import TelegramBotInfoResponse, TelegramLinkCodeResponse
+from app.schemas import TelegramBotInfoResponse, TelegramLinkCodeRequest, TelegramLinkCodeResponse
 from app.services.feature_guards import get_feature_service, module_disabled_message
 from app.services.panel_publish_info import resolve_request_url_root
 from app.services.rate_limit.sliding_window import RateLimitExceeded
@@ -128,13 +128,20 @@ def telegram_bot_info(
     return _bot_info(db)
 
 
-@router.get("/link-code", response_model=TelegramLinkCodeResponse)
+@router.post("/link-code", response_model=TelegramLinkCodeResponse)
 def telegram_link_code(
+    payload: TelegramLinkCodeRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     _ensure_telegram_module()
     if not _get_setting(db, "telegram_bot_token"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Токен бота не настроен")
+    if (current_user.telegram_id or "").strip():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Telegram уже привязан — сначала отвяжите его",
+        )
+    verify_current_password(current_user, payload.current_password)
     code, ttl = create_link_code(db, current_user)
     return TelegramLinkCodeResponse(code=code, expires_in_seconds=ttl)

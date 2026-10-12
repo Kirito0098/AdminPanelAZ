@@ -15,6 +15,7 @@ from app.models import ClientPortalToken, UserPortalToken, VpnConfig, VpnType
 from app.routers import client_portal as client_portal_router
 from app.routers import public_portal as public_portal_router
 from app.services import client_portal as portal
+from app.services import node_adapter
 from app.services import unlock_codes
 
 
@@ -641,7 +642,15 @@ def test_build_user_portal_payload_lists_clients_and_marks_expired_subscription(
         "node_id": 1,
         "client_name": "alice",
         "protocols": ["openvpn"],
-        "files": [],
+        "files": [
+            {
+                "path": "/tmp/alice.ovpn",
+                "label": "alice",
+                "filename": "alice.ovpn",
+                "vpn_type": "openvpn",
+                "download_url": "https://sub.example.com/a",
+            }
+        ],
         "status": {
             "status": "active",
             "status_label": "Активна",
@@ -656,7 +665,15 @@ def test_build_user_portal_payload_lists_clients_and_marks_expired_subscription(
         "node_id": 2,
         "client_name": "bob",
         "protocols": ["wireguard"],
-        "files": [],
+        "files": [
+            {
+                "path": "/tmp/bob.conf",
+                "label": "bob",
+                "filename": "bob.conf",
+                "vpn_type": "wireguard",
+                "download_url": "https://sub.example.com/b",
+            }
+        ],
         "status": {
             "status": "blocked",
             "status_label": "Заблокирована",
@@ -672,6 +689,10 @@ def test_build_user_portal_payload_lists_clients_and_marks_expired_subscription(
         patch("app.services.client_portal.ensure_portal_user", return_value=expired_user),
         patch("app.services.client_portal._owned_portal_targets", return_value=[(1, "alice"), (2, "bob")]),
         patch("app.services.client_portal._build_client_portal_entry", side_effect=[alice_entry, bob_entry]),
+        patch(
+            "app.services.client_portal._portal_node_info",
+            return_value={1: portal.PortalNodeInfo("A-node", False), 2: portal.PortalNodeInfo("B-node", False)},
+        ),
         patch("app.services.feature_guards.get_feature_service") as feats,
     ):
         feats.return_value.is_enabled.side_effect = lambda key: key == "unlock_codes"
@@ -681,11 +702,13 @@ def test_build_user_portal_payload_lists_clients_and_marks_expired_subscription(
         )
 
     assert payload["kind"] == "user"
-    assert len(payload["clients"]) == 2
-    assert payload["clients"][0]["client_name"] == "alice"
-    assert payload["clients"][0]["status"]["status"] == "expired"
-    assert payload["clients"][0]["status"]["status_label"] == "Истекла"
-    assert payload["clients"][1]["status"]["status"] == "blocked"
+    assert [n["node_id"] for n in payload["nodes"]] == [1, 2]
+    alice = payload["nodes"][0]["clients"][0]
+    bob = payload["nodes"][1]["clients"][0]
+    assert alice["client_name"] == "alice"
+    assert alice["status"]["status"] == "expired"
+    assert alice["status"]["status_label"] == "Истекла"
+    assert bob["status"]["status"] == "blocked"
 
 
 def test_redeem_public_portal_code_user_retries_next_owned_client():
@@ -1032,6 +1055,7 @@ def test_build_user_portal_payload_hides_vpn_for_restricted_owner():
         patch("app.services.client_portal.resolve_portal_base_url", return_value="https://portal.example.com"),
         patch("app.services.client_portal.ensure_portal_user", return_value=owner),
         patch("app.services.client_portal._owned_portal_targets", return_value=[(3, "OpenBox")]),
+        patch("app.services.client_portal._portal_node_info", return_value={3: portal.PortalNodeInfo("NL", False)}),
         patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
         patch("app.services.client_portal.build_portal_status", return_value={"state": "active"}),
         patch("app.services.client_portal._apply_user_subscription_status", side_effect=lambda status, _u: status),
@@ -1042,8 +1066,8 @@ def test_build_user_portal_payload_hides_vpn_for_restricted_owner():
         payload = portal.build_user_portal_payload(db, token_row)
 
     assert payload["kind"] == "user"
-    assert len(payload["clients"]) == 1
-    paths = [f["path"] for f in payload["clients"][0]["files"]]
+    assert len(payload["nodes"]) == 1
+    paths = [f["path"] for f in payload["nodes"][0]["clients"][0]["files"]]
     assert _AZ_OPENBOX_PATH in paths
     assert _VPN_OPENBOX_PATH not in paths
 
@@ -1123,3 +1147,296 @@ def test_collect_access_policies_lowercases_wg_client_name():
     assert ("AmneziaWg2AccessPolicy", "alice") in names
     assert WgAccessPolicy.__name__ in {m for m, _ in filter_calls}
     assert AmneziaWg2AccessPolicy.__name__ in {m for m, _ in filter_calls}
+
+
+def _user_entry(node_id: int, client_name: str, *, with_files: bool = True, status: str = "active") -> dict:
+    files = (
+        [
+            {
+                "path": f"/tmp/{client_name}.conf",
+                "label": f"{client_name} WireGuard",
+                "filename": f"{client_name}.conf",
+                "vpn_type": "wireguard",
+                "download_url": f"https://portal.example.com/{client_name}",
+            }
+        ]
+        if with_files
+        else []
+    )
+    return {
+        "node_id": node_id,
+        "client_name": client_name,
+        "protocols": ["wireguard"] if with_files else [],
+        "files": files,
+        "status": {"status": status, "status_label": status},
+    }
+
+
+def _run_user_payload(targets, entries: dict, labels: dict, offline=(), calls: list | None = None) -> dict:
+    info = {node_id: portal.PortalNodeInfo(label, node_id in offline) for node_id, label in labels.items()}
+
+    def fake_entry(_db, **kwargs):
+        if calls is not None:
+            calls.append((kwargs["node_id"], kwargs["client_name"]))
+        value = entries[(kwargs["node_id"], kwargs["client_name"])]
+        if callable(value):
+            value = value()
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+    with (
+        patch("app.services.client_portal.resolve_portal_base_url", return_value="https://portal.example.com"),
+        patch("app.services.client_portal.ensure_portal_user", return_value=MagicMock(id=7, access_until=None)),
+        patch("app.services.client_portal._owned_portal_targets", return_value=targets),
+        patch("app.services.client_portal._portal_node_info", return_value=info),
+        patch("app.services.client_portal._build_client_portal_entry", side_effect=fake_entry),
+        patch("app.services.client_portal._apply_user_subscription_status", side_effect=lambda status, _u: status),
+        patch("app.services.client_portal._portal_brand_title", return_value="VPN"),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        return portal.build_user_portal_payload(
+            MagicMock(),
+            UserPortalToken(id=3, token="usr", user_id=7, revoked_at=None),
+        )
+
+
+def test_user_payload_groups_clients_by_node_sorted_by_label():
+    payload = _run_user_payload(
+        targets=[(1, "bob"), (1, "alice"), (2, "carol")],
+        entries={
+            (1, "bob"): _user_entry(1, "bob"),
+            (1, "alice"): _user_entry(1, "alice"),
+            (2, "carol"): _user_entry(2, "carol"),
+        },
+        labels={1: "Финляндия", 2: "Германия"},
+    )
+    assert "clients" not in payload
+    assert [n["label"] for n in payload["nodes"]] == ["Германия", "Финляндия"]
+    assert [n["node_id"] for n in payload["nodes"]] == [2, 1]
+    assert [c["client_name"] for c in payload["nodes"][1]["clients"]] == ["alice", "bob"]
+    assert set(payload["nodes"][0].keys()) == {"node_id", "label", "clients"}
+
+
+def test_user_payload_drops_clients_without_files_and_empty_nodes():
+    payload = _run_user_payload(
+        targets=[(1, "a"), (1, "b"), (2, "c")],
+        entries={
+            (1, "a"): _user_entry(1, "a"),
+            (1, "b"): _user_entry(1, "b", with_files=False),
+            (2, "c"): _user_entry(2, "c", with_files=False),
+        },
+        labels={1: "NL", 2: "DE"},
+    )
+    assert [n["node_id"] for n in payload["nodes"]] == [1]
+    assert [c["client_name"] for c in payload["nodes"][0]["clients"]] == ["a"]
+
+
+def test_user_payload_empty_when_nothing_to_download():
+    payload = _run_user_payload(
+        targets=[(1, "a")],
+        entries={(1, "a"): _user_entry(1, "a", with_files=False)},
+        labels={1: "NL"},
+    )
+    assert payload["nodes"] == []
+    assert payload["unlock_codes_enabled"] is True
+
+
+def test_user_payload_skips_failing_nodes():
+    payload = _run_user_payload(
+        targets=[(1, "gone"), (2, "down"), (3, "ok")],
+        entries={
+            (1, "gone"): HTTPException(status_code=404, detail="Узел не найден"),
+            (2, "down"): RuntimeError("connection refused"),
+            (3, "ok"): _user_entry(3, "ok"),
+        },
+        labels={2: "DE", 3: "NL"},
+    )
+    assert [n["node_id"] for n in payload["nodes"]] == [3]
+
+
+def test_user_payload_skips_rest_of_node_after_first_failure():
+    calls: list = []
+    payload = _run_user_payload(
+        targets=[(1, "a"), (1, "b"), (2, "c")],
+        entries={
+            (1, "a"): RuntimeError("timeout"),
+            (1, "b"): _user_entry(1, "b"),
+            (2, "c"): _user_entry(2, "c"),
+        },
+        labels={1: "DE", 2: "NL"},
+        calls=calls,
+    )
+    assert [call for call in calls if call[0] == 1] == [(1, "a")]
+    assert [n["node_id"] for n in payload["nodes"]] == [2]
+
+
+def test_user_payload_skips_offline_nodes_without_calling_builder():
+    calls: list = []
+    payload = _run_user_payload(
+        targets=[(1, "a"), (2, "b")],
+        entries={(1, "a"): _user_entry(1, "a"), (2, "b"): _user_entry(2, "b")},
+        labels={1: "DE", 2: "NL"},
+        offline={1},
+        calls=calls,
+    )
+    assert calls == [(2, "b")]
+    assert [n["node_id"] for n in payload["nodes"]] == [2]
+
+
+def test_user_payload_caps_node_request_timeout_only_inside_portal():
+    seen: list = []
+
+    def entry():
+        seen.append(node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT))
+        return _user_entry(1, "a")
+
+    payload = _run_user_payload(targets=[(1, "a")], entries={(1, "a"): entry}, labels={1: "DE"})
+
+    assert seen == [10.0]
+    assert portal.PORTAL_NODE_TIMEOUT_SECONDS == 10.0
+    assert [n["node_id"] for n in payload["nodes"]] == [1]
+    assert node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT) == node_adapter.HTTP_TIMEOUT
+
+
+def test_client_portal_payload_caps_node_request_timeout():
+    seen: list = []
+
+    def fake_entry(_db, **kwargs):
+        seen.append(node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT))
+        return _user_entry(kwargs["node_id"], kwargs["client_name"])
+
+    with (
+        patch("app.services.client_portal.resolve_portal_base_url", return_value="https://portal.example.com"),
+        patch("app.services.client_portal._build_client_portal_entry", side_effect=fake_entry),
+        patch("app.services.client_portal._portal_brand_title", return_value="VPN"),
+        patch("app.services.feature_guards.get_feature_service") as feats,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        payload = portal.build_portal_payload(
+            MagicMock(),
+            ClientPortalToken(id=1, token="tok", node_id=1, client_name="alice", revoked_at=None),
+        )
+
+    assert seen == [10.0]
+    assert payload["client_name"] == "alice"
+    assert node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT) == node_adapter.HTTP_TIMEOUT
+
+
+def test_portal_download_caps_node_request_timeout():
+    seen: list = []
+
+    def fake_list(_db, _configs):
+        seen.append(node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT))
+        return [{"path": "/tmp/alice.conf"}]
+
+    def fake_read(_adapter, _path, _hosts):
+        seen.append(node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT))
+        return "[Interface]\n"
+
+    with (
+        patch("app.services.client_portal._list_files_for_configs", side_effect=fake_list),
+        patch("app.services.client_portal._adapter_for_node_id", return_value=MagicMock()),
+        patch("app.services.client_portal.load_node_remote_hosts", return_value=[]),
+        patch("app.services.client_portal.read_profile_file_for_delivery", side_effect=fake_read),
+    ):
+        _filename, content = portal._read_client_portal_profile(
+            MagicMock(),
+            node_id=1,
+            client_name="alice",
+            path="/tmp/alice.conf",
+        )
+
+    assert content == "[Interface]\n"
+    assert seen == [10.0, 10.0]
+    assert node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT) == node_adapter.HTTP_TIMEOUT
+
+
+def test_user_payload_logs_traceback_only_for_unexpected_errors(caplog):
+    from app.services.ssh_tunnel_pool import SshTunnelError
+
+    caplog.set_level("WARNING", logger="app.services.client_portal")
+    _run_user_payload(
+        targets=[(1, "a"), (2, "b"), (3, "c")],
+        entries={
+            (1, "a"): HTTPException(status_code=502, detail="secret-host 10.0.0.1"),
+            (2, "b"): KeyError("secret-key"),
+            (3, "c"): SshTunnelError("ssh_unreachable", "secret-ssh 10.0.0.2"),
+        },
+        labels={1: "DE", 2: "NL", 3: "FI"},
+    )
+    records = {r.getMessage().split("node_id=")[1].split()[0]: r for r in caplog.records}
+    assert not records["1"].exc_info
+    assert records["2"].exc_info
+    assert not records["3"].exc_info
+    assert "SshTunnelError" in records["3"].getMessage()
+    assert "HTTPException" in records["1"].getMessage()
+    assert "KeyError" in records["2"].getMessage()
+    for record in caplog.records:
+        assert "secret" not in record.getMessage()
+
+
+def test_user_payload_label_fallback_when_node_row_missing():
+    payload = _run_user_payload(
+        targets=[(5, "a")],
+        entries={(5, "a"): _user_entry(5, "a")},
+        labels={},
+    )
+    assert payload["nodes"][0]["label"] == "Сервер 5"
+
+
+def test_user_payload_keeps_blocked_client_with_files():
+    payload = _run_user_payload(
+        targets=[(1, "a")],
+        entries={(1, "a"): _user_entry(1, "a", status="blocked")},
+        labels={1: "NL"},
+    )
+    assert payload["nodes"][0]["clients"][0]["status"]["status"] == "blocked"
+
+
+def test_portal_node_label_falls_back_to_name():
+    from app.models import Node
+
+    assert portal.portal_node_label(Node(name="vpn-1", portal_label=None)) == "vpn-1"
+    assert portal.portal_node_label(Node(name="vpn-1", portal_label="   ")) == "vpn-1"
+    assert portal.portal_node_label(Node(name="vpn-1", portal_label=" NL ")) == "NL"
+
+
+def test_portal_node_info_loads_rows():
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.database import Base
+    from app.models import Node, NodeStatus
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False})
+    Base.metadata.create_all(engine)
+    session = sessionmaker(bind=engine)()
+    try:
+        for name, label, node_status in (
+            ("vpn-1", "Нидерланды", NodeStatus.unknown),
+            ("vpn-2", None, NodeStatus.offline),
+        ):
+            session.add(
+                Node(
+                    name=name,
+                    portal_label=label,
+                    host="10.0.0.1",
+                    port=9100,
+                    api_key_hash="h",
+                    api_key_encrypted="e",
+                    status=node_status,
+                    node_metadata="{}",
+                )
+            )
+        session.commit()
+        ids = [n.id for n in session.query(Node).order_by(Node.id).all()]
+        assert portal._portal_node_info(session, ids) == {
+            ids[0]: portal.PortalNodeInfo("Нидерланды", False),
+            ids[1]: portal.PortalNodeInfo("vpn-2", True),
+        }
+        assert portal._portal_node_info(session, []) == {}
+    finally:
+        session.close()
+        engine.dispose()

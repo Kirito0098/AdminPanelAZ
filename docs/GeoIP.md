@@ -10,7 +10,7 @@ NOC и мониторинг показывают город и провайде�
 
 ## Требуемые файлы
 
-Положите базы в каталог **`data/geoip/`** относительно корня репозитория (или `/opt/AdminPanelAZ/data/geoip/` на сервере):
+Положите базы в каталог **`backend/data/geoip/`** (на сервере `/opt/AdminPanelAZ/backend/data/geoip/`):
 
 | Файл | Назначение |
 |------|------------|
@@ -27,10 +27,10 @@ NOC и мониторинг показывают город и провайде�
 4. Распакуйте и переименуйте файлы:
 
 ```bash
-sudo mkdir -p /opt/AdminPanelAZ/data/geoip
-sudo cp GeoLite2-City_*/GeoLite2-City.mmdb /opt/AdminPanelAZ/data/geoip/
-sudo cp GeoLite2-ASN_*/GeoLite2-ASN.mmdb /opt/AdminPanelAZ/data/geoip/
-sudo chown -R "$(stat -c '%U' /opt/AdminPanelAZ)":"$(stat -c '%G' /opt/AdminPanelAZ)" /opt/AdminPanelAZ/data/geoip
+sudo mkdir -p /opt/AdminPanelAZ/backend/data/geoip
+sudo cp GeoLite2-City_*/GeoLite2-City.mmdb /opt/AdminPanelAZ/backend/data/geoip/
+sudo cp GeoLite2-ASN_*/GeoLite2-ASN.mmdb /opt/AdminPanelAZ/backend/data/geoip/
+sudo chown -R "$(stat -c '%U' /opt/AdminPanelAZ)":"$(stat -c '%G' /opt/AdminPanelAZ)" /opt/AdminPanelAZ/backend/data/geoip
 ```
 
 5. Перезапустите панель:
@@ -50,7 +50,7 @@ sudo systemctl restart adminpanelaz
 
 ## Обновление баз
 
-MaxMind публикует обновления GeoLite2 регулярно. Замените `.mmdb` в `data/geoip/` и перезапустите панель. Автообновление в панели не реализовано — настройте cron на сервере при необходимости.
+MaxMind публикует обновления GeoLite2 регулярно. Замените `.mmdb` в `backend/data/geoip/` и перезапустите панель. Автообновление в панели не реализовано — настройте cron на сервере при необходимости.
 
 ## Поведение lookup
 

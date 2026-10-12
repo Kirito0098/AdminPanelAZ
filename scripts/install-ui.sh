@@ -86,11 +86,10 @@ ui_box_bottom() {
 }
 
 ui_separator() {
-  local char="${1:--}"
   if [[ "$UI_USE_COLOR" == true ]]; then
-    echo "$(ui_cyan "$(printf '%*s' "$UI_BOX_WIDTH" '' | tr ' ' "$char")")"
+    echo "$(ui_cyan "$(printf '%*s' "$UI_BOX_WIDTH" '' | tr ' ' '-')")"
   else
-    printf '%*s\n' "$UI_BOX_WIDTH" '' | tr ' ' "$char"
+    printf '%*s\n' "$UI_BOX_WIDTH" '' | tr ' ' '-'
   fi
 }
 
@@ -261,6 +260,8 @@ AdminPanelAZ — веб-панель управления AntiZapret VPN.
 ================================================================
   (без опций)         Открыть интерактивное меню (установка / удаление / справка)
   --reinstall         Переустановить: сохранить .env, снести сервисы, поставить заново
+  --update            Полное обновление: код из git, пакеты, Python, интерфейс, unit'ы,
+                      nginx, firewall, DDNS и перезапуск по текущим настройкам (без мастера)
   --uninstall         Удалить сервисы и конфигурацию (каталог проекта остаётся)
   --uninstall --purge Удалить сервисы + сам каталог проекта
   --purge-all         Удалить ВСЁ без следов (сервисы, проект, БД, бэкапы)
@@ -338,23 +339,10 @@ AdminPanelAZ — веб-панель управления AntiZapret VPN.
   sudo ./install.sh --uninstall -y           # удалить сервисы
   sudo ./install.sh --uninstall --purge -y   # + удалить каталог проекта
   sudo ./install.sh --reinstall              # переустановить с сохранением .env
+  sudo ./install.sh --update                 # полное обновление: код + конфигурация сервера
 
 Примечание: AntiZapret устанавливается отдельно в /root/antizapret (см. README).
 proxy.sh на RU — отдельно; install.sh --proxy-only ставит только proxy_agent.
 EOF
 }
 
-ui_show_success_screen() {
-  local title="$1"
-  shift
-  echo
-  echo "$(ui_green "+$(ui_border_h)+")"
-  printf "%s %s %s\n" "$(ui_green "|")" "$(ui_bold "$title")" "$(ui_green "$(printf '%*s|' $((UI_BOX_WIDTH - ${#title} - 1)) '')")"
-  echo "$(ui_green "+$(ui_border_h)+")"
-  local line
-  for line in "$@"; do
-    ui_box_line "$line"
-  done
-  ui_box_bottom
-  echo
-}

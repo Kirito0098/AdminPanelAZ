@@ -57,6 +57,7 @@ export default function SubscriptionPage() {
   const awg2Enabled = isEnabled('awg2')
 
   const [portalDomain, setPortalDomain] = useState('')
+  const [portalTitle, setPortalTitle] = useState('')
   const [portalStatus, setPortalStatus] = useState<PortalPublishStatus | null>(null)
   const [loading, setLoading] = useState(clientPortalEnabled)
   const [saving, setSaving] = useState(false)
@@ -87,6 +88,7 @@ export default function SubscriptionPage() {
   useEffect(() => {
     if (!clientPortalEnabled) {
       setPortalDomain('')
+      setPortalTitle('')
       setPortalStatus(null)
       setLoading(false)
       return
@@ -95,6 +97,7 @@ export default function SubscriptionPage() {
     Promise.all([getSecuritySettings(), getPortalPublishStatus()])
       .then(([data, status]) => {
         setPortalDomain(data.portal_domain || status.suggested_portal_domain || '')
+        setPortalTitle(data.portal_title || '')
         setPortalStatus(status)
       })
       .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки'))
@@ -144,8 +147,10 @@ export default function SubscriptionPage() {
     try {
       const updated = await updateSecuritySettings({
         portal_domain: portalDomain.trim(),
+        portal_title: portalTitle.trim(),
       })
       setPortalDomain(updated.portal_domain || '')
+      setPortalTitle(updated.portal_title || '')
       success('Настройки портала сохранены')
       await refreshPortalStatus()
     } catch (err) {
@@ -484,6 +489,22 @@ export default function SubscriptionPage() {
               </p>
             </div>
 
+            <div className="space-y-2">
+              <Label htmlFor="portal-title">Название в портале</Label>
+              <Input
+                id="portal-title"
+                value={portalTitle}
+                onChange={(e) => setPortalTitle(e.target.value)}
+                placeholder="Подключение"
+                maxLength={64}
+                autoComplete="off"
+                disabled={portalModeBlocked}
+              />
+              <p className="text-xs text-muted-foreground">
+                Заголовок страницы, которую видит клиент. Если поле пустое — «Подключение».
+              </p>
+            </div>
+
             {portalStatus && (
               <div className="space-y-2 rounded-xl border bg-muted/20 p-3 text-sm">
                 <div className="flex flex-wrap items-center gap-2">
@@ -552,7 +573,7 @@ export default function SubscriptionPage() {
                   className="gap-1.5"
                 >
                   <Save size={16} />
-                  {saving ? 'Сохранение...' : 'Сохранить хост'}
+                  {saving ? 'Сохранение...' : 'Сохранить'}
                 </Button>
                 <Button
                   onClick={() => void provisionPortal()}

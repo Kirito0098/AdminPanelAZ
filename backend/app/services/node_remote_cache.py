@@ -40,6 +40,3 @@ def get_cached_monitoring_overview(
     return overview, False
 
 
-def invalidate_monitoring_overview(cache_key: str) -> None:
-    with _lock:
-        _overview_cache.pop(cache_key, None)

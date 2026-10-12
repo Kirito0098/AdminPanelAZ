@@ -5,7 +5,7 @@
  */
 
 export const EXPECTED_NODE_HEADER = 'X-Expected-Node-Id'
-export const ACTIVE_NODE_CHANGED_CODE = 'active_node_changed'
+const ACTIVE_NODE_CHANGED_CODE = 'active_node_changed'
 
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 
@@ -56,7 +56,7 @@ export function decideActiveNodeRefresh(
   return 'changed-elsewhere'
 }
 
-export type ActiveNodeRefreshOutcome = 'show' | 'changed-elsewhere' | 'stale'
+type ActiveNodeRefreshOutcome = 'show' | 'changed-elsewhere' | 'stale'
 
 /**
  * Tracks the node a tab shows. A poll answered around an activation from this tab reports the
@@ -92,9 +92,9 @@ export function createActiveNodeTracker() {
   }
 }
 
-export type ActiveNodeTracker = ReturnType<typeof createActiveNodeTracker>
+type ActiveNodeTracker = ReturnType<typeof createActiveNodeTracker>
 
-export type ActiveNodeRefresh<T> =
+type ActiveNodeRefresh<T> =
   | { outcome: 'show' | 'changed-elsewhere'; active: T }
   | { outcome: 'stale' | 'failed' }
 
@@ -114,7 +114,7 @@ export async function refreshActiveNode<T extends { node: { id: number } | null 
   return outcome === 'stale' ? { outcome } : { outcome, active }
 }
 
-export type NodeDeletionOutcome<T> = { moved: false } | { moved: true; active: T | null }
+type NodeDeletionOutcome<T> = { moved: false } | { moved: true; active: T | null }
 
 /**
  * Deletes a node from this tab. When it is the node the tab shows, the tab moves to the node the

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from app.services.openvpn_cert import (
     extract_pem_from_ovpn,
     parse_easyrsa_expiry,
 )
+
+logger = logging.getLogger(__name__)
 
 EASYRSA_INDEX_PATH = Path("/etc/openvpn/easyrsa3/pki/index.txt")
 
@@ -142,26 +145,6 @@ def serial_status(serial_hex: str, entries: list[EasyRsaIndexEntry]) -> str | No
     return None
 
 
-def find_valid_serials(cn: str, entries: list[EasyRsaIndexEntry]) -> list[str]:
-    name = (cn or "").strip()
-    return [
-        entry.serial_hex
-        for entry in entries
-        if entry.common_name == name and entry.status == "V"
-    ]
-
-
-def is_serial_revoked(serial_hex: str, entries: list[EasyRsaIndexEntry]) -> bool:
-    return serial_status(serial_hex, entries) == "R"
-
-
-def read_easyrsa_index_from_path(path: Path | None = None) -> str:
-    file_path = path or EASYRSA_INDEX_PATH
-    if not file_path.is_file():
-        return ""
-    return file_path.read_text(encoding="utf-8", errors="replace")
-
-
 def load_easyrsa_index(adapter) -> list[EasyRsaIndexEntry]:
     """Always read through the adapter — never the panel-local disk for remote nodes."""
     if not hasattr(adapter, "read_easyrsa_index"):
@@ -273,7 +256,8 @@ def validate_client_profiles(
             continue
         try:
             content = adapter.read_profile_file(path)
-        except Exception:
+        except Exception as exc:
+            logger.warning("pki check: cannot read profile %s for %s: %s", path, client_name, exc)
             continue
         issue = _issue_for_profile(
             client_name=client_name,
@@ -298,7 +282,8 @@ def validate_all_openvpn_profiles(
     if client_names is None:
         try:
             client_names = adapter.list_openvpn_clients()
-        except Exception:
+        except Exception as exc:
+            logger.warning("pki check: cannot list OpenVPN clients: %s", exc)
             client_names = []
     all_issues: list[ProfileCertIssue] = []
     for name in client_names:
@@ -310,10 +295,6 @@ def validate_all_openvpn_profiles(
         )
         all_issues.extend(result.issues)
     return ProfileValidationResult(ready=not all_issues, issues=tuple(all_issues))
-
-
-def clients_with_profile_issues(result: ProfileValidationResult) -> list[str]:
-    return sorted({issue.client_name for issue in result.issues})
 
 
 def profile_issues_payload(result: ProfileValidationResult) -> list[dict[str, str | None]]:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import escape
+
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext
 from app.services.telegram_bot_handlers.menu import build_reply_keyboard
@@ -27,7 +29,7 @@ async def handle_start(ctx: BotContext) -> None:
 
     text = i18n.START_LINKED.format(
         title=i18n.START_TITLE,
-        username=ctx.user.username,
+        username=escape(ctx.user.username),
         role_display=_start_role_display(ctx.user.role.value),
     )
     await send_message(

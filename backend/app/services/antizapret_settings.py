@@ -231,10 +231,6 @@ def read_protocol_enable_flags(setup_path: Path) -> dict[str, str]:
     return flags
 
 
-def is_openvpn_verbose_log_enabled(setup_path: Path) -> bool:
-    return read_setup_env_value(setup_path, "OPENVPN_LOG", "n").lower() == "y"
-
-
 def read_antizapret_settings(setup_path: Path) -> dict[str, str]:
     """Read setup file and return {key: value} for all ANTIZAPRET_PARAMS."""
     try:

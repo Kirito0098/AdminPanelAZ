@@ -6,23 +6,10 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from app.models import AppSetting
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.telegram_api import delete_webhook_sync
 
 logger = logging.getLogger(__name__)
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
 
 
 def shutdown_telegram_integration(db: Session) -> dict[str, bool]:

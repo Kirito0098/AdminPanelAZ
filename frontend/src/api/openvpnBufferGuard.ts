@@ -4,7 +4,7 @@ import type {
   OpenVpnBufferGuardSettings,
 } from '@/types'
 
-export type OpenVpnBufferGuardSettingsPayload = OpenVpnBufferGuardSettings
+type OpenVpnBufferGuardSettingsPayload = OpenVpnBufferGuardSettings
 
 export async function getBufferGuardSettings(
   nodeId: number,

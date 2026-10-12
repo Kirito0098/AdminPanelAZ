@@ -1,4 +1,4 @@
-export interface UnlockCodeRevokeConfirm {
+interface UnlockCodeRevokeConfirm {
   title: string
   description: string
   confirmLabel: string

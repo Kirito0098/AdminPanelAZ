@@ -28,6 +28,15 @@ def _get_models():
     return _models
 
 
+def _safe_progress(progress_callback, pct, stage) -> None:
+    if progress_callback is None:
+        return
+    try:
+        progress_callback(pct, stage)
+    except Exception:
+        logger.debug("CIDR progress callback failed at %s", stage, exc_info=True)
+
+
 _UNSET = object()
 
 from app.services.cidr.pipeline.download import _download_text as _download_cidr_text
@@ -78,10 +87,6 @@ ASN_FETCH_WORKERS = _read_positive_int_env(
 )
 SOURCE_FETCH_WORKERS = _read_positive_int_env(
     "CIDR_DB_SOURCE_FETCH_WORKERS",
-    4,
-)
-PROVIDER_FETCH_WORKERS = _read_positive_int_env(
-    "CIDR_DB_PROVIDER_WORKERS",
     4,
 )
 SOURCE_CACHE_TTL_SECONDS = _read_positive_int_env(
@@ -151,9 +156,6 @@ class CidrDbUpdaterService:
     def _current_source_fetch_workers():
         return _read_positive_int_env("CIDR_DB_SOURCE_FETCH_WORKERS", SOURCE_FETCH_WORKERS)
 
-    @staticmethod
-    def _current_provider_fetch_workers():
-        return _read_positive_int_env("CIDR_DB_PROVIDER_WORKERS", PROVIDER_FETCH_WORKERS)
 
     @staticmethod
     def _current_source_cache_ttl_seconds():
@@ -174,18 +176,6 @@ class CidrDbUpdaterService:
         workers = min(workers, 32)
         return min(workers, total)
 
-    @staticmethod
-    def _resolve_provider_fetch_workers(total_providers, configured_workers=None):
-        total = max(0, int(total_providers or 0))
-        if total <= 1:
-            return total
-
-        if configured_workers is None:
-            configured_workers = CidrDbUpdaterService._current_provider_fetch_workers()
-
-        workers = max(1, int(configured_workers or 1))
-        workers = min(workers, 16)
-        return min(workers, total)
 
     @staticmethod
     def _build_partial_reasons_by_source(source_details, asn_discovery_errors, asn_fetch_errors, fallback_applied):
@@ -226,12 +216,7 @@ class CidrDbUpdaterService:
         progress_callback=None,
     ):
         def _emit(rel_pct: int, stage: str) -> None:
-            if progress_callback is None:
-                return
-            try:
-                progress_callback(max(0, min(100, int(rel_pct))), stage)
-            except Exception:
-                pass
+            _safe_progress(progress_callback, max(0, min(100, int(rel_pct))), stage)
 
         _emit(5, f"{file_name}: обнаружение ASN…")
         source_hint_asns = _extract_asns_from_sources(sources)
@@ -478,11 +463,7 @@ class CidrDbUpdaterService:
         total_files = max(len(files_to_update), 1)
 
         def _emit_progress(pct, stage):
-            if progress_callback:
-                try:
-                    progress_callback(pct, stage)
-                except Exception:
-                    pass
+            _safe_progress(progress_callback, pct, stage)
 
         def _provider_progress_slot(index: int) -> tuple[int, int, int]:
             """Return (slot_base, write_base, slot_end) percents for one provider."""
@@ -666,7 +647,10 @@ class CidrDbUpdaterService:
                             synchronize_session=False
                         )
                         self.cidr_db.commit()
-                    except Exception:
+                    except Exception as cleanup_exc:
+                        logger.warning(
+                            "CIDR DB cleanup of %s rows failed: %s", file_name, cleanup_exc
+                        )
                         self.cidr_db.rollback()
                     try:
                         self._update_provider_meta(
@@ -744,9 +728,7 @@ class CidrDbUpdaterService:
                 log_entry.providers_updated = providers_updated
                 log_entry.providers_failed = providers_failed
                 m = _get_models()
-                full_pool_total = int(
-                    sum(int(pm.cidr_count or 0) for pm in self.db.query(m.ProviderMeta).all())
-                )
+                full_pool_total = sum(pm.cidr_count for pm in self.db.query(m.ProviderMeta).all())
                 log_entry.total_cidrs = full_pool_total
                 total_cidrs = full_pool_total
                 log_entry.details_json = json.dumps(per_provider, ensure_ascii=False)
@@ -840,9 +822,9 @@ class CidrDbUpdaterService:
                 "refresh_status": pm.refresh_status,
                 "refresh_error": pm.refresh_error,
                 "source_used": pm.source_used,
-                "expected_asn_min": int(pm.expected_asn_min or 0),
-                "asn_count": int(pm.asn_count or 0),
-                "active_asn_count": int(pm.active_asn_count or 0),
+                "expected_asn_min": pm.expected_asn_min,
+                "asn_count": pm.asn_count,
+                "active_asn_count": pm.active_asn_count,
                 "active_asns": asn_map.get(provider_key, []),
                 "anomaly_level": pm.anomaly_level or "none",
                 "anomaly_reason": pm.anomaly_reason,
@@ -996,35 +978,6 @@ class CidrDbUpdaterService:
             "triggered_by": triggered_by,
         }
 
-    def cleanup_retired_provider_data(self):
-        """Remove provider rows that are no longer present in IP_FILES."""
-        from app.services.cidr.constants import IP_FILES
-
-        m = _get_models()
-        valid_provider_keys = set(IP_FILES.keys())
-        if not valid_provider_keys:
-            return {
-                "success": False,
-                "message": "Пустой список валидных провайдеров",
-                "deleted": {},
-            }
-
-        valid_list = sorted(valid_provider_keys)
-        deleted = {
-            "provider_cidr": self.cidr_db.query(m.ProviderCidr).filter(~m.ProviderCidr.provider_key.in_(valid_list)).delete(synchronize_session=False),
-            "provider_meta": self.db.query(m.ProviderMeta).filter(~m.ProviderMeta.provider_key.in_(valid_list)).delete(synchronize_session=False),
-            "provider_asn": self.db.query(m.ProviderAsn).filter(~m.ProviderAsn.provider_key.in_(valid_list)).delete(synchronize_session=False),
-            "provider_asn_snapshot": self.db.query(m.ProviderAsnSnapshot).filter(~m.ProviderAsnSnapshot.provider_key.in_(valid_list)).delete(synchronize_session=False),
-        }
-
-        self.cidr_db.commit()
-        self.db.commit()
-
-        return {
-            "success": True,
-            "message": "Очистка устаревших провайдеров завершена",
-            "deleted": deleted,
-        }
 
     # ── Private helpers ───────────────────────────────────────────────
 
@@ -1223,7 +1176,7 @@ class CidrDbUpdaterService:
                 provider_key=provider_key,
                 asn=int(row.asn),
                 status=row.status or "ok",
-                prefix_count=int(row.prefix_count or 0),
+                prefix_count=row.prefix_count,
                 created_at=datetime.now(timezone.utc),
             )
             for row in asn_rows
@@ -1338,14 +1291,11 @@ class CidrDbUpdaterService:
     def _should_emit_global_pool_drop_alert(*, last_log, prev_log, known_provider_count: int) -> bool:
         if not last_log or not prev_log:
             return False
-        if int(getattr(prev_log, "total_cidrs", 0) or 0) <= 0:
+        if prev_log.total_cidrs <= 0:
             return False
-        updated = int(getattr(last_log, "providers_updated", 0) or 0)
-        if updated < int(known_provider_count):
+        if last_log.providers_updated < known_provider_count:
             return False  # partial ingest
-        previous_total = int(prev_log.total_cidrs or 0)
-        current_total = int(last_log.total_cidrs or 0)
-        return current_total < int(previous_total * 0.7)
+        return last_log.total_cidrs < int(prev_log.total_cidrs * 0.7)
 
     def _build_degradation_alerts(self, last_log, metas):
         """Build compact alert list for UI based on provider anomaly flags and global drops."""
@@ -1378,13 +1328,11 @@ class CidrDbUpdaterService:
                     prev_log=prev_log,
                     known_provider_count=len(PROVIDER_SOURCES),
                 ):
-                    previous_total = int(prev_log.total_cidrs or 0)
-                    current_total = int(last_log.total_cidrs or 0)
                     alerts.append({
                         "scope": "global",
                         "provider_key": None,
                         "level": "warning",
-                        "message": f"Общий пул CIDR снизился: {current_total} против {previous_total}",
+                        "message": f"Общий пул CIDR снизился: {last_log.total_cidrs} против {prev_log.total_cidrs}",
                     })
 
         severity_order = {"critical": 0, "warning": 1, "info": 2, "none": 3}
@@ -1551,12 +1499,7 @@ class CidrDbUpdaterService:
         label = str(progress_label or provider_key)
 
         def _emit(rel_pct: int, stage: str) -> None:
-            if progress_callback is None:
-                return
-            try:
-                progress_callback(rel_pct, stage)
-            except Exception:
-                pass
+            _safe_progress(progress_callback, rel_pct, stage)
 
         def _commit_sa_session() -> None:
             from sqlalchemy.exc import OperationalError
@@ -1776,11 +1719,7 @@ class CidrDbUpdaterService:
         ANTIFILTER_URL = get_settings().antifilter_url
 
         def emit(pct, stage):
-            if progress_callback:
-                try:
-                    progress_callback(pct, stage)
-                except Exception:
-                    pass
+            _safe_progress(progress_callback, pct, stage)
 
         emit(5, "Подключение к antifilter.download…")
         now = datetime.now(timezone.utc)

@@ -25,7 +25,7 @@ const heightClasses: Record<DialogSize, string> = {
   xl: 'max-h-[min(94dvh,56rem)]',
 }
 
-export interface AppDialogProps {
+interface AppDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   title: React.ReactNode

@@ -108,12 +108,16 @@ class BackgroundTaskCallable(Protocol):
 
 
 class BackgroundTaskService:
-    def _commit_with_retry(self, db: Session) -> None:
+    def _commit_with_retry(self, db: Session, apply_changes: Callable[[], None]) -> None:
         for attempt in range(_COMMIT_RETRY_ATTEMPTS):
+            apply_changes()
             try:
                 db.commit()
                 return
             except OperationalError as exc:
+                # A failed flush leaves the session unusable and rollback drops pending changes,
+                # so each attempt applies them again.
+                db.rollback()
                 if "database is locked" not in str(exc).lower() or attempt == _COMMIT_RETRY_ATTEMPTS - 1:
                     raise
                 time.sleep(_COMMIT_RETRY_DELAY_SEC * (attempt + 1))
@@ -132,13 +136,9 @@ class BackgroundTaskService:
                 return None
             return parsed if isinstance(parsed, dict) else None
         if task_type in {"portal_readiness_check", "portal_readiness_prepare"} and output:
-            try:
-                from app.services.portal_readiness import parse_portal_readiness_trailer
+            from app.services.portal_readiness import parse_portal_readiness_trailer
 
-                parsed = parse_portal_readiness_trailer(output)
-            except Exception:
-                return None
-            return parsed if isinstance(parsed, dict) else None
+            return parse_portal_readiness_trailer(output)
         if task_type not in _PIPELINE_TASK_TYPES or not output:
             return None
         try:
@@ -179,18 +179,19 @@ class BackgroundTaskService:
         return payload
 
     def update_background_task(self, task_id: str, **fields: Any) -> None:
+        for key in ("message", "progress_stage"):
+            if isinstance(fields.get(key), str):
+                fields[key] = fields[key][:255]
         db = SessionLocal()
         try:
-            task = db.get(BackgroundTask, task_id)
-            if not task:
-                return
-            for key, value in fields.items():
-                if key == "message" and isinstance(value, str):
-                    value = value[:255]
-                if key == "progress_stage" and isinstance(value, str):
-                    value = value[:255]
-                setattr(task, key, value)
-            self._commit_with_retry(db)
+            def apply_changes() -> None:
+                task = db.get(BackgroundTask, task_id)
+                if task is None:
+                    return
+                for key, value in fields.items():
+                    setattr(task, key, value)
+
+            self._commit_with_retry(db, apply_changes)
         finally:
             db.close()
 
@@ -219,24 +220,27 @@ class BackgroundTaskService:
     def recover_stale_running_tasks(self) -> int:
         """Mark running/queued tasks of dead workers as failed; other workers may still be running theirs."""
         db = SessionLocal()
+        recovered = 0
         try:
-            stale = [
-                task
-                for task in db.query(BackgroundTask).filter(BackgroundTask.status.in_(["queued", "running"])).all()
-                if not is_owner_alive(task.owner)
-            ]
-            if not stale:
-                return 0
-            now = datetime.now(timezone.utc)
-            for task in stale:
-                task.status = "failed"
-                task.finished_at = now
-                task.progress_percent = 100
-                task.progress_stage = "Прервано перезапуском панели"
-                task.message = "Задача прервана перезапуском панели"
-                task.error = "Задача прервана перезапуском панели"
-            self._commit_with_retry(db)
-            return len(stale)
+            def apply_changes() -> None:
+                nonlocal recovered
+                stale = [
+                    task
+                    for task in db.query(BackgroundTask).filter(BackgroundTask.status.in_(["queued", "running"])).all()
+                    if not is_owner_alive(task.owner)
+                ]
+                now = datetime.now(timezone.utc)
+                for task in stale:
+                    task.status = "failed"
+                    task.finished_at = now
+                    task.progress_percent = 100
+                    task.progress_stage = "Прервано перезапуском панели"
+                    task.message = "Задача прервана перезапуском панели"
+                    task.error = "Задача прервана перезапуском панели"
+                recovered = len(stale)
+
+            self._commit_with_retry(db, apply_changes)
+            return recovered
         finally:
             db.close()
 
@@ -263,20 +267,24 @@ class BackgroundTaskService:
         created_by_username: str | None = None,
     ) -> str:
         task_id = secrets.token_hex(16)
+        owner = current_process_owner()
         db = SessionLocal()
         try:
-            task = BackgroundTask(
-                id=task_id,
-                task_type=task_type,
-                status="queued",
-                created_by_username=created_by_username,
-                message=(message or "Задача поставлена в очередь")[:255],
-                progress_percent=0,
-                progress_stage="Ожидание запуска задачи…",
-                owner=current_process_owner(),
-            )
-            db.add(task)
-            self._commit_with_retry(db)
+            def apply_changes() -> None:
+                db.add(
+                    BackgroundTask(
+                        id=task_id,
+                        task_type=task_type,
+                        status="queued",
+                        created_by_username=created_by_username,
+                        message=(message or "Задача поставлена в очередь")[:255],
+                        progress_percent=0,
+                        progress_stage="Ожидание запуска задачи…",
+                        owner=owner,
+                    )
+                )
+
+            self._commit_with_retry(db, apply_changes)
             return task_id
         finally:
             db.close()
@@ -562,7 +570,7 @@ class BackgroundTaskService:
                     _node_progress,
                     recreate_profiles=captured_recreate,
                     hosts=hosts,
-                    ensure_openvpn_multihome=bool(node.openvpn_multihome),
+                    ensure_openvpn_multihome=node.openvpn_multihome,
                 )
                 result["message"] = f"{node_label}: {result.get('message', 'Маршрутизация применена')}"
                 result["output"] = json.dumps(

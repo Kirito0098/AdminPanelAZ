@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import type { ConfirmDialogAlert, ConfirmDialogProps } from '@/components/shared/ConfirmDialog'
+import type { ConfirmDialogProps } from '@/components/shared/ConfirmDialog'
 
 type ConfirmOptions = Omit<ConfirmDialogProps, 'open' | 'onOpenChange' | 'onConfirm'> & {
   onConfirm: () => void | Promise<void>
@@ -45,4 +45,3 @@ export function useConfirmDialog() {
   return { confirm, close, dialogProps, isOpen: options !== null }
 }
 
-export type { ConfirmDialogAlert }

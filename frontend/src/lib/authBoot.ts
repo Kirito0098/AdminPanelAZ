@@ -1,11 +1,11 @@
 import { ApiError } from '@/api/http'
 import type { User } from '@/types'
 
-export const SESSION_BOOT_TIMEOUT_MS = 15_000
+const SESSION_BOOT_TIMEOUT_MS = 15_000
 export const SERVER_UNAVAILABLE_MESSAGE =
   'Сервер не отвечает. Проверьте подключение или подождите, если панель перезапускается.'
 
-export type SessionBootResult =
+type SessionBootResult =
   | { kind: 'user'; user: User }
   | { kind: 'anonymous' }
   | { kind: 'unavailable'; message: string }
@@ -25,7 +25,7 @@ export interface AuthSessionState {
   unavailable: string | null
 }
 
-export type AuthSessionEvent = { type: 'checked'; result: SessionBootResult } | { type: 'signed-out' }
+type AuthSessionEvent = { type: 'checked'; result: SessionBootResult } | { type: 'signed-out' }
 
 /**
  * A signed-in tab keeps working when a later check cannot reach the server, and does not remember

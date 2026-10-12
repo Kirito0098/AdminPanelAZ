@@ -392,36 +392,6 @@ def test_delete_node_drops_ssh_tunnel(db, monkeypatch):
     pool.drop.assert_called_once_with(node.id)
 
 
-def test_enable_mtls_endpoint_rejects_ssh_transport(db, monkeypatch):
-    from app.routers import nodes as nodes_router
-
-    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
-    node = _add_node(db, transport="ssh")
-    admin = SimpleNamespace(id=1, username="admin")
-
-    with pytest.raises(HTTPException) as exc:
-        nodes_router.enable_node_mtls(node.id, admin=admin, db=db)
-
-    assert exc.value.status_code == 400
-    assert "transport" in str(exc.value.detail).lower()
-    assert "picker" in str(exc.value.detail).lower()
-
-
-def test_disable_mtls_endpoint_rejects_ssh_transport(db, monkeypatch):
-    from app.routers import nodes as nodes_router
-
-    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
-    node = _add_node(db, transport="ssh")
-    admin = SimpleNamespace(id=1, username="admin")
-
-    with pytest.raises(HTTPException) as exc:
-        nodes_router.disable_node_mtls(node.id, admin=admin, db=db)
-
-    assert exc.value.status_code == 400
-    assert "transport" in str(exc.value.detail).lower()
-    assert "picker" in str(exc.value.detail).lower()
-
-
 def test_create_node_with_ssh_transport(db, monkeypatch):
     from app.routers import nodes as nodes_router
     from app.schemas import NodeCreate
@@ -812,3 +782,51 @@ def test_patch_blocked_when_preflight_fails(db, monkeypatch):
     db.refresh(node)
     assert node.transport == "ssh"
 
+
+def _ssh_node_with_pinned_key(db) -> Node:
+    node = _add_node(db, transport="ssh")
+    node.ssh_host = "203.0.113.10"
+    node.ssh_port = 22
+    node.ssh_username = "root"
+    node.ssh_private_key_encrypted = "enc"
+    node.ssh_host_key = "ssh-ed25519 AAAApinned"
+    node.node_metadata = json.dumps({"ssh_host_key": "ssh-ed25519 AAAAlegacy", "agent_version": "1.11.1"})
+    db.commit()
+    return node
+
+
+def _patch_ssh(monkeypatch, db, node, **ssh_fields) -> None:
+    from app.routers import nodes as nodes_router
+
+    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
+    _allow_preflight(monkeypatch, nodes_router, current="ssh", wanted="ssh")
+    monkeypatch.setattr(nodes_router, "is_node_ssh_transport_enabled", lambda _db: True)
+    monkeypatch.setattr(nodes_router, "validate_node_host", lambda host: host)
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+    monkeypatch.setattr(nodes_router, "get_ssh_tunnel_pool", lambda: MagicMock())
+    nodes_router.patch_node_transport(
+        node.id,
+        NodeTransportUpdate(transport="ssh", **ssh_fields),
+        admin=SimpleNamespace(id=1, username="admin"),
+        db=db,
+    )
+    db.refresh(node)
+
+
+@pytest.mark.parametrize("change", [{"ssh_host": "203.0.113.99"}, {"ssh_port": 2222}])
+def test_ssh_endpoint_change_forgets_pinned_host_key(db, monkeypatch, change):
+    node = _ssh_node_with_pinned_key(db)
+
+    _patch_ssh(monkeypatch, db, node, **change)
+
+    assert node.ssh_host_key == ""
+    assert json.loads(node.node_metadata) == {"agent_version": "1.11.1"}
+
+
+def test_ssh_username_change_keeps_pinned_host_key(db, monkeypatch):
+    node = _ssh_node_with_pinned_key(db)
+
+    _patch_ssh(monkeypatch, db, node, ssh_username="deploy")
+
+    assert node.ssh_host_key == "ssh-ed25519 AAAApinned"
+    assert json.loads(node.node_metadata)["ssh_host_key"] == "ssh-ed25519 AAAAlegacy"

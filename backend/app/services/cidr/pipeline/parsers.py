@@ -191,7 +191,7 @@ def _render_file_content(file_name, cidrs, source_name):
     try:
         parsed = [ipaddress.ip_network(c, strict=False) for c in cidrs if c]
         aggregated = [str(n) for n in ipaddress.collapse_addresses(parsed)]
-    except Exception:
+    except (ValueError, TypeError):
         aggregated = list(cidrs)
     lines = [
         f"# Auto-generated CIDR list for {file_name}",

@@ -12,9 +12,10 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import SessionLocal
 from app.models import User, VpnConfig, VpnType
-from app.services.access_policy import AccessPolicyService
+from app.services.access_policy import AccessPolicyService, forget_deleted_openvpn_client
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import background_task_service
+from app.services.client_portal import cleanup_deleted_client_records, revoke_client_portal_links
 from app.services.config_tags import resolve_config_ids_by_tags
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
 from app.services.node_sync.client_sync import (
@@ -95,16 +96,22 @@ def _run_single_op(
         if operation == "block_temp":
             if config.vpn_type == VpnType.openvpn:
                 svc.openvpn_temp_block(name, block_days, actor=actor_username)
+            elif config.vpn_type == VpnType.amneziawg2:
+                svc.awg2_temp_block(name, block_days, actor=actor_username)
             else:
                 svc.wg_temp_block(name, block_days, actor=actor_username)
         elif operation == "block_perm":
             if config.vpn_type == VpnType.openvpn:
                 svc.openvpn_permanent_block(name, actor=actor_username)
+            elif config.vpn_type == VpnType.amneziawg2:
+                svc.awg2_permanent_block(name, actor=actor_username)
             else:
                 svc.wg_permanent_block(name, actor=actor_username)
         elif operation == "unblock":
             if config.vpn_type == VpnType.openvpn:
                 svc.openvpn_unblock(name, actor=actor_username)
+            elif config.vpn_type == VpnType.amneziawg2:
+                svc.awg2_unblock(name, actor=actor_username)
             else:
                 svc.wg_unblock(name, actor=actor_username)
         elif operation == "renew_cert":
@@ -131,12 +138,18 @@ def _run_single_op(
             owner = db.query(User).filter(User.id == owner_id).first()
             if not owner:
                 return {"config_id": config_id, "ok": False, "error": "владелец не найден"}
+            previous_owner_id = config.owner_id
             config.owner_id = owner_id
+            if previous_owner_id != owner_id:
+                revoke_client_portal_links(db, node_id=config.node_id, client_name=config.client_name)
             db.commit()
             maybe_replicate_config_metadata(db, node_id=node_id, primary_config=config)
         elif operation == "delete":
             if config.vpn_type == VpnType.openvpn:
                 adapter.delete_openvpn_client(name)
+                forget_deleted_openvpn_client(db, adapter, node_id=node_id, client_name=name)
+            elif config.vpn_type == VpnType.amneziawg2:
+                adapter.awg2_delete_client(name)
             else:
                 adapter.delete_wireguard_client(name)
             node = get_active_node(db)
@@ -153,6 +166,7 @@ def _run_single_op(
                 node_name=node.name,
             )
             db.query(VpnConfig).filter(VpnConfig.id == config.id).delete(synchronize_session=False)
+            cleanup_deleted_client_records(db, config)
             db.commit()
         else:
             return {"config_id": config_id, "ok": False, "error": f"unknown op {operation}"}

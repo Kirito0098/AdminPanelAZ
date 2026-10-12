@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from html import escape
+
 from fastapi import HTTPException
 
 from app.schemas import MonitorSettingsUpdate
@@ -176,5 +178,5 @@ async def handle_monitor_text(ctx: BotContext, text: str) -> bool:
         await send_message(ctx.bot_token, ctx.chat_id, f"✅ {label}: {value}")
         await handle_settings_monitor(ctx)
     except ValueError as exc:
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {exc}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(str(exc))}")
     return True

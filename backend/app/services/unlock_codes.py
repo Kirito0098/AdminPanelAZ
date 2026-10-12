@@ -24,6 +24,8 @@ from app.models import (
     VpnType,
     WgAccessPolicy,
 )
+from app.services.shared_helpers import as_utc as _as_utc
+from app.services.shared_helpers import normalize_client_name as _normalize_client_name
 from app.services.access_until import _policy_service_for_node, _reconcile_access_until, get_access_until, set_access_until
 from app.services.feature_guards import get_feature_service, module_disabled_message
 
@@ -63,20 +65,8 @@ def _to_db_datetime(value: datetime | None) -> datetime | None:
     return value.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def _as_utc(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
 def _normalize_code(code: str) -> str:
     return (code or "").strip().upper()
-
-
-def _normalize_client_name(client_name: str) -> str:
-    return (client_name or "").strip().lower()
 
 
 def _normalize_protocols(protocols: list[str]) -> list[str]:
@@ -145,20 +135,19 @@ def _parse_allowed_client_names(raw: str | None) -> list[str]:
 
 
 def _serialize_redemption(row: UnlockCodeRedemption) -> dict:
-    node = getattr(row, "node", None)
     return {
         "id": row.id,
         "client_name": row.client_name,
         "node_id": row.node_id,
-        "node_name": getattr(node, "name", None),
+        "node_name": row.node.name,
         "redeemed_at": _as_utc(row.redeemed_at).isoformat() if row.redeemed_at else None,
     }
 
 
 def _serialize_code(code: UnlockCode) -> dict:
-    redemptions = sorted(code.redemptions or [], key=lambda item: item.id, reverse=True)
-    redemption_count = int(getattr(code, "redemption_count", None) or len(redemptions))
-    max_redemptions = int(code.max_redemptions)
+    redemptions = sorted(code.redemptions, key=lambda item: item.id, reverse=True)
+    redemption_count = code.redemption_count
+    max_redemptions = code.max_redemptions
     exhausted = redemption_count >= max_redemptions
     return {
         "id": code.id,
@@ -169,9 +158,7 @@ def _serialize_code(code: UnlockCode) -> dict:
         "max_redemptions": max_redemptions,
         "redemption_count": redemption_count,
         "exhausted": exhausted,
-        "allowed_client_names": _parse_allowed_client_names(
-            getattr(code, "allowed_client_names", None)
-        ),
+        "allowed_client_names": _parse_allowed_client_names(code.allowed_client_names),
         "redemptions": [_serialize_redemption(item) for item in redemptions],
         "code_expires_at": _as_utc(code.code_expires_at).isoformat() if code.code_expires_at else None,
         "created_by_user_id": code.created_by_user_id,
@@ -400,10 +387,10 @@ def _replicate_redeemed_access_until(
 
 
 def _clear_policy_block(row, *, actor: str) -> None:
-    reason = (getattr(row, "block_reason", None) or "").strip().lower()
+    reason = (row.block_reason or "").strip().lower()
     # Unlock redeem extends access_until; it must never lift an admin-imposed ban.
     # Check the permanent flag even if reconcile rewrote block_reason to access_expired.
-    if bool(getattr(row, "is_permanent_blocked", False)):
+    if row.is_permanent_blocked:
         return
     if reason in ("manual_permanent", "manual_temp"):
         return
@@ -419,12 +406,12 @@ def _clear_policy_block(row, *, actor: str) -> None:
 def _is_manual_admin_block(row) -> bool:
     if row is None:
         return False
-    if bool(getattr(row, "is_permanent_blocked", False)):
+    if row.is_permanent_blocked:
         return True
-    reason = (getattr(row, "block_reason", None) or "").strip().lower()
+    reason = (row.block_reason or "").strip().lower()
     if reason in ("manual_permanent", "manual_temp"):
         return True
-    if bool(getattr(row, "is_temp_blocked", False)) and reason.startswith("manual"):
+    if row.is_temp_blocked and reason.startswith("manual"):
         return True
     return False
 
@@ -495,7 +482,7 @@ def redeem_unlock_code(
         if row.code_expires_at is not None and _as_utc(row.code_expires_at) <= now:
             raise ValueError(_REDEEM_EXPIRED_MESSAGE)
 
-        allowed_clients = _parse_allowed_client_names(getattr(row, "allowed_client_names", None))
+        allowed_clients = _parse_allowed_client_names(row.allowed_client_names)
         if allowed_clients and client_key not in allowed_clients:
             raise ValueError(_REDEEM_CLIENT_NOT_ALLOWED_MESSAGE)
 
@@ -556,7 +543,7 @@ def redeem_unlock_code(
                 raise ValueError(_REDEEM_EXPIRED_MESSAGE)
             raise ValueError(_REDEEM_LIMIT_MESSAGE)
 
-        grant_days = int(row.grant_days)
+        grant_days = row.grant_days
         grant_until_base = now
         granted_until_by_protocol = {}
         if owner_user is not None:

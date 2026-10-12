@@ -8,12 +8,12 @@ export type DiffOp = {
 
 export type DiffMode = 'myers' | 'indexed'
 
-export type DiffResult = {
+type DiffResult = {
   mode: DiffMode
   ops: DiffOp[]
 }
 
-export type DiffCounts = {
+type DiffCounts = {
   added: number
   removed: number
 }

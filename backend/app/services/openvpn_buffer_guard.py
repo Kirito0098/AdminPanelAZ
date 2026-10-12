@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,6 +20,8 @@ from app.services.admin_notify import admin_notify_service
 from app.services.background_gate import sleep_unless_paused
 from app.services.openvpn_buffer_guard_parse import summarize_enobufs
 from app.services.openvpn_management import openvpn_management_service
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_UNITS = frozenset({"antizapret-udp", "antizapret-tcp", "vpn-udp", "vpn-tcp"})
 
@@ -108,8 +111,7 @@ def _parse_watch_units(raw_json: str | None) -> list[str]:
             units.append(name)
     if not units:
         units = ["antizapret-udp", "vpn-udp"]
-    # Enforce allowlist defensively.
-    return [u for u in units if normalize_watch_unit(u)]
+    return units
 
 
 MODE_RECOMMENDED_THRESHOLD: dict[str, int] = {
@@ -121,7 +123,7 @@ MODE_RECOMMENDED_THRESHOLD: dict[str, int] = {
 
 
 def recommended_threshold(mode: str) -> int:
-    return int(MODE_RECOMMENDED_THRESHOLD.get(str(mode or "").strip(), 40))
+    return MODE_RECOMMENDED_THRESHOLD.get(str(mode or "").strip(), 40)
 
 
 def recommended_by_mode() -> dict[str, int]:
@@ -145,13 +147,13 @@ def get_settings(db: Session, node_id: int) -> OpenVpnBufferGuardSettings:
     if row is None:
         row = OpenVpnBufferGuardSettings(
             node_id=node_id,
-            enabled=bool(DEFAULT_SETTINGS["enabled"]),
-            mode=str(DEFAULT_SETTINGS["mode"]),
-            threshold_count=int(DEFAULT_SETTINGS["threshold_count"]),
-            window_seconds=int(DEFAULT_SETTINGS["window_seconds"]),
-            escalate_after_seconds=int(DEFAULT_SETTINGS["escalate_after_seconds"]),
-            cooldown_minutes=int(DEFAULT_SETTINGS["cooldown_minutes"]),
-            temp_ban_minutes=int(DEFAULT_SETTINGS["temp_ban_minutes"]),
+            enabled=DEFAULT_SETTINGS["enabled"],
+            mode=DEFAULT_SETTINGS["mode"],
+            threshold_count=DEFAULT_SETTINGS["threshold_count"],
+            window_seconds=DEFAULT_SETTINGS["window_seconds"],
+            escalate_after_seconds=DEFAULT_SETTINGS["escalate_after_seconds"],
+            cooldown_minutes=DEFAULT_SETTINGS["cooldown_minutes"],
+            temp_ban_minutes=DEFAULT_SETTINGS["temp_ban_minutes"],
             watch_units_json=json.dumps(DEFAULT_SETTINGS["watch_units"], ensure_ascii=False),
         )
         db.add(row)
@@ -271,10 +273,7 @@ def _apply_temp_ban(
     """Add client to banned_clients via AccessPolicyService and return ban_expires_at."""
     if node is None or not client_name or adapter is None:
         return None
-    try:
-        from app.services.access_policy import AccessPolicyService  # local import to avoid import cycles
-    except Exception:
-        return None
+    from app.services.access_policy import AccessPolicyService  # local import to avoid import cycles
 
     antizapret_path = _node_antizapret_path(node)
     try:
@@ -290,6 +289,7 @@ def _apply_temp_ban(
             banned.add(client_name)
             svc.write_banned_clients(banned)
     except Exception:
+        logger.exception("buffer guard: temp ban failed node_id=%s client=%s", node.id, client_name)
         return None
 
     return _now_utc() + timedelta(minutes=max(1, int(minutes)))
@@ -327,7 +327,7 @@ def run_guard_pass(
     """
     settings_row = get_settings(db, node_id)
     now = _now_utc()
-    cooldown = timedelta(minutes=max(0, int(settings_row.cooldown_minutes)))
+    cooldown = timedelta(minutes=max(0, settings_row.cooldown_minutes))
 
     # Cooldown: skip automatic runs after a recent automatic threshold event.
     # Manual scans and journal sample failures (error_count == 0) do not pause the guard.
@@ -341,14 +341,14 @@ def run_guard_pass(
         mode_enum = OpenVpnBufferGuardMode.notify
 
     watch_units = _parse_watch_units(settings_row.watch_units_json)
-    apply_actions = bool(settings_row.enabled) and not manual
-    threshold = max(1, int(settings_row.threshold_count))
+    apply_actions = settings_row.enabled and not manual
+    threshold = max(1, settings_row.threshold_count)
 
     results: list[dict] = []
 
     for unit in watch_units:
         try:
-            sample = adapter.sample_openvpn_journal(unit, int(settings_row.window_seconds))
+            sample = adapter.sample_openvpn_journal(unit, settings_row.window_seconds)
         except HTTPException as exc:
             if exc.status_code in (404, 405):
                 raise BufferGuardAgentOutdated(AGENT_OUTDATED_MESSAGE) from exc
@@ -383,7 +383,7 @@ def run_guard_pass(
                     )
                 except Exception:
                     # Notifications are best-effort; failure must not break the guard.
-                    pass
+                    logger.debug("buffer guard: notify failed node_id=%s unit=%s", node_id, unit, exc_info=True)
 
                 event_detail = {
                     "sample_ok": False,
@@ -396,7 +396,7 @@ def run_guard_pass(
                     common_name=None,
                     real_address=None,
                     error_count=0,
-                    window_seconds=int(settings_row.window_seconds),
+                    window_seconds=settings_row.window_seconds,
                     mode=mode_enum.value,
                     actions_json=json.dumps(actions, ensure_ascii=False),
                     result=event_result_label,
@@ -457,16 +457,16 @@ def run_guard_pass(
                 )
 
             if mode_enum in (OpenVpnBufferGuardMode.kill_restart, OpenVpnBufferGuardMode.kill_restart_temp_ban) and apply_actions:
-                delay = max(0, int(settings_row.escalate_after_seconds))
+                delay = max(0, settings_row.escalate_after_seconds)
 
                 # Use a short post-kill window close to the escalation delay
                 # so that pre-kill ENOBUFS do not force a restart.
-                second_window = max(5, int(settings_row.escalate_after_seconds or settings_row.window_seconds))
+                second_window = max(5, settings_row.escalate_after_seconds or settings_row.window_seconds)
                 if delay and not sleep_unless_paused(float(delay)):
                     second = {"ok": False, "error": "идёт восстановление бэкапа, эскалация отменена"}
                 else:
                     try:
-                        second = adapter.sample_openvpn_journal(unit, int(second_window))
+                        second = adapter.sample_openvpn_journal(unit, second_window)
                     except Exception as exc:
                         second = {"ok": False, "error": _error_text(exc)}
                 if not bool(second.get("ok", True)):
@@ -542,7 +542,7 @@ def run_guard_pass(
                     node_name=node.name if node else None,
                 )
             except Exception:
-                pass
+                logger.debug("buffer guard: notify failed node_id=%s unit=%s", node_id, unit, exc_info=True)
 
             event = OpenVpnBufferGuardEvent(
                 node_id=node_id,
@@ -551,7 +551,7 @@ def run_guard_pass(
                 common_name=top_cn,
                 real_address=top_real,
                 error_count=total,
-                window_seconds=int(settings_row.window_seconds),
+                window_seconds=settings_row.window_seconds,
                 mode=mode_enum.value,
                 actions_json=json.dumps(actions, ensure_ascii=False),
                 result=event_result_label,
@@ -588,11 +588,8 @@ def process_temp_ban_expiries(db: Session) -> list[dict]:
     traffic limit) and newer guard bans do not keep it there.
     Returns a summary per processed client.
     """
-    try:
-        from app.services.access_policy import AccessPolicyService  # local import to avoid import cycles
-        from app.services.node_manager import get_adapter_for_node  # local import to avoid cycles
-    except Exception:
-        return []
+    from app.services.access_policy import AccessPolicyService  # local import to avoid import cycles
+    from app.services.node_manager import get_adapter_for_node  # local import to avoid cycles
 
     now = _now_utc()
     expired_events = (
@@ -628,9 +625,10 @@ def process_temp_ban_expiries(db: Session) -> list[dict]:
         if node_id not in adapter_cache:
             try:
                 adapter_cache[node_id] = get_adapter_for_node(node)
-            except Exception:
+            except Exception as exc:
                 # If adapter resolution fails (e.g. node misconfigured or offline),
                 # keep bans as-is and move on.
+                logger.warning("buffer guard: no adapter for node_id=%s, bans kept: %s", node_id, exc)
                 adapter_cache[node_id] = None
 
         adapter_for_node = adapter_cache.get(node_id)
@@ -665,6 +663,7 @@ def process_temp_ban_expiries(db: Session) -> list[dict]:
             )
         except Exception:
             # If banned_clients write failed, we must not clear ban_expires_at.
+            logger.exception("buffer guard: unban failed node_id=%s client=%s", node_id, client_name)
             continue
 
     return results

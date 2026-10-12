@@ -7,7 +7,11 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.models import Node, NodeStatus, User, UserRole, VpnConfig, VpnType
-from app.services.config_import import import_clients_from_disk
+from app.services.config_import import (
+    ConfigDiskSyncResult,
+    format_config_disk_sync_message,
+    import_clients_from_disk,
+)
 
 
 @pytest.fixture()
@@ -99,3 +103,54 @@ def test_import_awg2_probe_failure_soft_fails(db):
     assert result.imported == 1
     assert result.removed == 0
     adapter.list_amneziawg2_clients.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    "probe_error",
+    [HTTPException(status_code=502, detail="agent down"), ConnectionError("refused"), OSError("timeout")],
+)
+def test_awg2_probe_failure_keeps_awg2_records(db, probe_error):
+    node = _make_node(db)
+    owner = _make_owner(db)
+    db.add(VpnConfig(node_id=node.id, client_name="ivan", vpn_type=VpnType.amneziawg2, owner_id=owner.id))
+    db.add(VpnConfig(node_id=node.id, client_name="wire-orphan", vpn_type=VpnType.wireguard, owner_id=owner.id))
+    db.commit()
+    adapter = MagicMock()
+    adapter.list_openvpn_clients.return_value = []
+    adapter.list_wireguard_clients.return_value = []
+    adapter.list_amneziawg2_clients.side_effect = probe_error
+
+    with patch("app.services.config_import.get_adapter_for_node", return_value=adapter):
+        result = import_clients_from_disk(db, node, owner.id)
+
+    assert result.awg2_skipped is True
+    assert result.removed == 1
+    assert db.query(VpnConfig).filter_by(node_id=node.id, client_name="ivan", vpn_type=VpnType.amneziawg2).count() == 1
+    assert db.query(VpnConfig).filter_by(node_id=node.id, client_name="wire-orphan").count() == 0
+
+
+def test_awg2_empty_answer_still_removes_stale_awg2_records(db):
+    node = _make_node(db)
+    owner = _make_owner(db)
+    db.add(VpnConfig(node_id=node.id, client_name="ivan", vpn_type=VpnType.amneziawg2, owner_id=owner.id))
+    db.commit()
+    adapter = MagicMock()
+    adapter.list_openvpn_clients.return_value = []
+    adapter.list_wireguard_clients.return_value = []
+    adapter.list_amneziawg2_clients.return_value = []
+
+    with patch("app.services.config_import.get_adapter_for_node", return_value=adapter):
+        result = import_clients_from_disk(db, node, owner.id)
+
+    assert result.awg2_skipped is False
+    assert result.removed == 1
+
+
+def test_sync_message_warns_when_awg2_was_skipped():
+    assert format_config_disk_sync_message(ConfigDiskSyncResult(imported=0, removed=0, awg2_skipped=True)) == (
+        "Синхронизация завершена без изменений. AmneziaWG 2.0 на узле не ответил — его клиенты не изменены"
+    )
+    assert format_config_disk_sync_message(ConfigDiskSyncResult(imported=2, removed=1, awg2_skipped=True)) == (
+        "Синхронизация: добавлено 2, удалено 1. AmneziaWG 2.0 на узле не ответил — его клиенты не изменены"
+    )
+    assert format_config_disk_sync_message(ConfigDiskSyncResult(imported=1, removed=0)) == "Синхронизация: добавлено 1"

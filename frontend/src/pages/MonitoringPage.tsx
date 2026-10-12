@@ -24,6 +24,7 @@ import {
   openMonitoringStream,
   openvpnDisconnect,
   restartService,
+  type StreamHandle,
 } from '@/api/client'
 import GeoRoutingHintBanner from '@/components/dashboard/GeoRoutingHintBanner'
 import MonitoringCharts from '@/components/monitoring/MonitoringCharts'
@@ -425,12 +426,12 @@ export default function MonitoringPage() {
   useEffect(() => {
     if (!autoRefresh || !scopeReady) return
 
-    let source: EventSource | null = null
+    let stream: StreamHandle | null = null
     let tick: ReturnType<typeof setInterval> | undefined
 
     const disconnect = () => {
-      source?.close()
-      source = null
+      stream?.close()
+      stream = null
       if (tick !== undefined) {
         clearInterval(tick)
         tick = undefined
@@ -439,7 +440,7 @@ export default function MonitoringPage() {
 
     const connect = () => {
       disconnect()
-      source = openMonitoringStream(
+      stream = openMonitoringStream(
         (payload) => {
           setData(payload)
           setLoadError(null)

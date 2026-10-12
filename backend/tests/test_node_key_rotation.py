@@ -9,13 +9,21 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 import app.services.node_key_rotation as rotation
+from app import database
 from app.database import Base
 from app.models import Node
-from app.services.node_manager import store_api_key
+from app.services.node_manager import (
+    get_api_key_plain,
+    get_pending_api_key_plain,
+    store_api_key,
+    store_pending_api_key,
+)
+
+PENDING = "pending-key-0123456789abcdef0123456789"
 
 
 @pytest.fixture()
@@ -205,3 +213,177 @@ def test_loop_rotates_off_the_event_loop_thread(monkeypatch):
     _run_loop(monkeypatch, 1, lambda: threads.append(threading.get_ident()))
 
     assert threads and threads[0] != main_thread
+
+
+def test_migration_adds_pending_api_key_column(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{tmp_path / 'm.db'}")
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE nodes (id INTEGER PRIMARY KEY, name VARCHAR(128))"))
+        conn.execute(text("INSERT INTO nodes (id, name) VALUES (1, 'old')"))
+    monkeypatch.setattr(database, "engine", engine)
+
+    database._migrate_nodes_api_key_pending()
+    database._migrate_nodes_api_key_pending()
+
+    with engine.connect() as conn:
+        value = conn.execute(text("SELECT api_key_pending_encrypted FROM nodes WHERE id = 1")).scalar()
+    assert value == ""
+    engine.dispose()
+
+
+def test_pending_key_is_stored_encrypted(db):
+    node = _node("vpn", created_days_ago=1)
+    assert get_pending_api_key_plain(node) is None
+
+    store_pending_api_key(node, PENDING)
+
+    assert node.api_key_pending_encrypted
+    assert PENDING not in node.api_key_pending_encrypted
+    assert get_pending_api_key_plain(node) == PENDING
+
+
+class _RecordingAdapter:
+    def __init__(self, error: Exception | None = None):
+        self.sent: list[str] = []
+        self.error = error
+
+    def rotate_api_key(self, new_key):
+        self.sent.append(new_key)
+        if self.error:
+            raise self.error
+
+
+def _agent_accepting(*keys):
+    def check(_node, api_key_override=None):
+        if api_key_override in keys:
+            return {"status": "online"}
+        return {"status": "offline", "error_code": "node_auth"}
+
+    return check
+
+
+def test_rotation_commits_pending_key_before_calling_agent(db):
+    node = _node("vpn", created_days_ago=90)
+    db.add(node)
+    db.commit()
+    seen_pending: list[str | None] = []
+
+    class _Adapter:
+        def rotate_api_key(self, new_key):
+            db.rollback()
+            db.refresh(node)
+            seen_pending.append(get_pending_api_key_plain(node))
+
+    with patch.object(rotation, "get_adapter_for_node", lambda _node: _Adapter()):
+        new_key = rotation.rotate_node_api_key(db, node)
+
+    assert seen_pending == [new_key]
+    assert get_api_key_plain(node) == new_key
+    assert node.api_key_pending_encrypted == ""
+
+
+def test_lost_agent_reply_still_completes_rotation(db, monkeypatch):
+    node = _node("vpn", created_days_ago=90)
+    db.add(node)
+    db.commit()
+    adapter = _RecordingAdapter(RuntimeError("read timeout"))
+    monkeypatch.setattr(rotation, "get_adapter_for_node", lambda _node: adapter)
+    monkeypatch.setattr(
+        rotation,
+        "check_node_health",
+        lambda _node, api_key_override=None: {"status": "online" if api_key_override in adapter.sent else "offline"},
+    )
+
+    new_key = rotation.rotate_node_api_key(db, node)
+
+    assert adapter.sent == [new_key]
+    assert get_api_key_plain(node) == new_key
+    assert node.api_key_pending_encrypted == ""
+
+
+def test_failed_rotation_keeps_old_key_and_retry_reuses_pending(db, monkeypatch):
+    node = _node("vpn", created_days_ago=90)
+    db.add(node)
+    db.commit()
+    adapter = _RecordingAdapter(RuntimeError("connection refused"))
+    monkeypatch.setattr(rotation, "get_adapter_for_node", lambda _node: adapter)
+    monkeypatch.setattr(rotation, "check_node_health", lambda _node, api_key_override=None: {"status": "offline"})
+
+    with pytest.raises(RuntimeError):
+        rotation.rotate_node_api_key(db, node)
+
+    db.refresh(node)
+    assert get_api_key_plain(node) == "key-vpn"
+    first_pending = get_pending_api_key_plain(node)
+    assert first_pending
+
+    adapter.error = None
+    new_key = rotation.rotate_node_api_key(db, node)
+
+    assert new_key == first_pending
+    assert adapter.sent == [first_pending, first_pending]
+    assert get_api_key_plain(node) == first_pending
+
+
+def test_complete_promotes_pending_key_the_agent_already_uses(db, monkeypatch):
+    node = _node("vpn", created_days_ago=90)
+    store_pending_api_key(node, PENDING)
+    db.add(node)
+    db.commit()
+    monkeypatch.setattr(rotation, "check_node_health", _agent_accepting(PENDING))
+
+    with patch.object(rotation, "get_adapter_for_node", side_effect=AssertionError("agent must not be called")):
+        assert rotation.complete_pending_key_rotation(db, node) is True
+
+    assert get_api_key_plain(node) == PENDING
+    assert node.api_key_pending_encrypted == ""
+
+
+def test_complete_resends_pending_key_when_agent_still_on_old_key(db, monkeypatch):
+    node = _node("vpn", created_days_ago=90)
+    store_pending_api_key(node, PENDING)
+    db.add(node)
+    db.commit()
+    adapter = _RecordingAdapter()
+    monkeypatch.setattr(rotation, "get_adapter_for_node", lambda _node: adapter)
+    monkeypatch.setattr(rotation, "check_node_health", _agent_accepting("key-vpn"))
+
+    assert rotation.complete_pending_key_rotation(db, node) is True
+
+    assert adapter.sent == [PENDING]
+    assert get_api_key_plain(node) == PENDING
+    assert node.api_key_pending_encrypted == ""
+
+
+def test_complete_without_pending_key_does_nothing(db):
+    node = _node("vpn", created_days_ago=90)
+    db.add(node)
+    db.commit()
+
+    with patch.object(rotation, "check_node_health", side_effect=AssertionError("no probe expected")):
+        assert rotation.complete_pending_key_rotation(db, node) is False
+
+
+def test_manual_key_change_drops_pending_key(db, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from app.routers import nodes as nodes_router
+    from app.schemas import NodeUpdate
+
+    node = _node("vpn", created_days_ago=90)
+    store_pending_api_key(node, PENDING)
+    db.add(node)
+    db.commit()
+    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
+
+    nodes_router.update_node(
+        node.id,
+        NodeUpdate(api_key="new-secret-key"),
+        MagicMock(),
+        admin=SimpleNamespace(id=1, username="admin"),
+        db=db,
+    )
+
+    db.refresh(node)
+    assert node.api_key_pending_encrypted == ""
+    assert get_api_key_plain(node) == "new-secret-key"

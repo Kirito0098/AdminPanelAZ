@@ -267,15 +267,14 @@ export default function DashboardPage() {
       let downloadName = filename
       await withInline(async () => {
         const res = await downloadProfile(config.id, path)
-        if (!res.ok) throw new Error('Ошибка скачивания')
         const blob = await res.blob()
         downloadName =
           parseContentDispositionFilename(res.headers.get('Content-Disposition')) ?? filename
         triggerFileDownload(blob, downloadName)
       }, 'Скачивание файла...')
       success(`Файл «${downloadName}» скачан`)
-    } catch {
-      notifyError('Ошибка скачивания файла')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка скачивания файла')
     }
   }
 
@@ -321,7 +320,6 @@ export default function DashboardPage() {
     setCsvExporting(true)
     try {
       const response = await downloadConfigsExport()
-      if (!response.ok) throw new ApiError('Ошибка экспорта', response.status)
       const blob = await response.blob()
       const disposition = response.headers.get('content-disposition') || ''
       const filename = parseContentDispositionFilename(disposition) || 'vpn-configs.csv'

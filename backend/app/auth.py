@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.database import get_db
 from app.models import ActiveWebSession, User, UserRole
+from app.services.auth_rate_limit import auth_rate_limit_service
 
 # bcrypt accepts at most 72 bytes; passlib historically truncated — keep that behaviour
 # so existing hashes and long passwords remain verifiable under bcrypt 5.x.
@@ -29,6 +30,18 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         return bcrypt.checkpw(_password_bytes(plain_password), hashed_password.encode("utf-8"))
     except (ValueError, TypeError):
         return False
+
+
+_CURRENT_PASSWORD_LOCKED = "Слишком много попыток ввода пароля. Повторите позже."
+
+
+def verify_current_password(user: User, password: str) -> None:
+    key = f"current_password:{user.id}"
+    auth_rate_limit_service.check(key, detail=_CURRENT_PASSWORD_LOCKED)
+    if not verify_password(password, user.password_hash):
+        auth_rate_limit_service.record_failure(key)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный текущий пароль")
+    auth_rate_limit_service.record_success(key)
 
 
 def get_password_hash(password: str) -> str:
@@ -119,14 +132,19 @@ def create_tg_mini_token(username: str, telegram_id: str, *, token_version: int 
     return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
 
 
+def _endpoint_in_tg_mini_router(request: Request) -> bool:
+    endpoint = request.scope.get("endpoint")
+    if endpoint is None:
+        return False
+    module = getattr(endpoint, "__module__", "") or ""
+    return module == _TG_MINI_ROUTER_PACKAGE or module.startswith(f"{_TG_MINI_ROUTER_PACKAGE}.")
+
+
 def _tg_mini_token_allowed(request: Request) -> bool:
     endpoint = request.scope.get("endpoint")
     if endpoint is None:
         return False
-    if getattr(endpoint, _TG_MINI_ENDPOINT_ATTR, False):
-        return True
-    module = getattr(endpoint, "__module__", "") or ""
-    return module == _TG_MINI_ROUTER_PACKAGE or module.startswith(f"{_TG_MINI_ROUTER_PACKAGE}.")
+    return bool(getattr(endpoint, _TG_MINI_ENDPOINT_ATTR, False)) or _endpoint_in_tg_mini_router(request)
 
 
 def create_2fa_pending_token(username: str) -> str:
@@ -200,9 +218,12 @@ def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-    user = get_active_user_from_access_token(db, token)
-    if user is None and _tg_mini_token_allowed(request):
+    if _endpoint_in_tg_mini_router(request):
         user = _get_active_user_from_tg_mini_token(db, token)
+    else:
+        user = get_active_user_from_access_token(db, token)
+        if user is None and _tg_mini_token_allowed(request):
+            user = _get_active_user_from_tg_mini_token(db, token)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

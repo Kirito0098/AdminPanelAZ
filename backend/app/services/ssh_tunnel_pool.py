@@ -249,13 +249,9 @@ class SshTunnelPool:
         signature: tuple[Any, ...],
         now: float,
     ) -> tuple[_TunnelSession, str | None]:
-        host = str(getattr(node, "ssh_host", "") or "").strip()
-        username = str(getattr(node, "ssh_username", "") or "").strip()
-        port = int(getattr(node, "ssh_port", 22) or 22)
-        remote_host = str(getattr(node, "ssh_remote_agent_host", "") or "127.0.0.1").strip()
-        remote_port = int(getattr(node, "ssh_remote_agent_port", None) or getattr(node, "port", 0) or 0)
-        key = self._decrypt_credential(getattr(node, "ssh_private_key_encrypted", ""), required=True)
-        passphrase = self._decrypt_credential(getattr(node, "ssh_passphrase_encrypted", ""), required=False)
+        host, port, username, key_encrypted, passphrase_encrypted, remote_host, remote_port = signature
+        key = self._decrypt_credential(key_encrypted, required=True)
+        passphrase = self._decrypt_credential(passphrase_encrypted, required=False)
 
         if not host or not username:
             raise SshTunnelError(CODE_SSH_AUTH, "SSH host or username is not configured")
@@ -355,13 +351,13 @@ class SshTunnelPool:
 
     def _node_signature(self, node: Any) -> tuple[Any, ...]:
         return (
-            str(getattr(node, "ssh_host", "") or "").strip(),
-            int(getattr(node, "ssh_port", 22) or 22),
-            str(getattr(node, "ssh_username", "") or "").strip(),
-            str(getattr(node, "ssh_private_key_encrypted", "") or ""),
-            str(getattr(node, "ssh_passphrase_encrypted", "") or ""),
-            str(getattr(node, "ssh_remote_agent_host", "") or "127.0.0.1").strip(),
-            int(getattr(node, "ssh_remote_agent_port", None) or getattr(node, "port", 0) or 0),
+            (node.ssh_host or "").strip(),
+            node.ssh_port,
+            (node.ssh_username or "").strip(),
+            node.ssh_private_key_encrypted,
+            node.ssh_passphrase_encrypted,
+            (node.ssh_remote_agent_host or "127.0.0.1").strip(),
+            node.ssh_remote_agent_port or node.port,
         )
 
     async def _resolve_expected_host_key(self, *, node: Any, host: str, port: int) -> tuple[Any, bool]:
@@ -386,11 +382,11 @@ class SshTunnelPool:
             raise SshTunnelError(CODE_SSH_TUNNEL, f"SSH host key discovery failed: {exc}") from exc
 
     def _stored_host_key_text(self, node: Any) -> str:
-        column = str(getattr(node, "ssh_host_key", "") or "").strip()
+        column = node.ssh_host_key.strip()
         if column:
             return column
         # Legacy pins stored in node_metadata before dedicated column existed.
-        raw_metadata = str(getattr(node, "node_metadata", "") or "").strip()
+        raw_metadata = node.node_metadata.strip()
         if not raw_metadata:
             return ""
         try:
@@ -414,11 +410,25 @@ class SshTunnelPool:
         host_key_text = str(host_key_text or "").strip()
         if not host_key_text:
             return False
-        current = str(getattr(node, "ssh_host_key", "") or "").strip()
+        current = node.ssh_host_key.strip()
         if current == host_key_text:
             return False
         setattr(node, "ssh_host_key", host_key_text)
         return True
+
+
+def forget_ssh_host_key(node: Any) -> None:
+    """Drop the pinned server key so the next connection pins the new endpoint (TOFU)."""
+    node.ssh_host_key = ""
+    raw_metadata = node.node_metadata.strip()
+    if not raw_metadata:
+        return
+    try:
+        metadata = json.loads(raw_metadata)
+    except json.JSONDecodeError:
+        return
+    if isinstance(metadata, dict) and metadata.pop(_SSH_HOST_KEY_METADATA_KEY, None) is not None:
+        node.node_metadata = json.dumps(metadata)
 
 
 _pool_singleton: SshTunnelPool | None = None

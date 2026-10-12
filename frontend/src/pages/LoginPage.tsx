@@ -4,7 +4,6 @@ import { LogIn, Send, Shield } from 'lucide-react'
 import {
   ApiError,
   getCaptchaRequired,
-  getFeatureModules,
   getPasskeyLoginOptions,
   getTelegramLoginConfig,
   login2FA,
@@ -100,16 +99,16 @@ export default function LoginPage() {
         if (d.required) return refreshCaptcha()
       })
       .catch(() => {})
-    Promise.all([getFeatureModules().catch(() => null), getTelegramLoginConfig().catch(() => null)])
-      .then(([modules, tgConfig]) => {
-        const telegramEnabled = modules?.features?.telegram ?? true
-        setTelegramModuleEnabled(telegramEnabled)
-        if (!telegramEnabled) {
-          setTgLoginReason('Модуль Telegram отключён в настройках модулей')
-          return
-        }
+    getTelegramLoginConfig()
+      .catch(() => null)
+      .then((tgConfig) => {
         if (!tgConfig) {
           setTgLoginReason('Не удалось загрузить настройки Telegram')
+          return
+        }
+        if (tgConfig.module_enabled === false) {
+          setTelegramModuleEnabled(false)
+          setTgLoginReason('Модуль Telegram отключён в настройках модулей')
           return
         }
         setTgOidcStartUrl('')
@@ -247,8 +246,8 @@ export default function LoginPage() {
           <div className="mx-auto mb-2 flex h-14 w-14 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Shield size={28} />
           </div>
-          <CardTitle className="text-2xl">AntiZapret VPN</CardTitle>
-          <CardDescription>Панель администрирования</CardDescription>
+          <CardTitle className="text-2xl">Admin Panel</CardTitle>
+          <CardDescription>Вход в панель</CardDescription>
         </CardHeader>
         <CardContent className="min-w-0">
           {sessionEnded && (

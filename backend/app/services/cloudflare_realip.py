@@ -165,12 +165,3 @@ def fetch_cloudflare_proxy_snippets(
     return realip, allow, content_hash(realip)
 
 
-def fetch_cloudflare_realip_conf(
-    *,
-    client: _HttpClient | None = None,
-    snapshot_date: str | None = None,
-) -> tuple[str, str]:
-    realip, _allow, digest = fetch_cloudflare_proxy_snippets(
-        client=client, snapshot_date=snapshot_date
-    )
-    return realip, digest

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import Node, VpnConfig, VpnType
+from app.services.client_portal import cleanup_deleted_client_records
 from app.services.node_manager import is_vpn_node, get_adapter_for_node
 from app.services.node_sync.client_sync import maybe_replicate_delete, purge_ha_shadow_configs
 from app.services.node_sync.groups import find_sync_group_for_primary
@@ -44,6 +45,7 @@ def _delete_config_row(db: Session, node: Node, config: VpnConfig) -> None:
         maybe_replicate_delete(db, node_id=node.id, primary_config=config)
     purge_ha_shadow_configs(db, config.id)
     db.delete(config)
+    cleanup_deleted_client_records(db, config)
 
 
 def _reconcile_node(db: Session, node: Node) -> tuple[int, int, int]:
@@ -116,7 +118,7 @@ def run_awg2_expire_once(db_session_factory: Callable[[], Session] = SessionLoca
                 logger.warning(
                     "awg2_expire: node %s (%s) reconcile failed",
                     node_id,
-                    getattr(node, "name", "?"),
+                    node.name,
                     exc_info=True,
                 )
                 continue

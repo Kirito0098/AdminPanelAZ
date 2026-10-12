@@ -11,7 +11,7 @@
 ## Важно: локальные настройки Cursor не в git
 
 Каталог **`.cursor/`** (MCP, rules, hooks) и **`.codebase-memory/`** в репозиторий **не коммитятся**.  
-Skills мейнтейнера лежат вне репо (`~/.agents/skills/`, `~/.cursor/skills-cursor` и т.п.).
+Skills мейнтейнера лежат вне репо (`~/.agents/skills/`, `~/.cursor/skills-cursor`, плагины в `~/.cursor/plugins/cache/` и т.п.).
 
 Подключайте инструменты **у себя локально** по этому файлу — не копируйте чужие токены и `mcp.json` с секретами в PR.
 
@@ -137,11 +137,19 @@ gh auth login
 
 ## Superpowers ([obra/superpowers](https://github.com/obra/superpowers)) — зачем каждый
 
-**Что это:** методология *как вести разработку с агентом* (не security-библиотека). ~14 skills. Ставится глобально, не в git репо:
+**Что это:** методология *как вести разработку с агентом* (не security-библиотека). ~14 skills. Ставится глобально, не в git репо — **плагином Cursor** `superpowers` из Marketplace (**Settings → Plugins**). Плагин обновляется вместе с Cursor и кладёт skills в `~/.cursor/plugins/cache/…`.
+
+Если плагин уже стоит, **не** ставьте пакет ещё и через `npx skills add obra/superpowers`: каждый skill окажется в списке агента дважды, и он хуже выбирает нужный. Остался старый дубль в `~/.agents/skills/` — удалите его:
 
 ```bash
-npx skills add obra/superpowers -g -a cursor -s '*' -y
+npx skills remove -g -y brainstorming dispatching-parallel-agents executing-plans \
+  finishing-a-development-branch receiving-code-review requesting-code-review \
+  subagent-driven-development systematic-debugging test-driven-development \
+  using-git-worktrees using-superpowers verification-before-completion \
+  writing-plans writing-skills
 ```
+
+Без плагина (другой агент, не Cursor) — `npx skills add obra/superpowers -g -a cursor -s '*' -y`, но только один из двух способов.
 
 **Зачем пакет в целом:** чтобы агент не прыгал сразу в код, а проходил цикл: понять задачу → дизайн → план → TDD → ревью → доказательства → закрытие ветки. Для крупных фич AdminPanelAZ (HA, HTTPS, Telegram, multi-node) это снижает «сломали соседний модуль».
 
@@ -218,7 +226,9 @@ Security диффа PR          → review-security
 3. **API:** тонкие роутеры, логика в `backend/app/services/`; фронт ходит в API через `frontend/src/api/client.ts`.
 4. **Фичи:** учитывать feature toggles и активный узел (`FeatureModulesContext`, `NodeContext`).
 5. **Секреты:** `.env`, ключи, `*.pem`, GeoIP `*.mmdb`, граф `.codebase-memory/` — только локально.
-6. **Проверки:** как в CI / pre-commit — ruff, bandit, eslint (advisory), shellcheck для `install.sh` и `scripts/*.sh`.
+6. **Проверки:** как в CI — ruff, bandit, eslint (advisory), shellcheck `-S warning` для `install.sh` и `scripts/*.sh`.
+7. **Ключ NodeSource:** `install.sh` принимает ключ репозитория NodeSource только с отпечатком `NODESOURCE_KEY_FINGERPRINT`. Если NodeSource сменит ключ, установка Node.js остановится с ошибкой «Ключ NodeSource не совпал». Тогда сверить новый отпечаток с [инструкцией NodeSource](https://github.com/nodesource/distributions) и обновить `NODESOURCE_KEY_FINGERPRINT` в `install.sh` и `NODESOURCE_FPR` в `scripts/test-install-nodejs-lts.sh`.
+8. **Ветки релиза и Dependabot:** изменения идут в `release/X.Y.Z`, в `main` — одним PR, когда релиз готов. Создав новую `release/X.Y.Z`, первым коммитом в ней переключите `target-branch` в `.github/dependabot.yml` на эту ветку. Dependabot читает файл только из `main`, поэтому новое значение заработает после merge этой ветки в `main`; до этого его PR в старую ветку релиза закрывайте без merge.
 
 Security-критичные зоны (auth, middleware, public download, telegram webhook, rate limit): перед «готово» — **review-security**.
 

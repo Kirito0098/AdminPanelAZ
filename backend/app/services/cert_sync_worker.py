@@ -52,7 +52,7 @@ def _sync_node(db, node: Node) -> int:
             "cert_sync: failed to load expiry map from node id=%s name=%s local=%s",
             node.id,
             node.name,
-            bool(node.is_local),
+            node.is_local,
         )
         expiry_by_cn = {}
 
@@ -103,7 +103,7 @@ def sync_cert_expiry(db) -> int:
                     "cert_sync: node %s refreshed %s config(s) (local=%s)",
                     node.name,
                     count,
-                    bool(node.is_local),
+                    node.is_local,
                 )
         except Exception:
             logger.exception("cert_sync: skip node id=%s name=%s", node.id, node.name)

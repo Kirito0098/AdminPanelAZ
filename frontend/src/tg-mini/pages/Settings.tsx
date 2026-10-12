@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Copy,
+  Gauge,
   Loader2,
   Send,
   Server,
@@ -32,6 +33,7 @@ import {
   LABEL_TELEGRAM_ID,
 } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
+import MiniLimitsForm from '@/tg-mini/components/MiniLimitsForm'
 import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
 import MiniSettingToggle from '@/tg-mini/components/MiniSettingToggle'
 import { getTgAdminNotify, getTgTelegramSettings, testTgAdminNotify, testTgTelegram, updateTgAdminNotify, updateTgTelegramSettings } from '@/tg-mini/api'
@@ -597,6 +599,15 @@ export default function Settings() {
                 </Button>
               </div>
             </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {isAdmin && telegram && (
+        <Card>
+          <CardContent className="space-y-4 p-4">
+            <SectionTitle icon={Gauge}>Лимиты</SectionTitle>
+            <MiniLimitsForm telegram={telegram} onTelegramSaved={setTelegram} onFeedback={setFeedback} />
           </CardContent>
         </Card>
       )}

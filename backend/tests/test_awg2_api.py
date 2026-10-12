@@ -128,10 +128,10 @@ def test_awg2_install_stream_rejects_non_admin_token():
     viewer = SimpleNamespace(username="viewer", is_active=True, role=UserRole.user)
 
     with (
-        patch.object(awg2_router, "get_active_user_from_access_token", return_value=viewer),
+        patch("app.services.stream_ticket.redeem_stream_ticket", return_value=viewer),
         patch.object(awg2_router, "SessionLocal", return_value=_FakeDb(owner=viewer)),
     ):
-        response = client.get("/api/awg2/install/stream", params={"token": "jwt", "mode": "install"})
+        response = client.get("/api/awg2/install/stream", params={"ticket": "t", "mode": "install"})
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Admin only"
@@ -140,7 +140,7 @@ def test_awg2_install_stream_rejects_non_admin_token():
 def test_awg2_install_stream_validates_mode():
     client = _stream_test_client()
 
-    response = client.get("/api/awg2/install/stream", params={"token": "jwt", "mode": "broken"})
+    response = client.get("/api/awg2/install/stream", params={"ticket": "t", "mode": "broken"})
 
     assert response.status_code == 422
 
@@ -158,7 +158,7 @@ def test_awg2_install_stream_returns_json_sse_events():
     )
 
     with (
-        patch.object(awg2_router, "get_active_user_from_access_token", return_value=admin),
+        patch("app.services.stream_ticket.redeem_stream_ticket", return_value=admin),
         patch.object(
             awg2_router,
             "SessionLocal",
@@ -170,7 +170,7 @@ def test_awg2_install_stream_returns_json_sse_events():
             "GET",
             "/api/awg2/install/stream",
             params={
-                "token": "jwt",
+                "ticket": "t",
                 "mode": "install",
                 "preset": "high",
                 "template": "web",
@@ -304,6 +304,7 @@ def test_delete_amneziawg2_calls_replicate_and_awg2():
         patch.object(configs_router, "find_sync_group_for_primary", return_value=SimpleNamespace(id=7)),
         patch.object(configs_router, "maybe_replicate_delete") as replicate,
         patch.object(configs_router, "purge_ha_shadow_configs"),
+        patch.object(configs_router, "cleanup_deleted_client_records"),
         patch.object(configs_router.admin_notify_service, "send_config_delete"),
         patch.object(configs_router, "get_client_timezone_from_request", return_value="UTC"),
     ):
@@ -365,44 +366,3 @@ def test_regenerate_obfuscation_maps_not_installed():
         with pytest.raises(HTTPException) as exc:
             awg2_router.regenerate_obfuscation(db=MagicMock(), _=SimpleNamespace())
     assert exc.value.status_code == 409
-
-
-def test_get_monitoring_ok():
-    node = SimpleNamespace(id=1, name="local", host="127.0.0.1")
-    adapter = MagicMock()
-    adapter.get_awg2_monitoring.return_value = {
-        "ifaces": [{"name": "antizapret-awg", "peer_count": 1}],
-        "clients": [{"name": "ivan", "online": True}],
-        "stats_available": True,
-    }
-    with (
-        patch.object(awg2_router, "get_active_node", return_value=node),
-        patch.object(awg2_router, "get_active_adapter", return_value=adapter),
-    ):
-        result = awg2_router.get_monitoring(db=MagicMock(), _=SimpleNamespace())
-    assert result["stats_available"] is True
-    assert result["clients"][0]["name"] == "ivan"
-    assert result["node_id"] == 1
-
-
-def test_get_client_stats_ok():
-    node = SimpleNamespace(id=1, name="local", host="127.0.0.1")
-    adapter = MagicMock()
-    adapter.get_awg2_client_stats.return_value = {
-        "name": "ivan",
-        "online": True,
-        "endpoint": "1.2.3.4:12345",
-        "handshake_age_s": 12,
-        "rx_life": 10,
-        "tx_life": 20,
-        "daily": [{"day": "2026-08-10", "rx": 1, "tx": 2}],
-        "geo": None,
-    }
-    with (
-        patch.object(awg2_router, "get_active_node", return_value=node),
-        patch.object(awg2_router, "get_active_adapter", return_value=adapter),
-    ):
-        result = awg2_router.get_client_stats("ivan", db=MagicMock(), _=SimpleNamespace())
-    assert result["name"] == "ivan"
-    assert result["daily"][0]["day"] == "2026-08-10"
-    assert result["node_id"] == 1

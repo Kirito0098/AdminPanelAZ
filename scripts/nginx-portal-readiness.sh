@@ -212,7 +212,6 @@ _compute_readiness() {
   fi
 
   READINESS_PORTAL="$portal"
-  READINESS_PANEL="$panel"
   READINESS_SUGGESTED="$suggested"
   READINESS_ISSUES_CSV="$(_join_csv "${issues[@]}")"
 

@@ -36,12 +36,6 @@ def normalize_openvpn_group(group: str | None) -> str:
     return raw
 
 
-def protocol_types_for_openvpn_group(group: str | None) -> frozenset[str]:
-    """Map UI OpenVPN group toggle to traffic ``protocol_type`` filters."""
-    normalized = normalize_openvpn_group(group)
-    return _GROUP_PROTOCOL_TYPES.get(normalized, OPENVPN_PROTOCOL_ALL)
-
-
 def is_openvpn_protocol_type(protocol_type: str | None) -> bool:
     return (protocol_type or "").strip().lower().startswith("openvpn")
 

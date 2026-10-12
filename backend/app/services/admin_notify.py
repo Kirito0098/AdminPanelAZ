@@ -13,7 +13,8 @@ import psutil
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AppSetting, User, UserRole
+from app.models import User, UserRole
+from app.services.app_setting_store import _get_setting
 from app.services.admin_notify_settings_text import (
     parse_mini_details_kv,
     user_action_tg_action_line,
@@ -154,11 +155,13 @@ SETTINGS_CHANGE_NOTIFY = frozenset({
     "settings_reboot_schedule",
     "settings_reboot_cancel",
     "settings_reboot_execute",
+    "settings_self_service_limits_update",
 })
 
 SETTINGS_TG_TITLES = {
     "settings_port_update": "Порт панели",
     "settings_telegram_auth_update": "Авторизация Telegram",
+    "settings_self_service_limits_update": "Лимиты самообслуживания",
     "settings_nightly_update": "Ночной рестарт",
     "settings_backup_update": "Бэкапы",
     "settings_backup_create": "Бэкапы",
@@ -213,11 +216,6 @@ _PREF_KEY_MAP = {
 }
 
 
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
-
-
 def _mini_protocol_label(raw_value: str | None) -> str:
     value = (raw_value or "").strip().lower()
     if value in {"openvpn", "ovpn"}:
@@ -226,6 +224,8 @@ def _mini_protocol_label(raw_value: str | None) -> str:
         return "WireGuard"
     if value in {"amneziawg", "amnezia"}:
         return "AmneziaWG"
+    if value in {"amneziawg2", "awg2"}:
+        return "AmneziaWG 2.0"
     return "неизвестно"
 
 
@@ -252,25 +252,9 @@ def _protocol_emoji(target_type: str | None) -> str:
         return "🔐"
     if kind in {"wireguard", "wg"}:
         return "🛡️"
-    if kind in {"amneziawg", "amnezia"}:
+    if kind in {"amneziawg", "amnezia", "amneziawg2", "awg2"}:
         return "🌀"
     return "📄"
-
-
-def _fmt_config_object(target_type: str | None, target_name: str | None) -> str:
-    protocol = _fmt_protocol(target_type)
-    emoji = _protocol_emoji(target_type)
-    name = _fmt_code(target_name)
-    if protocol:
-        return f"{emoji} {protocol} 📁 {name}"
-    return f"📁 {name}"
-
-
-def _fmt_action_config(verb: str, target_type: str | None, target_name: str | None) -> str:
-    verb_text = (verb or "").strip()
-    if verb_text:
-        verb_text = verb_text[0].upper() + verb_text[1:]
-    return f"{verb_text} конфигурацию {_fmt_config_object(target_type, target_name)}"
 
 
 def _format_notify_card(
@@ -369,16 +353,6 @@ def _login_context_lines(
 
 def _fmt_when(now: str) -> str:
     return f"🕐 {now}"
-
-
-def _prepend_node_context(
-    text: str,
-    *,
-    node_id: int | None = None,
-    node_name: str | None = None,
-) -> str:
-    """Legacy wrapper — node is now embedded in notify cards."""
-    return text
 
 
 def _resolve_client_block_action(details: str | None) -> str:
@@ -523,7 +497,6 @@ class AdminNotifyService:
 
     def __init__(self, *, logger_instance: logging.Logger | None = None):
         self.logger = logger_instance or logger
-        self._monitor_cooldowns: dict[str, datetime] = {}
         self._resource_alert_cooldowns: dict[tuple[str, int | None], datetime] = {}
         self._unlinked_login_cooldowns: dict[str, datetime] = {}
         self._monitor_lock = threading.Lock()
@@ -698,27 +671,6 @@ class AdminNotifyService:
             client_timezone=client_timezone,
         )
 
-    def send_config_recreate(
-        self,
-        db: Session,
-        *,
-        actor_username: str,
-        target_name: str,
-        target_type: str,
-        node_id: int | None = None,
-        node_name: str | None = None,
-        client_timezone: str | None = None,
-    ) -> None:
-        self.send(
-            db,
-            "config_recreate",
-            actor_username=actor_username,
-            target_name=target_name,
-            target_type=target_type,
-            node_id=node_id,
-            node_name=node_name,
-            client_timezone=client_timezone,
-        )
 
     def send_config_delete(
         self,
@@ -990,69 +942,51 @@ class AdminNotifyService:
         cfg = get_settings()
         now = datetime.now(timezone.utc)
         cooldown = timedelta(minutes=cfg.monitor_cooldown_minutes)
+        is_node = node_id is not None
+        metrics = (
+            (
+                "high_cpu",
+                cpu_percent,
+                cfg.monitor_cpu_threshold,
+                cpu_source
+                or (SustainedMetricSource.node_cpu if is_node else SustainedMetricSource.panel_host_cpu),
+                self.send_high_cpu,
+            ),
+            (
+                "high_ram",
+                ram_percent,
+                cfg.monitor_ram_threshold,
+                ram_source
+                or (SustainedMetricSource.node_ram if is_node else SustainedMetricSource.panel_host_ram),
+                self.send_high_ram,
+            ),
+        )
         with self._monitor_lock:
-            if cpu_percent is not None and cpu_percent >= cfg.monitor_cpu_threshold:
-                source = cpu_source or (
-                    SustainedMetricSource.node_cpu
-                    if node_id is not None
-                    else SustainedMetricSource.panel_host_cpu
-                )
-                interval = self._sustained_sample_interval(source)
+            for alert, value, threshold, source, send in metrics:
+                if value is None or value < threshold:
+                    continue
                 sustained_ok, sustained_detail = is_sustained_high(
                     db,
                     source=source,
                     node_id=node_id,
-                    threshold=float(cfg.monitor_cpu_threshold),
-                    current_value=float(cpu_percent),
+                    threshold=float(threshold),
+                    current_value=float(value),
                     sustained_seconds=cfg.monitor_sustained_seconds,
-                    sample_interval_seconds=interval,
+                    sample_interval_seconds=self._sustained_sample_interval(source),
                 )
-                if sustained_ok:
-                    key = ("high_cpu", node_id)
-                    last = self._resource_alert_cooldowns.get(key)
-                    if last is None or (now - last) >= cooldown:
-                        self._resource_alert_cooldowns[key] = now
-                        self.send_high_cpu(
-                            db,
-                            details=format_alert_details(
-                                float(cpu_percent),
-                                float(cfg.monitor_cpu_threshold),
-                                sustained_detail,
-                            ),
-                            node_id=node_id,
-                            node_name=node_name,
-                        )
-            if ram_percent is not None and ram_percent >= cfg.monitor_ram_threshold:
-                source = ram_source or (
-                    SustainedMetricSource.node_ram
-                    if node_id is not None
-                    else SustainedMetricSource.panel_host_ram
-                )
-                interval = self._sustained_sample_interval(source)
-                sustained_ok, sustained_detail = is_sustained_high(
+                if not sustained_ok:
+                    continue
+                key = (alert, node_id)
+                last = self._resource_alert_cooldowns.get(key)
+                if last is not None and (now - last) < cooldown:
+                    continue
+                self._resource_alert_cooldowns[key] = now
+                send(
                     db,
-                    source=source,
+                    details=format_alert_details(float(value), float(threshold), sustained_detail),
                     node_id=node_id,
-                    threshold=float(cfg.monitor_ram_threshold),
-                    current_value=float(ram_percent),
-                    sustained_seconds=cfg.monitor_sustained_seconds,
-                    sample_interval_seconds=interval,
+                    node_name=node_name,
                 )
-                if sustained_ok:
-                    key = ("high_ram", node_id)
-                    last = self._resource_alert_cooldowns.get(key)
-                    if last is None or (now - last) >= cooldown:
-                        self._resource_alert_cooldowns[key] = now
-                        self.send_high_ram(
-                            db,
-                            details=format_alert_details(
-                                float(ram_percent),
-                                float(cfg.monitor_ram_threshold),
-                                sustained_detail,
-                            ),
-                            node_id=node_id,
-                            node_name=node_name,
-                        )
 
     @staticmethod
     def _sustained_sample_interval(source: SustainedMetricSource) -> int:

@@ -115,6 +115,7 @@ function verifyBadge(group: NodeSyncGroup): ReadinessBadge {
 function replicationBadge(group: NodeSyncGroup): ReadinessBadge {
   if (group.sync_status === 'pending') return { label: 'Репликация…', variant: 'secondary' }
   if (group.sync_status === 'failed') return { label: 'Репликация: ошибка', variant: 'destructive' }
+  if (group.sync_status === 'drift') return { label: 'Репликация: есть расхождения', variant: 'destructive' }
   if (group.sync_status === 'synced') return { label: 'Репликация: OK', variant: 'default' }
   return { label: 'Репликация: —', variant: 'outline' }
 }
@@ -479,8 +480,9 @@ export default function NodeSyncGroupSection({
         }
 
         const prevStatus = prevSyncStatusRef.current.get(group.id)
+        const hasProblem = group.sync_status === 'failed' || group.sync_status === 'drift'
         const becameFailed =
-          group.sync_status === 'failed' && prevStatus !== undefined && prevStatus !== 'failed'
+          hasProblem && prevStatus !== undefined && prevStatus !== group.sync_status
         const errorText = group.last_sync_error?.trim()
 
         if (becameFailed && errorText) {

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -200,19 +200,17 @@ def test_legacy_token_without_version_valid_until_first_change(db_factory):
 
 
 def test_stream_and_docs_token_checks_reject_stale_tokens(db_factory):
-    from app.routers import awg2, monitoring, warper
     from app.services import openapi_docs_gate
+    from app.services.stream_ticket import issue_stream_ticket, redeem_stream_ticket
 
     stale = _token_for(db_factory, "admin")
     db, admin = _user(db_factory, "admin")
+    streams = ("monitoring", "warper_update", "awg2_install", "server_monitor")
+    tickets = {stream: issue_stream_ticket(admin, stream) for stream in streams}
     rt.invalidate_user_sessions(db, admin, reason="password")
 
-    with pytest.raises(HTTPException):
-        monitoring._user_from_access_token(stale, db)
-    with pytest.raises(HTTPException):
-        awg2._admin_from_stream_token(stale, db)
-    with pytest.raises(HTTPException):
-        warper._admin_from_stream_token(stale, db)
+    for stream, ticket in tickets.items():
+        assert redeem_stream_ticket(db, ticket, stream) is None
     assert openapi_docs_gate._is_admin_token(stale, db) is False
     assert openapi_docs_gate._is_admin_token(create_user_access_token(admin), db) is True
     db.close()

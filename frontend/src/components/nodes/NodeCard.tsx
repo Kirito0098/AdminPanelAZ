@@ -12,7 +12,7 @@ import NodeTransportBadge from './NodeTransportBadge'
 import { formatLastSeen, getNodeMeta } from './nodeHelpers'
 import { isProxyNode } from './nodeKind'
 
-export type NodeCardProps = {
+type NodeCardProps = {
   node: Node
   isActive: boolean
   showProxyUi: boolean

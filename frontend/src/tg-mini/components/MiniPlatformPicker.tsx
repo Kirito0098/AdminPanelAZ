@@ -42,4 +42,4 @@ export default function MiniPlatformPicker({ value, onChange, label = 'Устр�
   )
 }
 
-export { guessInstallPlatform } from '@/tg-mini/lib/platformMeta'
+

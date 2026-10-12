@@ -5,7 +5,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from app.models import NodeStatus
 
 from app.services import cert_sync_worker as cert_sync
 from app.services import geo_routing_hint as geo_hint
@@ -25,15 +24,6 @@ def _vpn(**kwargs):
     defaults = dict(id=1, name="vpn1", node_kind="vpn", status="online")
     defaults.update(kwargs)
     return SimpleNamespace(**defaults)
-
-
-def test_list_vpn_nodes_drops_proxy():
-    from app.services.node_manager import list_vpn_nodes
-
-    db = MagicMock()
-    db.query.return_value.order_by.return_value.all.return_value = [_vpn(), _proxy()]
-    names = [n.name for n in list_vpn_nodes(db)]
-    assert names == ["vpn1"]
 
 
 def test_traffic_limit_reconcile_skips_proxy(monkeypatch):

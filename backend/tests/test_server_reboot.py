@@ -67,12 +67,14 @@ def _other_worker(monkeypatch):
 def test_cancel_from_other_worker_prevents_reboot(monkeypatch):
     executed = Mock()
     pending = sr.schedule_reboot(
-        node_id=7, node_name="n7", scheduled_by="admin", execute_fn=executed, delay_seconds=0.2
+        node_id=7, node_name="n7", scheduled_by="admin", execute_fn=executed, delay_seconds=1.0
     )
+    timer = sr._timers[pending.reboot_id]
     with _other_worker(monkeypatch):
         assert [p.reboot_id for p in sr.list_pending()] == [pending.reboot_id]
         assert sr.cancel_reboot(pending.reboot_id).status == "cancelled"
-    time.sleep(0.35)
+    timer.join(timeout=5.0)
+    assert not timer.is_alive()
     executed.assert_not_called()
     assert sr.get_pending(pending.reboot_id).status == "cancelled"
 

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, User, VpnConfig, VpnType, WgAccessPolicy
 from app.services.access_until import _policy_service_for_node, _reconcile_access_until, _row_access_until, set_access_until
+from app.services.shared_helpers import as_utc as _as_utc
 from app.services.unlock_codes import _is_manual_admin_block
 
 logger = logging.getLogger(__name__)
@@ -17,14 +18,6 @@ _VPN_PROTOCOLS = {
     VpnType.amneziawg2: "amneziawg2",
 }
 _PROTOCOL_VPN_TYPE = {protocol: vpn_type for vpn_type, protocol in _VPN_PROTOCOLS.items()}
-
-
-def _as_utc(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
 
 
 def _to_db_datetime(dt: datetime | None) -> datetime | None:
@@ -594,80 +587,14 @@ def apply_due_user_subscription_blocks(db: Session) -> dict[str, int]:
             result = apply_user_subscription_expiry(db, user, commit=True)
         except Exception:
             db.rollback()
+            logger.exception("subscription expiry failed user_id=%s", user_id)
             counts["errors"] += 1
             continue
-        counts["cascaded"] += int(result.get("expired", 0) or 0)
-        counts["skipped"] += int(result.get("skipped_manual", 0) or 0)
-        counts["skipped"] += int(result.get("skipped_not_expired", 0) or 0)
+        counts["cascaded"] += result["expired"]
+        counts["skipped"] += result["skipped_manual"]
+        counts["skipped"] += result["skipped_not_expired"]
 
     return counts
-
-
-def clear_access_expired_for_user(db: Session, user: User, *, actor: str, commit: bool = True) -> dict:
-    access_until = get_user_access_until(user)
-    queued: list[tuple[int, str, str]] = []
-    replicate_queue: list[tuple[int, str, str, VpnType]] = []
-    skipped_manual = 0
-
-    for config in _owned_configs(db, user.id):
-        protocol = _VPN_PROTOCOLS.get(config.vpn_type)
-        if protocol is None:
-            continue
-        row = _policy_row(db, protocol=protocol, node_id=config.node_id, client_name=config.client_name)
-        if row is None:
-            continue
-        if _is_manual_admin_block(row):
-            skipped_manual += 1
-            continue
-        reason = (getattr(row, "block_reason", None) or "").strip().lower()
-        if reason != "access_expired":
-            continue
-        client_name = _policy_client_name(protocol, config.client_name)
-        set_access_until(
-            db,
-            protocol,
-            config.node_id,
-            client_name,
-            access_until,
-            actor=actor,
-            commit=False,
-        )
-        queued.append((config.node_id, protocol, client_name))
-        replicate_queue.append((config.node_id, protocol, config.client_name, config.vpn_type))
-
-    if commit:
-        db.commit()
-    else:
-        db.flush()
-
-    cleared = 0
-    reconcile = {"synced": 0, "errors": []}
-    replicate_errors: list[dict] = []
-    if commit:
-        reconcile = _reconcile_owned_client_queue(db, queued)
-        replicate_errors = _replicate_access_until_queue(
-            db,
-            queued_configs=replicate_queue,
-            access_until=access_until,
-            actor=actor,
-        )
-        for node_id, protocol, client_name in queued:
-            row = _policy_row(db, protocol=protocol, node_id=node_id, client_name=client_name)
-            if (getattr(row, "block_reason", None) or "").strip().lower() != "access_expired":
-                cleared += 1
-
-    return {
-        "targets": len(list_owned_client_targets(db, user.id)),
-        "cleared": cleared,
-        "skipped_manual": skipped_manual,
-        "synced": reconcile["synced"],
-        "reconcile_errors": reconcile["errors"],
-        "replicate_errors": replicate_errors,
-        "warning": _format_cascade_warning(
-            reconcile_errors=list(reconcile.get("errors") or []),
-            replicate_errors=replicate_errors,
-        ),
-    }
 
 
 def extend_owned_clients_for_redeem(

@@ -4,7 +4,6 @@ import json
 import os
 import secrets
 import time
-from datetime import timedelta
 from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -22,6 +21,7 @@ from app.auth import (
     get_current_user,
     get_password_hash,
     oauth2_scheme,
+    verify_current_password,
     verify_password,
 )
 from app.config import get_settings
@@ -71,9 +71,11 @@ from app.services.admin_notify import admin_notify_service
 from app.services.user_agent_format import user_agent_from_request
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.panel_paths import auth_cookie_path, with_access_path
+from app.services.asset_marker import clear_asset_marker_cookie, set_asset_marker_cookie
 from app.services.auth_cookies import refresh_token_cookie_secure
 from app.services.panel_publish_info import resolve_request_url_root
 from app.services.telegram_oidc import (
+    OIDC_STATE_TTL,
     build_authorization_url,
     exchange_authorization_code,
     pkce_verifier,
@@ -95,6 +97,8 @@ from app.services.webauthn_service import list_passkeys, user_has_passkeys, weba
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 settings = get_settings()
+
+OIDC_STATE_COOKIE = "tg_oidc_state"
 
 
 def _get_telegram_auth_settings(db: Session) -> tuple[str, str, int]:
@@ -187,6 +191,29 @@ def _oidc_login_error_redirect(message: str) -> RedirectResponse:
     return RedirectResponse(url=f"{with_access_path(settings, '/login')}?tg_error={quote(message)}", status_code=302)
 
 
+def _set_oidc_state_cookie(response: Response, state: str, request: Request) -> None:
+    # Lax: the callback is a top-level navigation from oauth.telegram.org.
+    response.set_cookie(
+        key=OIDC_STATE_COOKIE,
+        value=state,
+        httponly=True,
+        secure=refresh_token_cookie_secure(settings, request),
+        samesite="lax",
+        max_age=OIDC_STATE_TTL,
+        path=auth_cookie_path(settings),
+    )
+
+
+def _clear_oidc_state_cookie(response: Response, request: Request) -> None:
+    response.delete_cookie(
+        key=OIDC_STATE_COOKIE,
+        path=auth_cookie_path(settings),
+        httponly=True,
+        secure=refresh_token_cookie_secure(settings, request),
+        samesite="lax",
+    )
+
+
 def _verify_telegram_login(payload: dict[str, str], bot_token: str, max_age: int) -> tuple[bool, str]:
     received_hash = (payload.get("hash") or "").strip().lower()
     auth_date_raw = (payload.get("auth_date") or "").strip()
@@ -218,6 +245,7 @@ def _set_refresh_cookie(response: Response, raw_token: str, request: Request | N
         max_age=settings.refresh_token_expire_days * 86400,
         path=auth_cookie_path(settings),
     )
+    set_asset_marker_cookie(response, settings, request)
 
 
 def _issue_token_pair(
@@ -252,21 +280,20 @@ def _clear_refresh_cookie(response: Response, request: Request | None = None) ->
         secure=secure,
         samesite=settings.refresh_token_cookie_samesite,
     )
+    clear_asset_marker_cookie(response, settings, request)
 
 
-def _admin_requires_2fa(db: Session, user: User) -> bool:
-    if user.role != UserRole.admin:
-        return False
+def _requires_2fa(db: Session, user: User) -> bool:
     return bool(user.totp_enabled or user_has_passkeys(db, user.id))
 
 
 def _user_from_2fa_token(db: Session, temp_token: str, client_ip: str) -> User:
     username = decode_2fa_pending_token(temp_token)
     user = db.query(User).filter(User.username == username).first()
-    if not user or not user.is_active or user.role != UserRole.admin:
+    if not user or not user.is_active:
         auth_rate_limit_service.record_failure(client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Неверный код 2FA")
-    if not _admin_requires_2fa(db, user):
+    if not _requires_2fa(db, user):
         auth_rate_limit_service.record_failure(client_ip)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="2FA не настроена")
     return user
@@ -338,7 +365,7 @@ def _login_with_checks(
             detail += " (требуется капча)"
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=detail)
 
-    if _admin_requires_2fa(db, user):
+    if _requires_2fa(db, user):
         return Login2FARequired(
             temp_token=create_2fa_pending_token(user.username),
             passkey_available=user_has_passkeys(db, user.id),
@@ -386,6 +413,7 @@ def telegram_login_config(request: Request, db: Session = Depends(get_db)):
 
     if not get_feature_service().is_enabled("telegram"):
         return {
+            "module_enabled": False,
             "enabled": False,
             "bot_username": "",
             "max_age_seconds": 300,
@@ -403,6 +431,7 @@ def telegram_login_config(request: Request, db: Session = Depends(get_db)):
     auth_method = "oidc" if oidc_enabled else ("legacy" if legacy_enabled else "none")
     root = resolve_request_url_root(request, behind_nginx=settings.behind_nginx).rstrip("/")
     return {
+        "module_enabled": True,
         "enabled": oidc_ready or legacy_ready,
         "auth_method": auth_method,
         "bot_username": username if legacy_ready else "",
@@ -432,11 +461,22 @@ def telegram_oidc_start(request: Request, db: Session = Depends(get_db)):
         state=state,
         code_verifier=code_verifier,
     )
-    return RedirectResponse(url=auth_url, status_code=302)
+    response = RedirectResponse(url=auth_url, status_code=302)
+    _set_oidc_state_cookie(response, state, request)
+    return response
 
 
 @router.get("/telegram/oidc/callback")
 def telegram_oidc_callback(request: Request, db: Session = Depends(get_db)):
+    try:
+        response: Response = _telegram_oidc_callback_response(request, db)
+    except HTTPException as exc:
+        response = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+    _clear_oidc_state_cookie(response, request)
+    return response
+
+
+def _telegram_oidc_callback_response(request: Request, db: Session) -> RedirectResponse:
     from app.services.feature_guards import get_feature_service
 
     if not get_feature_service().is_enabled("telegram"):
@@ -456,6 +496,9 @@ def telegram_oidc_callback(request: Request, db: Session = Depends(get_db)):
     if not code or not state:
         return _oidc_login_error_redirect("Некорректный ответ Telegram OIDC")
 
+    cookie_state = request.cookies.get(OIDC_STATE_COOKIE) or ""
+    if not cookie_state or not hmac.compare_digest(cookie_state.encode(), state.encode()):
+        return _oidc_login_error_redirect("Вход через Telegram начат в другом браузере — попробуйте снова")
     stored = pop_oidc_state(state)
     if not stored:
         return _oidc_login_error_redirect("Сессия Telegram OIDC истекла — попробуйте снова")
@@ -509,10 +552,7 @@ def telegram_oidc_token(
         tg_id = telegram_id_from_claims(claims)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    try:
-        user = _complete_telegram_login(db, request, tg_id, mini=False)
-    except HTTPException:
-        raise
+    user = _complete_telegram_login(db, request, tg_id, mini=False)
     return _issue_token_pair(user, db, response, request)
 
 
@@ -528,11 +568,8 @@ def telegram_login_callback(request: Request, db: Session = Depends(get_db)):
     if not ok:
         raise HTTPException(status_code=401, detail=err)
     tg_id = str(payload.get("id", ""))
-    try:
-        user = _complete_telegram_login(db, request, tg_id, mini=False)
-        return _telegram_login_redirect(user, db, request)
-    except HTTPException as exc:
-        raise exc
+    user = _complete_telegram_login(db, request, tg_id, mini=False)
+    return _telegram_login_redirect(user, db, request)
 
 
 @router.post("/login", response_model=Token)
@@ -616,7 +653,9 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserResponse)
-def me(current_user: User = Depends(get_current_user)):
+def me(request: Request, response: Response, current_user: User = Depends(get_current_user)):
+    # Tabs that start with an access token already in storage never call /refresh before loading the panel.
+    set_asset_marker_cookie(response, settings, request)
     return current_user
 
 
@@ -629,8 +668,7 @@ def change_password(
     current_user: User = Depends(get_current_user),
     token: str = Depends(oauth2_scheme),
 ):
-    if not verify_password(payload.current_password, current_user.password_hash):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный текущий пароль")
+    verify_current_password(current_user, payload.current_password)
     validate_password(payload.new_password, username=current_user.username)
     current_user.password_hash = get_password_hash(payload.new_password)
     current_user.must_change_password = False

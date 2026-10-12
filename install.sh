@@ -13,6 +13,7 @@
 #   --proxy-only        только proxy_agent для RU-прокси (без панели и без proxy.sh)
 #   --with-systemd      автозапуск как системный сервис
 #   --reinstall         переустановка с сохранением backend/.env
+#   --update            полное обновление: код + конфигурация сервера (без мастера)
 #   --uninstall         удаление сервисов (каталог проекта остаётся)
 #   --purge-all         удаление без следов
 # ==============================================================================
@@ -96,11 +97,17 @@ ROOT_DIR="${_script_dir:-$(pwd)}"
 source "$ROOT_DIR/scripts/install-ui.sh"
 # shellcheck source=scripts/python-runtime.sh
 source "$ROOT_DIR/scripts/python-runtime.sh"
+# shellcheck source=scripts/system-packages.sh
+source "$ROOT_DIR/scripts/system-packages.sh"
 ui_init
 # shellcheck source=scripts/install-port-check.sh
 source "$ROOT_DIR/scripts/install-port-check.sh"
 # shellcheck source=scripts/install-reboot-check.sh
 source "$ROOT_DIR/scripts/install-reboot-check.sh"
+# shellcheck source=scripts/node-agent-mtls-check.sh
+source "$ROOT_DIR/scripts/node-agent-mtls-check.sh"
+# shellcheck source=scripts/console-command.sh
+source "$ROOT_DIR/scripts/console-command.sh"
 BACKEND_DIR="$ROOT_DIR/backend"
 FRONTEND_DIR="$ROOT_DIR/frontend"
 VENV_DIR="$BACKEND_DIR/.venv"
@@ -119,6 +126,9 @@ PROXY_ONLY=false
 FORCE=false
 NON_INTERACTIVE=false
 ACCEPT_DEFAULTS=false
+UPDATE_REQUESTED=false
+# Внутренний флаг: этап 2 полного обновления в уже обновлённом install.sh (файл итога этапа 1).
+UPDATE_RESUME_STATE=""
 INSTALL_FROM_GIT="${INSTALL_FROM_GIT:-}"
 # Стандартный каталог — /opt/AdminPanelAZ; при запуске из клона resolve_project_dir подставит ROOT_DIR
 INSTALL_TARGET="${INSTALL_TARGET:-$DEFAULT_INSTALL_TARGET}"
@@ -126,7 +136,6 @@ GENERATED_NODE_KEY=""
 GENERATED_PROXY_KEY=""
 WIZARD_RAN=false
 ACTION="install"
-FULL_PURGE=false
 PURGE_REPO=false
 ENV_BACKUP_DIR=""
 RESTORE_ENV_AFTER_INSTALL=false
@@ -301,6 +310,10 @@ validate_install_flags() {
   if [[ "$PROXY_ONLY" == true && "$WITH_NODE_AGENT" == true ]]; then
     die "--proxy-only и --with-node-agent несовместимы"
   fi
+  if [[ "$UPDATE_REQUESTED" == true ]] \
+    && [[ "$ACTION" != install || "$NODE_ONLY" == true || "$PROXY_ONLY" == true || "$WITH_NODE_AGENT" == true ]]; then
+    die "--update несовместим с --reinstall, --uninstall, --purge-all, --node-only, --proxy-only и --with-node-agent: роли берутся из установленной системы"
+  fi
 }
 
 parse_args() {
@@ -337,7 +350,6 @@ parse_args() {
         ;;
       --purge-all)
         ACTION="purge-all"
-        FULL_PURGE=true
         ;;
       --purge)
         PURGE_REPO=true
@@ -347,6 +359,13 @@ parse_args() {
         ;;
       --reinstall)
         ACTION="reinstall"
+        ;;
+      --update)
+        UPDATE_REQUESTED=true
+        ;;
+      --update-resume=*)
+        UPDATE_REQUESTED=true
+        UPDATE_RESUME_STATE="${1#*=}"
         ;;
       --help|-h)
         usage
@@ -470,8 +489,8 @@ run_uninstall_action() {
 }
 
 collect_full_purge_uninstall_args() {
-  local -n _out_args=$1
-  _out_args=(
+  local -n _purge_args=$1
+  _purge_args=(
     --remove-system-config
     --purge-state
     --remove-nginx
@@ -492,7 +511,7 @@ run_full_purge_action() {
     ui_section "Удалить всё без следов"
     ui_warn_box "Внимание — необратимо" \
       "Будут удалены systemd-сервисы, state dirs, nginx, firewall," \
-      "backend/.env, /etc/adminpanelaz, каталог бэкапов," \
+      "backend/.env, /etc/adminpanelaz, архивы бэкапов панели," \
       "каталог проекта $ROOT_DIR (код, БД, CIDR)." \
       "Данные AntiZapret (/root/antizapret и др.) НЕ удаляются."
     echo
@@ -598,6 +617,19 @@ run_reinstall_action() {
   ACTION="install"
   run_install_flow
   offer_restore_env_backup
+}
+
+# Полное обновление (--update): код и конфигурация сервера по текущим настройкам, без мастера.
+# Отдельный процесс: scripts/full-update.sh подключает консольное меню, а у меню и install.sh общие имена функций.
+run_update_action() {
+  local -a args=()
+  if [[ "$ACCEPT_DEFAULTS" == true || "$NON_INTERACTIVE" == true ]]; then
+    args+=(--yes)
+  fi
+  if [[ -n "$UPDATE_RESUME_STATE" ]]; then
+    args+=(--resume "$UPDATE_RESUME_STATE")
+  fi
+  exec env INSTALL_DIR="$ROOT_DIR" "${BASH:-bash}" "$ROOT_DIR/scripts/full-update.sh" "${args[@]}"
 }
 
 should_run_wizard() {
@@ -746,6 +778,11 @@ random_hex() {
 # Node 20 больше не поддерживается; ставим актуальную LTS.
 NODE_MIN_MAJOR=22
 NODE_INSTALL_MAJOR=24
+NODESOURCE_KEY_URL="https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key"
+NODESOURCE_KEY_FINGERPRINT="6F71F525282841EEDAF851B42F59B5F99B1BE0B4"
+NODESOURCE_KEYRING="${NODESOURCE_KEYRING:-/usr/share/keyrings/nodesource.gpg}"
+NODESOURCE_APT_SOURCES="${NODESOURCE_APT_SOURCES:-/etc/apt/sources.list.d/nodesource.sources}"
+NODESOURCE_APT_PIN="${NODESOURCE_APT_PIN:-/etc/apt/preferences.d/nodejs}"
 
 node_major_version() {
   if ! command -v node >/dev/null 2>&1; then
@@ -765,6 +802,39 @@ node_apt_candidate_major() {
   else
     echo 0
   fi
+}
+
+# Репозиторий NodeSource для apt вместо их setup-скрипта через curl | bash: скачанный ключ принимается
+# только с известным отпечатком, apt проверяет им пакеты (Signed-By).
+nodesource_add_repo() {
+  local tmp fingerprint
+  command -v gpg >/dev/null 2>&1 || apt-get install -y gnupg
+  tmp="$(mktemp -d)"
+  if ! curl -fsSL "$NODESOURCE_KEY_URL" >"$tmp/key.asc"; then
+    rm -rf "$tmp"
+    die "Не удалось скачать ключ NodeSource: $NODESOURCE_KEY_URL"
+  fi
+  mkdir -m 700 "$tmp/gnupg"
+  fingerprint="$(GNUPGHOME="$tmp/gnupg" gpg --batch --with-colons --show-keys "$tmp/key.asc" 2>/dev/null \
+    | awk -F: '$1 == "fpr" {print $10; exit}')"
+  if [[ "$fingerprint" != "$NODESOURCE_KEY_FINGERPRINT" ]]; then
+    rm -rf "$tmp"
+    die "Ключ NodeSource не совпал с ожидаемым (${NODESOURCE_KEY_FINGERPRINT}, получен: ${fingerprint:-нет}) — репозиторий не подключён"
+  fi
+  mkdir -p "$(dirname "$NODESOURCE_KEYRING")"
+  GNUPGHOME="$tmp/gnupg" gpg --batch --yes --dearmor -o "$NODESOURCE_KEYRING" "$tmp/key.asc"
+  chmod 644 "$NODESOURCE_KEYRING"
+  rm -rf "$tmp"
+  rm -f "$(dirname "$NODESOURCE_APT_SOURCES")/nodesource.list"
+  cat >"$NODESOURCE_APT_SOURCES" <<EOF
+Types: deb
+URIs: https://deb.nodesource.com/node_${NODE_INSTALL_MAJOR}.x
+Suites: nodistro
+Components: main
+Signed-By: ${NODESOURCE_KEYRING}
+EOF
+  printf 'Package: nodejs\nPin: origin deb.nodesource.com\nPin-Priority: 600\n' >"$NODESOURCE_APT_PIN"
+  apt-get update -qq
 }
 
 install_nodejs() {
@@ -792,8 +862,8 @@ install_nodejs() {
     fi
   fi
 
-  log "Подключение NodeSource (Node.js ${NODE_INSTALL_MAJOR}.x)..."
-  curl -fsSL "https://deb.nodesource.com/setup_${NODE_INSTALL_MAJOR}.x" | bash -
+  log "Подключение репозитория NodeSource (Node.js ${NODE_INSTALL_MAJOR}.x)..."
+  nodesource_add_repo
   apt-get install -y nodejs
   major="$(node_major_version)"
   if [[ "$major" -lt "$NODE_MIN_MAJOR" ]]; then
@@ -810,23 +880,6 @@ ensure_backend_data_dirs() {
     "${WIZ_BACKUP_ROOT:-/var/backups/adminpanelaz}"
 }
 
-backend_health_check_scheme() {
-  BHC_ENV_FILE="$ENV_FILE"
-  BHC_WIZ_NGINX_MODE="${WIZ_NGINX_MODE:-}"
-  BHC_BACKEND_LOG="${ADMINPANELAZ_STATE_DIR:-${WIZ_STATE_DIR:-/var/lib/adminpanelaz}}/logs/backend.log"
-  # shellcheck source=scripts/backend-health-check.sh
-  source "$ROOT_DIR/scripts/backend-health-check.sh"
-  bhc_primary_scheme
-}
-
-backend_health_check_port() {
-  BHC_ENV_FILE="$ENV_FILE"
-  BHC_BACKEND_PORT="${BACKEND_PORT:-}"
-  BHC_WIZ_BACKEND_PORT="${WIZ_BACKEND_PORT:-}"
-  # shellcheck source=scripts/backend-health-check.sh
-  source "$ROOT_DIR/scripts/backend-health-check.sh"
-  bhc_resolve_port
-}
 
 init_backend_health_check() {
   BHC_ENV_FILE="$ENV_FILE"
@@ -838,26 +891,6 @@ init_backend_health_check() {
   source "$ROOT_DIR/scripts/backend-health-check.sh"
 }
 
-curl_backend_health_url() {
-  init_backend_health_check
-  bhc_curl_url "$1"
-}
-
-wait_for_backend_health() {
-  init_backend_health_check
-  local port attempts="${2:-90}"
-  port="$(bhc_resolve_port)"
-  [[ -n "${1:-}" ]] && port="$1"
-  bhc_wait_health "$port" "/api/health" "$attempts"
-}
-
-wait_for_backend_health_deep() {
-  init_backend_health_check
-  local port attempts="${2:-30}"
-  port="$(bhc_resolve_port)"
-  [[ -n "${1:-}" ]] && port="$1"
-  bhc_wait_health_deep "$port" "$attempts"
-}
 
 verify_controller_running() {
   if ! install_controller_selected; then
@@ -907,16 +940,7 @@ install_system_deps() {
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   # Backend: Ubuntu 24.04 → python3.12; Debian 13 → python3.13 (см. scripts/python-runtime.sh)
-  apt-get install -y \
-    python3-pip \
-    git \
-    curl \
-    build-essential \
-    ca-certificates \
-    pkg-config \
-    libffi-dev \
-    libssl-dev \
-    vnstat
+  apt-get install -y "${ADMINPANELAZ_APT_PACKAGES[@]}"
 
   if ! py_mm="$(ap_apt_install_python)"; then
     die "Не удалось установить Python из apt (нужен 3.12 на Ubuntu 24.04 или 3.13 на Debian 13: python3.XX{,-venv,-dev}). Либо задайте ADMINPANELAZ_PYTHON_BIN"
@@ -989,40 +1013,29 @@ env_escape_for_sed() {
   printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
 }
 
-env_set() {
-  local key="$1"
-  local value="$2"
+env_file_set() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
   local escaped
   escaped="$(env_escape_for_sed "$value")"
-  if grep -qE "^${key}=" "$ENV_FILE" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "$ENV_FILE"
+  if grep -qE "^${key}=" "$file" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${escaped}|" "$file"
   else
-    printf '%s=%s\n' "$key" "$value" >>"$ENV_FILE"
+    printf '%s=%s\n' "$key" "$value" >>"$file"
   fi
+}
+
+env_set() {
+  env_file_set "$ENV_FILE" "$1" "$2"
 }
 
 node_env_set() {
-  local key="$1"
-  local value="$2"
-  local escaped
-  escaped="$(env_escape_for_sed "$value")"
-  if grep -qE "^${key}=" "$NODE_ENV_FILE" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "$NODE_ENV_FILE"
-  else
-    printf '%s=%s\n' "$key" "$value" >>"$NODE_ENV_FILE"
-  fi
+  env_file_set "$NODE_ENV_FILE" "$1" "$2"
 }
 
 proxy_env_set() {
-  local key="$1"
-  local value="$2"
-  local escaped
-  escaped="$(env_escape_for_sed "$value")"
-  if grep -qE "^${key}=" "$PROXY_ENV_FILE" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "$PROXY_ENV_FILE"
-  else
-    printf '%s=%s\n' "$key" "$value" >>"$PROXY_ENV_FILE"
-  fi
+  env_file_set "$PROXY_ENV_FILE" "$1" "$2"
 }
 
 agent_env_value() {
@@ -1448,6 +1461,11 @@ setup_node_env() {
   for line in "${AGENT_PRESERVED_MTLS[@]}"; do
     node_env_set "${line%%=*}" "${line#*=}"
   done
+  local mtls_warning
+  mtls_warning="$(node_agent_mtls_warning "$NODE_ENV_FILE")"
+  if [[ -n "$mtls_warning" ]]; then
+    warn "$mtls_warning"
+  fi
 
   GENERATED_NODE_KEY="$api_key"
   export NODE_AGENT_API_KEY="$api_key"
@@ -1659,7 +1677,7 @@ start_daemon() {
   fi
   warn "--with-daemon устарел: используйте --with-systemd (systemctl start adminpanelaz)"
   setup_systemd
-  systemctl start adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz"
+  systemctl restart adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz"
 }
 
 ddns_config_quote() {
@@ -1955,7 +1973,7 @@ restart_services_after_nginx() {
   fi
   if [[ "$WITH_SYSTEMD" == true ]] || [[ "$WITH_DAEMON" == true ]]; then
     setup_systemd
-    systemctl restart adminpanelaz 2>/dev/null || true
+    systemctl restart adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz (проверьте: systemctl status adminpanelaz)"
   fi
 }
 
@@ -1973,7 +1991,6 @@ setup_firewall_if_selected() {
   local has_node=false
   local has_proxy=false
   local has_controller=false
-  local fw_backend_port="${WIZ_BACKEND_PORT:-8000}"
   local fw_https_port="${WIZ_HTTPS_PUBLIC_PORT:-443}"
   local fw_http_port="${WIZ_HTTP_ACME_PORT:-80}"
 
@@ -1992,12 +2009,10 @@ setup_firewall_if_selected() {
     has_nginx=true
     fw_https_port="${WIZ_BACKEND_PORT:-8000}"
     fw_http_port="0"
-    fw_backend_port="0"
   elif is_direct_public_http_mode; then
     has_nginx=true
     fw_https_port="${WIZ_BACKEND_PORT:-8000}"
     fw_http_port="0"
-    fw_backend_port="0"
   fi
 
   local panel_ip="${WIZ_NODE_AGENT_ALLOWED_IPS:-${WIZ_PROXY_AGENT_ALLOWED_IPS:-}}"
@@ -2059,7 +2074,19 @@ start_node_via_systemd() {
   fi
   warn "--with-daemon устарел: используйте --with-systemd (systemctl start adminpanelaz-node)"
   setup_node_agent_systemd
-  systemctl start adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
+  systemctl restart adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
+}
+
+setup_console_command() {
+  install_set_step "Команда adminpanelaz"
+  local link rc=0
+  link="$(console_command_path)"
+  console_command_link "$ROOT_DIR" || rc=$?
+  case "$rc" in
+    0) log "Консольное меню: sudo adminpanelaz" ;;
+    2) warn "$link уже есть и это не ссылка AdminPanelAZ — команда adminpanelaz не установлена. Меню: sudo $ROOT_DIR/scripts/adminpanel-menu.sh" ;;
+    *) warn "Не удалось создать $link. Меню: sudo $ROOT_DIR/scripts/adminpanel-menu.sh" ;;
+  esac
 }
 
 print_post_install() {
@@ -2080,6 +2107,9 @@ print_post_install() {
   echo
   ui_summary_title
   ui_summary_row "Каталог проекта" "$ROOT_DIR"
+  if [[ -L "$(console_command_path)" ]]; then
+    ui_summary_row "Консольное меню" "sudo adminpanelaz"
+  fi
 
   if install_controller_selected; then
     ui_separator
@@ -2307,6 +2337,9 @@ main() {
   parse_args "$@"
   validate_install_flags
   require_root "$@"
+  if [[ "$UPDATE_REQUESTED" == true ]]; then
+    run_update_action
+  fi
 
   if [[ "$ACTION" != "uninstall" && "$ACTION" != "purge-all" ]]; then
     install_set_step "Проверка reboot после обновлений"
@@ -2365,8 +2398,9 @@ run_install_flow() {
 
   if [[ "$WITH_SYSTEMD" == true ]]; then
     setup_systemd
-    if install_controller_selected; then
-      systemctl start adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz (проверьте: systemctl status adminpanelaz)"
+    # При публикации .env меняется позже — панель перезапускает restart_services_after_nginx.
+    if install_controller_selected && [[ "${WIZ_NGINX_MODE:-none}" == "none" ]]; then
+      systemctl restart adminpanelaz 2>/dev/null || warn "Не удалось запустить adminpanelaz (проверьте: systemctl status adminpanelaz)"
     fi
   elif [[ "$WITH_DAEMON" == true ]]; then
     install_set_step "Запуск daemon панели"
@@ -2382,7 +2416,7 @@ run_install_flow() {
   if install_node_selected; then
     if [[ "$WITH_SYSTEMD" == true ]]; then
       setup_node_agent_systemd
-      systemctl start adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
+      systemctl restart adminpanelaz-node 2>/dev/null || warn "Не удалось запустить adminpanelaz-node"
     elif [[ "$WITH_DAEMON" == true ]]; then
       install_set_step "Запуск daemon node agent"
       start_node_via_systemd "$GENERATED_NODE_KEY"
@@ -2392,7 +2426,7 @@ run_install_flow() {
   if install_proxy_selected; then
     if [[ "$WITH_SYSTEMD" == true ]] || [[ "$WITH_DAEMON" == true ]]; then
       setup_proxy_agent_systemd
-      systemctl start adminpanelaz-proxy 2>/dev/null || warn "Не удалось запустить adminpanelaz-proxy"
+      systemctl restart adminpanelaz-proxy 2>/dev/null || warn "Не удалось запустить adminpanelaz-proxy"
     else
       setup_proxy_agent_systemd
       warn "Unit установлен, но не запущен: sudo systemctl start adminpanelaz-proxy"
@@ -2404,6 +2438,7 @@ run_install_flow() {
     verify_controller_running
   fi
 
+  setup_console_command
   install_set_step "завершение"
   print_post_install "$GENERATED_NODE_KEY"
 }

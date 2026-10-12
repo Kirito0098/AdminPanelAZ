@@ -22,12 +22,6 @@ def _normalize_timezone_name(raw: str | None) -> str | None:
     return name
 
 
-def set_client_timezone_for_request(tz_name: str | None) -> None:
-    """Store timezone from the current request context (set by middleware or router)."""
-    global _request_timezone
-    _request_timezone = _normalize_timezone_name(tz_name)
-
-
 def get_client_timezone_from_request(request: Request | None = None) -> str | None:
     if request is not None:
         return _normalize_timezone_name(request.headers.get("X-Client-Timezone"))
@@ -92,12 +86,9 @@ def remember_client_timezone(
 
 
 def _timezone_suffix(tz: ZoneInfo, dt: datetime) -> str:
-    try:
-        abbrev = dt.strftime("%Z")
-        if abbrev and abbrev != "UTC" and not abbrev.startswith("+"):
-            return abbrev
-    except Exception:
-        pass
+    abbrev = dt.strftime("%Z")
+    if abbrev and abbrev != "UTC" and not abbrev.startswith("+"):
+        return abbrev
     offset = dt.utcoffset()
     if offset is None:
         return "UTC"

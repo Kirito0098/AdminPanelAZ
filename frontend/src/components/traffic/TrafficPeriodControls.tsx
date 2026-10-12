@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 /** Widest preset set; overview omits `1h` via default `presets`. */
 export type TrafficPeriodPreset = '1h' | '1d' | '7d' | '30d'
 
-export const OVERVIEW_PERIOD_PRESETS: { id: TrafficPeriodPreset; label: string }[] = [
+const OVERVIEW_PERIOD_PRESETS: { id: TrafficPeriodPreset; label: string }[] = [
   { id: '1d', label: '1д' },
   { id: '7d', label: '7д' },
   { id: '30d', label: '30д' },

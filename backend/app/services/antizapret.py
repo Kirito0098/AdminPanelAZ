@@ -1,4 +1,3 @@
-import csv
 import io
 import os
 import re
@@ -727,45 +726,6 @@ class AntiZapretService:
         clients, data_source = openvpn_management_service.collect_clients(self.openvpn_logs)
         return clients, data_source
 
-    def parse_openvpn_status_legacy(self) -> list[OpenVpnClient]:
-        """Parse OpenVPN clients from *-status.log files (legacy fallback)."""
-        clients: list[OpenVpnClient] = []
-        if not self.openvpn_logs.exists():
-            return clients
-        for log_file in sorted(self.openvpn_logs.glob("*-status.log")):
-            try:
-                content = log_file.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                continue
-            reader = csv.reader(io.StringIO(content))
-            in_client_list = False
-            for row in reader:
-                if not row:
-                    continue
-                if row[0] == "HEADER" and len(row) > 1 and row[1] == "CLIENT_LIST":
-                    in_client_list = True
-                    continue
-                if row[0] == "HEADER":
-                    in_client_list = False
-                    continue
-                if row[0] == "END":
-                    in_client_list = False
-                    continue
-                if in_client_list and row[0] == "CLIENT_LIST" and len(row) >= 9:
-                    try:
-                        clients.append(
-                            OpenVpnClient(
-                                common_name=row[1],
-                                real_address=row[2],
-                                virtual_address=row[3],
-                                bytes_received=int(row[6] or 0),
-                                bytes_sent=int(row[7] or 0),
-                                connected_since=row[8],
-                            )
-                        )
-                    except (ValueError, IndexError):
-                        continue
-        return clients
 
     def parse_wireguard_status(self) -> list[WireGuardPeer]:
         peers: list[WireGuardPeer] = []

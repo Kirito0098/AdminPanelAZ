@@ -65,7 +65,7 @@ type HaSetupPayload = {
 export type HaSyncResultVariant = 'success' | 'warning' | 'error'
 export type HaSyncItemStatus = 'success' | 'warning' | 'error' | 'skipped'
 
-export interface HaSyncResultItem {
+interface HaSyncResultItem {
   nodeName: string
   text: string
   explanation?: string

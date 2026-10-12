@@ -193,7 +193,7 @@ function OpenVpnMultihomeToggle({
   )
 }
 
-export type OpenVpnPanelTabProps = {
+type OpenVpnPanelTabProps = {
   activeNodeId: number | null
   nodeName?: string | null
   disabled?: boolean

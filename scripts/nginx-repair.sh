@@ -37,14 +37,6 @@ usage() {
 EOF
 }
 
-is_non_interactive() {
-  [[ "$NON_INTERACTIVE" == "true" || "$NON_INTERACTIVE" == "1" ]] || [[ ! -t 0 ]]
-}
-
-require_root() {
-  [[ "$(id -u)" -eq 0 ]] || nginx_die "Запустите от root: sudo $0"
-}
-
 validate_domain() {
   local value="$1"
   [[ "$value" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] || nginx_die "Неверный формат домена: $value"
@@ -55,12 +47,6 @@ warn_if_domain_is_az_vpn_host() {
   if ! msg="$(nginx_az_vpn_host_conflict_message "${1:-}")"; then
     nginx_warn "$msg"
   fi
-}
-
-validate_port() {
-  local value="$1"
-  local label="$2"
-  [[ "$value" =~ ^[0-9]+$ ]] && ((value >= 1 && value <= 65535)) || nginx_die "${label}: некорректный порт (1-65535)"
 }
 
 restart_panel_if_needed() {
@@ -92,9 +78,9 @@ load_panel_publish_settings() {
     DOMAIN="$(nginx_env_get DOMAIN)"
   fi
 
-  validate_port "$BACKEND_PORT" "BACKEND_PORT"
-  validate_port "$HTTPS_PUBLIC_PORT" "HTTPS_PUBLIC_PORT"
-  validate_port "$HTTP_ACME_PORT" "HTTP_ACME_PORT"
+  nginx_validate_port "$BACKEND_PORT" "BACKEND_PORT"
+  nginx_validate_port "$HTTPS_PUBLIC_PORT" "HTTPS_PUBLIC_PORT"
+  nginx_validate_port "$HTTP_ACME_PORT" "HTTP_ACME_PORT"
   [[ "$HTTPS_PUBLIC_PORT" != "$BACKEND_PORT" ]] || nginx_die "HTTPS_PUBLIC_PORT совпадает с BACKEND_PORT"
 }
 
@@ -105,7 +91,7 @@ prompt_domain_if_needed() {
     warn_if_domain_is_az_vpn_host "$DOMAIN"
     return 0
   fi
-  if is_non_interactive; then
+  if nginx_is_non_interactive; then
     nginx_die "DOMAIN не задан в ${ENV_FILE}. Укажите домен или запустите без --non-interactive."
   fi
   while true; do
@@ -206,7 +192,7 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-require_root
+nginx_require_root
 [[ -f "$ENV_FILE" ]] || nginx_die "Не найден файл настроек: ${ENV_FILE}"
 
 nginx_log "Восстановление nginx для AdminPanelAZ"

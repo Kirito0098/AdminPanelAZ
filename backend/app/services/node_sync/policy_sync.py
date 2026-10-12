@@ -18,7 +18,7 @@ from app.models import (
     VpnType,
     WgAccessPolicy,
 )
-from app.services.access_policy import NODE_DEFAULT_POLICY_CLIENT, AccessPolicyService, is_node_default_policy_client
+from app.services.access_policy import AccessPolicyService, is_node_default_policy_client
 from app.services.access_until import set_access_until as set_policy_access_until
 from app.services.node_manager import get_adapter_for_node, node_metadata_dict
 from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes, is_auto_sync_enabled
@@ -261,63 +261,6 @@ def maybe_replicate_policy_op(
     return replicate_policy_op(db, group, primary_config, op, **kwargs)
 
 
-def replicate_node_default_policy(
-    db: Session,
-    group: NodeSyncGroup,
-    primary_node_id: int,
-) -> dict[str, Any]:
-    """Copy __node_default__ policy rows from primary to all HA replicas."""
-    if not is_auto_sync_enabled(group):
-        return {"applied": [], "errors": [], "skipped": True}
-    if not get_settings().node_sync_auto_replicate_policies:
-        return {"applied": [], "errors": [], "skipped": True}
-
-    primary_node = db.get(Node, primary_node_id)
-    if primary_node is None:
-        raise ValueError(f"Primary node {primary_node_id} not found")
-
-    result = ReplicateResult(operation=ReplicateOperation.POLICY_COPY_ALL)
-
-    for replica_node in get_replica_nodes(db, group):
-        try:
-            copy_single_client_policy(
-                db,
-                primary_node,
-                replica_node,
-                NODE_DEFAULT_POLICY_CLIENT,
-                vpn_type=VpnType.openvpn,
-            )
-            copy_single_client_policy(
-                db,
-                primary_node,
-                replica_node,
-                NODE_DEFAULT_POLICY_CLIENT,
-                vpn_type=VpnType.wireguard,
-            )
-        except Exception as exc:
-            logger.warning(
-                "HA node-default sync failed on replica %s: %s",
-                replica_node.name,
-                exc,
-            )
-            result.errors.append(
-                {"node_id": replica_node.id, "node_name": replica_node.name, "error": str(exc)}
-            )
-            continue
-
-        result.successes.append({"node_id": replica_node.id})
-
-    finalize_replicate_outcome(
-        db,
-        group,
-        result,
-        payload={"node_id": primary_node_id},
-        set_synced_on_success=True,
-        audit_on_partial_failure=True,
-    )
-    return {"applied": result.successes, "errors": result.errors, "skipped": False}
-
-
 def heal_policy_drift(db: Session, group: NodeSyncGroup) -> dict[str, Any]:
     """Incremental reconcile heal: copy all access policies from primary to replicas."""
     if not is_auto_sync_enabled(group):
@@ -376,15 +319,3 @@ def heal_policy_drift(db: Session, group: NodeSyncGroup) -> dict[str, Any]:
         "errors": result.errors,
         "applied": result.successes,
     }
-
-
-def maybe_replicate_node_default_policy(
-    db: Session,
-    *,
-    node_id: int,
-) -> dict[str, Any] | None:
-    """Replicate node default policy when node_id is primary in an auto-sync HA group."""
-    group = find_sync_group_for_primary(db, node_id)
-    if not group or not is_auto_sync_enabled(group):
-        return None
-    return replicate_node_default_policy(db, group, node_id)

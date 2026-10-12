@@ -1,8 +1,5 @@
-import {
-  API_BASE,
-  apiFetch,
-  getToken,
-} from './http'
+import { apiFetch } from './http'
+import { openTicketEventSource, type StreamHandle } from './streamTicket'
 import type {
   MonitoringOverview,
   NocIncidentsResponse,
@@ -11,7 +8,6 @@ import type {
   ResourceHistory,
   PanelResourceHistory,
   PanelResourceCurrent,
-  DashboardSummary,
 } from '../types'
 
 export async function getMonitoring(
@@ -41,39 +37,40 @@ export async function getGeoRoutingHint(clientIp?: string) {
   return apiFetch<GeoRoutingHint>(`/nodes/geo-routing-hint${query}`)
 }
 
+const MONITORING_RECONNECT_MS = 3000
+
 export function openMonitoringStream(
   onData: (data: MonitoringOverview) => void,
   onError?: (message: string) => void,
   scope: 'node' | 'all' = 'node',
   haMode: 'dedupe' | 'raw' = 'dedupe',
-): EventSource | null {
-  const token = getToken()
-  if (!token) return null
-  const params = new URLSearchParams({
-    token,
-    scope,
-    ha_mode: haMode,
-  })
-  const url = `${API_BASE}/monitoring/stream?${params}`
-  const source = new EventSource(url)
-  source.onmessage = (event) => {
-    try {
-      onData(JSON.parse(event.data) as MonitoringOverview)
-    } catch {
-      onError?.('Ошибка разбора потока мониторинга')
-    }
-  }
-  source.addEventListener('error', (event) => {
-    if (event instanceof MessageEvent && event.data) {
-      try {
-        const payload = JSON.parse(event.data) as { detail?: string }
-        onError?.(payload.detail || 'Ошибка потока мониторинга')
-      } catch {
-        onError?.('Ошибка потока мониторинга')
+): StreamHandle {
+  return openTicketEventSource({
+    stream: 'monitoring',
+    path: '/monitoring/stream',
+    params: { scope, ha_mode: haMode },
+    reconnectDelayMs: MONITORING_RECONNECT_MS,
+    onError,
+    attach: (source) => {
+      source.onmessage = (event) => {
+        try {
+          onData(JSON.parse(event.data) as MonitoringOverview)
+        } catch {
+          onError?.('Ошибка разбора потока мониторинга')
+        }
       }
-    }
+      source.addEventListener('error', (event) => {
+        if (event instanceof MessageEvent && event.data) {
+          try {
+            const payload = JSON.parse(event.data) as { detail?: string }
+            onError?.(payload.detail || 'Ошибка потока мониторинга')
+          } catch {
+            onError?.('Ошибка потока мониторинга')
+          }
+        }
+      })
+    },
   })
-  return source
 }
 
 export async function getResourceHistory(period: '1d' | '7d' | '30d' = '1d') {
@@ -88,8 +85,4 @@ export async function getPanelResourceHistory(period: '1d' | '7d' | '30d' = '1d'
 
 export async function getPanelResourceCurrent() {
   return apiFetch<PanelResourceCurrent>('/monitoring/panel-resource-current')
-}
-
-export async function getDashboardSummary() {
-  return apiFetch<DashboardSummary>('/monitoring/summary')
 }

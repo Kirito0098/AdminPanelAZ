@@ -9,12 +9,13 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from app.models import Node, NodeStatus, NodeSyncGroup
+from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus
 from app.services.node_adapter import NodeAdapter
 from app.services.node_manager import check_node_health, get_adapter_for_node, update_node_from_health
 from app.services.node_sync.fingerprints import CONFIG_FP_PREFIX
+from app.services.node_sync.group_status import group_is_pending
 from app.services.node_sync.groups import optional_wireguard_domain, parse_replica_node_ids
-from app.services.node_sync.vpn_state_sync import _error_detail
+from app.services.node_sync.vpn_state_sync import WIREGUARD_INTERFACES, _error_detail
 from app.services.openvpn_pki import profile_issues_payload, validate_all_openvpn_profiles
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,34 @@ def _client_set_diff(primary: set[str], replica: set[str]) -> dict[str, list[str
     if not only_primary and not only_replica:
         return {}
     return {"only_primary": only_primary, "only_replica": only_replica}
+
+
+def _live_wireguard_peers(adapter: NodeAdapter) -> dict[tuple[str, str], str]:
+    peers: dict[tuple[str, str], str] = {}
+    for peer in adapter.parse_wireguard_status():
+        if peer.interface not in WIREGUARD_INTERFACES:
+            continue
+        peers[(peer.interface, peer.public_key)] = f"{peer.interface}: {peer.client_name or peer.public_key[:12]}"
+    return peers
+
+
+def _live_peer_diff(
+    primary: dict[tuple[str, str], str],
+    replica: dict[tuple[str, str], str],
+) -> dict[str, list[str]]:
+    only_primary = sorted(primary[key] for key in primary.keys() - replica.keys())
+    only_replica = sorted(replica[key] for key in replica.keys() - primary.keys())
+    if not only_primary and not only_replica:
+        return {}
+    return {"only_primary": only_primary, "only_replica": only_replica}
+
+
+def _awg2_clients(adapter: NodeAdapter) -> set[str] | None:
+    """None when AZ-AWG2 is not installed on the node."""
+    health = adapter.get_awg2_health()
+    if not isinstance(health, dict) or health.get("installed") is not True:
+        return None
+    return set(adapter.list_amneziawg2_clients())
 
 
 def _carry_auto_heal_failures(group: NodeSyncGroup, result: dict[str, Any]) -> None:
@@ -70,6 +99,7 @@ def _enrich_config_fingerprints(fingerprints: dict[str, str], adapter: NodeAdapt
     try:
         file_hashes = adapter.get_config_file_fingerprints()
     except Exception:
+        logger.debug("verify: config file fingerprints unavailable", exc_info=True)
         return fingerprints
     if not file_hashes:
         return fingerprints
@@ -198,6 +228,12 @@ def verify_sync_group(
     primary_adapter = get_adapter_for_node(primary_node)
     primary_ovpn = set(primary_adapter.list_openvpn_clients())
     primary_wg = set(primary_adapter.list_wireguard_clients())
+    primary_peers = _live_wireguard_peers(primary_adapter)
+    try:
+        primary_awg2 = _awg2_clients(primary_adapter)
+    except Exception as exc:
+        logger.warning("Verify: AWG2 state on primary unavailable: %s", exc)
+        primary_awg2 = None
     primary_fp = _enrich_config_fingerprints(
         primary_adapter.get_antizapret_fingerprints(),
         primary_adapter,
@@ -238,6 +274,8 @@ def verify_sync_group(
             adapter = get_adapter_for_node(node)
             replica_ovpn = set(adapter.list_openvpn_clients())
             replica_wg = set(adapter.list_wireguard_clients())
+            replica_peers = _live_wireguard_peers(adapter)
+            replica_awg2 = (_awg2_clients(adapter) or set()) if primary_awg2 is not None else set()
             replica_fp = _enrich_config_fingerprints(
                 adapter.get_antizapret_fingerprints(),
                 adapter,
@@ -266,6 +304,17 @@ def verify_sync_group(
         if wg_diff:
             ready = False
             mismatches.append({"kind": "wireguard_clients", **wg_diff})
+
+        peer_diff = _live_peer_diff(primary_peers, replica_peers)
+        if peer_diff:
+            ready = False
+            mismatches.append({"kind": "wireguard_peers", **peer_diff})
+
+        if primary_awg2 is not None:
+            awg2_diff = _client_set_diff(primary_awg2, replica_awg2)
+            if awg2_diff:
+                ready = False
+                mismatches.append({"kind": "awg2_clients", **awg2_diff})
 
         fp_mismatches = _fingerprint_mismatches(primary_fp, replica_fp)
         if fp_mismatches:
@@ -325,14 +374,12 @@ def verify_sync_group(
 
     group.last_verify_at = datetime.utcnow()
     group.last_verify_result = json.dumps(result, ensure_ascii=False)
+    if ready and group.sync_status == SyncStatus.drift and not group_is_pending(db, group):
+        group.sync_status = SyncStatus.synced
+        group.last_sync_error = None
     db.commit()
 
     progress(100, "Verify завершён")
     return result
 
 
-def verify_sync_group_by_id(db: Session, group_id: int) -> dict[str, Any]:
-    group = db.get(NodeSyncGroup, group_id)
-    if not group:
-        raise ValueError(f"Sync group {group_id} not found")
-    return verify_sync_group(db, group)

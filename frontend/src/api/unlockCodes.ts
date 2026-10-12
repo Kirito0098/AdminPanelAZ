@@ -7,7 +7,7 @@ import type {
 
 export type UnlockCodeProtocol = 'openvpn' | 'wireguard' | 'amneziawg2'
 
-export interface UnlockCodeCreateInput {
+interface UnlockCodeCreateInput {
   grant_days: number
   protocols: UnlockCodeProtocol[]
   mode: 'single' | 'multi'
@@ -16,7 +16,7 @@ export interface UnlockCodeCreateInput {
   allowed_client_names?: string[]
 }
 
-export type UnlockCodeCreateResponse = UnlockCodeRecord
+type UnlockCodeCreateResponse = UnlockCodeRecord
 
 export async function setClientAccessUntil(
   protocol: 'openvpn' | 'wireguard' | 'amneziawg2',

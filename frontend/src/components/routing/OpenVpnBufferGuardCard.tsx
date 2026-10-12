@@ -66,7 +66,7 @@ const WATCH_UNIT_LABELS: Record<string, string> = {
 /** Recommended thresholds are calibrated for this window only (not scaled). */
 const RECOMMENDED_THRESHOLD_WINDOW_SECONDS = 60
 
-export type OpenVpnBufferGuardCardProps = {
+type OpenVpnBufferGuardCardProps = {
   activeNodeId: number | null
   nodeName?: string | null
   disabled?: boolean

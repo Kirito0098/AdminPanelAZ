@@ -181,7 +181,7 @@ def _deploy_target_label(payload: CidrDbDeployRequest) -> str:
 
 
 def _parse_refresh_time(value: str) -> tuple[int, int]:
-    match = _TIME_RE.match((value or "").strip())
+    match = _TIME_RE.match(value.strip())
     if not match:
         raise HTTPException(status_code=400, detail="Некорректное время (ожидается ЧЧ:ММ)")
     return int(match.group(1)), int(match.group(2))
@@ -471,7 +471,7 @@ def cidr_db_generate(
                     adapter,
                     sync_after=not payload.deploy_after,
                     apply_after=payload.apply_after,
-                    ensure_openvpn_multihome=bool(getattr(node, "openvpn_multihome", False)),
+                    ensure_openvpn_multihome=node.openvpn_multihome,
                 )
                 result.update(apply_result)
         finally:

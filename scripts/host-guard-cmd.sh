@@ -45,15 +45,22 @@ case "$name" in
     esac
     ;;
   nginx)
-    case "${1:-}" in
-      -t | -T | -v | -V | -h) allowed=true ;;
-    esac
-    # Свой экземпляр на временном конфиге (-c вне /etc/nginx) хост не трогает.
+    conf=""
     for ((i = 0; i < ${#argv[@]} - 1; i++)); do
-      if [[ "${argv[i]}" == "-c" && "${argv[i + 1]}" != /etc/nginx/* ]]; then
-        allowed=true
-      fi
+      [[ "${argv[i]}" == "-c" ]] && conf="${argv[i + 1]}"
     done
+    if [[ -z "$conf" || "$conf" == /etc/nginx/* ]]; then
+      case "${1:-}" in
+        -t | -T | -v | -V | -h) allowed=true ;;
+      esac
+    else
+      # Свой экземпляр на временном конфиге хост не трогает, только если все temp-каталоги свои: иначе nginx
+      # от root (даже с -t) отдаёт /var/lib/nginx/* пользователю nobody, и проксирование у www-data ломается.
+      allowed=true
+      for kind in client_body proxy fastcgi uwsgi scgi; do
+        grep -Eqs "(^|[[:space:];{])${kind}_temp_path[[:space:]]" "$conf" || allowed=false
+      done
+    fi
     ;;
   iptables | ip6tables)
     if isolated_netns; then

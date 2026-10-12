@@ -18,10 +18,6 @@ def register_notify_backend(name: str, handler) -> None:
     hook_registry.register(NOTIFY_SEND_HOOK, name, handler)
 
 
-def list_notify_backends() -> list[str]:
-    return hook_registry.list_handlers(NOTIFY_SEND_HOOK)
-
-
 def dispatch_admin_notify(
     db: Session,
     *,

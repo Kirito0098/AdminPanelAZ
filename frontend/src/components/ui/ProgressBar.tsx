@@ -17,7 +17,7 @@ function IndeterminateBar({ className, size = 'md' }: { className?: string; size
   )
 }
 
-export interface AppProgressProps {
+interface AppProgressProps {
   /** null or undefined = indeterminate */
   value?: number | null
   label?: string
@@ -84,7 +84,7 @@ export function GlobalProgressBar({ active }: { active: boolean }) {
   )
 }
 
-export interface InlineProgressBarProps {
+interface InlineProgressBarProps {
   active: boolean
   label?: string
   value?: number | null

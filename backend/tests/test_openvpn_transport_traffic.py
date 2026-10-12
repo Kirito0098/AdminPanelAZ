@@ -6,7 +6,6 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from app.constants.public_routes import DEFAULT_OPENVPN_GROUP
 from app.database import Base
 from app.models import UserTrafficSample, UserTrafficStatProtocol
 from app.services.openvpn_group import (
@@ -14,7 +13,6 @@ from app.services.openvpn_group import (
     OPENVPN_PROTOCOL_TCP,
     OPENVPN_PROTOCOL_UDP,
     WIREGUARD_PROTOCOL,
-    protocol_types_for_openvpn_group,
 )
 from app.services.traffic.collector import protocol_type_from_profile
 from app.services.traffic_limit import get_client_consumed_traffic_bytes
@@ -51,21 +49,6 @@ def db():
 )
 def test_protocol_type_from_profile(profile, expected):
     assert protocol_type_from_profile(profile) == expected
-
-
-@pytest.mark.parametrize(
-    ("group", "expected"),
-    [
-        ("GROUP_UDP", frozenset({"openvpn-udp"})),
-        ("GROUP_TCP", frozenset({"openvpn-tcp"})),
-        (DEFAULT_OPENVPN_GROUP, frozenset({"openvpn", "openvpn-udp", "openvpn-tcp"})),
-        ("GROUP_UDP\\TCP", frozenset({"openvpn", "openvpn-udp", "openvpn-tcp"})),
-        ("unknown", frozenset({"openvpn", "openvpn-udp", "openvpn-tcp"})),
-        (None, frozenset({"openvpn", "openvpn-udp", "openvpn-tcp"})),
-    ],
-)
-def test_protocol_types_for_openvpn_group(group, expected):
-    assert protocol_types_for_openvpn_group(group) == expected
 
 
 def _add_stat(db, *, common_name: str, protocol_type: str, received: int, sent: int = 0) -> None:

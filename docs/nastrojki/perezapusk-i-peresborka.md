@@ -40,7 +40,7 @@
 sudo systemctl restart adminpanelaz
 ```
 
-или `sudo ./scripts/adminpanel-menu.sh --restart` — меню дополнительно предупредит, если интерфейс собран до последнего обновления кода.
+или `sudo adminpanelaz --restart` — меню дополнительно предупредит, если интерфейс собран до последнего обновления кода.
 
 ---
 

@@ -1,22 +1,16 @@
-import { getWebSessionId } from '@/lib/webSession'
-import { clearAccessToken } from '@/lib/accessToken'
 import {
-  API_BASE,
   apiFetch,
-  getToken,
-  isNodeAgentAuthFailureDetail,
-  parseApiError,
-  refreshAccessToken,
+  apiFetchResponse,
 } from './http'
 import type {
   VpnConfig,
   SelfServiceQuota,
+  SelfServiceLimits,
   EffectiveVisibleVpnProfilesResponse,
   VisibleVpnProfilesDefaultResponse,
   VisibleVpnProfilesPolicy,
   VpnType,
   ConfigTag,
-  ClientTemplate,
   ConfigCsvImportResponse,
   OneTimeLinkResponse,
 } from '../types'
@@ -51,6 +45,17 @@ export async function setUserVpnVisibilityDefault(policy: VisibleVpnProfilesPoli
       body: JSON.stringify({ policy }),
     },
   )
+}
+
+export async function getSelfServiceLimits() {
+  return apiFetch<SelfServiceLimits>('/settings/self-service')
+}
+
+export async function updateSelfServiceLimits(data: Partial<SelfServiceLimits>) {
+  return apiFetch<SelfServiceLimits>('/settings/self-service', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
 }
 
 export async function getConfigProfileFiles(ids?: number[]) {
@@ -114,20 +119,6 @@ export async function setConfigTags(configId: number, tagIds: number[]) {
   })
 }
 
-export async function getClientTemplates() {
-  return apiFetch<ClientTemplate[]>('/client-templates')
-}
-
-export async function applyClientTemplate(
-  templateId: number,
-  data: { client_name: string; owner_id?: number },
-) {
-  return apiFetch<VpnConfig>(`/client-templates/${templateId}/apply`, {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
-}
-
 export async function bulkConfigOp(data: {
   operation: 'block_temp' | 'block_perm' | 'unblock' | 'delete' | 'renew_cert' | 'change_owner'
   config_ids?: number[]
@@ -143,17 +134,11 @@ export async function bulkConfigOp(data: {
 }
 
 export function downloadProfile(configId: number, path: string) {
-  const token = getToken()
-  const url = `${API_BASE}/configs/${configId}/download?path=${encodeURIComponent(path)}`
-  return fetch(url, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  return apiFetchResponse(`/configs/${configId}/download?path=${encodeURIComponent(path)}`)
 }
 
 export function downloadConfigsExport() {
-  const token = getToken()
-  return fetch(`${API_BASE}/configs/export`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    credentials: 'include',
-  })
+  return apiFetchResponse('/configs/export')
 }
 
 export async function importConfigsCsv(file: File) {
@@ -175,43 +160,15 @@ export async function createOneTimeLink(configId: number, path: string) {
 
 export type QrContentMode = 'profile' | 'download-link'
 
-export type QrBlobResult = {
+type QrBlobResult = {
   blob: Blob
   contentMode: QrContentMode
   downloadUrl?: string
 }
 
-export async function fetchQrBlob(
-  configId: number,
-  path: string,
-  retry = true,
-): Promise<QrBlobResult> {
-  const headers = new Headers()
-  const token = getToken()
-  if (token) headers.set('Authorization', `Bearer ${token}`)
-  const sessionId = getWebSessionId()
-  if (sessionId) headers.set('X-Web-Session-Id', sessionId)
-
+export async function fetchQrBlob(configId: number, path: string): Promise<QrBlobResult> {
   const params = new URLSearchParams({ path })
-  const response = await fetch(`${API_BASE}/configs/${configId}/qr?${params}`, {
-    headers,
-    credentials: 'include',
-  })
-  if (response.status === 401 && retry) {
-    const peek = await response.clone().json().catch(() => null)
-    const detail = peek && typeof peek === 'object' ? (peek as { detail?: unknown }).detail : undefined
-    if (isNodeAgentAuthFailureDetail(detail)) {
-      throw await parseApiError(response, 'Ошибка генерации QR')
-    }
-    const newToken = await refreshAccessToken()
-    if (newToken) {
-      return fetchQrBlob(configId, path, false)
-    }
-    clearAccessToken()
-  }
-  if (!response.ok) {
-    throw await parseApiError(response, 'Ошибка генерации QR')
-  }
+  const response = await apiFetchResponse(`/configs/${configId}/qr?${params}`)
   const contentMode: QrContentMode =
     response.headers.get('X-Qr-Content') === 'download-link' ? 'download-link' : 'profile'
   const downloadUrl = response.headers.get('X-Qr-Download-Url') ?? undefined

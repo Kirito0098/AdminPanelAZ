@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import logging
 import re
 import secrets
 import sqlite3
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal
+from typing import Literal, NamedTuple
 from urllib.parse import quote, urlencode
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -20,18 +22,21 @@ from app.models import (
     AppSetting,
     ClientPortalToken,
     Node,
+    NodeStatus,
     OpenVpnAccessPolicy,
     User,
     UserPortalToken,
     UserTrafficStatProtocol,
     VpnConfig,
-    VpnType,
     WgAccessPolicy,
 )
-from app.services.node_manager import get_adapter_for_node, get_active_node
+from app.services.config_access import can_mutate_config
+from app.services.node_adapter import node_request_timeout_cap
+from app.services.node_manager import get_active_node, get_adapter_for_node
 from app.services.node_sync.groups import find_sync_group_containing_node
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
+from app.services.ssh_tunnel_pool import SshTunnelError
 from app.services.vpn_profile_visibility import (
     feature_flags_from_service,
     get_default_visible_vpn_profiles,
@@ -40,6 +45,10 @@ from app.services.vpn_profile_visibility import (
     resolve_effective_visible_vpn_profiles,
 )
 
+logger = logging.getLogger(__name__)
+
+# Same as the node health check: a hung node must not hold the portal for HTTP_TIMEOUT.
+PORTAL_NODE_TIMEOUT_SECONDS = 10.0
 
 _HOSTNAME_RE = re.compile(
     r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$"
@@ -464,6 +473,82 @@ def revoke_portal_token(db: Session, *, client_name: str) -> None:
     db.commit()
 
 
+def cleanup_deleted_client_records(db: Session, config: VpnConfig) -> None:
+    """Run after the VpnConfig row is deleted, before commit; the caller commits."""
+    from app.services.access_policy import delete_client_access_policies
+
+    _revoke_orphaned_client_portal_links(db, config)
+    delete_client_access_policies(db, config)
+
+
+def _revoke_orphaned_client_portal_links(db: Session, config: VpnConfig) -> None:
+    node_id = config.node_id
+    client_name = config.client_name
+    config_id = config.id
+    db.flush()
+    remaining = (
+        db.query(VpnConfig.id)
+        .filter(
+            VpnConfig.node_id == node_id,
+            VpnConfig.client_name == client_name,
+            VpnConfig.ha_primary_config_id.is_(None),
+            VpnConfig.id != config_id,
+        )
+        .first()
+    )
+    if remaining is not None:
+        return
+    revoke_client_portal_links(db, node_id=node_id, client_name=client_name)
+
+
+def revoke_creator_portal_links(db: Session, creator_id: int, *, keep_accessible: bool = True) -> int:
+    """Revoke active client links the user created and may no longer manage; the caller commits."""
+    rows = (
+        db.query(ClientPortalToken)
+        .filter(
+            ClientPortalToken.created_by_user_id == creator_id,
+            ClientPortalToken.revoked_at.is_(None),
+        )
+        .all()
+    )
+    creator = db.get(User, creator_id) if keep_accessible else None
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    revoked = 0
+    for row in rows:
+        if creator is not None and _creator_still_manages(db, creator, row):
+            continue
+        row.revoked_at = now
+        revoked += 1
+    return revoked
+
+
+def _creator_still_manages(db: Session, creator: User, row: ClientPortalToken) -> bool:
+    configs = (
+        db.query(VpnConfig)
+        .filter(
+            VpnConfig.node_id == row.node_id,
+            VpnConfig.client_name == row.client_name,
+            VpnConfig.ha_primary_config_id.is_(None),
+        )
+        .all()
+    )
+    return any(can_mutate_config(creator, config) for config in configs)
+
+
+def revoke_client_portal_links(db: Session, *, node_id: int, client_name: str) -> int:
+    """Revoke every active link of the client, whoever created it; the caller commits."""
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    return (
+        db.query(ClientPortalToken)
+        .filter(
+            ClientPortalToken.node_id == node_id,
+            ClientPortalToken.client_name == client_name,
+            ClientPortalToken.revoked_at.is_(None),
+        )
+        .update({ClientPortalToken.revoked_at: now}, synchronize_session=False)
+    )
+
+
 def get_or_create_user_portal_token(
     db: Session,
     *,
@@ -632,10 +717,7 @@ def _portal_visibility_policy(db: Session, owner: User | None) -> dict:
 
 
 def _owner_for_config(db: Session, config: VpnConfig) -> User | None:
-    owner_id = getattr(config, "owner_id", None)
-    if not isinstance(owner_id, int):
-        return None
-    return db.get(User, owner_id)
+    return db.get(User, config.owner_id)
 
 
 def _list_files_for_configs(db: Session, configs: list[VpnConfig]) -> list[dict]:
@@ -710,11 +792,11 @@ def _format_bytes_label(n: int) -> str:
 def _policy_blocked(policy) -> bool:
     if policy is None:
         return False
-    if bool(getattr(policy, "is_permanent_blocked", False)):
+    if policy.is_permanent_blocked:
         return True
-    if bool(getattr(policy, "is_temp_blocked", False)):
+    if policy.is_temp_blocked:
         return True
-    until = getattr(policy, "block_until", None)
+    until = policy.block_until
     if until is None:
         return False
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -791,8 +873,8 @@ def build_portal_status(db: Session, *, node_id: int, client_name: str, configs:
         # Prefer actual access deadlines over certificate notAfter.
         expiry_candidates: list[datetime | None] = []
         for c in configs:
-            expiry_candidates.append(getattr(c, "expires_at", None))
-            expiry_candidates.append(getattr(c, "cert_expires_at", None))
+            expiry_candidates.append(c.expires_at)
+            expiry_candidates.append(c.cert_expires_at)
         expires_at = _earliest_datetime(expiry_candidates)
 
     expired = bool(expires_at and expires_at <= now)
@@ -819,11 +901,7 @@ def build_portal_status(db: Session, *, node_id: int, client_name: str, configs:
     )
     used_bytes = sum(int(r.total_received or 0) + int(r.total_sent or 0) for r in stats)
 
-    limit_candidates = [
-        int(p.traffic_limit_bytes)
-        for p in policies
-        if getattr(p, "traffic_limit_bytes", None) is not None and int(p.traffic_limit_bytes or 0) > 0
-    ]
+    limit_candidates = [p.traffic_limit_bytes for p in policies if (p.traffic_limit_bytes or 0) > 0]
     limit_bytes = min(limit_candidates) if limit_candidates else None
 
     if limit_bytes is None:
@@ -843,10 +921,7 @@ def build_portal_status(db: Session, *, node_id: int, client_name: str, configs:
 
 
 def _portal_brand_title(db: Session) -> str:
-    brand = _setting_value(db, "app_name") or "VPN"
-    if brand.lower().startswith("adminpanel"):
-        brand = "VPN"
-    return brand
+    return _setting_value(db, "portal_title") or "Подключение"
 
 
 def _portal_download_url(
@@ -905,7 +980,7 @@ def _parse_portal_status_datetime(value: str | None) -> datetime | None:
 
 
 def _apply_user_subscription_status(status_payload: dict, user: User) -> dict:
-    deadline = getattr(user, "access_until", None)
+    deadline = user.access_until
     if deadline is None:
         return status_payload
     updated = dict(status_payload)
@@ -967,13 +1042,14 @@ def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     from app.services.feature_guards import get_feature_service
 
-    entry = _build_client_portal_entry(
-        db,
-        token=token_row.token,
-        node_id=token_row.node_id,
-        client_name=token_row.client_name,
-        base=base,
-    )
+    with node_request_timeout_cap(PORTAL_NODE_TIMEOUT_SECONDS):
+        entry = _build_client_portal_entry(
+            db,
+            token=token_row.token,
+            node_id=token_row.node_id,
+            client_name=token_row.client_name,
+            base=base,
+        )
     return {
         "kind": "client",
         "node_id": token_row.node_id,
@@ -986,6 +1062,26 @@ def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
     }
 
 
+def portal_node_label(node: Node) -> str:
+    label = (node.portal_label or "").strip()
+    return label or node.name
+
+
+class PortalNodeInfo(NamedTuple):
+    label: str
+    offline: bool
+
+
+_EXPECTED_PORTAL_NODE_ERRORS = (HTTPException, httpx.HTTPError, OSError, SshTunnelError)
+
+
+def _portal_node_info(db: Session, node_ids: list[int]) -> dict[int, PortalNodeInfo]:
+    if not node_ids:
+        return {}
+    rows = db.query(Node).filter(Node.id.in_(node_ids)).all()
+    return {int(row.id): PortalNodeInfo(portal_node_label(row), row.status == NodeStatus.offline) for row in rows}
+
+
 def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
     base = resolve_portal_base_url(db)
     if not base:
@@ -993,24 +1089,54 @@ def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
     user = ensure_portal_user(db, token_row.user_id)
     from app.services.feature_guards import get_feature_service
 
-    clients = []
-    for node_id, client_name in _owned_portal_targets(db, user_id=user.id):
-        entry = _build_client_portal_entry(
-            db,
-            token=token_row.token,
-            node_id=node_id,
-            client_name=client_name,
-            base=base,
-            download_node_id=node_id,
-            download_client_name=client_name,
-        )
-        entry["status"] = _apply_user_subscription_status(entry["status"], user)
-        clients.append(entry)
+    targets = _owned_portal_targets(db, user_id=user.id)
+    node_info = _portal_node_info(db, sorted({node_id for node_id, _ in targets}))
+    clients_by_node: dict[int, list[dict]] = {}
+    failed_nodes: set[int] = set()
+    with node_request_timeout_cap(PORTAL_NODE_TIMEOUT_SECONDS):
+        for node_id, client_name in targets:
+            info = node_info.get(node_id)
+            if node_id in failed_nodes or (info is not None and info.offline):
+                continue
+            try:
+                entry = _build_client_portal_entry(
+                    db,
+                    token=token_row.token,
+                    node_id=node_id,
+                    client_name=client_name,
+                    base=base,
+                    download_node_id=node_id,
+                    download_client_name=client_name,
+                )
+            except Exception as exc:
+                failed_nodes.add(node_id)
+                logger.warning(
+                    "User portal: skipping node_id=%s client=%s (%s)",
+                    node_id,
+                    client_name,
+                    type(exc).__name__,
+                    exc_info=not isinstance(exc, _EXPECTED_PORTAL_NODE_ERRORS),
+                )
+                continue
+            if not entry["files"]:
+                continue
+            entry["status"] = _apply_user_subscription_status(entry["status"], user)
+            clients_by_node.setdefault(node_id, []).append(entry)
+
+    nodes = [
+        {
+            "node_id": node_id,
+            "label": (node_info[node_id].label if node_id in node_info else "") or f"Сервер {node_id}",
+            "clients": sorted(entries, key=lambda entry: entry["client_name"]),
+        }
+        for node_id, entries in clients_by_node.items()
+    ]
+    nodes.sort(key=lambda node: (node["label"].casefold(), node["node_id"]))
     return {
         "kind": "user",
         "brand_title": _portal_brand_title(db),
         "unlock_codes_enabled": get_feature_service().is_enabled("unlock_codes"),
-        "clients": clients,
+        "nodes": nodes,
     }
 
 
@@ -1043,12 +1169,13 @@ def _read_client_portal_profile(
         )
         .all()
     )
-    allowed = {item["path"] for item in _list_files_for_configs(db, configs)}
-    if path not in allowed:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
-    adapter = _adapter_for_node_id(db, node_id)
-    hosts = load_node_remote_hosts(db, node_id)
-    content = read_profile_file_for_delivery(adapter, path, hosts)
+    with node_request_timeout_cap(PORTAL_NODE_TIMEOUT_SECONDS):
+        allowed = {item["path"] for item in _list_files_for_configs(db, configs)}
+        if path not in allowed:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
+        adapter = _adapter_for_node_id(db, node_id)
+        hosts = load_node_remote_hosts(db, node_id)
+        content = read_profile_file_for_delivery(adapter, path, hosts)
     filename = build_profile_download_filename(client_name, path=path)
     return filename, content
 
@@ -1140,7 +1267,7 @@ def redeem_public_portal_code(db: Session, resolution: PortalTokenResolution, *,
                 continue
             raise
         user = ensure_portal_user(db, resolution.user_row.user_id)
-        access_until = getattr(user, "access_until", None)
+        access_until = user.access_until
         return {
             **result,
             "access_until": access_until.isoformat() if access_until else None,

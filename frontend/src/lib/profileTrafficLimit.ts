@@ -8,16 +8,16 @@ import {
 } from '@/api/vpnAccess'
 import type { VpnType } from '@/types'
 
-export const PROFILE_VPN_ORDER: VpnType[] = ['openvpn', 'wireguard', 'amneziawg2']
+const PROFILE_VPN_ORDER: VpnType[] = ['openvpn', 'wireguard', 'amneziawg2']
 
-export type TrafficLimitSetter = (
+type TrafficLimitSetter = (
   clientName: string,
   limitValue: number,
   limitUnit: string,
   limitPeriodDays?: number | null,
 ) => Promise<unknown>
 
-export type TrafficLimitClearer = (clientName: string) => Promise<unknown>
+type TrafficLimitClearer = (clientName: string) => Promise<unknown>
 
 const DEFAULT_SETTERS: Record<VpnType, TrafficLimitSetter> = {
   openvpn: openvpnSetTrafficLimit,

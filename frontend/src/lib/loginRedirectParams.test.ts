@@ -44,12 +44,14 @@ describe('readLoginRedirectParams', () => {
     expect(read('#token=%E0%A4%A', '').token).toBe('%E0%A4%A')
   })
 
-  it('decodes the token from the hash once and takes the query token as is', () => {
+  it('decodes the token from the hash once', () => {
     expect(read('#token=a%2Eb.c', '').token).toBe('a.b.c')
-    expect(read('', 'token=a.b.c').token).toBe('a.b.c')
-    expect(read('', 'token=a%252Eb').token).toBe('a%2Eb')
     expect(read('#token=h', 'token=q').token).toBe('h')
-    expect(read('#token=&session=abc', 'token=q')).toEqual({ token: 'q', webSessionId: null, tgError: null })
+  })
+
+  it('ignores a token in the query string', () => {
+    expect(read('', 'token=a.b.c').token).toBeNull()
+    expect(read('#token=&session=abc', 'token=q')).toEqual({ token: null, webSessionId: null, tgError: null })
   })
 
   it('ignores an empty error and caps a long one', () => {

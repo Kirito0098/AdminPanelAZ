@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from html import escape
+
 from app.config import get_settings
 from app.services.node_manager import get_active_node
 from app.services.config_access import accessible_client_names
@@ -57,7 +59,7 @@ def _format_top_lines(clients: list[dict], *, limit: int = _TOP_LIMIT) -> str:
             i18n.TRAFFIC_TOP_LINE.format(
                 medal=medal,
                 status=status,
-                name=item["name"],
+                name=escape(str(item["name"])),
                 traffic=traffic,
             )
         )
@@ -111,7 +113,7 @@ async def handle_traffic(ctx: BotContext, *, page: int = 0, message_id: int | No
 
     text = i18n.TRAFFIC_SUMMARY.format(
         title=title,
-        node_name=node.name,
+        node_name=escape(node.name or ""),
         scope_hint=scope_hint,
         count=len(clients),
         active=active_count,

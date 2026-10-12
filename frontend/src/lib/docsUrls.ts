@@ -1,8 +1,8 @@
 /** Canonical GitHub docs for in-panel «Инструкция» links. */
-export const DOCS_BASE =
+const DOCS_BASE =
   'https://github.com/Kirito0098/AdminPanelAZ/blob/main/docs'
 
-export function docsUrl(path: string): string {
+function docsUrl(path: string): string {
   const clean = path.replace(/^\/+/, '')
   return `${DOCS_BASE}/${clean}`
 }

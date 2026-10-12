@@ -162,19 +162,6 @@ class NodeRotateKeyResponse(BaseModel):
     node_id: int
 
 
-class NodeMtlsEnableResponse(BaseModel):
-    message: str
-    node_id: int
-    mtls_enabled: bool = True
-
-
-class NodeMtlsDisableResponse(BaseModel):
-    message: str
-    node_id: int
-    mtls_enabled: bool = False
-    warning: str | None = None
-
-
 class NodeMtlsStatusResponse(BaseModel):
     ready: bool
     writable: bool
@@ -520,14 +507,6 @@ class BulkConfigOpQueuedResponse(BaseModel):
     status_url: str
 
 
-class ProfileFile(BaseModel):
-    protocol: str
-    variant: str
-    filename: str
-    path: str
-    content: str | None = None
-
-
 class MonitoringService(BaseModel):
     name: str
     status: str
@@ -632,16 +611,6 @@ class GeoRoutingHintResponse(BaseModel):
     recommended_node_name: str | None = None
     hint_message: str | None = None
     nodes: list[GeoRoutingNodeHint] = Field(default_factory=list)
-
-
-class GlobalDashboardSummary(BaseModel):
-    timestamp: datetime
-    nodes_summary: list[MonitoringNodeSummary] = Field(default_factory=list)
-    nodes_online: int = 0
-    nodes_total: int = 0
-    total_connected_openvpn: int = 0
-    total_connected_wireguard: int = 0
-    total_connected_amneziawg2: int = 0
 
 
 class MonitoringOverview(BaseModel):
@@ -780,7 +749,6 @@ class AppSettingsResponse(BaseModel):
     noc_daily_time: str = ""
     noc_weekly_dow: str = ""
     noc_weekly_time: str = ""
-    app_name: str
     antizapret_path: str
     include_hosts: str = ""
     exclude_hosts: str = ""
@@ -802,18 +770,6 @@ class AppSettingsUpdate(BaseModel):
     include_ips: str | None = None
     exclude_ips: str | None = None
     allow_ips: str | None = None
-
-
-class DashboardSummary(BaseModel):
-    total_configs: int
-    openvpn_configs: int
-    wireguard_configs: int
-    connected_openvpn: int
-    connected_wireguard: int
-    active_services: int
-    total_services: int
-    server_ip: str | None = None
-    node_name: str | None = None
 
 
 class BackupEntry(BaseModel):
@@ -1158,6 +1114,9 @@ class TelegramSettingsResponse(BaseModel):
     legacy_login_enabled: bool = True
     auth_method: Literal["oidc", "legacy", "none"] = "legacy"
     login_ready: bool = False
+    bot_command_rate_max: int = 30
+    bot_command_rate_window_seconds: int = 60
+    bot_command_rate_limit_enabled: bool = True
 
 
 class TelegramSettingsUpdate(BaseModel):
@@ -1174,6 +1133,24 @@ class TelegramSettingsUpdate(BaseModel):
     oidc_client_id: str | None = None
     oidc_client_secret: str | None = None
     legacy_login_enabled: bool | None = None
+    bot_command_rate_max: int | None = Field(default=None, ge=0, le=1000)
+    bot_command_rate_window_seconds: int | None = Field(default=None, ge=10, le=3600)
+
+
+class SelfServiceLimitsResponse(BaseModel):
+    quota_default: int
+    create_rate_max: int
+    create_rate_window_seconds: int
+
+
+class SelfServiceLimitsUpdate(BaseModel):
+    quota_default: int | None = Field(default=None, ge=0, le=1000)
+    create_rate_max: int | None = Field(default=None, ge=0, le=100)
+    create_rate_window_seconds: int | None = Field(default=None, ge=60, le=86400)
+
+
+class TelegramLinkCodeRequest(BaseModel):
+    current_password: str = Field(min_length=1, max_length=256)
 
 
 class TelegramLinkCodeResponse(BaseModel):
@@ -1509,6 +1486,7 @@ class NodeUpdate(BaseModel):
     api_key: str | None = Field(default=None, min_length=8)
     destination_ip: str | None = Field(default=None, max_length=64)
     linked_vpn_node_id: int | None = None
+    portal_label: str | None = Field(default=None, max_length=128)
 
 
 class NodeResponse(NodeBase):
@@ -1525,6 +1503,7 @@ class NodeResponse(NodeBase):
     ssh_remote_agent_port: int | None = None
     destination_ip: str | None = None
     linked_vpn_node_id: int | None = None
+    portal_label: str | None = None
     last_seen_at: datetime | None = None
     metadata: dict[str, Any] = {}
     created_at: datetime
@@ -1556,10 +1535,6 @@ class ProxyMappingItem(BaseModel):
     proxy_sport: int | None = None
     dest_ip: str | None = None
     dest_port: int | None = None
-
-
-class ProxyMappingsResponse(BaseModel):
-    mappings: list[ProxyMappingItem] = []
 
 
 class ActiveNodeResponse(BaseModel):
@@ -2172,3 +2147,12 @@ class Awg2ObfuscationApply(BaseModel):
     mtu: int | None = Field(default=None, ge=576, le=1500)
     host: str | None = Field(default=None, max_length=253)
     fp: Literal["chrome", "firefox", "safari"] | None = None
+
+
+class StreamTicketRequest(BaseModel):
+    stream: Literal["monitoring", "warper_update", "awg2_install", "server_monitor"]
+
+
+class StreamTicketResponse(BaseModel):
+    ticket: str
+    expires_in_seconds: int

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 _CERT_BLOCK_RE = re.compile(
     r"<cert>\s*(-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----)\s*</cert>",
@@ -146,17 +149,6 @@ def expiry_map_from_iso_dict(raw: dict[str, str] | None) -> dict[str, datetime]:
     return result
 
 
-def cert_days_remaining_from_pem(pem: str, *, now: datetime | None = None) -> int | None:
-    return days_remaining_until(cert_not_after_utc(pem), now=now)
-
-
-def cert_days_remaining_from_ovpn_content(content: str, *, now: datetime | None = None) -> int | None:
-    pem = extract_pem_from_ovpn(content)
-    if not pem:
-        return None
-    return cert_days_remaining_from_pem(pem, now=now)
-
-
 def resolve_openvpn_cert_not_after(adapter, client_name: str) -> datetime | None:
     """Read the certificate expiry date from the first OpenVPN profile on the active node."""
     from app.models import VpnType
@@ -164,22 +156,19 @@ def resolve_openvpn_cert_not_after(adapter, client_name: str) -> datetime | None
     try:
         files = adapter.get_profile_files(client_name, VpnType.openvpn)
     except Exception:
+        logger.debug("cert expiry: profile list failed client=%s", client_name, exc_info=True)
         return None
     if not files:
         return None
     try:
         content = adapter.read_profile_file(files[0]["path"])
     except Exception:
+        logger.debug("cert expiry: profile read failed client=%s", client_name, exc_info=True)
         return None
     pem = extract_pem_from_ovpn(content)
     if not pem:
         return None
     return cert_not_after_utc(pem)
-
-
-def resolve_openvpn_cert_days_remaining(adapter, client_name: str) -> int | None:
-    """Read remaining certificate days from the first OpenVPN profile on the active node."""
-    return days_remaining_until(resolve_openvpn_cert_not_after(adapter, client_name))
 
 
 def refresh_config_cert_expiry(config, adapter) -> None:

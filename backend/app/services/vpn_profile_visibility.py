@@ -13,6 +13,7 @@ from app.constants.public_routes import (
     OPENVPN_GROUP_LABELS,
 )
 from app.models import AppSetting, User, UserRole, VpnType
+from app.services.app_setting_store import _get_setting
 from app.services.telegram_profile_ui import is_az_profile
 
 SETTING_VISIBLE_VPN_PROFILES_DEFAULT = "user_visible_vpn_profiles_default"
@@ -127,11 +128,6 @@ def normalize_policy(raw: Any, *, strict: bool = False) -> dict[str, list[str]]:
 
 def policy_to_json(policy: Mapping[str, Any]) -> str:
     return json.dumps(normalize_policy(policy), ensure_ascii=False, separators=(",", ":"))
-
-
-def _get_setting(db: Session, key: str, default: str = "") -> str:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    return row.value if row else default
 
 
 def get_default_visible_vpn_profiles(db: Session) -> dict[str, list[str]]:
@@ -387,12 +383,3 @@ def resolve_openvpn_group_for_user(
     return POLICY_GROUP_TO_SETTING[allowed_policy[0]]
 
 
-def policy_is_empty(policy: Mapping[str, Any]) -> bool:
-    routes = policy.get("routes") or []
-    protocols = policy.get("protocols") or []
-    if not routes or not protocols:
-        return True
-    if "openvpn" in protocols and not (policy.get("openvpn_groups") or []):
-        protocols_without_ovpn = [p for p in protocols if p != "openvpn"]
-        return not protocols_without_ovpn
-    return False

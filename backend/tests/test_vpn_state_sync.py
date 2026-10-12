@@ -1,7 +1,6 @@
 import io
 import tarfile
 from datetime import datetime, timedelta
-from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -176,7 +175,7 @@ def test_sync_openvpn_pki_from_primary_imports_pki_and_profiles_without_recreate
     replica.import_openvpn_client_profiles_archive.assert_called_once_with(b"ovpn-profiles")
 
 
-def test_sync_wireguard_state_continues_when_runtime_apply_fails():
+def test_sync_wireguard_state_copies_profiles_then_reports_runtime_failure():
     primary = MagicMock()
     replica = MagicMock()
     primary.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf"]
@@ -188,7 +187,8 @@ def test_sync_wireguard_state_continues_when_runtime_apply_fails():
         "errors": [{"interface": "vpn", "stderr": "sync failed"}],
     }
 
-    vpn_state_sync.sync_wireguard_state_from_primary(primary, replica)
+    with pytest.raises(vpn_state_sync.ReplicaRuntimeError, match="WireGuard на реплике не применён.*sync failed"):
+        vpn_state_sync.sync_wireguard_state_from_primary(primary, replica)
 
     replica.import_wireguard_client_profiles_archive.assert_called_once()
 

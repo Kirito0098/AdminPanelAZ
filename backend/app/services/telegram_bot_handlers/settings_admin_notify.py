@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from html import escape
+
 from fastapi import HTTPException
 
 from app.schemas import AdminNotifySettingsUpdate
@@ -261,11 +263,11 @@ async def handle_admin_notify_callback(ctx: BotContext, data: str, *, message_id
             return
 
     except ValueError as exc:
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {exc}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(str(exc))}")
         return
     except HTTPException as exc:
         detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {detail}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(detail)}")
         return
 
 
@@ -301,5 +303,5 @@ async def handle_admin_notify_text(ctx: BotContext, text: str) -> bool:
             await send_message(ctx.bot_token, ctx.chat_id, "✅ Telegram ID очищен.")
         await handle_settings_admin_notify(ctx)
     except ValueError as exc:
-        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {exc}")
+        await send_message(ctx.bot_token, ctx.chat_id, f"❌ {escape(str(exc))}")
     return True

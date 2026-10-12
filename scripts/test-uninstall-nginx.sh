@@ -93,8 +93,11 @@ run_uninstall() {
 # live_nginx_ok: настоящий nginx со своим префиксом принимает то, что осталось после удаления
 live_nginx_ok() {
   [[ -n "$REAL_NGINX" ]] || return 0
-  printf 'pid %s/nginx.pid;\nerror_log %s/error.log;\nevents {}\nhttp {\n  access_log off;\n  include %s/conf.d/*.conf;\n  include %s/sites-enabled/*;\n}\n' \
-    "$NGX" "$NGX" "$NGX" "$NGX" >"$NGX/nginx.conf"
+  {
+    printf 'pid %s/nginx.pid;\nerror_log %s/error.log;\nevents {}\nhttp {\n  access_log off;\n' "$NGX" "$NGX"
+    printf '  client_body_temp_path %s; proxy_temp_path %s; fastcgi_temp_path %s; uwsgi_temp_path %s; scgi_temp_path %s;\n' "$NGX" "$NGX" "$NGX" "$NGX" "$NGX"
+    printf '  include %s/conf.d/*.conf;\n  include %s/sites-enabled/*;\n}\n' "$NGX" "$NGX"
+  } >"$NGX/nginx.conf"
   "$REAL_NGINX" -t -q -p "$NGX/" -c "$NGX/nginx.conf" 2>"$TMP/nginx-t.err" && return 0
   cat "$TMP/nginx-t.err" >&2
   return 1

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Переустановка установленных systemd unit’ов из шаблонов репо (после git pull / UI «Обновить»).
-# Нужен при миграции 2.19+: старые ExecStart=…/start.sh; без refresh/shim restart падает.
+# Нужен для старых unit’ов с ExecStart=…/start.sh: без refresh restart падает.
 # Не перезапускает сервисы — caller делает systemctl restart.
 set -euo pipefail
 

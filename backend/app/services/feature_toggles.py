@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 
 from app.services.env_file import EnvFileService
+from app.services.shared_helpers import parse_bool as _parse_bool
 
 RESOURCE_IMPACT_LEVELS = {
     "minimal": {"label": "минимальная"},
@@ -870,12 +871,6 @@ for _item in FEATURE_TOGGLES:
         SETTINGS_TAB_TO_MODULE[_tab] = _item.key
 
 
-def _parse_bool(raw: str | None, *, default: bool) -> bool:
-    if raw is None:
-        return default
-    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
-
-
 class FeatureToggleService:
     """Env-backed feature toggles with a per-instance parsed-.env cache.
 
@@ -940,13 +935,6 @@ class FeatureToggleService:
         self._env_map()
         return {definition.key: self.is_enabled(definition.key) for definition in FEATURE_TOGGLES}
 
-    def get_app_module_states(self) -> dict[str, bool]:
-        self._env_map()
-        return {
-            definition.key: self.is_enabled(definition.key)
-            for definition in FEATURE_TOGGLES
-            if definition.group == "app_module"
-        }
 
     def list_toggles(self) -> dict:
         self._env_map()

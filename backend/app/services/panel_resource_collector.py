@@ -5,13 +5,14 @@ from __future__ import annotations
 import os
 import platform
 import time
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
 import psutil
 
 from app.config import get_settings
+from app.services.shared_helpers import utcnow_naive as _utcnow
 
 settings = get_settings()
 
@@ -29,10 +30,6 @@ _MANAGED_VPN_PROCESS_NAMES = frozenset(
     }
 )
 StackRole = Literal["panel", "node_agent", "managed_vpn"]
-
-
-def _utcnow() -> datetime:
-    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _ensure_cpu() -> None:

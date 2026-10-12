@@ -19,17 +19,14 @@ import {
 } from 'lucide-react'
 import {
   ApiError,
-  cleanupTrafficStatusLogs,
   deleteDeletedClientTraffic,
   getDeletedClientTraffic,
   getNeverConnectedClientTraffic,
   getTrafficChart,
-  getTrafficCleanupSchedule,
   getTrafficActiveClients,
   getClientPolicies,
   getTrafficOverview,
   resetTraffic,
-  setTrafficCleanupSchedule,
 } from '@/api/client'
 import { getRetentionSettings } from '@/api/settings'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
@@ -50,7 +47,6 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -379,8 +375,6 @@ export default function TrafficPage() {
     null,
   )
   const [neverConnectedExpanded, setNeverConnectedExpanded] = useState(false)
-  const [openvpnLogEnabled, setOpenvpnLogEnabled] = useState(false)
-  const [cleanupPeriod, setCleanupPeriod] = useState('none')
   const [maintenanceLoading, setMaintenanceLoading] = useState(false)
   const prevRetentionDaysRef = useRef<number | null>(null)
 
@@ -630,24 +624,11 @@ export default function TrafficPage() {
     }
   }, [])
 
-  const loadCleanupSchedule = useCallback(async () => {
-    if (!isAdmin) return
-    try {
-      const schedule = await getTrafficCleanupSchedule()
-      setCleanupPeriod(schedule.period)
-      setOpenvpnLogEnabled(schedule.openvpn_log_enabled)
-    } catch {
-      setCleanupPeriod('none')
-      setOpenvpnLogEnabled(false)
-    }
-  }, [isAdmin])
-
   useEffect(() => {
     if (nodeLoading) return
     void loadDeletedClients()
-    void loadCleanupSchedule()
     void loadNeverConnectedClients()
-  }, [loadDeletedClients, loadCleanupSchedule, loadNeverConnectedClients, nodeLoading, activeNode?.id])
+  }, [loadDeletedClients, loadNeverConnectedClients, nodeLoading, activeNode?.id])
 
   useEffect(() => {
     loadChart()
@@ -958,37 +939,12 @@ export default function TrafficPage() {
     }
   }
 
-  const handleCleanupLogs = async () => {
-    setMaintenanceLoading(true)
-    try {
-      const resp = await cleanupTrafficStatusLogs()
-      success(resp.message)
-    } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка очистки логов')
-    } finally {
-      setMaintenanceLoading(false)
-    }
-  }
-
-  const handleCleanupScheduleChange = async (period: string) => {
-    setMaintenanceLoading(true)
-    try {
-      const resp = await setTrafficCleanupSchedule(period)
-      setCleanupPeriod(period)
-      success(resp.message)
-    } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка расписания')
-    } finally {
-      setMaintenanceLoading(false)
-    }
-  }
-
   if (loading && !data) {
     return <Spinner label="Загрузка статистики трафика..." className="py-16" />
   }
 
   const hasRows = (data?.rows?.length ?? 0) > 0
-  const showTrafficMaintenance = isAdmin && (openvpnLogEnabled || deletedRows.length > 0)
+  const showTrafficMaintenance = isAdmin && deletedRows.length > 0
   const periodColumnSubtitle = overviewPeriodSubtitle(
     overviewMode,
     overviewPreset,
@@ -1440,39 +1396,9 @@ export default function TrafficPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Обслуживание БД трафика</CardTitle>
-                <CardDescription>
-                  {openvpnLogEnabled
-                    ? 'Удалённые клиенты, очистка OpenVPN-логов (кроме *-status.log)'
-                    : 'Осиротевшая статистика клиентов без конфигов (OPENVPN_LOG=n — очистка .log не требуется)'}
-                </CardDescription>
+                <CardDescription>Статистика клиентов, у которых больше нет конфигов</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                {openvpnLogEnabled && (
-                  <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
-                    <div className="w-full space-y-2 sm:w-auto">
-                      <Label className="text-xs text-muted-foreground">Расписание очистки .log</Label>
-                      <Select
-                        value={cleanupPeriod}
-                        onValueChange={(v) => void handleCleanupScheduleChange(v)}
-                        disabled={maintenanceLoading}
-                      >
-                        <SelectTrigger className="h-9 w-full sm:w-[180px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Выключено</SelectItem>
-                          <SelectItem value="daily">Ежедневно</SelectItem>
-                          <SelectItem value="weekly">Еженедельно</SelectItem>
-                          <SelectItem value="monthly">Ежемесячно</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <Button variant="outline" size="sm" onClick={() => void handleCleanupLogs()} disabled={maintenanceLoading}>
-                      Очистить .log сейчас
-                    </Button>
-                  </div>
-                )}
-
                 <div>
                   <p className="mb-2 text-sm text-muted-foreground">
                     Клиенты без конфигов: <strong>{deletedSummary?.users_count ?? 0}</strong>, суммарный трафик:{' '}

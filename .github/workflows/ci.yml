@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: ["**"]
+    branches: ["main", "release/**"]
   pull_request:
 
 # Cancel superseded runs on the same ref to save runner minutes.
@@ -21,12 +21,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Python 3.13
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.13"
           cache: pip
@@ -75,12 +75,12 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -110,9 +110,10 @@ jobs:
         working-directory: frontend
         run: npm run check:bundle
 
-      - name: npm audit
+      # Build-only tooling (tailwindcss 3 → braces/micromatch) has unfixed advisories and never ships to the browser.
+      - name: npm audit (production dependencies)
         working-directory: frontend
-        run: npm audit --audit-level=high
+        run: npm audit --omit=dev --audit-level=high
 
   shell:
     name: shell scripts
@@ -121,7 +122,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -132,7 +133,7 @@ jobs:
 
       - name: ShellCheck
         run: |
-          shellcheck -S error -x install.sh scripts/*.sh
+          shellcheck -S warning -x install.sh scripts/*.sh
 
       - name: Shell tests (all scripts/test-*.sh, host calls blocked)
         run: ./scripts/run-shell-tests.sh

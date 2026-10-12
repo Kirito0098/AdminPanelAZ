@@ -28,6 +28,7 @@ SETTINGS_CHANGE_LABELS: dict[str, str] = {
     "settings_reboot_schedule": "Планирование перезагрузки ОС",
     "settings_reboot_cancel": "Отмена перезагрузки ОС",
     "settings_reboot_execute": "Перезагрузка ОС сервера",
+    "settings_self_service_limits_update": "Изменены лимиты самообслуживания",
 }
 
 _ROLE_LABELS_RU = {

@@ -53,7 +53,7 @@ build_dist() {
   fi
 }
 
-# run_update [npm-доступен] [функция] — функция меню (по умолчанию panel_update) в отдельном bash.
+# run_update [npm-доступен] [код] — код с функциями меню (по умолчанию panel_update) в отдельном bash.
 run_update() {
   local npm_available="${1:-true}" fn="${2:-panel_update}" path="$TMP/npm-bin:$PATH"
   [[ "$npm_available" == true ]] || path="$TMP/git-only-bin"
@@ -64,7 +64,8 @@ run_update() {
     panel_uses_systemd() { return 0; }
     systemctl() { echo "systemctl $*"; }
     PATH="$TEST_PATH"
-    "$FN"
+    eval "$FN"
+    echo "changed=$PANEL_UPDATE_CHANGED"
   ' bash "$ROOT_DIR"
 }
 
@@ -82,6 +83,7 @@ run_update >"$TMP/out" 2>&1 || fail "обновление завершилось
 [[ "$(cat "$NPM_LOG")" == "npm ci @ $TMP/install/frontend"$'\n'"npm run build:all @ $TMP/install/frontend" ]] \
   || fail "вызовы npm: $(cat "$NPM_LOG")"
 grep -q "Перезапустите панель" "$TMP/out" || fail "нет подсказки про перезапуск"
+grep -qx "changed=true" "$TMP/out" || fail "обновление кода не отмечено для вопроса о перезапуске"
 echo "  OK"
 
 echo "[test] интерфейс здесь не собирался (сервер только с агентом): npm не вызывается"
@@ -102,7 +104,8 @@ build_dist
 mkdir -p "$TMP/install/frontend/node_modules/x"
 touch -d '+1 min' "$TMP/install/frontend/node_modules/x/index.js" "$TMP/install/frontend/.eslintcache"
 : >"$NPM_LOG"
-run_update >/dev/null 2>&1 || fail "обновление завершилось ошибкой"
+run_update >"$TMP/out" 2>&1 || fail "обновление завершилось ошибкой"
+grep -qx "changed=false" "$TMP/out" || fail "без обновлений отмечено изменение: $(cat "$TMP/out")"
 [[ ! -s "$NPM_LOG" ]] || fail "npm вызван без обновлений (файлы вне git не считаются): $(cat "$NPM_LOG")"
 echo "  OK"
 
@@ -114,6 +117,7 @@ run_update >"$TMP/out" 2>&1 || fail "обновление завершилось
 [[ "$(cat "$NPM_LOG")" == "npm ci @ $TMP/install/frontend"$'\n'"npm run build:all @ $TMP/install/frontend" ]] \
   || fail "вызовы npm: $(cat "$NPM_LOG")"
 grep -q "Перезапустите панель" "$TMP/out" || fail "нет подсказки про перезапуск"
+grep -qx "changed=true" "$TMP/out" || fail "пересборка интерфейса не отмечена для вопроса о перезапуске"
 rm -f "$TMP/install/frontend/dist/index.html"
 : >"$NPM_LOG"
 run_update >/dev/null 2>&1 || fail "обновление без index.html завершилось ошибкой"
@@ -186,6 +190,26 @@ rc=$?
 set -e
 [[ "$rc" != 0 ]] || fail "без npm обновление прошло молча"
 grep -q "npm" "$TMP/out" || fail "нет объяснения про npm: $(cat "$TMP/out")"
+echo "  OK"
+
+echo "[test] полное обновление (PANEL_UPDATE_CODE_ONLY=true): только git — без --after-pull и без пересборки"
+setup_repos
+build_dist
+printf '#!/usr/bin/env bash\necho "new-menu $*" >>"$NPM_LOG"\nexit 7\n' >"$TMP/dev/scripts/adminpanel-menu.sh"
+new_upstream_commit
+: >"$NPM_LOG"
+run_update true 'PANEL_UPDATE_CODE_ONLY=true; panel_update' >"$TMP/out" 2>&1 \
+  || fail "обновление кода завершилось ошибкой: $(cat "$TMP/out")"
+[[ ! -s "$NPM_LOG" ]] || fail "после git pull запущены шаги обновления: $(cat "$NPM_LOG")"
+cmp -s "$TMP/install/version" "$TMP/dev/version" || fail "код не обновлён"
+grep -qx "changed=true" "$TMP/out" || fail "обновление кода не отмечено"
+setup_repos
+build_dist '-2 hours'
+: >"$NPM_LOG"
+run_update true 'PANEL_UPDATE_CODE_ONLY=true; panel_update' >"$TMP/out" 2>&1 \
+  || fail "обновление завершилось ошибкой: $(cat "$TMP/out")"
+[[ ! -s "$NPM_LOG" ]] || fail "устаревший интерфейс пересобран в шаге «Код»: $(cat "$NPM_LOG")"
+grep -qx "changed=false" "$TMP/out" || fail "без обновлений отмечено изменение: $(cat "$TMP/out")"
 echo "  OK"
 
 echo "All menu update checks passed."

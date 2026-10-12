@@ -658,7 +658,7 @@ def _estimate_cidr_matches_from_db_impl(
                 quality_by_file[file_name] = file_quality
                 continue
 
-            count_value = max(0, int(meta.cidr_count or 0))
+            count_value = meta.cidr_count
             file_quality["raw_db_count"] = count_value
             file_quality["after_scope_count"] = count_value
             file_quality["after_ru_exclusion_count"] = count_value

@@ -25,9 +25,8 @@ ddns.env
 # --- Runtime data: backend/data/ (primary — sqlite:///./data/ относительно backend/) ---
 backend/data/
 
-# --- Runtime data: repo root data/ (только .gitkeep для onboarding-каталогов) ---
-/data/**
-!/data/**/.gitkeep
+# --- Legacy runtime data: repo root data/ ---
+/data/
 
 # GeoIP MMDB (пользователь загружает сам; см. docs/GeoIP.md)
 *.mmdb
@@ -98,6 +97,13 @@ scripts/capture-readme-screenshots.mjs
 # --- Agent SDD scratch (ledgers / briefs / reviews; not for repo) ---
 .superpowers/
 docs/superpowers/
+
+# --- OpenCode agent workspace (local config, memory, plans; not for repo) ---
+.opencode/
+
+# --- Agent skills installed via `npx skills` (local; not for repo) ---
+.agents/
+/skills-lock.json
 
 # --- Local implementation plans (owner-only; not for public repo) ---
 docs/plans/

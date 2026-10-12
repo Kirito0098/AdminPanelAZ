@@ -6,9 +6,11 @@ or died with the panel process must not leave it behind.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 from sqlalchemy.orm import Session
 
@@ -18,6 +20,10 @@ logger = logging.getLogger(__name__)
 
 ACTIVE_TASK_STATUSES = ("queued", "running")
 ERROR_MAX_LEN = 1000
+REPLICA_DRIFT_HINT = (
+    "Файлы на реплику скопированы, но WireGuard / AZ-AWG2 их не применил: "
+    "проверьте реплику и нажмите «Синхронизировать»"
+)
 
 
 def mark_group_sync_failed(db: Session, group_id: int, error: str) -> None:
@@ -28,6 +34,36 @@ def mark_group_sync_failed(db: Session, group_id: int, error: str) -> None:
     group.sync_status = SyncStatus.failed
     group.last_sync_error = error[:ERROR_MAX_LEN]
     db.commit()
+
+
+def group_is_pending(db: Session, group: NodeSyncGroup) -> bool:
+    """Committed status, not the loaded copy: a setup / Push full may have started meanwhile."""
+    status = db.query(NodeSyncGroup.sync_status).filter(NodeSyncGroup.id == group.id).scalar()
+    return status == SyncStatus.pending
+
+
+def notify_replica_drift(db: Session, group: NodeSyncGroup, drifts: list[dict[str, Any]]) -> None:
+    """Same admin event as the reconcile drift; a failed notify must not undo the replication."""
+    try:
+        from app.services.admin_notify import admin_notify_service
+
+        summary = "; ".join(f"{item.get('node_name') or item.get('node_id')}: {item.get('error')}" for item in drifts)
+        admin_notify_service.send(
+            db,
+            "node_sync_drift",
+            details=json.dumps(
+                {
+                    "group_id": group.id,
+                    "name": group.name,
+                    "shared_domain": group.shared_domain,
+                    "summary": summary[:ERROR_MAX_LEN],
+                    "hint": REPLICA_DRIFT_HINT,
+                },
+                ensure_ascii=False,
+            ),
+        )
+    except Exception as exc:
+        logger.warning("HA replica drift notify failed for group %s: %s", group.id, exc)
 
 
 @contextmanager

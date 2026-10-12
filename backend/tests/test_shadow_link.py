@@ -1,6 +1,5 @@
 from unittest.mock import MagicMock
 
-import pytest
 
 from app.models import VpnType
 from app.services.node_sync import client_sync, shadow_link

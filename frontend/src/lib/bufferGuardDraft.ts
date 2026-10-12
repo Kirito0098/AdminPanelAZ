@@ -1,6 +1,6 @@
 import type { OpenVpnBufferGuardSettings } from '@/types'
 
-export const DEFAULT_WATCH_UNITS: string[] = ['antizapret-udp', 'vpn-udp']
+const DEFAULT_WATCH_UNITS: string[] = ['antizapret-udp', 'vpn-udp']
 
 export function sortUnits(units: string[]): string[] {
   return [...units].sort()

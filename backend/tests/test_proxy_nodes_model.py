@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -158,7 +158,7 @@ def test_activate_vpn_ok(db, monkeypatch):
     vpn = _add_node(db, name="vpn-a", kind="vpn")
     monkeypatch.setattr(nodes_router, "check_node_health", lambda *a, **k: {"status": "online"})
     monkeypatch.setattr(nodes_router, "update_node_from_health", lambda *a, **k: None)
-    monkeypatch.setattr(nodes_router, "_active_node_response", lambda _db, node: {"node_id": node.id})
+    monkeypatch.setattr(nodes_router, "_active_node_response", lambda _db, node, _user: {"node_id": node.id})
     monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
 
     admin = SimpleNamespace(id=1, username="admin")

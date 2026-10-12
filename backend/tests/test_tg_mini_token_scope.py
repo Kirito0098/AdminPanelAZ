@@ -91,6 +91,16 @@ def test_access_token_still_works_on_unmarked_endpoint(client):
     assert response.status_code == 200
 
 
+def test_access_token_still_works_on_marked_endpoint(client):
+    response = _call(client, "GET", "/api/configs/quota", create_access_token({"sub": "bob"}))
+    assert response.status_code == 200
+
+
+def test_web_access_token_rejected_on_mini_app_router(real_client):
+    response = _call(real_client, "GET", "/api/tg-mini/dashboard", create_access_token({"sub": "bob"}))
+    assert response.status_code == 401
+
+
 def test_tg_mini_token_rejected_after_telegram_relink(client):
     response = _call(client, "GET", "/api/configs/quota", create_tg_mini_token("relinked", "555"))
     assert response.status_code == 401

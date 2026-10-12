@@ -22,7 +22,7 @@ function resolveTransport(node: Node): NodeTransportId {
   return 'http'
 }
 
-export type NodeTransportSelectProps = {
+type NodeTransportSelectProps = {
   node: Node
   compact?: boolean
   disabled?: boolean

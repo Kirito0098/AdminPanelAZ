@@ -40,17 +40,7 @@ export async function saveSwitch<T>(
   }
 }
 
-export function formatBytes(value: number): string {
-  if (!Number.isFinite(value) || value < 0) return '—'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let size = value
-  let unit = 0
-  while (size >= 1024 && unit < units.length - 1) {
-    size /= 1024
-    unit += 1
-  }
-  return `${size < 10 && unit > 0 ? size.toFixed(1) : Math.round(size)}\u00A0${units[unit]}`
-}
+export { formatBytes } from '@/lib/trafficFormat'
 
 export function countActiveTextLines(text: string): number {
   return text

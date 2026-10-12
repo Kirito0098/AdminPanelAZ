@@ -9,6 +9,7 @@ import type {
   AdminNotifySettings,
   FeatureModulesResponse,
   InstallPlatform,
+  SelfServiceLimits,
   SelfServiceQuota,
   TelegramSettings,
   TgMiniAuthResponse,
@@ -209,8 +210,21 @@ export async function updateTgTelegramSettings(data: {
   chat_id?: string
   notify_enabled?: boolean
   notify_on_backup?: boolean
+  bot_command_rate_max?: number
+  bot_command_rate_window_seconds?: number
 }): Promise<TelegramSettings> {
   return tgFetch<TelegramSettings>('/telegram-settings', {
+    method: 'PATCH',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getTgSelfServiceLimits(): Promise<SelfServiceLimits> {
+  return tgFetch<SelfServiceLimits>('/self-service')
+}
+
+export async function updateTgSelfServiceLimits(data: Partial<SelfServiceLimits>): Promise<SelfServiceLimits> {
+  return tgFetch<SelfServiceLimits>('/self-service', {
     method: 'PATCH',
     body: JSON.stringify(data),
   })

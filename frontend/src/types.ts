@@ -10,7 +10,7 @@ export interface NodeTransportOption {
   available: boolean
 }
 
-export interface NodeTransportSshFields {
+interface NodeTransportSshFields {
   ssh_host?: string | null
   ssh_port?: number | null
   ssh_username?: string | null
@@ -35,6 +35,7 @@ export interface NodeTransportPreflightResult {
 export interface Node {
   id: number
   name: string
+  portal_label?: string | null
   host: string
   port: number
   status: NodeStatus
@@ -62,18 +63,6 @@ export interface ProxyStatusResponse {
   detail?: string | null
 }
 
-export interface ProxyMappingItem {
-  client_ip: string
-  client_port?: number | null
-  proxy_sport?: number | null
-  dest_ip?: string | null
-  dest_port?: number | null
-}
-
-export interface ProxyMappingsResponse {
-  mappings: ProxyMappingItem[]
-}
-
 export interface ActiveNode {
   node: Node
   active: boolean
@@ -92,7 +81,7 @@ export interface NodeHaContext {
   sync_status: SyncStatus
 }
 
-export type SyncStatus = 'unknown' | 'synced' | 'pending' | 'failed'
+export type SyncStatus = 'unknown' | 'synced' | 'pending' | 'failed' | 'drift'
 
 export interface NodeSyncMismatch {
   kind: string
@@ -173,17 +162,6 @@ export interface NodeSyncGroup {
   updated_at: string
 }
 
-export interface NodeSyncGroupStatus {
-  group_id: number
-  sync_status: SyncStatus
-  last_sync_at?: string | null
-  last_verify_at?: string | null
-  last_sync_task_id?: string | null
-  last_sync_error?: string | null
-  progress_percent?: number | null
-  progress_stage?: string | null
-}
-
 export interface NodeMtlsStatus {
   ready: boolean
   writable: boolean
@@ -253,6 +231,12 @@ export interface VisibleVpnProfilesPolicy {
 
 export interface VisibleVpnProfilesDefaultResponse {
   policy: VisibleVpnProfilesPolicy
+}
+
+export interface SelfServiceLimits {
+  quota_default: number
+  create_rate_max: number
+  create_rate_window_seconds: number
 }
 
 export interface EffectiveVisibleVpnProfilesResponse {
@@ -521,7 +505,6 @@ export interface AppSettings {
   noc_daily_time?: string
   noc_weekly_dow?: string
   noc_weekly_time?: string
-  app_name: string
   antizapret_path: string
   include_hosts: string
   exclude_hosts: string
@@ -707,6 +690,9 @@ export interface TelegramSettings {
   legacy_login_enabled: boolean
   auth_method: 'oidc' | 'legacy' | 'none'
   login_ready: boolean
+  bot_command_rate_max: number
+  bot_command_rate_window_seconds: number
+  bot_command_rate_limit_enabled: boolean
 }
 
 export interface TelegramLinkCode {
@@ -1158,7 +1144,7 @@ export interface CidrRuntimeBackup {
   mtime: number
 }
 
-export interface CidrDeployPreviewFile {
+interface CidrDeployPreviewFile {
   file: string
   status: string
   controller_cidr_count?: number
@@ -1615,6 +1601,7 @@ export interface SecuritySettings {
   qr_download_pin_set: boolean
   public_download_enabled: boolean
   portal_domain: string
+  portal_title: string
 }
 
 export interface SecretRotationItem {
@@ -1820,13 +1807,6 @@ export interface RoutingProviderContent {
   filename: string
   content: string
   cidr_count: number
-}
-
-export interface NodeMtlsDisableResult {
-  message: string
-  node_id: number
-  mtls_enabled: boolean
-  warning?: string | null
 }
 
 export interface OneTimeLinkResponse {
@@ -2092,63 +2072,6 @@ export interface Awg2ObfuscationResponse {
   node_host?: string | null
 }
 
-export interface Awg2MonitoringResponse {
-  ifaces: Array<{
-    name: string
-    port?: string | null
-    subnet?: string | null
-    peer_count?: number | null
-  }>
-  clients: Array<{
-    name: string
-    iface?: string
-    online: boolean
-    handshake_age_s?: number | null
-    rx?: number | null
-    tx?: number | null
-    pubkey?: string
-  }>
-  stats_available: boolean
-  node_id?: number | null
-  node_name?: string | null
-  node_host?: string | null
-}
-
-export interface Awg2ClientStatsDailyRow {
-  day: string
-  rx: number
-  tx: number
-}
-
-export interface Awg2ClientStatsGeo {
-  city?: string | null
-  country?: string | null
-  isp?: string | null
-}
-
-export interface Awg2ClientStats {
-  name: string
-  online: boolean
-  endpoint?: string | null
-  handshake_age_s?: number | null
-  rx_life?: number | null
-  tx_life?: number | null
-  daily: Awg2ClientStatsDailyRow[]
-  geo: Awg2ClientStatsGeo | null
-}
-
-export interface Awg2RestoreResponse {
-  message: string
-  runtime?: Record<string, unknown>
-  ha?: {
-    attempted?: boolean
-    errors?: Array<{ node_name?: string | null; error?: string | null }>
-  }
-  node_id?: number | null
-  node_name?: string | null
-  node_host?: string | null
-}
-
 export interface WarperStatusResponse {
   status: Record<string, unknown>
   node_id?: number | null
@@ -2285,12 +2208,6 @@ export interface WarperLogsResponse {
 
 export interface WarperModeResponse {
   mode: Record<string, unknown>
-  node_id?: number | null
-  node_name?: string | null
-}
-
-export interface WarperTextContentResponse {
-  content: string
   node_id?: number | null
   node_name?: string | null
 }

@@ -55,6 +55,14 @@ function isServerUnavailableStatus(status: number): boolean {
   return status >= 500 || status === 408 || status === 429
 }
 
+const NO_REFRESH_AUTH_PATHS = ['/auth/login', '/auth/logout', '/auth/refresh']
+
+/** Sign-in (password, 2FA, passkey), logout and refresh answer 401 for bad credentials, not for an expired session. */
+function refreshesSessionOn401(path: string): boolean {
+  const pathname = path.split('?', 1)[0]
+  return !NO_REFRESH_AUTH_PATHS.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
+}
+
 /**
  * Tabs share one refresh cookie: overlapping rotations answered out of order leave a revoked token in it,
  * which the server treats as reuse once the grace window has passed.
@@ -116,12 +124,12 @@ export async function apiFetch<T>(path: string, options: RequestInit = {}, retry
   return apiFetchAtBase<T>(API_BASE, path, options, retry)
 }
 
-export async function apiFetchAtBase<T>(
+async function requestAtBase(
   base: string,
   path: string,
-  options: RequestInit = {},
-  retry = true,
-): Promise<T> {
+  options: RequestInit,
+  retry: boolean,
+): Promise<Response> {
   const headers = new Headers(options.headers)
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
@@ -143,7 +151,7 @@ export async function apiFetchAtBase<T>(
   } catch {
     throw new ApiError(SERVER_UNREACHABLE_MESSAGE, 0)
   }
-  if (response.status === 401 && retry && !path.startsWith('/auth/') && normalizedBase === API_BASE) {
+  if (response.status === 401 && retry && refreshesSessionOn401(path) && normalizedBase === API_BASE) {
     const body = await response.text()
     let payload: unknown
     try {
@@ -161,7 +169,7 @@ export async function apiFetchAtBase<T>(
     }
     const newToken = await refreshAccessToken()
     if (newToken) {
-      return apiFetchAtBase<T>(base, path, options, false)
+      return requestAtBase(base, path, options, false)
     }
     clearAccessToken()
     const message = parseHttpErrorBody(body, 401)
@@ -181,14 +189,23 @@ export async function apiFetchAtBase<T>(
     const detail = parseHttpErrorBody(body, response.status)
     throw new ApiError(detail, response.status, payload)
   }
+  return response
+}
+
+export async function apiFetchAtBase<T>(
+  base: string,
+  path: string,
+  options: RequestInit = {},
+  retry = true,
+): Promise<T> {
+  const response = await requestAtBase(base, path, options, retry)
   if (response.status === 204) return undefined as T
   return response.json()
 }
 
-export { API_BASE }
-
-export async function parseApiError(response: Response, fallback: string): Promise<ApiError> {
-  const body = await response.text()
-  const detail = parseHttpErrorBody(body, response.status, fallback)
-  return new ApiError(detail, response.status)
+/** For files and other non-JSON answers: the successful Response comes back unread. */
+export function apiFetchResponse(path: string, options: RequestInit = {}): Promise<Response> {
+  return requestAtBase(API_BASE, path, options, true)
 }
+
+export { API_BASE }

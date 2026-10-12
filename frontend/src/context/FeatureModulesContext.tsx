@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { getFeatureModules } from '@/api/client'
+import { useAuth } from '@/context/AuthContext'
 
 interface FeatureModulesContextValue {
   features: Record<string, boolean>
@@ -35,9 +36,17 @@ export function FeatureModulesProvider({ children }: { children: React.ReactNode
     }
   }, [])
 
+  const username = useAuth().user?.username
   useEffect(() => {
-    refresh()
-  }, [refresh])
+    if (username) {
+      refresh()
+      return
+    }
+    setFeatures({})
+    setFrontendPaths({})
+    setSettingsTabs({})
+    setLoading(false)
+  }, [username, refresh])
 
   const isEnabled = useCallback(
     (key: string) => features[key] ?? true,

@@ -1,5 +1,6 @@
 """Lightweight AntiZapret node agent — runs on each VPN server node."""
 
+import asyncio
 import ipaddress
 import io
 import json
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -20,7 +21,7 @@ from app.paths import get_cidr_list_dir
 from app.services.antizapret import AntiZapretService
 from app.services.atomic_file import atomic_write_text
 from app.services.antizapret_backup import resolve_backup_archive
-from app.services.antizapret_settings import build_schema, filter_known_keys, is_openvpn_verbose_log_enabled, read_antizapret_settings, update_antizapret_settings
+from app.services.antizapret_settings import build_schema, filter_known_keys, read_antizapret_settings, update_antizapret_settings
 from app.services.cidr.service import CidrRoutingService
 from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_agent_provision import provision_mtls
@@ -106,7 +107,8 @@ class NodeAgentIpAllowlistMiddleware(BaseHTTPMiddleware):
         try:
             addr = ipaddress.ip_address(client_ip)
         except ValueError:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён") from None
+            # BaseHTTPMiddleware turns a raised HTTPException into 500.
+            return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": "Доступ запрещён"})
         for entry in NODE_AGENT_ALLOWED_IPS:
             try:
                 if "/" in entry:
@@ -116,7 +118,7 @@ class NodeAgentIpAllowlistMiddleware(BaseHTTPMiddleware):
                     return await call_next(request)
             except ValueError:
                 continue
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён с вашего IP")
+        return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": "Доступ запрещён с вашего IP"})
 
 
 app.add_middleware(NodeAgentIpAllowlistMiddleware)
@@ -207,8 +209,7 @@ class ProvisionMtlsRequest(BaseModel):
 
 def _persist_api_key(new_key: str) -> None:
     global NODE_AGENT_API_KEY
-    NODE_AGENT_API_KEY = new_key
-    # The unit no longer carries the key: without the file a restart would lose the rotated key.
+    # The unit no longer carries the key: switching before the file is written could lose it on restart.
     existing = NODE_AGENT_ENV_FILE.read_text(encoding="utf-8") if NODE_AGENT_ENV_FILE.is_file() else ""
     lines: list[str] = []
     replaced = False
@@ -221,6 +222,7 @@ def _persist_api_key(new_key: str) -> None:
     if not replaced:
         lines.append(f"NODE_AGENT_API_KEY={new_key}")
     atomic_write_text(NODE_AGENT_ENV_FILE, "\n".join(lines) + "\n")
+    NODE_AGENT_API_KEY = new_key
 
 
 @app.get("/health")
@@ -228,7 +230,7 @@ def health(_: None = Depends(verify_api_key)):
     payload = build_health_payload(
         service,
         agent_version=app.version,
-        listen_tls=bool(_uvicorn_ssl_kwargs()),
+        listen_tls=NODE_AGENT_MTLS_ENABLED,
     )
     payload["status"] = "online"
     payload["timestamp"] = datetime.utcnow().isoformat()
@@ -472,7 +474,7 @@ async def import_easyrsa3(
     _: None = Depends(verify_api_key),
 ):
     content = await archive.read()
-    service.import_easyrsa3_archive(content)
+    await asyncio.to_thread(service.import_easyrsa3_archive, content)
     return {"message": "easyrsa3 импортирован"}
 
 
@@ -534,9 +536,9 @@ async def restore_antizapret_backup(
         tmp_path = tmp.name
     try:
         if ha_replica:
-            result = service.restore_antizapret_backup_for_ha_replica(tmp_path)
+            result = await asyncio.to_thread(service.restore_antizapret_backup_for_ha_replica, tmp_path)
         else:
-            result = service.restore_antizapret_backup(tmp_path)
+            result = await asyncio.to_thread(service.restore_antizapret_backup, tmp_path)
     finally:
         Path(tmp_path).unlink(missing_ok=True)
     return {
@@ -630,7 +632,7 @@ async def import_wireguard_profiles(
     _: None = Depends(verify_api_key),
 ):
     content = await archive.read()
-    service.import_wireguard_client_profiles_archive(content)
+    await asyncio.to_thread(service.import_wireguard_client_profiles_archive, content)
     return {"message": "Профили WireGuard/AmneziaWG импортированы"}
 
 
@@ -661,7 +663,7 @@ async def import_openvpn_profiles(
     _: None = Depends(verify_api_key),
 ):
     content = await archive.read()
-    service.import_openvpn_client_profiles_archive(content)
+    await asyncio.to_thread(service.import_openvpn_client_profiles_archive, content)
     return {"message": "Профили OpenVPN импортированы"}
 
 
@@ -714,11 +716,6 @@ def routing_result_content(key: str, _: None = Depends(verify_api_key)):
 def routing_antizapret_settings_get(_: None = Depends(verify_api_key)):
     settings_data = read_antizapret_settings(ANTIZAPRET_PATH / "setup")
     return {"settings": settings_data, "schema": build_schema()}
-
-
-@app.get("/traffic/setup-openvpn-log")
-def traffic_setup_openvpn_log(_: None = Depends(verify_api_key)):
-    return {"enabled": is_openvpn_verbose_log_enabled(ANTIZAPRET_PATH / "setup")}
 
 
 @app.put("/routing/antizapret-settings")
@@ -842,12 +839,17 @@ def awg2_backup(_: None = Depends(verify_api_key)):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
+def _restore_awg2_backup(data: bytes) -> dict:
+    awg2 = Awg2Service()
+    awg2.import_narrow_backup(data)
+    return awg2.apply_runtime()
+
+
 @app.post("/awg2/restore")
 async def awg2_restore(archive: UploadFile = File(...), _: None = Depends(verify_api_key)):
+    data = await archive.read()
     try:
-        service = Awg2Service()
-        service.import_narrow_backup(await archive.read())
-        return service.apply_runtime()
+        return await asyncio.to_thread(_restore_awg2_backup, data)
     except Awg2NotInstalledError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValueError as exc:
@@ -868,7 +870,7 @@ def awg2_export_archive(_: None = Depends(verify_api_key)):
 async def awg2_import_archive(request: Request, _: None = Depends(verify_api_key)):
     try:
         data = await request.body()
-        Awg2Service().import_state_archive(data)
+        await asyncio.to_thread(Awg2Service().import_state_archive, data)
     except Awg2NotInstalledError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     return {"success": True}
@@ -1319,7 +1321,13 @@ def system_ensure_openvpn_ban_check(_: None = Depends(verify_api_key)):
 
 @app.post("/system/rotate-api-key")
 def rotate_api_key(payload: RotateApiKeyRequest, _: None = Depends(verify_api_key)):
-    _persist_api_key(payload.new_api_key)
+    try:
+        _persist_api_key(payload.new_api_key)
+    except OSError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Не удалось записать новый API-ключ в {NODE_AGENT_ENV_FILE}: {exc}. Ключ не изменён.",
+        ) from exc
     return {"message": "API-ключ обновлён", "success": True}
 
 
@@ -1380,8 +1388,15 @@ def _uvicorn_ssl_kwargs() -> dict:
     cert = Path(NODE_AGENT_MTLS_SERVER_CERT)
     key = Path(NODE_AGENT_MTLS_SERVER_KEY)
     ca = Path(NODE_AGENT_MTLS_CA_CERT)
-    if not all(p.is_file() for p in (cert, key, ca)):
-        return {}
+    missing = [str(p) for p in (cert, key, ca) if not p.is_file()]
+    if missing:
+        # Falling back to plain HTTP would expose the API key and agent API without TLS.
+        raise SystemExit(
+            "node agent: mTLS включён (NODE_AGENT_MTLS_ENABLED=true), сертификатов нет: "
+            + ", ".join(missing)
+            + ". Агент не запущен: верните файлы в /etc/adminpanelaz/mtls "
+            "или выключите mTLS в backend/node_agent.env."
+        )
     return {
         "ssl_certfile": str(cert),
         "ssl_keyfile": str(key),

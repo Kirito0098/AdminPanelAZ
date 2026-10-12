@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Copy, ExternalLink, Link2, Link2Off, Send } from 'lucide-react'
+import { Copy, ExternalLink, Link2Off, Send } from 'lucide-react'
 import { ApiError, getTelegramBotInfo, getTelegramLinkCode, updateUser } from '@/api/client'
+import TelegramLinkCodeForm from '@/components/telegram/TelegramLinkCodeForm'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useAuth } from '@/context/AuthContext'
@@ -13,7 +14,6 @@ export default function PersonalTelegramCard() {
   const { success, error: notifyError } = useNotifications()
   const [linkCode, setLinkCode] = useState<string | null>(null)
   const [expiresIn, setExpiresIn] = useState<number | null>(null)
-  const [loadingCode, setLoadingCode] = useState(false)
   const [unlinking, setUnlinking] = useState(false)
   const [botUsername, setBotUsername] = useState('')
   const [botUrl, setBotUrl] = useState('')
@@ -40,10 +40,9 @@ export default function PersonalTelegramCard() {
   const telegramId = user.telegram_id?.trim() || ''
   const linked = Boolean(telegramId)
 
-  const handleGetLinkCode = async () => {
-    setLoadingCode(true)
+  const handleGetLinkCode = async (currentPassword: string) => {
     try {
-      const result = await getTelegramLinkCode()
+      const result = await getTelegramLinkCode(currentPassword)
       setLinkCode(result.code)
       setExpiresIn(result.expires_in_seconds)
       const command = `/link ${result.code}`
@@ -53,10 +52,10 @@ export default function PersonalTelegramCard() {
       } catch {
         success(`Код привязки создан (действует ${result.expires_in_seconds} сек)`)
       }
+      return true
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка получения кода')
-    } finally {
-      setLoadingCode(false)
+      return false
     }
   }
 
@@ -161,7 +160,7 @@ export default function PersonalTelegramCard() {
         ) : (
           <div className="space-y-3">
             <p className="text-xs text-muted-foreground">
-              Получите одноразовый код и отправьте боту
+              Введите текущий пароль, получите одноразовый код и отправьте боту
               {botLink ? <> ({botLink})</> : null} команду{' '}
               <code className="rounded bg-muted px-1 py-0.5">/link &lt;код&gt;</code>. Код действует
               ограниченное время.
@@ -186,30 +185,14 @@ export default function PersonalTelegramCard() {
                       </a>
                     </Button>
                   ) : null}
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={loadingCode}
-                    onClick={() => void handleGetLinkCode()}
-                  >
-                    <Link2 size={14} className="mr-1.5" />
+                  <Button type="button" variant="outline" size="sm" onClick={() => setLinkCode(null)}>
                     Новый код
                   </Button>
                 </div>
               </div>
             ) : (
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  className="gap-1.5"
-                  disabled={loadingCode}
-                  onClick={() => void handleGetLinkCode()}
-                >
-                  <Link2 size={16} />
-                  {loadingCode ? 'Создание…' : 'Получить код для привязки'}
-                </Button>
+              <div className="space-y-3">
+                <TelegramLinkCodeForm idPrefix="personal-telegram" onRequest={handleGetLinkCode} />
                 {botUrl ? (
                   <Button type="button" variant="outline" className="gap-1.5" asChild>
                     <a href={botUrl} target="_blank" rel="noreferrer">

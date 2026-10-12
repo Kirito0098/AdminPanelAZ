@@ -34,7 +34,7 @@ def serialize_replica_node_ids(replica_ids: list[int]) -> str:
 
 def effective_openvpn_domain(group: NodeSyncGroup) -> str:
     """HA OpenVPN host → OPENVPN_HOST (stored in shared_domain)."""
-    return (group.shared_domain or "").strip()
+    return group.shared_domain.strip()
 
 
 def optional_wireguard_domain(group: NodeSyncGroup) -> str | None:
@@ -168,21 +168,11 @@ def apply_group_fields(
 
 
 def is_auto_sync_enabled(group: NodeSyncGroup) -> bool:
-    return str(group.sync_mode or "").strip().lower() == "auto"
+    return group.sync_mode.strip().lower() == "auto"
 
 
 def find_sync_group_for_primary(db: Session, node_id: int) -> NodeSyncGroup | None:
     return db.query(NodeSyncGroup).filter(NodeSyncGroup.primary_node_id == node_id).first()
-
-
-def get_sync_group_for_primary_or_raise(db: Session, node_id: int) -> NodeSyncGroup:
-    group = find_sync_group_for_primary(db, node_id)
-    if not group:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"HA sync group for primary node {node_id} not found",
-        )
-    return group
 
 
 def find_sync_group_containing_node(
@@ -247,15 +237,6 @@ def require_ha_primary_for_client_ops(db: Session, *, node: Node | None = None) 
         db,
         node_id=node.id,
         operation_hint="Создавайте и изменяйте клиентов",
-    )
-
-
-def require_ha_primary_node(db: Session, node_id: int) -> None:
-    """Reject per-node mutations (e.g. node defaults) on HA replica nodes."""
-    _raise_ha_replica_forbidden(
-        db,
-        node_id=node_id,
-        operation_hint="Меняйте политику по умолчанию",
     )
 
 

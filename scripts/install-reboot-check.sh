@@ -8,9 +8,6 @@
 # Тесты: REBOOT_CHECK_RUN_DIR, REBOOT_CHECK_BOOT_DIR, REBOOT_CHECK_UNAME,
 #        REBOOT_CHECK_IN_CONTAINER, INSTALL_SKIP_REBOOT_CHECK.
 
-reboot_check_run_dir() {
-  printf '%s' "${REBOOT_CHECK_RUN_DIR:-/var/run}"
-}
 
 reboot_check_boot_dir() {
   printf '%s' "${REBOOT_CHECK_BOOT_DIR:-/boot}"
@@ -179,13 +176,16 @@ install_reboot_now() {
   else
     echo "[install] Перезагрузка сервера. После загрузки снова: sudo ./install.sh"
   fi
+  # shellcheck disable=SC2034 # читает обработчик ошибок install.sh
   INSTALL_FATAL_HANDLED=true
   trap - ERR INT TERM
   sync || true
-  if command -v systemctl >/dev/null 2>&1; then
-    exec systemctl reboot
+  if command -v systemctl >/dev/null 2>&1 && systemctl reboot; then
+    exit 0
   fi
-  exec reboot
+  if reboot; then
+    exit 0
+  fi
   if declare -F die >/dev/null 2>&1; then
     die "Не удалось выполнить reboot. Сделайте вручную: sudo reboot"
   fi

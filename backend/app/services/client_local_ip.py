@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections import defaultdict
 
 from sqlalchemy import desc
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.models import TrafficSessionState, VpnType
 from app.services.node_adapter import NodeAdapter
+
+logger = logging.getLogger(__name__)
 
 _WG_INTERFACES = ("antizapret", "vpn")
 _CLIENT_RE = re.compile(r"^#\s*Client\s*=\s*(.+)$", re.I)
@@ -93,6 +97,7 @@ def load_wireguard_local_ip_map(adapter: NodeAdapter) -> dict[str, str]:
         try:
             content = adapter.read_wireguard_server_config(interface)
         except Exception:
+            logger.debug("local ip: read wireguard config %s failed", interface, exc_info=True)
             continue
         parsed = parse_wireguard_allowed_ips_by_client(content or "")
         for key, ips in parsed.items():
@@ -108,7 +113,7 @@ def load_wireguard_local_ip_map(adapter: NodeAdapter) -> dict[str, str]:
                 continue
             _merge_ip(collected, name, peer.allowed_ips)
     except Exception:
-        pass
+        logger.debug("local ip: wireguard status failed", exc_info=True)
     return _format_map(collected)
 
 
@@ -131,7 +136,7 @@ def load_openvpn_local_ip_map(
                 continue
             _merge_ip(collected, key, client.virtual_address)
     except Exception:
-        pass
+        logger.debug("local ip: openvpn status failed", exc_info=True)
 
     if db is not None and node_id is not None:
         missing = None
@@ -158,8 +163,8 @@ def load_openvpn_local_ip_map(
                 if client_names is not None and key not in client_names:
                     continue
                 _merge_ip(collected, key, virtual_address)
-        except Exception:
-            pass
+        except SQLAlchemyError:
+            logger.debug("local ip: session state query failed node_id=%s", node_id, exc_info=True)
 
     return _format_map(collected)
 

@@ -1,6 +1,7 @@
 import type { MonitoringOverview } from '@/types'
 
 export function formatBytes(n: number) {
+  if (!Number.isFinite(n) || n < 0) return '—'
   const unit = '\u00A0'
   if (n < 1024) return `${n}${unit}B`
   if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)}${unit}KB`

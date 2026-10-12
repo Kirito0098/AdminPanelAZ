@@ -75,7 +75,7 @@ class AccessUntilRequest(BaseModel):
 
 
 def _owner_for_client(db: Session, *, node_id: int, client_name: str) -> User | None:
-    client_key = (client_name or "").strip()
+    client_key = client_name.strip()
     return (
         db.query(User)
         .join(VpnConfig, VpnConfig.owner_id == User.id)
@@ -216,7 +216,7 @@ def list_policies(
     if not names:
         return {}
     if current_user.role != UserRole.admin:
-        allowed = accessible_client_names(db, current_user, node_id=get_active_node(db).id) or set()
+        allowed = accessible_client_names(db, current_user, node_id=get_active_node(db).id)
         allowed_lower = {name.lower() for name in allowed}
         names = [name for name in names if name.lower() in allowed_lower]
         if not names:

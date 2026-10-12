@@ -1,8 +1,5 @@
-import {
-  API_BASE,
-  apiFetch,
-  getToken,
-} from './http'
+import { apiFetch } from './http'
+import { openTicketEventSource, type StreamHandle } from './streamTicket'
 import type {
   WarperHealthResponse,
   WarperStatusResponse,
@@ -292,20 +289,20 @@ export async function checkWarperUpdates(force = false) {
 export function openWarperUpdateStream(
   onEvent: (event: WarperUpdateStreamEvent) => void,
   onError?: (message: string) => void,
-): EventSource | null {
-  const token = getToken()
-  if (!token) return null
-  const url = `${API_BASE}/warper/updates/stream?token=${encodeURIComponent(token)}`
-  const source = new EventSource(url)
-  source.onmessage = (event) => {
-    try {
-      onEvent(JSON.parse(event.data) as WarperUpdateStreamEvent)
-    } catch {
-      onError?.('Ошибка разбора потока обновления AZ-WARP')
-    }
-  }
-  source.onerror = () => {
-    onError?.('Соединение с потоком обновления прервано')
-  }
-  return source
+): StreamHandle {
+  return openTicketEventSource({
+    stream: 'warper_update',
+    path: '/warper/updates/stream',
+    onError,
+    connectionLostMessage: 'Соединение с потоком обновления прервано',
+    attach: (source) => {
+      source.onmessage = (event) => {
+        try {
+          onEvent(JSON.parse(event.data) as WarperUpdateStreamEvent)
+        } catch {
+          onError?.('Ошибка разбора потока обновления AZ-WARP')
+        }
+      }
+    },
+  })
 }
