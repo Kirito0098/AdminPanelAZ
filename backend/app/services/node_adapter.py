@@ -1197,12 +1197,13 @@ class RemoteNodeAdapter(NodeAdapter):
 
         url = f"{self.base_url}{path}"
         timeout = _effective_timeout(kwargs.pop("timeout", HTTP_TIMEOUT))
+        headers = {**self._headers(), **kwargs.pop("headers", {})}
         try:
             client = self._get_http_client()
             response = client.request(
                 method,
                 url,
-                headers=self._headers(),
+                headers=headers,
                 timeout=timeout,
                 **kwargs,
             )
@@ -1225,6 +1226,15 @@ class RemoteNodeAdapter(NodeAdapter):
         if response.status_code == 204 or not response.content:
             return None
         return response.json()
+
+    def telegram_bot_api(self, token: str, method: str, body: bytes, content_type: str) -> dict:
+        return self._request(
+            "POST",
+            f"/telegram/bot-api/{method}",
+            content=body,
+            headers={"X-Telegram-Bot-Token": token, "Content-Type": content_type},
+            timeout=200.0,
+        )
 
     def _request_bytes(self, method: str, path: str, **kwargs) -> bytes:
         from app.services.node_link_errors import (

@@ -1,11 +1,9 @@
-import json
 import logging
 import threading
-import urllib.request
 
 import httpx
 
-from app.services import telegram_api
+from app.services import telegram_api, telegram_transport
 
 logger = logging.getLogger(__name__)
 
@@ -24,21 +22,19 @@ def send_tg_message(bot_token: str, chat_id: str, text: str, *, run_async: bool 
         return False
     def _send() -> bool:
         try:
-            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-            payload = json.dumps({
-                "chat_id": chat_id,
-                "text": text,
-                "parse_mode": "HTML",
-            }).encode()
-            req = urllib.request.Request(
-                url, data=payload, headers={"Content-Type": "application/json"},
+            body = telegram_transport.bot_api_post_sync(
+                bot_token,
+                "sendMessage",
+                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+                timeout=10,
             )
-            with urllib.request.urlopen(req, timeout=10):
-                pass
-            return True
         except Exception as exc:
             logger.warning("TG notify failed chat_id=%s: %s", chat_id, exc)
             return False
+        if not body.get("ok"):
+            logger.warning("TG notify failed chat_id=%s: %s", chat_id, body.get("description"))
+            return False
+        return True
 
     if run_async:
         threading.Thread(target=_send, daemon=True).start()
@@ -69,16 +65,14 @@ def send_tg_document_result(
                 data["parse_mode"] = "HTML"
             upload_name = (filename or "").strip() or (file_path or "").strip().split("/")[-1] or "backup.tar.gz"
             mime = (content_type or "application/octet-stream").strip()
-            url = f"https://api.telegram.org/bot{bot_token}/sendDocument"
-            client = telegram_api._get_bot_api_sync_client()
             with open(file_path, "rb") as fh:
-                response = client.post(
-                    url,
+                payload = telegram_transport.bot_api_post_sync(
+                    bot_token,
+                    "sendDocument",
                     data=data,
                     files={"document": (upload_name, fh, mime)},
                     timeout=httpx.Timeout(float(upload_timeout), connect=5.0),
                 )
-            payload = response.json()
             if not payload.get("ok"):
                 detail = str(payload.get("description") or "sendDocument failed")
                 return False, telegram_api.format_telegram_connect_error(
@@ -144,16 +138,14 @@ def send_tg_photo(
                 data["caption"] = caption
                 data["parse_mode"] = "HTML"
             upload_name = (filename or "").strip() or (file_path or "").strip().split("/")[-1] or "report.png"
-            url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
-            client = telegram_api._get_bot_api_sync_client()
             with open(file_path, "rb") as fh:
-                response = client.post(
-                    url,
+                payload = telegram_transport.bot_api_post_sync(
+                    bot_token,
+                    "sendPhoto",
                     data=data,
                     files={"photo": (upload_name, fh, "image/png")},
                     timeout=httpx.Timeout(float(upload_timeout), connect=5.0),
                 )
-            payload = response.json()
             if not payload.get("ok"):
                 logger.warning(
                     "TG photo send failed chat_id=%s file=%s: %s",
