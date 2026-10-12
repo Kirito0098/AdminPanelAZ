@@ -1141,12 +1141,14 @@ class SelfServiceLimitsResponse(BaseModel):
     quota_default: int
     create_rate_max: int
     create_rate_window_seconds: int
+    require_password_change: bool
 
 
 class SelfServiceLimitsUpdate(BaseModel):
     quota_default: int | None = Field(default=None, ge=0, le=1000)
     create_rate_max: int | None = Field(default=None, ge=0, le=100)
     create_rate_window_seconds: int | None = Field(default=None, ge=60, le=86400)
+    require_password_change: bool | None = None
 
 
 class TelegramLinkCodeRequest(BaseModel):

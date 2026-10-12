@@ -15,6 +15,7 @@ from app.services.user_subscription import user_subscription_expired
 SETTING_QUOTA_DEFAULT = "user_config_quota_default"
 SETTING_CREATE_RATE_MAX = "user_config_create_rate_max"
 SETTING_CREATE_RATE_WINDOW = "user_config_create_rate_window_seconds"
+SETTING_REQUIRE_PASSWORD_CHANGE = "user_require_password_change"
 
 DEFAULT_CONFIG_QUOTA = 5
 DEFAULT_CREATE_RATE_MAX = 3
@@ -58,11 +59,17 @@ def _create_rate_window(db: Session) -> int:
     )
 
 
-def get_self_service_limits(db: Session) -> dict[str, int]:
+def password_change_required_on_admin_set(db: Session) -> bool:
+    """Accounts whose password an admin sets must replace it at first sign-in."""
+    return _get_setting(db, SETTING_REQUIRE_PASSWORD_CHANGE, "0").strip() == "1"
+
+
+def get_self_service_limits(db: Session) -> dict[str, int | bool]:
     return {
         "quota_default": _quota_default(db),
         "create_rate_max": _create_rate_max(db),
         "create_rate_window_seconds": _create_rate_window(db),
+        "require_password_change": password_change_required_on_admin_set(db),
     }
 
 
@@ -72,7 +79,8 @@ def set_self_service_limits(
     quota_default: int | None = None,
     create_rate_max: int | None = None,
     create_rate_window_seconds: int | None = None,
-) -> dict[str, int]:
+    require_password_change: bool | None = None,
+) -> dict[str, int | bool]:
     """Store limits (clamped). Caller commits."""
     if quota_default is not None:
         _set_setting(db, SETTING_QUOTA_DEFAULT, str(clamp_int(quota_default, QUOTA_DEFAULT_BOUNDS)))
@@ -84,6 +92,8 @@ def set_self_service_limits(
             SETTING_CREATE_RATE_WINDOW,
             str(clamp_int(create_rate_window_seconds, CREATE_RATE_WINDOW_BOUNDS)),
         )
+    if require_password_change is not None:
+        _set_setting(db, SETTING_REQUIRE_PASSWORD_CHANGE, "1" if require_password_change else "0")
     db.flush()
     return get_self_service_limits(db)
 

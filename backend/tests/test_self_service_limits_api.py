@@ -59,15 +59,27 @@ def _no_notify():
 def test_get_defaults(session_factory, base):
     resp = _make_client(session_factory).get(base)
     assert resp.status_code == 200
-    assert resp.json() == {"quota_default": 5, "create_rate_max": 3, "create_rate_window_seconds": 3600}
+    assert resp.json() == {
+        "quota_default": 5,
+        "create_rate_max": 3,
+        "create_rate_window_seconds": 3600,
+        "require_password_change": False,
+    }
 
 
 @pytest.mark.parametrize("base", ["/api/settings/self-service", "/api/tg-mini/self-service"])
 def test_patch_partial_persists(session_factory, base):
     client = _make_client(session_factory)
-    resp = client.patch(base, json={"quota_default": 0, "create_rate_window_seconds": 600})
+    resp = client.patch(
+        base, json={"quota_default": 0, "create_rate_window_seconds": 600, "require_password_change": True}
+    )
     assert resp.status_code == 200
-    assert resp.json() == {"quota_default": 0, "create_rate_max": 3, "create_rate_window_seconds": 600}
+    assert resp.json() == {
+        "quota_default": 0,
+        "create_rate_max": 3,
+        "create_rate_window_seconds": 600,
+        "require_password_change": True,
+    }
     db = session_factory()
     try:
         assert ss.get_self_service_limits(db)["create_rate_window_seconds"] == 600
