@@ -9,7 +9,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.auth import create_user_access_token, get_password_hash
+from app.auth import create_tg_mini_token, create_user_access_token, get_password_hash
 from app.database import Base, get_db
 from app.models import User, UserRole
 from app.routers import auth as auth_router
@@ -96,3 +96,26 @@ def test_admin_set_password_follows_setting(client, db_factory, required):
     assert reset.status_code == 200
     assert _flag(db_factory, "dave") is required
     assert _flag(db_factory, "carol") is required
+
+
+def test_flagged_web_session_is_blocked_until_password_change(client, db_factory):
+    token = _token(db_factory, "carol")
+
+    blocked = client.get("/api/configs/quota", headers=_auth(token))
+    assert blocked.status_code == 403
+    assert blocked.json()["detail"].startswith("password_change_required")
+    assert client.get("/api/auth/me", headers=_auth(token)).status_code == 200
+
+    changed = client.post(
+        "/api/auth/change-password",
+        json={"current_password": ADMIN_SET_PASSWORD, "new_password": OWN_PASSWORD},
+        headers=_auth(token),
+    )
+    assert changed.status_code == 200
+    new_token = changed.json()["access_token"]
+    assert client.get("/api/configs/quota", headers=_auth(new_token)).status_code == 200
+
+
+def test_flagged_user_keeps_mini_app_access(client):
+    response = client.get("/api/configs/quota", headers=_auth(create_tg_mini_token("carol", "777")))
+    assert response.status_code == 200

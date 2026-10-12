@@ -120,6 +120,16 @@ def tg_mini_token_allowed(endpoint: _EndpointT) -> _EndpointT:
     return endpoint
 
 
+_PASSWORD_CHANGE_ENDPOINT_ATTR = "_allowed_before_password_change"
+PASSWORD_CHANGE_REQUIRED_DETAIL = "password_change_required: Смените пароль, выданный администратором"
+
+
+def allowed_before_password_change(endpoint: _EndpointT) -> _EndpointT:
+    """Let a user with must_change_password call this endpoint; every other one answers 403."""
+    setattr(endpoint, _PASSWORD_CHANGE_ENDPOINT_ATTR, True)
+    return endpoint
+
+
 def create_tg_mini_token(username: str, telegram_id: str, *, token_version: int = 0) -> str:
     expire = datetime.utcnow() + timedelta(minutes=settings.access_token_expire_minutes)
     payload = {
@@ -218,18 +228,27 @@ def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-    if _endpoint_in_tg_mini_router(request):
+    via_tg_mini = _endpoint_in_tg_mini_router(request)
+    if via_tg_mini:
         user = _get_active_user_from_tg_mini_token(db, token)
     else:
         user = get_active_user_from_access_token(db, token)
         if user is None and _tg_mini_token_allowed(request):
             user = _get_active_user_from_tg_mini_token(db, token)
+            via_tg_mini = True
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Неверный токен авторизации",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # Mini App signs in through Telegram, not with the password an admin handed out.
+    if (
+        user.must_change_password
+        and not via_tg_mini
+        and not getattr(request.scope.get("endpoint"), _PASSWORD_CHANGE_ENDPOINT_ATTR, False)
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=PASSWORD_CHANGE_REQUIRED_DETAIL)
     return user
 
 
