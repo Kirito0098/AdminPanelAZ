@@ -2,7 +2,7 @@ version: 2
 updates:
   - package-ecosystem: github-actions
     directory: /
-    target-branch: "release/2.26.4"
+    target-branch: "release/2.26.5"
     schedule:
       interval: weekly
     commit-message:
