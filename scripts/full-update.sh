@@ -246,6 +246,7 @@ fu_units_list() {
 }
 
 fu_step_systemd() {
+  menu_install_command
   fu_refresh_units
   ui_ok "Unit'ы обновлены из шаблонов: $(fu_units_list)"
   fu_row systemd ok "$(fu_units_list)"

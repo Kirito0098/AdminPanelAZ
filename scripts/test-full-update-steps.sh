@@ -9,6 +9,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 export CALLS="$TMP/calls.log"
+export ADMINPANELAZ_MENU_LINK="$TMP/adminpanelaz"
 INSTALL="$TMP/install"
 mkdir -p "$INSTALL/backend" "$INSTALL/scripts" "$TMP/units" "$TMP/venv/bin"
 cat >"$TMP/venv/bin/python" <<'EOF'
@@ -141,6 +142,17 @@ run 'fu_run systemd fu_step_systemd'
 REFRESH_FAIL=1 run 'fu_run systemd fu_step_systemd; echo "stopped=$FU_STOPPED"'
 [[ "$(row systemd)" == "ошибка|refresh-systemd-units.sh завершился с ошибкой — проверьте unit'ы вручную" ]] \
   && grep -qx "stopped=false" "$TMP/out" && ok "ошибка без стопа" || bad "итог: $(row systemd); $(cat "$TMP/out")"
+
+echo "[test] systemd: ставит команду adminpanelaz, даже если unit'ы не обновились"
+touch "$INSTALL/scripts/adminpanel-menu.sh"
+run 'fu_run systemd fu_step_systemd'
+[[ "$(readlink "$ADMINPANELAZ_MENU_LINK" || true)" == "$INSTALL/scripts/adminpanel-menu.sh" ]] && ok "ссылка создана" \
+  || bad "ссылки нет: $(readlink "$ADMINPANELAZ_MENU_LINK" || true); $(cat "$TMP/out")"
+rm -f "$ADMINPANELAZ_MENU_LINK"
+REFRESH_FAIL=1 run 'fu_run systemd fu_step_systemd'
+[[ "$(readlink "$ADMINPANELAZ_MENU_LINK" || true)" == "$INSTALL/scripts/adminpanel-menu.sh" ]] && ok "при ошибке unit'ов" \
+  || bad "ссылки нет после ошибки refresh: $(cat "$TMP/out")"
+rm -f "$ADMINPANELAZ_MENU_LINK" "$INSTALL/scripts/adminpanel-menu.sh"
 
 PANEL_NGINX_ENV='DOMAIN=panel.example.com
 PUBLISH_MODE=nginx_le
