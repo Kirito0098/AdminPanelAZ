@@ -1,6 +1,10 @@
+import logging
+
 from sqlalchemy.orm import Session
 
 from app.models import UserActionLog
+
+logger = logging.getLogger(__name__)
 
 
 def log_action(
@@ -29,5 +33,5 @@ def log_action(
         event_webhook_service.dispatch_after_log(row, db=db)
         audit_stream_service.dispatch_after_log(row, db=db)
     except Exception:
-        pass
+        logger.exception("action log dispatch failed action=%s", action)
     return row

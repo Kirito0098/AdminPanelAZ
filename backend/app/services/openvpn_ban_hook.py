@@ -9,8 +9,11 @@ ban-check hook at that mirror instead of the root-owned source file.
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 BAN_CHECK_START = "# BEGIN adminpanel ban check"
 BAN_CHECK_END = "# END adminpanel ban check"
@@ -47,12 +50,15 @@ def _strip_existing_block(content: str) -> str:
     return pattern.sub("", content)
 
 
-def _read_source_banned(antizapret_path: Path) -> str:
+def _read_source_banned(antizapret_path: Path) -> str | None:
     source = antizapret_path / "config" / "banned_clients"
     try:
         return source.read_text(encoding="utf-8", errors="replace")
-    except OSError:
+    except FileNotFoundError:
         return ""
+    except OSError as exc:
+        logger.error("cannot read %s, keeping existing ban mirror: %s", source, exc)
+        return None
 
 
 def _sync_readable_mirror(mirror_path: Path, content: str) -> None:
@@ -123,6 +129,12 @@ def ensure_openvpn_ban_check(
 ) -> dict:
     antizapret_path = Path(antizapret_path)
     banned_content = _read_source_banned(antizapret_path)
+    if banned_content is None:
+        return {
+            "success": False,
+            "message": "banned_clients не читается",
+            "changed": False,
+        }
 
     candidates = (
         list(client_connect_paths)

@@ -1,10 +1,12 @@
 import ipaddress
 import json
+import logging
 import socket
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
+from cryptography.fernet import InvalidToken
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session, object_session
 
@@ -40,6 +42,7 @@ from app.services.node_health import HEALTH_METADATA_KEYS
 from app.services.node_transport import TRANSPORT_SSH, get_transport, node_uses_tls, resolve_transport_id
 from app.services.proxy_node_adapter import ProxyNodeAdapter
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 ACTIVE_NODE_KEY = "active_node_id"
 NODE_KIND_VPN = "vpn"
@@ -113,7 +116,8 @@ def get_api_key_plain(node: Node) -> str | None:
         return None
     try:
         return decrypt_secret(node.api_key_encrypted, settings.secret_key)
-    except Exception:
+    except InvalidToken:
+        logger.warning("node %s: api key does not decrypt with current SECRET_KEY", node.id)
         return None
 
 
@@ -126,7 +130,8 @@ def get_pending_api_key_plain(node: Node) -> str | None:
         return None
     try:
         return decrypt_secret(node.api_key_pending_encrypted, settings.secret_key)
-    except Exception:
+    except InvalidToken:
+        logger.warning("node %s: pending api key does not decrypt with current SECRET_KEY", node.id)
         return None
 
 

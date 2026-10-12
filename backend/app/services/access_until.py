@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -14,6 +15,8 @@ from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, WgAcce
 from app.services.access_policy import AccessPolicyService
 from app.services.node_manager import get_adapter_for_node, node_metadata_dict
 from app.services.shared_helpers import as_utc as _as_utc
+
+logger = logging.getLogger(__name__)
 
 Protocol = Literal["openvpn", "wireguard", "amneziawg2"]
 
@@ -236,6 +239,9 @@ def apply_due_access_blocks(db: Session) -> dict[str, int]:
                 counts["skipped"] += 1
                 continue
         except Exception:
+            logger.exception(
+                "access expiry block failed protocol=%s node_id=%s client=%s", protocol, node_id, client_name
+            )
             counts["errors"] += 1
             continue
         counts[protocol] += 1

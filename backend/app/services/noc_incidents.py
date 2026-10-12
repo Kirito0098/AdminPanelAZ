@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
@@ -12,6 +13,8 @@ from app.services.alert_rules import format_rule_condition
 from app.services.monitoring_overview import _build_node_summary, _collect_nodes_monitoring_data
 from app.services.node_manager import is_vpn_node, get_active_node
 from app.services.shared_helpers import utcnow_naive as _utcnow
+
+logger = logging.getLogger(__name__)
 
 _CIDR_OK_STATUSES = frozenset({"ok", "success"})
 _ALERT_WINDOW_DAYS = 7
@@ -72,6 +75,7 @@ def build_noc_incidents(db: Session, *, limit: int = 20) -> NocIncidentsResponse
         payloads = _collect_nodes_monitoring_data(db)
         summary_by_id = {payload["node"].id: _build_node_summary(payload) for payload in payloads}
     except Exception:
+        logger.exception("noc incidents: node monitoring collect failed")
         payloads = []
         summary_by_id = {}
 
@@ -142,7 +146,7 @@ def build_noc_incidents(db: Session, *, limit: int = 20) -> NocIncidentsResponse
                     )
                 )
     except Exception:
-        pass
+        logger.exception("noc incidents: active node services check failed")
 
     cidr_since = now - timedelta(hours=_CIDR_WINDOW_HOURS)
     cidr_rows = (

@@ -587,6 +587,7 @@ def apply_due_user_subscription_blocks(db: Session) -> dict[str, int]:
             result = apply_user_subscription_expiry(db, user, commit=True)
         except Exception:
             db.rollback()
+            logger.exception("subscription expiry failed user_id=%s", user_id)
             counts["errors"] += 1
             continue
         counts["cascaded"] += int(result.get("expired", 0) or 0)

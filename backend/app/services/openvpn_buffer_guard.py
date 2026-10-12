@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -19,6 +20,8 @@ from app.services.admin_notify import admin_notify_service
 from app.services.background_gate import sleep_unless_paused
 from app.services.openvpn_buffer_guard_parse import summarize_enobufs
 from app.services.openvpn_management import openvpn_management_service
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_UNITS = frozenset({"antizapret-udp", "antizapret-tcp", "vpn-udp", "vpn-tcp"})
 
@@ -290,6 +293,7 @@ def _apply_temp_ban(
             banned.add(client_name)
             svc.write_banned_clients(banned)
     except Exception:
+        logger.exception("buffer guard: temp ban failed node_id=%s client=%s", node.id, client_name)
         return None
 
     return _now_utc() + timedelta(minutes=max(1, int(minutes)))
@@ -628,9 +632,10 @@ def process_temp_ban_expiries(db: Session) -> list[dict]:
         if node_id not in adapter_cache:
             try:
                 adapter_cache[node_id] = get_adapter_for_node(node)
-            except Exception:
+            except Exception as exc:
                 # If adapter resolution fails (e.g. node misconfigured or offline),
                 # keep bans as-is and move on.
+                logger.warning("buffer guard: no adapter for node_id=%s, bans kept: %s", node_id, exc)
                 adapter_cache[node_id] = None
 
         adapter_for_node = adapter_cache.get(node_id)
@@ -665,6 +670,7 @@ def process_temp_ban_expiries(db: Session) -> list[dict]:
             )
         except Exception:
             # If banned_clients write failed, we must not clear ban_expires_at.
+            logger.exception("buffer guard: unban failed node_id=%s client=%s", node_id, client_name)
             continue
 
     return results

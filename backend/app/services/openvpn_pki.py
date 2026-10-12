@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 import subprocess
 from dataclasses import dataclass
@@ -15,6 +16,8 @@ from app.services.openvpn_cert import (
     extract_pem_from_ovpn,
     parse_easyrsa_expiry,
 )
+
+logger = logging.getLogger(__name__)
 
 EASYRSA_INDEX_PATH = Path("/etc/openvpn/easyrsa3/pki/index.txt")
 
@@ -253,7 +256,8 @@ def validate_client_profiles(
             continue
         try:
             content = adapter.read_profile_file(path)
-        except Exception:
+        except Exception as exc:
+            logger.warning("pki check: cannot read profile %s for %s: %s", path, client_name, exc)
             continue
         issue = _issue_for_profile(
             client_name=client_name,
@@ -278,7 +282,8 @@ def validate_all_openvpn_profiles(
     if client_names is None:
         try:
             client_names = adapter.list_openvpn_clients()
-        except Exception:
+        except Exception as exc:
+            logger.warning("pki check: cannot list OpenVPN clients: %s", exc)
             client_names = []
     all_issues: list[ProfileCertIssue] = []
     for name in client_names:
