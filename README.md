@@ -4,7 +4,7 @@
 
 [![GitHub](https://img.shields.io/badge/GitHub-Kirito0098%2FAdminPanelAZ-181717?style=for-the-badge&logo=github)](https://github.com/Kirito0098/AdminPanelAZ)
 [![Version](https://img.shields.io/badge/Панель-2.26.4-blue?style=for-the-badge)](CHANGELOG.md)
-[![Node agent](https://img.shields.io/badge/Node_agent-1.12.0-555?style=for-the-badge)](CHANGELOG.md)
+[![Node agent](https://img.shields.io/badge/Node_agent-1.13.0-555?style=for-the-badge)](CHANGELOG.md)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](backend/)
 [![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=black)](frontend/)
 
@@ -216,7 +216,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
 6. В разделе **Клиенты** нажмите **Синхронизировать** — [инструкция](docs/konfiguracii.md)
 7. **Подписка** — unlock-коды и **клиентский портал** (поддомен + «Настроить под текущую публикацию»)
 8. **Telegram** — раздел уже в меню; укажите bot token в UI — [инструкция](docs/Telegram.md)
-9. Для **HA** (два сервера на один домен): создайте группу синхронизации на **Узлах**, нажмите **Синхронизировать** (домен → Push full → verify) — [Node Sync](docs/NodeSync.md). После обновления панели обновите **node agent** на VPN-узлах (**Узлы** → «Обновить», агент перезапустится сам), чтобы в «Узлах» отображалась версия **1.12.0**
+9. Для **HA** (два сервера на один домен): создайте группу синхронизации на **Узлах**, нажмите **Синхронизировать** (домен → Push full → verify) — [Node Sync](docs/NodeSync.md). После обновления панели обновите **node agent** на VPN-узлах (**Узлы** → «Обновить», агент перезапустится сам), чтобы в «Узлах» отображалась версия **1.13.0**
 
 > [!NOTE]
 > **Авто-бэкап** после install включён (каждые **7** дней) — изменить в [Настройки → Резервные копии](docs/nastrojki/rezervnye-kopii.md).
@@ -311,7 +311,7 @@ CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|
 **LAN-ноды / mTLS / SSH:** приватные IP узлов — `ALLOW_INTERNAL_NODES=true` в `.env`; mTLS и SSH — per-node в UI **Узлы** (SSH — модуль **SSH transport узлов**). Подробнее: [docs/uzly.md](docs/uzly.md) · [docs/node-ssh-transport.md](docs/node-ssh-transport.md).
 
 - **Health** — `GET /api/health`, `GET /api/health/deep` (только с сервера или с JWT админа)
-- **Node agent** — **1.12.0** (для HA: ≥ 1.3.0; byte-copy `.ovpn` при Push full: ≥ 1.5.0; сроки сертификатов: ≥ 1.6.0; AZ-AWG2 / reboot: ≥ 1.7.0; uptime / `listen_tls` в `/health`: ≥ 1.8.0; AZ-WARP 1.5, файлы WARP/RPZ/Lua, OpenVPN Buffer Guard, `block-batch`: ≥ 1.11.0; без лишнего перезапуска OpenVPN после doall при multihome: ≥ 1.11.1; отказ запуска и отказ обновления при mTLS без сертификатов, `403` по allowlist IP, импорт/восстановление без блокировки агента, новый ключ сначала в `node_agent.env`: ≥ 1.12.0)
+- **Node agent** — **1.13.0** (для HA: ≥ 1.3.0; byte-copy `.ovpn` при Push full: ≥ 1.5.0; сроки сертификатов: ≥ 1.6.0; AZ-AWG2 / reboot: ≥ 1.7.0; uptime / `listen_tls` в `/health`: ≥ 1.8.0; AZ-WARP 1.5, файлы WARP/RPZ/Lua, OpenVPN Buffer Guard, `block-batch`: ≥ 1.11.0; без лишнего перезапуска OpenVPN после doall при multihome: ≥ 1.11.1; отказ запуска и отказ обновления при mTLS без сертификатов, `403` по allowlist IP, импорт/восстановление без блокировки агента, новый ключ сначала в `node_agent.env`: ≥ 1.12.0; связь с Telegram через узел для панели в РФ: ≥ 1.13.0)
 
 ## 🔐 Безопасность
 
