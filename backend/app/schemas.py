@@ -1093,6 +1093,11 @@ class LatestChangelogResponse(BaseModel):
     pending: ChangelogBlockResponse | None = None
 
 
+class TelegramRelayNode(BaseModel):
+    id: int
+    name: str
+
+
 class TelegramSettingsResponse(BaseModel):
     bot_token_set: bool = False
     bot_username: str = ""
@@ -1117,6 +1122,14 @@ class TelegramSettingsResponse(BaseModel):
     bot_command_rate_max: int = 30
     bot_command_rate_window_seconds: int = 60
     bot_command_rate_limit_enabled: bool = True
+    relay_node_id: int | None = None
+    relay_nodes: list[TelegramRelayNode] = Field(default_factory=list)
+    relay_last_ok_at: str = ""
+    relay_last_error: str = ""
+
+
+class TelegramRelayUpdate(BaseModel):
+    node_id: int | None = None
 
 
 class TelegramSettingsUpdate(BaseModel):

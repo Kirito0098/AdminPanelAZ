@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.auth import require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import DEFAULT_TG_NOTIFY_EVENTS, User
+from app.models import DEFAULT_TG_NOTIFY_EVENTS, Node, User
 from app.schemas import (
     AdminNotifyEventItem,
     AdminNotifyEventTestRequest,
@@ -18,6 +18,8 @@ from app.schemas import (
     AdminNotifySettingsUpdate,
     MessageResponse,
     NocReportPreviewRequest,
+    TelegramRelayNode,
+    TelegramRelayUpdate,
     TelegramSettingsResponse,
     TelegramSettingsUpdate,
 )
@@ -30,13 +32,20 @@ from app.services.admin_notify import (
 )
 from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.feature_guards import get_feature_service, module_disabled_message
+from app.services.node_transport import TRANSPORT_SSH, resolve_transport_id
 from app.services.noc_report import send_noc_report_preview, send_weekly_image_preview
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.panel_publish_info import resolve_request_url_root
 from app.services.telegram import send_tg_message
-from app.services.telegram_api import delete_webhook_sync, set_webhook_sync
+from app.services.telegram_api import (
+    delete_webhook_sync,
+    reset_chat_menu_button_sync,
+    set_my_commands_sync,
+    set_webhook_sync,
+)
 from app.services.telegram_bot_command_rate_limit import get_bot_command_rate_limits, set_bot_command_rate_limits
 from app.services.telegram_link import notify_telegram_unlinked
+from app.services.telegram_transport import RELAY_NODE_SETTING
 from app.services.telegram_recipients import (
     get_notify_recipient_user_ids,
     get_setting_chat_ids,
@@ -66,6 +75,24 @@ def _webhook_url(request: Request, secret: str) -> str:
     return f"{root}/api/telegram/webhook/{secret}"
 
 
+def relay_node_ineligible_reason(node: Node) -> str | None:
+    if node.is_local:
+        return "Нужен удалённый узел: этот сервер и есть панель"
+    if (node.node_kind or "vpn") != "vpn":
+        return "Прокси-узел стоит в РФ и не поможет достучаться до Telegram"
+    if not node.mtls_enabled and resolve_transport_id(node) != TRANSPORT_SSH:
+        return "Канал до узла не шифруется: включите mTLS или SSH-транспорт на странице «Узлы»"
+    return None
+
+
+def _configure_bot_menu(token: str) -> None:
+    from app.services.telegram_bot_handlers.menu import build_bot_commands
+
+    for ok, error in (set_my_commands_sync(token, build_bot_commands()), reset_chat_menu_button_sync(token)):
+        if not ok:
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
+
+
 def _telegram_settings_response(db: Session, request: Request) -> TelegramSettingsResponse:
     max_age_raw = _get_setting(db, "telegram_auth_max_age_seconds")
     max_age = int(max_age_raw) if max_age_raw.isdigit() else 300
@@ -84,6 +111,12 @@ def _telegram_settings_response(db: Session, request: Request) -> TelegramSettin
     auth_method: str = "oidc" if oidc_enabled else ("legacy" if legacy_login_enabled else "none")
     chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
     bot_limits = get_bot_command_rate_limits(db)
+    relay_raw = _get_setting(db, RELAY_NODE_SETTING)
+    relay_nodes = [
+        TelegramRelayNode(id=node.id, name=node.name)
+        for node in db.query(Node).order_by(Node.name).all()
+        if relay_node_ineligible_reason(node) is None
+    ]
     return TelegramSettingsResponse(
         bot_token_set=bot_token_set,
         bot_username=bot_username,
@@ -108,6 +141,10 @@ def _telegram_settings_response(db: Session, request: Request) -> TelegramSettin
         bot_command_rate_max=bot_limits["max_requests"],
         bot_command_rate_window_seconds=bot_limits["window_seconds"],
         bot_command_rate_limit_enabled=get_settings().telegram_bot_command_rate_limit_enabled,
+        relay_node_id=int(relay_raw) if relay_raw else None,
+        relay_nodes=relay_nodes,
+        relay_last_ok_at=_get_setting(db, "telegram_relay_last_ok_at"),
+        relay_last_error=_get_setting(db, "telegram_relay_last_error"),
     )
 
 
@@ -449,6 +486,10 @@ def register_telegram_webhook(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Токен бота не настроен")
     if _get_setting(db, "telegram_bot_interactive_enabled", "false") != "true":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Интерактивный бот не включён")
+    if _get_setting(db, RELAY_NODE_SETTING):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Включена связь через узел: webhook не нужен"
+        )
 
     secret = _ensure_webhook_secret(db)
     url = _webhook_url(request, secret)
@@ -456,17 +497,7 @@ def register_telegram_webhook(
     if not ok:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
 
-    from app.services.telegram_bot_handlers.menu import build_bot_commands
-    from app.services.telegram_api import reset_chat_menu_button_sync, set_my_commands_sync
-
-    cmd_ok, cmd_error = set_my_commands_sync(bot_token, build_bot_commands())
-    if not cmd_ok:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=cmd_error)
-
-    menu_ok, menu_error = reset_chat_menu_button_sync(bot_token)
-    if not menu_ok:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=menu_error)
-
+    _configure_bot_menu(bot_token)
     _set_setting(db, "telegram_webhook_set_at", datetime.now(timezone.utc).isoformat())
     db.commit()
     admin_notify_service.send_settings_change(
@@ -489,11 +520,53 @@ def unregister_telegram_webhook(
         ok, error = delete_webhook_sync(bot_token)
         if not ok:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
-        from app.services.telegram_api import reset_chat_menu_button_sync
-
         menu_ok, menu_error = reset_chat_menu_button_sync(bot_token)
         if not menu_ok:
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=menu_error)
+    _set_setting(db, "telegram_webhook_set_at", "")
+    db.commit()
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="settings_telegram_auth_update",
+        client_timezone=get_client_timezone_from_request(request),
+    )
+    return _telegram_settings_response(db, request)
+
+
+@router.put("/settings/telegram/relay", response_model=TelegramSettingsResponse)
+def update_telegram_relay(
+    payload: TelegramRelayUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    if payload.node_id is None:
+        _set_setting(db, RELAY_NODE_SETTING, "")
+    else:
+        node = db.get(Node, payload.node_id)
+        if node is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+        reason = relay_node_ineligible_reason(node)
+        if reason:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=reason)
+        previous = _get_setting(db, RELAY_NODE_SETTING)
+        root = resolve_request_url_root(request, behind_nginx=get_settings().behind_nginx).rstrip("/")
+        _set_setting(db, RELAY_NODE_SETTING, str(node.id))
+        _set_setting(db, "telegram_mini_app_url", f"{root}/api/tg-mini")
+        _set_setting(db, "telegram_relay_last_error", "")
+        db.commit()
+        token = _get_setting(db, "telegram_bot_token")
+        try:
+            if token:
+                ok, error = delete_webhook_sync(token)
+                if not ok:
+                    raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
+                _configure_bot_menu(token)
+        except HTTPException:
+            _set_setting(db, RELAY_NODE_SETTING, previous)
+            db.commit()
+            raise
     _set_setting(db, "telegram_webhook_set_at", "")
     db.commit()
     admin_notify_service.send_settings_change(
