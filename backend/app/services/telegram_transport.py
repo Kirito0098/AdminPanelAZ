@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+from collections.abc import Callable
 from typing import Any
+from urllib.parse import urlencode
 
 import httpx
 from fastapi import HTTPException
@@ -74,9 +77,9 @@ def _encode(
     return request
 
 
-def _via_relay(adapter, token: str, method: str, request: httpx.Request) -> dict:
+def _relay_envelope(adapter, call: Callable[[Any], dict]) -> dict:
     try:
-        envelope = adapter.telegram_bot_api(token, method, request.content, request.headers["content-type"])
+        return call(adapter)
     except HTTPException as exc:
         if exc.status_code == 404:
             raise TelegramRelayError(
@@ -86,6 +89,12 @@ def _via_relay(adapter, token: str, method: str, request: httpx.Request) -> dict
         raise TelegramRelayError(f"Узел «{adapter.node_name}»: {detail}") from exc
     finally:
         adapter.close()
+
+
+def _via_relay(adapter, token: str, method: str, request: httpx.Request) -> dict:
+    envelope = _relay_envelope(
+        adapter, lambda a: a.telegram_bot_api(token, method, request.content, request.headers["content-type"])
+    )
     return envelope["body"]
 
 
@@ -117,4 +126,39 @@ async def bot_api_post(
     if adapter is not None:
         return await asyncio.to_thread(_via_relay, adapter, token, method, request)
     response = await telegram_api._get_bot_api_client().send(request)
+    return response.json()
+
+
+def _json_or_text(response: httpx.Response) -> Any:
+    try:
+        return response.json()
+    except ValueError:
+        return {"error": response.text.strip() or response.reason_phrase}
+
+
+def oidc_token_exchange_sync(form: dict[str, str], *, client_id: str, client_secret: str) -> tuple[int, Any]:
+    """POST the OIDC token form to oauth.telegram.org; returns (HTTP status, parsed body)."""
+    from app.services.telegram_relay import OIDC_TOKEN_URL
+
+    adapter = _relay_adapter()
+    if adapter is not None:
+        body = urlencode(form).encode()
+        authorization = "Basic " + base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+        envelope = _relay_envelope(adapter, lambda a: a.telegram_oidc_token(body, authorization))
+        return envelope["status"], envelope["body"]
+    response = httpx.post(OIDC_TOKEN_URL, data=form, auth=(client_id, client_secret), timeout=15.0)
+    return response.status_code, _json_or_text(response)
+
+
+def oidc_jwks_sync() -> dict:
+    from app.services.telegram_relay import OIDC_JWKS_URL
+
+    adapter = _relay_adapter()
+    if adapter is not None:
+        envelope = _relay_envelope(adapter, lambda a: a.telegram_oidc_jwks())
+        if envelope["status"] >= 400:
+            raise TelegramRelayError(f"oauth.telegram.org вернул HTTP {envelope['status']} на запрос ключей")
+        return envelope["body"]
+    response = httpx.get(OIDC_JWKS_URL, timeout=10.0)
+    response.raise_for_status()
     return response.json()

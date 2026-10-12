@@ -90,3 +90,24 @@ def test_old_agent_without_relay_gives_update_hint(monkeypatch):
 
     with pytest.raises(telegram_transport.TelegramRelayError, match="1.13.0"):
         telegram_transport.bot_api_post_sync(TOKEN, "getMe")
+
+
+def test_oidc_token_exchange_goes_through_relay_node(monkeypatch):
+    seen = {}
+
+    def relay(body, authorization):
+        seen.update(body=body, authorization=authorization)
+        return {"status": 200, "body": {"id_token": "idt"}}
+
+    monkeypatch.setattr(
+        telegram_transport,
+        "_relay_adapter",
+        lambda: SimpleNamespace(telegram_oidc_token=relay, node_name="nl-1", close=lambda: None),
+    )
+    monkeypatch.setattr(httpx, "post", lambda *_a, **_k: pytest.fail("OIDC went direct"))
+
+    status, body = telegram_transport.oidc_token_exchange_sync({"code": "c1"}, client_id="bot", client_secret="secret")
+
+    assert (status, body) == (200, {"id_token": "idt"})
+    assert seen["body"] == b"code=c1"
+    assert seen["authorization"] == "Basic Ym90OnNlY3JldA=="

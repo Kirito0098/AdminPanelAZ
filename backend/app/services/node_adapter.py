@@ -1236,6 +1236,20 @@ class RemoteNodeAdapter(NodeAdapter):
             timeout=200.0,
         )
 
+    def telegram_oidc_token(self, body: bytes, authorization: str) -> dict:
+        return self._request(
+            "POST",
+            "/telegram/oidc/token",
+            content=body,
+            headers={
+                "X-Telegram-Oidc-Authorization": authorization,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+        )
+
+    def telegram_oidc_jwks(self) -> dict:
+        return self._request("GET", "/telegram/oidc/jwks")
+
     def _request_bytes(self, method: str, path: str, **kwargs) -> bytes:
         from app.services.node_link_errors import (
             classify_http_status,

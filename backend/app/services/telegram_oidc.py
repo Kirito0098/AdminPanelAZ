@@ -9,19 +9,35 @@ import threading
 from datetime import timedelta
 from typing import Any
 
-import httpx
 import jwt
 from jwt import PyJWKClient
+from jwt.exceptions import PyJWKClientConnectionError
 
 from app.services.shared_state import pop_state, put_state
+from app.services.telegram_relay import OIDC_JWKS_URL
 
 OIDC_ISSUER = "https://oauth.telegram.org"
 OIDC_AUTH_URL = f"{OIDC_ISSUER}/auth"
-OIDC_TOKEN_URL = f"{OIDC_ISSUER}/token"
-OIDC_JWKS_URL = f"{OIDC_ISSUER}/.well-known/jwks.json"
 OIDC_SCOPE = "openid profile"
 OIDC_STATE_TTL = 600
 OIDC_STATE_NAMESPACE = "tg_oidc_state"
+
+
+
+class _TelegramJwksClient(PyJWKClient):
+    """Fetches keys through the Telegram transport, so a relay node is used when one is chosen."""
+
+    def fetch_data(self) -> Any:
+        from app.services.telegram_transport import oidc_jwks_sync
+
+        try:
+            jwk_set = oidc_jwks_sync()
+        except Exception as exc:
+            raise PyJWKClientConnectionError(f"Не удалось получить ключи Telegram OIDC: {exc}") from exc
+        if self.jwk_set_cache is not None:
+            self.jwk_set_cache.put(jwk_set)
+        return jwk_set
+
 
 _jwks_client: PyJWKClient | None = None
 _jwks_client_lock = threading.Lock()
@@ -75,7 +91,7 @@ def _get_jwks_client() -> PyJWKClient:
     with _jwks_client_lock:
         if _jwks_client is None:
             # lifespan=3600 matches the previous 1h JWKS cache.
-            _jwks_client = PyJWKClient(OIDC_JWKS_URL, cache_keys=True, lifespan=3600, timeout=10)
+            _jwks_client = _TelegramJwksClient(OIDC_JWKS_URL, cache_keys=True, lifespan=3600, timeout=10)
         return _jwks_client
 
 
@@ -107,22 +123,22 @@ def exchange_authorization_code(
     redirect_uri: str,
     code_verifier: str,
 ) -> dict[str, Any]:
-    resp = httpx.post(
-        OIDC_TOKEN_URL,
-        data={
+    from app.services.telegram_transport import oidc_token_exchange_sync
+
+    status_code, body = oidc_token_exchange_sync(
+        {
             "grant_type": "authorization_code",
             "code": code,
             "redirect_uri": redirect_uri,
             "client_id": client_id,
             "code_verifier": code_verifier,
         },
-        auth=(client_id, client_secret),
-        timeout=15.0,
+        client_id=client_id,
+        client_secret=client_secret,
     )
-    if resp.status_code >= 400:
-        detail = resp.text.strip() or resp.reason_phrase
-        raise ValueError(f"Telegram OIDC token exchange failed: {detail}")
-    return resp.json()
+    if status_code >= 400:
+        raise ValueError(f"Telegram OIDC token exchange failed: {body}")
+    return body
 
 
 def telegram_id_from_claims(claims: dict[str, Any]) -> str:
