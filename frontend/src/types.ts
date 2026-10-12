@@ -237,6 +237,7 @@ export interface SelfServiceLimits {
   quota_default: number
   create_rate_max: number
   create_rate_window_seconds: number
+  require_password_change: boolean
 }
 
 export interface EffectiveVisibleVpnProfilesResponse {
