@@ -22,7 +22,7 @@ def factory(monkeypatch):
     with factory() as db:
         _set_setting(db, "telegram_bot_token", "123456:" + "A" * 35)
         _set_setting(db, "telegram_bot_interactive_enabled", "true")
-        _set_setting(db, "telegram_relay_node_id", "1")
+        _set_setting(db, "telegram_relay_node_ids", "1")
         _set_setting(db, "telegram_mini_app_url", "https://panel.example/api/tg-mini")
         _set_setting(db, "telegram_relay_last_error", "старая ошибка")
         db.commit()

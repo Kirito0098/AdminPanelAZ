@@ -18,6 +18,7 @@ from app.schemas import (
     AdminNotifySettingsUpdate,
     MessageResponse,
     NocReportPreviewRequest,
+    TelegramRelayCheck,
     TelegramRelayNode,
     TelegramRelayUpdate,
     TelegramSettingsResponse,
@@ -44,7 +45,14 @@ from app.services.telegram_api import (
 )
 from app.services.telegram_bot_command_rate_limit import get_bot_command_rate_limits, set_bot_command_rate_limits
 from app.services.telegram_link import notify_telegram_unlinked
-from app.services.telegram_transport import RELAY_NODE_SETTING, relay_node_ineligible_reason
+from app.services.telegram_transport import (
+    RELAY_NODES_SETTING,
+    TelegramRelayError,
+    call_via_node,
+    mark_relay_node_failed,
+    parse_relay_node_ids,
+    relay_node_ineligible_reason,
+)
 from app.services.telegram_recipients import (
     get_notify_recipient_user_ids,
     get_setting_chat_ids,
@@ -100,11 +108,10 @@ def _telegram_settings_response(db: Session, request: Request) -> TelegramSettin
     auth_method: str = "oidc" if oidc_enabled else ("legacy" if legacy_login_enabled else "none")
     chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
     bot_limits = get_bot_command_rate_limits(db)
-    relay_raw = _get_setting(db, RELAY_NODE_SETTING)
     relay_nodes = [
-        TelegramRelayNode(id=node.id, name=node.name)
+        TelegramRelayNode(id=node.id, name=node.name, unavailable_reason=relay_node_ineligible_reason(node))
         for node in db.query(Node).order_by(Node.name).all()
-        if relay_node_ineligible_reason(node) is None
+        if not node.is_local and (node.node_kind or "vpn") == "vpn"
     ]
     return TelegramSettingsResponse(
         bot_token_set=bot_token_set,
@@ -130,10 +137,11 @@ def _telegram_settings_response(db: Session, request: Request) -> TelegramSettin
         bot_command_rate_max=bot_limits["max_requests"],
         bot_command_rate_window_seconds=bot_limits["window_seconds"],
         bot_command_rate_limit_enabled=get_settings().telegram_bot_command_rate_limit_enabled,
-        relay_node_id=int(relay_raw) if relay_raw else None,
+        relay_node_ids=parse_relay_node_ids(_get_setting(db, RELAY_NODES_SETTING)),
         relay_nodes=relay_nodes,
         relay_last_ok_at=_get_setting(db, "telegram_relay_last_ok_at"),
         relay_last_error=_get_setting(db, "telegram_relay_last_error"),
+        relay_last_node=_get_setting(db, "telegram_relay_last_node"),
     )
 
 
@@ -475,7 +483,7 @@ def register_telegram_webhook(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Токен бота не настроен")
     if _get_setting(db, "telegram_bot_interactive_enabled", "false") != "true":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Интерактивный бот не включён")
-    if _get_setting(db, RELAY_NODE_SETTING):
+    if _get_setting(db, RELAY_NODES_SETTING):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Включена связь через узел: webhook не нужен"
         )
@@ -523,6 +531,22 @@ def unregister_telegram_webhook(
     return _telegram_settings_response(db, request)
 
 
+def _check_relay_node(token: str, node: Node) -> TelegramRelayCheck:
+    try:
+        envelope, _name = call_via_node(
+            node.id, lambda adapter: adapter.telegram_bot_api(token, "getMe", b"{}", "application/json")
+        )
+    except TelegramRelayError as exc:
+        mark_relay_node_failed(node.id)
+        return TelegramRelayCheck(id=node.id, name=node.name, ok=False, error=str(exc))
+    body = envelope["body"]
+    if not body.get("ok"):
+        return TelegramRelayCheck(
+            id=node.id, name=node.name, ok=False, error=str(body.get("description") or "Telegram отклонил токен бота")
+        )
+    return TelegramRelayCheck(id=node.id, name=node.name, ok=True)
+
+
 @router.put("/settings/telegram/relay", response_model=TelegramSettingsResponse)
 def update_telegram_relay(
     payload: TelegramRelayUpdate,
@@ -530,22 +554,33 @@ def update_telegram_relay(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    if payload.node_id is None:
-        _set_setting(db, RELAY_NODE_SETTING, "")
+    checks: list[TelegramRelayCheck] = []
+    if not payload.node_ids:
+        _set_setting(db, RELAY_NODES_SETTING, "")
     else:
-        node = db.get(Node, payload.node_id)
-        if node is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
-        reason = relay_node_ineligible_reason(node)
-        if reason:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=reason)
-        previous = _get_setting(db, RELAY_NODE_SETTING)
+        nodes = []
+        for node_id in payload.node_ids:
+            node = db.get(Node, node_id)
+            if node is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Узел #{node_id} не найден")
+            reason = relay_node_ineligible_reason(node)
+            if reason:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"«{node.name}»: {reason}")
+            nodes.append(node)
+        token = _get_setting(db, "telegram_bot_token")
+        if token:
+            checks = [_check_relay_node(token, node) for node in nodes]
+            if not any(check.ok for check in checks):
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="Ни один узел не достучался до Telegram: " + "; ".join(c.error for c in checks),
+                )
+        previous = _get_setting(db, RELAY_NODES_SETTING)
         root = resolve_request_url_root(request, behind_nginx=get_settings().behind_nginx).rstrip("/")
-        _set_setting(db, RELAY_NODE_SETTING, str(node.id))
+        _set_setting(db, RELAY_NODES_SETTING, ",".join(str(node_id) for node_id in payload.node_ids))
         _set_setting(db, "telegram_mini_app_url", f"{root}/api/tg-mini")
         _set_setting(db, "telegram_relay_last_error", "")
         db.commit()
-        token = _get_setting(db, "telegram_bot_token")
         try:
             if token:
                 ok, error = delete_webhook_sync(token)
@@ -553,7 +588,7 @@ def update_telegram_relay(
                     raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
                 _configure_bot_menu(token)
         except HTTPException:
-            _set_setting(db, RELAY_NODE_SETTING, previous)
+            _set_setting(db, RELAY_NODES_SETTING, previous)
             db.commit()
             raise
     _set_setting(db, "telegram_webhook_set_at", "")
@@ -564,4 +599,6 @@ def update_telegram_relay(
         settings_key="settings_telegram_auth_update",
         client_timezone=get_client_timezone_from_request(request),
     )
-    return _telegram_settings_response(db, request)
+    response = _telegram_settings_response(db, request)
+    response.relay_check = checks
+    return response

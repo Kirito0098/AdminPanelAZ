@@ -12,7 +12,7 @@ from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.background_gate import run_background_step
 from app.services.telegram_api import ALLOWED_UPDATES
 from app.services.telegram_bot_loop import run_on_bot_loop
-from app.services.telegram_transport import RELAY_NODE_SETTING, bot_api_post
+from app.services.telegram_transport import RELAY_NODES_SETTING, bot_api_post, last_relay_node_name
 from app.services.telegram_update_dedup import claim_telegram_update
 
 logger = logging.getLogger(__name__)
@@ -33,7 +33,7 @@ def _polling_config() -> tuple[str, str] | None:
         return None
     with SessionLocal() as db:
         token = _get_setting(db, "telegram_bot_token")
-        if not token or not _get_setting(db, RELAY_NODE_SETTING):
+        if not token or not _get_setting(db, RELAY_NODES_SETTING):
             return None
         if _get_setting(db, "telegram_bot_interactive_enabled", "false") != "true":
             return None
@@ -76,6 +76,7 @@ async def poll_once(offset: int) -> int:
         _record,
         telegram_relay_last_ok_at=datetime.now(timezone.utc).isoformat(),
         telegram_relay_last_error="",
+        telegram_relay_last_node=last_relay_node_name(),
     )
     return offset
 

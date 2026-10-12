@@ -25,8 +25,25 @@ def direct(monkeypatch):
     return calls
 
 
+def _use_nodes(monkeypatch, adapters: dict[int, object]) -> None:
+    monkeypatch.setattr(telegram_transport, "relay_node_ids", lambda: list(adapters))
+    monkeypatch.setattr(telegram_transport, "_relay_adapter_for", lambda node_id: adapters[node_id])
+    monkeypatch.setattr(telegram_transport, "_failed_until", {})
+
+
+def _bot_adapter(name: str, reply, calls: list[str] | None = None):
+    def telegram_bot_api(*_args):
+        if calls is not None:
+            calls.append(name)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    return SimpleNamespace(telegram_bot_api=telegram_bot_api, node_name=name, close=lambda: None)
+
+
 def test_without_relay_node_calls_telegram_directly(monkeypatch, direct):
-    monkeypatch.setattr(telegram_transport, "_relay_adapter", lambda: None)
+    monkeypatch.setattr(telegram_transport, "relay_node_ids", lambda: [])
 
     body = telegram_transport.bot_api_post_sync(TOKEN, "getMe")
 
@@ -42,7 +59,7 @@ def test_with_relay_node_sends_multipart_through_agent(monkeypatch, direct):
         return {"status": 200, "body": {"ok": True, "result": True}}
 
     adapter = SimpleNamespace(telegram_bot_api=relay, node_name="nl-1", close=lambda: None)
-    monkeypatch.setattr(telegram_transport, "_relay_adapter", lambda: adapter)
+    _use_nodes(monkeypatch, {1: adapter})
 
     body = telegram_transport.bot_api_post_sync(
         TOKEN, "sendDocument", data={"chat_id": "1"}, files={"document": ("b.tar.gz", b"xyz", "application/gzip")}
@@ -70,7 +87,7 @@ def test_relay_node_downgraded_to_plain_http_is_not_used(monkeypatch):
     factory = sessionmaker(bind=engine)
     with factory() as db:
         db.add(Node(id=1, name="nl-1", host="203.0.113.1", mtls_enabled=False, transport="http"))
-        _set_setting(db, telegram_transport.RELAY_NODE_SETTING, "1")
+        _set_setting(db, telegram_transport.RELAY_NODES_SETTING, "1")
         db.commit()
     monkeypatch.setattr(database, "SessionLocal", factory)
     monkeypatch.setattr(node_manager, "get_adapter_for_node", lambda _node: pytest.fail("token sent over plain HTTP"))
@@ -84,9 +101,7 @@ def test_old_agent_without_relay_gives_update_hint(monkeypatch):
     def relay(*_args):
         raise HTTPException(status_code=404, detail="Not Found")
 
-    monkeypatch.setattr(
-        telegram_transport, "_relay_adapter", lambda: SimpleNamespace(telegram_bot_api=relay, node_name="nl-1", close=lambda: None)
-    )
+    _use_nodes(monkeypatch, {1: SimpleNamespace(telegram_bot_api=relay, node_name="nl-1", close=lambda: None)})
 
     with pytest.raises(telegram_transport.TelegramRelayError, match="1.13.0"):
         telegram_transport.bot_api_post_sync(TOKEN, "getMe")
@@ -99,11 +114,7 @@ def test_oidc_token_exchange_goes_through_relay_node(monkeypatch):
         seen.update(body=body, authorization=authorization)
         return {"status": 200, "body": {"id_token": "idt"}}
 
-    monkeypatch.setattr(
-        telegram_transport,
-        "_relay_adapter",
-        lambda: SimpleNamespace(telegram_oidc_token=relay, node_name="nl-1", close=lambda: None),
-    )
+    _use_nodes(monkeypatch, {1: SimpleNamespace(telegram_oidc_token=relay, node_name="nl-1", close=lambda: None)})
     monkeypatch.setattr(httpx, "post", lambda *_a, **_k: pytest.fail("OIDC went direct"))
 
     status, body = telegram_transport.oidc_token_exchange_sync({"code": "c1"}, client_id="bot", client_secret="secret")
@@ -111,3 +122,58 @@ def test_oidc_token_exchange_goes_through_relay_node(monkeypatch):
     assert (status, body) == (200, {"id_token": "idt"})
     assert seen["body"] == b"code=c1"
     assert seen["authorization"] == "Basic Ym90OnNlY3JldA=="
+
+
+OK = {"status": 200, "body": {"ok": True, "result": True}}
+
+
+def test_failed_node_hands_request_to_next(monkeypatch):
+    _use_nodes(
+        monkeypatch,
+        {1: _bot_adapter("nl-1", HTTPException(status_code=502, detail="таймаут")), 2: _bot_adapter("de-2", OK)},
+    )
+
+    assert telegram_transport.bot_api_post_sync(TOKEN, "getMe") == {"ok": True, "result": True}
+    assert telegram_transport.last_relay_node_name() == "de-2"
+
+
+def test_failed_node_is_skipped_until_cooldown_ends(monkeypatch):
+    calls: list[str] = []
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(telegram_transport.time, "monotonic", lambda: clock["now"])
+    _use_nodes(
+        monkeypatch,
+        {
+            1: _bot_adapter("nl-1", HTTPException(status_code=502, detail="таймаут"), calls),
+            2: _bot_adapter("de-2", OK, calls),
+        },
+    )
+
+    telegram_transport.bot_api_post_sync(TOKEN, "getMe")
+    telegram_transport.bot_api_post_sync(TOKEN, "getMe")
+    clock["now"] += telegram_transport.FAILED_NODE_COOLDOWN_SECONDS + 1
+    telegram_transport.bot_api_post_sync(TOKEN, "getMe")
+
+    assert calls == ["nl-1", "de-2", "de-2", "nl-1", "de-2"]
+
+
+def test_telegram_error_does_not_switch_node(monkeypatch):
+    calls: list[str] = []
+    refused = {"status": 400, "body": {"ok": False, "description": "chat not found"}}
+    _use_nodes(monkeypatch, {1: _bot_adapter("nl-1", refused, calls), 2: _bot_adapter("de-2", OK, calls)})
+
+    assert telegram_transport.bot_api_post_sync(TOKEN, "getMe") == refused["body"]
+    assert calls == ["nl-1"]
+
+
+def test_all_nodes_failed_reports_each(monkeypatch):
+    _use_nodes(
+        monkeypatch,
+        {
+            1: _bot_adapter("nl-1", HTTPException(status_code=502, detail="таймаут")),
+            2: _bot_adapter("de-2", HTTPException(status_code=404, detail="Not Found")),
+        },
+    )
+
+    with pytest.raises(telegram_transport.TelegramRelayError, match="nl-1.*таймаут.*de-2.*1.13.0"):
+        telegram_transport.bot_api_post_sync(TOKEN, "getMe")

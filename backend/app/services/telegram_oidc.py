@@ -80,7 +80,7 @@ def build_authorization_url(*, client_id: str, redirect_uri: str, state: str, co
     return f"{OIDC_AUTH_URL}?{query}"
 
 
-# Keyed by relay node: keys fetched through one node must never verify logins after it is replaced.
+# Keyed by the relay node list: keys fetched through a node must never verify logins once the list changes.
 _jwks_clients: dict[str, PyJWKClient] = {}
 _jwks_client_lock = threading.Lock()
 
