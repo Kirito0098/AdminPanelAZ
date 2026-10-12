@@ -191,6 +191,13 @@ export async function updateTelegramSettings(data: {
   })
 }
 
+export async function updateTelegramRelay(nodeId: number | null) {
+  return apiFetch<TelegramSettings>('/settings/telegram/relay', {
+    method: 'PUT',
+    body: JSON.stringify({ node_id: nodeId }),
+  })
+}
+
 export async function registerTelegramWebhook() {
   return apiFetch<TelegramSettings>('/settings/telegram/webhook/register', {
     method: 'POST',

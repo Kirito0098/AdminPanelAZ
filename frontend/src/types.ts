@@ -694,6 +694,10 @@ export interface TelegramSettings {
   bot_command_rate_max: number
   bot_command_rate_window_seconds: number
   bot_command_rate_limit_enabled: boolean
+  relay_node_id: number | null
+  relay_nodes: { id: number; name: string }[]
+  relay_last_ok_at: string
+  relay_last_error: string
 }
 
 export interface TelegramLinkCode {
