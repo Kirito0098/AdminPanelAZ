@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -88,6 +89,7 @@ NODE_KIND_PROXY = "proxy"
 PROXY_DEFAULT_PORT = 9101
 VPN_DEFAULT_PORT = 9100
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/nodes", tags=["nodes"])
 settings = get_settings()
 
@@ -107,7 +109,7 @@ def _validate_linked_vpn_node_id(
             detail="linked_vpn_node_id можно задать только для прокси-узла",
         )
     linked = db.query(Node).filter(Node.id == linked_vpn_node_id).first()
-    if not linked or (getattr(linked, "node_kind", None) or NODE_KIND_VPN) != NODE_KIND_VPN:
+    if not linked or linked.node_kind != NODE_KIND_VPN:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="linked_vpn_node_id должен ссылаться на существующий VPN-узел",
@@ -170,16 +172,16 @@ def _to_response(node: Node) -> NodeResponse:
         name=node.name,
         host=node.host,
         port=node.port,
-        node_kind=getattr(node, "node_kind", None) or NODE_KIND_VPN,
+        node_kind=node.node_kind,
         status=node.status,
         is_local=node.is_local,
         transport=transport,
         mtls_enabled=False if node.is_local else (transport == TRANSPORT_MTLS),
         ssh_host=getattr(node, "ssh_host", None),
-        ssh_port=int(getattr(node, "ssh_port", 22) or 22),
+        ssh_port=node.ssh_port,
         ssh_username=getattr(node, "ssh_username", None),
-        ssh_key_configured=bool(str(getattr(node, "ssh_private_key_encrypted", "") or "").strip()),
-        ssh_remote_agent_host=getattr(node, "ssh_remote_agent_host", None),
+        ssh_key_configured=bool(node.ssh_private_key_encrypted.strip()),
+        ssh_remote_agent_host=node.ssh_remote_agent_host,
         ssh_remote_agent_port=getattr(node, "ssh_remote_agent_port", None),
         destination_ip=getattr(node, "destination_ip", None),
         linked_vpn_node_id=getattr(node, "linked_vpn_node_id", None),
@@ -201,12 +203,12 @@ def _abort_failed_node_create(db: Session, node: Node, *, made_active: bool) -> 
     node_id = int(node.id)
     try:
         get_ssh_tunnel_pool().drop(node_id)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("node %s: ssh tunnel drop failed during create abort: %s", node_id, exc)
     try:
         db.rollback()
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("node %s: rollback failed during create abort: %s", node_id, exc)
     row = db.query(Node).filter(Node.id == node_id).first()
     if row is not None:
         db.delete(row)
@@ -224,16 +226,6 @@ def _normalize_optional_text(value: str | None) -> str:
 
 def _resolve_ssh_remote_agent_host(value: str | None, *, current: str | None) -> str:
     host = _normalize_optional_text(value) or _normalize_optional_text(current) or "127.0.0.1"
-    if not host:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="ssh_remote_agent_host обязателен для SSH transport",
-        )
-    if len(host) > 255:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="ssh_remote_agent_host слишком длинный",
-        )
     if host.lower().startswith(("http://", "https://", "ftp://", "file://")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -282,24 +274,15 @@ def _apply_ssh_transport_update(node: Node, body: NodeTransportUpdate, db: Sessi
             detail="ssh_username обязателен для SSH transport",
         )
 
-    ssh_port = body.ssh_port if "ssh_port" in updates else getattr(node, "ssh_port", None)
-    ssh_port = int(ssh_port or 22)
+    ssh_port = (body.ssh_port if "ssh_port" in updates else node.ssh_port) or 22
 
     ssh_remote_agent_host = _resolve_ssh_remote_agent_host(
         body.ssh_remote_agent_host if "ssh_remote_agent_host" in updates else None,
-        current=getattr(node, "ssh_remote_agent_host", None),
+        current=node.ssh_remote_agent_host,
     )
     ssh_remote_agent_port = (
-        body.ssh_remote_agent_port
-        if "ssh_remote_agent_port" in updates
-        else getattr(node, "ssh_remote_agent_port", None)
-    )
-    ssh_remote_agent_port = int(ssh_remote_agent_port or node.port)
-    if ssh_remote_agent_port <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="ssh_remote_agent_port обязателен для SSH transport",
-        )
+        body.ssh_remote_agent_port if "ssh_remote_agent_port" in updates else node.ssh_remote_agent_port
+    ) or node.port
 
     if "ssh_private_key" in updates:
         ssh_private_key = _normalize_optional_text(body.ssh_private_key)
@@ -309,7 +292,7 @@ def _apply_ssh_transport_update(node: Node, body: NodeTransportUpdate, db: Sessi
                 detail="Для SSH transport нужен приватный ключ",
             )
         node.ssh_private_key_encrypted = encrypt_secret(ssh_private_key, settings.secret_key)
-    elif not str(getattr(node, "ssh_private_key_encrypted", "") or "").strip():
+    elif not node.ssh_private_key_encrypted.strip():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Для SSH transport сначала задайте приватный ключ",
@@ -321,7 +304,7 @@ def _apply_ssh_transport_update(node: Node, body: NodeTransportUpdate, db: Sessi
             node.ssh_passphrase_encrypted = encrypt_secret(ssh_passphrase, settings.secret_key)
 
     previous_ssh_host = _normalize_optional_text(getattr(node, "ssh_host", None))
-    previous_ssh_port = int(getattr(node, "ssh_port", None) or 22)
+    previous_ssh_port = node.ssh_port
     node.ssh_host = ssh_host
     node.ssh_port = ssh_port
     node.ssh_username = ssh_username
@@ -584,7 +567,7 @@ def update_node(
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
 
-    kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
+    kind = node.node_kind.strip().lower()
     # /api/nodes is ALWAYS_ALLOWED — block mutating proxy cards when module is off.
     if kind == NODE_KIND_PROXY and not is_proxy_nodes_enabled(db):
         raise HTTPException(
@@ -619,13 +602,13 @@ def update_node(
         node.portal_label = label or None
     if "destination_ip" in updates and kind == NODE_KIND_PROXY:
         dest = updates["destination_ip"]
-        if dest is None or (isinstance(dest, str) and not dest.strip()):
+        if not (dest or "").strip():
             node.destination_ip = None
         else:
             try:
                 from proxy_agent.iptables_dest import validate_destination_ip
 
-                node.destination_ip = validate_destination_ip(str(dest))
+                node.destination_ip = validate_destination_ip(dest)
             except ValueError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -745,7 +728,7 @@ def _require_proxy_node(node_id: int, db: Session) -> Node:
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
-    kind = (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
+    kind = node.node_kind.strip().lower()
     if kind != NODE_KIND_PROXY:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -859,7 +842,7 @@ def patch_node_transport(
             detail="Способ связи не применим к локальному узлу",
         )
 
-    wanted = (body.transport or "").strip().lower()
+    wanted = body.transport.strip().lower()
     if wanted not in (TRANSPORT_HTTP, TRANSPORT_MTLS, TRANSPORT_SSH):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -944,7 +927,7 @@ def get_remote_hosts(node_id: int, _: User = Depends(require_admin), db: Session
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
     return NodeRemoteHostsResponse(
         hosts=parse_hosts_json(node.openvpn_remote_hosts),
-        apply_to_wireguard=bool(node.wireguard_use_first_remote),
+        apply_to_wireguard=node.wireguard_use_first_remote,
     )
 
 
@@ -965,7 +948,7 @@ def put_remote_hosts(
     except RemoteHostsError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     node.openvpn_remote_hosts = hosts_to_json(hosts) if hosts else None
-    node.wireguard_use_first_remote = bool(payload.apply_to_wireguard)
+    node.wireguard_use_first_remote = payload.apply_to_wireguard
     node.updated_at = datetime.utcnow()
     db.add(node)
     db.commit()
@@ -973,7 +956,7 @@ def put_remote_hosts(
     warnings = sync_openvpn_host_from_remotes(
         lambda: get_adapter_for_node(node),
         hosts,
-        apply_to_wireguard=bool(payload.apply_to_wireguard),
+        apply_to_wireguard=payload.apply_to_wireguard,
     )
     if settings.audit_log_enabled:
         log_action(
@@ -987,7 +970,7 @@ def put_remote_hosts(
     return NodeRemoteHostsResponse(
         hosts=hosts,
         warnings=warnings,
-        apply_to_wireguard=bool(node.wireguard_use_first_remote),
+        apply_to_wireguard=node.wireguard_use_first_remote,
     )
 
 
@@ -1087,7 +1070,7 @@ def put_openvpn_multihome(
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
-    enabled = bool(payload.enabled)
+    enabled = payload.enabled
     node.openvpn_multihome = enabled
     node.updated_at = datetime.utcnow()
     db.add(node)
@@ -1169,7 +1152,7 @@ def activate_node(
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
 
-    if (getattr(node, "node_kind", None) or NODE_KIND_VPN) == NODE_KIND_PROXY:
+    if node.node_kind == NODE_KIND_PROXY:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Прокси-узел нельзя сделать активным для VPN",

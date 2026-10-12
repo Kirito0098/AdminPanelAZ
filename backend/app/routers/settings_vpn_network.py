@@ -179,7 +179,7 @@ def get_vpn_network_domain_ssl(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=module_disabled_message("vpn_network"),
         )
-    domain_host = (domain or "").strip().split(":")[0]
+    domain_host = domain.strip().split(":")[0]
     if not domain_host:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите домен")
     cert, key = letsencrypt_cert_paths(domain_host)
@@ -303,7 +303,7 @@ def put_vpn_network_ddns(
                 ) from exc
 
         try:
-            output_parts.append(ddns_settings_service.set_ddns_timer(bool(payload.enable_timer)))
+            output_parts.append(ddns_settings_service.set_ddns_timer(payload.enable_timer))
         except RuntimeError as exc:
             # Keep new ddns.env if provider update already succeeded — rolling back would
             # desync panel config from the provider. Only roll back when update was skipped.
@@ -460,7 +460,7 @@ def publish_vpn_network(
 
     task_payload = payload.model_dump()
     if task_payload.get("domain"):
-        domain_host = str(task_payload["domain"]).strip().split(":")[0]
+        domain_host = task_payload["domain"].strip().split(":")[0]
         task_payload["domain"] = domain_host or None
     if normalized_access_path:
         task_payload["access_path"] = normalized_access_path
@@ -471,7 +471,7 @@ def publish_vpn_network(
     if task_payload.get("configure_portal"):
         from app.services.client_portal import normalize_portal_domain, set_portal_domain, suggest_portal_domain
 
-        portal_raw = str(task_payload.get("portal_domain") or "").strip() or suggest_portal_domain(domain_host)
+        portal_raw = (task_payload.get("portal_domain") or "").strip() or suggest_portal_domain(domain_host)
         try:
             portal_host = normalize_portal_domain(portal_raw)
             if not portal_host:

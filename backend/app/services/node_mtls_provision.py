@@ -31,7 +31,7 @@ _MTLS_HEALTH_DELAY_SECONDS = 2.0
 
 
 def _node_kind(node: Node) -> str:
-    return (getattr(node, "node_kind", None) or "vpn").strip().lower()
+    return node.node_kind.strip().lower()
 
 
 def _wait_for_mtls_health(node: Node) -> dict:

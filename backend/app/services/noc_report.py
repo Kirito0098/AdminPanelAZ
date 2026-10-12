@@ -202,23 +202,16 @@ def _awg2_stats_from_connection_samples(
     if until_n <= since_n:
         return {}, {"amneziawg2_peak": 0}
 
-    filtered: list = []
-    for sample in samples:
-        created = getattr(sample, "created_at", None)
-        if created is None:
-            continue
-        created_n = _to_naive_utc(created) if isinstance(created, datetime) else created
-        if created_n < since_n or created_n >= until_n:
-            continue
-        filtered.append(sample)
+    filtered = [
+        sample for sample in samples if since_n <= _to_naive_utc(sample.created_at) < until_n
+    ]
 
     if not filtered:
         return {}, {"amneziawg2_peak": 0}
 
     counts_by_node: dict[int, list[int]] = defaultdict(list)
     for sample in filtered:
-        node_id = int(sample.node_id)
-        counts_by_node[node_id].append(max(0, int(getattr(sample, "amneziawg2_count", 0) or 0)))
+        counts_by_node[sample.node_id].append(max(0, sample.amneziawg2_count))
 
     by_node: dict[int, dict[str, float | int]] = {}
     for node_id, values in counts_by_node.items():
@@ -228,15 +221,11 @@ def _awg2_stats_from_connection_samples(
         }
 
     # Fleet peak: max over time of sum(amneziawg2_count across nodes)
-    ordered = sorted(
-        filtered,
-        key=lambda s: _to_naive_utc(s.created_at) if isinstance(s.created_at, datetime) else s.created_at,
-    )
+    ordered = sorted(filtered, key=lambda s: _to_naive_utc(s.created_at))
     current: dict[int, int] = {}
     fleet_peak = 0
     for sample in ordered:
-        node_id = int(sample.node_id)
-        current[node_id] = max(0, int(getattr(sample, "amneziawg2_count", 0) or 0))
+        current[sample.node_id] = max(0, sample.amneziawg2_count)
         fleet_peak = max(fleet_peak, sum(current.values()))
 
     return by_node, {"amneziawg2_peak": int(fleet_peak)}
@@ -261,10 +250,7 @@ def _latest_awg2_counts_by_node(db: Session) -> dict[int, int]:
         )
         .all()
     )
-    return {
-        int(sample.node_id): max(0, int(getattr(sample, "amneziawg2_count", 0) or 0))
-        for sample in rows
-    }
+    return {sample.node_id: max(0, sample.amneziawg2_count) for sample in rows}
 
 
 def _query_awg2_connection_samples(
@@ -344,7 +330,7 @@ def build_noc_summary(db: Session) -> dict:
             {
                 "node_id": node.id,
                 "name": node.name,
-                "status": node.status.value if hasattr(node.status, "value") else str(node.status),
+                "status": node.status.value,
                 "openvpn": sessions["openvpn"],
                 "wireguard": sessions["wireguard"],
                 "amneziawg2": awg2_count,

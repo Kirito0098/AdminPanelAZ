@@ -684,5 +684,5 @@ class BackupManager:
                 old_path = Path(old)
                 backup_meta_path(old_path).unlink(missing_ok=True)
                 old_path.with_suffix(".json").unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.warning("Backup rotation failed to remove %s: %s", old, exc)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy import func
@@ -10,6 +11,8 @@ from sqlalchemy.orm import Session
 from app.services.cidr.cidr_tasks import find_any_active_pipeline_task
 from app.services.cidr.pipeline.deploy import list_compile_artifacts
 from app.services.node_manager import get_active_adapter, get_active_node
+
+logger = logging.getLogger(__name__)
 
 
 def _awg2_ifaces_summary(ifaces: list[Any]) -> str:
@@ -84,7 +87,7 @@ def build_awg2_status_payload(db: Session) -> dict:
                 online_count = sum(1 for c in clients if isinstance(c, dict) and c.get("online") is True)
                 top_traffic = _awg2_top_traffic(clients)
         except Exception:  # noqa: BLE001 — best-effort; health still useful
-            pass
+            logger.debug("AWG2 monitoring read failed for node %s", node.id, exc_info=True)
 
     return {
         "node_id": node.id,
@@ -188,14 +191,14 @@ def build_warper_status_payload(db: Session) -> dict:
             if isinstance(domains, list):
                 domain_count = len(domains)
         except Exception:
-            pass
+            logger.debug("Warper domains read failed for node %s", node.id, exc_info=True)
         try:
             traffic = adapter.get_warper_traffic("today")
             if isinstance(traffic, dict):
                 traffic_tx = _traffic_number(traffic, "period_tx", "tx", "upload")
                 traffic_rx = _traffic_number(traffic, "period_rx", "rx", "download")
         except Exception:
-            pass
+            logger.debug("Warper traffic read failed for node %s", node.id, exc_info=True)
 
     return {
         "node_id": node.id,
@@ -263,7 +266,7 @@ def build_cidr_status_payload(db: Session) -> dict:
     from app.models import ProviderMeta
     from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 
-    total_cidrs = int(db.query(func.coalesce(func.sum(ProviderMeta.cidr_count), 0)).scalar() or 0)
+    total_cidrs = db.query(func.coalesce(func.sum(ProviderMeta.cidr_count), 0)).scalar()
     active = find_any_active_pipeline_task()
     active_summary = _summarize_pipeline_task(active)
     active_label = active_summary["task_label"] if active_summary else None

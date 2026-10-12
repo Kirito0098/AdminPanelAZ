@@ -70,7 +70,7 @@ def _node_meta_lines(node: Node) -> list[str]:
 
 
 def _format_node_card(node: Node, *, active_id: int | None) -> str:
-    status = node.status if isinstance(node.status, NodeStatus) else NodeStatus.unknown
+    status = node.status
     icon = _STATUS_ICON.get(status, "🟡")
     active_mark = i18n.NODES_ACTIVE_MARK if active_id == node.id else ""
     local_mark = i18n.NODES_LOCAL_MARK if node.is_local else ""
@@ -102,7 +102,7 @@ def _list_keyboard(nodes: list[Node], page: int, *, active_id: int | None) -> di
     chunk = nodes[start : start + _PAGE_SIZE]
     rows: list[list[dict]] = []
     for node in chunk:
-        status = node.status if isinstance(node.status, NodeStatus) else NodeStatus.unknown
+        status = node.status
         icon = _STATUS_ICON.get(status, "🟡")
         prefix = "★ " if active_id == node.id else ""
         label = f"{prefix}{icon} {node.name}"

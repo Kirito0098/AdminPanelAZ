@@ -136,13 +136,9 @@ class BackgroundTaskService:
                 return None
             return parsed if isinstance(parsed, dict) else None
         if task_type in {"portal_readiness_check", "portal_readiness_prepare"} and output:
-            try:
-                from app.services.portal_readiness import parse_portal_readiness_trailer
+            from app.services.portal_readiness import parse_portal_readiness_trailer
 
-                parsed = parse_portal_readiness_trailer(output)
-            except Exception:
-                return None
-            return parsed if isinstance(parsed, dict) else None
+            return parse_portal_readiness_trailer(output)
         if task_type not in _PIPELINE_TASK_TYPES or not output:
             return None
         try:
@@ -574,7 +570,7 @@ class BackgroundTaskService:
                     _node_progress,
                     recreate_profiles=captured_recreate,
                     hosts=hosts,
-                    ensure_openvpn_multihome=bool(node.openvpn_multihome),
+                    ensure_openvpn_multihome=node.openvpn_multihome,
                 )
                 result["message"] = f"{node_label}: {result.get('message', 'Маршрутизация применена')}"
                 result["output"] = json.dumps(

@@ -552,10 +552,7 @@ def telegram_oidc_token(
         tg_id = telegram_id_from_claims(claims)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
-    try:
-        user = _complete_telegram_login(db, request, tg_id, mini=False)
-    except HTTPException:
-        raise
+    user = _complete_telegram_login(db, request, tg_id, mini=False)
     return _issue_token_pair(user, db, response, request)
 
 
@@ -571,11 +568,8 @@ def telegram_login_callback(request: Request, db: Session = Depends(get_db)):
     if not ok:
         raise HTTPException(status_code=401, detail=err)
     tg_id = str(payload.get("id", ""))
-    try:
-        user = _complete_telegram_login(db, request, tg_id, mini=False)
-        return _telegram_login_redirect(user, db, request)
-    except HTTPException as exc:
-        raise exc
+    user = _complete_telegram_login(db, request, tg_id, mini=False)
+    return _telegram_login_redirect(user, db, request)
 
 
 @router.post("/login", response_model=Token)

@@ -590,9 +590,9 @@ def apply_due_user_subscription_blocks(db: Session) -> dict[str, int]:
             logger.exception("subscription expiry failed user_id=%s", user_id)
             counts["errors"] += 1
             continue
-        counts["cascaded"] += int(result.get("expired", 0) or 0)
-        counts["skipped"] += int(result.get("skipped_manual", 0) or 0)
-        counts["skipped"] += int(result.get("skipped_not_expired", 0) or 0)
+        counts["cascaded"] += result["expired"]
+        counts["skipped"] += result["skipped_manual"]
+        counts["skipped"] += result["skipped_not_expired"]
 
     return counts
 

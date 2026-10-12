@@ -78,8 +78,6 @@ def push_cidr_artifacts(
                 content = handle.read()
             adapter.save_provider_content(filename, content)
             pushed.append(filename)
-        except OSError as exc:
-            failed.append({"file": filename, "error": str(exc)})
         except Exception as exc:
             failed.append({"file": filename, "error": str(exc)})
 

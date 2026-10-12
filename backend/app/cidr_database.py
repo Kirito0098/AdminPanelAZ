@@ -85,13 +85,13 @@ def run_cidr_db_migrations() -> None:
         return
 
     with main_engine.connect() as conn:
-        main_count = int(conn.execute(text("SELECT COUNT(*) FROM provider_cidr")).scalar() or 0)
+        main_count = conn.execute(text("SELECT COUNT(*) FROM provider_cidr")).scalar()
 
     cidr_inspector = inspect(cidr_engine)
     cidr_count = 0
     if "provider_cidr" in cidr_inspector.get_table_names():
         with cidr_engine.connect() as conn:
-            cidr_count = int(conn.execute(text("SELECT COUNT(*) FROM provider_cidr")).scalar() or 0)
+            cidr_count = conn.execute(text("SELECT COUNT(*) FROM provider_cidr")).scalar()
 
     if main_count == 0:
         with main_engine.begin() as conn:
@@ -134,9 +134,7 @@ def run_cidr_db_migrations() -> None:
             """
         )
         conn.commit()
-        migrated = int(
-            conn.execute("SELECT COUNT(*) FROM provider_cidr").fetchone()[0]
-        )
+        migrated = conn.execute("SELECT COUNT(*) FROM provider_cidr").fetchone()[0]
     finally:
         conn.close()
 

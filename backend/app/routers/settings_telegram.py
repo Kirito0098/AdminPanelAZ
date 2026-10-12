@@ -275,7 +275,7 @@ def update_admin_notify_settings(
         merged = admin.merged_tg_notify_events()
         for key in DEFAULT_TG_NOTIFY_EVENTS:
             if key in payload.events:
-                merged[key] = bool(payload.events[key])
+                merged[key] = payload.events[key]
         admin.tg_notify_events = json.dumps(merged)
     if payload.node_offline_grace_seconds is not None:
         from app.services.node_status_notify import set_node_offline_grace_seconds
@@ -372,14 +372,13 @@ def test_noc_report_preview(
             detail="Выберите получателей с Telegram ID в настройках уведомлений",
         )
 
-    period = payload.period if payload.period in {"daily", "weekly"} else "daily"
     sent = 0
     for user in recipients:
         if not user.telegram_id:
             continue
         if send_noc_report_preview(
             db,
-            period=period,
+            period=payload.period,
             telegram_id=user.telegram_id,
             bot_token=bot_token,
         ):
@@ -387,7 +386,7 @@ def test_noc_report_preview(
     if sent == 0:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
 
-    label = "еженедельная" if period == "weekly" else "ежедневная"
+    label = "еженедельная" if payload.period == "weekly" else "ежедневная"
     return MessageResponse(message=f"NOC сводка ({label}) отправлена ({sent} из {len(recipients)})")
 
 

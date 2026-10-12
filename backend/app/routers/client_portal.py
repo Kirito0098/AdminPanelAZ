@@ -48,7 +48,7 @@ def _require_portal_domain(db: Session) -> str:
 
 
 def _configs_for_client(db: Session, client_name: str) -> list[VpnConfig]:
-    name = (client_name or "").strip()
+    name = client_name.strip()
     active = get_active_node(db)
     group, _ = find_sync_group_containing_node(db, active.id)
     node_id = group.primary_node_id if group else active.id

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from html import escape
 
@@ -22,7 +21,7 @@ from app.services.telegram_bot_handlers.unlock_codes_fsm import (
     set_pending,
 )
 from app.services.telegram_bot_handlers.ui import send_or_edit
-from app.services.unlock_codes import create_unlock_code
+from app.services.unlock_codes import _parse_code_protocols, create_unlock_code
 
 _ALLOWED_PROTOCOLS = ("openvpn", "wireguard", "amneziawg2")
 _PROTOCOL_ALIASES = {
@@ -151,10 +150,7 @@ def _mode_text(draft_protocols: tuple[str, ...], grant_days: int) -> str:
 
 
 def _success_text(code) -> str:
-    try:
-        protocols = tuple(str(item) for item in json.loads(code.protocols or "[]"))
-    except Exception:
-        protocols = ()
+    protocols = tuple(_parse_code_protocols(code.protocols))
     return (
         "✅ <b>Unlock-ключ создан</b>\n\n"
         f"Код: <code>{escape(code.code)}</code>\n"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -14,6 +15,8 @@ from app.services.feature_toggles import is_awg2_enabled
 from app.services.node_manager import is_vpn_node, get_active_node, get_adapter_for_node
 from app.services.shared_helpers import utcnow_naive as _utcnow
 from app.services.wireguard_status import wireguard_peer_is_online
+
+logger = logging.getLogger(__name__)
 
 VALID_PERIODS = frozenset({"1h", "6h", "24h"})
 PERIOD_DELTAS = {
@@ -88,7 +91,8 @@ def collect_connection_samples(db: Session) -> int:
                 commit=False,
             )
             written += 1
-        except Exception:
+        except Exception as exc:
+            logger.warning("connection history: sample failed node_id=%s: %s", node.id, exc)
             persist_connection_sample(
                 db,
                 node.id,
@@ -133,13 +137,11 @@ def _aggregate_bucket(samples: list[ConnectionCountSample], *, sum_nodes: bool) 
                 by_node[sample.node_id] = sample
         ovpn = sum(s.openvpn_count for s in by_node.values())
         wg = sum(s.wireguard_count for s in by_node.values())
-        awg2 = sum(getattr(s, "amneziawg2_count", 0) or 0 for s in by_node.values())
+        awg2 = sum(s.amneziawg2_count for s in by_node.values())
     else:
         ovpn = int(sum(s.openvpn_count for s in samples) / len(samples))
         wg = int(sum(s.wireguard_count for s in samples) / len(samples))
-        awg2 = int(
-            sum(getattr(s, "amneziawg2_count", 0) or 0 for s in samples) / len(samples)
-        )
+        awg2 = int(sum(s.amneziawg2_count for s in samples) / len(samples))
     return {
         "timestamp": latest.created_at,
         "openvpn": ovpn,

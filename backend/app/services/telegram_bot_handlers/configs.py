@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from html import escape
 
 from app.models import VpnConfig, VpnType
@@ -28,6 +29,8 @@ from app.services.vpn_profile_visibility import (
     filter_profile_files,
     resolve_effective_visible_vpn_profiles,
 )
+
+logger = logging.getLogger(__name__)
 _PAGE_SIZE = 12
 _COLUMNS = 2
 _NAME_MAX_LEN = 20
@@ -77,10 +80,10 @@ def _load_config_protocol_map(ctx: BotContext, configs: list[VpnConfig]) -> dict
     adapter = get_active_adapter(ctx.db)
     policy = resolve_effective_visible_vpn_profiles(ctx.db, ctx.user)
     clients = [(config.client_name, config.vpn_type) for config in configs]
-    files_by_key: dict[str, list[dict[str, str]]] = {}
     try:
-        files_by_key = adapter.get_profile_files_batch(clients)
+        files_by_key: dict[str, list[dict[str, str]]] = adapter.get_profile_files_batch(clients)
     except Exception:
+        logger.debug("bot configs: profile files batch failed", exc_info=True)
         files_by_key = {}
 
     protocol_map: dict[int, frozenset[str]] = {}
@@ -91,6 +94,7 @@ def _load_config_protocol_map(ctx: BotContext, configs: list[VpnConfig]) -> dict
             try:
                 files = adapter.get_profile_files(config.client_name, config.vpn_type)
             except Exception:
+                logger.debug("bot configs: profile files failed client=%s", config.client_name, exc_info=True)
                 files = []
         files = filter_profile_files(files or [], policy)
         protocol_map[config.id] = classify_config_profile_groups(files, config.vpn_type)

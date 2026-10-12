@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from threading import Lock
 
@@ -10,6 +11,8 @@ from sqlalchemy.orm import Session
 from app.models import Node, TrafficSessionState
 from app.services.node_manager import is_vpn_node, get_adapter_for_node
 from app.services.wireguard_status import wireguard_peer_is_online
+
+logger = logging.getLogger(__name__)
 
 # Coalesce rapid /traffic/active-clients + overview?live=true probes (UI + Telegram).
 _LIVE_ACTIVE_TTL_SECONDS = 8.0
@@ -51,7 +54,7 @@ def live_active_names_for_node(
     now = time.monotonic()
     if ttl > 0:
         with _live_active_lock:
-            entry = _live_active_cache.get(int(node.id))
+            entry = _live_active_cache.get(node.id)
             if entry is not None and now < entry[0]:
                 return set(entry[1])
 
@@ -74,8 +77,9 @@ def live_active_names_for_node(
                     p.client_name for p in awg2 if p.client_name and wireguard_peer_is_online(p)
                 )
         except Exception:
-            pass
+            logger.debug("active clients: awg2 probe failed node_id=%s", node.id, exc_info=True)
     except Exception:
+        logger.debug("active clients: live probe failed node_id=%s", node.id, exc_info=True)
         active_names = set()
 
     if not active_names:
@@ -83,6 +87,6 @@ def live_active_names_for_node(
 
     if ttl > 0:
         with _live_active_lock:
-            _live_active_cache[int(node.id)] = (now + ttl, frozenset(active_names))
+            _live_active_cache[node.id] = (now + ttl, frozenset(active_names))
 
     return active_names

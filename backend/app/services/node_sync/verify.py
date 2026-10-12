@@ -99,6 +99,7 @@ def _enrich_config_fingerprints(fingerprints: dict[str, str], adapter: NodeAdapt
     try:
         file_hashes = adapter.get_config_file_fingerprints()
     except Exception:
+        logger.debug("verify: config file fingerprints unavailable", exc_info=True)
         return fingerprints
     if not file_hashes:
         return fingerprints

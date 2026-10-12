@@ -1316,7 +1316,7 @@ def migrate_factory_buffer_guard_thresholds(conn) -> int:
     ).fetchall()
     updated = 0
     for row_id, mode in rows:
-        new_thr = int(recommended_threshold(mode))
+        new_thr = recommended_threshold(mode)
         conn.execute(
             text(
                 "UPDATE openvpn_buffer_guard_settings "
@@ -2055,8 +2055,8 @@ def _backfill_subscription_deadline(conn, user_id: int, now: datetime) -> object
     latest_raw = None
     latest = None
     for config in configs:
-        spec = _POLICY_DEADLINE_BY_VPN_TYPE.get(str(config["vpn_type"] or "").lower())
-        raw_name = (config["client_name"] or "").strip()
+        spec = _POLICY_DEADLINE_BY_VPN_TYPE.get(config["vpn_type"].lower())
+        raw_name = config["client_name"].strip()
         if spec is None or not raw_name:
             continue
         table, column, lowercase = spec
@@ -2142,7 +2142,7 @@ def _migrate_user_telegram_backfill() -> None:
         for row in rows:
             if row["telegram_id"]:
                 continue
-            username = str(row["username"] or "")
+            username = row["username"]
             if not username.startswith("tg_"):
                 continue
             tg_id = username[3:].strip()

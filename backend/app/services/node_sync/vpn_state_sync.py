@@ -538,7 +538,7 @@ def replicate_primary_crypto_to_replicas(db, group, primary_config) -> dict[str,
                 db=db,
                 replica_node=replica_node,
                 client_name=client_name,
-                openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
+                openvpn_multihome=replica_node.openvpn_multihome,
             )
         except ReplicaRuntimeError as exc:
             logger.warning("HA crypto sync: runtime not applied on replica %s: %s", replica_node.name, exc)
@@ -604,7 +604,7 @@ def heal_crypto_drift(db, group) -> dict[str, object]:
                 get_adapter_for_node(replica_node),
                 db=db,
                 replica_node=replica_node,
-                openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
+                openvpn_multihome=replica_node.openvpn_multihome,
             )
         except Exception as exc:
             errors.append(

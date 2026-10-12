@@ -186,7 +186,7 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
 
         if settings.security_headers_enabled:
-            self._apply_headers(response, settings, request.url.path or "", request)
+            self._apply_headers(response, settings, request.url.path, request)
 
         return response
 
@@ -198,7 +198,7 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
         return proto == "https"
 
     @staticmethod
-    def _apply_headers(response: Response, settings, path: str, request: Request | None = None) -> None:
+    def _apply_headers(response: Response, settings, path: str, request: Request) -> None:
         tg_mini = is_tg_mini_path(path)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         if not tg_mini:
@@ -206,7 +206,7 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         if not tg_mini:
             response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
-        if request is not None and HttpSecurityMiddleware._is_secure(request):
+        if HttpSecurityMiddleware._is_secure(request):
             from app.services.panel_paths import access_path as panel_access_path, with_access_path
 
             login_path = with_access_path(settings, "/login").rstrip("/")
@@ -224,11 +224,10 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
                 f"max-age={settings.hsts_max_age}; includeSubDomains",
             )
         if settings.content_security_policy:
-            nonce = getattr(request.state, "csp_nonce", None) if request is not None else None
             csp = csp_for_path(
                 path,
                 settings.content_security_policy,
-                nonce,
+                request.state.csp_nonce,
                 relaxed=settings.csp_relaxed_dev,
             )
             response.headers["Content-Security-Policy"] = csp

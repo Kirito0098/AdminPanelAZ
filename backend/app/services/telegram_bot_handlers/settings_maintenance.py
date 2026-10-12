@@ -87,7 +87,7 @@ def _get_node(db, node_id: int) -> Node | None:
 def _reboot_nodes_keyboard(nodes: list[Node]) -> dict:
     rows: list[list] = []
     for node in nodes:
-        status = node.status if isinstance(node.status, NodeStatus) else NodeStatus.unknown
+        status = node.status
         icon = _REBOOT_STATUS_ICON.get(status, "🟡")
         rows.append([inline_button(f"{icon} {node.name}", callback_data=f"st:mnt:reboot:n:{node.id}")])
     rows.append([inline_button("◀️ Назад", callback_data="st:mnt")])

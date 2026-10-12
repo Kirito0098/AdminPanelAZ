@@ -115,13 +115,11 @@ async def handle_settings_security(ctx: BotContext, *, message_id: int | None = 
     )
 
 
-def _apply_security_patch(ctx: BotContext, payload, *, log_details: str):
+def _apply_security_patch(ctx: BotContext, payload: dict, *, log_details: str):
     from app.routers.security import SecuritySettingsUpdate, update_security
 
     try:
-        if not isinstance(payload, SecuritySettingsUpdate):
-            payload = SecuritySettingsUpdate(**payload)
-        result = update_security(payload, _make_bot_request(ctx), ctx.db, ctx.user)
+        result = update_security(SecuritySettingsUpdate(**payload), _make_bot_request(ctx), ctx.db, ctx.user)
         _log_bot_action(ctx, "settings_security_update", log_details)
         return result
     except HTTPException as exc:

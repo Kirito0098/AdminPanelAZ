@@ -99,10 +99,10 @@ def _local_ip_for_config(db: Session, config: VpnConfig, adapter: NodeAdapter | 
         mapping = build_client_local_ip_map(
             node_adapter,
             db,
-            node_id=active.id if active else None,
+            node_id=active.id,
             configs=[config],
         )
-        return mapping.get((config.client_name or "").strip().lower())
+        return mapping.get(config.client_name.strip().lower())
     except Exception:
         return None
 
@@ -369,7 +369,7 @@ def list_configs(
             local_ip_map = build_client_local_ip_map(
                 ip_adapter,
                 db,
-                node_id=active.id if active else None,
+                node_id=active.id,
                 configs=configs,
             )
         except Exception:
@@ -387,7 +387,7 @@ def list_configs(
                 ConfigTagResponse(id=t.id, name=t.name, color=t.color)
                 for t in tags_map.get(c.id, [])
             ],
-            local_ip=local_ip_map.get((c.client_name or "").strip().lower()),
+            local_ip=local_ip_map.get(c.client_name.strip().lower()),
         )
         for c in configs
     ]

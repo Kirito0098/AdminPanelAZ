@@ -82,6 +82,7 @@ def _node() -> Node:
         name="remote",
         host="10.0.0.2",
         port=9100,
+        node_kind="vpn",
         status=NodeStatus.online,
         is_local=False,
         ssh_host="198.51.100.5",

@@ -153,10 +153,7 @@ class SecurityService:
         if "portal_domain" in payload:
             from app.services.client_portal import set_portal_domain
 
-            try:
-                set_portal_domain(db, payload.get("portal_domain"))
-            except ValueError as exc:
-                raise ValueError(str(exc)) from exc
+            set_portal_domain(db, payload.get("portal_domain"))
         if "portal_title" in payload:
             _set(db, "portal_title", (payload["portal_title"] or "").strip())
         if "whitelist_firewall" in payload:

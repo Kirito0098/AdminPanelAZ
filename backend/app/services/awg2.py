@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import io
+import logging
 import os
 import re
 import shlex
@@ -21,6 +22,8 @@ from typing import Any, Iterator, Literal
 from fastapi import HTTPException, status
 
 from app.services.ip_geo import is_local_geoip_loaded, parse_client_endpoint
+
+logger = logging.getLogger(__name__)
 
 AWG2_CLIENT_BIN = Path(os.environ.get("AWG2_CLIENT_BIN", "/usr/local/bin/awg-client"))
 AWG2_OBFUSCATION_BIN = Path(os.environ.get("AWG2_OBFUSCATION_BIN", "/usr/local/bin/awg-obfuscation"))
@@ -334,10 +337,6 @@ def iter_install_stream_events(
         if proc and proc.poll() is None:
             proc.kill()
         if lock_handle is not None:
-            try:
-                fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
-            except Exception:
-                pass
             lock_handle.close()
 
 
@@ -911,7 +910,7 @@ class Awg2Service:
                 try:
                     self._run_awg_client("del", name, tunnel)
                 except Exception:
-                    pass
+                    logger.debug("awg2: rollback del failed name=%s tunnel=%s", name, tunnel, exc_info=True)
             raise
         return "\n".join(outputs)
 

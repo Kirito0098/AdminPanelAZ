@@ -89,10 +89,10 @@ def get_settings(current_user: User = Depends(get_current_user), db: Session = D
 
     return AppSettingsResponse(
         theme=current_user.theme,
-        timezone=current_user.timezone or "",
-        noc_daily_time=current_user.noc_daily_time or "",
-        noc_weekly_dow=current_user.noc_weekly_dow or "",
-        noc_weekly_time=current_user.noc_weekly_time or "",
+        timezone=current_user.timezone,
+        noc_daily_time=current_user.noc_daily_time,
+        noc_weekly_dow=current_user.noc_weekly_dow,
+        noc_weekly_time=current_user.noc_weekly_time,
         antizapret_path=str(get_node_antizapret_path(db)),
         include_hosts=include_hosts,
         exclude_hosts=exclude_hosts,

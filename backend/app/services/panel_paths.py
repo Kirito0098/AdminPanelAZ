@@ -54,7 +54,7 @@ def normalize_access_path(raw: str | None) -> str:
 
 
 def access_path(settings: Settings) -> str:
-    return normalize_access_path(getattr(settings, "access_path", "") or "")
+    return normalize_access_path(settings.access_path)
 
 
 def api_prefix(settings: Settings) -> str:

@@ -60,10 +60,10 @@ IMPORT_HEADERS = IMPORT_REQUIRED_HEADERS + (
 def _encode_block_mode(policy) -> str:
     if policy is None:
         return ""
-    if getattr(policy, "is_permanent_blocked", False):
+    if policy.is_permanent_blocked:
         return "permanent"
-    if getattr(policy, "is_temp_blocked", False):
-        days = getattr(policy, "block_days", None)
+    if policy.is_temp_blocked:
+        days = policy.block_days
         return f"temp:{days}" if days else "temp"
     return ""
 

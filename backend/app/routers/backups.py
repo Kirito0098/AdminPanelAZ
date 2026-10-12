@@ -337,9 +337,6 @@ def upload_backup(
 
     try:
         result = manager.import_uploaded_backup(tmp_path, original_name=original_name)
-    except Exception:
-        tmp_path.unlink(missing_ok=True)
-        raise
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -360,7 +357,7 @@ def upload_backup(
             components=result.get("components") or [],
             summary=result.get("summary") or "",
             restore_message=msg.message,
-            restore_detail=msg.detail if isinstance(msg.detail, dict) else None,
+            restore_detail=msg.detail,
         )
 
     admin_notify_service.send_settings_change(
@@ -529,9 +526,9 @@ def test_backup_telegram(
             content={"detail": "Тестовая отправка бэкапа уже выполняется", "active_task_id": active.id},
         )
 
-    include_az = bool(payload.include_antizapret_backup)
-    include_awg2 = bool(payload.include_awg2_backup)
-    include_configs = bool(payload.include_configs)
+    include_az = payload.include_antizapret_backup
+    include_awg2 = payload.include_awg2_backup
+    include_configs = payload.include_configs
 
     def _task(progress_updater=None):
         from app.database import SessionLocal

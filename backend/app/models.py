@@ -111,13 +111,13 @@ class User(Base):
 
     def has_tg_notify_event(self, event_type: str) -> bool:
         events = self.get_tg_notify_events()
-        if not self.tg_notify_events or not events:
+        if not events:
             return bool(DEFAULT_TG_NOTIFY_EVENTS.get(event_type, False))
         return _stored_tg_notify_event(events, event_type)
 
     def merged_tg_notify_events(self) -> dict[str, bool]:
         stored = self.get_tg_notify_events()
-        if not self.tg_notify_events or not stored:
+        if not stored:
             return dict(DEFAULT_TG_NOTIFY_EVENTS)
         return {key: _stored_tg_notify_event(stored, key) for key in DEFAULT_TG_NOTIFY_EVENTS}
 

@@ -153,11 +153,11 @@ def get_active_node_id(db: Session) -> int | None:
 
 
 def is_vpn_node(node: Node) -> bool:
-    return (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower() == NODE_KIND_VPN
+    return _node_kind(node) == NODE_KIND_VPN
 
 
 def proxy_is_not_vpn_message(node: Node) -> str:
-    name = getattr(node, "name", None) or "без имени"
+    name = node.name or "без имени"
     return (
         f"«{name}» — прокси-узел (российский вход, proxy_agent), а не VPN-сервер. "
         "OpenVPN и WireGuard на нём не запускаются. "
@@ -166,7 +166,7 @@ def proxy_is_not_vpn_message(node: Node) -> str:
 
 
 def vpn_is_not_proxy_message(node: Node) -> str:
-    name = getattr(node, "name", None) or "без имени"
+    name = node.name or "без имени"
     return (
         f"«{name}» — VPN-узел (node_agent), а не прокси. "
         "DESTINATION и таблица прокси-подключений доступны только у прокси-узлов."
@@ -250,7 +250,7 @@ def _resolve_active_node(db: Session) -> Node:
 
 
 def _node_kind(node: Node) -> str:
-    return (getattr(node, "node_kind", None) or NODE_KIND_VPN).strip().lower()
+    return (node.node_kind or NODE_KIND_VPN).strip().lower()
 
 
 def _remote_http_endpoint(node: Node) -> tuple[str, int, bool]:

@@ -30,15 +30,9 @@ def mini_dashboard(current_user: User = Depends(require_tg_mini_admin), db: Sess
         "connected_wireguard": len(wg_online),
         "total_wireguard_peers": len(wg),
         "server_ip": adapter.get_server_ip(),
-        "openvpn_clients": [c.model_dump() if hasattr(c, "model_dump") else c.__dict__ for c in ovpn[:20]],
+        "openvpn_clients": [c.model_dump() for c in ovpn[:20]],
         "wireguard_peers": [
-            {
-                "client_name": getattr(p, "client_name", None),
-                "public_key": getattr(p, "public_key", ""),
-                "transfer_rx": getattr(p, "transfer_rx", 0),
-                "transfer_tx": getattr(p, "transfer_tx", 0),
-                "latest_handshake": getattr(p, "latest_handshake", None),
-            }
+            p.model_dump(include={"client_name", "public_key", "transfer_rx", "transfer_tx", "latest_handshake"})
             for p in wg_online[:20]
         ],
         "timestamp": datetime.utcnow().isoformat(),

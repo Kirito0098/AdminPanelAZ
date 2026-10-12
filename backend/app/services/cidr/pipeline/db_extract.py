@@ -41,7 +41,7 @@ def _extract_asns_from_url(url):
     asns = set()
     try:
         parsed = urlparse(str(url or ""))
-    except Exception:
+    except ValueError:
         return asns
 
     query = parse_qs(parsed.query)

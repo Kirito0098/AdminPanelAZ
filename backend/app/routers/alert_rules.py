@@ -49,8 +49,7 @@ def _validate_rule_payload(
     node_id: int | None,
     db: Session,
 ) -> None:
-    metric_key = metric.value if hasattr(metric, "value") else str(metric)
-    if metric_key in METRICS_REQUIRING_NODE and node_id is None:
+    if metric.value in METRICS_REQUIRING_NODE and node_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Для этой метрики нужно указать узел",

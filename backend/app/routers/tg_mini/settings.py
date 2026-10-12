@@ -143,7 +143,7 @@ def mini_update_admin_notify(
         allowed_keys = DEFAULT_TG_NOTIFY_EVENTS if is_admin else PERSONAL_OWNER_NOTIFY_KEYS
         for key in allowed_keys:
             if key in payload.events:
-                merged[key] = bool(payload.events[key])
+                merged[key] = payload.events[key]
         current_user.tg_notify_events = json.dumps(merged)
     if payload.recipient_user_ids is not None:
         from app.services.telegram_recipients import join_user_ids

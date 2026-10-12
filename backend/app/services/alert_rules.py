@@ -134,14 +134,8 @@ def resolve_metric_value(db: Session, metric: AlertRuleMetric | str, node_id: in
 
 
 def format_rule_condition(rule: AlertRule, value: float | None = None) -> str:
-    metric_label = ALERT_METRIC_LABELS.get(
-        rule.metric.value if hasattr(rule.metric, "value") else str(rule.metric),
-        str(rule.metric),
-    )
-    op_label = OPERATOR_LABELS.get(
-        rule.operator.value if hasattr(rule.operator, "value") else str(rule.operator),
-        str(rule.operator),
-    )
+    metric_label = ALERT_METRIC_LABELS.get(rule.metric.value, str(rule.metric))
+    op_label = OPERATOR_LABELS.get(rule.operator.value, str(rule.operator))
     current = f" (сейчас {value:g})" if value is not None else ""
     return f"{metric_label} {op_label} {rule.threshold:g}{current}"
 
@@ -154,12 +148,12 @@ def _cooldown_active(rule: AlertRule, now: datetime) -> bool:
         last = last.replace(tzinfo=timezone.utc)
     from datetime import timedelta
 
-    return (now - last) < timedelta(minutes=max(1, int(rule.cooldown_minutes or 1)))
+    return (now - last) < timedelta(minutes=max(1, rule.cooldown_minutes))
 
 
 def evaluate_rule(db: Session, rule: AlertRule, *, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
-    metric_key = rule.metric.value if hasattr(rule.metric, "value") else str(rule.metric)
+    metric_key = rule.metric.value
     value = resolve_metric_value(db, metric_key, rule.node_id)
     result = {
         "rule_id": rule.id,
@@ -167,7 +161,7 @@ def evaluate_rule(db: Session, rule: AlertRule, *, now: datetime | None = None) 
         "metric": metric_key,
         "value": value,
         "threshold": rule.threshold,
-        "operator": rule.operator.value if hasattr(rule.operator, "value") else str(rule.operator),
+        "operator": rule.operator.value,
         "triggered": False,
         "skipped_reason": None,
     }

@@ -234,7 +234,7 @@ def _handle_client_renew_cert(db: Session, group: NodeSyncGroup, payload: dict[s
             sync_openvpn_pki_from_primary(
                 primary_adapter,
                 get_adapter_for_node(replica_node),
-                openvpn_multihome=bool(getattr(replica_node, "openvpn_multihome", False)),
+                openvpn_multihome=replica_node.openvpn_multihome,
                 db=db,
                 replica_node=replica_node,
             )

@@ -34,7 +34,7 @@ def serialize_replica_node_ids(replica_ids: list[int]) -> str:
 
 def effective_openvpn_domain(group: NodeSyncGroup) -> str:
     """HA OpenVPN host → OPENVPN_HOST (stored in shared_domain)."""
-    return (group.shared_domain or "").strip()
+    return group.shared_domain.strip()
 
 
 def optional_wireguard_domain(group: NodeSyncGroup) -> str | None:
@@ -168,7 +168,7 @@ def apply_group_fields(
 
 
 def is_auto_sync_enabled(group: NodeSyncGroup) -> bool:
-    return str(group.sync_mode or "").strip().lower() == "auto"
+    return group.sync_mode.strip().lower() == "auto"
 
 
 def find_sync_group_for_primary(db: Session, node_id: int) -> NodeSyncGroup | None:

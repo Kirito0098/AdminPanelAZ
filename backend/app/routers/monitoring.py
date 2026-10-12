@@ -20,7 +20,6 @@ from app.schemas import (
     ResourceHistoryPoint,
     ResourceHistoryResponse,
 )
-from app.services.connection_history import VALID_PERIODS as CONNECTION_VALID_PERIODS
 from app.services.connection_history import query_connection_history
 from app.services.monitoring_overview import (
     build_federated_monitoring_overview,
@@ -58,7 +57,7 @@ def _stream_coalesce_ttl(interval: int) -> int:
     cache_ttl = _monitoring_cache_ttl()
     if cache_ttl <= 0:
         return 0
-    return min(cache_ttl, max(1, int(interval) - 1))
+    return min(cache_ttl, max(1, interval - 1))
 
 
 def _mark_cache_hit(overview: MonitoringOverview, served_from_cache: bool) -> MonitoringOverview:
@@ -74,7 +73,7 @@ def _federated_cache_key(ha_mode: str) -> str:
 
 
 def _node_overview_cache_key(node_id: int) -> str:
-    return f"node:overview:{int(node_id)}"
+    return f"node:overview:{node_id}"
 
 
 def _build_monitoring_overview(
@@ -88,17 +87,16 @@ def _build_monitoring_overview(
 ) -> MonitoringOverview:
     """Build overview; optional ``cache_key_prefix`` isolates SSE coalesce from REST TTL."""
     ttl = 0 if bypass_cache else (cache_ttl if cache_ttl is not None else _monitoring_cache_ttl())
-    prefix = cache_key_prefix or ""
     if scope == "all":
         overview, from_cache = get_cached_monitoring_overview(
-            f"{prefix}{_federated_cache_key(ha_mode)}",
+            f"{cache_key_prefix}{_federated_cache_key(ha_mode)}",
             ttl,
             lambda: build_federated_monitoring_overview(db, ha_mode=ha_mode),  # type: ignore[arg-type]
         )
         return _mark_cache_hit(overview, from_cache and ttl > 0)
     node = get_active_node(db)
     overview, from_cache = get_cached_monitoring_overview(
-        f"{prefix}{_node_overview_cache_key(node.id)}",
+        f"{cache_key_prefix}{_node_overview_cache_key(node.id)}",
         ttl,
         lambda: build_monitoring_overview_for_node(db, node),
     )
@@ -215,11 +213,6 @@ def connection_history(
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    if period not in CONNECTION_VALID_PERIODS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="period должен быть 1h, 6h или 24h",
-        )
     try:
         points, sample_count = query_connection_history(db, period=period, scope=scope)
     except Exception as exc:

@@ -110,8 +110,8 @@ def _seed_database():
     try:
         try:
             upsert_bootstrap_admin(db, force=False, settings=settings)
-        except ValueError:
-            pass
+        except ValueError as exc:
+            logger.warning("bootstrap admin skipped: %s", exc)
 
         sync_local_node(db)
 

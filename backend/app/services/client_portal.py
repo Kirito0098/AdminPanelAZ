@@ -717,10 +717,7 @@ def _portal_visibility_policy(db: Session, owner: User | None) -> dict:
 
 
 def _owner_for_config(db: Session, config: VpnConfig) -> User | None:
-    owner_id = getattr(config, "owner_id", None)
-    if not isinstance(owner_id, int):
-        return None
-    return db.get(User, owner_id)
+    return db.get(User, config.owner_id)
 
 
 def _list_files_for_configs(db: Session, configs: list[VpnConfig]) -> list[dict]:
@@ -795,11 +792,11 @@ def _format_bytes_label(n: int) -> str:
 def _policy_blocked(policy) -> bool:
     if policy is None:
         return False
-    if bool(getattr(policy, "is_permanent_blocked", False)):
+    if policy.is_permanent_blocked:
         return True
-    if bool(getattr(policy, "is_temp_blocked", False)):
+    if policy.is_temp_blocked:
         return True
-    until = getattr(policy, "block_until", None)
+    until = policy.block_until
     if until is None:
         return False
     now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -876,8 +873,8 @@ def build_portal_status(db: Session, *, node_id: int, client_name: str, configs:
         # Prefer actual access deadlines over certificate notAfter.
         expiry_candidates: list[datetime | None] = []
         for c in configs:
-            expiry_candidates.append(getattr(c, "expires_at", None))
-            expiry_candidates.append(getattr(c, "cert_expires_at", None))
+            expiry_candidates.append(c.expires_at)
+            expiry_candidates.append(c.cert_expires_at)
         expires_at = _earliest_datetime(expiry_candidates)
 
     expired = bool(expires_at and expires_at <= now)
@@ -904,11 +901,7 @@ def build_portal_status(db: Session, *, node_id: int, client_name: str, configs:
     )
     used_bytes = sum(int(r.total_received or 0) + int(r.total_sent or 0) for r in stats)
 
-    limit_candidates = [
-        int(p.traffic_limit_bytes)
-        for p in policies
-        if getattr(p, "traffic_limit_bytes", None) is not None and int(p.traffic_limit_bytes or 0) > 0
-    ]
+    limit_candidates = [p.traffic_limit_bytes for p in policies if (p.traffic_limit_bytes or 0) > 0]
     limit_bytes = min(limit_candidates) if limit_candidates else None
 
     if limit_bytes is None:
@@ -987,7 +980,7 @@ def _parse_portal_status_datetime(value: str | None) -> datetime | None:
 
 
 def _apply_user_subscription_status(status_payload: dict, user: User) -> dict:
-    deadline = getattr(user, "access_until", None)
+    deadline = user.access_until
     if deadline is None:
         return status_payload
     updated = dict(status_payload)
@@ -1070,8 +1063,8 @@ def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
 
 
 def portal_node_label(node: Node) -> str:
-    label = (getattr(node, "portal_label", None) or "").strip()
-    return label or str(node.name)
+    label = (node.portal_label or "").strip()
+    return label or node.name
 
 
 class PortalNodeInfo(NamedTuple):
@@ -1274,7 +1267,7 @@ def redeem_public_portal_code(db: Session, resolution: PortalTokenResolution, *,
                 continue
             raise
         user = ensure_portal_user(db, resolution.user_row.user_id)
-        access_until = getattr(user, "access_until", None)
+        access_until = user.access_until
         return {
             **result,
             "access_until": access_until.isoformat() if access_until else None,

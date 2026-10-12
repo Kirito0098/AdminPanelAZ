@@ -182,7 +182,6 @@ def _build_webhook_health_text(info: dict[str, Any], last_error_value: str) -> s
 
 
 def format_webhook_health_text(info: dict) -> str:
-    info = info or {}
     raw_error = str(info.get("last_error_message") or "").strip()
     if not raw_error:
         return _build_webhook_health_text(info, i18n.TG_WEBHOOK_NONE)

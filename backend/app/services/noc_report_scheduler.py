@@ -127,7 +127,7 @@ def run_noc_report_scheduler_tick(now: datetime | None = None) -> list[dict]:
                     db.rollback()
                 except Exception:
                     pass
-                user_id = getattr(user, "id", None)
+                user_id = user.id
                 logger.exception(
                     "NOC report scheduler tick failed for user %s: %s",
                     user_id,

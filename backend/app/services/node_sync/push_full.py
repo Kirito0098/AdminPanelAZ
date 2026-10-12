@@ -275,7 +275,7 @@ def run_push_full(
             progress(percent, f"Перезапуск OpenVPN на {replica_name}…", current_step)
             # Read before the restart: a PKI sync marking the node meanwhile still owes its own.
             restart_owed = replica_node is not None and replica_node.openvpn_restart_pending is True
-            if replica_node is not None and bool(getattr(replica_node, "openvpn_multihome", False)):
+            if replica_node is not None and replica_node.openvpn_multihome:
                 from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
 
                 mh = maybe_ensure_node_openvpn_multihome(replica_adapter, replica_node) or {}

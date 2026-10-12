@@ -319,7 +319,7 @@ class AccessPolicyService:
         access_expired = bool(access_until and access_until <= now)
         block_until = _as_utc(row.block_until)
         temp = bool(row.is_temp_blocked and block_until and block_until > now)
-        perm = bool(row.is_permanent_blocked)
+        perm = row.is_permanent_blocked
         traffic_state = self._ovpn_traffic_state(row)
         traffic_exceeded = bool(traffic_state.get("traffic_limit_exceeded"))
         blocked = access_expired or temp or perm or traffic_exceeded
@@ -724,7 +724,7 @@ class AccessPolicyService:
         access_expired = bool(access_until and access_until <= now)
         block_until = _as_utc(row.block_until)
         temp = bool(row.is_temp_blocked and block_until and block_until > now)
-        perm = bool(row.is_permanent_blocked)
+        perm = row.is_permanent_blocked
         traffic_state = self._awg2_traffic_state(row)
         traffic_exceeded = bool(traffic_state.get("traffic_limit_exceeded"))
         blocked = access_expired or temp or perm or traffic_exceeded
@@ -949,7 +949,7 @@ class AccessPolicyService:
         access_expired = bool(expires and expires <= now)
         block_until = _as_utc(row.block_until)
         temp = bool(row.is_temp_blocked and block_until and block_until > now)
-        perm = bool(row.is_permanent_blocked)
+        perm = row.is_permanent_blocked
         traffic_state = self._wg_traffic_state(row)
         traffic_exceeded = bool(traffic_state.get("traffic_limit_exceeded"))
         blocked = access_expired or temp or perm or traffic_exceeded

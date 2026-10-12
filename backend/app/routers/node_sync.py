@@ -187,8 +187,8 @@ def update_sync_group(
         else:
             link_primary_configs_to_group(db, group)
         return _to_response(group, db)
-    new_mode = str(group.sync_mode or "").strip().lower()
-    prev_mode = str(previous_sync_mode or "").strip().lower()
+    new_mode = group.sync_mode.strip().lower()
+    prev_mode = previous_sync_mode.strip().lower()
     if prev_mode == "auto" and new_mode == "manual_full":
         clear_shadow_links_for_group(db, group)
         db.commit()
@@ -296,9 +296,9 @@ def setup_sync_group(
     return NodeSyncPushFullResponse(
         task_id=task.id,
         group_id=group.id,
-        message=str(payload.get("message") or "Настройка HA запущена"),
-        queued=bool(payload.get("queued", True)),
-        status_url=payload.get("status_url"),
+        message=payload["message"],
+        queued=payload["queued"],
+        status_url=payload["status_url"],
     )
 
 
@@ -356,9 +356,9 @@ def apply_shared_domain_endpoint(
     return NodeSyncPushFullResponse(
         task_id=task.id,
         group_id=group.id,
-        message=str(payload.get("message") or "Применение shared domain запущено"),
-        queued=bool(payload.get("queued", True)),
-        status_url=payload.get("status_url"),
+        message=payload["message"],
+        queued=payload["queued"],
+        status_url=payload["status_url"],
     )
 
 

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth import get_tg_mini_user
 from app.database import get_db
-from app.models import User, VpnConfig, VpnType
+from app.models import User, VpnConfig
 from app.schemas import MessageResponse
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
@@ -60,7 +60,7 @@ def mini_config_files(
 ):
     config = _get_accessible_config(db, config_id, current_user)
     adapter = get_active_adapter(db)
-    files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
+    files = adapter.get_profile_files(config.client_name, config.vpn_type)
     policy = resolve_effective_visible_vpn_profiles(db, current_user)
     files = filter_profile_files(files, policy)
     if not files:
@@ -77,7 +77,7 @@ def mini_send_config(
 ):
     config = _get_accessible_config(db, config_id, current_user)
     adapter = get_active_adapter(db)
-    files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
+    files = adapter.get_profile_files(config.client_name, config.vpn_type)
     match = next((item for item in files if item.get("path") == payload.path), None)
     policy = resolve_effective_visible_vpn_profiles(db, current_user)
     if match is None or not profile_file_allowed(
@@ -107,7 +107,7 @@ def mini_qr_link(
 ):
     config = _get_accessible_config(db, config_id, current_user)
     adapter = get_active_adapter(db)
-    files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
+    files = adapter.get_profile_files(config.client_name, config.vpn_type)
     match = next((item for item in files if item.get("path") == path), None)
     policy = resolve_effective_visible_vpn_profiles(db, current_user)
     if match is None or not profile_file_allowed(

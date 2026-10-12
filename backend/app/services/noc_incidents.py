@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.models import AlertRule, AlertRuleMetric, CidrDbRefreshLog, Node, NodeStatus
-from app.schemas import NocIncidentItem, NocIncidentsResponse
+from app.schemas import MonitoringNodeSummary, NocIncidentItem, NocIncidentsResponse
 from app.services.alert_rules import format_rule_condition
 from app.services.monitoring_overview import _build_node_summary, _collect_nodes_monitoring_data
 from app.services.node_manager import is_vpn_node, get_active_node
@@ -69,7 +69,7 @@ def build_noc_incidents(db: Session, *, limit: int = 20) -> NocIncidentsResponse
 
     nodes = db.query(Node).order_by(Node.id.asc()).all()
     payloads: list[dict] = []
-    summary_by_id: dict[int, object] = {}
+    summary_by_id: dict[int, MonitoringNodeSummary] = {}
     try:
         # One collect for node health + active-node services (was global summary + overview).
         payloads = _collect_nodes_monitoring_data(db)
@@ -80,9 +80,9 @@ def build_noc_incidents(db: Session, *, limit: int = 20) -> NocIncidentsResponse
         summary_by_id = {}
 
     for node in nodes:
-        status = node.status.value if hasattr(node.status, "value") else str(node.status)
+        status = node.status.value
         summary = summary_by_id.get(node.id)
-        error = getattr(summary, "error", None) if summary else None
+        error = summary.error if summary else None
         if status != NodeStatus.online.value and status != "online":
             items.append(
                 NocIncidentItem(
@@ -109,8 +109,8 @@ def build_noc_incidents(db: Session, *, limit: int = 20) -> NocIncidentsResponse
                 )
             )
         if summary is not None:
-            score = getattr(summary, "health_score", None)
-            level = getattr(summary, "health_level", None)
+            score = summary.health_score
+            level = summary.health_level
             if level and level != "ok" and status in {NodeStatus.online.value, "online"}:
                 role_nom = "Прокси-узел" if not is_vpn_node(node) else "VPN-узел"
                 items.append(
@@ -129,11 +129,11 @@ def build_noc_incidents(db: Session, *, limit: int = 20) -> NocIncidentsResponse
         active = get_active_node(db)
         active_payload = next((p for p in payloads if p["node"].id == active.id), None)
         if active_payload is not None:
-            for service in active_payload.get("services") or []:
-                if getattr(service, "active", False):
+            for service in active_payload["services"]:
+                if service.active:
                     continue
-                name = getattr(service, "name", None) or "unknown"
-                status = getattr(service, "status", None) or "inactive"
+                name = service.name or "unknown"
+                status = service.status or "inactive"
                 items.append(
                     NocIncidentItem(
                         id=f"service_down:{active.id}:{name}",

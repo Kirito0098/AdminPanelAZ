@@ -68,7 +68,7 @@ def _ha_sync_awg2_from_active(db: Session) -> dict[str, Any]:
                     replica_node=replica,
                 )
             except Exception as exc:  # noqa: BLE001 — collect warnings, do not fail apply
-                errors.append({"node_name": getattr(replica, "name", None), "error": str(exc)})
+                errors.append({"node_name": replica.name, "error": str(exc)})
         return {"attempted": True, "errors": errors}
     except Exception as exc:  # noqa: BLE001
         return {"attempted": True, "errors": [{"node_name": None, "error": str(exc)}]}
@@ -81,8 +81,6 @@ def _map_awg2_exc(exc: Exception) -> HTTPException:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, ValueError):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-    if isinstance(exc, RuntimeError):
-        return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
 
 

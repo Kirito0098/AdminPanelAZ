@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models import Node, NodeStatus, NodeSyncGroup, VpnConfig, VpnType
@@ -44,7 +45,7 @@ def resolve_geoip_mode() -> Literal["local_mmdb", "ip_api", "none"]:
 
 
 def _node_status_value(node: Node) -> str:
-    return node.status.value if hasattr(node.status, "value") else str(node.status)
+    return node.status.value
 
 
 def _exc_message(exc: BaseException) -> str:
@@ -65,9 +66,8 @@ def _proxy_service_from_cache(
     bits: list[str] = []
     if version:
         bits.append(str(version))
-    dest = getattr(node, "destination_ip", None)
-    if dest:
-        bits.append(f"DESTINATION={dest}")
+    if node.destination_ip:
+        bits.append(f"DESTINATION={node.destination_ip}")
     if detail:
         bits.append(detail)
     return MonitoringService(
@@ -92,7 +92,7 @@ def _probe_proxy_node(node: Node) -> tuple[list[MonitoringService], str | None, 
     return (
         [_proxy_service_from_cache(node, active=ok, version=str(version) if version else None)],
         error,
-        getattr(node, "host", None),
+        node.host,
     )
 
 
@@ -134,7 +134,7 @@ def _collect_nodes_monitoring_data(db: Session) -> list[dict]:
                             detail="модуль proxy_nodes выключен",
                         )
                     ]
-                    payload["server_ip"] = getattr(node, "host", None)
+                    payload["server_ip"] = node.host
                 else:
                     services, error, server_ip = _probe_proxy_node(node)
                     payload["services"] = services
@@ -398,7 +398,7 @@ def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOve
                         detail="модуль proxy_nodes выключен",
                     )
                 ]
-                server_ip = getattr(node, "host", None)
+                server_ip = node.host
             else:
                 services, _error, server_ip = _probe_proxy_node(node)
         except Exception as exc:
@@ -410,7 +410,7 @@ def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOve
                     description=_exc_message(exc),
                 )
             ]
-            server_ip = getattr(node, "host", None)
+            server_ip = node.host
         return MonitoringOverview(
             scope="node",
             services=services,
@@ -556,10 +556,10 @@ def _aggregation_key_for_client(
 def _ha_nodes_from_group(group_clients: list[OpenVpnClient] | list[WireGuardPeer]) -> list[HaNodePresence]:
     seen: dict[int, HaNodePresence] = {}
     for item in group_clients:
-        node_id = getattr(item, "node_id", None)
+        node_id = item.node_id
         if node_id is None:
             continue
-        node_name = getattr(item, "node_name", None) or f"node-{node_id}"
+        node_name = item.node_name or f"node-{node_id}"
         seen[node_id] = HaNodePresence(node_id=node_id, node_name=node_name, online=True)
     return list(seen.values())
 
@@ -809,7 +809,7 @@ def build_federated_monitoring_overview(
     active_node = None
     try:
         active_node = get_active_node(db)
-    except Exception:
+    except HTTPException:
         active_node = nodes[0] if nodes else None
 
     return MonitoringOverview(

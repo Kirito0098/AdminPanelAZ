@@ -43,7 +43,7 @@ def _require_unlock_codes_enabled() -> None:
 def _default_max_redemptions(mode: str, max_redemptions: int | None) -> int:
     if max_redemptions is not None:
         return max_redemptions
-    return 1 if (mode or "").strip().lower() == "single" else 10
+    return 1 if mode.strip().lower() == "single" else 10
 
 
 @router.get("")

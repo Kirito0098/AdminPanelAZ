@@ -11,18 +11,12 @@ from app.services.telegram_bot_handlers.ui import nav_footer_keyboard, send_or_e
 from app.services import telegram_bot_i18n as i18n
 
 
-def _format_top_traffic(rows: list) -> str:
+def _format_top_traffic(rows: list[dict]) -> str:
     if not rows:
         return i18n.AWG2_NONE
-    lines: list[str] = []
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        name = escape(str(row.get("name") or "—"))
-        rx = int(row.get("rx") or 0)
-        tx = int(row.get("tx") or 0)
-        lines.append(f"• <code>{name}</code> — ↓{rx} ↑{tx}")
-    return "\n".join(lines) if lines else i18n.AWG2_NONE
+    return "\n".join(
+        f"• <code>{escape(row['name'])}</code> — ↓{row['rx']} ↑{row['tx']}" for row in rows
+    )
 
 
 def _format_awg2_text(payload: dict) -> str:
@@ -32,7 +26,7 @@ def _format_awg2_text(payload: dict) -> str:
     if payload.get("health_error"):
         details_parts.append(i18n.AWG2_HEALTH_ERROR.format(detail=escape(str(payload["health_error"]))))
     if not installed:
-        missing = payload.get("missing_components") or []
+        missing = payload["missing_components"]
         if missing:
             details_parts.append(
                 i18n.AWG2_MISSING.format(components=escape(", ".join(str(x) for x in missing)))
@@ -47,10 +41,10 @@ def _format_awg2_text(payload: dict) -> str:
         node_host=escape(str(payload.get("node_host") or i18n.AWG2_NONE)),
         installed_label=installed_label,
         details=details,
-        online_count=int(payload.get("online_count") or 0),
-        peer_count=int(payload.get("peer_count") or 0),
+        online_count=payload["online_count"],
+        peer_count=payload["peer_count"],
         ifaces_summary=escape(str(payload.get("ifaces_summary") or i18n.AWG2_NONE)),
-        top_traffic=_format_top_traffic(payload.get("top_traffic") or []),
+        top_traffic=_format_top_traffic(payload["top_traffic"]),
     )
 
 

@@ -1,5 +1,7 @@
 """Session heartbeat API (ported from AdminAntizapret /api/session-heartbeat)."""
 
+import logging
+
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
@@ -10,6 +12,7 @@ from app.schemas import StreamTicketRequest, StreamTicketResponse
 from app.services.active_web_session import active_web_session_service
 from app.services.stream_ticket import STREAM_TICKET_TTL, issue_stream_ticket
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["session"])
 
 
@@ -32,7 +35,8 @@ def session_heartbeat(
                 session_id=session_id,
                 force=True,
             )
-        except Exception:
+        except Exception as exc:
+            logger.warning("session heartbeat touch failed for %s: %s", current_user.username, exc)
             db.rollback()
             return {"success": False}
     return {"success": True}

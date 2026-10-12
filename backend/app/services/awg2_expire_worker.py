@@ -118,7 +118,7 @@ def run_awg2_expire_once(db_session_factory: Callable[[], Session] = SessionLoca
                 logger.warning(
                     "awg2_expire: node %s (%s) reconcile failed",
                     node_id,
-                    getattr(node, "name", "?"),
+                    node.name,
                     exc_info=True,
                 )
                 continue

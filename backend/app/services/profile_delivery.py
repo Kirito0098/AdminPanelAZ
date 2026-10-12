@@ -69,7 +69,8 @@ def wireguard_host_from_adapter(adapter) -> str:
     """Live WIREGUARD_HOST from AntiZapret setup on the node (client.sh source)."""
     try:
         raw = adapter.get_antizapret_settings()
-    except Exception:  # noqa: BLE001 — delivery must still return the file
+    except Exception as exc:  # noqa: BLE001 — delivery must still return the file
+        logger.warning("profile delivery: WIREGUARD_HOST unavailable, keeping profile Endpoint: %s", exc)
         return ""
     if not isinstance(raw, dict):
         return ""

@@ -86,12 +86,9 @@ def remember_client_timezone(
 
 
 def _timezone_suffix(tz: ZoneInfo, dt: datetime) -> str:
-    try:
-        abbrev = dt.strftime("%Z")
-        if abbrev and abbrev != "UTC" and not abbrev.startswith("+"):
-            return abbrev
-    except Exception:
-        pass
+    abbrev = dt.strftime("%Z")
+    if abbrev and abbrev != "UTC" and not abbrev.startswith("+"):
+        return abbrev
     offset = dt.utcoffset()
     if offset is None:
         return "UTC"
