@@ -32,7 +32,6 @@ from app.services.admin_notify import (
 )
 from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.feature_guards import get_feature_service, module_disabled_message
-from app.services.node_transport import TRANSPORT_SSH, resolve_transport_id
 from app.services.noc_report import send_noc_report_preview, send_weekly_image_preview
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.panel_publish_info import resolve_request_url_root
@@ -45,7 +44,7 @@ from app.services.telegram_api import (
 )
 from app.services.telegram_bot_command_rate_limit import get_bot_command_rate_limits, set_bot_command_rate_limits
 from app.services.telegram_link import notify_telegram_unlinked
-from app.services.telegram_transport import RELAY_NODE_SETTING
+from app.services.telegram_transport import RELAY_NODE_SETTING, relay_node_ineligible_reason
 from app.services.telegram_recipients import (
     get_notify_recipient_user_ids,
     get_setting_chat_ids,
@@ -73,16 +72,6 @@ def _ensure_webhook_secret(db: Session) -> str:
 def _webhook_url(request: Request, secret: str) -> str:
     root = resolve_request_url_root(request, behind_nginx=get_settings().behind_nginx).rstrip("/")
     return f"{root}/api/telegram/webhook/{secret}"
-
-
-def relay_node_ineligible_reason(node: Node) -> str | None:
-    if node.is_local:
-        return "Нужен удалённый узел: этот сервер и есть панель"
-    if (node.node_kind or "vpn") != "vpn":
-        return "Прокси-узел стоит в РФ и не поможет достучаться до Telegram"
-    if not node.mtls_enabled and resolve_transport_id(node) != TRANSPORT_SSH:
-        return "Канал до узла не шифруется: включите mTLS или SSH-транспорт на странице «Узлы»"
-    return None
 
 
 def _configure_bot_menu(token: str) -> None:

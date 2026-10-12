@@ -55,6 +55,31 @@ def test_with_relay_node_sends_multipart_through_agent(monkeypatch, direct):
     assert b"xyz" in seen["body"]
 
 
+def test_relay_node_downgraded_to_plain_http_is_not_used(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app import database
+    from app.models import Node
+    from app.services import node_manager
+    from app.services.app_setting_store import _set_setting
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    database.Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    with factory() as db:
+        db.add(Node(id=1, name="nl-1", host="203.0.113.1", mtls_enabled=False, transport="http"))
+        _set_setting(db, telegram_transport.RELAY_NODE_SETTING, "1")
+        db.commit()
+    monkeypatch.setattr(database, "SessionLocal", factory)
+    monkeypatch.setattr(node_manager, "get_adapter_for_node", lambda _node: pytest.fail("token sent over plain HTTP"))
+
+    with pytest.raises(telegram_transport.TelegramRelayError, match="не шифруется"):
+        telegram_transport.bot_api_post_sync(TOKEN, "getMe")
+    engine.dispose()
+
+
 def test_old_agent_without_relay_gives_update_hint(monkeypatch):
     def relay(*_args):
         raise HTTPException(status_code=404, detail="Not Found")

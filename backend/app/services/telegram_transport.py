@@ -17,6 +17,18 @@ class TelegramRelayError(RuntimeError):
     pass
 
 
+def relay_node_ineligible_reason(node) -> str | None:
+    from app.services.node_transport import TRANSPORT_SSH, resolve_transport_id
+
+    if node.is_local:
+        return "Нужен удалённый узел: этот сервер и есть панель"
+    if (node.node_kind or "vpn") != "vpn":
+        return "Прокси-узел стоит в РФ и не поможет достучаться до Telegram"
+    if not node.mtls_enabled and resolve_transport_id(node) != TRANSPORT_SSH:
+        return "Канал до узла не шифруется: включите mTLS или SSH-транспорт на странице «Узлы»"
+    return None
+
+
 def _relay_adapter():
     """Adapter of the relay node, or None when Telegram is reached directly."""
     from app.database import SessionLocal
@@ -31,6 +43,9 @@ def _relay_adapter():
         node = db.get(Node, int(raw))
         if node is None:
             raise TelegramRelayError("Узел для связи с Telegram удалён — выберите другой в настройках Telegram")
+        reason = relay_node_ineligible_reason(node)
+        if reason:
+            raise TelegramRelayError(f"Узел «{node.name}»: {reason}")
         adapter = get_adapter_for_node(node)
         adapter.node_name = node.name
         return adapter
