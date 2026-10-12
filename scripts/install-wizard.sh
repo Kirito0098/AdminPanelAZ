@@ -450,6 +450,23 @@ wizard_ask_install_type() {
   WIZ_CURRENT_STEP=0
   WIZ_TOTAL_STEPS="?"
   wiz_step "Тип установки"
+  # node / proxy приходят только из --node-only / --proxy-only (или WIZ_INSTALL_TYPE в env) — не переспрашиваем.
+  case "$WIZ_INSTALL_TYPE" in
+    node)
+      WIZ_REQUIRE_ANTIZAPRET=true
+      print_info "Тип установки: только Node agent (--node-only)"
+      wiz_set_total_steps
+      echo
+      return 0
+      ;;
+    proxy)
+      WIZ_REQUIRE_ANTIZAPRET=false
+      print_info "Тип установки: только proxy_agent (--proxy-only)"
+      wiz_set_total_steps
+      echo
+      return 0
+      ;;
+  esac
   ui_info_box "Что именно ставим на этот сервер" \
     "1) Только панель — веб-интерфейс управления; VPN-серверы (AntiZapret)" \
     "   работают на других машинах и подключаются как узлы." \
