@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   CheckCircle2,
   Download,
@@ -9,7 +10,7 @@ import {
   Server,
   Sparkles,
 } from 'lucide-react'
-import { ApiError, applySystemUpdate, checkSystemUpdates, getLatestChangelog } from '@/api/client'
+import { ApiError, applySystemUpdate, checkSystemUpdates, getLatestChangelog, getServerConfigPreview } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { SettingsCollapsible, SettingsMetaLine, SettingsPanel, SettingsToolbar } from '@/components/settings/SettingsChrome'
@@ -108,6 +109,8 @@ export default function UpdatesTab() {
   const [updating, setUpdating] = useState(false)
   const [changelogOpen, setChangelogOpen] = useState(false)
   const [pendingChangelogOpen, setPendingChangelogOpen] = useState(false)
+  const [serverPending, setServerPending] = useState(0)
+  const navigate = useNavigate()
 
   const load = async () => {
     setLoading(true)
@@ -118,6 +121,11 @@ export default function UpdatesTab() {
       ])
       setInfo(updates)
       setChangelog(changelogResp)
+      if (!updates.updates_available) {
+        getServerConfigPreview()
+          .then((preview) => setServerPending(preview.pending))
+          .catch(() => setServerPending(0))
+      }
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка проверки обновлений')
     } finally {
@@ -235,6 +243,15 @@ export default function UpdatesTab() {
       />
 
       <p className="text-sm text-muted-foreground">{statusDescription}</p>
+
+      {!hasUpdate && serverPending > 0 ? (
+        <SettingsAlert variant="warning" title={`Осталось обновить настройки сервера: ${serverPending}`}>
+          <p>Обновление через панель не меняет nginx, системные пакеты и команду adminpanelaz. Это можно сделать отсюда.</p>
+          <Button size="sm" variant="outline" className="mt-3" onClick={() => navigate('/settings/tests?tab=server')}>
+            Открыть
+          </Button>
+        </SettingsAlert>
+      ) : null}
 
       {info?.error && (
         <SettingsAlert variant="danger" title="Ошибка проверки">

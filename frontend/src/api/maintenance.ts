@@ -12,6 +12,7 @@ import type {
   VpnNetworkPortStatus,
   VpnNetworkPublishPayload,
   BackgroundTaskAcceptedResponse,
+  ServerConfigPreview,
   DdnsSettings,
   DdnsSettingsUpdatePayload,
   DdnsActionResponse,
@@ -304,6 +305,14 @@ export async function closeIpAccess() {
   return apiFetch<SiteDiagnosticsCloseIpAccessResponse>('/site-diagnostics/close-ip-access', {
     method: 'POST',
   })
+}
+
+export async function getServerConfigPreview() {
+  return apiFetch<ServerConfigPreview>('/system/update/server-config')
+}
+
+export async function applyServerConfig() {
+  return apiFetch<BackgroundTaskAcceptedResponse>('/system/update/server-config', { method: 'POST' })
 }
 
 export async function applySystemUpdate() {

@@ -1379,6 +1379,20 @@ export interface BackgroundTaskAcceptedResponse extends BackgroundTask {
 
 export type BackgroundTaskAccepted = BackgroundTaskAcceptedResponse
 
+export type ServerConfigSection = 'add' | 'change' | 'recheck' | 'keep' | 'remove' | 'effect'
+
+export interface ServerConfigPreview {
+  sections: Record<ServerConfigSection, string[]>
+  pending: number
+}
+
+export interface ServerConfigRow {
+  step: string
+  label: string
+  status: 'ok' | 'пропущен' | 'ошибка'
+  detail: string
+}
+
 export interface ConfigCsvImportResponse {
   success: boolean
   async?: boolean
