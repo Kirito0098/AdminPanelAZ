@@ -50,7 +50,7 @@ _install() {
     env "$@" "$script"
     return
   fi
-  rendered="$(env "$@" UNIT_RENDER_ONLY=1 ADMINPANELAZ_UNIT_ROOT="${ADMINPANELAZ_UNIT_ROOT:-$ROOT_DIR}" "$script")"
+  rendered="$(env "$@" UNIT_RENDER_ONLY=1 "$script")"
   if [[ "$rendered" != "$(cat "$unit")" ]]; then
     basename "$unit" .service
   fi
