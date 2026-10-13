@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Bell, Bot, LogIn, Send, Smartphone } from 'lucide-react'
+import { Bell, Bot, LogIn, Route, Send, Smartphone } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import TelegramAlerts from '@/components/telegram/TelegramAlerts'
 import TelegramDisableSection from '@/components/telegram/TelegramDisableSection'
@@ -15,6 +15,7 @@ const TELEGRAM_TABS: Array<{ id: TelegramSection; icon: typeof Send }> = [
   { id: 'bot', icon: Send },
   { id: 'miniapp', icon: Smartphone },
   { id: 'interactive', icon: Bot },
+  { id: 'relay', icon: Route },
   { id: 'notify', icon: Bell },
 ]
 

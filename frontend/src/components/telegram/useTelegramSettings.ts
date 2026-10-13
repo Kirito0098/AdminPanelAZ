@@ -21,7 +21,7 @@ import type { AdminNotifySettings, TelegramSettings, User } from '@/types'
 
 export type TelegramAuthMethod = 'oidc' | 'legacy'
 
-export type TelegramSection = 'setup' | 'bot' | 'miniapp' | 'interactive' | 'notify'
+export type TelegramSection = 'setup' | 'bot' | 'miniapp' | 'interactive' | 'relay' | 'notify'
 
 export function useTelegramSettings() {
   const { success, error: notifyError } = useNotifications()

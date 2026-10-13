@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CheckCircle2, ChevronDown, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell, BarChart3, ImageIcon, Users, BellRing, Settings2, Cpu, Network, Database } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell, BarChart3, ImageIcon, Users, BellRing, Settings2, Cpu, Network, Database, Route } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import TelegramBotAuthGuide from '@/components/telegram/TelegramBotAuthGuide'
@@ -840,7 +840,14 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               </>
             )}
 
-            {tg.settings ? <TelegramRelayCard settings={tg.settings} onSaved={tg.setSettings} /> : null}
+            {tg.settings?.relay_node_ids.length ? (
+              <p className="text-sm text-muted-foreground">
+                Связь с Telegram идёт через узлы — настройки на вкладке{' '}
+                <button type="button" className="font-medium text-foreground underline underline-offset-4" onClick={() => onNavigate?.('relay')}>
+                  Связь через узел
+                </button>
+              </p>
+            ) : null}
 
             {tg.settings ? <TelegramBotRateLimitFields settings={tg.settings} onSaved={tg.setSettings} /> : null}
 
@@ -882,6 +889,24 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                 />
               )}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === 'relay' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Route size={18} />
+              Связь через узел
+            </CardTitle>
+            <CardDescription>
+              Если сервер панели в РФ и бот молчит, запросы к Telegram можно пустить через ваш зарубежный VPN-сервер.
+              Остальным эта функция не нужна — оставьте её выключенной.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {tg.settings ? <TelegramRelayCard settings={tg.settings} onSaved={tg.setSettings} /> : null}
           </CardContent>
         </Card>
       )}

@@ -24,6 +24,11 @@ export const TELEGRAM_TAB_META: Record<
     shortLabel: 'Команды',
     description: 'Webhook, команды /start и /status, привязка аккаунта через /link',
   },
+  relay: {
+    label: 'Связь через узел',
+    shortLabel: 'Узел',
+    description: 'Для панели в РФ: запросы к Telegram через ваш зарубежный VPN-сервер',
+  },
   notify: {
     label: 'Уведомления',
     shortLabel: 'Увед.',
