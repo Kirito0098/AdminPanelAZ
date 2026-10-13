@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.auth import require_tg_mini_admin
+from app.config import get_settings
 from app.database import get_db
 from app.models import User
 from app.services.action_log import log_action
@@ -67,8 +68,6 @@ def mini_activate_node(
     db: Session = Depends(get_db),
     admin: User = Depends(require_tg_mini_admin),
 ):
-    from app.routers import tg_mini as root
-
     node = _get_tg_node_or_404(node_id, db)
     set_active_node_id(db, node.id)
     db.commit()
@@ -76,7 +75,7 @@ def mini_activate_node(
     update_node_from_health(node, health, db)
     db.commit()
     db.refresh(node)
-    if root.settings.audit_log_enabled:
+    if get_settings().audit_log_enabled:
         log_action(
             db,
             action="node_activate",
