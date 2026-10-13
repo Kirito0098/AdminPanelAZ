@@ -133,7 +133,7 @@ export default function ServerConfigTab() {
               {rows.map((row) => (
                 <li key={row.step} className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="w-32 shrink-0 font-medium">{row.label}</span>
-                  <Badge variant={STATUS_BADGE[row.status] ?? 'secondary'}>{row.status}</Badge>
+                  <Badge variant={STATUS_BADGE[row.status]}>{row.status}</Badge>
                   {row.detail ? <span className="min-w-0 text-muted-foreground">{row.detail}</span> : null}
                 </li>
               ))}
