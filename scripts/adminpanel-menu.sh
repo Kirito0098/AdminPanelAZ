@@ -333,10 +333,14 @@ _menu_unit_state() {
   esac
 }
 
+# menu_version <каталог установки>: версия из frontend/package.json, пусто — если файла нет.
+menu_version() {
+  sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$1/frontend/package.json" 2>/dev/null | head -1
+}
+
 menu_code_line() {
   local version commit branch
-  version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$INSTALL_DIR/frontend/package.json" 2>/dev/null \
-    | head -1)" || true
+  version="$(menu_version "$INSTALL_DIR")" || true
   commit="$(timeout 3 git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null)" || true
   branch="$(timeout 3 git -C "$INSTALL_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null)" || true
   printf 'AdminPanelAZ %s %s %s @ %s' "${version:-неизвестно}" "$MENU_DOT" "${branch:-неизвестно}" "${commit:-неизвестно}"

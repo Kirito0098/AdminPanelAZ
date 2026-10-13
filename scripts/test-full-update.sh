@@ -98,6 +98,8 @@ run() {
 }
 
 calls() { tr '\n' ';' <"$CALLS"; }
+# Вызовы без git: предпросмотр до ответа вызывает только git fetch и rev-parse.
+calls_no_git() { calls | sed 's/git [^;]*;//g'; }
 summary() { sed -n '/^Полное обновление$/,$p' "$TMP/out"; }
 golden() {
   local expected
@@ -312,14 +314,14 @@ run '' 'full_update_main'
 
 echo "[test] подтверждение: план, «Продолжить? [y/N]»; n и EOF — ничего не меняется, код 0; y — обновление"
 run 'n\n' 'fu_stdin_is_tty() { :; }; full_update_main'
-[[ "$rc" -eq 0 && "$(calls)" == "" ]] && grep -qF "Полное обновление отменено, ничего не изменено" "$TMP/out" \
+[[ "$rc" -eq 0 && "$(calls_no_git)" == "" ]] && grep -qF "Полное обновление отменено, ничего не изменено" "$TMP/out" \
   && ok "n — отмена" || bad "код $rc, вызовы: $(calls); $(cat "$TMP/out")"
-grep -qF "Не меняются: база, backend/.env, *_agent.env, сертификаты, mTLS" "$TMP/out" \
-  && grep -qF "Продолжить? [y/N]:" "$TMP/out" && ok "план и вопрос" || bad "вывод: $(cat "$TMP/out")"
+grep -qF "Ваши данные не удаляются" "$TMP/out" \
+  && grep -qF "Продолжить? [y/N]:" "$TMP/out" && ok "экран и вопрос" || bad "вывод: $(cat "$TMP/out")"
 run '' 'fu_stdin_is_tty() { :; }; full_update_main'
-[[ "$rc" -eq 0 && "$(calls)" == "" ]] && ok "EOF — отмена" || bad "код $rc, вызовы: $(calls)"
+[[ "$rc" -eq 0 && "$(calls_no_git)" == "" ]] && ok "EOF — отмена" || bad "код $rc, вызовы: $(calls)"
 run 'y\n' 'fu_stdin_is_tty() { :; }; full_update_main'
-[[ "$rc" -eq 0 && "$(calls)" == "backup --no-prune --keep-running;"* ]] && ok "y — обновление" \
+[[ "$rc" -eq 0 && "$(calls_no_git)" == "backup --no-prune --keep-running;"* ]] && ok "y — обновление" \
   || bad "код $rc, вызовы: $(calls)"
 
 echo "[test] неизвестный аргумент — код 2"
@@ -541,6 +543,67 @@ diff -r "$PV" "$PV.orig" >/dev/null && ok "файлы не менялись" || 
   && ok "ни systemctl, ни каталогов состояния, ни ключа агента" || bad "побочные действия: $(calls)"
 grep -qx "WorkingDirectory=/srv/apaz/backend" "$PV/adminpanelaz.service" \
   && ok "путь установки из ADMINPANELAZ_UNIT_ROOT" || bad "unit: $(cat "$PV/adminpanelaz.service")"
+
+NEW="$TMP/new"
+mkdir -p "$NEW/frontend" "$NEW/backend" "$NEW/scripts" "$INSTALL/frontend"
+printf '{\n  "version": "2.26.5"\n}\n' >"$NEW/frontend/package.json"
+printf '{\n  "version": "2.26.4"\n}\n' >"$INSTALL/frontend/package.json"
+printf '## [Unreleased]\n\n### Added\n\n- **Связь с Telegram через узел** — текст\n- `test_x.py` — тест\n\n## [2.26.4] - 2026-10-12\n\n- **Старое** — текст\n' \
+  >"$NEW/CHANGELOG.md"
+printf 'fastapi==0.116.0\nuvicorn[standard]==0.51.0\naiosmtplib==3.0.1\n' >"$NEW/backend/requirements.txt"
+printf 'fastapi==0.115.0\nuvicorn[standard]==0.51.0\n' >"$INSTALL/backend/requirements.txt"
+cp "$ROOT_DIR/scripts/console-command.sh" "$NEW/scripts/"
+printf '#!/usr/bin/env bash\necho adminpanelaz\n' >"$NEW/scripts/refresh-systemd-units.sh"
+PREVIEW_STUBS='UP_NEW_ROOT="$TMPDIR/new"; export ADMINPANELAZ_MENU_LINK="$TMPDIR/bin/adminpanelaz"
+  git() { case "$*" in *"rev-list --count"*) echo 12 ;; *) echo "git $*" >>"$CALLS" ;; esac; }
+  fu_apt_missing() { echo python3.12-venv; }
+  fu_nginx_published() { false; }
+  fu_firewall_configured() { false; }
+'
+
+echo "[test] экран: версия, что нового, что добавится и изменится, данные не удаляются, как повлияет"
+with_units adminpanelaz.service
+run '' "$PREVIEW_STUBS"'up_render 1a2b3c4'
+for line in \
+  "  Версия: 2.26.4 → 2.26.5 (изменений: 12)" \
+  "    • Связь с Telegram через узел" \
+  "  • Команда sudo adminpanelaz — меню можно будет открывать ею из любой папки" \
+  "  • Пакеты системы: python3.12-venv" \
+  "  • Библиотеки Python: aiosmtplib 3.0.1" \
+  "  • Библиотеки Python: fastapi 0.115.0 → 0.116.0" \
+  "  • Службы systemd: adminpanelaz" \
+  "  • Ваши данные не удаляются: база, настройки, пользователи, VPN-клиенты, сертификаты" \
+  "  • Панель будет недоступна примерно 10–30 секунд, пока перезапускается" \
+  "  • VPN-клиенты остаются подключёнными: OpenVPN и WireGuard не перезапускаются"; do
+  grep -qxF "$line" "$TMP/out" && ok "строка: $line" || bad "нет строки «$line»: $(cat "$TMP/out")"
+done
+! grep -qF "Старое" "$TMP/out" && ! grep -qF "test_x" "$TMP/out" && ok "что нового — только новее текущей версии" \
+  || bad "лишнее в «Что нового»"
+[[ "$(calls)" == "" ]] && ok "ничего не запускалось" || bad "вызовы: $(calls)"
+
+echo "[test] экран: конфиг nginx устарел — обновится, старый останется копией; совпадает — уже актуален"
+printf 'old\n' >"$TMP/vhost"
+NGINX_STUBS='fu_nginx_published() { :; }
+  fu_nginx_targets() { printf "panel\tvpn.example.com\t%s\n" "$TMPDIR/vhost"; }
+  fu_nginx_render() { echo new; }
+'
+run '' "$PREVIEW_STUBS$NGINX_STUBS"'up_render 1a2b3c4'
+grep -qxF "  • Конфиг nginx для vpn.example.com устарел — обновится" "$TMP/out" \
+  && grep -qxF "  • Старый конфиг nginx останется рядом копией .bak-<дата>" "$TMP/out" && ok "nginx устарел" \
+  || bad "вывод: $(cat "$TMP/out")"
+[[ "$(cat "$TMP/vhost")" == old ]] && ok "конфиг nginx не тронут" || bad "конфиг nginx изменён"
+printf 'new\n' >"$TMP/vhost"
+run '' "$PREVIEW_STUBS$NGINX_STUBS"'up_render 1a2b3c4'
+grep -qxF "  • Конфиг nginx для vpn.example.com — уже актуален" "$TMP/out" && ok "nginx актуален" \
+  || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] git fetch не прошёл: «Не удалось узнать новую версию», вопрос всё равно задаётся, n — ничего"
+run 'n\n' 'fu_stdin_is_tty() { :; }
+  git() { case "$*" in *fetch*) return 1 ;; *) echo "git $*" >>"$CALLS" ;; esac; }
+  full_update_main'
+grep -qF "Не удалось узнать новую версию (нет связи с GitHub) — обновление всё равно можно запустить" "$TMP/out" \
+  && grep -qF "Продолжить? [y/N]:" "$TMP/out" && ok "без связи" || bad "вывод: $(cat "$TMP/out")"
+[[ "$rc" -eq 0 && "$(calls)" == "" ]] && ok "n — ничего не изменено" || bad "код $rc, вызовы: $(calls)"
 
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]
