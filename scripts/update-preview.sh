@@ -14,7 +14,12 @@ UP_CHANGE=()
 UP_KEEP=()
 UP_REMOVE=()
 UP_EFFECT=()
+UP_RECHECK=()
 UP_NGINX_COPY=false
+UP_UNITS_CHANGED=false
+# --server-only: без кода, Python, сборки и перезапуска. UP_FORMAT=tsv — строки «раздел<TAB>пункт» для веба.
+UP_SERVER_ONLY="${UP_SERVER_ONLY:-false}"
+UP_FORMAT="${UP_FORMAT:-text}"
 
 up_join() {
   local joined
@@ -133,6 +138,7 @@ up_units() {
     bash "$UP_NEW_ROOT/scripts/refresh-systemd-units.sh" 2>/dev/null || true)
   if ((${#changed[@]} > 0)); then
     UP_CHANGE+=("Службы systemd: $(up_join "${changed[@]}")")
+    UP_UNITS_CHANGED=true
   else
     UP_KEEP+=("Службы systemd — без изменений")
   fi
@@ -140,24 +146,34 @@ up_units() {
 
 up_server_settings() {
   if fu_firewall_configured; then
-    UP_CHANGE+=("Правила firewall AdminPanelAZ проверятся, недостающие добавятся; ваши правила не трогаются")
+    UP_RECHECK+=("Правила firewall AdminPanelAZ проверятся, недостающие добавятся; ваши правила не трогаются")
   fi
   if [[ -f "${DDNS_CONFIG:-/etc/adminpanelaz/ddns.env}" ]]; then
-    UP_CHANGE+=("Таймер DDNS обновится")
+    UP_RECHECK+=("Таймер DDNS обновится")
   fi
 }
 
 up_effects() {
   local unit
-  if panel_uses_systemd; then
-    UP_CHANGE+=("Интерфейс панели соберётся заново")
-    UP_EFFECT+=("Панель будет недоступна примерно 10–30 секунд, пока перезапускается")
+  if [[ "$UP_SERVER_ONLY" == true ]]; then
+    UP_EFFECT+=("Панель и агенты не перезапускаются")
+    if [[ "$UP_NGINX_COPY" == true ]]; then
+      UP_EFFECT+=("nginx перечитает настройки без обрыва соединений")
+    fi
+    if [[ "$UP_UNITS_CHANGED" == true ]]; then
+      UP_EFFECT+=("Новые настройки служб применятся при следующем перезапуске панели")
+    fi
+  else
+    if panel_uses_systemd; then
+      UP_CHANGE+=("Интерфейс панели соберётся заново")
+      UP_EFFECT+=("Панель будет недоступна примерно 10–30 секунд, пока перезапускается")
+    fi
+    while IFS= read -r unit; do
+      UP_EFFECT+=("Агент $unit перезапустится — панель на несколько секунд потеряет связь с этим сервером")
+    done < <(menu_agent_units)
   fi
-  while IFS= read -r unit; do
-    UP_EFFECT+=("Агент $unit перезапустится — панель на несколько секунд потеряет связь с этим сервером")
-  done < <(menu_agent_units)
   UP_EFFECT+=("VPN-клиенты остаются подключёнными: OpenVPN и WireGuard не перезапускаются")
-  if panel_uses_systemd; then
+  if [[ "$UP_SERVER_ONLY" != true ]] && panel_uses_systemd; then
     UP_EFFECT+=("Перед обновлением делается резервная копия панели; восстановить — sudo adminpanelaz $FU_ARROW 6")
   fi
   UP_REMOVE+=("Ваши данные не удаляются: база, настройки, пользователи, VPN-клиенты, сертификаты")
@@ -166,11 +182,16 @@ up_effects() {
   fi
 }
 
+# up_section <ключ для tsv> <заголовок> [пункт…]
 up_section() {
-  local item
-  (($# > 1)) || return 0
-  ui_section "$1"
-  shift
+  local key="$1" title="$2" item
+  shift 2
+  (($# > 0)) || return 0
+  if [[ "$UP_FORMAT" == tsv ]]; then
+    printf "$key\t%s\n" "$@"
+    return 0
+  fi
+  ui_section "$title"
   for item in "$@"; do
     printf '  %s %s\n' "$UP_BULLET" "$item"
   done
@@ -181,19 +202,32 @@ up_render() {
   # Сборка конфига nginx на пробу не должна дописывать сниппеты Cloudflare: только в этом процессе.
   nginx_ensure_cloudflare_realip_snippet() { :; }
   nginx_ensure_cloudflare_origin_snippets() { :; }
-  ui_section "Полное обновление AdminPanelAZ"
-  up_header "$1"
+  if [[ "$UP_FORMAT" != tsv ]]; then
+    ui_section "Полное обновление AdminPanelAZ"
+  fi
+  if [[ "$UP_SERVER_ONLY" != true ]]; then
+    up_header "$1"
+  fi
   up_command
   up_apt
-  up_pip
+  if [[ "$UP_SERVER_ONLY" != true ]]; then
+    up_pip
+  fi
   up_nginx
   up_units
   up_server_settings
   up_effects
-  up_section "Добавится" ${UP_ADD[@]+"${UP_ADD[@]}"}
-  up_section "Изменится" ${UP_CHANGE[@]+"${UP_CHANGE[@]}"}
-  up_section "Не изменится" ${UP_KEEP[@]+"${UP_KEEP[@]}"}
-  up_section "Удалится" "${UP_REMOVE[@]}"
-  up_section "Как это повлияет" "${UP_EFFECT[@]}"
-  printf '\n'
+  up_section add "Добавится" ${UP_ADD[@]+"${UP_ADD[@]}"}
+  if [[ "$UP_FORMAT" == tsv ]]; then
+    up_section change "" ${UP_CHANGE[@]+"${UP_CHANGE[@]}"}
+    up_section recheck "" ${UP_RECHECK[@]+"${UP_RECHECK[@]}"}
+  else
+    up_section change "Изменится" ${UP_CHANGE[@]+"${UP_CHANGE[@]}"} ${UP_RECHECK[@]+"${UP_RECHECK[@]}"}
+  fi
+  up_section keep "Не изменится" ${UP_KEEP[@]+"${UP_KEEP[@]}"}
+  up_section remove "Удалится" "${UP_REMOVE[@]}"
+  up_section effect "Как это повлияет" "${UP_EFFECT[@]}"
+  if [[ "$UP_FORMAT" != tsv ]]; then
+    printf '\n'
+  fi
 }

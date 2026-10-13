@@ -30,6 +30,7 @@ declare -A FU_LABELS=(
 # Ошибка этих шагов останавливает обновление до перезапуска: панель продолжает работать на прежнем коде.
 FU_STOP_STEPS=" backup code pip frontend "
 FU_STATE=""
+FU_REPORT=""
 FU_STOPPED=false
 FU_EXIT=0
 FU_ARROW="->"
@@ -133,6 +134,9 @@ fu_finish() {
     printf '\n'
     ui_warn "Панель не ответила после обновления. Бэкап до обновления: ${backup:-нет}"
     ui_info "Восстановить: sudo adminpanelaz $FU_ARROW 6 Бэкап и восстановление"
+  fi
+  if [[ -n "$FU_REPORT" ]]; then
+    cp "$FU_STATE" "$FU_REPORT"
   fi
   rm -f "$FU_STATE"
 }
@@ -544,6 +548,15 @@ full_update_apply() {
   fu_run restart fu_step_restart
 }
 
+# Веб: то, что обновление из панели не делает. Код, сборку и перезапуск панель уже выполнила сама.
+full_update_server_only() {
+  fu_run apt fu_step_apt
+  fu_run systemd fu_step_systemd
+  fu_run nginx fu_step_nginx
+  fu_run firewall fu_step_firewall
+  fu_run ddns fu_step_ddns
+}
+
 full_update_run() {
   local before
   before="$(fu_head)"
@@ -638,7 +651,7 @@ fu_show_preview() {
 FU_ASSUME_YES=false
 
 full_update_main() {
-  local resume="" preview=false preview_rev=""
+  local resume="" preview=false preview_rev="" server_only=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --yes) FU_ASSUME_YES=true ;;
@@ -648,6 +661,15 @@ full_update_main() {
           return 2
         fi
         resume="$2"
+        shift
+        ;;
+      --server-only) server_only=true ;;
+      --report)
+        if [[ $# -lt 2 ]]; then
+          ui_fail "--report: нужен файл"
+          return 2
+        fi
+        FU_REPORT="$2"
         shift
         ;;
       --preview)
@@ -672,8 +694,16 @@ full_update_main() {
     return 1
   fi
   if [[ "$preview" == true ]]; then
+    UP_SERVER_ONLY="$server_only"
     up_render "$preview_rev"
     return 0
+  fi
+  if [[ "$server_only" == true ]]; then
+    FU_STEPS=(apt systemd nginx firewall ddns)
+    FU_STATE="$(mktemp "$(fu_state_dir)/adminpanelaz-update.XXXXXX")"
+    full_update_server_only
+    fu_finish
+    return "$FU_EXIT"
   fi
   if [[ -n "$resume" ]]; then
     if ! fu_state_resume "$resume"; then

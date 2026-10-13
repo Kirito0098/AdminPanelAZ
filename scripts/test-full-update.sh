@@ -600,5 +600,24 @@ grep -qF "Не удалось узнать новую версию (нет св�
   && grep -qF "Продолжить? [y/N]:" "$TMP/out" && ok "без связи" || bad "вывод: $(cat "$TMP/out")"
 [[ "$rc" -eq 0 && "$(calls)" == "" ]] && ok "n — ничего не изменено" || bad "код $rc, вызовы: $(calls)"
 
+echo "[test] --server-only: только пакеты, unit'ы, nginx, firewall, DDNS; без бэкапа, кода, сборки, перезапуска и вопроса"
+with_units adminpanelaz.service
+run '' 'full_update_main --server-only --report "$TMPDIR/report.tsv"'
+[[ "$(calls)" == "refresh SYSTEMD_UNIT_DIR=$TMP/units;" ]] && ok "только unit'ы" || bad "вызовы: $(calls); $(cat "$TMP/out")"
+[[ "$rc" -eq 0 ]] && ok "код 0" || bad "код $rc: $(cat "$TMP/out")"
+[[ "$(cut -f1,2 "$TMP/report.tsv" 2>/dev/null | tr '\t\n' ' ;')" == "apt ok;systemd ok;nginx пропущен;firewall пропущен;ddns пропущен;" ]] \
+  && ok "--report: строки итога" || bad "отчёт: $(cat "$TMP/report.tsv" 2>/dev/null)"
+! grep -qF "Продолжить?" "$TMP/out" && ok "без вопроса" || bad "задан вопрос"
+
+echo "[test] экран --server-only в UP_FORMAT=tsv: раздел<TAB>пункт, без кода, Python и сборки"
+run '' "$PREVIEW_STUBS"'fu_firewall_configured() { :; }; UP_FORMAT=tsv; UP_SERVER_ONLY=true; up_render HEAD'
+grep -qxF $'add\tПакеты системы: python3.12-venv' "$TMP/out" && ok "add: пакеты" || bad "вывод: $(cat "$TMP/out")"
+grep -qxF $'recheck\tПравила firewall AdminPanelAZ проверятся, недостающие добавятся; ваши правила не трогаются' "$TMP/out" \
+  && ok "firewall — recheck" || bad "вывод: $(cat "$TMP/out")"
+grep -qxF $'effect\tПанель и агенты не перезапускаются' "$TMP/out" && ok "эффект без перезапуска" || bad "вывод: $(cat "$TMP/out")"
+! grep -qE 'Версия|Код панели|Библиотеки Python|Интерфейс|недоступна' "$TMP/out" && ok "без кода, Python, сборки" \
+  || bad "лишнее: $(cat "$TMP/out")"
+! grep -qvE $'^(add|change|recheck|keep|remove|effect)\t' "$TMP/out" && ok "только строки tsv" || bad "вывод: $(cat "$TMP/out")"
+
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]
