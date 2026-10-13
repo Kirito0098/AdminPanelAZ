@@ -512,5 +512,35 @@ run 'y\n' 'menu_full_update'
 [[ "$(calls)" == "install.sh --update -y LC_ALL= LANG=C.UTF-8;" ]] && ok "y — install.sh --update -y в исходной локали" \
   || bad "вызовы: $(calls); $(cat "$TMP/out")"
 
+echo "[test] refresh-systemd-units.sh REFRESH_PREVIEW=1: только изменившиеся службы, файлы не меняются, без root"
+# Копия скриптов, systemctl-заглушка и пути во временной папке. Без REFRESH_PREVIEW refresh создал бы /var/lib/adminpanelaz-node — не запускать от root до реализации.
+UR="$TMP/unit-repo"
+mkdir -p "$UR" "$TMP/fakebin" "$TMP/unit-state"
+cp -r "$ROOT_DIR/scripts" "$ROOT_DIR/systemd" "$UR/"
+printf '#!/usr/bin/env bash\necho "systemctl $*" >>"%s"\n' "$CALLS" >"$TMP/fakebin/systemctl"
+chmod +x "$TMP/fakebin/systemctl"
+: >"$CALLS"
+PV="$TMP/preview-units"
+mkdir -p "$PV"
+unit_env=(PATH="$TMP/fakebin:$PATH" INSTALL_FROM_INSTALL_SH=1 SYSTEMD_UNIT_DIR="$PV"
+  ADMINPANELAZ_STATE_DIR="$TMP/unit-state/panel" NODE_AGENT_STATE_DIR="$TMP/unit-state/node")
+for name in adminpanelaz adminpanelaz-node; do
+  script=install-systemd.sh
+  [[ "$name" == adminpanelaz-node ]] && script=install-node-systemd.sh
+  env "${unit_env[@]}" UNIT_RENDER_ONLY=1 ADMINPANELAZ_UNIT_ROOT=/srv/apaz \
+    bash "$UR/scripts/$script" >"$TMP/rendered" 2>/dev/null || true
+  mv "$TMP/rendered" "$PV/$name.service"
+done
+echo "# старая версия" >>"$PV/adminpanelaz-node.service"
+cp -a "$PV" "$PV.orig"
+pv_out="$(env "${unit_env[@]}" REFRESH_PREVIEW=1 ADMINPANELAZ_UNIT_ROOT=/srv/apaz \
+  bash "$UR/scripts/refresh-systemd-units.sh" 2>&1)" || true
+[[ "$pv_out" == adminpanelaz-node ]] && ok "изменится только adminpanelaz-node" || bad "вывод: $pv_out"
+diff -r "$PV" "$PV.orig" >/dev/null && ok "файлы не менялись" || bad "файлы unit'ов изменены"
+[[ ! -s "$CALLS" && ! -e "$TMP/unit-state/node" && ! -e "$UR/backend/node_agent.env" ]] \
+  && ok "ни systemctl, ни каталогов состояния, ни ключа агента" || bad "побочные действия: $(calls)"
+grep -qx "WorkingDirectory=/srv/apaz/backend" "$PV/adminpanelaz.service" \
+  && ok "путь установки из ADMINPANELAZ_UNIT_ROOT" || bad "unit: $(cat "$PV/adminpanelaz.service")"
+
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]
