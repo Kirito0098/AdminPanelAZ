@@ -19,6 +19,9 @@ from app.services import server_config
 
 PREVIEW_TSV = (
     "add\tПакеты системы: jq\n"
+    "change\tКонфиг nginx для a.example устарел — обновится\n"
+    'minus\tadd_header X-Frame-Options "SAMEORIGIN" always;\n'
+    "why\tЗаголовки безопасности теперь ставит сама панель\n"
     "recheck\tПравила firewall AdminPanelAZ проверятся\n"
     "keep\tСлужбы systemd — без изменений\n"
     "effect\tПанель и агенты не перезапускаются\n"
@@ -33,7 +36,12 @@ def db_factory():
     with factory() as db:
         db.add_all(
             [
-                User(username="admin", password_hash=get_password_hash("x-Admin-123"), role=UserRole.admin, is_active=True),
+                User(
+                    username="admin",
+                    password_hash=get_password_hash("x-Admin-123"),
+                    role=UserRole.admin,
+                    is_active=True,
+                ),
                 User(username="bob", password_hash=get_password_hash("x-User-123"), role=UserRole.user, is_active=True),
             ]
         )
@@ -73,7 +81,15 @@ def test_server_config_admin_only_single_run_and_parsed(client, db_factory, monk
 
     admin = _auth(db_factory, "admin")
     body = client.get("/api/system/update/server-config", headers=admin).json()
-    assert body["pending"] == 1
+    assert body["pending"] == 2
+    assert body["details"] == {
+        "Конфиг nginx для a.example устарел — обновится": {
+            "removed": ['add_header X-Frame-Options "SAMEORIGIN" always;'],
+            "added": [],
+            "why": ["Заголовки безопасности теперь ставит сама панель"],
+            "info": [],
+        }
+    }
     assert body["sections"]["add"] == ["Пакеты системы: jq"]
     assert body["sections"]["recheck"] == ["Правила firewall AdminPanelAZ проверятся"]
 

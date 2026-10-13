@@ -617,7 +617,31 @@ grep -qxF $'recheck\tПравила firewall AdminPanelAZ проверятся, 
 grep -qxF $'effect\tПанель и агенты не перезапускаются' "$TMP/out" && ok "эффект без перезапуска" || bad "вывод: $(cat "$TMP/out")"
 ! grep -qE 'Версия|Код панели|Библиотеки Python|Интерфейс|недоступна' "$TMP/out" && ok "без кода, Python, сборки" \
   || bad "лишнее: $(cat "$TMP/out")"
-! grep -qvE $'^(add|change|recheck|keep|remove|effect)\t' "$TMP/out" && ok "только строки tsv" || bad "вывод: $(cat "$TMP/out")"
+! grep -qvE $'^(add|change|recheck|keep|remove|effect|minus|plus|why|info)\t' "$TMP/out" && ok "только строки tsv" || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] экран: у устаревшего nginx — какие строки уберутся и добавятся и почему; у firewall — порты"
+printf '    listen 443 ssl;\n\n    add_header X-Frame-Options "SAMEORIGIN" always;\n' >"$TMP/vhost"
+DETAIL_STUBS='fu_nginx_published() { :; }
+  fu_nginx_targets() { printf "portal\tportal.example.com\t%s\n" "$TMPDIR/vhost"; }
+  fu_nginx_render() { printf "  listen 443 ssl;\n  client_max_body_size 32m;\n"; }
+  fu_firewall_configured() { :; }
+  fu_firewall_args() { FU_FW_ARGS=(8000 9100 443 80 false true "" false 9101); }
+'
+run '' "$PREVIEW_STUBS$DETAIL_STUBS"'up_render 1a2b3c4'
+for line in \
+  '      уберётся: add_header X-Frame-Options "SAMEORIGIN" always;' \
+  '      добавится: client_max_body_size 32m;' \
+  '      Открыты для всех: 443, 80 — сайт панели через nginx' \
+  '      Закрыт снаружи: 8000 — сама панель, доступ к ней только через nginx'; do
+  grep -qxF "$line" "$TMP/out" && ok "строка: $line" || bad "нет строки «$line»: $(cat "$TMP/out")"
+done
+grep -qF '      почему: Заголовки безопасности теперь ставит сама панель' "$TMP/out" && ok "почему — заголовки" \
+  || bad "нет пояснения: $(cat "$TMP/out")"
+! grep -qF 'уберётся: listen' "$TMP/out" && ok "отступы не считаются отличием" || bad "лишнее: $(cat "$TMP/out")"
+run '' "$PREVIEW_STUBS$DETAIL_STUBS"'UP_FORMAT=tsv; UP_SERVER_ONLY=true; up_render HEAD'
+grep -qxF $'minus\tadd_header X-Frame-Options "SAMEORIGIN" always;' "$TMP/out" \
+  && grep -qE $'^why\tЗаголовки безопасности' "$TMP/out" && grep -qxF $'info\tЗакрыт снаружи: 8000 — сама панель, доступ к ней только через nginx' "$TMP/out" \
+  && ok "tsv: minus, why, info" || bad "вывод: $(cat "$TMP/out")"
 
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]

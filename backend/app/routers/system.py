@@ -45,7 +45,10 @@ def _git_update_status(repo_root: Path) -> dict:
         if local_hash and remote_hash and local_hash != remote_hash:
             count = subprocess.run(
                 ["git", "rev-list", "--count", f"{local_hash}..{remote_hash}"],
-                cwd=repo_root, capture_output=True, text=True, check=False,
+                cwd=repo_root,
+                capture_output=True,
+                text=True,
+                check=False,
             )
             behind = int(count.stdout.strip() or "0")
         return {
@@ -157,7 +160,9 @@ def server_config_apply(db: Session = Depends(get_db), user: User = Depends(requ
         result = server_config.apply(progress_updater)
         errors = sum(row["status"] == "ошибка" for row in result["rows"])
         with SessionLocal() as log_db:
-            log_action(log_db, action="server_config_done", user_id=user_id, username=username, details=f"errors={errors}")
+            log_action(
+                log_db, action="server_config_done", user_id=user_id, username=username, details=f"errors={errors}"
+            )
         return result
 
     task = background_task_service.enqueue_background_task(

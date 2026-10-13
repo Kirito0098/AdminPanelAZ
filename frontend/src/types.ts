@@ -1381,8 +1381,16 @@ export type BackgroundTaskAccepted = BackgroundTaskAcceptedResponse
 
 export type ServerConfigSection = 'add' | 'change' | 'recheck' | 'keep' | 'remove' | 'effect'
 
+export interface ServerConfigDetail {
+  removed: string[]
+  added: string[]
+  why: string[]
+  info: string[]
+}
+
 export interface ServerConfigPreview {
   sections: Record<ServerConfigSection, string[]>
+  details: Record<string, ServerConfigDetail>
   pending: number
 }
 

@@ -5,6 +5,7 @@
 
 UP_NEW_ROOT="$(cd "$FU_DIR/.." && pwd)"
 UP_NEWS_LIMIT=6
+UP_DETAIL_LIMIT=12
 UP_BULLET="-"
 case "${MENU_USER_LOCALE,,}" in
   *utf-8* | *utf8*) UP_BULLET="•" ;;
@@ -17,9 +18,29 @@ UP_EFFECT=()
 UP_RECHECK=()
 UP_NGINX_COPY=false
 UP_UNITS_CHANGED=false
+# Подробности пункта: строки «вид<TAB>текст», вид — minus | plus | why | info.
+declare -A UP_DETAIL=()
 # --server-only: без кода, Python, сборки и перезапуска. UP_FORMAT=tsv — строки «раздел<TAB>пункт» для веба.
 UP_SERVER_ONLY="${UP_SERVER_ONLY:-false}"
 UP_FORMAT="${UP_FORMAT:-text}"
+
+up_detail() {
+  UP_DETAIL[$1]+="$2"$'\t'"$3"$'\n'
+}
+
+# up_detail_list <пункт> <вид> [строка…]: не больше UP_DETAIL_LIMIT строк, остальное — «… и ещё N».
+up_detail_list() {
+  local item="$1" kind="$2" line shown=0
+  shift 2
+  for line in "$@"; do
+    if ((shown == UP_DETAIL_LIMIT)); then
+      up_detail "$item" "$kind" "… и ещё $(($# - UP_DETAIL_LIMIT))"
+      return 0
+    fi
+    up_detail "$item" "$kind" "$line"
+    shown=$((shown + 1))
+  done
+}
 
 up_join() {
   local joined
@@ -116,16 +137,46 @@ up_pip() {
   fi
 }
 
+# Отступы, пустые строки и перевод строки в конце файла отличием не считаются.
+up_conf_lines() {
+  sed -e 's/\t/ /g' -e 's/^ *//' -e 's/ *$//' -e '/^$/d'
+}
+
+# Почему важно — по тому, какие строки меняются. Новая причина — новая ветка здесь, когда меняется шаблон nginx.
+up_nginx_why() {
+  if grep -qE 'add_header (Strict-Transport-Security|X-Content-Type-Options|X-Frame-Options|Referrer-Policy|Permissions-Policy)' <<<"$1"; then
+    printf '%s\n' "Заголовки безопасности теперь ставит сама панель: если их ставит и nginx, браузер получает их дважды с разными значениями, а сканеры безопасности считают это ошибкой. Защита не ослабевает"
+  else
+    printf '%s\n' "Конфиг собран по шаблону новой версии — что поменялось в шаблоне, описано в CHANGELOG"
+  fi
+}
+
+up_nginx_detail() {
+  local item="$1" file="$2" conf="$3" line
+  local -a minus=() plus=()
+  while IFS= read -r line; do
+    case "$line" in
+      "< "*) minus+=("${line#< }") ;;
+      "> "*) plus+=("${line#> }") ;;
+    esac
+  done < <(diff <(up_conf_lines <"$file") <(up_conf_lines <<<"$conf") || true)
+  up_detail_list "$item" minus ${minus[@]+"${minus[@]}"}
+  up_detail_list "$item" plus ${plus[@]+"${plus[@]}"}
+  up_detail "$item" why "$(up_nginx_why "$(printf '%s\n' ${minus[@]+"${minus[@]}"} ${plus[@]+"${plus[@]}"})")"
+}
+
 up_nginx() {
-  local kind host file conf
+  local kind host file conf item
   panel_uses_systemd && fu_nginx_published || return 0
   while IFS=$'\t' read -r kind host file; do
     if ! conf="$(fu_nginx_render "$kind" "$host" "$file" 2>/dev/null)"; then
       UP_KEEP+=("Конфиг nginx для $host — новый не собрать, останется прежний")
-    elif [[ "$conf" == "$(cat "$file")" ]]; then
+    elif [[ "$(up_conf_lines <<<"$conf")" == "$(up_conf_lines <"$file")" ]]; then
       UP_KEEP+=("Конфиг nginx для $host — уже актуален")
     else
-      UP_CHANGE+=("Конфиг nginx для $host устарел — обновится")
+      item="Конфиг nginx для $host устарел — обновится"
+      UP_CHANGE+=("$item")
+      up_nginx_detail "$item" "$file" "$conf"
       UP_NGINX_COPY=true
     fi
   done < <(fu_nginx_targets)
@@ -144,9 +195,45 @@ up_units() {
   fi
 }
 
+up_firewall_detail() {
+  local item="$1" backend https http nginx ip open
+  if ! fu_firewall_args; then
+    up_detail "$item" info "Правила не изменятся: IP панели не записан в node_agent.env / proxy_agent.env"
+    return 0
+  fi
+  backend="${FU_FW_ARGS[0]}" https="${FU_FW_ARGS[2]}" http="${FU_FW_ARGS[3]}" nginx="${FU_FW_ARGS[5]}" ip="${FU_FW_ARGS[6]}"
+  if [[ "$nginx" == true ]]; then
+    open="$https"
+    [[ "$http" == 0 ]] || open+=", $http"
+    if [[ "$backend" != 0 ]]; then
+      up_detail "$item" info "Открыты для всех: $open — сайт панели через nginx"
+    else
+      up_detail "$item" info "Открыт для всех: $open — панель"
+    fi
+  fi
+  if [[ "$backend" != 0 ]]; then
+    if [[ "$nginx" == true ]]; then
+      up_detail "$item" info "Закрыт снаружи: $backend — сама панель, доступ к ней только через nginx"
+    else
+      up_detail "$item" info "Закрыт снаружи: $backend — внутренний порт панели"
+    fi
+  fi
+  if [[ "${FU_FW_ARGS[4]}" == true ]]; then
+    up_detail "$item" info "Только с IP панели $ip: ${FU_FW_ARGS[1]} — агент узла"
+  fi
+  if [[ "${FU_FW_ARGS[7]}" == true ]]; then
+    up_detail "$item" info "Только с IP панели $ip: ${FU_FW_ARGS[8]} — прокси-агент"
+  fi
+  up_detail "$item" info "SSH остаётся открытым"
+  up_detail "$item" why "Если правило пропало (сброс firewall, чужой скрипт), сайт панели может перестать открываться, а внутренний порт — оказаться открытым в интернет"
+}
+
 up_server_settings() {
+  local item
   if fu_firewall_configured; then
-    UP_RECHECK+=("Правила firewall AdminPanelAZ проверятся, недостающие добавятся; ваши правила не трогаются")
+    item="Правила firewall AdminPanelAZ проверятся, недостающие добавятся; ваши правила не трогаются"
+    UP_RECHECK+=("$item")
+    up_firewall_detail "$item"
   fi
   if [[ -f "${DDNS_CONFIG:-/etc/adminpanelaz/ddns.env}" ]]; then
     UP_RECHECK+=("Таймер DDNS обновится")
@@ -182,18 +269,36 @@ up_effects() {
   fi
 }
 
-# up_section <ключ для tsv> <заголовок> [пункт…]
+up_print_details() {
+  local kind text
+  [[ -n "${UP_DETAIL[$1]-}" ]] || return 0
+  while IFS=$'\t' read -r kind text; do
+    if [[ "$UP_FORMAT" == tsv ]]; then
+      printf '%s\t%s\n' "$kind" "$text"
+      continue
+    fi
+    case "$kind" in
+      minus) printf '      уберётся: %s\n' "$text" ;;
+      plus) printf '      добавится: %s\n' "$text" ;;
+      why) printf '      почему: %s\n' "$text" ;;
+      *) printf '      %s\n' "$text" ;;
+    esac
+  done <<<"${UP_DETAIL[$1]%$'\n'}"
+}
+
+# up_section <ключ для tsv> <заголовок> [пункт…]; под пунктом — его подробности.
 up_section() {
   local key="$1" title="$2" item
   shift 2
   (($# > 0)) || return 0
-  if [[ "$UP_FORMAT" == tsv ]]; then
-    printf "$key\t%s\n" "$@"
-    return 0
-  fi
-  ui_section "$title"
+  [[ "$UP_FORMAT" == tsv ]] || ui_section "$title"
   for item in "$@"; do
-    printf '  %s %s\n' "$UP_BULLET" "$item"
+    if [[ "$UP_FORMAT" == tsv ]]; then
+      printf '%s\t%s\n' "$key" "$item"
+    else
+      printf '  %s %s\n' "$UP_BULLET" "$item"
+    fi
+    up_print_details "$item"
   done
 }
 

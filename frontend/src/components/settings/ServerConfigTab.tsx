@@ -11,7 +11,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
-import type { ServerConfigPreview, ServerConfigRow } from '@/types'
+import type { ServerConfigDetail, ServerConfigPreview, ServerConfigRow } from '@/types'
 
 const STATUS_BADGE: Record<ServerConfigRow['status'], 'success' | 'secondary' | 'destructive'> = {
   ok: 'success',
@@ -19,14 +19,55 @@ const STATUS_BADGE: Record<ServerConfigRow['status'], 'success' | 'secondary' | 
   ошибка: 'destructive',
 }
 
-function Section({ title, items }: { title: string; items: string[] }) {
+function DetailLines({ sign, lines, className }: { sign: string; lines: string[]; className: string }) {
+  return lines.map((line) => (
+    <div key={sign + line} className={className}>
+      <span aria-hidden="true" className="select-none pr-2">
+        {sign}
+      </span>
+      {line}
+    </div>
+  ))
+}
+
+function ItemDetail({ detail }: { detail: ServerConfigDetail }) {
+  const diff = detail.removed.length + detail.added.length > 0
+  return (
+    <div className="mt-1.5 space-y-2">
+      {diff ? (
+        <div className="overflow-x-auto rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed">
+          <DetailLines sign="−" lines={detail.removed} className="whitespace-pre text-destructive" />
+          <DetailLines sign="+" lines={detail.added} className="whitespace-pre text-emerald-600 dark:text-emerald-400" />
+        </div>
+      ) : null}
+      {detail.info.length ? (
+        <ul className="space-y-0.5 text-foreground/80">
+          {detail.info.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      ) : null}
+      {detail.why.map((line) => (
+        <p key={line}>
+          <span className="font-medium text-foreground">Почему это важно: </span>
+          {line}
+        </p>
+      ))}
+    </div>
+  )
+}
+
+function Section({ title, items, details = {} }: { title: string; items: string[]; details?: Record<string, ServerConfigDetail> }) {
   if (!items.length) return null
   return (
     <section className="space-y-1.5">
       <h4 className="text-sm font-semibold">{title}</h4>
       <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground marker:text-muted-foreground/60">
         {items.map((item) => (
-          <li key={item}>{item}</li>
+          <li key={item}>
+            {item}
+            {details[item] ? <ItemDetail detail={details[item]} /> : null}
+          </li>
         ))}
       </ul>
     </section>
@@ -157,7 +198,11 @@ export default function ServerConfigTab() {
               <p className="text-sm">Всё, что можно обновить отсюда, уже в актуальном состоянии.</p>
             ) : null}
             <Section title="Добавится" items={sections.add} />
-            <Section title="Изменится" items={pending > 0 ? [...sections.change, ...sections.recheck] : []} />
+            <Section
+              title="Изменится"
+              items={pending > 0 ? [...sections.change, ...sections.recheck] : []}
+              details={preview.details}
+            />
             <Section title="Не изменится" items={sections.keep} />
             {pending > 0 ? (
               <>

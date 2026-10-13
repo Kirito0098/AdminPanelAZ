@@ -12,6 +12,8 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 SCRIPT = PROJECT_ROOT / "scripts" / "full-update.sh"
 SECTIONS = ("add", "change", "recheck", "keep", "remove", "effect")
+# Строки под пунктом превью: вид в tsv → поле в details.
+DETAIL_KINDS = {"minus": "removed", "plus": "added", "why": "why", "info": "info"}
 LABELS = {"apt": "Пакеты", "systemd": "Службы systemd", "nginx": "nginx", "firewall": "firewall", "ddns": "DDNS"}
 
 
@@ -32,12 +34,19 @@ def _run_script(*args: str, timeout: int, env: dict[str, str] | None = None, ok_
 
 def preview() -> dict[str, Any]:
     sections: dict[str, list[str]] = {key: [] for key in SECTIONS}
+    details: dict[str, dict[str, list[str]]] = {}
+    item = ""
     output = _run_script("--preview", "HEAD", "--server-only", timeout=60, env={"UP_FORMAT": "tsv"})
     for line in output.splitlines():
-        key, _, item = line.partition("\t")
-        if key in sections and item:
+        key, _, text = line.partition("\t")
+        if not text:
+            continue
+        if key in sections:
+            item = text
             sections[key].append(item)
-    return {"sections": sections, "pending": len(sections["add"]) + len(sections["change"])}
+        elif key in DETAIL_KINDS and item:
+            details.setdefault(item, {kind: [] for kind in DETAIL_KINDS.values()})[DETAIL_KINDS[key]].append(text)
+    return {"sections": sections, "details": details, "pending": len(sections["add"]) + len(sections["change"])}
 
 
 def parse_report(text: str) -> dict[str, Any]:
