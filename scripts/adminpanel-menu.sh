@@ -807,16 +807,9 @@ panel_update_interactive() {
   panel_offer_restart
 }
 
-# Полное обновление — режим install.sh: кроме кода заново пакеты, unit'ы, nginx, firewall и DDNS, свой итог по шагам.
+# Полное обновление — режим install.sh: экран «что изменится» и вопрос показывает full-update.sh.
 menu_full_update() {
-  ui_section "Полное обновление (код + конфигурация сервера)"
-  ui_info "Бэкап, код из git, пакеты apt, Python, интерфейс, unit'ы systemd, nginx, firewall, DDNS и перезапуск — по текущим настройкам"
-  ui_info "База, backend/.env, сертификаты и mTLS не меняются"
-  if ! menu_confirm "Запустить полное обновление?" n; then
-    ui_info "Полное обновление отменено"
-    return 0
-  fi
-  LC_ALL="$MENU_USER_LC_ALL" LANG="$MENU_USER_LANG" "${BASH:-bash}" "$INSTALL_DIR/install.sh" --update -y
+  LC_ALL="$MENU_USER_LC_ALL" LANG="$MENU_USER_LANG" "${BASH:-bash}" "$INSTALL_DIR/install.sh" --update
 }
 
 panel_backup() {

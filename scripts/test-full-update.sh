@@ -503,15 +503,10 @@ echo "[test] --update в справке и в шапке install.sh"
 grep -qE '^  --update +Полное обновление' "$ROOT_DIR/scripts/install-ui.sh" \
   && grep -qE '^#   --update +полное обновление' "$ROOT_DIR/install.sh" && ok "справка" || bad "--update нет в справке"
 
-echo "[test] меню: «Полное обновление» спрашивает [y/N]; n и конец ввода — ничего; y — install.sh --update -y"
+echo "[test] меню: «Полное обновление» без своего вопроса — экран и вопрос задаёт install.sh --update"
 with_units adminpanelaz.service
-run 'n\n' 'menu_full_update'
-[[ "$(calls)" == "" ]] && grep -qF "Запустить полное обновление? [y/N]:" "$TMP/out" && ok "n — отмена" \
-  || bad "вызовы: $(calls); $(cat "$TMP/out")"
 run '' 'menu_full_update'
-[[ "$(calls)" == "" ]] && ok "конец ввода — отмена" || bad "вызовы: $(calls)"
-run 'y\n' 'menu_full_update'
-[[ "$(calls)" == "install.sh --update -y LC_ALL= LANG=C.UTF-8;" ]] && ok "y — install.sh --update -y в исходной локали" \
+[[ "$(calls)" == "install.sh --update LC_ALL= LANG=C.UTF-8;" ]] && ok "install.sh --update без -y в исходной локали" \
   || bad "вызовы: $(calls); $(cat "$TMP/out")"
 
 echo "[test] refresh-systemd-units.sh REFRESH_PREVIEW=1: только изменившиеся службы, файлы не меняются, без root"
