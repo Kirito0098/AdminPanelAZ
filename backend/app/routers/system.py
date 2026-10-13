@@ -7,10 +7,11 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import User
 from app.schemas import LatestChangelogResponse, MessageResponse
 from app.services.action_log import log_action
+from app.services import server_config
 from app.services.background_tasks import background_task_service
 from app.services.changelog_remote import build_changelog_response, fetch_remote_changelog_content
 from app.services.feature_guards import get_feature_service, module_disabled_message
@@ -124,6 +125,49 @@ def apply_update(db: Session = Depends(get_db), user: User = Depends(require_adm
     )
 
     return background_task_service.build_accepted_payload(task, "Обновление системы запущено в фоне.")
+
+
+@router.get("/update/server-config")
+def server_config_preview(user: User = Depends(require_admin)):
+    try:
+        return server_config.preview()
+    except (RuntimeError, subprocess.TimeoutExpired) as exc:
+        return JSONResponse(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            content={"detail": f"Не удалось проверить сервер: {exc}"},
+        )
+
+
+@router.post("/update/server-config", status_code=status.HTTP_202_ACCEPTED)
+def server_config_apply(db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    for task_type, busy in (
+        ("update_system", "Обновление системы уже выполняется"),
+        ("rebuild_frontend", "Пересборка frontend уже выполняется"),
+        ("server_config", "Настройки сервера уже обновляются"),
+    ):
+        active = background_task_service.find_active_task(task_type)
+        if active:
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content={"detail": busy, "active_task_id": active.id},
+            )
+    user_id, username = user.id, user.username
+
+    def _callable(progress_updater=None):
+        result = server_config.apply(progress_updater)
+        errors = sum(row["status"] == "ошибка" for row in result["rows"])
+        with SessionLocal() as log_db:
+            log_action(log_db, action="server_config_done", user_id=user_id, username=username, details=f"errors={errors}")
+        return result
+
+    task = background_task_service.enqueue_background_task(
+        "server_config",
+        _callable,
+        created_by_username=username,
+        queued_message="Обновление настроек сервера поставлено в очередь",
+    )
+    log_action(db, action="server_config_queued", user_id=user_id, username=username, details=f"task_id={task.id}")
+    return background_task_service.build_accepted_payload(task, "Настройки сервера обновляются в фоне.")
 
 
 @router.post("/rebuild", status_code=status.HTTP_202_ACCEPTED)

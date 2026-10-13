@@ -42,6 +42,7 @@ def _submit_in_current_context(fn: Callable[..., Any], *args: Any) -> None:
     _EXECUTOR.submit(context.run, fn, *args)
 
 _PIPELINE_TASK_TYPES = {
+    "server_config",
     "cidr_db_refresh",
     "cidr_db_refresh_dry_run",
     "cidr_estimate_from_db",
