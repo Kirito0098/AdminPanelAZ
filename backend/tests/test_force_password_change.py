@@ -14,6 +14,7 @@ from app.database import Base, get_db
 from app.models import User, UserRole
 from app.routers import auth as auth_router
 from app.routers import configs as configs_router
+from app.routers import session as session_router
 from app.routers import users as users_router
 from app.services.self_service import set_self_service_limits
 
@@ -51,7 +52,7 @@ def client(db_factory, monkeypatch):
     monkeypatch.setattr(auth_router, "should_scrub_env_after_password_change", lambda _username: False)
     monkeypatch.setattr(users_router.admin_notify_service, "send_user_create", lambda *_a, **_k: None)
     app = FastAPI()
-    for module in (auth_router, users_router, configs_router):
+    for module in (auth_router, users_router, configs_router, session_router):
         app.include_router(module.router, prefix="/api")
 
     def _get_db():
@@ -114,6 +115,12 @@ def test_flagged_web_session_is_blocked_until_password_change(client, db_factory
     assert changed.status_code == 200
     new_token = changed.json()["access_token"]
     assert client.get("/api/configs/quota", headers=_auth(new_token)).status_code == 200
+
+
+def test_flagged_session_keeps_heartbeat_to_learn_about_revocation(client, db_factory):
+    response = client.get("/api/session-heartbeat", headers=_auth(_token(db_factory, "carol")))
+
+    assert response.status_code == 200
 
 
 def test_reusing_admin_set_password_does_not_clear_flag(client, db_factory):

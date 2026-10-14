@@ -5,7 +5,13 @@ import logging
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from app.auth import access_token_session_id, get_current_user, oauth2_scheme, require_admin
+from app.auth import (
+    access_token_session_id,
+    allowed_before_password_change,
+    get_current_user,
+    oauth2_scheme,
+    require_admin,
+)
 from app.database import get_db
 from app.models import User
 from app.schemas import StreamTicketRequest, StreamTicketResponse
@@ -17,6 +23,7 @@ router = APIRouter(tags=["session"])
 
 
 @router.get("/session-heartbeat")
+@allowed_before_password_change
 def session_heartbeat(
     request: Request,
     db: Session = Depends(get_db),

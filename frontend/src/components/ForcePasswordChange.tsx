@@ -9,7 +9,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useNotifications } from '@/context/NotificationContext'
 
 export default function ForcePasswordChange() {
-  const { refreshUser } = useAuth()
+  const { refreshUser, logout } = useAuth()
   const { success, error: notifyError } = useNotifications()
   const [currentPwd, setCurrentPwd] = useState('')
   const [newPwd, setNewPwd] = useState('')
@@ -84,6 +84,9 @@ export default function ForcePasswordChange() {
             </div>
             <Button type="submit" className="w-full" disabled={saving}>
               {saving ? 'Сохранение...' : 'Сохранить пароль'}
+            </Button>
+            <Button type="button" variant="ghost" className="w-full" onClick={logout}>
+              Выйти
             </Button>
           </form>
         </CardContent>
