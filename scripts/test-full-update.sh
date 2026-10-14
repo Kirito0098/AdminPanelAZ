@@ -600,6 +600,14 @@ grep -qF "Не удалось узнать новую версию (нет св�
   && grep -qF "Продолжить? [y/N]:" "$TMP/out" && ok "без связи" || bad "вывод: $(cat "$TMP/out")"
 [[ "$rc" -eq 0 && "$(calls)" == "" ]] && ok "n — ничего не изменено" || bad "код $rc, вызовы: $(calls)"
 
+echo "[test] экран в том же процессе не отключает сниппеты Cloudflare для настоящего обновления"
+run '' "$PREVIEW_STUBS"'git() { case "$*" in *fetch*) return 1 ;; *) echo "git $*" >>"$CALLS" ;; esac; }
+  before="$(declare -f nginx_ensure_cloudflare_realip_snippet nginx_ensure_cloudflare_origin_snippets)"
+  fu_show_preview >/dev/null
+  [[ "$(declare -f nginx_ensure_cloudflare_realip_snippet nginx_ensure_cloudflare_origin_snippets)" == "$before" ]] \
+    && echo SNIPPETS-KEPT'
+grep -qx SNIPPETS-KEPT "$TMP/out" && ok "сниппеты Cloudflare не заглушены" || bad "вывод: $(cat "$TMP/out")"
+
 echo "[test] --server-only: только пакеты, unit'ы, nginx, firewall, DDNS; без бэкапа, кода, сборки, перезапуска и вопроса"
 with_units adminpanelaz.service
 run '' 'full_update_main --server-only --report "$TMPDIR/report.tsv"'

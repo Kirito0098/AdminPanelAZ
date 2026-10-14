@@ -88,26 +88,29 @@ def latest_changelog(_: User = Depends(require_admin)):
     return LatestChangelogResponse(**payload)
 
 
+# Update and rebuild restart the panel and with it the server-config script mid-write, so none of them overlap.
+_EXCLUSIVE_TASKS = {
+    "update_system": "Обновление системы уже выполняется",
+    "rebuild_frontend": "Пересборка frontend уже выполняется",
+    "server_config": "Настройки сервера уже обновляются",
+}
+
+
+def _busy_conflict() -> JSONResponse | None:
+    for task_type, busy in _EXCLUSIVE_TASKS.items():
+        active = background_task_service.find_active_task(task_type)
+        if active:
+            return JSONResponse(
+                status_code=status.HTTP_409_CONFLICT,
+                content={"detail": busy, "active_task_id": active.id},
+            )
+    return None
+
+
 @router.post("/update", status_code=status.HTTP_202_ACCEPTED)
 def apply_update(db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    active = background_task_service.find_active_task("update_system")
-    if active:
-        return JSONResponse(
-            status_code=status.HTTP_409_CONFLICT,
-            content={
-                "detail": "Обновление системы уже выполняется",
-                "active_task_id": active.id,
-            },
-        )
-    active_rebuild = background_task_service.find_active_task("rebuild_frontend")
-    if active_rebuild:
-        return JSONResponse(
-            status_code=status.HTTP_409_CONFLICT,
-            content={
-                "detail": "Пересборка frontend уже выполняется",
-                "active_task_id": active_rebuild.id,
-            },
-        )
+    if conflict := _busy_conflict():
+        return conflict
 
     def _callable(progress_updater=None):
         return background_task_service.task_update_system(progress_updater)
@@ -143,17 +146,8 @@ def server_config_preview(user: User = Depends(require_admin)):
 
 @router.post("/update/server-config", status_code=status.HTTP_202_ACCEPTED)
 def server_config_apply(db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    for task_type, busy in (
-        ("update_system", "Обновление системы уже выполняется"),
-        ("rebuild_frontend", "Пересборка frontend уже выполняется"),
-        ("server_config", "Настройки сервера уже обновляются"),
-    ):
-        active = background_task_service.find_active_task(task_type)
-        if active:
-            return JSONResponse(
-                status_code=status.HTTP_409_CONFLICT,
-                content={"detail": busy, "active_task_id": active.id},
-            )
+    if conflict := _busy_conflict():
+        return conflict
     user_id, username = user.id, user.username
 
     def _callable(progress_updater=None):
@@ -186,16 +180,8 @@ def rebuild_panel(db: Session = Depends(get_db), user: User = Depends(require_ad
                 "message": module_disabled_message("panel_ops"),
             },
         )
-    for task_type in ("update_system", "rebuild_frontend"):
-        active = background_task_service.find_active_task(task_type)
-        if active:
-            return JSONResponse(
-                status_code=status.HTTP_409_CONFLICT,
-                content={
-                    "detail": "Пересборка или обновление уже выполняется",
-                    "active_task_id": active.id,
-                },
-            )
+    if conflict := _busy_conflict():
+        return conflict
 
     def _callable(progress_updater=None):
         return background_task_service.task_rebuild_frontend(progress_updater)

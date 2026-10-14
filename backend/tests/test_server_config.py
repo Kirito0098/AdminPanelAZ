@@ -108,3 +108,20 @@ def test_server_config_admin_only_single_run_and_parsed(client, db_factory, monk
             {"step": "nginx", "label": "nginx", "status": "ошибка", "detail": "nginx -t"},
         ],
     }
+
+
+@pytest.mark.parametrize("path", ["/api/system/update", "/api/system/rebuild"])
+def test_update_and_rebuild_wait_for_server_config(client, db_factory, monkeypatch, path):
+    monkeypatch.setattr(system_router, "get_feature_service", lambda: SimpleNamespace(is_enabled=lambda _key: True))
+    monkeypatch.setattr(
+        system_router.background_task_service,
+        "find_active_task",
+        lambda task_type: SimpleNamespace(id="t1") if task_type == "server_config" else None,
+    )
+    monkeypatch.setattr(
+        system_router.background_task_service,
+        "enqueue_background_task",
+        lambda *_a, **_k: pytest.fail("started while server config is being applied"),
+    )
+
+    assert client.post(path, headers=_auth(db_factory, "admin")).status_code == 409

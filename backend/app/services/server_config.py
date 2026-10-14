@@ -22,13 +22,15 @@ def _run_script(*args: str, timeout: int, env: dict[str, str] | None = None, ok_
         ["bash", str(SCRIPT), *args],
         cwd=PROJECT_ROOT,
         env={**os.environ, "NO_COLOR": "1", "INSTALL_DIR": str(PROJECT_ROOT), **(env or {})},
-        capture_output=True,
+        # Ошибки шагов (nginx -t, apt, ui_fail) идут в stderr — без них итог «см. вывод выше» пуст.
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
         timeout=timeout,
         check=False,
     )
     if result.returncode not in ok_codes:
-        raise RuntimeError((result.stderr or result.stdout).strip()[-500:] or f"код {result.returncode}")
+        raise RuntimeError(result.stdout.strip()[-500:] or f"код {result.returncode}")
     return result.stdout
 
 

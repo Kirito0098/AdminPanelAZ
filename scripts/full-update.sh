@@ -635,7 +635,8 @@ fu_show_preview() {
     rev="$(git -C "$INSTALL_DIR" rev-parse --verify --quiet "$ref^{commit}" 2>/dev/null || true)"
   fi
   if [[ -z "$rev" || "$rev" == "$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null)" ]]; then
-    up_render "$rev"
+    # Подоболочка: up_render глушит функции nginx, а настоящее обновление идёт дальше в этом же процессе.
+    (up_render "$rev")
     return 0
   fi
   dir="$(mktemp -d "$(fu_state_dir)/adminpanelaz-preview.XXXXXX")"
