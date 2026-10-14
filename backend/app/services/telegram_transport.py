@@ -17,6 +17,10 @@ from app.services import telegram_api
 
 RELAY_NODES_SETTING = "telegram_relay_node_ids"
 FAILED_NODE_COOLDOWN_SECONDS = 120
+# A dead node must hand the request to the next one quickly; the read budget is the caller's plus the hop.
+RELAY_CONNECT_TIMEOUT = 5.0
+RELAY_OVERHEAD_SECONDS = 15.0
+RELAY_CHECK_TIMEOUT = httpx.Timeout(10.0, connect=RELAY_CONNECT_TIMEOUT)
 
 _failed_until: dict[int, float] = {}
 _failed_lock = threading.Lock()
@@ -69,6 +73,7 @@ def _relay_adapter_for(node_id: int):
     from app.database import SessionLocal
     from app.models import Node
     from app.services.node_manager import get_adapter_for_node
+    from app.services.ssh_tunnel_pool import SshTunnelError
 
     with SessionLocal() as db:
         node = db.get(Node, node_id)
@@ -77,9 +82,17 @@ def _relay_adapter_for(node_id: int):
         reason = relay_node_ineligible_reason(node)
         if reason:
             raise TelegramRelayError(f"Узел «{node.name}»: {reason}")
-        adapter = get_adapter_for_node(node)
+        try:
+            adapter = get_adapter_for_node(node)
+        except (SshTunnelError, HTTPException) as exc:
+            raise TelegramRelayError(f"Узел «{node.name}»: {_error_detail(exc)}") from exc
         adapter.node_name = node.name
         return adapter
+
+
+def _error_detail(exc: Exception) -> str:
+    detail = exc.detail if isinstance(exc, HTTPException) else str(exc)
+    return detail.get("message", str(detail)) if isinstance(detail, dict) else str(detail)
 
 
 def _encode(
@@ -113,8 +126,7 @@ def _relay_envelope(adapter, call: Callable[[Any], dict]) -> dict:
             raise TelegramRelayError(
                 f"Агент узла «{adapter.node_name}» не умеет пересылать запросы Telegram — обновите агент до 1.13.0"
             ) from exc
-        detail = exc.detail.get("message") if isinstance(exc.detail, dict) else exc.detail
-        raise TelegramRelayError(f"Узел «{adapter.node_name}»: {detail}") from exc
+        raise TelegramRelayError(f"Узел «{adapter.node_name}»: {_error_detail(exc)}") from exc
     finally:
         adapter.close()
 
@@ -148,8 +160,16 @@ def _call_relay_chain(node_ids: list[int], call: Callable[[Any], dict]) -> dict:
     raise TelegramRelayError("; ".join(errors))
 
 
+def _relay_timeout(request: httpx.Request) -> httpx.Timeout:
+    read = request.extensions["timeout"]["read"]
+    return httpx.Timeout(read + RELAY_OVERHEAD_SECONDS, connect=RELAY_CONNECT_TIMEOUT)
+
+
 def _bot_api_call(token: str, method: str, request: httpx.Request) -> Callable[[Any], dict]:
-    return lambda adapter: adapter.telegram_bot_api(token, method, request.content, request.headers["content-type"])
+    timeout = _relay_timeout(request)
+    return lambda adapter: adapter.telegram_bot_api(
+        token, method, request.content, request.headers["content-type"], timeout=timeout
+    )
 
 
 def bot_api_post_sync(

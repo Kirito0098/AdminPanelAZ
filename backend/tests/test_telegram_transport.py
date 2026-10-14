@@ -32,7 +32,7 @@ def _use_nodes(monkeypatch, adapters: dict[int, object]) -> None:
 
 
 def _bot_adapter(name: str, reply, calls: list[str] | None = None):
-    def telegram_bot_api(*_args):
+    def telegram_bot_api(*_args, **_kwargs):
         if calls is not None:
             calls.append(name)
         if isinstance(reply, Exception):
@@ -54,7 +54,7 @@ def test_without_relay_node_calls_telegram_directly(monkeypatch, direct):
 def test_with_relay_node_sends_multipart_through_agent(monkeypatch, direct):
     seen = {}
 
-    def relay(token, method, body, content_type):
+    def relay(token, method, body, content_type, *, timeout):
         seen.update(token=token, method=method, body=body, content_type=content_type)
         return {"status": 200, "body": {"ok": True, "result": True}}
 
@@ -97,8 +97,57 @@ def test_relay_node_downgraded_to_plain_http_is_not_used(monkeypatch):
     engine.dispose()
 
 
+def test_relay_call_fails_fast_on_dead_node_and_keeps_caller_read_timeout(monkeypatch):
+    seen = {}
+
+    def relay(*_args, timeout):
+        seen["timeout"] = timeout
+        return OK
+
+    _use_nodes(monkeypatch, {1: SimpleNamespace(telegram_bot_api=relay, node_name="nl-1", close=lambda: None)})
+
+    telegram_transport.bot_api_post_sync(TOKEN, "getUpdates", timeout=40)
+
+    assert seen["timeout"].connect == telegram_transport.RELAY_CONNECT_TIMEOUT
+    assert seen["timeout"].read == 40 + telegram_transport.RELAY_OVERHEAD_SECONDS
+
+
+def test_ssh_tunnel_failure_hands_request_to_next_node(monkeypatch):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app import database
+    from app.models import Node
+    from app.services import node_manager
+    from app.services.app_setting_store import _set_setting
+    from app.services.ssh_tunnel_pool import SshTunnelError
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    database.Base.metadata.create_all(engine)
+    factory = sessionmaker(bind=engine)
+    with factory() as db:
+        db.add(Node(id=1, name="nl-1", host="203.0.113.1", mtls_enabled=True))
+        db.add(Node(id=2, name="de-2", host="203.0.113.2", mtls_enabled=True))
+        _set_setting(db, telegram_transport.RELAY_NODES_SETTING, "1,2")
+        db.commit()
+    monkeypatch.setattr(database, "SessionLocal", factory)
+    monkeypatch.setattr(telegram_transport, "_failed_until", {})
+
+    def adapter_for(node):
+        if node.id == 1:
+            raise SshTunnelError("ssh_unreachable", "SSH host is unreachable")
+        return _bot_adapter("de-2", OK)
+
+    monkeypatch.setattr(node_manager, "get_adapter_for_node", adapter_for)
+
+    assert telegram_transport.bot_api_post_sync(TOKEN, "getMe") == {"ok": True, "result": True}
+    assert telegram_transport.last_relay_node_name() == "de-2"
+    engine.dispose()
+
+
 def test_old_agent_without_relay_gives_update_hint(monkeypatch):
-    def relay(*_args):
+    def relay(*_args, **_kwargs):
         raise HTTPException(status_code=404, detail="Not Found")
 
     _use_nodes(monkeypatch, {1: SimpleNamespace(telegram_bot_api=relay, node_name="nl-1", close=lambda: None)})

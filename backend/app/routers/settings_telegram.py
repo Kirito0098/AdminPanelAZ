@@ -46,6 +46,7 @@ from app.services.telegram_api import (
 from app.services.telegram_bot_command_rate_limit import get_bot_command_rate_limits, set_bot_command_rate_limits
 from app.services.telegram_link import notify_telegram_unlinked
 from app.services.telegram_transport import (
+    RELAY_CHECK_TIMEOUT,
     RELAY_NODES_SETTING,
     TelegramRelayError,
     call_via_node,
@@ -534,7 +535,10 @@ def unregister_telegram_webhook(
 def _check_relay_node(token: str, node: Node) -> TelegramRelayCheck:
     try:
         envelope, _name = call_via_node(
-            node.id, lambda adapter: adapter.telegram_bot_api(token, "getMe", b"{}", "application/json")
+            node.id,
+            lambda adapter: adapter.telegram_bot_api(
+                token, "getMe", b"{}", "application/json", timeout=RELAY_CHECK_TIMEOUT
+            ),
         )
     except TelegramRelayError as exc:
         mark_relay_node_failed(node.id)
