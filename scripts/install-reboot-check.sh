@@ -6,7 +6,7 @@
 # Запасной сигнал: в /boot есть vmlinuz новее, чем uname -r (не в контейнере).
 #
 # Тесты: REBOOT_CHECK_RUN_DIR, REBOOT_CHECK_BOOT_DIR, REBOOT_CHECK_UNAME,
-#        REBOOT_CHECK_IN_CONTAINER, INSTALL_SKIP_REBOOT_CHECK.
+#        REBOOT_CHECK_IN_CONTAINER, REBOOT_CHECK_DPKG_AUDIT_FILE, INSTALL_SKIP_REBOOT_CHECK.
 
 
 reboot_check_boot_dir() {
@@ -193,8 +193,51 @@ install_reboot_now() {
   exit 1
 }
 
+# Пакеты, которые dpkg не доконфигурировал, через запятую. Пусто — dpkg в порядке.
+reboot_check_dpkg_stuck_pkgs() {
+  local audit
+  if [[ -n "${REBOOT_CHECK_DPKG_AUDIT_FILE:-}" ]]; then
+    audit="$(<"$REBOOT_CHECK_DPKG_AUDIT_FILE")"
+  else
+    command -v dpkg >/dev/null 2>&1 || return 0
+    audit="$(dpkg --audit)"
+  fi
+  printf '%s\n' "$audit" | awk '/^ [^ ]/ {printf "%s%s", sep, $1; sep = ", "}'
+}
+
+# Пока dpkg сломан, любой apt-get install падает с кодом 100, и reboot это не чинит.
+check_dpkg_healthy() {
+  local pkgs
+  pkgs="$(reboot_check_dpkg_stuck_pkgs)"
+  [[ -z "$pkgs" ]] && return 0
+
+  local -a lines=(
+    "Пакеты не доустановлены: ${pkgs}"
+    "Пока это так, apt не ставит ничего. Перезагрузка не поможет."
+    ""
+    "Ошибку покажет: sudo dpkg --configure -a"
+    "Частая причина — DKMS-модуль (например, amneziawg) не собрался"
+    "под новое ядро. Лог: /var/lib/dkms/<модуль>/<версия>/build/make.log"
+    "Обойти: удалить новое ядро или дождаться исправленного модуля."
+    ""
+    "После исправления снова: sudo ./install.sh"
+  )
+  if declare -F ui_warn_box >/dev/null 2>&1 && [[ "${NON_INTERACTIVE:-false}" != true ]]; then
+    ui_warn_box "Пакетный менеджер в сломанном состоянии" "${lines[@]}"
+  else
+    local line
+    for line in "${lines[@]}"; do
+      echo "[install] $line" >&2
+    done
+  fi
+  # shellcheck disable=SC2034 # читает обработчик ошибок install.sh
+  INSTALL_FATAL_HANDLED=true
+  exit 1
+}
+
 # Preflight для install.sh. 0 — можно продолжать.
 check_reboot_required() {
+  check_dpkg_healthy
   if [[ "${INSTALL_SKIP_REBOOT_CHECK:-}" == "1" ]]; then
     return 0
   fi
