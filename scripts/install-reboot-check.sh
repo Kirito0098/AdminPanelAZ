@@ -6,7 +6,8 @@
 # Запасной сигнал: в /boot есть vmlinuz новее, чем uname -r (не в контейнере).
 #
 # Тесты: REBOOT_CHECK_RUN_DIR, REBOOT_CHECK_BOOT_DIR, REBOOT_CHECK_UNAME,
-#        REBOOT_CHECK_IN_CONTAINER, REBOOT_CHECK_DPKG_AUDIT_FILE, INSTALL_SKIP_REBOOT_CHECK.
+#        REBOOT_CHECK_IN_CONTAINER, REBOOT_CHECK_DPKG_STATUS_FILE, INSTALL_SKIP_REBOOT_CHECK.
+# INSTALL_SKIP_DPKG_CHECK=1 — не останавливаться на недоустановленных пакетах.
 
 
 reboot_check_boot_dir() {
@@ -193,20 +194,24 @@ install_reboot_now() {
   exit 1
 }
 
-# Пакеты, которые dpkg не доконфигурировал, через запятую. Пусто — dpkg в порядке.
+# Недоустановленные пакеты через запятую. Пусто — dpkg в порядке.
+# Только статусы, на которых падает apt-get install: U — распакован, F/H — настройка/установка оборвалась,
+# R — нужна переустановка. Триггеры и прочие замечания dpkg --audit apt не мешают.
 reboot_check_dpkg_stuck_pkgs() {
-  local audit
-  if [[ -n "${REBOOT_CHECK_DPKG_AUDIT_FILE:-}" ]]; then
-    audit="$(<"$REBOOT_CHECK_DPKG_AUDIT_FILE")"
+  local status
+  if [[ -n "${REBOOT_CHECK_DPKG_STATUS_FILE:-}" ]]; then
+    status="$(<"$REBOOT_CHECK_DPKG_STATUS_FILE")"
   else
-    command -v dpkg >/dev/null 2>&1 || return 0
-    audit="$(dpkg --audit)"
+    command -v dpkg-query >/dev/null 2>&1 || return 0
+    status="$(dpkg-query -W -f='${db:Status-Abbrev} ${binary:Package}\n')"
   fi
-  printf '%s\n' "$audit" | awk '/^ [^ ]/ {printf "%s%s", sep, $1; sep = ", "}'
+  printf '%s\n' "$status" \
+    | awk 'substr($1, 2, 1) ~ /[UFH]/ || substr($1, 3, 1) == "R" {printf "%s%s", sep, $2; sep = ", "}'
 }
 
 # Пока dpkg сломан, любой apt-get install падает с кодом 100, и reboot это не чинит.
 check_dpkg_healthy() {
+  [[ "${INSTALL_SKIP_DPKG_CHECK:-}" == "1" ]] && return 0
   local pkgs
   pkgs="$(reboot_check_dpkg_stuck_pkgs)"
   [[ -z "$pkgs" ]] && return 0
@@ -221,6 +226,7 @@ check_dpkg_healthy() {
     "Обойти: удалить новое ядро или дождаться исправленного модуля."
     ""
     "После исправления снова: sudo ./install.sh"
+    "Если apt-get install работает: sudo INSTALL_SKIP_DPKG_CHECK=1 ./install.sh"
   )
   if declare -F ui_warn_box >/dev/null 2>&1 && [[ "${NON_INTERACTIVE:-false}" != true ]]; then
     ui_warn_box "Пакетный менеджер в сломанном состоянии" "${lines[@]}"
