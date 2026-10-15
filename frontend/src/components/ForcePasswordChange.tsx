@@ -9,14 +9,12 @@ import { useAuth } from '@/context/AuthContext'
 import { useNotifications } from '@/context/NotificationContext'
 
 export default function ForcePasswordChange() {
-  const { user, refreshUser } = useAuth()
+  const { refreshUser, logout } = useAuth()
   const { success, error: notifyError } = useNotifications()
   const [currentPwd, setCurrentPwd] = useState('')
   const [newPwd, setNewPwd] = useState('')
   const [confirmPwd, setConfirmPwd] = useState('')
   const [saving, setSaving] = useState(false)
-
-  if (!user?.must_change_password) return null
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault()
@@ -52,7 +50,7 @@ export default function ForcePasswordChange() {
             <KeyRound size={20} />
             Смените пароль
           </CardTitle>
-          <CardDescription>Для безопасности необходимо сменить пароль по умолчанию</CardDescription>
+          <CardDescription>Пароль задан администратором — придумайте свой</CardDescription>
         </CardHeader>
         <CardContent>
           <form noValidate onSubmit={handleSubmit} className="space-y-4">
@@ -86,6 +84,9 @@ export default function ForcePasswordChange() {
             </div>
             <Button type="submit" className="w-full" disabled={saving}>
               {saving ? 'Сохранение...' : 'Сохранить пароль'}
+            </Button>
+            <Button type="button" variant="ghost" className="w-full" onClick={logout}>
+              Выйти
             </Button>
           </form>
         </CardContent>

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from pathlib import Path
+
+from app.services import wg_runtime
 
 # HA-local config files under {antizapret}/config/ — excluded from parity verify and
 # from blind full-directory push to replicas (node-specific state must not fail Verify
@@ -52,15 +55,16 @@ def _sha256_directory_glob(
 ) -> str | None:
     if not directory.is_dir():
         return None
-    files = sorted(directory.glob(pattern))
-    if not files:
-        return None
+    return _sha256_named_files(
+        path for path in directory.glob(pattern) if not (exclude_names and path.name in exclude_names)
+    )
+
+
+def _sha256_named_files(paths: Iterable[Path]) -> str | None:
     hasher = hashlib.sha256()
     included = False
-    for file_path in files:
+    for file_path in sorted(paths):
         if not file_path.is_file():
-            continue
-        if exclude_names and file_path.name in exclude_names:
             continue
         included = True
         hasher.update(file_path.name.encode())
@@ -107,7 +111,7 @@ def collect_antizapret_fingerprints(install_dir: str | Path = "/root/antizapret"
         if digest:
             fingerprints[key] = digest
 
-    wg_hash = _sha256_directory_glob(Path("/etc/wireguard"), "*.conf")
+    wg_hash = _sha256_named_files(wg_runtime.WG_CONFIG_FILES.values())
     if wg_hash:
         fingerprints["wireguard/conf_files"] = wg_hash
 

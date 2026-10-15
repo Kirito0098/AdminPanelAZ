@@ -200,7 +200,7 @@ def replica(tmp_path, monkeypatch):
     wg = etc / "wireguard"
     wg.mkdir()
     (wg / "antizapret.conf").write_text("replica-wg")
-    (wg / "extra.conf").write_text("replica-extra")
+    (wg / "warp-antizapret.conf").write_text("replica-warp")
     (wg / "params").write_text("keep")
     knot = etc / "knot-resolver"
     install = tmp_path / "antizapret"
@@ -210,6 +210,10 @@ def replica(tmp_path, monkeypatch):
     (install / "config").mkdir()
     monkeypatch.setattr(backup_mod, "_HA_EASYRSA3_ROOT", easyrsa)
     monkeypatch.setattr(backup_mod, "_HA_WIREGUARD_DIR", wg)
+    monkeypatch.setattr(
+        "app.services.wg_runtime.WG_CONFIG_FILES",
+        {"antizapret": wg / "antizapret.conf", "vpn": wg / "vpn.conf"},
+    )
     monkeypatch.setattr(backup_mod, "_KNOT_RESOLVER_DIR", knot)
     service = AntizapretBackupService(install_dir=install, timeout_seconds=30)
     monkeypatch.setattr(service, "_run_doall_sh", lambda: "")
@@ -263,7 +267,7 @@ def test_ha_copy_failure_restores_replica(replica, monkeypatch):
         k: v for k, v in before.items() if not k.startswith(overwritten)
     }
     assert _names(tmp_path / "etc" / "openvpn") == ["easyrsa3"]
-    assert _names(tmp_path / "etc" / "wireguard") == ["antizapret.conf", "extra.conf", "params"]
+    assert _names(tmp_path / "etc" / "wireguard") == ["antizapret.conf", "params", "warp-antizapret.conf"]
     assert _names(tmp_path / "antizapret" / "client") == ["amneziawg", "openvpn", "wireguard"]
 
 
@@ -274,13 +278,13 @@ def test_ha_restore_replaces_crypto_and_drops_profiles(replica):
     state = _state(tmp_path)
     assert state["openvpn/easyrsa3/pki/ca.crt"] == "primary-ca"
     assert state["wireguard/antizapret.conf"] == "primary-wg"
-    assert "wireguard/extra.conf" not in state
+    assert state["wireguard/warp-antizapret.conf"] == "replica-warp"
     assert state["wireguard/params"] == "keep"
     assert state["az/config/include-hosts.txt"] == "example.com"
     assert state["knot-resolver/kresd.conf"] == "primary-knot"
     assert not any(k.startswith("az/client/") for k in state)
     assert _names(tmp_path / "etc" / "openvpn") == ["easyrsa3"]
-    assert _names(tmp_path / "etc" / "wireguard") == ["antizapret.conf", "params"]
+    assert _names(tmp_path / "etc" / "wireguard") == ["antizapret.conf", "params", "warp-antizapret.conf"]
 
 
 def test_ha_archive_without_pki_leaves_replica_intact(replica):

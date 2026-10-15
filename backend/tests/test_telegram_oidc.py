@@ -102,3 +102,16 @@ def test_verify_id_token_jwks_miss_is_value_error(monkeypatch):
 
     with pytest.raises(ValueError, match="не найден"):
         oidc.verify_id_token(token, client_id="bot-client")
+
+
+def test_jwks_cache_is_not_reused_after_relay_node_changes(monkeypatch):
+    from app.services import telegram_transport
+
+    relay = {"value": "1"}
+    monkeypatch.setattr(telegram_transport, "current_relay_setting", lambda: relay["value"])
+    monkeypatch.setattr(oidc, "_jwks_clients", {})
+
+    first = oidc._get_jwks_client()
+    relay["value"] = ""
+
+    assert oidc._get_jwks_client() is not first

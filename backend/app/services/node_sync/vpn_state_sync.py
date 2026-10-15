@@ -118,7 +118,8 @@ def _mirror_wireguard_server_configs(primary_adapter, replica_adapter) -> None:
         if conf_name in primary_files:
             content = primary_adapter.read_wireguard_server_config(interface)
             replica_adapter.write_wireguard_server_config(interface, content)
-    replica_files = set(replica_adapter.list_wireguard_server_config_files())
+    interface_files = {f"{interface}.conf" for interface in WIREGUARD_INTERFACES}
+    replica_files = set(replica_adapter.list_wireguard_server_config_files()) & interface_files
     for extra in sorted(replica_files - primary_files):
         replica_adapter.delete_wireguard_server_config_file(extra)
 

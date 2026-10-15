@@ -24,7 +24,7 @@ import {
 import SettingsSectionBrowser from '@/components/settings/SettingsSectionBrowser'
 import { getSectionMeta } from '@/components/settings/settingsLabels'
 import PanelOpsTab from '@/components/settings/PanelOpsTab'
-import RunbookTab from '@/components/settings/RunbookTab'
+import DiagnosticsTabs from '@/components/settings/DiagnosticsTabs'
 import UpdatesTab from '@/components/settings/UpdatesTab'
 import UsersTab from '@/components/settings/UsersTab'
 import VpnNetworkTab from '@/components/settings/VpnNetworkTab'
@@ -256,7 +256,7 @@ export default function SettingsPage() {
       case 'panel_ops':
         return <PanelOpsTab />
       case 'tests':
-        return <RunbookTab />
+        return <DiagnosticsTabs />
       case 'vpn_network':
         return <VpnNetworkTab />
       default:

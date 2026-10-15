@@ -237,6 +237,56 @@ def health(_: None = Depends(verify_api_key)):
     return payload
 
 
+@app.post("/telegram/bot-api/{method}")
+async def telegram_bot_api_relay(
+    method: str,
+    request: Request,
+    x_telegram_bot_token: str = Header(..., alias="X-Telegram-Bot-Token"),
+    _: None = Depends(verify_api_key),
+):
+    from app.services.telegram_relay import (
+        TelegramRelayInputError,
+        TelegramUnreachableError,
+        relay_bot_api_call,
+    )
+
+    body = await request.body()
+    content_type = request.headers.get("content-type", "application/json")
+    try:
+        return await asyncio.to_thread(relay_bot_api_call, x_telegram_bot_token, method, body, content_type)
+    except TelegramRelayInputError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except TelegramUnreachableError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@app.post("/telegram/oidc/token")
+async def telegram_oidc_token_relay(
+    request: Request,
+    x_telegram_oidc_authorization: str = Header(..., alias="X-Telegram-Oidc-Authorization"),
+    _: None = Depends(verify_api_key),
+):
+    from app.services.telegram_relay import TelegramRelayInputError, TelegramUnreachableError, relay_oidc_token
+
+    body = await request.body()
+    try:
+        return await asyncio.to_thread(relay_oidc_token, body, x_telegram_oidc_authorization)
+    except TelegramRelayInputError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except TelegramUnreachableError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
+@app.get("/telegram/oidc/jwks")
+async def telegram_oidc_jwks_relay(_: None = Depends(verify_api_key)):
+    from app.services.telegram_relay import TelegramUnreachableError, relay_oidc_jwks
+
+    try:
+        return await asyncio.to_thread(relay_oidc_jwks)
+    except TelegramUnreachableError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+
+
 @app.get("/server-monitor/metrics")
 def server_metrics(accurate: bool = False, _: None = Depends(verify_api_key)):
     return monitor.get_metrics(accurate_cpu=accurate)

@@ -1,8 +1,10 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
+import ForcePasswordChange from './components/ForcePasswordChange'
 import Layout from './components/Layout'
 import RouteProgress from './components/RouteProgress'
 import FeatureGuardRoute from './components/FeatureGuardRoute'
 import LazyPage from './components/LazyPage'
+import { useAuth } from './context/AuthContext'
 import { FeatureModulesProvider } from './context/FeatureModulesContext'
 import { NodeProvider } from './context/NodeContext'
 import { ProgressProvider } from './context/ProgressContext'
@@ -28,6 +30,9 @@ const ServerMonitorPage = lazyWithRetry(() => import('./pages/ServerMonitorPage'
 
 /** Everything behind login; loaded only once a session exists. */
 export default function AppShell() {
+  const { user } = useAuth()
+  // Until the password is replaced the API answers 403 to everything except /me and change-password.
+  if (user?.must_change_password) return <ForcePasswordChange />
   return (
     <FeatureModulesProvider>
       <ThemeProvider>

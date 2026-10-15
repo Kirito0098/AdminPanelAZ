@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CheckCircle2, ChevronDown, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell, BarChart3, ImageIcon, Users, BellRing, Settings2, Cpu, Network, Database } from 'lucide-react'
+import { CheckCircle2, ChevronDown, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell, BarChart3, ImageIcon, Users, BellRing, Settings2, Cpu, Network, Database, Route } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import TelegramBotAuthGuide from '@/components/telegram/TelegramBotAuthGuide'
@@ -8,6 +8,7 @@ import TelegramMiniAppGuide from '@/components/telegram/TelegramMiniAppGuide'
 import TelegramBotCommandsGuide from '@/components/telegram/TelegramBotCommandsGuide'
 import TelegramBotRateLimitFields from '@/components/telegram/TelegramBotRateLimitFields'
 import TelegramRecipientsPanel from '@/components/telegram/TelegramRecipientsPanel'
+import TelegramRelayCard from '@/components/telegram/TelegramRelayCard'
 import { formatDateTime } from '@/lib/datetime'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
@@ -785,55 +786,68 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               onCheckedChange={(checked) => void tg.handleSaveInteractive(checked)}
             />
 
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">Связь с панелью</p>
-                <Badge variant={tg.webhookReady ? 'success' : 'secondary'} className="mt-1">
-                  {tg.webhookReady ? 'Подключено' : 'Не подключено'}
-                </Badge>
+            {!tg.settings?.relay_node_ids.length && (
+              <>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Связь с панелью</p>
+                  <Badge variant={tg.webhookReady ? 'success' : 'secondary'} className="mt-1">
+                    {tg.webhookReady ? 'Подключено' : 'Не подключено'}
+                  </Badge>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Защита соединения</p>
+                  <p className="mt-1 text-sm font-medium">
+                    {tg.settings?.webhook_secret_set ? 'Настроена' : '—'}
+                  </p>
+                </div>
+                <div className="rounded-lg border p-3">
+                  <p className="text-xs text-muted-foreground">Последнее подключение</p>
+                  <p className="mt-1 text-sm font-medium">
+                    {tg.settings?.webhook_set_at
+                      ? formatDateTime(tg.settings.webhook_set_at)
+                      : '—'}
+                  </p>
+                </div>
               </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">Защита соединения</p>
-                <p className="mt-1 text-sm font-medium">
-                  {tg.settings?.webhook_secret_set ? 'Настроена' : '—'}
-                </p>
-              </div>
-              <div className="rounded-lg border p-3">
-                <p className="text-xs text-muted-foreground">Последнее подключение</p>
-                <p className="mt-1 text-sm font-medium">
-                  {tg.settings?.webhook_set_at
-                    ? formatDateTime(tg.settings.webhook_set_at)
-                    : '—'}
-                </p>
-              </div>
-            </div>
 
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                disabled={tg.registeringWebhook || !tg.interactiveEnabled || !tg.settings?.bot_token_set}
-                onClick={() => void tg.handleRegisterWebhook()}
-              >
-                {tg.registeringWebhook
-                  ? 'Подключение...'
-                  : tg.webhookReady
-                    ? 'Переподключить'
-                    : 'Подключить бота к панели'}
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={tg.deletingWebhook || !tg.webhookReady}
-                onClick={() => void tg.handleDeleteWebhook()}
-              >
-                {tg.deletingWebhook ? 'Отключение...' : 'Отключить'}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              После подключения webhook Telegram передаёт сообщения на панель — бот отвечает в личке. Нужен HTTPS и
-              доступ сервера из интернета. При ошибке «сеть недоступна» проверьте исходящий доступ сервера к
-              api.telegram.org (команда на сервере: curl -4 https://api.telegram.org/).
-            </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  disabled={tg.registeringWebhook || !tg.interactiveEnabled || !tg.settings?.bot_token_set}
+                  onClick={() => void tg.handleRegisterWebhook()}
+                >
+                  {tg.registeringWebhook
+                    ? 'Подключение...'
+                    : tg.webhookReady
+                      ? 'Переподключить'
+                      : 'Подключить бота к панели'}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  disabled={tg.deletingWebhook || !tg.webhookReady}
+                  onClick={() => void tg.handleDeleteWebhook()}
+                >
+                  {tg.deletingWebhook ? 'Отключение...' : 'Отключить'}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                После подключения webhook Telegram передаёт сообщения на панель — бот отвечает в личке. Нужен HTTPS и
+                доступ сервера из интернета. При ошибке «сеть недоступна» проверьте исходящий доступ сервера к
+                api.telegram.org (команда на сервере: curl -4 https://api.telegram.org/).
+              </p>
+              </>
+            )}
+
+            {tg.settings?.relay_node_ids.length ? (
+              <p className="text-sm text-muted-foreground">
+                Связь с Telegram идёт через узлы — настройки на вкладке{' '}
+                <button type="button" className="font-medium text-foreground underline underline-offset-4" onClick={() => onNavigate?.('relay')}>
+                  Связь через узел
+                </button>
+              </p>
+            ) : null}
 
             {tg.settings ? <TelegramBotRateLimitFields settings={tg.settings} onSaved={tg.setSettings} /> : null}
 
@@ -875,6 +889,24 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                 />
               )}
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {activeTab === 'relay' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Route size={18} />
+              Связь через узел
+            </CardTitle>
+            <CardDescription>
+              Если сервер панели в РФ и бот молчит, запросы к Telegram можно пустить через ваш зарубежный VPN-сервер.
+              Остальным эта функция не нужна — оставьте её выключенной.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {tg.settings ? <TelegramRelayCard settings={tg.settings} onSaved={tg.setSettings} /> : null}
           </CardContent>
         </Card>
       )}

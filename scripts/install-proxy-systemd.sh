@@ -20,6 +20,24 @@ log() {
   echo "[install-proxy-systemd] $*"
 }
 
+UNIT_ROOT="${ADMINPANELAZ_UNIT_ROOT:-$ROOT_DIR}"
+
+render_unit() {
+  sed \
+    -e "s|/opt/AdminPanelAZ|$UNIT_ROOT|g" \
+    -e "s|/var/lib/adminpanelaz-proxy|$STATE_DIR|g" \
+    -e "s|^User=root|User=$INSTALL_USER|" \
+    -e "s|^Group=root|Group=$INSTALL_GROUP|" \
+    -e "s|Environment=PROXY_AGENT_PORT=9101|Environment=PROXY_AGENT_PORT=${PROXY_AGENT_PORT:-9101}|" \
+    "$UNIT_SRC"
+}
+
+# Unit на пробу (предпросмотр полного обновления): только stdout, без root и записей.
+if [[ "${UNIT_RENDER_ONLY:-}" == 1 ]]; then
+  render_unit
+  exit 0
+fi
+
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "Запустите от root: sudo $0"
   exit 1
@@ -40,14 +58,7 @@ source "$ROOT_DIR/scripts/lib-agent-key.sh"
 persist_agent_api_key "$ENV_FILE" PROXY_AGENT_API_KEY "${PROXY_AGENT_API_KEY:-}"
 
 log "Установка $UNIT_DST"
-sed \
-  -e "s|/opt/AdminPanelAZ|$ROOT_DIR|g" \
-  -e "s|/var/lib/adminpanelaz-proxy|$STATE_DIR|g" \
-  -e "s|^User=root|User=$INSTALL_USER|" \
-  -e "s|^Group=root|Group=$INSTALL_GROUP|" \
-  -e "s|Environment=PROXY_AGENT_PORT=9101|Environment=PROXY_AGENT_PORT=${PROXY_AGENT_PORT:-9101}|" \
-  -e "s|EnvironmentFile=-/opt/AdminPanelAZ/backend/proxy_agent.env|EnvironmentFile=-$ROOT_DIR/backend/proxy_agent.env|" \
-  "$UNIT_SRC" >"$UNIT_DST"
+render_unit >"$UNIT_DST"
 
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"

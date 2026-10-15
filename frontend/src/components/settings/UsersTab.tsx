@@ -17,6 +17,7 @@ import {
 import { ApiError, getConfigs, getUserConfigAccess, getUserVpnVisibilityDefault, setUserConfigAccess, setUserVpnVisibilityDefault, updateUser } from '@/api/client'
 import AppDialog from '@/components/shared/AppDialog'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
+import PasswordChangePolicyRow from '@/components/settings/PasswordChangePolicyRow'
 import SelfServiceLimitsSection from '@/components/settings/SelfServiceLimitsSection'
 import VpnVisibilityPolicyEditor, {
   copyVisibleVpnPolicy,
@@ -685,6 +686,8 @@ export default function UsersTab({
           )}
         </CardContent>
       </Card>
+
+      <PasswordChangePolicyRow />
 
       <SettingsCollapsible
         open={policyOpen}

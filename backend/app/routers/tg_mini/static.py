@@ -19,6 +19,7 @@ def mini_app_asset(file_path: str):
 def mini_app_page(request: Request):
     from fastapi.responses import HTMLResponse
 
+    from app.config import get_settings
     from app.routers import tg_mini as root
     from app.services.html_csp import get_request_csp_nonce, inject_csp_nonce
     from app.services.panel_paths import panel_access_path_script
@@ -35,7 +36,7 @@ def mini_app_page(request: Request):
     base_path = request.url.path.rstrip("/")
     html = index_path.read_text(encoding="utf-8")
     html = html.replace('"./assets/', f'"{base_path}/assets/')
-    runtime_config = panel_access_path_script(root.settings)
+    runtime_config = panel_access_path_script(get_settings())
     if runtime_config and "</head>" in html:
         html = html.replace("</head>", f"    {runtime_config}\n  </head>", 1)
     nonce = get_request_csp_nonce(request)

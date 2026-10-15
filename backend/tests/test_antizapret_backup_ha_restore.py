@@ -14,17 +14,16 @@ def test_ha_vpn_crypto_paths_cover_pki_wireguard_and_profiles(tmp_path, monkeypa
     install_dir = tmp_path / "antizapret"
     easyrsa = tmp_path / "easyrsa3"
     wg_dir = tmp_path / "wireguard"
-    wg_dir.mkdir()
-    (wg_dir / "antizapret.conf").write_text("wg", encoding="utf-8")
-    (wg_dir / "extra.conf").write_text("old", encoding="utf-8")
-    (wg_dir / "params").write_text("keep", encoding="utf-8")
     monkeypatch.setattr("app.services.antizapret_backup._HA_EASYRSA3_ROOT", easyrsa)
-    monkeypatch.setattr("app.services.antizapret_backup._HA_WIREGUARD_DIR", wg_dir)
+    monkeypatch.setattr(
+        "app.services.wg_runtime.WG_CONFIG_FILES",
+        {"antizapret": wg_dir / "antizapret.conf", "vpn": wg_dir / "vpn.conf"},
+    )
 
     assert ha_vpn_crypto_paths(install_dir=install_dir) == [
         easyrsa,
         wg_dir / "antizapret.conf",
-        wg_dir / "extra.conf",
+        wg_dir / "vpn.conf",
         install_dir / "client" / "openvpn",
         install_dir / "client" / "wireguard",
         install_dir / "client" / "amneziawg",
@@ -52,6 +51,10 @@ def test_restore_backup_for_ha_replica_skips_client_sh_7(tmp_path, monkeypatch):
     service = AntizapretBackupService(install_dir=install_dir, timeout_seconds=30)
     monkeypatch.setattr("app.services.antizapret_backup._HA_EASYRSA3_ROOT", tmp_path / "dst_easyrsa3")
     monkeypatch.setattr("app.services.antizapret_backup._HA_WIREGUARD_DIR", tmp_path / "dst_wg")
+    monkeypatch.setattr(
+        "app.services.wg_runtime.WG_CONFIG_FILES",
+        {"antizapret": tmp_path / "dst_wg" / "antizapret.conf"},
+    )
     monkeypatch.setattr(service, "_run_client_sh_7", MagicMock(side_effect=AssertionError("sh7 must not run")))
     monkeypatch.setattr(service, "_restart_legacy_services", MagicMock())
     monkeypatch.setattr(service, "_run_doall_sh", lambda: "")

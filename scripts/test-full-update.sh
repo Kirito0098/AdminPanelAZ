@@ -98,6 +98,8 @@ run() {
 }
 
 calls() { tr '\n' ';' <"$CALLS"; }
+# Вызовы без git: предпросмотр до ответа вызывает только git fetch и rev-parse.
+calls_no_git() { calls | sed 's/git [^;]*;//g'; }
 summary() { sed -n '/^Полное обновление$/,$p' "$TMP/out"; }
 golden() {
   local expected
@@ -312,14 +314,14 @@ run '' 'full_update_main'
 
 echo "[test] подтверждение: план, «Продолжить? [y/N]»; n и EOF — ничего не меняется, код 0; y — обновление"
 run 'n\n' 'fu_stdin_is_tty() { :; }; full_update_main'
-[[ "$rc" -eq 0 && "$(calls)" == "" ]] && grep -qF "Полное обновление отменено, ничего не изменено" "$TMP/out" \
+[[ "$rc" -eq 0 && "$(calls_no_git)" == "" ]] && grep -qF "Полное обновление отменено, ничего не изменено" "$TMP/out" \
   && ok "n — отмена" || bad "код $rc, вызовы: $(calls); $(cat "$TMP/out")"
-grep -qF "Не меняются: база, backend/.env, *_agent.env, сертификаты, mTLS" "$TMP/out" \
-  && grep -qF "Продолжить? [y/N]:" "$TMP/out" && ok "план и вопрос" || bad "вывод: $(cat "$TMP/out")"
+grep -qF "Ваши данные не удаляются" "$TMP/out" \
+  && grep -qF "Продолжить? [y/N]:" "$TMP/out" && ok "экран и вопрос" || bad "вывод: $(cat "$TMP/out")"
 run '' 'fu_stdin_is_tty() { :; }; full_update_main'
-[[ "$rc" -eq 0 && "$(calls)" == "" ]] && ok "EOF — отмена" || bad "код $rc, вызовы: $(calls)"
+[[ "$rc" -eq 0 && "$(calls_no_git)" == "" ]] && ok "EOF — отмена" || bad "код $rc, вызовы: $(calls)"
 run 'y\n' 'fu_stdin_is_tty() { :; }; full_update_main'
-[[ "$rc" -eq 0 && "$(calls)" == "backup --no-prune --keep-running;"* ]] && ok "y — обновление" \
+[[ "$rc" -eq 0 && "$(calls_no_git)" == "backup --no-prune --keep-running;"* ]] && ok "y — обновление" \
   || bad "код $rc, вызовы: $(calls)"
 
 echo "[test] неизвестный аргумент — код 2"
@@ -501,16 +503,153 @@ echo "[test] --update в справке и в шапке install.sh"
 grep -qE '^  --update +Полное обновление' "$ROOT_DIR/scripts/install-ui.sh" \
   && grep -qE '^#   --update +полное обновление' "$ROOT_DIR/install.sh" && ok "справка" || bad "--update нет в справке"
 
-echo "[test] меню: «Полное обновление» спрашивает [y/N]; n и конец ввода — ничего; y — install.sh --update -y"
+echo "[test] меню: «Полное обновление» без своего вопроса — экран и вопрос задаёт install.sh --update"
 with_units adminpanelaz.service
-run 'n\n' 'menu_full_update'
-[[ "$(calls)" == "" ]] && grep -qF "Запустить полное обновление? [y/N]:" "$TMP/out" && ok "n — отмена" \
-  || bad "вызовы: $(calls); $(cat "$TMP/out")"
 run '' 'menu_full_update'
-[[ "$(calls)" == "" ]] && ok "конец ввода — отмена" || bad "вызовы: $(calls)"
-run 'y\n' 'menu_full_update'
-[[ "$(calls)" == "install.sh --update -y LC_ALL= LANG=C.UTF-8;" ]] && ok "y — install.sh --update -y в исходной локали" \
+[[ "$(calls)" == "install.sh --update LC_ALL= LANG=C.UTF-8;" ]] && ok "install.sh --update без -y в исходной локали" \
   || bad "вызовы: $(calls); $(cat "$TMP/out")"
+
+echo "[test] refresh-systemd-units.sh REFRESH_PREVIEW=1: только изменившиеся службы, файлы не меняются, без root"
+# Копия скриптов, systemctl-заглушка и пути во временной папке. Без REFRESH_PREVIEW refresh создал бы /var/lib/adminpanelaz-node — не запускать от root до реализации.
+UR="$TMP/unit-repo"
+mkdir -p "$UR" "$TMP/fakebin" "$TMP/unit-state"
+cp -r "$ROOT_DIR/scripts" "$ROOT_DIR/systemd" "$UR/"
+printf '#!/usr/bin/env bash\necho "systemctl $*" >>"%s"\n' "$CALLS" >"$TMP/fakebin/systemctl"
+chmod +x "$TMP/fakebin/systemctl"
+: >"$CALLS"
+PV="$TMP/preview-units"
+mkdir -p "$PV"
+unit_env=(PATH="$TMP/fakebin:$PATH" INSTALL_FROM_INSTALL_SH=1 SYSTEMD_UNIT_DIR="$PV"
+  ADMINPANELAZ_STATE_DIR="$TMP/unit-state/panel" NODE_AGENT_STATE_DIR="$TMP/unit-state/node")
+for name in adminpanelaz adminpanelaz-node; do
+  script=install-systemd.sh
+  [[ "$name" == adminpanelaz-node ]] && script=install-node-systemd.sh
+  env "${unit_env[@]}" UNIT_RENDER_ONLY=1 ADMINPANELAZ_UNIT_ROOT=/srv/apaz \
+    bash "$UR/scripts/$script" >"$TMP/rendered" 2>/dev/null || true
+  mv "$TMP/rendered" "$PV/$name.service"
+done
+echo "# старая версия" >>"$PV/adminpanelaz-node.service"
+cp -a "$PV" "$PV.orig"
+pv_out="$(env "${unit_env[@]}" REFRESH_PREVIEW=1 ADMINPANELAZ_UNIT_ROOT=/srv/apaz \
+  bash "$UR/scripts/refresh-systemd-units.sh" 2>&1)" || true
+[[ "$pv_out" == adminpanelaz-node ]] && ok "изменится только adminpanelaz-node" || bad "вывод: $pv_out"
+diff -r "$PV" "$PV.orig" >/dev/null && ok "файлы не менялись" || bad "файлы unit'ов изменены"
+[[ ! -s "$CALLS" && ! -e "$TMP/unit-state/node" && ! -e "$UR/backend/node_agent.env" ]] \
+  && ok "ни systemctl, ни каталогов состояния, ни ключа агента" || bad "побочные действия: $(calls)"
+grep -qx "WorkingDirectory=/srv/apaz/backend" "$PV/adminpanelaz.service" \
+  && ok "путь установки из ADMINPANELAZ_UNIT_ROOT" || bad "unit: $(cat "$PV/adminpanelaz.service")"
+
+NEW="$TMP/new"
+mkdir -p "$NEW/frontend" "$NEW/backend" "$NEW/scripts" "$INSTALL/frontend"
+printf '{\n  "version": "2.26.5"\n}\n' >"$NEW/frontend/package.json"
+printf '{\n  "version": "2.26.4"\n}\n' >"$INSTALL/frontend/package.json"
+printf '## [Unreleased]\n\n### Added\n\n- **Связь с Telegram через узел** — текст\n- `test_x.py` — тест\n\n## [2.26.4] - 2026-10-12\n\n- **Старое** — текст\n' \
+  >"$NEW/CHANGELOG.md"
+printf 'fastapi==0.116.0\nuvicorn[standard]==0.51.0\naiosmtplib==3.0.1\n' >"$NEW/backend/requirements.txt"
+printf 'fastapi==0.115.0\nuvicorn[standard]==0.51.0\n' >"$INSTALL/backend/requirements.txt"
+cp "$ROOT_DIR/scripts/console-command.sh" "$NEW/scripts/"
+printf '#!/usr/bin/env bash\necho adminpanelaz\n' >"$NEW/scripts/refresh-systemd-units.sh"
+PREVIEW_STUBS='UP_NEW_ROOT="$TMPDIR/new"; export ADMINPANELAZ_MENU_LINK="$TMPDIR/bin/adminpanelaz"
+  git() { case "$*" in *"rev-list --count"*) echo 12 ;; *) echo "git $*" >>"$CALLS" ;; esac; }
+  fu_apt_missing() { echo python3.12-venv; }
+  fu_nginx_published() { false; }
+  fu_firewall_configured() { false; }
+'
+
+echo "[test] экран: версия, что нового, что добавится и изменится, данные не удаляются, как повлияет"
+with_units adminpanelaz.service
+run '' "$PREVIEW_STUBS"'up_render 1a2b3c4'
+for line in \
+  "  Версия: 2.26.4 → 2.26.5 (изменений: 12)" \
+  "    • Связь с Telegram через узел" \
+  "  • Команда sudo adminpanelaz — меню можно будет открывать ею из любой папки" \
+  "  • Пакеты системы: python3.12-venv" \
+  "  • Библиотеки Python: aiosmtplib 3.0.1" \
+  "  • Библиотеки Python: fastapi 0.115.0 → 0.116.0" \
+  "  • Службы systemd: adminpanelaz" \
+  "  • Ваши данные не удаляются: база, настройки, пользователи, VPN-клиенты, сертификаты" \
+  "  • Панель будет недоступна примерно 10–30 секунд, пока перезапускается" \
+  "  • VPN-клиенты остаются подключёнными: OpenVPN и WireGuard не перезапускаются"; do
+  grep -qxF "$line" "$TMP/out" && ok "строка: $line" || bad "нет строки «$line»: $(cat "$TMP/out")"
+done
+! grep -qF "Старое" "$TMP/out" && ! grep -qF "test_x" "$TMP/out" && ok "что нового — только новее текущей версии" \
+  || bad "лишнее в «Что нового»"
+[[ "$(calls)" == "" ]] && ok "ничего не запускалось" || bad "вызовы: $(calls)"
+
+echo "[test] экран: конфиг nginx устарел — обновится, старый останется копией; совпадает — уже актуален"
+printf 'old\n' >"$TMP/vhost"
+NGINX_STUBS='fu_nginx_published() { :; }
+  fu_nginx_targets() { printf "panel\tvpn.example.com\t%s\n" "$TMPDIR/vhost"; }
+  fu_nginx_render() { echo new; }
+'
+run '' "$PREVIEW_STUBS$NGINX_STUBS"'up_render 1a2b3c4'
+grep -qxF "  • Конфиг nginx для vpn.example.com устарел — обновится" "$TMP/out" \
+  && grep -qxF "  • Старый конфиг nginx останется рядом копией .bak-<дата>" "$TMP/out" && ok "nginx устарел" \
+  || bad "вывод: $(cat "$TMP/out")"
+[[ "$(cat "$TMP/vhost")" == old ]] && ok "конфиг nginx не тронут" || bad "конфиг nginx изменён"
+printf 'new\n' >"$TMP/vhost"
+run '' "$PREVIEW_STUBS$NGINX_STUBS"'up_render 1a2b3c4'
+grep -qxF "  • Конфиг nginx для vpn.example.com — уже актуален" "$TMP/out" && ok "nginx актуален" \
+  || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] git fetch не прошёл: «Не удалось узнать новую версию», вопрос всё равно задаётся, n — ничего"
+run 'n\n' 'fu_stdin_is_tty() { :; }
+  git() { case "$*" in *fetch*) return 1 ;; *) echo "git $*" >>"$CALLS" ;; esac; }
+  full_update_main'
+grep -qF "Не удалось узнать новую версию (нет связи с GitHub) — обновление всё равно можно запустить" "$TMP/out" \
+  && grep -qF "Продолжить? [y/N]:" "$TMP/out" && ok "без связи" || bad "вывод: $(cat "$TMP/out")"
+[[ "$rc" -eq 0 && "$(calls)" == "" ]] && ok "n — ничего не изменено" || bad "код $rc, вызовы: $(calls)"
+
+echo "[test] экран в том же процессе не отключает сниппеты Cloudflare для настоящего обновления"
+run '' "$PREVIEW_STUBS"'git() { case "$*" in *fetch*) return 1 ;; *) echo "git $*" >>"$CALLS" ;; esac; }
+  before="$(declare -f nginx_ensure_cloudflare_realip_snippet nginx_ensure_cloudflare_origin_snippets)"
+  fu_show_preview >/dev/null
+  [[ "$(declare -f nginx_ensure_cloudflare_realip_snippet nginx_ensure_cloudflare_origin_snippets)" == "$before" ]] \
+    && echo SNIPPETS-KEPT'
+grep -qx SNIPPETS-KEPT "$TMP/out" && ok "сниппеты Cloudflare не заглушены" || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] --server-only: только пакеты, unit'ы, nginx, firewall, DDNS; без бэкапа, кода, сборки, перезапуска и вопроса"
+with_units adminpanelaz.service
+run '' 'full_update_main --server-only --report "$TMPDIR/report.tsv"'
+[[ "$(calls)" == "refresh SYSTEMD_UNIT_DIR=$TMP/units;" ]] && ok "только unit'ы" || bad "вызовы: $(calls); $(cat "$TMP/out")"
+[[ "$rc" -eq 0 ]] && ok "код 0" || bad "код $rc: $(cat "$TMP/out")"
+[[ "$(cut -f1,2 "$TMP/report.tsv" 2>/dev/null | tr '\t\n' ' ;')" == "apt ok;systemd ok;nginx пропущен;firewall пропущен;ddns пропущен;" ]] \
+  && ok "--report: строки итога" || bad "отчёт: $(cat "$TMP/report.tsv" 2>/dev/null)"
+! grep -qF "Продолжить?" "$TMP/out" && ok "без вопроса" || bad "задан вопрос"
+
+echo "[test] экран --server-only в UP_FORMAT=tsv: раздел<TAB>пункт, без кода, Python и сборки"
+run '' "$PREVIEW_STUBS"'fu_firewall_configured() { :; }; UP_FORMAT=tsv; UP_SERVER_ONLY=true; up_render HEAD'
+grep -qxF $'add\tПакеты системы: python3.12-venv' "$TMP/out" && ok "add: пакеты" || bad "вывод: $(cat "$TMP/out")"
+grep -qxF $'recheck\tПравила firewall AdminPanelAZ проверятся, недостающие добавятся; ваши правила не трогаются' "$TMP/out" \
+  && ok "firewall — recheck" || bad "вывод: $(cat "$TMP/out")"
+grep -qxF $'effect\tПанель и агенты не перезапускаются' "$TMP/out" && ok "эффект без перезапуска" || bad "вывод: $(cat "$TMP/out")"
+! grep -qE 'Версия|Код панели|Библиотеки Python|Интерфейс|недоступна' "$TMP/out" && ok "без кода, Python, сборки" \
+  || bad "лишнее: $(cat "$TMP/out")"
+! grep -qvE $'^(add|change|recheck|keep|remove|effect|minus|plus|why|info)\t' "$TMP/out" && ok "только строки tsv" || bad "вывод: $(cat "$TMP/out")"
+
+echo "[test] экран: у устаревшего nginx — какие строки уберутся и добавятся и почему; у firewall — порты"
+printf '    listen 443 ssl;\n\n    add_header X-Frame-Options "SAMEORIGIN" always;\n' >"$TMP/vhost"
+DETAIL_STUBS='fu_nginx_published() { :; }
+  fu_nginx_targets() { printf "portal\tportal.example.com\t%s\n" "$TMPDIR/vhost"; }
+  fu_nginx_render() { printf "  listen 443 ssl;\n  client_max_body_size 32m;\n"; }
+  fu_firewall_configured() { :; }
+  fu_firewall_args() { FU_FW_ARGS=(8000 9100 443 80 false true "" false 9101); }
+'
+run '' "$PREVIEW_STUBS$DETAIL_STUBS"'up_render 1a2b3c4'
+for line in \
+  '      уберётся: add_header X-Frame-Options "SAMEORIGIN" always;' \
+  '      добавится: client_max_body_size 32m;' \
+  '      Открыты для всех: 443, 80 — сайт панели через nginx' \
+  '      Закрыт снаружи: 8000 — сама панель, доступ к ней только через nginx'; do
+  grep -qxF "$line" "$TMP/out" && ok "строка: $line" || bad "нет строки «$line»: $(cat "$TMP/out")"
+done
+grep -qF '      почему: Заголовки безопасности теперь ставит сама панель' "$TMP/out" && ok "почему — заголовки" \
+  || bad "нет пояснения: $(cat "$TMP/out")"
+! grep -qF 'уберётся: listen' "$TMP/out" && ok "отступы не считаются отличием" || bad "лишнее: $(cat "$TMP/out")"
+run '' "$PREVIEW_STUBS$DETAIL_STUBS"'UP_FORMAT=tsv; UP_SERVER_ONLY=true; up_render HEAD'
+grep -qxF $'minus\tadd_header X-Frame-Options "SAMEORIGIN" always;' "$TMP/out" \
+  && grep -qE $'^why\tЗаголовки безопасности' "$TMP/out" && grep -qxF $'info\tЗакрыт снаружи: 8000 — сама панель, доступ к ней только через nginx' "$TMP/out" \
+  && ok "tsv: minus, why, info" || bad "вывод: $(cat "$TMP/out")"
 
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]

@@ -333,10 +333,14 @@ _menu_unit_state() {
   esac
 }
 
+# menu_version <каталог установки>: версия из frontend/package.json, пусто — если файла нет.
+menu_version() {
+  sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$1/frontend/package.json" 2>/dev/null | head -1
+}
+
 menu_code_line() {
   local version commit branch
-  version="$(sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$INSTALL_DIR/frontend/package.json" 2>/dev/null \
-    | head -1)" || true
+  version="$(menu_version "$INSTALL_DIR")" || true
   commit="$(timeout 3 git -C "$INSTALL_DIR" rev-parse --short HEAD 2>/dev/null)" || true
   branch="$(timeout 3 git -C "$INSTALL_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null)" || true
   printf 'AdminPanelAZ %s %s %s @ %s' "${version:-неизвестно}" "$MENU_DOT" "${branch:-неизвестно}" "${commit:-неизвестно}"
@@ -803,16 +807,9 @@ panel_update_interactive() {
   panel_offer_restart
 }
 
-# Полное обновление — режим install.sh: кроме кода заново пакеты, unit'ы, nginx, firewall и DDNS, свой итог по шагам.
+# Полное обновление — режим install.sh: экран «что изменится» и вопрос показывает full-update.sh.
 menu_full_update() {
-  ui_section "Полное обновление (код + конфигурация сервера)"
-  ui_info "Бэкап, код из git, пакеты apt, Python, интерфейс, unit'ы systemd, nginx, firewall, DDNS и перезапуск — по текущим настройкам"
-  ui_info "База, backend/.env, сертификаты и mTLS не меняются"
-  if ! menu_confirm "Запустить полное обновление?" n; then
-    ui_info "Полное обновление отменено"
-    return 0
-  fi
-  LC_ALL="$MENU_USER_LC_ALL" LANG="$MENU_USER_LANG" "${BASH:-bash}" "$INSTALL_DIR/install.sh" --update -y
+  LC_ALL="$MENU_USER_LC_ALL" LANG="$MENU_USER_LANG" "${BASH:-bash}" "$INSTALL_DIR/install.sh" --update
 }
 
 panel_backup() {

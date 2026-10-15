@@ -11,6 +11,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+from app.services import wg_runtime
 from app.services.path_stash import stashed
 from app.services.node_sync.fingerprints import collect_antizapret_fingerprints, collect_config_file_fingerprints, CONFIG_FINGERPRINT_EXCLUDE
 
@@ -24,12 +25,12 @@ _HA_WG_PROFILE_DIRS = ("wireguard", "amneziawg")
 def ha_vpn_crypto_paths(*, install_dir: str | Path = "/root/antizapret") -> list[Path]:
     """VPN/crypto paths a replica replaces from the primary on HA Push full (config/ is not touched)."""
     base = Path(install_dir or "/root/antizapret").resolve()
-    paths = [_HA_EASYRSA3_ROOT]
-    if _HA_WIREGUARD_DIR.is_dir():
-        paths.extend(conf for conf in sorted(_HA_WIREGUARD_DIR.glob("*.conf")) if conf.is_file())
-    paths.append(base / "client" / _HA_OVPN_PROFILE_DIR)
-    paths.extend(base / "client" / subdir for subdir in _HA_WG_PROFILE_DIRS)
-    return paths
+    return [
+        _HA_EASYRSA3_ROOT,
+        *wg_runtime.WG_CONFIG_FILES.values(),
+        base / "client" / _HA_OVPN_PROFILE_DIR,
+        *(base / "client" / subdir for subdir in _HA_WG_PROFILE_DIRS),
+    ]
 
 
 _BACKUP_ARCHIVE_NAME_RE = re.compile(r"backup[\w.\-]*\.tar\.gz")

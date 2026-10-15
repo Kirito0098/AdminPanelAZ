@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import (
     access_token_session_id,
+    allowed_before_password_change,
     authenticate_user,
     bearer_session_id,
     create_2fa_pending_token,
@@ -653,6 +654,7 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=UserResponse)
+@allowed_before_password_change
 def me(request: Request, response: Response, current_user: User = Depends(get_current_user)):
     # Tabs that start with an access token already in storage never call /refresh before loading the panel.
     set_asset_marker_cookie(response, settings, request)
@@ -660,6 +662,7 @@ def me(request: Request, response: Response, current_user: User = Depends(get_cu
 
 
 @router.post("/change-password", response_model=PasswordChangeResponse)
+@allowed_before_password_change
 def change_password(
     payload: PasswordChangeRequest,
     request: Request,
@@ -669,6 +672,8 @@ def change_password(
     token: str = Depends(oauth2_scheme),
 ):
     verify_current_password(current_user, payload.current_password)
+    if payload.new_password == payload.current_password:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Новый пароль должен отличаться от текущего")
     validate_password(payload.new_password, username=current_user.username)
     current_user.password_hash = get_password_hash(payload.new_password)
     current_user.must_change_password = False

@@ -264,14 +264,13 @@ def mini_test_telegram(db: Session = Depends(get_db), _: User = Depends(require_
 @router.post("/check-bot-delivery")
 def check_bot_delivery(db: Session = Depends(get_db), _: User = Depends(require_tg_mini_admin)):
     from app.routers import tg_mini as root
-    import httpx
+    from app.services.telegram_transport import bot_api_post_sync
 
     token = root._get_bot_token(db)
     if not token:
         return {"success": False, "message": "Бот не настроен"}
     try:
-        resp = httpx.get(f"https://api.telegram.org/bot{token}/getMe", timeout=10)
-        data = resp.json()
+        data = bot_api_post_sync(token, "getMe", timeout=10)
         if data.get("ok"):
             return {"success": True, "message": f"Бот @{data['result'].get('username', '')} доступен"}
         return {"success": False, "message": data.get("description", "Ошибка API")}

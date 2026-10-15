@@ -1093,6 +1093,19 @@ class LatestChangelogResponse(BaseModel):
     pending: ChangelogBlockResponse | None = None
 
 
+class TelegramRelayNode(BaseModel):
+    id: int
+    name: str
+    unavailable_reason: str | None = None
+
+
+class TelegramRelayCheck(BaseModel):
+    id: int
+    name: str
+    ok: bool
+    error: str = ""
+
+
 class TelegramSettingsResponse(BaseModel):
     bot_token_set: bool = False
     bot_username: str = ""
@@ -1117,6 +1130,23 @@ class TelegramSettingsResponse(BaseModel):
     bot_command_rate_max: int = 30
     bot_command_rate_window_seconds: int = 60
     bot_command_rate_limit_enabled: bool = True
+    relay_node_ids: list[int] = Field(default_factory=list)
+    relay_nodes: list[TelegramRelayNode] = Field(default_factory=list)
+    relay_last_ok_at: str = ""
+    relay_last_error: str = ""
+    relay_last_node: str = ""
+    relay_check: list[TelegramRelayCheck] = Field(default_factory=list)
+
+
+class TelegramRelayUpdate(BaseModel):
+    node_ids: list[int] = Field(default_factory=list, max_length=10)
+
+    @field_validator("node_ids")
+    @classmethod
+    def _unique(cls, value: list[int]) -> list[int]:
+        if len(set(value)) != len(value):
+            raise ValueError("Узел указан в списке дважды")
+        return value
 
 
 class TelegramSettingsUpdate(BaseModel):
@@ -1141,12 +1171,14 @@ class SelfServiceLimitsResponse(BaseModel):
     quota_default: int
     create_rate_max: int
     create_rate_window_seconds: int
+    require_password_change: bool
 
 
 class SelfServiceLimitsUpdate(BaseModel):
     quota_default: int | None = Field(default=None, ge=0, le=1000)
     create_rate_max: int | None = Field(default=None, ge=0, le=100)
     create_rate_window_seconds: int | None = Field(default=None, ge=60, le=86400)
+    require_password_change: bool | None = None
 
 
 class TelegramLinkCodeRequest(BaseModel):

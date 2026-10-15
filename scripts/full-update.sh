@@ -18,6 +18,8 @@ source "$FU_DIR/nginx-common.sh"
 nginx_common_init
 # shellcheck source=scripts/firewall-setup.sh
 source "$FU_DIR/firewall-setup.sh"
+# shellcheck source=scripts/update-preview.sh
+source "$FU_DIR/update-preview.sh"
 FU_FW_ARGS=()
 
 FU_STEPS=(backup code apt pip frontend systemd nginx firewall ddns restart)
@@ -28,6 +30,7 @@ declare -A FU_LABELS=(
 # Ошибка этих шагов останавливает обновление до перезапуска: панель продолжает работать на прежнем коде.
 FU_STOP_STEPS=" backup code pip frontend "
 FU_STATE=""
+FU_REPORT=""
 FU_STOPPED=false
 FU_EXIT=0
 FU_ARROW="->"
@@ -132,6 +135,9 @@ fu_finish() {
     ui_warn "Панель не ответила после обновления. Бэкап до обновления: ${backup:-нет}"
     ui_info "Восстановить: sudo adminpanelaz $FU_ARROW 6 Бэкап и восстановление"
   fi
+  if [[ -n "$FU_REPORT" ]]; then
+    cp "$FU_STATE" "$FU_REPORT"
+  fi
   rm -f "$FU_STATE"
 }
 
@@ -184,15 +190,19 @@ fu_pkg_installed() {
   grep -qx 'Status: install ok installed' <<<"$status"
 }
 
-# Уже установленные пакеты не обновляются (--no-upgrade); ошибка apt не останавливает обновление.
-fu_step_apt() {
+fu_apt_missing() {
   local pkg
-  local -a missing=()
   while IFS= read -r pkg; do
     if [[ -n "$pkg" ]] && ! fu_pkg_installed "$pkg"; then
-      missing+=("$pkg")
+      printf '%s\n' "$pkg"
     fi
   done < <(fu_apt_packages)
+}
+
+# Уже установленные пакеты не обновляются (--no-upgrade); ошибка apt не останавливает обновление.
+fu_step_apt() {
+  local -a missing=()
+  mapfile -t missing < <(fu_apt_missing)
   if [[ "${#missing[@]}" -eq 0 ]]; then
     ui_ok "Все пакеты apt на месте"
     fu_row apt ok "доустановлено: 0"
@@ -286,19 +296,9 @@ fu_nginx_render() {
   fi
 }
 
-# Пересобираются только свои файлы sites-available/<домен>; панель в подпути чужого сайта — nginx-repair.sh.
-# Все vhost собираются до записи, копии .bak-* делаются до первой записи: откат возвращает всё сразу.
-fu_step_nginx() {
-  local domain portal kind host stamp file err line list i
-  local -a kinds=() hosts=() files=() confs=()
-  if ! panel_uses_systemd; then
-    fu_row nginx пропущен "нет панели"
-    return 0
-  fi
-  if ! fu_nginx_published; then
-    fu_row nginx пропущен "публикация без nginx"
-    return 0
-  fi
+# Свои файлы sites-available панели и портала: «вид<TAB>домен<TAB>файл» по строке.
+fu_nginx_targets() {
+  local domain portal kind host
   domain="$(nginx_normalize_host "$(nginx_env_get DOMAIN)")"
   portal="$(nginx_normalize_host "$(nginx_env_get PORTAL_DOMAIN)")"
   for kind in panel portal; do
@@ -309,11 +309,29 @@ fu_step_nginx() {
     [[ -n "$host" ]] || continue
     nginx_conf_paths "$host"
     if nginx_is_our_panel_vhost_file "$NGINX_CONF_FILE"; then
-      kinds+=("$kind")
-      hosts+=("$host")
-      files+=("$NGINX_CONF_FILE")
+      printf '%s\t%s\t%s\n' "$kind" "$host" "$NGINX_CONF_FILE"
     fi
   done
+}
+
+# Пересобираются только свои файлы sites-available/<домен>; панель в подпути чужого сайта — nginx-repair.sh.
+# Все vhost собираются до записи, копии .bak-* делаются до первой записи: откат возвращает всё сразу.
+fu_step_nginx() {
+  local kind host stamp file err line list i
+  local -a kinds=() hosts=() files=() confs=()
+  if ! panel_uses_systemd; then
+    fu_row nginx пропущен "нет панели"
+    return 0
+  fi
+  if ! fu_nginx_published; then
+    fu_row nginx пропущен "публикация без nginx"
+    return 0
+  fi
+  while IFS=$'\t' read -r kind host file; do
+    kinds+=("$kind")
+    hosts+=("$host")
+    files+=("$file")
+  done < <(fu_nginx_targets)
   if [[ "${#files[@]}" -eq 0 ]]; then
     ui_warn "Свой vhost панели не найден (панель в подпути чужого сайта?) — nginx не менялся; пересборка: sudo ./scripts/nginx-repair.sh"
     fu_row nginx пропущен "нет своего vhost в $(nginx_sites_available_dir) — nginx не менялся"
@@ -530,6 +548,15 @@ full_update_apply() {
   fu_run restart fu_step_restart
 }
 
+# Веб: то, что обновление из панели не делает. Код, сборку и перезапуск панель уже выполнила сама.
+full_update_server_only() {
+  fu_run apt fu_step_apt
+  fu_run systemd fu_step_systemd
+  fu_run nginx fu_step_nginx
+  fu_run firewall fu_step_firewall
+  fu_run ddns fu_step_ddns
+}
+
 full_update_run() {
   local before
   before="$(fu_head)"
@@ -600,10 +627,32 @@ fu_state_resume() {
   FU_STATE="$copy"
 }
 
+# Экран строит код новой версии: шаблоны nginx и unit'ов, список пакетов и CHANGELOG — её. До ответа «y» на сервере
+# меняются только refs git fetch и временная папка.
+fu_show_preview() {
+  local ref rev="" dir
+  if git -C "$INSTALL_DIR" fetch origin --quiet 2>/dev/null && ref="$(panel_update_ref 2>/dev/null)"; then
+    rev="$(git -C "$INSTALL_DIR" rev-parse --verify --quiet "$ref^{commit}" 2>/dev/null || true)"
+  fi
+  if [[ -z "$rev" || "$rev" == "$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null)" ]]; then
+    # Подоболочка: up_render глушит функции nginx, а настоящее обновление идёт дальше в этом же процессе.
+    (up_render "$rev")
+    return 0
+  fi
+  dir="$(mktemp -d "$(fu_state_dir)/adminpanelaz-preview.XXXXXX")"
+  if git -C "$INSTALL_DIR" archive "$rev" | tar -x -C "$dir" && [[ -f "$dir/scripts/update-preview.sh" ]]; then
+    env LC_ALL="$MENU_USER_LC_ALL" LANG="$MENU_USER_LANG" INSTALL_DIR="$INSTALL_DIR" \
+      "${BASH:-bash}" "$dir/scripts/full-update.sh" --preview "$rev" || fu_print_plan
+  else
+    fu_print_plan
+  fi
+  rm -rf -- "$dir"
+}
+
 FU_ASSUME_YES=false
 
 full_update_main() {
-  local resume=""
+  local resume="" preview=false preview_rev="" server_only=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --yes) FU_ASSUME_YES=true ;;
@@ -613,6 +662,24 @@ full_update_main() {
           return 2
         fi
         resume="$2"
+        shift
+        ;;
+      --server-only) server_only=true ;;
+      --report)
+        if [[ $# -lt 2 ]]; then
+          ui_fail "--report: нужен файл"
+          return 2
+        fi
+        FU_REPORT="$2"
+        shift
+        ;;
+      --preview)
+        if [[ $# -lt 2 ]]; then
+          ui_fail "--preview: нужна ревизия"
+          return 2
+        fi
+        preview=true
+        preview_rev="$2"
         shift
         ;;
       *)
@@ -626,6 +693,18 @@ full_update_main() {
   if [[ "$(menu_mode)" == none ]]; then
     ui_fail "AdminPanelAZ не установлена: используйте обычную установку (sudo ./install.sh)"
     return 1
+  fi
+  if [[ "$preview" == true ]]; then
+    UP_SERVER_ONLY="$server_only"
+    up_render "$preview_rev"
+    return 0
+  fi
+  if [[ "$server_only" == true ]]; then
+    FU_STEPS=(apt systemd nginx firewall ddns)
+    FU_STATE="$(mktemp "$(fu_state_dir)/adminpanelaz-update.XXXXXX")"
+    full_update_server_only
+    fu_finish
+    return "$FU_EXIT"
   fi
   if [[ -n "$resume" ]]; then
     if ! fu_state_resume "$resume"; then
@@ -641,7 +720,7 @@ full_update_main() {
       ui_fail "Нет терминала для подтверждения. Без вопросов: sudo ./install.sh --update -y"
       return 2
     fi
-    fu_print_plan
+    fu_show_preview
     if ! menu_confirm "Продолжить?" n; then
       ui_info "Полное обновление отменено, ничего не изменено"
       return 0

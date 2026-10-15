@@ -29,6 +29,7 @@ def test_self_service_limits_defaults_when_unset(db):
         "quota_default": 5,
         "create_rate_max": 3,
         "create_rate_window_seconds": 3600,
+        "require_password_change": False,
     }
 
 
@@ -40,6 +41,7 @@ def test_self_service_limits_clamp_stored_values(db):
         "quota_default": 1000,
         "create_rate_max": 0,
         "create_rate_window_seconds": 60,
+        "require_password_change": False,
     }
 
 
@@ -51,7 +53,12 @@ def test_self_service_limits_garbage_falls_back_to_default(db):
 def test_set_self_service_limits_partial_update_and_clamp(db):
     result = ss.set_self_service_limits(db, quota_default=12, create_rate_window_seconds=10**9)
     db.commit()
-    assert result == {"quota_default": 12, "create_rate_max": 3, "create_rate_window_seconds": 86400}
+    assert result == {
+        "quota_default": 12,
+        "create_rate_max": 3,
+        "create_rate_window_seconds": 86400,
+        "require_password_change": False,
+    }
     assert ss.get_self_service_limits(db) == result
 
 

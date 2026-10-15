@@ -50,9 +50,11 @@ setup_overlay() {
   REBOOT_CHECK_BOOT_DIR="$TMP/boot"
   REBOOT_CHECK_UNAME="6.8.0-71-generic"
   REBOOT_CHECK_IN_CONTAINER="0"
-  unset INSTALL_SKIP_REBOOT_CHECK
+  REBOOT_CHECK_DPKG_STATUS_FILE="$TMP/dpkg-status"
+  unset INSTALL_SKIP_REBOOT_CHECK INSTALL_SKIP_DPKG_CHECK
   rm -rf "${TMP:?}/run" "${TMP:?}/boot"
   mkdir -p "$TMP/run" "$TMP/boot"
+  printf '%s\n' "ii  git" "rc  linux-image-6.8.0-100-generic" "hi  openvpn" >"$REBOOT_CHECK_DPKG_STATUS_FILE"
 }
 
 echo "[test] нет маркера и ядро совпадает — reboot не нужен"
@@ -136,6 +138,39 @@ REBOOT_CHECK_DRY_RUN=1
 out="$(check_reboot_required 2>&1)"
 assert_rc $? 0 "non-interactive continues"
 assert_contains "$out" "нужна перезагрузка" "non-interactive warns"
+
+echo "[test] пакеты dpkg застряли (DKMS не собрался под новое ядро) — стоп, reboot не предлагаем"
+setup_overlay
+touch "$TMP/run/reboot-required"
+touch "$TMP/boot/vmlinuz-6.8.0-71-generic" "$TMP/boot/vmlinuz-7.0.0-38-generic"
+cat >"$REBOOT_CHECK_DPKG_STATUS_FILE" <<'EOF'
+ii  git
+iU  linux-generic-hwe-24.04
+iF  linux-headers-7.0.0-38-generic
+iF  linux-image-7.0.0-38-generic
+ii  openvpn
+EOF
+NON_INTERACTIVE=true
+ACCEPT_DEFAULTS=true
+REBOOT_CHECK_DRY_RUN=1
+set +e
+out="$(check_reboot_required 2>&1)"
+rc=$?
+set -e
+assert_rc "$rc" 1 "broken dpkg stops install"
+assert_contains "$out" "linux-generic-hwe-24.04, linux-headers-7.0.0-38-generic, linux-image-7.0.0-38-generic" \
+  "lists stuck packages"
+assert_contains "$out" "dpkg --configure -a" "points to dpkg error"
+if printf '%s' "$out" | grep -qF "DRY-RUN: reboot"; then
+  assert_rc 1 0 "no reboot on broken dpkg"
+else
+  assert_rc 0 0 "no reboot on broken dpkg"
+fi
+set +e
+out="$(INSTALL_SKIP_DPKG_CHECK=1 check_reboot_required 2>&1)"
+rc=$?
+set -e
+assert_rc "$rc" 0 "INSTALL_SKIP_DPKG_CHECK=1 continues"
 
 echo "[test] .efi.signed не считается отдельным ядром"
 setup_overlay

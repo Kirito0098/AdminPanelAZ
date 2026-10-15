@@ -41,6 +41,7 @@ from app.services.admin_bootstrap import (
 )
 from app.services.password_policy import validate_password
 from app.services.refresh_token import invalidate_user_sessions
+from app.services.self_service import password_change_required_on_admin_set
 from app.services.telegram_link import notify_telegram_unlinked
 from app.services.user_subscription import (
     get_user_access_until,
@@ -105,6 +106,7 @@ def create_user(
         role=payload.role,
         theme=payload.theme,
         is_active=payload.is_active,
+        must_change_password=password_change_required_on_admin_set(db),
     )
     db.add(user)
     db.commit()
@@ -190,6 +192,8 @@ def update_user(
         validate_password(payload.password, username=user.username)
         user.password_hash = get_password_hash(payload.password)
         invalidate_user_sessions(db, user, reason="password", commit=False)
+        if password_change_required_on_admin_set(db):
+            user.must_change_password = True
     if payload.telegram_id is not None:
         tg_id = payload.telegram_id.strip()
         # Non-admins may only clear their own telegram_id (self-unlink).

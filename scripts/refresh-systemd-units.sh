@@ -12,12 +12,13 @@ PROXY_UNIT="$UNIT_DIR/adminpanelaz-proxy.service"
 DO_PANEL="${REFRESH_PANEL:-1}"
 DO_NODE="${REFRESH_NODE:-1}"
 DO_PROXY="${REFRESH_PROXY:-1}"
+PREVIEW="${REFRESH_PREVIEW:-0}"
 
 log() {
-  echo "[refresh-systemd] $*"
+  [[ "$PREVIEW" == 1 ]] || echo "[refresh-systemd] $*"
 }
 
-if [[ "$(id -u)" -ne 0 ]]; then
+if [[ "$PREVIEW" != 1 && "$(id -u)" -ne 0 ]]; then
   echo "Run as root: sudo $0" >&2
   exit 1
 fi
@@ -40,6 +41,21 @@ _env_file_value() {
   sed -n "s/^${key}=//p" "$file" | head -1
 }
 
+# _install <установленный unit> <установщик> [ПЕРЕМЕННАЯ=значение…]. REFRESH_PREVIEW=1 — не ставить, а напечатать
+# имя службы, если собранный заново unit отличается от установленного.
+_install() {
+  local unit="$1" script="$2" rendered
+  shift 2
+  if [[ "$PREVIEW" != 1 ]]; then
+    env "$@" "$script"
+    return
+  fi
+  rendered="$(env "$@" UNIT_RENDER_ONLY=1 "$script")"
+  if [[ "$rendered" != "$(cat "$unit")" ]]; then
+    basename "$unit" .service
+  fi
+}
+
 refreshed=0
 
 if [[ "$DO_PANEL" == "1" && -f "$PANEL_UNIT" ]]; then
@@ -47,11 +63,11 @@ if [[ "$DO_PANEL" == "1" && -f "$PANEL_UNIT" ]]; then
   group="$(_unit_field "$PANEL_UNIT" Group)"
   state="$(_unit_env "$PANEL_UNIT" ADMINPANELAZ_STATE_DIR)"
   log "Обновление unit adminpanelaz из шаблона репо…"
-  INSTALL_FROM_INSTALL_SH=1 \
+  _install "$PANEL_UNIT" "$ROOT_DIR/scripts/install-systemd.sh" \
+    INSTALL_FROM_INSTALL_SH=1 \
     INSTALL_USER="${user:-root}" \
     INSTALL_GROUP="${group:-root}" \
-    ADMINPANELAZ_STATE_DIR="${state:-/var/lib/adminpanelaz}" \
-    "$ROOT_DIR/scripts/install-systemd.sh"
+    ADMINPANELAZ_STATE_DIR="${state:-/var/lib/adminpanelaz}"
   refreshed=1
 fi
 
@@ -69,13 +85,13 @@ if [[ "$DO_NODE" == "1" && -f "$NODE_UNIT" ]]; then
     port="$(_env_file_value "$node_env" NODE_AGENT_PORT)"
   fi
   log "Обновление unit adminpanelaz-node из шаблона репо…"
-  INSTALL_FROM_INSTALL_SH=1 \
+  _install "$NODE_UNIT" "$ROOT_DIR/scripts/install-node-systemd.sh" \
+    INSTALL_FROM_INSTALL_SH=1 \
     INSTALL_USER="${user:-root}" \
     INSTALL_GROUP="${group:-root}" \
     NODE_AGENT_STATE_DIR="${state:-/var/lib/adminpanelaz-node}" \
     NODE_AGENT_PORT="${port:-9100}" \
-    NODE_AGENT_API_KEY="${api_key:-change-me-node-agent-key}" \
-    "$ROOT_DIR/scripts/install-node-systemd.sh"
+    NODE_AGENT_API_KEY="${api_key:-change-me-node-agent-key}"
   refreshed=1
 fi
 
@@ -93,13 +109,13 @@ if [[ "$DO_PROXY" == "1" && -f "$PROXY_UNIT" ]]; then
     port="$(_env_file_value "$proxy_env" PROXY_AGENT_PORT)"
   fi
   log "Обновление unit adminpanelaz-proxy из шаблона репо…"
-  INSTALL_FROM_INSTALL_SH=1 \
+  _install "$PROXY_UNIT" "$ROOT_DIR/scripts/install-proxy-systemd.sh" \
+    INSTALL_FROM_INSTALL_SH=1 \
     INSTALL_USER="${user:-root}" \
     INSTALL_GROUP="${group:-root}" \
     PROXY_AGENT_STATE_DIR="${state:-/var/lib/adminpanelaz-proxy}" \
     PROXY_AGENT_PORT="${port:-9101}" \
-    PROXY_AGENT_API_KEY="${api_key:-change-me-proxy-agent-key}" \
-    "$ROOT_DIR/scripts/install-proxy-systemd.sh"
+    PROXY_AGENT_API_KEY="${api_key:-change-me-proxy-agent-key}"
   refreshed=1
 fi
 

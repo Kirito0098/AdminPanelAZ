@@ -50,6 +50,7 @@ from app.services.awg2 import Awg2Service, is_awg2_profile_path
 _settings = get_settings()
 
 HTTP_TIMEOUT = 120.0
+_TELEGRAM_OIDC_RELAY_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
 
 _request_timeout_cap: ContextVar[float | None] = ContextVar("node_request_timeout_cap", default=None)
 
@@ -1197,12 +1198,13 @@ class RemoteNodeAdapter(NodeAdapter):
 
         url = f"{self.base_url}{path}"
         timeout = _effective_timeout(kwargs.pop("timeout", HTTP_TIMEOUT))
+        headers = {**self._headers(), **kwargs.pop("headers", {})}
         try:
             client = self._get_http_client()
             response = client.request(
                 method,
                 url,
-                headers=self._headers(),
+                headers=headers,
                 timeout=timeout,
                 **kwargs,
             )
@@ -1225,6 +1227,32 @@ class RemoteNodeAdapter(NodeAdapter):
         if response.status_code == 204 or not response.content:
             return None
         return response.json()
+
+    def telegram_bot_api(
+        self, token: str, method: str, body: bytes, content_type: str, *, timeout: httpx.Timeout
+    ) -> dict:
+        return self._request(
+            "POST",
+            f"/telegram/bot-api/{method}",
+            content=body,
+            headers={"X-Telegram-Bot-Token": token, "Content-Type": content_type},
+            timeout=timeout,
+        )
+
+    def telegram_oidc_token(self, body: bytes, authorization: str) -> dict:
+        return self._request(
+            "POST",
+            "/telegram/oidc/token",
+            content=body,
+            headers={
+                "X-Telegram-Oidc-Authorization": authorization,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            timeout=_TELEGRAM_OIDC_RELAY_TIMEOUT,
+        )
+
+    def telegram_oidc_jwks(self) -> dict:
+        return self._request("GET", "/telegram/oidc/jwks", timeout=_TELEGRAM_OIDC_RELAY_TIMEOUT)
 
     def _request_bytes(self, method: str, path: str, **kwargs) -> bytes:
         from app.services.node_link_errors import (

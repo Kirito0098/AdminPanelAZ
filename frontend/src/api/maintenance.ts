@@ -12,6 +12,7 @@ import type {
   VpnNetworkPortStatus,
   VpnNetworkPublishPayload,
   BackgroundTaskAcceptedResponse,
+  ServerConfigPreview,
   DdnsSettings,
   DdnsSettingsUpdatePayload,
   DdnsActionResponse,
@@ -191,6 +192,13 @@ export async function updateTelegramSettings(data: {
   })
 }
 
+export async function updateTelegramRelay(nodeIds: number[]) {
+  return apiFetch<TelegramSettings>('/settings/telegram/relay', {
+    method: 'PUT',
+    body: JSON.stringify({ node_ids: nodeIds }),
+  })
+}
+
 export async function registerTelegramWebhook() {
   return apiFetch<TelegramSettings>('/settings/telegram/webhook/register', {
     method: 'POST',
@@ -297,6 +305,14 @@ export async function closeIpAccess() {
   return apiFetch<SiteDiagnosticsCloseIpAccessResponse>('/site-diagnostics/close-ip-access', {
     method: 'POST',
   })
+}
+
+export async function getServerConfigPreview() {
+  return apiFetch<ServerConfigPreview>('/system/update/server-config')
+}
+
+export async function applyServerConfig() {
+  return apiFetch<BackgroundTaskAcceptedResponse>('/system/update/server-config', { method: 'POST' })
 }
 
 export async function applySystemUpdate() {

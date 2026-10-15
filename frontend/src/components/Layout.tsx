@@ -16,7 +16,6 @@ import {
   getVisibleSidebarNavGroups,
   type SidebarNavItem,
 } from '@/components/nav/sidebarNav'
-import ForcePasswordChange from './ForcePasswordChange'
 import LiveClock from './noc/LiveClock'
 import { ROLE_LABELS } from '@/components/settings/settingsLabels'
 
@@ -230,7 +229,6 @@ export default function Layout() {
 
   return (
     <div className="flex min-h-dscreen bg-background">
-      <ForcePasswordChange />
       <HaScopeEnforcer />
       <aside className="hidden h-dscreen w-72 shrink-0 overflow-hidden border-r border-border/80 bg-card lg:sticky lg:top-0 lg:block">
         <SidebarContent />
