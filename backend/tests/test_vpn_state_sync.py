@@ -57,7 +57,7 @@ def test_sync_wireguard_state_from_primary_copies_configs_profiles_and_applies_r
     primary = MagicMock()
     replica = MagicMock()
     primary.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf"]
-    replica.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf", "orphan.conf"]
+    replica.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf", "warp-antizapret.conf"]
     primary.read_wireguard_server_config.side_effect = lambda iface: f"{iface}-primary"
     replica.apply_wireguard_runtime.return_value = {"success": True, "synced": ["antizapret", "vpn"]}
     primary.export_wireguard_client_profiles_archive.return_value = _sample_profile_archive()
@@ -68,7 +68,7 @@ def test_sync_wireguard_state_from_primary_copies_configs_profiles_and_applies_r
         (("antizapret", "antizapret-primary"),),
         (("vpn", "vpn-primary"),),
     ]
-    replica.delete_wireguard_server_config_file.assert_called_once_with("orphan.conf")
+    replica.delete_wireguard_server_config_file.assert_not_called()
     replica.apply_wireguard_runtime.assert_called_once()
     replica.import_wireguard_client_profiles_archive.assert_called_once()
     replica.recreate_profiles.assert_not_called()

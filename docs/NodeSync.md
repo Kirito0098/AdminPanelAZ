@@ -81,7 +81,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 
 | Операция | Replica |
 |----------|---------|
-| Create / delete client | Копия crypto-состояния primary: `/etc/wireguard/*.conf` + **те же файлы профилей** WG/AWG (PrivateKey/PSK) или `/etc/openvpn/easyrsa3/` + **байт-копия `.ovpn`** с primary + restart OpenVPN (OVPN); shadow `VpnConfig` |
+| Create / delete client | Копия crypto-состояния primary: `/etc/wireguard/antizapret.conf` и `vpn.conf` (WARP-аккаунты `warp-*.conf` у каждого узла свои и не копируются) + **те же файлы профилей** WG/AWG (PrivateKey/PSK) или `/etc/openvpn/easyrsa3/` + **байт-копия `.ovpn`** с primary + restart OpenVPN (OVPN); shadow `VpnConfig` |
 | Renew OpenVPN cert | Копия easyrsa3 + `.ovpn` с primary после явного `client.sh 1` на primary; тот же `client_name`, новый срок |
 | Temp / permanent block, unblock | Та же политика в БД + runtime (iptables/WG) |
 | Set / clear traffic limit | Те же `traffic_limit_*` + reconcile runtime |

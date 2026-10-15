@@ -1,3 +1,4 @@
+import hashlib
 from pathlib import Path
 
 from app.services.node_sync.fingerprints import (
@@ -38,3 +39,22 @@ def test_collect_antizapret_fingerprints_includes_aggregate_and_per_file_keys(tm
     assert result[CONFIG_FP_PREFIX] == "aggregate-hash"
     assert f"{CONFIG_FP_PREFIX}/include-hosts.txt" in result
     assert f"{CONFIG_FP_PREFIX}/warper-include-ips.txt" not in result
+
+
+def test_wireguard_fingerprint_ignores_node_local_warp_configs(tmp_path: Path, monkeypatch):
+    def wireguard_fingerprint(warp_private_key: str) -> str:
+        wg_dir = tmp_path / warp_private_key
+        wg_dir.mkdir()
+        (wg_dir / "antizapret.conf").write_text("az", encoding="utf-8")
+        (wg_dir / "vpn.conf").write_text("vpn", encoding="utf-8")
+        (wg_dir / "warp-antizapret.conf").write_text(warp_private_key, encoding="utf-8")
+        monkeypatch.setattr(
+            "app.services.wg_runtime.WG_CONFIG_FILES",
+            {"antizapret": wg_dir / "antizapret.conf", "vpn": wg_dir / "vpn.conf"},
+        )
+        return collect_antizapret_fingerprints(tmp_path / "antizapret")["wireguard/conf_files"]
+
+    primary = wireguard_fingerprint("primary-warp-key")
+
+    assert primary == wireguard_fingerprint("replica-warp-key")
+    assert primary == hashlib.sha256(b"antizapret.confazvpn.confvpn").hexdigest()
