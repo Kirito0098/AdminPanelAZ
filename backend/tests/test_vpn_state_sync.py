@@ -193,6 +193,24 @@ def test_sync_wireguard_state_copies_profiles_then_reports_runtime_failure():
     replica.import_wireguard_client_profiles_archive.assert_called_once()
 
 
+def _awg2_state_tar(*, amnezia_files: dict[str, bytes], client_files: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as archive:
+        for name, content in amnezia_files.items():
+            info = tarfile.TarInfo(name=f"amneziawg/{name}")
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+        for name, content in client_files.items():
+            info = tarfile.TarInfo(name=f"clients/{name}")
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+        manifest = b"kind=az-awg2-state\n"
+        info = tarfile.TarInfo(name="MANIFEST")
+        info.size = len(manifest)
+        archive.addfile(info, io.BytesIO(manifest))
+    return buf.getvalue()
+
+
 def test_sync_amneziawg2_requires_replica_installed():
     primary = MagicMock()
     replica = MagicMock()
@@ -201,22 +219,58 @@ def test_sync_amneziawg2_requires_replica_installed():
         "install_command": awg2.AWG2_INSTALL_CMD,
     }
 
-    with pytest.raises(Exception) as exc:
+    with pytest.raises(vpn_state_sync.Awg2NotInstalledError, match="не установлен на реплике"):
         vpn_state_sync.sync_amneziawg2_state_from_primary(primary, replica)
 
-    assert "install" in str(exc.value).lower() or awg2.AWG2_INSTALL_CMD in str(exc.value)
+    primary.export_awg2_state_archive.assert_not_called()
+    replica.import_awg2_state_archive.assert_not_called()
+
+
+def test_sync_amneziawg2_rejects_empty_primary_state_before_import():
+    primary = MagicMock()
+    replica = MagicMock()
+    replica.get_awg2_health.return_value = {"installed": True}
+    primary.export_awg2_state_archive.return_value = _awg2_state_tar(
+        amnezia_files={},
+        client_files={},
+    )
+
+    with pytest.raises(vpn_state_sync.Awg2EmptyStateError, match="нет состояния AZ-AWG2"):
+        vpn_state_sync.sync_amneziawg2_state_from_primary(primary, replica)
+
+    replica.import_awg2_state_archive.assert_not_called()
+    replica.apply_awg2_runtime.assert_not_called()
+
+
+def test_sync_amneziawg2_rejects_partial_primary_state():
+    primary = MagicMock()
+    replica = MagicMock()
+    replica.get_awg2_health.return_value = {"installed": True}
+    primary.export_awg2_state_archive.return_value = _awg2_state_tar(
+        amnezia_files={"awg0.conf": b"[Interface]\n"},
+        client_files={},
+    )
+
+    with pytest.raises(vpn_state_sync.Awg2EmptyStateError, match="нет состояния AZ-AWG2"):
+        vpn_state_sync.sync_amneziawg2_state_from_primary(primary, replica)
+
+    replica.import_awg2_state_archive.assert_not_called()
 
 
 def test_sync_amneziawg2_exports_imports_applies():
     primary = MagicMock()
     replica = MagicMock()
     replica.get_awg2_health.return_value = {"installed": True}
-    primary.export_awg2_state_archive.return_value = b"fake-tar"
+    archive = _awg2_state_tar(
+        amnezia_files={"awg0.conf": b"x"},
+        client_files={"antizapret/antizapret-ivan-am.conf": b"y"},
+    )
+    primary.export_awg2_state_archive.return_value = archive
     replica.apply_awg2_runtime.return_value = {"success": True}
 
     vpn_state_sync.sync_amneziawg2_state_from_primary(primary, replica)
 
-    replica.import_awg2_state_archive.assert_called_once_with(b"fake-tar")
+    replica.import_awg2_state_archive.assert_called_once_with(archive)
     replica.apply_awg2_runtime.assert_called_once()
 
 
@@ -238,7 +292,10 @@ def test_crypto_import_does_not_delete_awg2_policy_rows(db):
     primary = MagicMock()
     replica = MagicMock()
     replica.get_awg2_health.return_value = {"installed": True}
-    primary.export_awg2_state_archive.return_value = b"fake-tar"
+    primary.export_awg2_state_archive.return_value = _awg2_state_tar(
+        amnezia_files={"awg0.conf": b"x"},
+        client_files={"antizapret/antizapret-ivan-am.conf": b"y"},
+    )
     replica.apply_awg2_runtime.return_value = {"success": True}
 
     with patch(
@@ -289,7 +346,10 @@ def test_post_import_reapply_blocked_awg2_peers(db):
     primary = MagicMock()
     replica = MagicMock()
     replica.get_awg2_health.return_value = {"installed": True}
-    primary.export_awg2_state_archive.return_value = b"fake-tar"
+    primary.export_awg2_state_archive.return_value = _awg2_state_tar(
+        amnezia_files={"awg0.conf": b"x"},
+        client_files={"antizapret/antizapret-ivan-am.conf": b"y"},
+    )
     replica.apply_awg2_runtime.return_value = {"success": True}
 
     vpn_state_sync.sync_amneziawg2_state_from_primary(
@@ -453,7 +513,10 @@ def test_sync_amneziawg2_reblocks_when_runtime_apply_raises(db):
     primary = MagicMock()
     replica = MagicMock()
     replica.get_awg2_health.return_value = {"installed": True}
-    primary.export_awg2_state_archive.return_value = b"fake-tar"
+    primary.export_awg2_state_archive.return_value = _awg2_state_tar(
+        amnezia_files={"awg0.conf": b"x"},
+        client_files={"antizapret/antizapret-ivan-am.conf": b"y"},
+    )
     replica.apply_awg2_runtime.side_effect = RuntimeError("agent timeout after apply")
 
     with pytest.raises(RuntimeError, match="agent timeout after apply"):
@@ -469,7 +532,7 @@ def test_sync_amneziawg2_not_installed_raises_without_reblock(db):
     replica = MagicMock()
     replica.get_awg2_health.return_value = {"installed": False, "install_command": "install-awg2"}
 
-    with pytest.raises(vpn_state_sync.Awg2NotInstalledError, match="install-awg2"):
+    with pytest.raises(vpn_state_sync.Awg2NotInstalledError, match="не установлен на реплике"):
         vpn_state_sync.sync_amneziawg2_state_from_primary(MagicMock(), replica, db=db, replica_node=replica_node)
 
     replica.import_awg2_state_archive.assert_not_called()

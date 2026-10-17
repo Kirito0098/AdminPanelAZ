@@ -103,7 +103,7 @@ def test_import_archive_rejects_partial_archive_before_mutation(tmp_path: Path):
         patch.object(awg2, "AWG2_EXPIRY_TSV", tmp_path / "overlay" / "expiry.tsv"),
     ):
         svc = awg2.Awg2Service()
-        with pytest.raises(ValueError, match="must contain both amneziawg/ and clients/ files"):
+        with pytest.raises(ValueError, match="нет состояния AZ-AWG2"):
             svc.import_state_archive(buffer.getvalue())
     assert (tmp_path / "amnezia" / "antizapret-awg.conf").read_text() == "[Interface]\nPrivateKey = aaa=\n"
     assert (tmp_path / "overlay" / "clients" / "antizapret" / "antizapret-ivan-am.conf").read_text() == "[Interface]\n"

@@ -469,7 +469,8 @@ def _replace_awg2_snapshot(
 ) -> None:
     if not _tree_has_files(source_amnezia) or not _tree_has_files(source_clients):
         raise ValueError(
-            "AWG2 archive must contain both amneziawg/ and clients/ files before import"
+            "На primary нет состояния AZ-AWG2 (пустые конфиги сервера или клиентов). "
+            "Создайте клиентов или дождитесь завершения установки на primary и повторите синхронизацию."
         )
 
     _replace_tree_from_snapshot(source_amnezia, AWG2_AMNEZIA_DIR)
@@ -1194,7 +1195,10 @@ class Awg2Service:
 
     def import_state_archive(self, data: bytes) -> None:
         if not data:
-            raise ValueError("empty AWG2 archive")
+            raise ValueError(
+                "На primary нет состояния AZ-AWG2 (пустые конфиги сервера или клиентов). "
+                "Создайте клиентов или дождитесь завершения установки на primary и повторите синхронизацию."
+            )
         _ensure_replica_installed()
 
         with tempfile.TemporaryDirectory(prefix="awg2-import-") as temp_dir:

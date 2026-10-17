@@ -72,6 +72,8 @@ class _FakeAwg2:
         return {"success": True}
 
     def import_state_archive(self, data):
+        if self.error:
+            raise self.error
         self.calls.append(("import_state_archive", data, _on_event_loop()))
 
 
@@ -110,3 +112,16 @@ def test_awg2_state_import_runs_off_the_event_loop(agent, fake_awg2):
 
     assert response.json() == {"success": True}
     assert fake_awg2.calls == [("import_state_archive", b"state-bytes", False)]
+
+
+def test_awg2_state_import_maps_value_error_to_400(agent, fake_awg2):
+    _agent_main, client, headers = agent
+    fake_awg2.error = ValueError(
+        "На primary нет состояния AZ-AWG2 (пустые конфиги сервера или клиентов). "
+        "Создайте клиентов или дождитесь завершения установки на primary и повторите синхронизацию."
+    )
+
+    response = client.post("/awg2/state/archive", content=b"state-bytes", headers=headers)
+
+    assert response.status_code == 400
+    assert "нет состояния AZ-AWG2" in response.json()["detail"]

@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import Node, VpnType
-from app.services.awg2 import AWG2_INSTALL_CMD
 from app.services.access_policy import AccessPolicyService
 from app.services.node_sync.openvpn_pki_state import (
     PkiState,
@@ -29,6 +28,42 @@ WIREGUARD_INTERFACES = ("antizapret", "vpn")
 
 class Awg2NotInstalledError(RuntimeError):
     """AZ-AWG2 is missing on the replica; its state was not touched."""
+
+
+class Awg2EmptyStateError(RuntimeError):
+    """Primary AZ-AWG2 is installed but has no exportable amneziawg/ + clients/ files."""
+
+
+AWG2_REPLICA_NOT_INSTALLED_MSG = (
+    "AZ-AWG2 установлен на primary, но не установлен на реплике. "
+    "Установите AZ-AWG2 на реплике и повторите синхронизацию."
+)
+AWG2_PRIMARY_EMPTY_STATE_MSG = (
+    "На primary нет состояния AZ-AWG2 (пустые конфиги сервера или клиентов). "
+    "Создайте клиентов или дождитесь завершения установки на primary и повторите синхронизацию."
+)
+
+
+def _archive_has_awg2_state_files(data: bytes) -> bool:
+    if not data:
+        return False
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+            has_amnezia = False
+            has_clients = False
+            for member in archive.getmembers():
+                if not member.isfile():
+                    continue
+                name = member.name
+                if name.startswith("amneziawg/") and name != "amneziawg/":
+                    has_amnezia = True
+                elif name.startswith("clients/") and name != "clients/":
+                    has_clients = True
+                if has_amnezia and has_clients:
+                    return True
+            return False
+    except tarfile.TarError:
+        return False
 
 
 class ReplicaRuntimeError(RuntimeError):
@@ -403,12 +438,11 @@ def sync_amneziawg2_state_from_primary(
     """Copy AZ-AWG2 state archive from primary to replica and apply runtime."""
     health = replica_adapter.get_awg2_health()
     if not health.get("installed"):
-        cmd = health.get("install_command") or AWG2_INSTALL_CMD
-        raise Awg2NotInstalledError(f"AZ-AWG2 не установлен на replica. Установите: {cmd}")
+        raise Awg2NotInstalledError(AWG2_REPLICA_NOT_INSTALLED_MSG)
 
     archive = primary_adapter.export_awg2_state_archive()
-    if not archive:
-        raise RuntimeError("Пустой архив состояния AZ-AWG2 с primary")
+    if not _archive_has_awg2_state_files(archive):
+        raise Awg2EmptyStateError(AWG2_PRIMARY_EMPTY_STATE_MSG)
 
     reblock = db is not None and replica_node is not None
     try:
@@ -506,6 +540,8 @@ def sync_all_vpn_crypto_from_primary(
             )
         except Awg2NotInstalledError as exc:
             logger.warning("HA full crypto: AWG2 skipped: %s", exc)
+        except Awg2EmptyStateError as exc:
+            runtime_errors.append(str(exc))
         except ReplicaRuntimeError as exc:
             runtime_errors.append(str(exc))
     if runtime_errors:

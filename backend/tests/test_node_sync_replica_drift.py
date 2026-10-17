@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import io
 import json
+import tarfile
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,7 +18,12 @@ from app.services.node_sync.replicate import (
     _handle_client_create,
     finalize_replicate_outcome,
 )
-from app.services.node_sync.vpn_state_sync import Awg2NotInstalledError, ReplicaRuntimeError
+from app.services.node_sync.vpn_state_sync import (
+    AWG2_PRIMARY_EMPTY_STATE_MSG,
+    Awg2EmptyStateError,
+    Awg2NotInstalledError,
+    ReplicaRuntimeError,
+)
 
 WG_DRIFT = "WireGuard на реплике не применён (файлы скопированы): sync failed"
 
@@ -45,17 +52,32 @@ def _replica() -> MagicMock:
     return node
 
 
+def _awg2_state_tar(*, amnezia_files: dict[str, bytes], client_files: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as archive:
+        for name, content in amnezia_files.items():
+            info = tarfile.TarInfo(name=f"amneziawg/{name}")
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+        for name, content in client_files.items():
+            info = tarfile.TarInfo(name=f"clients/{name}")
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+    return buf.getvalue()
+
+
 def test_awg2_partial_apply_raises_after_import():
     primary = MagicMock()
     replica = MagicMock()
     replica.get_awg2_health.return_value = {"installed": True}
-    primary.export_awg2_state_archive.return_value = b"tar"
+    archive = _awg2_state_tar(amnezia_files={"awg0.conf": b"x"}, client_files={"c/a.conf": b"y"})
+    primary.export_awg2_state_archive.return_value = archive
     replica.apply_awg2_runtime.return_value = {"success": False, "errors": ["awg0: syncconf failed"]}
 
     with pytest.raises(ReplicaRuntimeError, match="AZ-AWG2 на реплике не применён.*awg0: syncconf failed"):
         vpn_state_sync.sync_amneziawg2_state_from_primary(primary, replica)
 
-    replica.import_awg2_state_archive.assert_called_once_with(b"tar")
+    replica.import_awg2_state_archive.assert_called_once_with(archive)
 
 
 def test_sync_all_finishes_openvpn_and_awg2_then_reports_runtime_failure(monkeypatch):
@@ -98,10 +120,10 @@ def test_sync_all_reports_awg2_copy_failure(monkeypatch):
     monkeypatch.setattr(
         vpn_state_sync,
         "sync_amneziawg2_state_from_primary",
-        MagicMock(side_effect=RuntimeError("Пустой архив состояния AZ-AWG2 с primary")),
+        MagicMock(side_effect=Awg2EmptyStateError(AWG2_PRIMARY_EMPTY_STATE_MSG)),
     )
 
-    with pytest.raises(RuntimeError, match="Пустой архив"):
+    with pytest.raises(ReplicaRuntimeError, match="нет состояния"):
         vpn_state_sync.sync_all_vpn_crypto_from_primary(primary, MagicMock())
 
 
