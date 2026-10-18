@@ -1746,8 +1746,73 @@ def _run_db_migrations() -> None:
     _migrate_viewer_role_to_user()
     _migrate_user_telegram_backfill()
     _migrate_user_access_until_backfill()
+    _migrate_users_provisioning()
     _migrate_revoke_unmanaged_client_portal_links()
     _seed_client_templates_for_nodes()
+
+
+def _migrate_users_provisioning() -> None:
+    """Add user provisioning columns, subject_key, and user_node_assignments."""
+    with _migration_transaction() as conn:
+        tables = {r[0] for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+        if "users" in tables:
+            cols = _table_columns(conn, "users")
+            alters = [
+                ("client_base_name", "VARCHAR(28)"),
+                ("plan_config_indexes", "TEXT"),
+                ("desired_protocols", "TEXT"),
+                ("panel_login_enabled", "BOOLEAN DEFAULT 1"),
+                ("provision_state", "VARCHAR(16) DEFAULT 'unmanaged'"),
+            ]
+            for name, typ in alters:
+                if name not in cols:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {typ}"))
+                    logger.info("DB migration: added users.%s", name)
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_client_base_name_lower "
+                    "ON users (lower(client_base_name)) WHERE client_base_name IS NOT NULL"
+                )
+            )
+
+        if "background_task" in tables:
+            bt = _table_columns(conn, "background_task")
+            if "subject_key" not in bt:
+                conn.execute(text("ALTER TABLE background_task ADD COLUMN subject_key VARCHAR(64)"))
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_background_task_subject_key "
+                        "ON background_task (subject_key)"
+                    )
+                )
+                logger.info("DB migration: added background_task.subject_key")
+
+        if "user_node_assignments" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE user_node_assignments (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        node_id INTEGER NOT NULL REFERENCES nodes(id),
+                        UNIQUE (user_id, node_id)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_node_assignments_user_id "
+                    "ON user_node_assignments (user_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_node_assignments_node_id "
+                    "ON user_node_assignments (node_id)"
+                )
+            )
+            logger.info("DB migration: created user_node_assignments table")
 
 
 def _migrate_user_config_access_table() -> None:

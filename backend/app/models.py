@@ -98,6 +98,11 @@ class User(Base):
     can_manage_configs: Mapped[bool] = mapped_column(Boolean, default=False)
     visible_vpn_profiles: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     access_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    client_base_name: Mapped[str | None] = mapped_column(String(28), nullable=True)
+    plan_config_indexes: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list[int]
+    desired_protocols: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list[str]
+    panel_login_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    provision_state: Mapped[str] = mapped_column(String(16), default="unmanaged")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     vpn_configs: Mapped[list["VpnConfig"]] = relationship(back_populates="owner")
@@ -130,6 +135,15 @@ def _stored_tg_notify_event(stored: dict[str, bool], event_type: str) -> bool:
     if parent and parent in stored:
         return bool(stored[parent])
     return bool(DEFAULT_TG_NOTIFY_EVENTS.get(event_type, False))
+
+
+class UserNodeAssignment(Base):
+    __tablename__ = "user_node_assignments"
+    __table_args__ = (UniqueConstraint("user_id", "node_id", name="uq_user_node_assignment"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    node_id: Mapped[int] = mapped_column(ForeignKey("nodes.id"), index=True)
 
 
 class RefreshToken(Base):
@@ -803,6 +817,7 @@ class BackgroundTask(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # process_identity token of the worker running the task.
     owner: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    subject_key: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
 
 
 class WebAuthnCredential(Base):
