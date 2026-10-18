@@ -34,6 +34,14 @@ def plan_name_for_index(base: str, index: int) -> str:
     return f"{base}-{index}"
 
 
+def names_under_base(base: str) -> set[str]:
+    """Lower-cased ``base`` plus ``base-2`` … ``base-20`` (plan name namespace)."""
+    cleaned = (base or "").strip()
+    if not cleaned:
+        return set()
+    return {plan_name_for_index(cleaned, index).lower() for index in range(1, 21)}
+
+
 def parse_plan_indexes(raw: str | None) -> list[int]:
     """Parse ``plan_config_indexes`` JSON column into a list of ints (empty on any error)."""
     if not raw:
