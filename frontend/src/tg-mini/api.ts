@@ -15,6 +15,7 @@ import type {
   TgMiniAuthResponse,
   TgMiniConfig,
   TgMiniConfigFile,
+  TgMeConfig,
   TgMiniDashboard,
   TgMiniNodeActionResponse,
   TgMiniNodesResponse,
@@ -154,6 +155,10 @@ export async function getTgDashboard(): Promise<TgMiniDashboard> {
 
 export async function getTgConfigs(): Promise<{ configs: TgMiniConfig[] }> {
   return tgFetch<{ configs: TgMiniConfig[] }>('/configs')
+}
+
+export async function getTgMeConfigs(): Promise<{ configs: TgMeConfig[] }> {
+  return tgFetch<{ configs: TgMeConfig[] }>('/me/configs')
 }
 
 export async function getTgConfigFiles(configId: number): Promise<{ files: TgMiniConfigFile[] }> {

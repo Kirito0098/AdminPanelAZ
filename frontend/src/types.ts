@@ -789,6 +789,18 @@ export interface TgMiniConfigFile {
   variant?: string
 }
 
+export interface TgMeConfigNode {
+  node_id: number
+  node_label: string
+  vpn_type: string
+  config_id: number
+}
+
+export interface TgMeConfig {
+  name: string
+  nodes: TgMeConfigNode[]
+}
+
 export interface TgMiniSettings {
   server_ip: string | null
   bot_configured: boolean

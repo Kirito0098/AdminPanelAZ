@@ -374,6 +374,114 @@ def is_in_plan_config(db: Session, user: User, config: VpnConfig) -> bool:
     )
 
 
+def plan_add_index(db: Session, user: User) -> int:
+    """Добавить в план самое свободное имя (индекс 1..20). Возвращает новый индекс."""
+    if not user.client_base_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="У пользователя нет плана конфигов"
+        )
+    indexes = parse_plan_indexes(user.plan_config_indexes or [])
+    used = set(indexes)
+    free = next((item for item in range(1, 21) if item not in used), None)
+    if free is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Нет свободных индексов имён (1..20)"
+        )
+    indexes.append(free)
+    user.plan_config_indexes = json.dumps(sorted(indexes))
+    user.provision_state = recompute_provision_state(db, user)
+    db.commit()
+    return free
+
+
+def plan_remove_index(
+    db: Session, user: User, index: int, *, confirm_deletions: bool = False
+) -> None:
+    """Удалить имя плана по индексу.
+
+    Последнее имя → 409 ``last_config_name``; удаления конфигов без
+    ``confirm_deletions`` → 409 ``confirm_deletions`` (как админский маршрут).
+    """
+    if not user.client_base_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="У пользователя нет плана конфигов"
+        )
+    if index < 1 or index > 20:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Индекс должен быть от 1 до 20"
+        )
+    indexes = parse_plan_indexes(user.plan_config_indexes or [])
+    if index not in indexes:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Индекс не в плане пользователя"
+        )
+    if len(indexes) == 1:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "last_config_name",
+                "message": "Последнее имя плана нельзя удалить — удалите пользователя или очистите план",
+            },
+        )
+
+    original = user.plan_config_indexes
+    user.plan_config_indexes = json.dumps([item for item in indexes if item != index])
+    plan = compute_plan(db, user)
+    user.plan_config_indexes = original
+    if plan.delete and not confirm_deletions:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "confirm_deletions",
+                "configs": [
+                    {
+                        "node_id": item.node_id,
+                        "node_label": item.node_label,
+                        "client_name": item.client_name,
+                        "vpn_type": item.vpn_type,
+                        "config_id": item.config_id,
+                        "reason": item.reason,
+                    }
+                    for item in plan.delete
+                ],
+            },
+        )
+
+    user.plan_config_indexes = json.dumps(sorted(item for item in indexes if item != index))
+    user.provision_state = recompute_provision_state(db, user)
+    db.commit()
+
+
+def move_user_node_assignments(
+    db: Session, user_id: int, from_node_id: int, to_node_id: int
+) -> None:
+    """Переносит присвоения пользователя с одного узла на другой.
+
+    Если пользователь уже назначен на целевой узел — исходное присвоение удаляется
+    (дедупликация по уникальности ``(user_id, node_id)``), дубля не создаётся.
+    """
+    if from_node_id == to_node_id:
+        return
+    target_exists = (
+        db.query(UserNodeAssignment)
+        .filter_by(user_id=user_id, node_id=to_node_id)
+        .first()
+        is not None
+    )
+    rows = (
+        db.query(UserNodeAssignment)
+        .filter_by(user_id=user_id, node_id=from_node_id)
+        .all()
+    )
+    for row in rows:
+        if target_exists:
+            db.delete(row)
+        else:
+            row.node_id = to_node_id
+            target_exists = True
+    db.flush()
+
+
 def purge_user_before_delete(db: Session, user: User, successor: User) -> None:
     """Переносит владение оставшимися (off-plan) конфигами на successeur и
     обнуляет ссылки на удаляемого пользователя в смежных таблицах."""

@@ -28,6 +28,8 @@ from app.models import (
     TrafficLimitNotifyState,
     TrafficSessionState,
     UnlockCodeRedemption,
+    User,
+    UserNodeAssignment,
     UserTrafficSample,
     UserTrafficStatProtocol,
     VpnConfig,
@@ -390,6 +392,23 @@ def purge_node_related(db: Session, node_id: int) -> None:
         AlertRule,
     ):
         db.query(model).filter(model.node_id == node_id).delete(synchronize_session=False)
+
+    # Присвоения пользователей к узлу удаляются; пользователи с планом переходят в pending.
+    assignment_rows = db.query(UserNodeAssignment).filter(
+        UserNodeAssignment.node_id == node_id
+    ).all()
+    affected_user_ids = {row.user_id for row in assignment_rows}
+    db.query(UserNodeAssignment).filter(
+        UserNodeAssignment.node_id == node_id
+    ).delete(synchronize_session=False)
+
+    if affected_user_ids:
+        from app.services.user_provisioning import user_has_plan
+
+        for user_id in affected_user_ids:
+            user_row = db.get(User, user_id)
+            if user_row is not None and user_has_plan(user_row):
+                user_row.provision_state = "pending"
 
 
 def _remove_local_node(db: Session, local: Node) -> None:

@@ -70,6 +70,7 @@ from app.routers import (
 )
 from app.routers import settings as settings_router
 from app.routers import users
+from app.routers import me
 from app.services.admin_bootstrap import upsert_bootstrap_admin
 from app.services.node_manager import get_active_adapter, get_active_node, sync_local_node
 from app.services.ip_restriction import ip_restriction_service
@@ -305,6 +306,7 @@ app.add_middleware(ApiRateLimitMiddleware)
 app.include_router(auth.router, prefix=_API_PREFIX)
 app.include_router(session.router, prefix=_API_PREFIX)
 app.include_router(users.router, prefix=_API_PREFIX)
+app.include_router(me.router, prefix=_API_PREFIX)
 app.include_router(configs.router, prefix=_API_PREFIX)
 app.include_router(configs_bulk.router, prefix=_API_PREFIX)
 app.include_router(config_tags.router, prefix=_API_PREFIX)

@@ -22,12 +22,19 @@ import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import {
   getTgConfigFiles,
   getTgConfigQuota,
-  getTgConfigs,
+  getTgMeConfigs,
   getTgQrLink,
   sendTgConfig,
 } from '@/tg-mini/api'
 import { copyText, openExternalLink, shareViaTelegram } from '@/tg-mini/lib/shareDownloadLink'
-import type { InstallPlatform, SelfServiceQuota, TgMiniConfig, TgMiniConfigFile, TgMiniQrLink } from '@/types'
+import type {
+  InstallPlatform,
+  SelfServiceQuota,
+  TgMeConfig,
+  TgMiniConfig,
+  TgMiniConfigFile,
+  TgMiniQrLink,
+} from '@/types'
 
 const canShareInTelegram = typeof window.Telegram?.WebApp?.shareUrl === 'function'
 
@@ -76,8 +83,16 @@ export default function Configs() {
     }
     setError(null)
     try {
-      const [data, quotaData] = await Promise.all([getTgConfigs(), getTgConfigQuota()])
-      setConfigs(data.configs)
+      const [data, quotaData] = await Promise.all([getTgMeConfigs(), getTgConfigQuota()])
+      const flattened: TgMiniConfig[] = data.configs.flatMap((c) =>
+        c.nodes.map((n) => ({
+          id: n.config_id,
+          client_name: c.name,
+          vpn_type: n.vpn_type,
+          is_mine: true,
+        }))
+      )
+      setConfigs(flattened)
       setQuota(quotaData)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Ошибка загрузки')

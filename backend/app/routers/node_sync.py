@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_admin
 from app.database import get_db
-from app.models import NodeSyncGroup, SyncStatus, User
+from app.models import NodeSyncGroup, SyncStatus, User, UserNodeAssignment
 from app.schemas import (
     MessageResponse,
     NodeSyncGroupCreate,
@@ -40,6 +40,7 @@ from app.services.node_sync.setup import make_group_setup_callable
 from app.services.node_sync.shadow_link import link_shadow_configs_for_group
 from app.services.node_sync.shared_domain import make_shared_domain_callable
 from app.services.node_sync.verify import verify_sync_group
+from app.services.user_provisioning import move_user_node_assignments
 
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
@@ -164,8 +165,11 @@ def update_sync_group(
         _reject_shared_domains_panel_conflict(wg or ovpn)
 
     previous_sync_mode = group.sync_mode
-    membership_changed = primary_id != group.primary_node_id or sorted(set(replica_ids)) != sorted(
-        set(parse_replica_node_ids(group.replica_node_ids))
+    old_primary_id = group.primary_node_id
+    old_replica_ids = set(parse_replica_node_ids(group.replica_node_ids))
+    new_replica_ids = set(replica_ids)
+    membership_changed = primary_id != group.primary_node_id or sorted(new_replica_ids) != sorted(
+        old_replica_ids
     )
     if membership_changed:
         dissolve_sync_group(db, group)
@@ -186,6 +190,27 @@ def update_sync_group(
             db.commit()
         else:
             link_primary_configs_to_group(db, group)
+        # Primary swap: assignments on old primary → new primary.
+        if primary_id != old_primary_id:
+            user_ids = [
+                row[0]
+                for row in db.query(UserNodeAssignment.user_id).filter_by(
+                    node_id=old_primary_id
+                ).all()
+            ]
+            for user_id in user_ids:
+                move_user_node_assignments(db, user_id, old_primary_id, primary_id)
+        # Standalone (or other) node joined as replica → move its assignments to primary.
+        for node_id in new_replica_ids - old_replica_ids:
+            if node_id == primary_id:
+                continue
+            user_ids = [
+                row[0]
+                for row in db.query(UserNodeAssignment.user_id).filter_by(node_id=node_id).all()
+            ]
+            for user_id in user_ids:
+                move_user_node_assignments(db, user_id, node_id, primary_id)
+        db.commit()
         return _to_response(group, db)
     new_mode = group.sync_mode.strip().lower()
     prev_mode = previous_sync_mode.strip().lower()
