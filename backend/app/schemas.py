@@ -294,6 +294,12 @@ class UserResponse(UserBase):
     can_manage_configs: bool = False
     visible_vpn_profiles: dict | None = None
     panel_login_enabled: bool = True
+    # Сводка режима предоставления конфигов (заполняется в списке абонентов GET /users).
+    provision_state: str = "unmanaged"
+    plan_node_ids: list[int] = []
+    plan_protocols: list[str] = []
+    plan_config_count: int = 0
+    active_task_id: str | None = None
     timezone: str = ""
     noc_daily_time: str = ""
     noc_weekly_dow: str = ""
@@ -318,6 +324,105 @@ class UserResponse(UserBase):
                 return None
             return parsed if isinstance(parsed, dict) else None
         return None
+
+
+class ProvisionPlanItem(BaseModel):
+    node_id: int
+    node_label: str
+    client_name: str
+    vpn_type: str
+    action: str  # create|delete|conflict|skipped
+    reason: str | None = None
+    config_id: int | None = None
+
+
+class ProvisionPlanResponse(BaseModel):
+    create: list[ProvisionPlanItem] = []
+    delete: list[ProvisionPlanItem] = []
+    conflict: list[ProvisionPlanItem] = []
+    skipped: list[ProvisionPlanItem] = []
+    blocked: bool = False
+    block_reason: str | None = None
+
+
+class UserProvisionedCreate(BaseModel):
+    username: str
+    client_base_name: str | None = None
+    node_ids: list[int]
+    protocols: list[str]
+    config_count: int = Field(default=1, ge=1, le=20)
+    config_quota: int | None = Field(default=None, ge=0, le=1000)
+    access_until: datetime | None = None
+    panel_login_enabled: bool = False
+    password: str | None = None
+    telegram_id: str | None = None
+
+
+class UserProvisionSummary(BaseModel):
+    id: int
+    username: str
+    role: str
+    client_base_name: str | None = None
+    plan_config_indexes: list[int] | None = None
+    desired_protocols: list[str] | None = None
+    panel_login_enabled: bool = True
+    provision_state: str = "unmanaged"
+    access_until: datetime | None = None
+    node_ids: list[int] = []
+    config_quota: int | None = None
+
+
+class UserProvisionedResponse(BaseModel):
+    user: UserProvisionSummary
+    task_id: str
+
+
+class UserProvisioningUpdate(BaseModel):
+    node_ids: list[int]
+    protocols: list[str]
+    plan_config_indexes: list[int]
+    client_base_name: str | None = None
+    confirm_deletions: bool = False
+
+
+class UserProvisioningApply(BaseModel):
+    confirm_deletions: bool = False
+
+
+class ProvisioningConfigNode(BaseModel):
+    node_id: int
+    node_label: str
+    vpn_type: str
+    config_id: int | None = None
+
+
+class ProvisioningConfig(BaseModel):
+    name: str
+    nodes: list[ProvisioningConfigNode] = []
+
+
+class UserProvisioningDesired(BaseModel):
+    client_base_name: str | None = None
+    plan_config_indexes: list[int] = []
+    desired_protocols: list[str] = []
+    node_ids: list[int] = []
+
+
+class UserProvisioningSuggested(BaseModel):
+    client_base_name: str | None = None
+    plan_config_indexes: list[int] = []
+    node_ids: list[int] = []
+    protocols: list[str] = []
+
+
+class UserProvisioningCard(BaseModel):
+    user: UserProvisionSummary
+    has_plan: bool
+    desired: UserProvisioningDesired
+    suggested: UserProvisioningSuggested | None = None
+    plan: ProvisionPlanResponse
+    configs: list[ProvisioningConfig] = []
+    last_task: dict | None = None
 
 
 class UserConfigAccessUpdate(BaseModel):

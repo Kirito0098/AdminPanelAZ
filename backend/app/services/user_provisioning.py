@@ -11,21 +11,29 @@ from __future__ import annotations
 
 import httpx
 import json
+import re
 import threading
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
 
 from fastapi import HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import SessionLocal
-from app.models import BackgroundTask, Node, NodeStatus, User, UserNodeAssignment, VpnConfig, VpnType
+from app.models import BackgroundTask, Node, NodeStatus, NodeSyncGroup, User, UserNodeAssignment, VpnConfig, VpnType
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import _submit_in_current_context, background_task_service
-from app.services.client_names import names_under_base, parse_plan_indexes, plan_name_for_index
+from app.services.client_names import (
+    assert_client_base_name_valid,
+    names_under_base,
+    parse_plan_indexes,
+    plan_name_for_index,
+)
 from app.services.config_provisioning import deprovision_config, provision_config
 from app.services.expected_node import forget_confirmed_node
 from app.services.feature_guards import get_feature_service
@@ -92,6 +100,94 @@ def _plan_names(user: User) -> list[str]:
     if not base:
         return []
     return [plan_name_for_index(base, index) for index in parse_plan_indexes(user.plan_config_indexes)]
+
+
+def _tail_index(base: str, name: str) -> int | None:
+    """Индекс k для имени base-k; None, если имя не подходит под пространство базы."""
+    prefix = base + "-"
+    if not name or not name.startswith(prefix):
+        return None
+    try:
+        k = int(name[len(prefix):])
+    except ValueError:
+        return None
+    return k if 1 <= k <= 20 else None
+
+
+def prefill_for_unmanaged(db: Session, user: User) -> dict[str, Any] | None:
+    """Подсказка плана для пользователя без базового имени (не пишет в БД).
+
+    База — самое частое владельческое имя конфига, которое проходит валидацию и
+    свободно среди других пользователей. Индексы восстанавливаются из имён
+    base / base-k, узлы и протоколы — из владельческих конфигов.
+    """
+    configs = db.query(VpnConfig).filter(VpnConfig.owner_id == user.id).all()
+    if not configs:
+        return None
+
+    counter = Counter((c.client_name or "") for c in configs)
+    base: str | None = None
+    for name, _ in counter.most_common():
+        try:
+            assert_client_base_name_valid(name)
+        except ValueError:
+            continue
+        taken = (
+            db.query(User)
+            .filter(func.lower(User.client_base_name) == name.lower(), User.id != user.id)
+            .first()
+        )
+        if taken is not None:
+            continue
+        base = name
+        break
+    if base is None:
+        return None
+
+    indexes: set[int] = set()
+    for c in configs:
+        name = c.client_name or ""
+        if name == base:
+            indexes.add(1)
+        else:
+            k = _tail_index(base, name)
+            if k is not None:
+                indexes.add(k)
+
+    return {
+        "client_base_name": base,
+        "plan_config_indexes": sorted(indexes) if indexes else [1],
+        "node_ids": sorted({c.node_id for c in configs}),
+        "protocols": sorted({c.vpn_type.value for c in configs}),
+    }
+
+
+def validate_plan_nodes(db: Session, node_ids: list[int]) -> list[Node]:
+    """Узлы для плана: существуют, не прокси и не реплики HA (только standalone/primary)."""
+    if not node_ids:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Укажите хотя бы один узел")
+    unique = list(dict.fromkeys(node_ids))
+    nodes = db.query(Node).filter(Node.id.in_(unique)).all()
+    if len(nodes) != len(unique):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Один из узлов не найден")
+    replicas: set[int] = set()
+    for group in db.query(NodeSyncGroup).all():
+        try:
+            replicas.update(int(item) for item in json.loads(group.replica_node_ids or "[]"))
+        except (TypeError, ValueError):
+            continue
+    for node in nodes:
+        if node.node_kind == "proxy":
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Узел «{node.name}» — прокси, его нельзя назначать в план абонента",
+            )
+        if node.id in replicas:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"Узел «{node.name}» — реплика HA, назначьте первичный узел группы",
+            )
+    return nodes
 
 
 def compute_plan(db: Session, user: User) -> ProvisionPlan:
