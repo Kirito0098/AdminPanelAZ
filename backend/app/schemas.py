@@ -333,6 +333,7 @@ class SelfServiceQuotaResponse(BaseModel):
     remaining: int | None = None
     unlimited: bool = False
     can_create: bool = True
+    can_manage: bool = True
     create_rate_max: int | None = None
     create_rate_window_seconds: int | None = None
 

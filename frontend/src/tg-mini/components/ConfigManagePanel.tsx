@@ -194,7 +194,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
   }
 
   const handleRenewCert = async () => {
-    const days = Number(certDays)
+    const days = isAdmin ? Number(certDays) : 3650
     if (!Number.isFinite(days) || days < 1 || days > 3650) {
       setFeedback({ tone: 'error', text: 'Срок сертификата: от 1 до 3650 дней' })
       return
@@ -361,18 +361,24 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
       {config.vpn_type === 'openvpn' && (
         <ManageSection title="Сертификат" summary={certExpiry ?? '—'} defaultOpen={false}>
           <div className="space-y-3">
-            <div className="space-y-2">
-              <Label htmlFor="tg-mini-renew-cert">Новый срок (дней)</Label>
-              <Input
-                id="tg-mini-renew-cert"
-                type="number"
-                min={1}
-                max={3650}
-                value={certDays}
-                onChange={(e) => setCertDays(e.target.value)}
-                disabled={busy != null}
-              />
-            </div>
+            {isAdmin ? (
+              <div className="space-y-2">
+                <Label htmlFor="tg-mini-renew-cert">Новый срок (дней)</Label>
+                <Input
+                  id="tg-mini-renew-cert"
+                  type="number"
+                  min={1}
+                  max={3650}
+                  value={certDays}
+                  onChange={(e) => setCertDays(e.target.value)}
+                  disabled={busy != null}
+                />
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Сертификат будет обновлён на максимальный срок (3650 дней)
+              </p>
+            )}
             <Button
               type="button"
               variant="secondary"
