@@ -187,6 +187,18 @@ def update_user(
             invalidate_user_sessions(db, user, reason="disabled", commit=False)
             active_web_session_service.revoke_user_sessions(db, user.username, commit=False)
         user.is_active = payload.is_active
+    if "panel_login_enabled" in payload.model_fields_set:
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только администратор может менять вход в панель",
+            )
+        if payload.panel_login_enabled is False and user.panel_login_enabled:
+            # Existing access/refresh sessions stop working: token_version bumps all JWTs,
+            # revoke_user_sessions ends the active web sessions.
+            user.token_version = (user.token_version or 0) + 1
+            active_web_session_service.revoke_user_sessions(db, user.username, commit=False)
+        user.panel_login_enabled = payload.panel_login_enabled
     if "access_until" in payload.model_fields_set:
         if not is_admin:
             raise HTTPException(

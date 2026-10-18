@@ -268,6 +268,7 @@ class UserUpdate(BaseModel):
     can_create_configs: bool | None = None
     can_manage_configs: bool | None = None
     visible_vpn_profiles: dict | None = None
+    panel_login_enabled: bool | None = None
 
     @field_validator("access_until", mode="before")
     @classmethod
@@ -292,6 +293,7 @@ class UserResponse(UserBase):
     can_create_configs: bool = True
     can_manage_configs: bool = False
     visible_vpn_profiles: dict | None = None
+    panel_login_enabled: bool = True
     timezone: str = ""
     noc_daily_time: str = ""
     noc_weekly_dow: str = ""

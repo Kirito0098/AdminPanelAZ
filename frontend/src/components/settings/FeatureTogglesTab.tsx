@@ -51,6 +51,15 @@ const PROFILE_META: Record<string, { icon: LucideIcon }> = {
   full: { icon: Rocket },
 }
 
+/** «Клиенты» и «Пользователи (абоненты)» не выключаются одновременно. */
+const CORE_UI_MODULES = ['clients_page', 'user_provisioning'] as const
+
+function isLastEnabledCoreModule(key: string, draft: Record<string, boolean>): boolean {
+  if (!CORE_UI_MODULES.includes(key as (typeof CORE_UI_MODULES)[number])) return false
+  const other = key === 'clients_page' ? 'user_provisioning' : 'clients_page'
+  return Boolean(draft[key]) && !(draft[other] ?? false)
+}
+
 function stripPresetRamLine(description: string): string {
   return description.split(';')[0].trim().replace(/\.$/, '')
 }
@@ -100,10 +109,14 @@ function ModuleToggleRow({
   item,
   enabled,
   onChange,
+  disabledSwitch,
+  blockHint,
 }: {
   item: FeatureToggleItem
   enabled: boolean
   onChange: (enabled: boolean) => void
+  disabledSwitch?: boolean
+  blockHint?: string
 }) {
   const switchId = `module-${item.key}`
   return (
@@ -155,6 +168,11 @@ function ModuleToggleRow({
           {!enabled && item.disable_hint && (
             <p className="mt-2 text-xs leading-snug text-muted-foreground">{item.disable_hint}</p>
           )}
+          {disabledSwitch && blockHint && (
+            <p className="mt-2 rounded-md border border-amber-500/25 bg-amber-500/8 px-2.5 py-1.5 text-xs text-amber-950 dark:text-amber-100">
+              {blockHint}
+            </p>
+          )}
 
           {enabled && item.resource_savings && (
             <p className="mt-1.5 line-clamp-1 text-xs text-muted-foreground" title={item.resource_savings}>
@@ -166,7 +184,8 @@ function ModuleToggleRow({
         <Switch
           id={switchId}
           checked={enabled}
-          onCheckedChange={onChange}
+          onCheckedChange={disabledSwitch ? undefined : onChange}
+          disabled={disabledSwitch}
           className="mt-1 shrink-0"
           aria-label={item.label}
         />
@@ -421,6 +440,14 @@ export default function FeatureTogglesTab() {
   const save = async () => {
     setSaving(true)
     try {
+      const coreOff = CORE_UI_MODULES.every((key) => !(draft[key] ?? false))
+      if (coreOff) {
+        notifyError(
+          'Нельзя отключить «Клиенты» и «Пользователи (абоненты)» одновременно. ' +
+            'Оставьте хотя бы один из этих разделов включённым.',
+        )
+        return
+      }
       const updates = Object.fromEntries(
         items.filter((item) => draft[item.key] !== item.enabled).map((item) => [item.key, draft[item.key]]),
       )
@@ -588,14 +615,23 @@ export default function FeatureTogglesTab() {
               </CardHeader>
               <CardContent className="pt-0">
                 <div className="grid grid-cols-1 gap-x-8 md:grid-cols-2">
-                  {groupItems.map((item) => (
-                    <ModuleToggleRow
-                      key={item.key}
-                      item={item}
-                      enabled={draft[item.key] ?? false}
-                      onChange={(checked) => setDraft((prev) => ({ ...prev, [item.key]: checked }))}
-                    />
-                  ))}
+                  {groupItems.map((item) => {
+                    const coreBlocked = isLastEnabledCoreModule(item.key, draft)
+                    return (
+                      <ModuleToggleRow
+                        key={item.key}
+                        item={item}
+                        enabled={draft[item.key] ?? false}
+                        onChange={(checked) => setDraft((prev) => ({ ...prev, [item.key]: checked }))}
+                        disabledSwitch={coreBlocked}
+                        blockHint={
+                          coreBlocked
+                            ? 'Нельзя выключить «Клиенты» и «Пользователи (абоненты)» одновременно — оставьте хотя бы один из этих разделов включённым.'
+                            : undefined
+                        }
+                      />
+                    )
+                  })}
                 </div>
               </CardContent>
             </Card>

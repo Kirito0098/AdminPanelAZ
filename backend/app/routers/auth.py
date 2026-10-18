@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.auth import (
     access_token_session_id,
     allowed_before_password_change,
+    assert_panel_login_allowed,
     authenticate_user,
     bearer_session_id,
     create_2fa_pending_token,
@@ -177,6 +178,8 @@ def _complete_telegram_login(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Этот Telegram аккаунт не привязан ни к одному пользователю панели",
         )
+    # Mini App signs in through Telegram and is not gated by panel_login_enabled.
+    assert_panel_login_allowed(user, mini=mini)
     admin_notify_service.send_login_success(
         db,
         actor_username=user.username,
@@ -630,6 +633,13 @@ def refresh_token(request: Request, response: Response, db: Session = Depends(ge
         failed = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         _clear_refresh_cookie(failed, request)
         return failed
+    # Panel-login gate: a disabled panel login fails like wrong credentials.
+    try:
+        assert_panel_login_allowed(user)
+    except HTTPException as exc:
+        failed = JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+        _clear_refresh_cookie(failed, request)
+        return failed
     # A pre-upgrade token has no family; its successor starts one, and the access token must name it.
     access = create_user_access_token(user, session_id=refresh_token_family(db, new_raw or raw))
     if new_raw is not None:
@@ -904,4 +914,5 @@ def passkey_login_verify(
                 remote_addr=client_ip,
             )
         raise
+    assert_panel_login_allowed(user)
     return _complete_2fa_login(user, db, request, response, details="passkey")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -61,6 +62,14 @@ ALWAYS_ALLOWED_PREFIXES = (
 
 WG_ACCESS_PREFIX = "/api/client-access/wireguard"
 CONFIGS_QR_PATH_MARKERS = ("/download", "/qr", "/one-time-link")
+
+# §8.1: user_provisioning has no broad api_prefixes (user_management owns /api/users).
+# Provisioning routes are gated by explicit path checks only:
+#   POST /api/users/provisioned, /api/users/{id}/provisioning*, /api/users/{id}/configs/*
+# GET /api/users, PATCH /api/users/{id} and /api/tg-mini/me/* are NOT gated here.
+_USER_PROVISIONING_PATH_RE = re.compile(r"^/api/users/provisioned(?:/|$)")
+_USER_PROVISIONING_ITEM_RE = re.compile(r"^/api/users/\d+/provisioning(?:/|$)")
+_USER_CONFIGS_ITEM_RE = re.compile(r"^/api/users/\d+/configs(?:/|$)")
 
 PATH_TO_MODULES: dict[str, tuple[str, ...]] = {}
 PREFIX_TO_MODULES: dict[str, tuple[str, ...]] = {}
@@ -125,8 +134,19 @@ def _wg_access_modules(path: str) -> tuple[str, ...] | None:
     return ("wireguard", "amneziawg")
 
 
+def _user_provisioning_modules(path: str) -> tuple[str, ...] | None:
+    if (
+        _USER_PROVISIONING_PATH_RE.match(path)
+        or _USER_PROVISIONING_ITEM_RE.match(path)
+        or _USER_CONFIGS_ITEM_RE.match(path)
+    ):
+        return ("user_provisioning",)
+    return None
+
+
 def _modules_for_path(path: str) -> tuple[str, ...] | None:
     for resolver in (
+        _user_provisioning_modules,
         _public_qr_modules,
         _security_public_download_modules,
         _openvpn_group_modules,

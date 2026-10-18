@@ -347,6 +347,33 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         settings_tabs=("users",),
     ),
     FeatureToggleDefinition(
+        key="clients_page",
+        env_key="FEATURE_CLIENTS_PAGE_ENABLED",
+        label="Клиенты",
+        description="Пункт «Клиенты» в меню. Маршрут остаётся доступен из карточки пользователя.",
+        icon="📇",
+        disable_hint="Пункт «Клиенты» скроется из меню; маршрут карточки пользователя останется доступен.",
+        resource_impact_level="minimal",
+        default=True,
+        group="app_module",
+        # Sidebar-only: the / route must stay reachable, no api_prefixes here.
+        frontend_paths=(),
+    ),
+    FeatureToggleDefinition(
+        key="user_provisioning",
+        env_key="FEATURE_USER_PROVISIONING_ENABLED",
+        label="Пользователи (абоненты)",
+        description="Раздел «Пользователи», набор конфигов и provisioning API.",
+        icon="👥",
+        disable_hint="Раздел «Пользователи (абоненты)» и API предоставления конфигов будут недоступны.",
+        resource_impact_level="minimal",
+        default=False,
+        group="app_module",
+        # No broad /api/users prefix — user_management owns it. Explicit path checks in
+        # feature_guards cover only provisioning routes.
+        frontend_paths=("/users",),
+    ),
+    FeatureToggleDefinition(
         key="action_logs",
         env_key="FEATURE_ACTION_LOGS_ENABLED",
         label="Логи действий",
@@ -960,10 +987,36 @@ class FeatureToggleService:
         }
 
     def update_toggles(self, updates: dict[str, bool]) -> dict:
-        for key, enabled in updates.items():
+        for key in updates:
             definition = FEATURE_TOGGLE_BY_KEY.get(key)
             if definition is None:
                 raise ValueError(f"Неизвестный модуль: {key}")
+
+        intended = {key: self.is_enabled(key) for key in FEATURE_TOGGLE_BY_KEY}
+        intended.update({key: bool(value) for key, value in updates.items()})
+
+        # «Клиенты» и «Пользователи (абоненты)» не выключаются одновременно.
+        if not intended.get("clients_page", True) and not intended.get("user_provisioning", False):
+            raise ValueError(
+                "Нельзя отключить «Клиенты» и «Пользователи (абоненты)» одновременно — "
+                "хотя бы один раздел должен оставаться включённым."
+            )
+
+        # «Пользователи (абоненты)» работают поверх «Пользователи и доступ»:
+        # выключение user_management тянет за собой user_provisioning.
+        if "user_management" in updates and not updates["user_management"]:
+            updates = dict(updates)
+            updates["user_provisioning"] = False
+            intended["user_provisioning"] = False
+
+        # Включение user_provisioning требует включённого user_management.
+        if intended.get("user_provisioning", False) and not intended.get("user_management", True):
+            raise ValueError(
+                "«Пользователи (абоненты)» требуют включённый модуль «Пользователи и доступ»."
+            )
+
+        for key, enabled in updates.items():
+            definition = FEATURE_TOGGLE_BY_KEY[key]
             self.env.set_env_value(definition.env_key, "true" if enabled else "false")
         self._invalidate_env_map()
         return self.list_toggles()
