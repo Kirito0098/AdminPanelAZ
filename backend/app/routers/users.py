@@ -1,7 +1,11 @@
 import json
 import secrets
 from collections import defaultdict
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -10,30 +14,23 @@ from app.config import get_settings
 from app.database import get_db
 from app.models import (
     BackgroundTask,
-    ClientPortalToken,
     Node,
-    QrDownloadAuditLog,
-    QrDownloadToken,
-    RefreshToken,
-    UnlockCode,
-    UnlockCodeRedemption,
     User,
-    UserActionLog,
-    UserConfigAccess,
     UserNodeAssignment,
-    UserPortalToken,
-    UserReminderLog,
     UserRole,
     VpnConfig,
     VpnType,
-    WebAuthnCredential,
+    UserTrafficSample,
+    UserTrafficStatProtocol,
 )
 from app.schemas import (
+    ConfigAccessOpRequest,
     MessageResponse,
     ProvisionPlanItem,
     ProvisionPlanResponse,
     ProvisioningConfig,
     ProvisioningConfigNode,
+    TelegramLinkCodeResponse,
     UserConfigAccessResponse,
     UserConfigAccessUpdate,
     UserCreate,
@@ -46,9 +43,13 @@ from app.schemas import (
     UserProvisioningSuggested,
     UserProvisioningUpdate,
     UserResponse,
+    UserStatsResponse,
+    UserTrafficStatRow,
+    UserTrafficTotals,
     UserUpdate,
 )
 from app.services.action_log import log_action
+from app.services.access_policy import AccessPolicyService
 from app.services.admin_notify import admin_notify_service
 from app.services.active_web_session import active_web_session_service
 from app.services.background_tasks import background_task_service
@@ -62,15 +63,29 @@ from app.services.client_portal import revoke_creator_portal_links
 from app.services.config_access import get_user_config_grants, set_user_config_access
 from app.services.ip_restriction import ip_restriction_service
 from app.services.notify_time import get_client_timezone_from_request
+from app.services.node_manager import get_adapter_for_node, get_node_antizapret_path, node_metadata_dict
+from app.services.node_sync.groups import require_ha_primary_for_client_ops
+from app.services.config_provisioning import deprovision_config
+from app.services.traffic.ha_aggregate import resolve_traffic_scope
+from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
+from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
+from app.services.file_download import attachment_response
+from app.services.qr_generator import generate_qr_png, prefers_download_link_qr
+from app.services.telegram_link import create_link_code
 from app.services.user_provisioning import (
     TASK_TYPE,
+    USER_DELETE_CLEANUP_TASK_TYPE,
     compute_plan,
+    enqueue_user_delete_cleanup,
     enqueue_user_provision,
+    is_in_plan_config,
     prefill_for_unmanaged,
+    purge_user_before_delete,
     recompute_provision_state,
     user_has_plan,
     validate_plan_nodes,
 )
+from app.routers.configs import _qr_download_service, _require_profile_path_allowed
 from app.services.admin_bootstrap import (
     scrub_admin_bootstrap_secret_from_env,
     should_scrub_env_after_password_change,
@@ -170,34 +185,35 @@ def _user_summary(user: User, node_ids: list[int]) -> UserProvisionSummary:
     )
 
 
-def _purge_user_before_delete(db: Session, user: User, successor: User) -> None:
-    db.query(RefreshToken).filter(RefreshToken.user_id == user.id).delete(synchronize_session=False)
-    db.query(UserConfigAccess).filter(UserConfigAccess.user_id == user.id).delete(synchronize_session=False)
-    db.query(UserReminderLog).filter(UserReminderLog.user_id == user.id).delete(synchronize_session=False)
-    db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).delete(synchronize_session=False)
-    # Обнулённый user_id сделал бы погашение клиентским и мог бы нарушить уникальность (код, клиент, узел).
-    db.query(UnlockCodeRedemption).filter(UnlockCodeRedemption.user_id == user.id).delete(synchronize_session=False)
-    for model in (ClientPortalToken, UnlockCode, UserPortalToken):
-        db.query(model).filter(model.created_by_user_id == user.id).update(
-            {model.created_by_user_id: None},
-            synchronize_session=False,
-        )
-    db.query(VpnConfig).filter(VpnConfig.owner_id == user.id).update(
-        {VpnConfig.owner_id: successor.id},
-        synchronize_session=False,
-    )
-    db.query(QrDownloadToken).filter(QrDownloadToken.created_by_user_id == user.id).update(
-        {QrDownloadToken.created_by_user_id: None},
-        synchronize_session=False,
-    )
-    db.query(QrDownloadAuditLog).filter(QrDownloadAuditLog.actor_user_id == user.id).update(
-        {QrDownloadAuditLog.actor_user_id: None},
-        synchronize_session=False,
-    )
-    db.query(UserActionLog).filter(UserActionLog.user_id == user.id).update(
-        {UserActionLog.user_id: None},
-        synchronize_session=False,
-    )
+def _get_owned_config(db: Session, user_id: int, config_id: int) -> VpnConfig:
+    """Конфиг пользователя; несоответствие владельца → 404 «не найдено»
+    (без утечки чужих id)."""
+    config = db.get(VpnConfig, config_id)
+    if config is None or config.owner_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
+    return config
+
+
+def _resolve_op_config_and_node(db: Session, config: VpnConfig) -> tuple[VpnConfig, Node]:
+    """D2-операции ведутся на узле конфига (не активном). Теневая (HA-реплика)
+    конфигурация — через первичный конфиг/первичный узел."""
+    node = db.get(Node, config.node_id)
+    if config.ha_primary_config_id is not None:
+        primary = db.get(VpnConfig, config.ha_primary_config_id)
+        if primary is not None:
+            config = primary
+            node = db.get(Node, config.node_id)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
+    return config, node
+
+
+def _antizapret_path_for_node(db: Session, node: Node) -> Path:
+    meta = node_metadata_dict(node)
+    raw = meta.get("antizapret_path")
+    if raw:
+        return Path(str(raw))
+    return settings.antizapret_path
 
 
 @router.get("", response_model=list[UserResponse])
@@ -860,6 +876,275 @@ def remove_provisioning_config(
     )
 
 
+@router.get("/{user_id}/configs/{config_id}/files")
+def config_files(
+    user_id: int,
+    config_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """D2: список файлов профиля с узла конфига."""
+    config = _get_owned_config(db, user_id, config_id)
+    op_config, node = _resolve_op_config_and_node(db, config)
+    require_ha_primary_for_client_ops(db, node=node)
+    adapter = get_adapter_for_node(node)
+    files = adapter.get_profile_files(op_config.client_name, op_config.vpn_type)
+    return enrich_profile_files(op_config.client_name, files)
+
+
+@router.get("/{user_id}/configs/{config_id}/download")
+def config_download(
+    user_id: int,
+    config_id: int,
+    path: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """D2: скачать файл профиля с узла конфига."""
+    config = _get_owned_config(db, user_id, config_id)
+    op_config, node = _resolve_op_config_and_node(db, config)
+    require_ha_primary_for_client_ops(db, node=node)
+    adapter = get_adapter_for_node(node)
+    _require_profile_path_allowed(db, current_user, op_config, path, adapter=adapter)
+    hosts = load_node_remote_hosts(db, node.id)
+    content = read_profile_file_for_delivery(adapter, path, hosts)
+    filename = build_profile_download_filename(op_config.client_name, path=path)
+    return attachment_response(content, filename)
+
+
+@router.get("/{user_id}/configs/{config_id}/qr")
+def config_qr(
+    user_id: int,
+    config_id: int,
+    path: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """D2: QR-код профиля с узла конфига."""
+    config = _get_owned_config(db, user_id, config_id)
+    op_config, node = _resolve_op_config_and_node(db, config)
+    require_ha_primary_for_client_ops(db, node=node)
+    adapter = get_adapter_for_node(node)
+    _require_profile_path_allowed(db, current_user, op_config, path, adapter=adapter)
+    hosts = load_node_remote_hosts(db, node.id)
+    content = read_profile_file_for_delivery(adapter, path, hosts)
+    if prefers_download_link_qr(path=path, content=content):
+        link = _qr_download_service(db, request).create_token(
+            file_path=path,
+            config_type=op_config.vpn_type.value,
+            config_name=build_profile_download_filename(op_config.client_name, path=path),
+            node_id=node.id,
+            creator_id=current_user.id,
+            creator_username=current_user.username,
+            remote_addr=request.client.host if request.client else None,
+        )
+        png = generate_qr_png(link["url"])
+        headers = {
+            "X-Qr-Content": "download-link",
+            "X-Qr-Download-Url": link["url"],
+            "Access-Control-Expose-Headers": "X-Qr-Content, X-Qr-Download-Url",
+        }
+        return Response(content=png, media_type="image/png", headers=headers)
+    png = generate_qr_png(content)
+    headers = {
+        "X-Qr-Content": "profile",
+        "Access-Control-Expose-Headers": "X-Qr-Content, X-Qr-Download-Url",
+    }
+    return Response(content=png, media_type="image/png", headers=headers)
+
+
+@router.post("/{user_id}/configs/{config_id}/access")
+def config_access(
+    user_id: int,
+    config_id: int,
+    payload: ConfigAccessOpRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """D2: block_temp / block_perm / unblock на узле конфига (сервис client_access)."""
+    config = _get_owned_config(db, user_id, config_id)
+    op_config, node = _resolve_op_config_and_node(db, config)
+    require_ha_primary_for_client_ops(db, node=node)
+    adapter = get_adapter_for_node(node)
+    service = AccessPolicyService(
+        db,
+        antizapret_path=_antizapret_path_for_node(db, node),
+        node_id=node.id,
+        node_name=node.name,
+        adapter=adapter,
+    )
+    client_name = op_config.client_name
+    actor = current_user.username
+    if payload.op == "block_temp":
+        if not payload.days:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите срок блокировки")
+        if op_config.vpn_type == VpnType.openvpn:
+            result = service.openvpn_temp_block(client_name, payload.days, actor=actor)
+        elif op_config.vpn_type == VpnType.wireguard:
+            result = service.wg_temp_block(client_name, payload.days, actor=actor)
+        else:
+            result = service.awg2_temp_block(client_name, payload.days, actor=actor)
+    elif payload.op == "block_perm":
+        if op_config.vpn_type == VpnType.openvpn:
+            result = service.openvpn_permanent_block(client_name, actor=actor)
+        elif op_config.vpn_type == VpnType.wireguard:
+            result = service.wg_permanent_block(client_name, actor=actor)
+        else:
+            result = service.awg2_permanent_block(client_name, actor=actor)
+    elif payload.op == "unblock":
+        if op_config.vpn_type == VpnType.openvpn:
+            result = service.openvpn_unblock(client_name, actor=actor)
+        elif op_config.vpn_type == VpnType.wireguard:
+            result = service.wg_unblock(client_name, actor=actor)
+        else:
+            result = service.awg2_unblock(client_name, actor=actor)
+    else:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неизвестная операция доступа")
+    log_action(
+        db,
+        action=f"config_access_{payload.op}",
+        user_id=current_user.id,
+        username=current_user.username,
+        remote_addr=request.client.host if request.client else None,
+        details=f"config={config.id} client={client_name} op={payload.op}",
+    )
+    return result
+
+
+@router.delete("/{user_id}/configs/{config_id}", response_model=MessageResponse)
+def config_delete(
+    user_id: int,
+    config_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """D2: deprovision конфига; если в плане — provision_state = pending."""
+    config = _get_owned_config(db, user_id, config_id)
+    op_config, node = _resolve_op_config_and_node(db, config)
+    require_ha_primary_for_client_ops(db, node=node)
+    user = db.get(User, user_id)
+    plan_delete = is_in_plan_config(db, user, op_config)
+    deprovision_config(db, config=op_config, actor=current_user, notify=True, request=request)
+    if plan_delete:
+        user.provision_state = "pending"
+        db.commit()
+    return MessageResponse(message=f"Клиент '{op_config.client_name}' удалён")
+
+
+@router.get("/{user_id}/stats", response_model=UserStatsResponse)
+def user_stats(
+    user_id: int,
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """D13: трафик пользователя по его конфигам (тень HA складывается в primary-узел)."""
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    retention_days = int(get_settings().traffic_sample_retention_days or 90)
+    days = min(days, retention_days)
+    until_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    since_utc = until_utc - timedelta(days=days)
+
+    totals = UserTrafficTotals()
+    rows: list[UserTrafficStatRow] = []
+    configs = (
+        db.query(VpnConfig)
+        .filter(VpnConfig.owner_id == user_id, VpnConfig.ha_primary_config_id.is_(None))
+        .order_by(VpnConfig.client_name, VpnConfig.node_id)
+        .all()
+    )
+    for config in configs:
+        scope = resolve_traffic_scope(db, config.node_id)
+        scope_ids = scope.node_ids
+        stats = (
+            db.query(UserTrafficStatProtocol)
+            .filter(
+                UserTrafficStatProtocol.node_id.in_(scope_ids),
+                UserTrafficStatProtocol.common_name == config.client_name,
+            )
+            .all()
+        )
+        rx = tx = rx_vpn = tx_vpn = rx_az = tx_az = sessions = 0
+        first_seen: datetime | None = None
+        last_seen: datetime | None = None
+        for row in stats:
+            rx += int(row.total_received or 0)
+            tx += int(row.total_sent or 0)
+            rx_vpn += int(row.total_received_vpn or 0)
+            tx_vpn += int(row.total_sent_vpn or 0)
+            rx_az += int(row.total_received_antizapret or 0)
+            tx_az += int(row.total_sent_antizapret or 0)
+            sessions += int(row.total_sessions or 0)
+            if row.first_seen_at is not None and (first_seen is None or row.first_seen_at < first_seen):
+                first_seen = row.first_seen_at
+            if row.last_seen_at is not None and (last_seen is None or row.last_seen_at > last_seen):
+                last_seen = row.last_seen_at
+        samples = (
+            db.query(UserTrafficSample)
+            .filter(
+                UserTrafficSample.node_id.in_(scope_ids),
+                UserTrafficSample.common_name == config.client_name,
+                UserTrafficSample.created_at >= since_utc,
+                UserTrafficSample.created_at < until_utc,
+            )
+            .all()
+        )
+        period_bytes = 0
+        daily: dict[str, int] = {}
+        for sample in samples:
+            period_bytes += int(sample.delta_received or 0) + int(sample.delta_sent or 0)
+            day = sample.created_at.date().isoformat()
+            daily[day] = daily.get(day, 0) + int(sample.delta_received or 0) + int(sample.delta_sent or 0)
+        rows.append(
+            UserTrafficStatRow(
+                node_id=config.node_id,
+                client_name=config.client_name,
+                vpn_type=config.vpn_type.value,
+                total_received=rx,
+                total_sent=tx,
+                total_bytes=rx + tx,
+                total_received_vpn=rx_vpn,
+                total_sent_vpn=tx_vpn,
+                total_received_antizapret=rx_az,
+                total_sent_antizapret=tx_az,
+                total_sessions=sessions,
+                period_bytes=period_bytes,
+                first_seen_at=first_seen,
+                last_seen_at=last_seen,
+                daily=[{"date": d, "bytes": b} for d, b in sorted(daily.items())],
+            )
+        )
+        totals.received += rx
+        totals.sent += tx
+        totals.received_vpn += rx_vpn
+        totals.sent_vpn += tx_vpn
+        totals.received_antizapret += rx_az
+        totals.sent_antizapret += tx_az
+        totals.sessions += sessions
+        totals.period_bytes += period_bytes
+    totals.bytes = totals.received + totals.sent
+    return UserStatsResponse(user_id=user_id, period_days=days, rows=rows, totals=totals)
+
+
+@router.post("/{user_id}/telegram-link-code", response_model=TelegramLinkCodeResponse)
+def telegram_link_code_admin(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Админ выдаёт код привязки Telegram другому пользователю."""
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    code, ttl = create_link_code(db, target)
+    return TelegramLinkCodeResponse(code=code, expires_in_seconds=ttl)
+
+
 @router.get("/{user_id}/config-access", response_model=UserConfigAccessResponse)
 def get_user_config_access_endpoint(
     user_id: int,
@@ -915,12 +1200,57 @@ def delete_user(
                 detail="Нельзя удалить последнего администратора",
             )
     deleted_username = user.username
+    active_provision = (
+        db.query(BackgroundTask)
+        .filter(
+            BackgroundTask.task_type == TASK_TYPE,
+            BackgroundTask.subject_key == f"user:{user_id}",
+            BackgroundTask.status.in_(["queued", "running"]),
+        )
+        .first()
+    )
+    if active_provision is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "user_provision_in_progress",
+                "message": "У пользователя выполняется задача предоставления конфигов",
+            },
+        )
+    has_plan = user_has_plan(user)
     if user.role != UserRole.admin:
         revoke_creator_portal_links(db, user.id, keep_accessible=False)
         db.flush()
-    _purge_user_before_delete(db, user, current_user)
-    db.delete(user)
+    if not has_plan:
+        # Без плана — исходное поведение: очистка и удаление строки.
+        purge_user_before_delete(db, user, current_user)
+        db.delete(user)
+        db.commit()
+        if settings.audit_log_enabled:
+            log_action(
+                db,
+                action="user_delete",
+                user_id=current_user.id,
+                username=current_user.username,
+                remote_addr=ip_restriction_service.get_client_ip(request),
+                details=f"deleted={deleted_username}",
+            )
+        admin_notify_service.send_user_delete(
+            db,
+            actor_username=current_user.username,
+            target_name=deleted_username,
+            client_timezone=get_client_timezone_from_request(request),
+        )
+        return MessageResponse(message="Пользователь удалён")
+    # С планом: pending_deletion, вход+портал выключены, очистка в фоне.
+    user.provision_state = "pending_deletion"
+    user.panel_login_enabled = False
+    user.is_active = False
+    user.token_version = (user.token_version or 0) + 1
+    invalidate_user_sessions(db, user, reason="deleted", commit=False)
+    active_web_session_service.revoke_user_sessions(db, user.username, commit=False)
     db.commit()
+    enqueue_user_delete_cleanup(db, user_id=user.id, actor_username=current_user.username)
     if settings.audit_log_enabled:
         log_action(
             db,
@@ -928,7 +1258,7 @@ def delete_user(
             user_id=current_user.id,
             username=current_user.username,
             remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"deleted={deleted_username}",
+            details=f"deleted={deleted_username}, pending_deletion",
         )
     admin_notify_service.send_user_delete(
         db,
@@ -936,4 +1266,7 @@ def delete_user(
         target_name=deleted_username,
         client_timezone=get_client_timezone_from_request(request),
     )
-    return MessageResponse(message="Пользователь удалён")
+    return JSONResponse(
+        status_code=status.HTTP_202_ACCEPTED,
+        content={"message": "Удаление запущено"},
+    )

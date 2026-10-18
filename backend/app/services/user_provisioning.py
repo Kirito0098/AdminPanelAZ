@@ -25,7 +25,28 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import SessionLocal
-from app.models import BackgroundTask, Node, NodeStatus, NodeSyncGroup, User, UserNodeAssignment, VpnConfig, VpnType
+from app.models import (
+    BackgroundTask,
+    ClientPortalToken,
+    Node,
+    NodeStatus,
+    NodeSyncGroup,
+    QrDownloadAuditLog,
+    QrDownloadToken,
+    RefreshToken,
+    UnlockCode,
+    UnlockCodeRedemption,
+    User,
+    UserActionLog,
+    UserConfigAccess,
+    UserNodeAssignment,
+    UserPortalToken,
+    UserReminderLog,
+    UserRole,
+    VpnConfig,
+    VpnType,
+    WebAuthnCredential,
+)
 from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import _submit_in_current_context, background_task_service
 from app.services.client_names import (
@@ -40,6 +61,7 @@ from app.services.feature_guards import get_feature_service
 from app.services.ssh_tunnel_pool import SshTunnelError
 
 TASK_TYPE = "user_provision"
+USER_DELETE_CLEANUP_TASK_TYPE = "user_delete_cleanup"
 
 # Сетевые ошибки узла: после первой такой ошибки на узле остальные его элементы
 # пропускаются (та же политика, что у портала).
@@ -341,6 +363,38 @@ def is_in_plan_config(db: Session, user: User, config: VpnConfig) -> bool:
         .filter_by(user_id=user.id, node_id=config.node_id)
         .first()
         is not None
+    )
+
+
+def purge_user_before_delete(db: Session, user: User, successor: User) -> None:
+    """Переносит владение оставшимися (off-plan) конфигами на successeur и
+    обнуляет ссылки на удаляемого пользователя в смежных таблицах."""
+    db.query(RefreshToken).filter(RefreshToken.user_id == user.id).delete(synchronize_session=False)
+    db.query(UserConfigAccess).filter(UserConfigAccess.user_id == user.id).delete(synchronize_session=False)
+    db.query(UserReminderLog).filter(UserReminderLog.user_id == user.id).delete(synchronize_session=False)
+    db.query(WebAuthnCredential).filter(WebAuthnCredential.user_id == user.id).delete(synchronize_session=False)
+    # Обнулённый user_id сделал бы погашение клиентским и мог бы нарушить уникальность (код, клиент, узел).
+    db.query(UnlockCodeRedemption).filter(UnlockCodeRedemption.user_id == user.id).delete(synchronize_session=False)
+    for model in (ClientPortalToken, UnlockCode, UserPortalToken):
+        db.query(model).filter(model.created_by_user_id == user.id).update(
+            {model.created_by_user_id: None},
+            synchronize_session=False,
+        )
+    db.query(VpnConfig).filter(VpnConfig.owner_id == user.id).update(
+        {VpnConfig.owner_id: successor.id},
+        synchronize_session=False,
+    )
+    db.query(QrDownloadToken).filter(QrDownloadToken.created_by_user_id == user.id).update(
+        {QrDownloadToken.created_by_user_id: None},
+        synchronize_session=False,
+    )
+    db.query(QrDownloadAuditLog).filter(QrDownloadAuditLog.actor_user_id == user.id).update(
+        {QrDownloadAuditLog.actor_user_id: None},
+        synchronize_session=False,
+    )
+    db.query(UserActionLog).filter(UserActionLog.user_id == user.id).update(
+        {UserActionLog.user_id: None},
+        synchronize_session=False,
     )
 
 
@@ -652,3 +706,120 @@ def run_user_provision_task(task_id: str, user_id: int) -> dict[str, Any]:
         output=json.dumps({"success": True, "items": results}, ensure_ascii=False),
     )
     return {"success": True, "items": results}
+
+
+def _resolve_delete_actor(session: Session, actor_username: str | None, fallback: User) -> User:
+    actor = _load_actor(session, actor_username, fallback)
+    if actor.role == UserRole.admin:
+        return actor
+    admin = (
+        session.query(User)
+        .filter(User.role == UserRole.admin, User.is_active.is_(True))
+        .first()
+    )
+    return admin or fallback
+
+
+def enqueue_user_delete_cleanup(db: Session, *, user_id: int, actor_username: str) -> BackgroundTask:
+    """Поставить фоновую задачу очистки при удалении пользователя с планом.
+
+    Возвращает уже активную задачу пользователя, если она есть (повторный
+    DELETE не создаёт дублей).
+    """
+    subject_key = f"user:{user_id}"
+    existing = background_task_service.find_active_task(
+        USER_DELETE_CLEANUP_TASK_TYPE, subject_key=subject_key
+    )
+    if existing is not None:
+        return existing
+
+    task_id = background_task_service.create_queued_task(
+        USER_DELETE_CLEANUP_TASK_TYPE,
+        f"Удаление пользователя {user_id}…",
+        created_by_username=actor_username,
+        subject_key=subject_key,
+    )
+
+    def _callable(progress_updater: Callable[..., Any] | None = None) -> dict[str, Any]:
+        return run_user_delete_cleanup(task_id, user_id, actor_username)
+
+    _submit_in_current_context(background_task_service.run_background_task, task_id, _callable)
+    task = background_task_service.get_task(task_id)
+    if task is None:
+        raise RuntimeError("Не удалось создать фоновую задачу удаления пользователя")
+    return task
+
+
+def run_user_delete_cleanup(task_id: str, user_id: int, actor_username: str | None = None) -> dict[str, Any]:
+    """Очистка пользователя с планом: deprovision in-plan конфигов, реassign
+    off-plan конфигов администратору, удаление присваиваний и строки User.
+
+    Любая ошибка deprovision оставляет пользователя в ``pending_deletion`` —
+    удаление можно повторить.
+    """
+    from app.services.active_web_session import active_web_session_service
+    from app.services.client_portal import revoke_creator_portal_links
+    from app.services.refresh_token import invalidate_user_sessions
+
+    db = SessionLocal()
+    try:
+        user = db.get(User, user_id)
+        if user is None:
+            return {"success": True, "errors": []}
+
+        actor = _resolve_delete_actor(db, actor_username, user)
+
+        # Доступ в панель/портал и сессии отключаем сразу.
+        user.panel_login_enabled = False
+        user.is_active = False
+        user.token_version = (user.token_version or 0) + 1
+        revoke_creator_portal_links(db, user.id, keep_accessible=False)
+        invalidate_user_sessions(db, user, reason="deleted", commit=False)
+        active_web_session_service.revoke_user_sessions(db, user.username, commit=False)
+
+        configs = db.query(VpnConfig).filter(VpnConfig.owner_id == user.id).all()
+        in_plan: list[VpnConfig] = []
+        off_plan: list[VpnConfig] = []
+        for config in configs:
+            (in_plan if is_in_plan_config(db, user, config) else off_plan).append(config)
+
+        errors: list[str] = []
+        for config in in_plan:
+            try:
+                deprovision_config(db, config=config, actor=actor, notify=False)
+            except Exception as exc:  # не гасим всё удаление из-за одного конфига
+                errors.append(f"{config.client_name} (node {config.node_id}): {exc}")
+
+        if errors:
+            db.rollback()
+            background_task_service.update_background_task(
+                task_id,
+                status="completed",
+                progress_percent=100,
+                progress_stage="Ошибка очистки",
+                message="Очистка завершена с ошибками",
+                output=json.dumps({"success": False, "errors": errors}, ensure_ascii=False),
+            )
+            return {"success": False, "errors": errors}
+
+        purge_user_before_delete(db, user, actor)  # остальные (off-plan) конфиги → администратор
+        db.query(UserNodeAssignment).filter_by(user_id=user.id).delete(synchronize_session=False)
+        db.delete(user)
+        db.commit()
+
+        output = {
+            "success": True,
+            "deprovisioned": len(in_plan),
+            "reassigned": len(off_plan),
+        }
+        background_task_service.update_background_task(
+            task_id,
+            status="completed",
+            progress_percent=100,
+            progress_stage="Готово",
+            message="Пользователь удалён",
+            output=json.dumps(output, ensure_ascii=False),
+        )
+        return {"success": True, **output}
+    finally:
+        db.close()

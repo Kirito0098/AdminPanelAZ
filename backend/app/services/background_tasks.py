@@ -55,6 +55,7 @@ _PIPELINE_TASK_TYPES = {
     "node_sync_shared_domain",
     "node_update_roll",
     "user_provision",
+    "user_delete_cleanup",
 }
 
 _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
@@ -79,6 +80,7 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "node_sync_shared_domain": ("Применение shared domain…", "Запись хостов в setup…", 5),
     "node_update_roll": ("Rolling update узлов…", "Подготовка очереди…", 3),
     "user_provision": ("Применение плана конфигов…", "Подготовка плана…", 5),
+    "user_delete_cleanup": ("Удаление пользователя…", "Подготовка очистки…", 5),
 }
 
 _TASK_DONE_PROGRESS: dict[str, str] = {
@@ -103,6 +105,7 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "node_sync_shared_domain": "Shared domain применён на узлах",
     "node_update_roll": "Rolling update завершён",
     "user_provision": "План конфигов применён",
+    "user_delete_cleanup": "Пользователь удалён",
 }
 
 

@@ -1304,6 +1304,48 @@ class TelegramLinkCodeResponse(BaseModel):
     expires_in_seconds: int
 
 
+class UserTrafficTotals(BaseModel):
+    received: int = 0
+    sent: int = 0
+    bytes: int = 0
+    received_vpn: int = 0
+    sent_vpn: int = 0
+    received_antizapret: int = 0
+    sent_antizapret: int = 0
+    sessions: int = 0
+    period_bytes: int = 0
+
+
+class UserTrafficStatRow(BaseModel):
+    node_id: int
+    client_name: str
+    vpn_type: str
+    total_received: int = 0
+    total_sent: int = 0
+    total_bytes: int = 0
+    total_received_vpn: int = 0
+    total_sent_vpn: int = 0
+    total_received_antizapret: int = 0
+    total_sent_antizapret: int = 0
+    total_sessions: int = 0
+    period_bytes: int = 0
+    first_seen_at: datetime | None = None
+    last_seen_at: datetime | None = None
+    daily: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class UserStatsResponse(BaseModel):
+    user_id: int
+    period_days: int
+    rows: list[UserTrafficStatRow] = []
+    totals: UserTrafficTotals = Field(default_factory=UserTrafficTotals)
+
+
+class ConfigAccessOpRequest(BaseModel):
+    op: Literal["block_temp", "block_perm", "unblock"]
+    days: int | None = Field(default=None, ge=1, le=3650)
+
+
 class TelegramBotInfoResponse(BaseModel):
     bot_username: str = ""
     bot_url: str = ""

@@ -17,6 +17,7 @@ from app.database import Base, get_db
 from app.models import Node, NodeStatus, User, UserRole, UserNodeAssignment, VpnConfig, VpnType
 from app.routers import users as users_router
 from app.services.admin_notify import admin_notify_service
+from app.services.app_setting_store import _set_setting
 
 
 @pytest.fixture()
@@ -303,3 +304,21 @@ def test_reject_proxy_node_assignment(client, db, admin, nodes, proxy_node):
     assert response.status_code in (status.HTTP_400_BAD_REQUEST, status.HTTP_422_UNPROCESSABLE_ENTITY), response.text
     detail = response.json().get("detail", "")
     assert "прокси" in str(detail).lower(), detail
+
+
+# 8. admin password reset → must_change_password (Task 7 не ломаем)
+def test_admin_password_reset_sets_must_change_password(client, db, admin):
+    _set_setting(db, "user_require_password_change", "1")
+    db.commit()
+    ivan = User(username="ivan", password_hash="x", role=UserRole.user, panel_login_enabled=False)
+    db.add(ivan)
+    db.commit()
+    db.refresh(ivan)
+
+    response = client.patch(
+        f"/api/users/{ivan.id}",
+        json={"password": "Str0ng!Pass"},
+        headers=_headers(db, admin),
+    )
+    assert response.status_code == status.HTTP_200_OK, response.text
+    assert db.query(User).filter_by(id=ivan.id).one().must_change_password is True
