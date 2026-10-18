@@ -22,7 +22,12 @@ from app.schemas import (
     VpnConfigResponse,
     VpnConfigUpdate,
 )
-from app.services.self_service import build_quota_payload, enforce_user_can_create_config
+from app.services.self_service import (
+    awg2_ttl_for_actor,
+    build_quota_payload,
+    enforce_user_can_create_config,
+    openvpn_cert_days_for_actor,
+)
 from app.services.user_subscription import apply_owner_access_until_to_config, replicate_inherited_access_until
 from app.services.client_portal import cleanup_deleted_client_records, revoke_client_portal_links
 from app.services.config_access import can_mutate_config, can_view_config, list_accessible_configs
@@ -179,6 +184,21 @@ def _can_access_config(user: User, config: VpnConfig, db: Session | None = None)
 
 def _can_mutate_config(user: User, config: VpnConfig) -> bool:
     return can_mutate_config(user, config)
+
+
+def _raise_if_cannot_mutate(user: User, config: VpnConfig) -> None:
+    if _can_mutate_config(user, config):
+        return
+    if (
+        user.role == UserRole.user
+        and config.owner_id == user.id
+        and not bool(getattr(user, "can_manage_configs", False))
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Управление конфигурациями отключено администратором",
+        )
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
 
 def _to_response(
@@ -545,9 +565,11 @@ def create_config(
     require_vpn_type(payload.vpn_type.value, service=get_feature_service())
     enforce_can_create_vpn_type(db, current_user, payload.vpn_type)
     adapter = get_active_adapter(db)
+    cert_days = openvpn_cert_days_for_actor(current_user, payload.cert_expire_days)
+    ttl = awg2_ttl_for_actor(current_user, payload.ttl)
     awg2_expires_at = None
     if payload.vpn_type == VpnType.openvpn:
-        adapter.add_openvpn_client(payload.client_name, payload.cert_expire_days or 3650)
+        adapter.add_openvpn_client(payload.client_name, cert_days)
         recreate_openvpn_profiles_after_admin_change(
             adapter,
             client_names=[payload.client_name],
@@ -558,11 +580,11 @@ def create_config(
     elif payload.vpn_type == VpnType.amneziawg2:
         require_awg2_installed(adapter)
         try:
-            awg2_expires_at = compute_expires_at(payload.ttl)
+            awg2_expires_at = compute_expires_at(ttl)
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        if payload.ttl:
-            adapter.awg2_add_client(payload.client_name, ttl=payload.ttl)
+        if ttl:
+            adapter.awg2_add_client(payload.client_name, ttl=ttl)
         else:
             adapter.awg2_add_client(payload.client_name)
     else:
@@ -573,7 +595,7 @@ def create_config(
         client_name=payload.client_name,
         vpn_type=payload.vpn_type,
         owner_id=owner_id,
-        cert_expire_days=payload.cert_expire_days,
+        cert_expire_days=cert_days if payload.vpn_type == VpnType.openvpn else payload.cert_expire_days,
         expires_at=awg2_expires_at,
         description=payload.description,
     )
@@ -660,8 +682,7 @@ def update_config(
     config = _get_config_for_active_node(db, config_id)
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_mutate_config(current_user, config):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+    _raise_if_cannot_mutate(current_user, config)
 
     require_ha_primary_for_client_ops(db)
 
@@ -685,16 +706,17 @@ def update_config(
         metadata_changed = True
     if payload.cert_expire_days is not None and config.vpn_type == VpnType.openvpn:
         adapter = get_active_adapter(db)
-        adapter.add_openvpn_client(config.client_name, payload.cert_expire_days)
+        days = openvpn_cert_days_for_actor(current_user, payload.cert_expire_days)
+        adapter.add_openvpn_client(config.client_name, days)
         recreate_openvpn_profiles_after_admin_change(
             adapter,
             client_names=[config.client_name],
             hosts=load_node_remote_hosts(db, config.node_id),
         )
-        config.cert_expire_days = payload.cert_expire_days
+        config.cert_expire_days = days
         refresh_config_cert_expiry(config, adapter)
         cert_renewed = True
-        renewed_days = payload.cert_expire_days
+        renewed_days = days
 
     db.commit()
     db.refresh(config)
@@ -731,8 +753,7 @@ def delete_config(
     config = _get_config_for_active_node(db, config_id)
     if not config:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_mutate_config(current_user, config):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+    _raise_if_cannot_mutate(current_user, config)
 
     require_ha_primary_for_client_ops(db)
     adapter = get_active_adapter(db)

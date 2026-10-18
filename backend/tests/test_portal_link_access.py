@@ -200,3 +200,22 @@ def test_deleted_admin_links_survive(factory, monkeypatch):
         users_router.delete_user(ADMIN2, MagicMock(), db=db, current_user=db.get(User, ADMIN))
 
         assert _active_tokens(db) == {"c_alice", "c_dave"}
+
+
+def test_owner_without_manage_flag_keeps_portal_access(factory, monkeypatch):
+    configs = [SimpleNamespace(owner_id=OWNER, client_name="alice")]
+    monkeypatch.setattr(portal_router, "_configs_for_client", lambda _db, _name: configs)
+    owner = SimpleNamespace(id=OWNER, role=UserRole.user, can_manage_configs=False)
+
+    portal_router._assert_can_manage_client(owner, MagicMock(), "alice")
+
+    with factory() as db:
+        _config(db, "alice", owner_id=OWNER)
+        _link(db, "alice", "c_alice", creator_id=OWNER)
+        db.get(User, OWNER).can_manage_configs = False
+        db.commit()
+
+        assert revoke_creator_portal_links(db, OWNER, keep_accessible=True) == 0
+        db.commit()
+
+        assert _active_tokens(db) == {"c_alice"}

@@ -30,7 +30,7 @@ from app.models import (
     VpnConfig,
     WgAccessPolicy,
 )
-from app.services.config_access import can_mutate_config
+from app.services.config_access import is_config_owner
 from app.services.node_adapter import node_request_timeout_cap
 from app.services.node_manager import get_active_node, get_adapter_for_node
 from app.services.node_sync.groups import find_sync_group_containing_node
@@ -532,7 +532,7 @@ def _creator_still_manages(db: Session, creator: User, row: ClientPortalToken) -
         )
         .all()
     )
-    return any(can_mutate_config(creator, config) for config in configs)
+    return any(is_config_owner(creator, config) for config in configs)
 
 
 def revoke_client_portal_links(db: Session, *, node_id: int, client_name: str) -> int:

@@ -27,6 +27,20 @@ CREATE_RATE_WINDOW_BOUNDS = (60, 86400)
 
 REMINDER_DEDUP_SECONDS = 86400
 
+USER_OPENVPN_CERT_DAYS = 3650
+
+
+def openvpn_cert_days_for_actor(actor: User, requested: int | None) -> int:
+    if actor.role == UserRole.admin:
+        return requested or USER_OPENVPN_CERT_DAYS
+    return USER_OPENVPN_CERT_DAYS
+
+
+def awg2_ttl_for_actor(actor: User, requested: str | None) -> str | None:
+    if actor.role == UserRole.admin:
+        return requested
+    return None
+
 
 def _get_setting_int(db: Session, key: str, default: int) -> int:
     raw = _get_setting(db, key, str(default)).strip()
@@ -143,6 +157,7 @@ def build_quota_payload(db: Session, user: User) -> dict:
         "limit": limit,
         "remaining": remaining,
         "unlimited": limit is None,
+        "can_manage": user.role == UserRole.admin or bool(getattr(user, "can_manage_configs", False)),
         "can_create": bool(getattr(user, "can_create_configs", True)) and (limit is None or used < limit),
         "create_rate_max": rate_max if user.role == UserRole.user else None,
         "create_rate_window_seconds": rate_window if user.role == UserRole.user else None,

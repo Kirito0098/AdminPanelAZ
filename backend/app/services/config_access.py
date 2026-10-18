@@ -33,10 +33,20 @@ def can_view_config(user: User, config: VpnConfig, db: Session) -> bool:
     return matches_user_config_grant(db, user.id, config.client_name)
 
 
-def can_mutate_config(user: User, config: VpnConfig) -> bool:
+def is_config_owner(user: User, config: VpnConfig) -> bool:
+    """Admin always True; else owner. Does NOT check can_manage_configs (portal uses this)."""
     if user.role == UserRole.admin:
         return True
     return config.owner_id == user.id
+
+
+def can_mutate_config(user: User, config: VpnConfig) -> bool:
+    """Admin always True; else owner AND can_manage_configs."""
+    if user.role == UserRole.admin:
+        return True
+    if not is_config_owner(user, config):
+        return False
+    return bool(getattr(user, "can_manage_configs", False))
 
 
 def list_accessible_configs(db: Session, user: User, query_base) -> list[VpnConfig]:

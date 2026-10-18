@@ -23,7 +23,7 @@ from app.services.client_portal import (
 from app.services.feature_guards import get_feature_service, module_disabled_message
 from app.services.node_manager import get_active_node
 from app.services.node_sync.groups import find_sync_group_containing_node
-from app.services.config_access import can_mutate_config
+from app.services.config_access import is_config_owner
 
 router = APIRouter(prefix="/portal", tags=["portal"])
 
@@ -69,7 +69,7 @@ def _assert_can_manage_client(user: User, db: Session, client_name: str) -> None
         raise HTTPException(status_code=404, detail="Клиент не найден")
     if user.role == UserRole.admin:
         return
-    if not any(can_mutate_config(user, c) for c in configs):
+    if not any(is_config_owner(user, c) for c in configs):
         raise HTTPException(status_code=403, detail="Недостаточно прав")
 
 
