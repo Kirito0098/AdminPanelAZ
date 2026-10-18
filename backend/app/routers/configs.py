@@ -32,6 +32,7 @@ from app.services.client_portal import revoke_client_portal_links
 from app.services.config_access import can_mutate_config, can_view_config, list_accessible_configs
 from app.services.client_names import validate_new_client_name
 from app.services.config_provisioning import deprovision_config, provision_config
+from app.services.user_provisioning import is_in_plan_config, user_has_plan
 from app.services.background_tasks import background_task_service
 from app.services.config_csv_ops import (
     enqueue_config_csv_import,
@@ -536,6 +537,15 @@ def create_config(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # D3: пользователь с планом создаёт конфиги только через «Мои конфиги»
+    # (Mini App / /me/plan-configs) или через администратора.
+    if current_user.role != UserRole.admin and user_has_plan(current_user):
+        provisioning_enabled = get_feature_service().is_enabled("user_provisioning")
+        if provisioning_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Добавьте конфиг через Мои конфиги или запросите у админа",
+            )
     enforce_user_can_create_config(db, current_user)
     require_ha_primary_for_client_ops(db)
     owner_id = payload.owner_id if current_user.role == UserRole.admin and payload.owner_id else current_user.id
@@ -631,6 +641,11 @@ def update_config(
     config = _get_config_for_active_node(db, config_id)
     if not config or not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
+    if current_user.role != UserRole.admin and is_in_plan_config(db, current_user, config):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Конфиг из плана нельзя менять напрямую — удалите конфиг целиком в Мои конфиги или обратитесь к администратору",
+        )
     _raise_if_cannot_mutate(current_user, config)
 
     require_ha_primary_for_client_ops(db)
@@ -703,11 +718,21 @@ def delete_config(
     config = _get_config_for_active_node(db, config_id)
     if not config or not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
+    if current_user.role != UserRole.admin and is_in_plan_config(db, current_user, config):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Конфиг из плана нельзя удалять напрямую — удалите конфиг целиком в Мои конфиги или обратитесь к администратору",
+        )
     _raise_if_cannot_mutate(current_user, config)
 
     require_ha_primary_for_client_ops(db)
     client_name = config.client_name
+    owner = db.get(User, config.owner_id)
+    was_in_plan = owner is not None and is_in_plan_config(db, owner, config)
     deprovision_config(db, config=config, actor=current_user, notify=True, request=request)
+    if was_in_plan:
+        owner.provision_state = "pending"
+        db.commit()
     return MessageResponse(message=f"Клиент '{client_name}' удалён")
 
 

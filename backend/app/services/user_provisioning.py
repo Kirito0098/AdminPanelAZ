@@ -106,6 +106,14 @@ def user_has_plan(user: User, *, provisioning_enabled: bool = True) -> bool:
     return bool(provisioning_enabled and getattr(user, "client_base_name", None))
 
 
+def plan_name_count(user: User) -> int:
+    """Число имён в плане пользователя (D3 квота): индексы ``plan_config_indexes``, а не созданные файлы.
+
+    1 → ``base``, k → ``base-k``; реальные конфиги на узлах здесь не считаются.
+    """
+    return len(parse_plan_indexes(getattr(user, "plan_config_indexes", None) or []))
+
+
 def _desired_protocols(user: User) -> list[str]:
     raw = getattr(user, "desired_protocols", None) or ""
     try:

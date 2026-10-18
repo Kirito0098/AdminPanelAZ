@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import User, UserRole, VpnConfig
 from app.services.app_setting_store import _get_setting, _set_setting
+from app.services.user_provisioning import plan_name_count, user_has_plan
 from app.services.rate_limit.backends import MemoryRateLimitBackend
 from app.services.rate_limit.sliding_window import RateLimitExceeded, SlidingWindowLimiter
 from app.services.user_subscription import user_subscription_expired
@@ -146,9 +147,17 @@ def get_owned_client_names(db: Session, user: User, node_id: int | None = None) 
     return {name for (name,) in query.all() if name}
 
 
+def _quota_used(db: Session, user: User) -> int:
+    """Учтённые под квоту конфиги: для пользователя с планом — число имён плана
+    (``plan_config_indexes``, D3), для остальных — реальные конфиги (как раньше)."""
+    if user_has_plan(user):
+        return plan_name_count(user)
+    return count_user_configs(db, user.id)
+
+
 def build_quota_payload(db: Session, user: User) -> dict:
     limit = get_user_config_quota_limit(db, user)
-    used = count_user_configs(db, user.id)
+    used = _quota_used(db, user)
     remaining = None if limit is None else max(0, limit - used)
     rate_max = _create_rate_max(db)
     rate_window = _create_rate_window(db)
@@ -204,7 +213,7 @@ def enforce_user_can_create_config(db: Session, user: User) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Создание конфигураций отключено администратором")
     limit = get_user_config_quota_limit(db, user)
     if limit is not None:
-        used = count_user_configs(db, user.id)
+        used = _quota_used(db, user)
         if used >= limit:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
