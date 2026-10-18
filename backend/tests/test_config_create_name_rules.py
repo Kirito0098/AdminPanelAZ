@@ -13,6 +13,7 @@ from app.database import Base
 from app.models import Node, NodeStatus, User, UserRole, VpnConfig, VpnType
 from app.routers import configs as configs_router
 from app.schemas import VpnConfigCreate
+from app.services.admin_notify import admin_notify_service
 
 
 @pytest.fixture()
@@ -62,14 +63,8 @@ def _create(db, node: Node, owner: User, adapter: MagicMock, client_name: str, v
         "get_feature_service": MagicMock(return_value=SimpleNamespace()),
         "enforce_can_create_vpn_type": MagicMock(),
         "get_active_adapter": MagicMock(return_value=adapter),
-        "recreate_openvpn_profiles_after_admin_change": MagicMock(),
-        "load_node_remote_hosts": MagicMock(return_value=[]),
-        "refresh_config_cert_expiry": MagicMock(),
-        "purge_traffic_history_for_reused_name": MagicMock(),
-        "apply_owner_access_until_to_config": MagicMock(return_value={}),
         "find_sync_group_for_primary": MagicMock(return_value=None),
         "get_active_node": MagicMock(return_value=node),
-        "get_client_timezone_from_request": MagicMock(return_value="UTC"),
         "_viewer_visibility_policy": MagicMock(return_value={}),
         "resolve_openvpn_group_for_user": MagicMock(return_value=None),
         "_local_ip_for_config": MagicMock(return_value=None),
@@ -79,7 +74,18 @@ def _create(db, node: Node, owner: User, adapter: MagicMock, client_name: str, v
     payload = VpnConfigCreate(client_name=client_name, vpn_type=vpn_type)
     with (
         patch.multiple(configs_router, **patches),
-        patch.object(configs_router.admin_notify_service, "send_config_create"),
+        patch.object(admin_notify_service, "send_config_create"),
+        patch("app.services.config_provisioning.get_adapter_for_node", return_value=adapter),
+        patch(
+            "app.services.config_provisioning.recreate_openvpn_profiles_after_admin_change", MagicMock()
+        ),
+        patch("app.services.config_provisioning.load_node_remote_hosts", MagicMock(return_value=[])),
+        patch("app.services.config_provisioning.refresh_config_cert_expiry", MagicMock()),
+        patch("app.services.config_provisioning.purge_traffic_history_for_reused_name", MagicMock()),
+        patch(
+            "app.services.config_provisioning.apply_owner_access_until_to_config",
+            MagicMock(return_value={}),
+        ),
     ):
         return configs_router.create_config(payload, SimpleNamespace(client=SimpleNamespace(host="127.0.0.1")), db, admin)
 

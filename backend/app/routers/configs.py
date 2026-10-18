@@ -28,11 +28,10 @@ from app.services.self_service import (
     enforce_user_can_create_config,
     openvpn_cert_days_for_actor,
 )
-from app.services.user_subscription import apply_owner_access_until_to_config, replicate_inherited_access_until
-from app.services.client_portal import cleanup_deleted_client_records, revoke_client_portal_links
+from app.services.client_portal import revoke_client_portal_links
 from app.services.config_access import can_mutate_config, can_view_config, list_accessible_configs
 from app.services.client_names import validate_new_client_name
-from app.services.admin_notify import admin_notify_service
+from app.services.config_provisioning import deprovision_config, provision_config
 from app.services.background_tasks import background_task_service
 from app.services.config_csv_ops import (
     enqueue_config_csv_import,
@@ -48,12 +47,8 @@ from app.services.client_local_ip import build_client_local_ip_map
 from app.services.config_import import format_config_disk_sync_message, import_clients_from_disk
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.client_sync import (
-    format_ha_replicate_errors,
     maybe_replicate_cert_renew,
-    maybe_replicate_create,
-    maybe_replicate_delete,
     maybe_replicate_config_metadata,
-    purge_ha_shadow_configs,
 )
 from app.services.node_sync.groups import (
     build_ha_metadata,
@@ -62,14 +57,12 @@ from app.services.node_sync.groups import (
     require_ha_primary_for_client_ops,
 )
 from app.services.openvpn_cert import days_remaining_until, refresh_config_cert_expiry
-from app.services.traffic.maintenance import purge_traffic_history_for_reused_name
 from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
 from app.services.openvpn_group import (
     filter_openvpn_profile_files,
     list_openvpn_groups,
     set_user_openvpn_group,
 )
-from app.services.notify_time import get_client_timezone_from_request
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.file_download import attachment_response
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
@@ -77,8 +70,6 @@ from app.services.profile_files import profile_files_batch_key
 from app.services.panel_publish_info import resolve_public_base_url
 from app.services.qr_download import QrDownloadService
 from app.services.qr_generator import generate_qr_png, prefers_download_link_qr
-from app.services.access_policy import forget_deleted_openvpn_client
-from app.services.awg2 import compute_expires_at, require_awg2_installed
 from app.services.security import SecurityService
 from app.services.vpn_profile_visibility import (
     POLICY_GROUP_TO_SETTING,
@@ -565,84 +556,35 @@ def create_config(
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Конфигурация уже существует")
     try:
-        validate_new_client_name(db, node_id=node_id, client_name=payload.client_name)
+        validate_new_client_name(
+            db, node_id=node_id, client_name=payload.client_name, owner_id=owner_id
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     require_vpn_type(payload.vpn_type.value, service=get_feature_service())
     enforce_can_create_vpn_type(db, current_user, payload.vpn_type)
-    adapter = get_active_adapter(db)
     cert_days = openvpn_cert_days_for_actor(current_user, payload.cert_expire_days)
     ttl = awg2_ttl_for_actor(current_user, payload.ttl)
-    awg2_expires_at = None
-    if payload.vpn_type == VpnType.openvpn:
-        adapter.add_openvpn_client(payload.client_name, cert_days)
-        recreate_openvpn_profiles_after_admin_change(
-            adapter,
-            client_names=[payload.client_name],
-            hosts=load_node_remote_hosts(db, node_id),
-        )
-    elif payload.vpn_type == VpnType.wireguard:
-        adapter.add_wireguard_client(payload.client_name)
-    elif payload.vpn_type == VpnType.amneziawg2:
-        require_awg2_installed(adapter)
-        try:
-            awg2_expires_at = compute_expires_at(ttl)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        if ttl:
-            adapter.awg2_add_client(payload.client_name, ttl=ttl)
-        else:
-            adapter.awg2_add_client(payload.client_name)
-    else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неизвестный тип VPN")
-
-    config = VpnConfig(
-        node_id=node_id,
-        client_name=payload.client_name,
-        vpn_type=payload.vpn_type,
-        owner_id=owner_id,
-        cert_expire_days=cert_days if payload.vpn_type == VpnType.openvpn else payload.cert_expire_days,
-        expires_at=awg2_expires_at,
-        description=payload.description,
-    )
-    refresh_config_cert_expiry(config, adapter)
-    purge_traffic_history_for_reused_name(db, node_id=node_id, client_name=payload.client_name)
-    db.add(config)
-    db.commit()
-    db.refresh(config)
-
-    inherit = apply_owner_access_until_to_config(
-        db,
-        config,
-        actor=current_user.username,
-        commit=True,
-        replicate=False,
-    )
-
-    ha_replicate_warning = None
-    group = find_sync_group_for_primary(db, node_id)
-    if group:
-        replicate_result = maybe_replicate_create(db, node_id=node_id, primary_config=config)
-        ha_replicate_warning = format_ha_replicate_errors(replicate_result)
-        inherit = replicate_inherited_access_until(db, config, inherit, actor=current_user.username)
-
-    if inherit.get("warning"):
-        if ha_replicate_warning:
-            ha_replicate_warning = f"{ha_replicate_warning}; {inherit['warning']}"
-        else:
-            ha_replicate_warning = inherit["warning"]
 
     node = get_active_node(db)
-    admin_notify_service.send_config_create(
-        db,
-        actor_username=current_user.username,
-        target_name=config.client_name,
-        target_type=config.vpn_type.value,
-        node_id=node.id,
-        node_name=node.name,
-        client_timezone=get_client_timezone_from_request(request),
-    )
+    adapter = get_active_adapter(db)
+    try:
+        config, ha_replicate_warning = provision_config(
+            db,
+            node=node,
+            client_name=payload.client_name,
+            vpn_type=payload.vpn_type,
+            owner=owner,
+            actor=current_user,
+            notify=True,
+            cert_expire_days=cert_days if payload.vpn_type == VpnType.openvpn else payload.cert_expire_days,
+            ttl=ttl,
+            description=payload.description,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     return _to_response(
         config,
         db,
@@ -764,36 +706,8 @@ def delete_config(
     _raise_if_cannot_mutate(current_user, config)
 
     require_ha_primary_for_client_ops(db)
-    adapter = get_active_adapter(db)
-    if config.vpn_type == VpnType.openvpn:
-        adapter.delete_openvpn_client(config.client_name)
-        forget_deleted_openvpn_client(db, adapter, node_id=config.node_id, client_name=config.client_name)
-    elif config.vpn_type == VpnType.amneziawg2:
-        adapter.awg2_delete_client(config.client_name)
-    else:
-        adapter.delete_wireguard_client(config.client_name)
-
     client_name = config.client_name
-    vpn_type = config.vpn_type.value
-    node = get_active_node(db)
-
-    sync_group = find_sync_group_for_primary(db, node.id)
-    if sync_group:
-        maybe_replicate_delete(db, node_id=node.id, primary_config=config)
-
-    purge_ha_shadow_configs(db, config.id)
-    db.delete(config)
-    cleanup_deleted_client_records(db, config)
-    db.commit()
-    admin_notify_service.send_config_delete(
-        db,
-        actor_username=current_user.username,
-        target_name=client_name,
-        target_type=vpn_type,
-        node_id=node.id,
-        node_name=node.name,
-        client_timezone=get_client_timezone_from_request(request),
-    )
+    deprovision_config(db, config=config, actor=current_user, notify=True, request=request)
     return MessageResponse(message=f"Клиент '{client_name}' удалён")
 
 
