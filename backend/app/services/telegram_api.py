@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -15,7 +16,19 @@ logger = logging.getLogger(__name__)
 _API_BASE = "https://api.telegram.org/bot{token}/{method}"
 _TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 _TELEGRAM_API_HOST = "api.telegram.org"
-ALLOWED_UPDATES = ["message", "callback_query", "inline_query", "chosen_inline_result"]
+_BOT_TOKEN_IN_URL_RE = re.compile(r"/bot[^/\s]+/")
+
+
+def redact_bot_token(text: str) -> str:
+    """Mask bot tokens that appear in Telegram API URLs inside exception text."""
+    return _BOT_TOKEN_IN_URL_RE.sub("/bot<redacted>/", text or "")
+ALLOWED_UPDATES = [
+    "message",
+    "callback_query",
+    "inline_query",
+    "chosen_inline_result",
+    "my_chat_member",
+]
 
 
 def bot_api_url(token: str, method: str) -> str:
@@ -177,10 +190,10 @@ async def call_bot_api_result(
             )
         return BotApiResult(ok=True, result=data.get("result"))
     except Exception as exc:
-        logger.warning("Telegram API %s error: %s", method, exc)
+        logger.warning("Telegram API %s error: %s", method, redact_bot_token(str(exc)))
         return BotApiResult(
             ok=False,
-            error=format_telegram_connect_error(str(exc), operation=operation),
+            error=format_telegram_connect_error(redact_bot_token(str(exc)), operation=operation),
         )
 
 
@@ -218,6 +231,7 @@ async def send_message(
         "chat_id": chat_id,
         "text": text,
         "parse_mode": parse_mode,
+        "link_preview_options": {"is_disabled": True},
     }
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
@@ -251,6 +265,8 @@ async def answer_inline_query(
     *,
     cache_time: int = 0,
     is_personal: bool = True,
+    switch_pm_text: str | None = None,
+    switch_pm_parameter: str | None = None,
 ) -> bool:
     payload: dict[str, Any] = {
         "inline_query_id": inline_query_id,
@@ -258,6 +274,9 @@ async def answer_inline_query(
         "cache_time": max(0, int(cache_time)),
         "is_personal": is_personal,
     }
+    if switch_pm_text and switch_pm_parameter:
+        payload["switch_pm_text"] = switch_pm_text
+        payload["switch_pm_parameter"] = switch_pm_parameter
     return (await call_bot_api(bot_token, "answerInlineQuery", payload=payload)) is not None
 
 
@@ -322,8 +341,27 @@ async def delete_webhook(bot_token: str) -> tuple[bool, str]:
     )
 
 
+async def leave_chat(bot_token: str, chat_id: str | int) -> bool:
+    return (await call_bot_api(bot_token, "leaveChat", payload={"chat_id": chat_id})) is not None
+
+
 def delete_webhook_sync(bot_token: str) -> tuple[bool, str]:
     return _post_checked_sync(bot_token, "deleteWebhook", {"drop_pending_updates": True}, "отключить бота от панели")
+
+
+def get_webhook_info_sync(bot_token: str) -> tuple[bool, dict[str, Any] | str]:
+    """Return (ok, info_dict) or (False, error_message)."""
+    from app.services.telegram_transport import bot_api_post_sync
+
+    try:
+        data = bot_api_post_sync(bot_token, "getWebhookInfo", json={})
+    except Exception as exc:
+        return False, format_telegram_connect_error(str(exc), operation="получить статус webhook")
+    ok, err = _ok_or_error(data, "getWebhookInfo", "получить статус webhook")
+    if not ok:
+        return False, err
+    result = data.get("result") if isinstance(data, dict) else None
+    return True, result if isinstance(result, dict) else {}
 
 
 def set_webhook_sync(bot_token: str, url: str, *, secret_token: str | None = None) -> tuple[bool, str]:

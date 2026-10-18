@@ -382,6 +382,46 @@ nginx_ensure_server_names_hash() {
   nginx_log "Snippet server_names_hash: ${dest}"
 }
 
+nginx_privacy_log_dest() {
+  printf '%s/adminpanelaz-privacy-log.conf' "$(nginx_conf_d_dir)"
+}
+
+nginx_ensure_privacy_log() {
+  local src dest dir
+  src="${NGINX_TEMPLATE_DIR}/adminpanelaz-privacy-log.conf"
+  dir="$(nginx_conf_d_dir)"
+  dest="$(nginx_privacy_log_dest)"
+  [[ -f "$src" ]] || nginx_die "Нет шаблона privacy-log: ${src}"
+  mkdir -p "$dir"
+  NGINX_PRIVACY_LOG_DEST="$dest"
+  NGINX_PRIVACY_LOG_BAK=""
+  NGINX_PRIVACY_LOG_CHANGED=false
+  if [[ -f "$dest" ]]; then
+    if cmp -s "$src" "$dest"; then
+      return 0
+    fi
+    NGINX_PRIVACY_LOG_BAK="${dest}.apaz-privacy.bak.$$"
+    cp -a "$dest" "$NGINX_PRIVACY_LOG_BAK"
+    cp "$src" "$dest"
+    NGINX_PRIVACY_LOG_CHANGED=true
+  else
+    cp "$src" "$dest"
+    NGINX_PRIVACY_LOG_CHANGED=true
+  fi
+  nginx_log "Snippet privacy access log: ${dest}"
+}
+
+nginx_rollback_privacy_log() {
+  local dest="${NGINX_PRIVACY_LOG_DEST:-}"
+  [[ -n "$dest" ]] || return 0
+  [[ "${NGINX_PRIVACY_LOG_CHANGED:-false}" == "true" ]] || return 0
+  if [[ -n "${NGINX_PRIVACY_LOG_BAK:-}" && -f "$NGINX_PRIVACY_LOG_BAK" ]]; then
+    mv -f "$NGINX_PRIVACY_LOG_BAK" "$dest"
+  else
+    rm -f "$dest"
+  fi
+}
+
 nginx_rollback_server_names_hash() {
   local dest="${NGINX_HASH_SNIPPET_DEST:-}"
   [[ -n "$dest" ]] || return 0
@@ -553,6 +593,7 @@ nginx_install_temp_acme_http_vhost() {
   http_port="${http_port:-80}"
 
   nginx_ensure_server_names_hash
+  nginx_ensure_privacy_log
   mkdir -p "$(nginx_acme_webroot)/.well-known/acme-challenge"
   base="$(nginx_acme_temp_site_basename "$domain")"
   available_dir="$(nginx_sites_available_dir)"
@@ -1958,6 +1999,7 @@ nginx_install_site() {
     return 1
   fi
   nginx_ensure_server_names_hash
+  nginx_ensure_privacy_log
   nginx_conf_paths "$domain"
   available_dir="$(nginx_sites_available_dir)"
   enabled_dir="$(nginx_sites_enabled_dir)"

@@ -86,9 +86,10 @@ def test_route_download_rate_limit_propagates(client):
     assert resp.json()["detail"] == "too many"
 
 
-def test_qr_download_get_requires_pin_when_token_has_pin(client):
+def test_qr_download_get_html_shows_pin_when_token_has_pin(client):
     peeked = MagicMock()
     peeked.pin_hash = "abc"
+    peeked.config_name = "alice.ovpn"
     with (
         patch("app.routers.public_download.ip_restriction_service") as ip_svc,
         patch("app.routers.public_download.public_download_rate_limit_service") as rl,
@@ -100,14 +101,18 @@ def test_qr_download_get_requires_pin_when_token_has_pin(client):
         Svc.return_value.peek_token.return_value = peeked
         resp = client.get("/api/public/qr-download/tok-abc")
 
-    assert resp.status_code == 428
-    assert "PIN" in resp.json()["detail"]
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert 'name="pin"' in resp.text
+    assert "Скачать" in resp.text
+    Svc.return_value.redeem_token.assert_not_called()
     rl.consume.assert_called_once_with("203.0.113.1")
 
 
-def test_qr_download_get_requires_pin_when_global_pin_set(client):
+def test_qr_download_get_html_shows_pin_when_global_pin_set(client):
     peeked = MagicMock()
     peeked.pin_hash = None
+    peeked.config_name = "bob.conf"
     with (
         patch("app.routers.public_download.ip_restriction_service") as ip_svc,
         patch("app.routers.public_download.public_download_rate_limit_service"),
@@ -119,7 +124,8 @@ def test_qr_download_get_requires_pin_when_global_pin_set(client):
         Svc.return_value.peek_token.return_value = peeked
         resp = client.get("/api/public/qr-download/tok-old")
 
-    assert resp.status_code == 428
+    assert resp.status_code == 200
+    assert 'name="pin"' in resp.text
     Svc.return_value.redeem_token.assert_not_called()
 
 

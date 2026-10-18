@@ -25,11 +25,18 @@ def send_tg_message(bot_token: str, chat_id: str, text: str, *, run_async: bool 
             body = telegram_transport.bot_api_post_sync(
                 bot_token,
                 "sendMessage",
-                json={"chat_id": chat_id, "text": text, "parse_mode": "HTML"},
+                json={
+                    "chat_id": chat_id,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "link_preview_options": {"is_disabled": True},
+                },
                 timeout=10,
             )
         except Exception as exc:
-            logger.warning("TG notify failed chat_id=%s: %s", chat_id, exc)
+            from app.services.telegram_api import redact_bot_token
+
+            logger.warning("TG notify failed chat_id=%s: %s", chat_id, redact_bot_token(str(exc)))
             return False
         if not body.get("ok"):
             logger.warning("TG notify failed chat_id=%s: %s", chat_id, body.get("description"))
@@ -81,9 +88,14 @@ def send_tg_document_result(
                 )
             return True, None
         except Exception as exc:
-            logger.warning("TG document send failed chat_id=%s file=%s: %s", chat_id, file_path, exc)
+            logger.warning(
+                "TG document send failed chat_id=%s file=%s: %s",
+                chat_id,
+                file_path,
+                telegram_api.redact_bot_token(str(exc)),
+            )
             return False, telegram_api.format_telegram_connect_error(
-                str(exc),
+                telegram_api.redact_bot_token(str(exc)),
                 operation="отправить документ",
             )
 
@@ -156,7 +168,12 @@ def send_tg_photo(
                 return False
             return True
         except Exception as exc:
-            logger.warning("TG photo send failed chat_id=%s file=%s: %s", chat_id, file_path, exc)
+            logger.warning(
+                "TG photo send failed chat_id=%s file=%s: %s",
+                chat_id,
+                file_path,
+                telegram_api.redact_bot_token(str(exc)),
+            )
             return False
 
     if run_async:

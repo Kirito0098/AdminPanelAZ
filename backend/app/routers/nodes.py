@@ -328,6 +328,8 @@ def _active_node_response(db: Session, node: Node, current_user: User) -> Active
     if current_user.role != UserRole.admin:
         node_response = node_response.model_copy(
             update={
+                "host": "hidden",
+                "port": 1,
                 "ssh_host": None,
                 "ssh_username": None,
                 "ssh_key_configured": False,
@@ -354,7 +356,7 @@ def list_nodes(_: User = Depends(require_admin), db: Session = Depends(get_db)):
 def geo_routing_hint(
     request: Request,
     client_ip: str | None = Query(default=None, description="Публичный IP клиента (опционально)"),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     resolved_ip = client_ip or ip_restriction_service.get_client_ip(request)

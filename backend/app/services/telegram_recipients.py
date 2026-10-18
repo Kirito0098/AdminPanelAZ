@@ -87,7 +87,12 @@ def filter_notify_recipients(db: Session, users: list[User], get_setting) -> lis
 
 def resolve_notify_recipient_users(db: Session, get_setting) -> list[User]:
     from app.models import User as UserModel
+    from app.models import UserRole
 
-    users = db.query(UserModel).filter(UserModel.telegram_id.isnot(None)).all()
+    users = (
+        db.query(UserModel)
+        .filter(UserModel.telegram_id.isnot(None), UserModel.role == UserRole.admin)
+        .all()
+    )
     users = [user for user in users if (user.telegram_id or "").strip()]
     return filter_notify_recipients(db, users, get_setting)

@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.services.telegram_api import answer_callback_query
+from app.services.telegram_api import answer_callback_query, leave_chat
 from app.services.telegram_bot_handlers.base import (
     BotContext,
     TelegramBotSettingsSnapshot,
@@ -214,6 +214,11 @@ class TelegramBotService:
         if not snap.interactive_enabled or not snap.bot_token:
             return
 
+        my_chat_member = update.get("my_chat_member")
+        if my_chat_member:
+            await self._handle_my_chat_member(snap.bot_token, my_chat_member)
+            return
+
         callback = update.get("callback_query")
         if callback:
             await self._handle_callback(db, callback, mini_app_url=mini_app_url, settings=snap)
@@ -351,6 +356,23 @@ class TelegramBotService:
             return
 
         await handle_chosen_inline_result(ctx, chosen)
+
+    async def _handle_my_chat_member(self, bot_token: str, my_chat_member: dict[str, Any]) -> None:
+        """Leave groups/channels — configs must never be available outside private chats."""
+        chat = my_chat_member.get("chat") or {}
+        if not _is_shared_chat(chat):
+            return
+        new_status = str((my_chat_member.get("new_chat_member") or {}).get("status") or "")
+        if new_status in {"left", "kicked"}:
+            return
+        chat_id = chat.get("id")
+        if chat_id is None:
+            return
+        ok = await leave_chat(bot_token, chat_id)
+        if ok:
+            logger.info("Left non-private Telegram chat type=%s id=%s", chat.get("type"), chat_id)
+        else:
+            logger.warning("Failed to leave Telegram chat type=%s id=%s", chat.get("type"), chat_id)
 
 
 telegram_bot_service = TelegramBotService()

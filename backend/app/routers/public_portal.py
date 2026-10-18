@@ -17,6 +17,7 @@ from app.services.client_portal import (
 from app.services.feature_guards import get_feature_service, module_disabled_message
 from app.services.file_download import attachment_response
 from app.services.ip_restriction import ip_restriction_service
+from app.services.portal_redeem_lockout import portal_redeem_lockout_service
 from app.services.public_download_rate_limit import public_download_rate_limit_service
 
 router = APIRouter(prefix="/public/portal", tags=["public-portal"])
@@ -74,10 +75,13 @@ def portal_redeem(
     if not get_feature_service().is_enabled("unlock_codes"):
         raise HTTPException(status_code=403, detail=module_disabled_message("unlock_codes"))
     row = get_valid_portal_token(db, token)
+    portal_redeem_lockout_service.check(token)
     try:
         result = redeem_public_portal_code(db, row, code=payload.code)
     except ValueError as exc:
+        portal_redeem_lockout_service.record_failure(token)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    portal_redeem_lockout_service.record_success(token)
     return {
         "ok": True,
         "grant_days": result["grant_days"],

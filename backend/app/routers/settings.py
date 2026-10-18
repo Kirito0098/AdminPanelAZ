@@ -80,7 +80,8 @@ def get_settings(current_user: User = Depends(get_current_user), db: Session = D
     exclude_ips = file_contents["exclude-ips.txt"]
     allow_ips = file_contents["allow-ips.txt"]
 
-    if current_user.role.value != "admin":
+    is_admin = current_user.role.value == "admin"
+    if not is_admin:
         include_hosts = ""
         exclude_hosts = ""
         include_ips = ""
@@ -93,7 +94,7 @@ def get_settings(current_user: User = Depends(get_current_user), db: Session = D
         noc_daily_time=current_user.noc_daily_time,
         noc_weekly_dow=current_user.noc_weekly_dow,
         noc_weekly_time=current_user.noc_weekly_time,
-        antizapret_path=str(get_node_antizapret_path(db)),
+        antizapret_path=str(get_node_antizapret_path(db)) if is_admin else "",
         include_hosts=include_hosts,
         exclude_hosts=exclude_hosts,
         include_ips=include_ips,

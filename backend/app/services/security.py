@@ -144,10 +144,12 @@ class SecurityService:
             val = int(payload["qr_download_max_downloads"])
             _set(db, "qr_download_max_downloads", str(val if val in (1, 3, 5) else 1))
         if "qr_download_pin" in payload:
+            from app.services.qr_download import MIN_PIN_LENGTH, hash_pin
+
             pin = (payload["qr_download_pin"] or "").strip()
-            if pin and len(pin) < 4:
-                raise ValueError("PIN для QR-ссылок должен быть не короче 4 символов")
-            _set(db, "qr_download_pin", pin)
+            if pin and len(pin) < MIN_PIN_LENGTH:
+                raise ValueError(f"PIN для QR-ссылок должен быть не короче {MIN_PIN_LENGTH} символов")
+            _set(db, "qr_download_pin", hash_pin(pin) if pin else "")
         if "public_download_enabled" in payload:
             set_public_download_enabled(db, bool(payload["public_download_enabled"]))
         if "portal_domain" in payload:

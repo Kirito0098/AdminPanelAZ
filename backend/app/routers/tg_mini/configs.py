@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.auth import get_tg_mini_user
 from app.database import get_db
-from app.models import User, VpnConfig
+from app.models import User, UserRole, VpnConfig
 from app.schemas import MessageResponse
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
@@ -37,19 +37,25 @@ def mini_configs(current_user: User = Depends(get_tg_mini_user), db: Session = D
         for c in rows
         if can_create_vpn_type(policy, c.vpn_type)
     ]
-    return {
-        "configs": [
+    is_admin = current_user.role == UserRole.admin
+    configs_out = []
+    for c in visible_rows:
+        show_owner = is_admin or c.owner_id == current_user.id
+        configs_out.append(
             {
                 "id": c.id,
                 "client_name": c.client_name,
                 "vpn_type": c.vpn_type.value,
-                "owner_username": c.owner.username if c.owner else None,
+                "owner_username": (c.owner.username if c.owner else None) if show_owner else None,
                 "is_mine": c.owner_id == current_user.id,
-                "owner_telegram_linked": bool((c.owner.telegram_id or "").strip()) if c.owner else False,
+                "owner_telegram_linked": (
+                    bool((c.owner.telegram_id or "").strip()) if c.owner else False
+                )
+                if show_owner
+                else False,
             }
-            for c in visible_rows
-        ]
-    }
+        )
+    return {"configs": configs_out}
 
 
 @router.get("/configs/{config_id}/files")

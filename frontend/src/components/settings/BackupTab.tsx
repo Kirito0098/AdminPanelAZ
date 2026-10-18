@@ -237,6 +237,8 @@ export default function BackupTab() {
   const [savingSettings, setSavingSettings] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [scheduleOpen, setScheduleOpen] = useState(false)
+  const [backupPasswordDraft, setBackupPasswordDraft] = useState('')
+  const [clearBackupPassword, setClearBackupPassword] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const pendingRestoreRef = useRef(false)
 
@@ -267,24 +269,34 @@ export default function BackupTab() {
       settings.backup_az_enabled !== settingsDraft.backup_az_enabled ||
       settings.backup_awg2_enabled !== settingsDraft.backup_awg2_enabled ||
       settings.auto_backup_days !== settingsDraft.auto_backup_days ||
-      settings.retention_count !== settingsDraft.retention_count
+      settings.retention_count !== settingsDraft.retention_count ||
+      backupPasswordDraft.trim().length > 0 ||
+      clearBackupPassword
     )
-  }, [settings, settingsDraft])
+  }, [settings, settingsDraft, backupPasswordDraft, clearBackupPassword])
 
   const saveSettingsDraft = async () => {
     if (!settingsDraft) return
     setSavingSettings(true)
     try {
-      const updated = await updateBackupSettings({
+      const payload: Parameters<typeof updateBackupSettings>[0] = {
         telegram_on_backup: settingsDraft.telegram_on_backup,
         auto_backup_enabled: settingsDraft.auto_backup_enabled,
         backup_az_enabled: settingsDraft.backup_az_enabled,
         backup_awg2_enabled: settingsDraft.backup_awg2_enabled,
         auto_backup_days: settingsDraft.auto_backup_days,
         retention_count: settingsDraft.retention_count,
-      })
+      }
+      if (clearBackupPassword) {
+        payload.backup_password = ''
+      } else if (backupPasswordDraft.trim()) {
+        payload.backup_password = backupPasswordDraft.trim()
+      }
+      const updated = await updateBackupSettings(payload)
       setSettings(updated)
       setSettingsDraft(updated)
+      setBackupPasswordDraft('')
+      setClearBackupPassword(false)
       success('Настройки резервного копирования сохранены')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
@@ -363,7 +375,19 @@ export default function BackupTab() {
       onConfirm: async () => {
         try {
           const resp = await withInline(async () => {
-            const result = await restoreBackup(fileName)
+            let result
+            try {
+              result = await restoreBackup(fileName)
+            } catch (err) {
+              const msg = err instanceof ApiError ? err.message : ''
+              if (msg.toLowerCase().includes('пароль')) {
+                const password = window.prompt('Введите пароль бэкапа для этого архива')
+                if (!password) throw err
+                result = await restoreBackup(fileName, password)
+              } else {
+                throw err
+              }
+            }
             await load()
             return result
           }, 'Восстановление и перезапуск...')
@@ -439,10 +463,20 @@ export default function BackupTab() {
 
     const restoreAfterUpload = pendingRestoreRef.current
     pendingRestoreRef.current = false
+    const needsPassword =
+      file.name.toLowerCase().endsWith('.enc') ||
+      file.name.toLowerCase().includes('.tar.gz.enc')
+    const uploadPassword = needsPassword
+      ? window.prompt('Архив зашифрован. Введите пароль бэкапа') || undefined
+      : undefined
+    if (needsPassword && !uploadPassword) {
+      notifyError('Для зашифрованного архива нужен пароль бэкапа')
+      return
+    }
     const runUpload = async () => {
       try {
         const uploaded = await withInline(async () => {
-          const entry = await uploadBackup(file, restoreAfterUpload)
+          const entry = await uploadBackup(file, restoreAfterUpload, uploadPassword)
           await load()
           return entry
         }, restoreAfterUpload ? 'Загрузка, восстановление и перезапуск...' : 'Загрузка архива...')
@@ -641,6 +675,47 @@ export default function BackupTab() {
                   checked={settingsDraft.telegram_on_backup}
                   onChange={(checked) => patchDraft({ telegram_on_backup: checked })}
                 />
+                <div className="space-y-2 rounded-xl border bg-card/50 p-4">
+                  <div className="flex items-start gap-2">
+                    <Shield size={16} className="mt-0.5 shrink-0 text-primary" />
+                    <div className="min-w-0 space-y-1">
+                      <p className="text-sm font-medium">Пароль бэкапа для Telegram</p>
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        Нужен, чтобы отправлять архивы в группу или канал. Пароль хранится только в
+                        панели и не уходит в Telegram. Без пароля бэкапы уходят только в личные чаты.
+                        {settings?.backup_password_set ? ' Сейчас пароль задан.' : ' Сейчас пароль не задан.'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="backup-password">Новый пароль</Label>
+                    <Input
+                      id="backup-password"
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder={settings?.backup_password_set ? '••••••••' : 'Задать пароль'}
+                      value={backupPasswordDraft}
+                      disabled={clearBackupPassword}
+                      onChange={(e) => {
+                        setBackupPasswordDraft(e.target.value)
+                        if (e.target.value) setClearBackupPassword(false)
+                      }}
+                    />
+                    {settings?.backup_password_set && (
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={clearBackupPassword}
+                          onChange={(e) => {
+                            setClearBackupPassword(e.target.checked)
+                            if (e.target.checked) setBackupPasswordDraft('')
+                          }}
+                        />
+                        Сбросить пароль
+                      </label>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -683,7 +758,7 @@ export default function BackupTab() {
             <input
               ref={uploadInputRef}
               type="file"
-              accept=".tar.gz,.tgz,application/gzip,application/x-gzip"
+              accept=".tar.gz,.tgz,.enc,application/gzip,application/x-gzip"
               className="hidden"
               onChange={(event) => void handleUploadFileSelected(event)}
             />

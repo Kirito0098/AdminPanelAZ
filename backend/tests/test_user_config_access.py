@@ -99,10 +99,11 @@ def test_can_view_grant_but_not_mutate():
     assert can_mutate_config(user, config) is False
 
 
-def test_grant_prefix_match():
-    db = _FakeDb(grants=["team-"])
+def test_grant_prefix_match_requires_explicit_star():
+    db = _FakeDb(grants=["team-*"])
     assert matches_user_config_grant(db, 1, "team-alice") is True
     assert matches_user_config_grant(db, 1, "other") is False
+    assert matches_user_config_grant(_FakeDb(grants=["team-"]), 1, "team-alice") is False
 
 
 def test_no_access_without_owner_or_grant():

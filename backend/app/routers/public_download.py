@@ -1,5 +1,7 @@
+from html import escape
+
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -19,10 +21,6 @@ from app.services.security import SecurityService
 
 router = APIRouter(prefix="/public", tags=["public"])
 settings = get_settings()
-
-
-class PinRequest(BaseModel):
-    pin: str = ""
 
 
 def _qr_settings(db: Session) -> dict:
@@ -50,6 +48,49 @@ def _qr_delivery_source(db: Session, row: QrDownloadToken):
     return get_adapter_for_node(node), load_node_remote_hosts(db, node.id)
 
 
+def _qr_download_page(*, token: str, config_name: str, pin_required: bool) -> HTMLResponse:
+    """Self-contained page: GET must not redeem the one-time token (link previews)."""
+    name = escape(config_name or "config")
+    pin_block = (
+        '<label for="pin">PIN</label><input id="pin" name="pin" type="password" '
+        'inputmode="numeric" autocomplete="one-time-code" required />'
+        if pin_required
+        else ""
+    )
+    html = f"""<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<meta name="robots" content="noindex,nofollow"/>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'"/>
+<title>Скачать конфиг</title>
+<style>
+body{{font-family:system-ui,sans-serif;margin:2rem;max-width:28rem;line-height:1.4}}
+button{{margin-top:1rem;padding:.6rem 1rem;font-size:1rem}}
+input{{display:block;width:100%;margin-top:.35rem;padding:.5rem;box-sizing:border-box}}
+</style>
+</head>
+<body>
+<h1>Скачать конфиг</h1>
+<p><code>{name}</code></p>
+<form method="post" action="/api/public/qr-download/{escape(token)}">
+{pin_block}
+<button type="submit">Скачать</button>
+</form>
+</body>
+</html>"""
+    return HTMLResponse(
+        content=html,
+        headers={
+            "Cache-Control": "private, no-store",
+            "Pragma": "no-cache",
+            "X-Robots-Tag": "noindex, nofollow",
+            "Referrer-Policy": "no-referrer",
+        },
+    )
+
+
 @router.get("/qr-download/{token}")
 def qr_download_get(token: str, request: Request, db: Session = Depends(get_db)):
     client_ip = ip_restriction_service.get_client_ip(request)
@@ -58,24 +99,28 @@ def qr_download_get(token: str, request: Request, db: Session = Depends(get_db))
     cfg = _qr_settings(db)
     svc = QrDownloadService(db, **cfg)
     row = svc.peek_token(token)
-    if row.pin_hash or _global_pin_set(db):
-        raise HTTPException(status_code=428, detail="Требуется PIN")
-
-    adapter, hosts = _qr_delivery_source(db, row)
-    row = svc.redeem_token(token, remote_addr=client_ip)
-    content = read_profile_file_for_delivery(adapter, row.file_path, hosts)
-    return attachment_response(content, row.config_name)
+    pin_required = bool(row.pin_hash or _global_pin_set(db))
+    return _qr_download_page(token=token, config_name=row.config_name, pin_required=pin_required)
 
 
 @router.post("/qr-download/{token}")
-def qr_download_post(token: str, payload: PinRequest, request: Request, db: Session = Depends(get_db)):
+async def qr_download_post(token: str, request: Request, db: Session = Depends(get_db)):
     client_ip = ip_restriction_service.get_client_ip(request)
     public_download_rate_limit_service.consume(client_ip)
+
+    pin: str | None = None
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        body = await request.json()
+        pin = str((body or {}).get("pin") or "") or None
+    else:
+        form = await request.form()
+        pin = str(form.get("pin") or "") or None
 
     cfg = _qr_settings(db)
     svc = QrDownloadService(db, **cfg)
     adapter, hosts = _qr_delivery_source(db, svc.peek_token(token))
-    row = svc.redeem_token(token, pin=payload.pin or None, remote_addr=client_ip)
+    row = svc.redeem_token(token, pin=pin, remote_addr=client_ip)
     content = read_profile_file_for_delivery(adapter, row.file_path, hosts)
     return attachment_response(content, row.config_name)
 

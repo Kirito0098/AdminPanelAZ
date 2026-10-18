@@ -27,5 +27,9 @@ def attachment_response(content: str | bytes, filename: str) -> Response:
     return Response(
         content=body,
         media_type=DOWNLOAD_MEDIA_TYPE,
-        headers={"Content-Disposition": content_disposition_attachment(filename)},
+        headers={
+            "Content-Disposition": content_disposition_attachment(filename),
+            "Cache-Control": "private, no-store",
+            "Pragma": "no-cache",
+        },
     )

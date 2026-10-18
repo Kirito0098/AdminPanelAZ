@@ -395,7 +395,7 @@ class VpnConfigResponse(BaseModel):
     id: int
     client_name: str
     vpn_type: VpnType
-    owner_id: int
+    owner_id: int | None = None
     owner_username: str | None = None
     cert_expire_days: int | None
     cert_expires_at: datetime | None = None
@@ -807,6 +807,7 @@ class BackupTestTelegramRequest(BaseModel):
 
 class BackupRestoreRequest(BaseModel):
     file_name: str
+    password: str | None = None
 
 
 class BackupSettingsResponse(BaseModel):
@@ -816,6 +817,7 @@ class BackupSettingsResponse(BaseModel):
     backup_az_enabled: bool = True
     backup_awg2_enabled: bool = True
     retention_count: int = 5
+    backup_password_set: bool = False
 
 
 class BackupSettingsUpdate(BaseModel):
@@ -825,6 +827,8 @@ class BackupSettingsUpdate(BaseModel):
     backup_az_enabled: bool | None = None
     backup_awg2_enabled: bool | None = None
     retention_count: int | None = Field(default=None, ge=1, le=30)
+    # Set a new password, or "" / null to clear. Omitted = leave unchanged.
+    backup_password: str | None = None
 
 
 class MonitorSettingsResponse(BaseModel):

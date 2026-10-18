@@ -51,6 +51,12 @@ def _purge_expired(codes: dict[str, dict[str, str | int]]) -> dict[str, dict[str
 
 def create_link_code(db: Session, user: User) -> tuple[str, int]:
     codes = _purge_expired(_load_codes(db))
+    # One active code per user: drop older unexpired codes for this account.
+    codes = {
+        code: meta
+        for code, meta in codes.items()
+        if int(meta.get("user_id", -1)) != user.id
+    }
     code = secrets.token_hex(_CODE_LENGTH // 2)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=_CODE_TTL_SECONDS)
     codes[code] = {

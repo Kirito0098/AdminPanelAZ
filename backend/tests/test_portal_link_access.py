@@ -71,7 +71,8 @@ def test_view_grant_cannot_manage_portal_link(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         portal_router._assert_can_manage_client(SimpleNamespace(id=OTHER, role=UserRole.user), MagicMock(), "alice")
 
-    assert exc.value.status_code == 403
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Клиент не найден"
 
 
 def test_owner_and_admin_can_manage_portal_link(monkeypatch):

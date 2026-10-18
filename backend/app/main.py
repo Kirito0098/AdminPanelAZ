@@ -5,8 +5,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.services.access_log_privacy import install_uvicorn_access_log_filter
 
 logger = logging.getLogger(__name__)
+install_uvicorn_access_log_filter()
 from app.middleware.api_rate_limit import ApiRateLimitMiddleware
 from app.middleware.http_security import (
     HttpSecurityMiddleware,
@@ -212,6 +214,25 @@ def run_leader_startup_actions() -> None:
             startup_db.close()
     except Exception:
         logger.exception("Failed to sync whitelist port firewall on startup")
+    try:
+        from app.database import SessionLocal
+        from app.services.privacy_upgrade import run_privacy_upgrade
+
+        privacy_db = SessionLocal()
+        try:
+            result = run_privacy_upgrade(privacy_db)
+            if result.get("grants_changed") or result.get("pin_migrated"):
+                logger.info(
+                    "Privacy upgrade: grants=%s pin=%s webhook=%s nginx=%s",
+                    result.get("grants_changed"),
+                    result.get("pin_migrated"),
+                    result.get("webhook"),
+                    result.get("nginx"),
+                )
+        finally:
+            privacy_db.close()
+    except Exception:
+        logger.exception("Failed to run privacy upgrade on startup")
 
 
 @asynccontextmanager

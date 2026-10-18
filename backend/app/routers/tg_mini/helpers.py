@@ -86,10 +86,8 @@ def _get_accessible_config(db: Session, config_id: int, current_user: User) -> V
         .filter(VpnConfig.id == config_id, VpnConfig.node_id == node.id)
         .first()
     )
-    if not config:
+    if not config or not can_view_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not can_view_config(current_user, config, db):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     return config
 
 

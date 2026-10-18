@@ -57,8 +57,9 @@ def _mini_notify_settings_response(db: Session, user: User) -> AdminNotifySettin
     return AdminNotifySettingsResponse(
         telegram_id=response.telegram_id,
         recipient_user_ids=[],
-        notify_enabled=response.notify_enabled,
-        bot_token_set=response.bot_token_set,
+        # C6: global admin notify / bot / grace are admin-only.
+        notify_enabled=False,
+        bot_token_set=False,
         events=[
             AdminNotifyEventItem(
                 key=key,
@@ -76,7 +77,7 @@ def _mini_notify_settings_response(db: Session, user: User) -> AdminNotifySettin
                 keys=list(PERSONAL_OWNER_NOTIFY_KEY_ORDER),
             )
         ],
-        node_offline_grace_seconds=response.node_offline_grace_seconds,
+        node_offline_grace_seconds=0,
     )
 
 

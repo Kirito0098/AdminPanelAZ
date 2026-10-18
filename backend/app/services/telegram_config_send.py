@@ -118,16 +118,13 @@ def send_config_for_user(
     *,
     bot_token: str,
     path: str | None = None,
-    destination: Literal["self", "chat", "owner"] = "self",
+    destination: Literal["self", "owner"] = "self",
     chat_id_override: str | int | None = None,
     send_all: bool = False,
     run_async: bool = False,
     install_platform: InstallPlatform | None = None,
 ) -> tuple[int, str | None]:
-    """Resolve destination chat and send config files."""
-    from app.services.app_setting_store import _get_setting
-    from app.services.telegram_recipients import get_setting_chat_ids
-
+    """Resolve destination chat and send config files (personal telegram_id only)."""
     if chat_id_override is not None:
         chat_ids = [str(chat_id_override).strip()]
     elif destination == "owner":
@@ -140,19 +137,10 @@ def send_config_for_user(
         if not chat_id:
             return 0, "У пользователя не привязан Telegram"
         chat_ids = [chat_id]
-    elif destination == "chat":
-        if user.role.value != "admin":
-            return 0, "Только admin может отправлять в общий chat"
-        chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
-        if not chat_ids:
-            return 0, "Получатели бэкапов не настроены"
     else:
         chat_id = (user.telegram_id or "").strip()
-        if not chat_id and user.role.value == "admin":
-            fallback = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
-            chat_id = fallback[0] if fallback else ""
         if not chat_id:
-            return 0, "Telegram ID не привязан к вашему аккаунту"
+            return 0, "Привяжите Telegram"
         chat_ids = [chat_id]
 
     visible_policy = resolve_effective_visible_vpn_profiles(db, user)

@@ -1,7 +1,10 @@
 """One-time download tokens for VPN profiles (ported from AdminAntizapret)."""
 
+from __future__ import annotations
+
 import hashlib
 import hmac
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -13,31 +16,85 @@ from app.models import QrDownloadAuditLog, QrDownloadToken
 MAX_PIN_FAILURES = 5
 PIN_LOCKED_DETAIL = "Ссылка заблокирована после 5 неверных PIN — запросите новую"
 DOWNLOADS_EXHAUSTED_DETAIL = "Лимит скачиваний исчерпан"
+_PBKDF2_PREFIX = "pbkdf2$"
+_PBKDF2_ITERATIONS = 210_000
+_LEGACY_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+MIN_PIN_LENGTH = 6
 
 
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
-def _hash_pin(pin: str) -> str:
+def _hash_pin_legacy(pin: str) -> str:
     return hashlib.sha256(pin.encode("utf-8")).hexdigest()
 
 
-def _pins_match(provided: str | None, expected_hash: str | None) -> bool:
+def hash_pin(pin: str) -> str:
+    """Salted PBKDF2 hash for new PINs."""
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        pin.encode("utf-8"),
+        bytes.fromhex(salt),
+        _PBKDF2_ITERATIONS,
+    ).hex()
+    return f"{_PBKDF2_PREFIX}{_PBKDF2_ITERATIONS}${salt}${digest}"
+
+
+def is_stored_pin_hash(value: str) -> bool:
+    raw = (value or "").strip()
+    return raw.startswith(_PBKDF2_PREFIX) or bool(_LEGACY_SHA256_RE.fullmatch(raw))
+
+
+def verify_pin(provided: str | None, expected_hash: str | None) -> bool:
     if not expected_hash:
         return True
     if not provided:
         return False
-    return hmac.compare_digest(_hash_pin(provided), expected_hash)
+    if expected_hash.startswith(_PBKDF2_PREFIX):
+        try:
+            _, rest = expected_hash.split("$", 1)
+            iterations_s, salt_hex, digest_hex = rest.split("$", 2)
+            iterations = int(iterations_s)
+            candidate = hashlib.pbkdf2_hmac(
+                "sha256",
+                provided.encode("utf-8"),
+                bytes.fromhex(salt_hex),
+                iterations,
+            ).hex()
+            return hmac.compare_digest(candidate, digest_hex)
+        except (ValueError, TypeError):
+            return False
+    # Legacy unsalted SHA-256 (token rows and pre-migration global PIN).
+    return hmac.compare_digest(_hash_pin_legacy(provided), expected_hash)
+
+
+def _pins_match(provided: str | None, expected_hash: str | None) -> bool:
+    return verify_pin(provided, expected_hash)
 
 
 class QrDownloadService:
-    def __init__(self, db: Session, *, base_url: str = "", ttl_seconds: int = 600, max_downloads: int = 1, pin: str = ""):
+    def __init__(
+        self,
+        db: Session,
+        *,
+        base_url: str = "",
+        ttl_seconds: int = 600,
+        max_downloads: int = 1,
+        pin: str = "",
+    ):
         self.db = db
         self.base_url = base_url.rstrip("/")
         self.ttl_seconds = max(60, min(ttl_seconds, 86400))
         self.max_downloads = max_downloads if max_downloads in (1, 3, 5) else 1
-        self.pin_hash = _hash_pin(pin) if pin else None
+        raw_pin = (pin or "").strip()
+        if not raw_pin:
+            self.pin_hash = None
+        elif is_stored_pin_hash(raw_pin):
+            self.pin_hash = raw_pin
+        else:
+            self.pin_hash = hash_pin(raw_pin)
 
     def create_token(
         self,
@@ -101,8 +158,6 @@ class QrDownloadService:
         if row.download_count >= row.max_downloads:
             raise HTTPException(status_code=status.HTTP_410_GONE, detail=DOWNLOADS_EXHAUSTED_DETAIL)
 
-        # Token PIN if set; otherwise fall back to current global PIN (protects older unpinned links
-        # after an admin enables a global PIN).
         required_hash = row.pin_hash or self.pin_hash
         if required_hash and not _pins_match(pin, required_hash):
             self.db.query(QrDownloadToken).filter(QrDownloadToken.id == row.id).update(

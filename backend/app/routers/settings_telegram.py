@@ -497,6 +497,7 @@ def register_telegram_webhook(
 
     _configure_bot_menu(bot_token)
     _set_setting(db, "telegram_webhook_set_at", datetime.now(timezone.utc).isoformat())
+    _set_setting(db, "telegram_webhook_secret_required", "true")
     db.commit()
     admin_notify_service.send_settings_change(
         db,

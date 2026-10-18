@@ -70,7 +70,8 @@ def _assert_can_manage_client(user: User, db: Session, client_name: str) -> None
     if user.role == UserRole.admin:
         return
     if not any(is_config_owner(user, c) for c in configs):
-        raise HTTPException(status_code=403, detail="Недостаточно прав")
+        # Same 404 as missing — avoid probing client names via 403 vs 404.
+        raise HTTPException(status_code=404, detail="Клиент не найден")
 
 
 @router.post("/clients/{client_name}/link")

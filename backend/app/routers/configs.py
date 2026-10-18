@@ -213,8 +213,14 @@ def _to_response(
     ha_replicate_warning: str | None = None,
     visibility_policy: dict | None = None,
     local_ip: str | None = None,
+    viewer: User | None = None,
 ) -> VpnConfigResponse:
     owner = db.query(User).filter(User.id == config.owner_id).first()
+    # C7: owner id/username only for admin or the owner (grantee sees neither).
+    # No viewer (internal callers) → keep fields; API paths always pass current_user.
+    show_owner = viewer is None or (
+        viewer.role == UserRole.admin or (owner is not None and owner.id == viewer.id)
+    )
     files: list[dict[str, str]] = []
     if include_files:
         if profile_files is not None:
@@ -232,8 +238,8 @@ def _to_response(
         id=config.id,
         client_name=config.client_name,
         vpn_type=config.vpn_type,
-        owner_id=config.owner_id,
-        owner_username=owner.username if owner else None,
+        owner_id=config.owner_id if show_owner else None,
+        owner_username=(owner.username if owner else None) if show_owner else None,
         cert_expire_days=config.cert_expire_days,
         cert_expires_at=config.cert_expires_at,
         expires_at=config.expires_at,
@@ -408,6 +414,7 @@ def list_configs(
                 for t in tags_map.get(c.id, [])
             ],
             local_ip=local_ip_map.get(c.client_name.strip().lower()),
+            viewer=current_user,
         )
         for c in configs
     ]
@@ -645,6 +652,7 @@ def create_config(
         visibility_policy=_viewer_visibility_policy(db, current_user),
         openvpn_group=resolve_openvpn_group_for_user(db, current_user),
         local_ip=_local_ip_for_config(db, config, adapter),
+        viewer=current_user,
     )
 
 
@@ -657,10 +665,8 @@ def get_config(
     current_user: User = Depends(get_current_user),
 ):
     config = _get_config_for_active_node(db, config_id)
-    if not config:
+    if not config or not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config, db):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     return _to_response(
         config,
         db,
@@ -668,6 +674,7 @@ def get_config(
         visibility_policy=_viewer_visibility_policy(db, current_user),
         openvpn_group=resolve_openvpn_group_for_user(db, current_user),
         local_ip=_local_ip_for_config(db, config),
+        viewer=current_user,
     )
 
 
@@ -680,7 +687,7 @@ def update_config(
     current_user: User = Depends(get_current_user),
 ):
     config = _get_config_for_active_node(db, config_id)
-    if not config:
+    if not config or not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
     _raise_if_cannot_mutate(current_user, config)
 
@@ -739,6 +746,7 @@ def update_config(
         visibility_policy=_viewer_visibility_policy(db, current_user),
         openvpn_group=resolve_openvpn_group_for_user(db, current_user),
         local_ip=_local_ip_for_config(db, config),
+        viewer=current_user,
     )
 
 
@@ -751,7 +759,7 @@ def delete_config(
     current_user: User = Depends(get_current_user),
 ):
     config = _get_config_for_active_node(db, config_id)
-    if not config:
+    if not config or not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
     _raise_if_cannot_mutate(current_user, config)
 
@@ -797,10 +805,8 @@ def download_profile(
     current_user: User = Depends(get_current_user),
 ):
     config = _get_config_for_active_node(db, config_id)
-    if not config:
+    if not config or not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config, db):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
     adapter = get_active_adapter(db)
     _require_profile_path_allowed(db, current_user, config, path, adapter=adapter)
@@ -819,10 +825,8 @@ def generate_qr(
     current_user: User = Depends(get_current_user),
 ):
     config = _get_config_for_active_node(db, config_id)
-    if not config:
+    if not config or not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config, db):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
 
     adapter = get_active_adapter(db)
     _require_profile_path_allowed(db, current_user, config, path, adapter=adapter)
@@ -863,10 +867,8 @@ def create_one_time_link(
     current_user: User = Depends(get_current_user),
 ):
     config = _get_config_for_active_node(db, config_id)
-    if not config:
+    if not config or not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config, db):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     _require_profile_path_allowed(db, current_user, config, path)
     return _qr_download_service(db, request).create_token(
         file_path=path,

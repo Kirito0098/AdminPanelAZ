@@ -203,7 +203,10 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         if not tg_mini:
             response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
-        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        if path.startswith("/p/") or "/api/public/" in path:
+            response.headers["Referrer-Policy"] = "no-referrer"
+        else:
+            response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         if not tg_mini:
             response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         if HttpSecurityMiddleware._is_secure(request):

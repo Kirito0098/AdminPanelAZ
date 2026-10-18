@@ -297,6 +297,12 @@ INLINE_CONFIG_MESSAGE = (
 INLINE_EMPTY_TITLE = "🔍 Ничего не найдено"
 INLINE_EMPTY_DESC = "Запрос: {query}"
 INLINE_EMPTY_MESSAGE = "Конфиги по запросу <code>{query}</code> не найдены."
+INLINE_PRIVATE_ONLY_TITLE = "🔒 Только в личном чате"
+INLINE_PRIVATE_ONLY_DESC = "Конфиги недоступны в группах и чужих чатах"
+INLINE_PRIVATE_ONLY_MESSAGE = (
+    "Конфиги доступны только в личном чате с ботом. Откройте диалог с ботом и повторите запрос."
+)
+INLINE_PRIVATE_ONLY_BUTTON = "Открыть личный чат"
 
 # --- /settings root ---
 

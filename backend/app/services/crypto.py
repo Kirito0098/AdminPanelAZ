@@ -15,3 +15,11 @@ def encrypt_secret(plain: str, secret_key: str) -> str:
 
 def decrypt_secret(encrypted: str, secret_key: str) -> str:
     return _fernet(secret_key).decrypt(encrypted.encode()).decode()
+
+
+def encrypt_bytes(data: bytes, secret_key: str) -> bytes:
+    return _fernet(secret_key).encrypt(data)
+
+
+def decrypt_bytes(data: bytes, secret_key: str) -> bytes:
+    return _fernet(secret_key).decrypt(data)

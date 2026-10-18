@@ -301,8 +301,8 @@ export interface VpnConfig {
   id: number
   client_name: string
   vpn_type: VpnType
-  owner_id: number
-  owner_username?: string
+  owner_id: number | null
+  owner_username?: string | null
   /** Validity the certificate was issued for — not the remaining time. */
   cert_expire_days?: number | null
   cert_expires_at?: string | null
@@ -555,6 +555,7 @@ export interface BackupSettings {
   backup_az_enabled: boolean
   backup_awg2_enabled: boolean
   retention_count: number
+  backup_password_set: boolean
 }
 
 export interface MonitorSettings {

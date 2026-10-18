@@ -2,15 +2,34 @@
 
 from __future__ import annotations
 
+import re
+
 from sqlalchemy.orm import Session
 
 from app.models import User, UserConfigAccess, UserRole, VpnConfig
 
+_BASE_N_RE = re.compile(r"^(.+)-(\d+)$")
+
 
 def _grant_matches(client_name: str, grant: str) -> bool:
+    """Exact name, plan-style ``base-N``, or explicit prefix with trailing ``*``."""
     name = client_name.lower()
-    g = grant.lower()
-    return name == g or name.startswith(g)
+    g = (grant or "").strip().lower()
+    if not g:
+        return False
+    if g.endswith("*"):
+        prefix = g[:-1]
+        return bool(prefix) and name.startswith(prefix)
+    if name == g:
+        return True
+    # Grant ``ivan`` covers ``ivan-2`` … ``ivan-20`` (provisioning plan names), not ``ivanov``.
+    match = _BASE_N_RE.fullmatch(name)
+    if match and match.group(1) == g:
+        try:
+            return 2 <= int(match.group(2)) <= 20
+        except ValueError:
+            return False
+    return False
 
 
 def get_user_config_grants(db: Session, user_id: int) -> list[str]:
@@ -90,3 +109,25 @@ def set_user_config_access(db: Session, user_id: int, config_groups: list[str]) 
         seen.add(group.lower())
         db.add(UserConfigAccess(user_id=user_id, config_group=group))
     db.commit()
+
+
+def migrate_grants_to_explicit_prefix(db: Session) -> int:
+    """One-time: rewrite grants without ``*`` to ``name*`` so access stays the same after exact match."""
+    from app.services.app_setting_store import _get_setting, _set_setting
+
+    if _get_setting(db, "config_access_explicit_prefix", "") == "1":
+        return 0
+    rows = db.query(UserConfigAccess).all()
+    changed = 0
+    for row in rows:
+        group = (row.config_group or "").strip()
+        if not group or group.endswith("*"):
+            continue
+        row.config_group = f"{group}*"
+        changed += 1
+    _set_setting(db, "config_access_explicit_prefix", "1")
+    if changed:
+        db.commit()
+    else:
+        db.commit()
+    return changed
