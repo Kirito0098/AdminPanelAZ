@@ -458,14 +458,18 @@ def run_user_provision_task(task_id: str, user_id: int) -> dict[str, Any]:
     results: list[dict[str, Any]] = []
     total_items = len(apply_items)
     done = 0
-    lock = threading.Lock()
+    results_lock = threading.Lock()
+    progress_lock = threading.Lock()
     # Detached ORM instances from the closed session must not be used across threads.
     owner_id = user_id
     node_name_by_id = {nid: (nodes[nid].name if nid in nodes else str(nid)) for nid in node_ids}
 
     def _progress(node_label: str, client_name: str, vpn_type: str) -> None:
+        # Вызывается без удержания results_lock: update_background_task открывает
+        # своё БД-соединение; с одним соединением StaticPool иначе возможен
+        # deadlock между потоками разных узлов.
         nonlocal done
-        with lock:
+        with progress_lock:
             done += 1
             percent = int(done / total_items * 100) if total_items else 100
         background_task_service.update_background_task(
@@ -492,10 +496,12 @@ def run_user_provision_task(task_id: str, user_id: int) -> dict[str, Any]:
         finally:
             session.close()
         node_label = node_name_by_id.get(node_id, str(node_id))
-        with lock:
+        with results_lock:
             results.extend(node_results)
-            for item in [i for i in apply_items if i.node_id == node_id]:
-                _progress(node_label, item.client_name, item.vpn_type)
+        # Прогресс вне блокировки результатов, чтобы не держать БД-соединение
+        # под мьютексом между потоками узлов.
+        for item in [i for i in apply_items if i.node_id == node_id]:
+            _progress(node_label, item.client_name, item.vpn_type)
 
     max_workers = max(1, int(get_settings().bulk_config_op_max_workers))
     if node_ids:
