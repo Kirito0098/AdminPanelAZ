@@ -185,6 +185,7 @@ export interface User {
   telegram_id?: string | null
   config_quota?: number | null
   can_create_configs?: boolean
+  can_manage_configs?: boolean
   visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
   timezone?: string
   noc_daily_time?: string
@@ -202,6 +203,7 @@ export interface UserUpdatePayload {
   telegram_id?: string | null
   config_quota?: number | null
   can_create_configs?: boolean
+  can_manage_configs?: boolean
   visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
 }
 
@@ -251,6 +253,7 @@ export interface SelfServiceQuota {
   remaining: number | null
   unlimited: boolean
   can_create: boolean
+  can_manage?: boolean
   create_rate_max?: number | null
   create_rate_window_seconds?: number | null
 }
@@ -793,6 +796,7 @@ export interface TgMiniSettings {
   role: string
   theme: 'light' | 'dark'
   visible_vpn_profiles?: VisibleVpnProfilesPolicy
+  can_manage_configs?: boolean
 }
 
 export interface TgMiniNode extends Node {

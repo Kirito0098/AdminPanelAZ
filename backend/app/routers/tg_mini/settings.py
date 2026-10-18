@@ -96,6 +96,11 @@ def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(ge
         "role": current_user.role.value,
         "theme": current_user.theme,
         "visible_vpn_profiles": policy,
+        "can_manage_configs": (
+            True
+            if current_user.role == UserRole.admin
+            else bool(getattr(current_user, "can_manage_configs", False))
+        ),
     }
 
 
