@@ -209,6 +209,7 @@ export default function CreateConfigDialog({
     }
     const parsedCertDays = Number(certDays)
     if (
+      isAdmin &&
       selectedProtocols.includes('openvpn') &&
       (!Number.isFinite(parsedCertDays) || parsedCertDays < 1 || parsedCertDays > 3650)
     ) {
@@ -242,10 +243,10 @@ export default function CreateConfigDialog({
           await createTgPanelConfig({
             client_name: trimmedName,
             vpn_type: vpnType,
-            cert_expire_days: vpnType === 'openvpn' ? parsedCertDays : undefined,
+            cert_expire_days: isAdmin && vpnType === 'openvpn' ? parsedCertDays : undefined,
             description: description.trim() || undefined,
             owner_id: isAdmin && ownerId ? ownerId : undefined,
-            ttl: vpnType === 'amneziawg2' && ttl !== 'none' ? ttl : undefined,
+            ttl: isAdmin && vpnType === 'amneziawg2' && ttl !== 'none' ? ttl : undefined,
           })
           created.push(vpnType)
           const nextAccessErr = await applyAccessUntilAfterCreate(
@@ -364,7 +365,7 @@ export default function CreateConfigDialog({
               </div>
             </div>
 
-            {selectedProtocols.includes('openvpn') && (
+            {isAdmin && selectedProtocols.includes('openvpn') && (
               <div className="space-y-2">
                 <Label htmlFor="tg-mini-cert-days">Срок сертификата OpenVPN (дней)</Label>
                 <Input
@@ -379,7 +380,7 @@ export default function CreateConfigDialog({
               </div>
             )}
 
-            {selectedProtocols.includes('amneziawg2') && (
+            {isAdmin && selectedProtocols.includes('amneziawg2') && (
               <div className="space-y-2">
                 <Label htmlFor="tg-mini-awg2-ttl">TTL AWG 2.0</Label>
                 <Select value={ttl} onValueChange={setTtl} disabled={busy || quotaReached}>

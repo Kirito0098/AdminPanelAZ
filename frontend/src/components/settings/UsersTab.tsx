@@ -116,6 +116,7 @@ function UserAvatar({ username, size = 'md' }: { username: string; size?: 'sm' |
 function UserMetaLine({ user }: { user: PanelUser }) {
   const bits: string[] = [`ID ${user.id}`]
   if (user.role === 'user' && user.can_create_configs === false) bits.push('Создание выкл.')
+  if (user.role === 'user' && user.can_manage_configs === false) bits.push('Управление выкл.')
   if (user.role === 'user' && user.config_quota != null && user.config_quota > 0) {
     bits.push(`Квота ${user.config_quota}`)
   }
@@ -214,6 +215,7 @@ export default function UsersTab({
   const [draftTelegramId, setDraftTelegramId] = useState('')
   const [draftConfigQuota, setDraftConfigQuota] = useState('')
   const [draftCanCreate, setDraftCanCreate] = useState(true)
+  const [draftCanManage, setDraftCanManage] = useState(false)
   const [draftAccessUntil, setDraftAccessUntil] = useState('')
   const [savingUser, setSavingUser] = useState(false)
   const [usersList, setUsersList] = useState(users)
@@ -370,6 +372,7 @@ export default function UsersTab({
       user.config_quota != null && user.config_quota > 0 ? String(user.config_quota) : '',
     )
     setDraftCanCreate(user.can_create_configs !== false)
+    setDraftCanManage(user.can_manage_configs === true)
     setDraftAccessUntil(isoToDateInput(user.access_until))
     const hasOverride = user.visible_vpn_profiles != null
     setDraftUseCustomVisibility(hasOverride)
@@ -421,6 +424,7 @@ export default function UsersTab({
       }
       if (draftRole === 'user') {
         payload.can_create_configs = draftCanCreate
+        payload.can_manage_configs = draftCanManage
         // Отправляем срок только при реальной правке даты — иначе сохранение
         // Telegram ID / квоты пересинхронизировало бы сроки всех профилей.
         if (draftAccessUntil !== isoToDateInput(activeEditor.access_until)) {
@@ -815,6 +819,15 @@ export default function UsersTab({
                   </div>
                   <Switch id="editCanCreate" checked={draftCanCreate} onCheckedChange={setDraftCanCreate} />
                 </div>
+                <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/20 p-3">
+                  <div className="space-y-0.5">
+                    <Label htmlFor="editCanManage">Может управлять конфигурациями</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Выкл. — только получение и скачивание. Срок доступа — поле «Доступ до».
+                    </p>
+                  </div>
+                  <Switch id="editCanManage" checked={draftCanManage} onCheckedChange={setDraftCanManage} />
+                </div>
                 <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">
                   <Label htmlFor="editConfigQuota">Квота конфигов</Label>
                   <Input
@@ -842,7 +855,7 @@ export default function UsersTab({
                     disabled={savingUser}
                   />
                   <p className="text-xs text-muted-foreground">
-                    Пусто — бессрочно. При сохранении срок синхронизируется на все клиентские профили этого пользователя.
+                    Пусто — бессрочно. При сохранении срок синхронизируется на все клиентские профили этого пользователя. При создании конфигов пользователем сюда копируется срок блокировки; сертификат OpenVPN у пользователя всегда максимальный.
                   </p>
                 </div>
                 <div className="space-y-2 rounded-xl border bg-muted/20 p-3">

@@ -634,6 +634,7 @@ export default function DashboardPage() {
           visibilityPolicy={visibilityPolicy}
           userRole={user.role}
           currentUserId={user.id}
+          canManageConfigs={isAdmin || Boolean(user?.can_manage_configs)}
           ownerCandidates={panelUsers}
           connectionMap={connectionMap}
           filesLoading={loadingFiles}

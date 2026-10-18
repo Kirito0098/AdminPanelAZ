@@ -163,7 +163,9 @@ export default function Configs() {
   const canCreate =
     (openvpnEnabled || wireguardEnabled || awg2Enabled) &&
     (quota?.can_create ?? true)
-  const canManageConfig = (config: TgMiniConfig) => isAdmin || config.is_mine !== false
+  const canManageConfig = (config: TgMiniConfig) =>
+    isAdmin ||
+    (Boolean(quota?.can_manage ?? settings?.can_manage_configs) && config.is_mine !== false)
 
   const openActions = async (config: TgMiniConfig) => {
     setActiveConfig(config)

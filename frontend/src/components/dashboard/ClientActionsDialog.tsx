@@ -95,6 +95,7 @@ interface ClientActionsDialogProps {
   allConfigs?: VpnConfig[]
   userRole: UserRole
   currentUserId?: number
+  canManageConfigs: boolean
   ownerCandidates?: User[]
   allTags?: ConfigTag[]
   open: boolean
@@ -220,6 +221,7 @@ export default function ClientActionsDialog({
   allConfigs = [],
   userRole,
   currentUserId,
+  canManageConfigs,
   ownerCandidates = [],
   allTags = [],
   open,
@@ -447,9 +449,14 @@ export default function ClientActionsDialog({
     }
   }
 
-  const isOwner = isAdmin || (userRole === 'user' && currentUserId != null && config.owner_id === currentUserId)
+  const canManageOwn =
+    isAdmin ||
+    (userRole === 'user' &&
+      currentUserId != null &&
+      config.owner_id === currentUserId &&
+      canManageConfigs)
   const canManage = isAdmin
-  const canDelete = isOwner
+  const canDelete = canManageOwn
   const vpnFile = pickVpnFile(config, tab)
   const azFile = pickAzFile(config, tab)
   const isOpenVpn = config.vpn_type === 'openvpn'
@@ -772,7 +779,7 @@ export default function ClientActionsDialog({
           key: 'renew-cert',
           label: 'Продлить сертификат',
           icon: <RefreshCw size={14} />,
-          hidden: !isOwner || haReplicaReadonly,
+          hidden: !canManageOwn || haReplicaReadonly,
           onClick: handleRenewCert,
         },
         {
@@ -1105,13 +1112,13 @@ export default function ClientActionsDialog({
           </DialogHeader>
 
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-5">
-            {(isOwner || (isAdmin && ownerCandidates.length > 0)) && (
+            {(canManageOwn || (isAdmin && ownerCandidates.length > 0)) && (
               <ProfileSection
                 title="Основное"
                 description="Описание видно на карточке. Владелец определяет, кто видит конфиг в своём списке."
               >
                 <div className="space-y-4">
-                  {isOwner && (
+                  {canManageOwn && (
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                       <div className="min-w-0 flex-1 space-y-2">
                         <Label htmlFor={`description-${config.id}`}>Описание</Label>

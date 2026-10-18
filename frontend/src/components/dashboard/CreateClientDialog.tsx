@@ -224,6 +224,7 @@ export default function CreateClientDialog({
       return
     }
     if (
+      isAdmin &&
       selectedProtocols.includes('openvpn') &&
       (!Number.isFinite(certDays) || certDays < 1 || certDays > 3650)
     ) {
@@ -257,8 +258,8 @@ export default function CreateClientDialog({
             const result = await createConfig({
               client_name: trimmedName,
               vpn_type: vpnType,
-              cert_expire_days: vpnType === 'openvpn' ? certDays : undefined,
-              ttl: vpnType === 'amneziawg2' && awg2Ttl !== 'none' ? awg2Ttl : undefined,
+              cert_expire_days: isAdmin && vpnType === 'openvpn' ? certDays : undefined,
+              ttl: isAdmin && vpnType === 'amneziawg2' && awg2Ttl !== 'none' ? awg2Ttl : undefined,
               description: description || undefined,
               owner_id: isAdmin && ownerId ? ownerId : undefined,
             })
@@ -409,7 +410,7 @@ export default function CreateClientDialog({
               )}
             </div>
 
-            {(showOpenVpnOpts || showAwg2Opts) && (
+            {isAdmin && (showOpenVpnOpts || showAwg2Opts) && (
               <div
                 className={cn(
                   'grid gap-4',
