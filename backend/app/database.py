@@ -1718,6 +1718,7 @@ def _run_db_migrations() -> None:
             ("tg_notify_events", "TEXT"),
             ("config_quota", "INTEGER"),
             ("can_create_configs", "INTEGER DEFAULT 1"),
+            ("can_manage_configs", "INTEGER DEFAULT 0"),
             ("visible_vpn_profiles", "TEXT"),
             ("timezone", "VARCHAR(64) DEFAULT ''"),
             ("last_client_timezone", "VARCHAR(64) DEFAULT ''"),

@@ -169,8 +169,15 @@ def update_user(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Нельзя снять роль у последнего администратора",
                 )
+        old_role = user.role
         user.role = payload.role
         revoke_creator_portal_links(db, user.id)
+        if (
+            old_role == UserRole.admin
+            and payload.role == UserRole.user
+            and "can_manage_configs" not in payload.model_fields_set
+        ):
+            user.can_manage_configs = False
     if payload.theme is not None:
         user.theme = payload.theme
     if payload.is_active is not None:
@@ -233,6 +240,13 @@ def update_user(
                 detail="Только администратор может менять право создания конфигов",
             )
         user.can_create_configs = payload.can_create_configs
+    if payload.can_manage_configs is not None:
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только администратор может менять право управления конфигами",
+            )
+        user.can_manage_configs = payload.can_manage_configs
     if "visible_vpn_profiles" in payload.model_fields_set:
         if not is_admin:
             raise HTTPException(

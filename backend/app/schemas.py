@@ -266,6 +266,7 @@ class UserUpdate(BaseModel):
     telegram_id: str | None = None
     config_quota: int | None = Field(default=None, ge=0, le=1000)
     can_create_configs: bool | None = None
+    can_manage_configs: bool | None = None
     visible_vpn_profiles: dict | None = None
 
     @field_validator("access_until", mode="before")
@@ -289,6 +290,7 @@ class UserResponse(UserBase):
     telegram_id: str | None = None
     config_quota: int | None = None
     can_create_configs: bool = True
+    can_manage_configs: bool = False
     visible_vpn_profiles: dict | None = None
     timezone: str = ""
     noc_daily_time: str = ""
