@@ -96,6 +96,8 @@ def build_reply_keyboard(ctx: BotContext) -> dict:
         [reply_button(i18n.BTN_MENU_MORE)],
         [reply_button(i18n.BTN_REQUEST_MORE_CONFIG)],
     ]
+    if get_feature_service().is_enabled("unlock_codes"):
+        rows.append([reply_button(i18n.BTN_REDEEM_UNLOCK)])
     return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
 
 
@@ -185,6 +187,13 @@ async def _dispatch_action(ctx: BotContext, action: str, *, message_id: int | No
         )
 
         await handle_request_more_config(ctx)
+    elif action == "redeem_unlock":
+        if not get_feature_service().is_enabled("unlock_codes"):
+            await send_message(ctx.bot_token, ctx.chat_id, "Раздел кодов доступа отключён.")
+            return
+        from app.services.telegram_bot_handlers.user_renew import start_redeem_prompt
+
+        await start_redeem_prompt(ctx.bot_token, str(ctx.chat_id))
     elif action == "link_code":
         await send_message(ctx.bot_token, ctx.chat_id, i18n.REQUEST_LINK_HINT)
 

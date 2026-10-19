@@ -277,6 +277,16 @@ class TelegramBotService:
                 return
             if text.strip() and await handle_unlock_codes_text(ctx, text):
                 return
+            if text.strip():
+                from app.services.telegram_bot_handlers.user_renew import try_handle_code_message
+
+                if await try_handle_code_message(
+                    db,
+                    ctx.bot_token,
+                    telegram_id=telegram_user_id,
+                    text=text,
+                ):
+                    return
             if message.get("photo"):
                 from app.services.telegram_bot_handlers.access_requests import (
                     handle_request_photo,

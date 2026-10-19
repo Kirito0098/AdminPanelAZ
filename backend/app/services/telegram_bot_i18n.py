@@ -91,6 +91,7 @@ BTN_MENU_CIDR = "🗂 CIDR"
 BTN_MENU_WARPER = "🌐 WARP"
 BTN_MENU_AWG2 = "🛡️ AWG2"
 BTN_MENU_UNLOCK_CODES = "🎟 Коды доступа"
+BTN_REDEEM_UNLOCK = "Продлить по ключу"
 
 MENU_KEYBOARD_PLACEHOLDER = "Конфиги, статус или Ещё…"
 MENU_MORE_TITLE = "📋 <b>Дополнительно</b>\n\n<i>Остальные разделы — кнопками ниже.</i>"
@@ -109,6 +110,7 @@ MENU_ACTIONS: dict[str, str] = {
     BTN_MENU_AWG2: "awg2",
     "Запросить доступ": "request_access",
     "Запросить ещё конфиг": "request_more_config",
+    BTN_REDEEM_UNLOCK: "redeem_unlock",
     "У меня есть код привязки": "link_code",
     # Старые подписи кнопок (до обновления меню)
     "🌐 AZ-WARP": "warper",

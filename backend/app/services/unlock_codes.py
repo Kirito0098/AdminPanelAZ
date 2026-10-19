@@ -677,3 +677,23 @@ def redeem_unlock_code(
         "protocols_applied": protocols_applied,
         "access_until_by_protocol": access_until_by_protocol,
     }
+
+
+def redeem_unlock_code_for_user(db: Session, *, code: str, user: User) -> dict:
+    """Owner-scope redeem: anchor on first owned primary config (lowest node_id, name)."""
+    configs = (
+        db.query(VpnConfig)
+        .filter(VpnConfig.owner_id == user.id, VpnConfig.ha_primary_config_id.is_(None))
+        .order_by(VpnConfig.node_id.asc(), VpnConfig.client_name.asc(), VpnConfig.id.asc())
+        .all()
+    )
+    if not configs:
+        raise ValueError("Нет конфигураций для продления — обратитесь к администратору")
+    anchor = configs[0]
+    return redeem_unlock_code(
+        db,
+        code=code,
+        client_name=anchor.client_name,
+        node_id=anchor.node_id,
+        user_id=user.id,
+    )
