@@ -1661,6 +1661,43 @@ class PresetResponse(PresetBase):
     model_config = {"from_attributes": True}
 
 
+class AccessRequestResponse(BaseModel):
+    id: int
+    request_type: str
+    user_id: int | None = None
+    telegram_id: str
+    telegram_username: str | None = None
+    telegram_name: str | None = None
+    requested_count: int = 1
+    user_note: str | None = None
+    status: str
+    reviewed_by_id: int | None = None
+    reviewed_at: datetime | None = None
+    reject_reason: str | None = None
+    delivered_at: datetime | None = None
+    receipt_file_id: str | None = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ApproveRequest(BaseModel):
+    preset_id: int | None = None
+    node_ids: list[int] | None = None
+    protocols: list[str] | None = None
+    config_count: int | None = Field(default=None, ge=1, le=20)
+    access_until: datetime | None = None
+    traffic_limit_bytes: int | None = Field(default=None, ge=0)
+    username: str | None = Field(default=None, min_length=1, max_length=64)
+    count: int | None = Field(default=None, ge=1, le=20)
+    days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class RejectRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=256)
+    ban: bool = False
+
+
 class NodeBase(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     host: str = Field(min_length=1, max_length=255)

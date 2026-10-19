@@ -3,6 +3,7 @@ import secrets
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response
@@ -16,6 +17,7 @@ from app.models import (
     BackgroundTask,
     Node,
     User,
+    UserAccessRequest,
     UserNodeAssignment,
     UserRole,
     VpnConfig,
@@ -24,6 +26,8 @@ from app.models import (
     UserTrafficStatProtocol,
 )
 from app.schemas import (
+    AccessRequestResponse,
+    ApproveRequest,
     ConfigAccessOpRequest,
     MessageResponse,
     PresetCreate,
@@ -33,6 +37,7 @@ from app.schemas import (
     ProvisionPlanResponse,
     ProvisioningConfig,
     ProvisioningConfigNode,
+    RejectRequest,
     TelegramLinkCodeResponse,
     UserConfigAccessResponse,
     UserConfigAccessUpdate,
@@ -65,6 +70,13 @@ from app.services.client_names import (
 from app.services.client_portal import revoke_creator_portal_links
 from app.services.config_access import get_user_config_grants, set_user_config_access
 from app.services.feature_guards import get_feature_service
+from app.services.user_access_requests import (
+    AlreadyDecided,
+    TelegramAlreadyBound,
+    approve_request,
+    delete_user_write_archive,
+    reject_request,
+)
 from app.services.ip_restriction import ip_restriction_service
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.node_manager import get_adapter_for_node, get_node_antizapret_path, node_metadata_dict
@@ -495,6 +507,134 @@ def delete_preset_endpoint(
     if not delete_preset(db, preset_id):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Шаблон не найден")
     return MessageResponse(message="Шаблон удалён")
+
+
+def _require_provisioning() -> None:
+    if not get_feature_service().is_enabled("user_provisioning"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="Раздел «Предоставление доступа» отключён администратором.",
+        )
+
+
+@router.get("/requests", response_model=list[AccessRequestResponse])
+def list_access_requests(
+    status: str | None = None,
+    type: str | None = Query(default=None, alias="type"),
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Список заявок на предоставление доступа (с фильтрами по статусу/типу)."""
+    _require_provisioning()
+    query = db.query(UserAccessRequest)
+    if status:
+        query = query.filter(UserAccessRequest.status == status)
+    if type:
+        query = query.filter(UserAccessRequest.request_type == type)
+    rows = query.order_by(UserAccessRequest.id.desc()).all()
+    return [AccessRequestResponse.model_validate(row) for row in rows]
+
+
+@router.post("/requests/{request_id}/approve", response_model=AccessRequestResponse)
+def approve_access_request(
+    request_id: int,
+    payload: ApproveRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Одобрить заявку (с шаблоном или ad-hoc планом). Условие pending→approved."""
+    _require_provisioning()
+    row = db.get(UserAccessRequest, request_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Заявка не найдена")
+    ad_hoc: dict[str, Any] | None = None
+    if row.request_type == "new_user":
+        if payload.preset_id is None:
+            ad_hoc = {
+                "node_ids": payload.node_ids or [],
+                "protocols": payload.protocols or [],
+                "config_count": payload.config_count,
+                "access_until": payload.access_until,
+                "traffic_limit_bytes": payload.traffic_limit_bytes,
+                "username": payload.username,
+            }
+    elif row.request_type == "add_config":
+        ad_hoc = {"count": payload.count}
+    elif row.request_type == "extend_access":
+        ad_hoc = {"days": payload.days}
+    try:
+        decided = approve_request(
+            db, request_id=request_id, admin=admin, preset_id=payload.preset_id, ad_hoc=ad_hoc
+        )
+    except AlreadyDecided:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "already_decided", "message": "Заявка уже обработана"},
+        )
+    except TelegramAlreadyBound as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={
+                "code": "telegram_already_bound",
+                "message": exc.admin_detail,
+                "actions": ["extend_user", "open_card"],
+                "user_id": exc.user_id,
+                "username": exc.username,
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    if decided is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Заявка не найдена")
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="access_request_approve",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"request_id={request_id}, type={row.request_type}",
+        )
+    return AccessRequestResponse.model_validate(decided)
+
+
+@router.post("/requests/{request_id}/reject", response_model=AccessRequestResponse)
+def reject_access_request(
+    request_id: int,
+    payload: RejectRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Отклонить заявку с опциональной блокировкой telegram_id."""
+    _require_provisioning()
+    row = db.get(UserAccessRequest, request_id)
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Заявка не найдена")
+    try:
+        decided = reject_request(
+            db, request_id=request_id, admin=admin, reason=payload.reason, ban=payload.ban
+        )
+    except AlreadyDecided:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail={"code": "already_decided", "message": "Заявка уже обработана"},
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    if decided is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Заявка не найдена")
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="access_request_reject",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"request_id={request_id}, ban={payload.ban}",
+        )
+    return AccessRequestResponse.model_validate(decided)
 
 
 @router.patch("/{user_id}", response_model=UserResponse)
@@ -1295,6 +1435,8 @@ def delete_user(
                 detail="Нельзя удалить последнего администратора",
             )
     deleted_username = user.username
+    # Task 8: перед удалением пишем строку в telegram_user_archive (история requester'ов).
+    delete_user_write_archive(db, user)
     active_provision = (
         db.query(BackgroundTask)
         .filter(

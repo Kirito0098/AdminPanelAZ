@@ -1037,7 +1037,9 @@ class TelegramRequestBan(Base):
     __tablename__ = "telegram_request_bans"
 
     telegram_id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    banned_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    banned_by_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     note: Mapped[str | None] = mapped_column(String(256), nullable=True)
 

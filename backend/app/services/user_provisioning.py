@@ -19,9 +19,13 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+import logging
+
 from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.config import get_settings
 from app.database import SessionLocal
@@ -821,6 +825,18 @@ def run_user_provision_task(task_id: str, user_id: int) -> dict[str, Any]:
         message=f"Готово: создано {created}, удалено {deleted}, ошибок {errors}",
         output=json.dumps({"success": True, "items": results}, ensure_ascii=False),
     )
+    # Task 9 hook: после завершения задачи provision — единая доставка «Доступ одобрен».
+    try:
+        from app.services.user_access_requests import maybe_send_delivery_after_task
+
+        delivery_db = SessionLocal()
+        try:
+            maybe_send_delivery_after_task(delivery_db, user_id=user_id, created_count=created)
+        finally:
+            delivery_db.close()
+    except Exception as exc:  # доставка не должна ломать завершение задачи
+        logger.exception("delivery follow-up after provision task failed: %s", exc)
+
     return {"success": True, "items": results}
 
 
