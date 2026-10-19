@@ -538,24 +538,26 @@ def enqueue_user_provision(
     user_id: int,
     actor_username: str,
     confirm_deletions: bool,
+    creations_only: bool = False,
 ) -> BackgroundTask:
     """Поставить задачу применения плана в очередь.
 
     Raises HTTP 409 ``access_expired`` когда план заблокирован истёкшим доступом,
     HTTP 409 ``confirm_deletions`` когда в плане есть удаления, но флага нет.
-    Возвращает уже активную задачу пользователя, если она есть.
+    При ``creations_only`` удаления не применяются и флаг подтверждения не
+    требуется. Возвращает уже активную задачу пользователя, если она есть.
     """
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
 
     plan = compute_plan(db, user)
-    if plan.blocked:
+    if plan.blocked and not creations_only:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "access_expired", "message": plan.block_reason},
         )
-    if plan.delete and not confirm_deletions:
+    if plan.delete and not confirm_deletions and not creations_only:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={"code": "confirm_deletions"},
@@ -572,6 +574,9 @@ def enqueue_user_provision(
         message,
         created_by_username=actor_username,
         subject_key=subject_key,
+        input=json.dumps(
+            {"creations_only": creations_only, "user_id": user_id, "actor": actor_username}
+        ),
     )
 
     def _callable(progress_updater: Callable[..., Any] | None = None) -> dict[str, Any]:
@@ -713,9 +718,18 @@ def run_user_provision_task(task_id: str, user_id: int) -> dict[str, Any]:
                 "items": [],
             }
 
-        apply_items = sorted(
-            (*plan.create, *plan.delete),
-            key=lambda item: (item.action, item.client_name, item.node_id),
+        try:
+            task_payload = json.loads(task.input or "{}")
+        except (ValueError, TypeError):
+            task_payload = {}
+        creations_only = bool(task_payload.get("creations_only"))
+        apply_items = (
+            plan.create
+            if creations_only
+            else sorted(
+                (*plan.create, *plan.delete),
+                key=lambda item: (item.action, item.client_name, item.node_id),
+            )
         )
         node_ids = sorted({item.node_id for item in apply_items})
         nodes = {

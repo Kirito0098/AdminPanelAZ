@@ -29,7 +29,13 @@ from app.models import (
 from app.routers import unlock_codes as unlock_codes_router
 from app.services.feature_guards import check_path_access, module_disabled_message
 from app.services.feature_toggles import FeatureToggleService
-from app.services.unlock_codes import create_unlock_code, generate_code_value, redeem_unlock_code
+from app.services.unlock_codes import (
+    create_unlock_code,
+    generate_code_value,
+    list_unlock_codes,
+    redeem_unlock_code,
+    serialize_unlock_code,
+)
 
 
 
@@ -1509,3 +1515,97 @@ def test_client_name_underscore_is_not_a_wildcard(db):
     assert _client_config_name_and_protocols(db, node.id, "a_b") == ("a_b", set())
     assert router_owner_for_client(db, node_id=node.id, client_name="a_b") is None
     assert router_owner_for_client(db, node_id=node.id, client_name="AXB").id == owner.id
+
+
+def test_create_unlock_code_with_comment(db):
+    admin = _make_user(db)
+    row = create_unlock_code(
+        db,
+        grant_days=7,
+        protocols=["openvpn"],
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="COMMENT-001",
+        comment="  наличные  ",
+    )
+    assert row.comment == "наличные"
+    assert serialize_unlock_code(row)["comment"] == "наличные"
+
+
+def test_create_unlock_code_comment_none_or_blank(db):
+    admin = _make_user(db)
+    row = create_unlock_code(
+        db,
+        grant_days=7,
+        protocols=["openvpn"],
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="COMMENT-002",
+        comment=None,
+    )
+    assert row.comment is None
+    assert serialize_unlock_code(row)["comment"] is None
+
+    row = create_unlock_code(
+        db,
+        grant_days=7,
+        protocols=["openvpn"],
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="COMMENT-003",
+        comment="   ",
+    )
+    assert row.comment is None
+
+
+def test_list_unlock_codes_comment_filter_case_insensitive(db):
+    admin = _make_user(db)
+    create_unlock_code(
+        db,
+        grant_days=7,
+        protocols=["openvpn"],
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="COMMENT-010",
+        comment="наличные, друг",
+    )
+    create_unlock_code(
+        db,
+        grant_days=7,
+        protocols=["openvpn"],
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="COMMENT-011",
+        comment="подарок сотрудникам",
+    )
+    create_unlock_code(
+        db,
+        grant_days=7,
+        protocols=["openvpn"],
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=admin,
+        code="COMMENT-012",
+        comment=None,
+    )
+    listed = list_unlock_codes(db)
+    assert len(listed) == 3
+
+    def codes(q: str) -> list[str]:
+        return [item["code"] for item in list_unlock_codes(db, comment_query=q)]
+
+    assert codes("наличные") == ["COMMENT-010"]
+    assert codes("НАЛИЧНЫЕ") == ["COMMENT-010"]
+    assert codes("сотруд") == ["COMMENT-011"]
+    assert codes("нет такого") == []

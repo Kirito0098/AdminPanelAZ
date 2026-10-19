@@ -53,6 +53,7 @@ from app.schemas import (
     UserProvisioningSuggested,
     UserProvisioningUpdate,
     UserResumeRequest,
+    UserExtendRequest,
     UserResponse,
     UserStatsResponse,
     UserSuspendRequest,
@@ -121,6 +122,7 @@ from app.services.password_policy import validate_password
 from app.services.refresh_token import invalidate_user_sessions
 from app.services.self_service import password_change_required_on_admin_set
 from app.services.telegram_link import notify_telegram_unlinked
+from app.services.user_access_extend import compute_extended_access_until
 from app.services.user_subscription import (
     get_user_access_until,
     normalize_access_until,
@@ -956,6 +958,27 @@ def resume_user(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"target={user.username}",
         )
+    return UserResponse.model_validate(user)
+
+
+@router.post("/{user_id}/extend")
+def extend_user_access(
+    user_id: int,
+    payload: UserExtendRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Продлить доступ на N дней (max(now, access_until) + days) и сбросить счётчик трафика."""
+    if not get_feature_service().is_enabled("user_provisioning"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=module_disabled_message("user_provisioning")
+        )
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    new_until = compute_extended_access_until(get_user_access_until(user), payload.days)
+    set_user_access_until(db, user, new_until, actor=current_user.username)
     return UserResponse.model_validate(user)
 
 

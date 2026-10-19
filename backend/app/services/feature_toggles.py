@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
+from sqlalchemy.orm import Session
+
 from app.services.env_file import EnvFileService
 from app.services.shared_helpers import parse_bool as _parse_bool
 
@@ -986,7 +988,9 @@ class FeatureToggleService:
             "disabled_count": len(items) - enabled_count,
         }
 
-    def update_toggles(self, updates: dict[str, bool]) -> dict:
+    def update_toggles(
+        self, updates: dict[str, bool], db: Session | None = None
+    ) -> dict:
         for key in updates:
             definition = FEATURE_TOGGLE_BY_KEY.get(key)
             if definition is None:
@@ -1019,6 +1023,16 @@ class FeatureToggleService:
             definition = FEATURE_TOGGLE_BY_KEY[key]
             self.env.set_env_value(definition.env_key, "true" if enabled else "false")
         self._invalidate_env_map()
+        # Выключение сбора трафика снимает все пользовательские блоки user_traffic_limit.
+        if (
+            db is not None
+            and "traffic_sync" in updates
+            and not updates["traffic_sync"]
+            and intended.get("traffic_sync", False)
+        ):
+            from app.services.user_traffic_limit import _lift_all_user_traffic_blocks
+
+            _lift_all_user_traffic_blocks(db)
         return self.list_toggles()
 
     def get_resource_profile(self) -> str:

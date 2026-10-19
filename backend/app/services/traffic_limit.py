@@ -211,6 +211,7 @@ def get_client_consumed_traffic_bytes(
     client_name: str,
     node_id: int | None = None,
     period_days: int | None = None,
+    since: datetime | None = None,
     protocol_types: set[str] | frozenset[str] | None = None,
     normalize_identity=None,
 ):
@@ -242,7 +243,20 @@ def get_client_consumed_traffic_bytes(
     if not matched:
         return 0
 
-    if period_days in TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED:
+    if since is not None:
+        # Пользовательский лимит считает от traffic_counter_reset_at: только creada_at >= since,
+        # без ограничения по концу периода и без разбивки на календарные окна.
+        since_dt = _as_utc(since).replace(tzinfo=None)
+        model = UserTrafficSample
+        total_expr = func.coalesce(model.delta_received, 0) + func.coalesce(model.delta_sent, 0)
+        query = db.query(func.coalesce(func.sum(total_expr), 0)).filter(
+            model.common_name.in_(matched),
+            model.created_at >= since_dt,
+        )
+        if node_id is not None:
+            # "+ 0" keeps SQLite on (common_name, created_at).
+            query = query.filter(model.node_id + 0 == node_id)
+    elif period_days in TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED:
         now = datetime.now(timezone.utc)
         period_start, period_end = get_traffic_limit_period_bounds(period_days, now=now)
         since_dt = _as_utc(period_start).replace(tzinfo=None)

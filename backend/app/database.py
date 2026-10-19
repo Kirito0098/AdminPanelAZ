@@ -2036,6 +2036,11 @@ def _migrate_users_stage3() -> None:
             if "traffic_limit_bytes" not in cols:
                 conn.execute(text("ALTER TABLE provisioning_presets ADD COLUMN traffic_limit_bytes BIGINT"))
                 logger.info("DB migration: added provisioning_presets.traffic_limit_bytes")
+        if "background_task" in tables:
+            cols = _table_columns(conn, "background_task")
+            if "input" not in cols:
+                conn.execute(text("ALTER TABLE background_task ADD COLUMN input TEXT"))
+                logger.info("DB migration: added background_task.input")
 
 
 def _migrate_user_config_access_table() -> None:

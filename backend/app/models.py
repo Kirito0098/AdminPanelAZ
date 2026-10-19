@@ -817,6 +817,7 @@ class BackgroundTask(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued", index=True)
     created_by_username: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
     message: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    input: Mapped[str | None] = mapped_column(Text, nullable=True)
     output: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

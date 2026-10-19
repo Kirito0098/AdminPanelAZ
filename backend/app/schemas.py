@@ -292,6 +292,10 @@ class UserResumeRequest(BaseModel):
     notify_telegram: bool = False
 
 
+class UserExtendRequest(BaseModel):
+    days: int = Field(ge=1, le=3650)
+
+
 class UserResponse(UserBase):
     id: int
     must_change_password: bool

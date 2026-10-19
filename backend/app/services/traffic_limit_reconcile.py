@@ -23,7 +23,16 @@ def reconcile_traffic_limit_policies(db: Session, *, node_id: int | None = None)
                 continue
             result = _reconcile_for_node(db, node)
             total_changed += int(result.get("changed") or 0)
-        return {"traffic_limit_reconcile": "ok", "changed": total_changed, "node_id": None}
+        result: dict = {
+            "traffic_limit_reconcile": "ok",
+            "changed": total_changed,
+            "node_id": None,
+        }
+        # Per-user traffic limits after all per-node reconcile.
+        from app.services.user_traffic_limit import reconcile_user_traffic_limits
+
+        result["user_traffic"] = reconcile_user_traffic_limits(db)
+        return result
 
     node = db.query(Node).filter(Node.id == node_id).first()
     if not node:

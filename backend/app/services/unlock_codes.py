@@ -159,6 +159,7 @@ def _serialize_code(code: UnlockCode) -> dict:
         "redemption_count": redemption_count,
         "exhausted": exhausted,
         "allowed_client_names": _parse_allowed_client_names(code.allowed_client_names),
+        "comment": code.comment,
         "redemptions": [_serialize_redemption(item) for item in redemptions],
         "code_expires_at": _as_utc(code.code_expires_at).isoformat() if code.code_expires_at else None,
         "created_by_user_id": code.created_by_user_id,
@@ -191,6 +192,7 @@ def create_unlock_code(
     creator: User | None,
     code: str | None = None,
     allowed_client_names: list[str] | None = None,
+    comment: str | None = None,
 ) -> UnlockCode:
     if int(grant_days) < 1:
         raise ValueError("grant_days must be at least 1")
@@ -228,6 +230,7 @@ def create_unlock_code(
         allowed_client_names=json.dumps(normalized_clients, ensure_ascii=False),
         code_expires_at=_to_db_datetime(code_expires_at),
         created_by_user_id=creator.id if creator is not None else None,
+        comment=(comment or "").strip() or None,
     )
     db.add(row)
     db.commit()
@@ -244,12 +247,21 @@ def revoke_unlock_code(db: Session, code_id: int) -> None:
         db.commit()
 
 
-def list_unlock_codes(db: Session, *, include_revoked: bool = False) -> list[dict]:
+def list_unlock_codes(
+    db: Session, *, include_revoked: bool = False, comment_query: str | None = None
+) -> list[dict]:
     query = db.query(UnlockCode).options(
         joinedload(UnlockCode.redemptions).joinedload(UnlockCodeRedemption.node)
     )
     if not include_revoked:
         query = query.filter(UnlockCode.revoked_at.is_(None))
+    if comment_query:
+        needle = comment_query.strip().casefold()
+        if needle:
+            # SQLite ILIKE is ASCII-only; casefold the needle in Python and match
+            # against lower(column) so Latin is case-insensitive; Cyrillic comments
+            # are typically stored lowercase and match the casefolded needle.
+            query = query.filter(func.lower(UnlockCode.comment).like(f"%{needle}%"))
     rows = query.order_by(UnlockCode.created_at.desc(), UnlockCode.id.desc()).all()
     return [_serialize_code(row) for row in rows]
 
@@ -406,11 +418,14 @@ def _clear_policy_block(row, *, actor: str) -> None:
 def _is_manual_admin_block(row) -> bool:
     if row is None:
         return False
-    if row.is_permanent_blocked:
-        return True
     reason = (row.block_reason or "").strip().lower()
-    if reason in ("manual_permanent", "manual_temp"):
+    if reason in {"manual_permanent", "manual_temp", "user_suspended"}:
         return True
+    if row.is_permanent_blocked:
+        # user_traffic_limit и per-config traffic_limit — это не админский бан:
+        # оuner-код может продлить через них, а хук продления снимет user_traffic_limit.
+        # access_expired и прочие permanent остаются «ручными» — отказ без изменений.
+        return reason not in {"user_traffic_limit", "traffic_limit"}
     if row.is_temp_blocked and reason.startswith("manual"):
         return True
     return False
@@ -546,9 +561,11 @@ def redeem_unlock_code(
         grant_days = row.grant_days
         grant_until_base = now
         granted_until_by_protocol = {}
+        previous_access_until: datetime | None = None
         if owner_user is not None:
             from app.services import user_subscription as user_subscription
 
+            previous_access_until = user_subscription.get_user_access_until(owner_user)
             user_access_until, user_changes = user_subscription.extend_owned_clients_for_redeem(
                 db,
                 owner_user,
@@ -623,6 +640,25 @@ def redeem_unlock_code(
     if owner_user is not None and user_subscription is not None:
         user_subscription.reconcile_owned_clients_access_until(db, owner_user)
         user_subscription.replicate_access_until_changes(db, user_changes, actor="unlock_codes")
+        # Task 7: owner redeem is an extension — reset traffic counter, lift
+        # user_traffic_limit, auto-apply creations, notify owner.
+        from app.services.user_access_extend import on_user_access_extended
+
+        owned = (
+            db.query(VpnConfig)
+            .filter(
+                VpnConfig.owner_id == owner_user.id,
+                VpnConfig.ha_primary_config_id.is_(None),
+            )
+            .all()
+        )
+        on_user_access_extended(
+            db,
+            owner_user,
+            actor="unlock_codes",
+            previous_access_until=previous_access_until,
+            configs_were_kept=len(owned) > 0,
+        )
 
     if owner_user is None:
         for protocol in protocols_applied:

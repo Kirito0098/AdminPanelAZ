@@ -33,6 +33,7 @@ class UnlockCodeCreateRequest(BaseModel):
     code_expires_at: datetime | None = None
     code: str | None = None
     allowed_client_names: list[str] | None = None
+    comment: str | None = Field(default=None, max_length=128)
 
 
 def _require_unlock_codes_enabled() -> None:
@@ -50,11 +51,12 @@ def _default_max_redemptions(mode: str, max_redemptions: int | None) -> int:
 @tg_mini_token_allowed
 def get_unlock_codes(
     include_revoked: bool = False,
+    comment: str | None = None,
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
     _require_unlock_codes_enabled()
-    return list_unlock_codes(db, include_revoked=include_revoked)
+    return list_unlock_codes(db, include_revoked=include_revoked, comment_query=comment)
 
 
 @router.post("")

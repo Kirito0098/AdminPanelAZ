@@ -40,7 +40,7 @@ def update_feature_toggles(payload: FeatureToggleUpdate, _: User = Depends(requi
         and service.is_enabled("telegram")
     )
     try:
-        result = service.update_toggles(payload.toggles)
+        result = service.update_toggles(payload.toggles, db=db)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if turning_off_telegram:

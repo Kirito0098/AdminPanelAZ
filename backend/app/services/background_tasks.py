@@ -271,6 +271,7 @@ class BackgroundTaskService:
         *,
         created_by_username: str | None = None,
         subject_key: str | None = None,
+        input: str | None = None,
     ) -> str:
         task_id = secrets.token_hex(16)
         owner = current_process_owner()
@@ -284,6 +285,7 @@ class BackgroundTaskService:
                         status="queued",
                         created_by_username=created_by_username,
                         message=(message or "Задача поставлена в очередь")[:255],
+                        input=input,
                         progress_percent=0,
                         progress_stage="Ожидание запуска задачи…",
                         owner=owner,

@@ -682,6 +682,7 @@ def set_user_access_until(
     sync_clients: bool = True,
     commit: bool = True,
 ) -> tuple[User, dict | None]:
+    prev = get_user_access_until(user)
     user.access_until = _to_db_datetime(access_until)
     db.add(user)
     if commit:
@@ -692,4 +693,19 @@ def set_user_access_until(
     cascade: dict | None = None
     if sync_clients:
         cascade = sync_owned_clients_access_until(db, user, actor=actor, commit=commit)
+    # Task 7: extension hook fires only when the deadline grows
+    # (future set, or past/None moved into the future). Clearing to NULL is not
+    # an extension and must not reset the traffic counter.
+    new = get_user_access_until(user)
+    if prev != new and new is not None and (prev is None or new > prev):
+        from app.services.user_access_extend import on_user_access_extended
+
+        owned = _owned_configs(db, user.id)
+        on_user_access_extended(
+            db,
+            user,
+            actor=actor,
+            previous_access_until=prev,
+            configs_were_kept=len(owned) > 0,
+        )
     return user, cascade
