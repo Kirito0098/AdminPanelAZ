@@ -49,6 +49,9 @@ logger = logging.getLogger(__name__)
 NODE_DEFAULT_POLICY_CLIENT = "__node_default__"
 NODE_ROUTE_MODES = frozenset({"route_all", "route_selective"})
 
+# Sticky user-level block reasons that reconcile_* must never rewrite to manual_permanent.
+USER_LEVEL_BLOCK_REASONS = frozenset({"user_suspended", "user_traffic_limit"})
+
 
 # Transient "cooldown" bans for the OpenVPN disconnect-kick feature: keep a
 # client banned for a few seconds so its client auto-reconnect is rejected (the
@@ -103,6 +106,18 @@ def _policy_access_expired(row, now: datetime | None = None) -> bool:
     current = _as_utc(now) or _now()
     access_until = _policy_access_until(row)
     return bool(access_until and access_until <= current)
+
+
+def _sticky_reason(row) -> str | None:
+    """Return the sticky user-level block reason on a permanent policy row, else None.
+
+    Sticky reasons (user_suspended / user_traffic_limit) survive reconcile_* and are never
+    rewritten to manual_permanent / access_expired / traffic_limit.
+    """
+    reason = (getattr(row, "block_reason", None) or "").strip()
+    if getattr(row, "is_permanent_blocked", False) and reason in USER_LEVEL_BLOCK_REASONS:
+        return reason
+    return None
 
 
 def delete_client_access_policies(db: Session, config: VpnConfig) -> int:
@@ -313,6 +328,24 @@ class AccessPolicyService:
             self.db.flush()
         return row
 
+    def _ovpn_target_reason(self, state: dict, row=None) -> str | None:
+        """Target block_reason: sticky user-level reasons win over computed block_mode."""
+        sticky = _sticky_reason(row) if row is not None else None
+        if sticky:
+            return sticky
+        if not state["is_blocked"]:
+            return None
+        mode = state["block_mode"]
+        if mode == "permanent":
+            return "manual_permanent"
+        if mode == "access_expired":
+            return "access_expired"
+        if mode == "temp":
+            return "manual_temp"
+        if mode == "traffic_limit":
+            return "traffic_limit"
+        return None
+
     def _ovpn_state(self, row: OpenVpnAccessPolicy, now: datetime | None = None) -> dict:
         now = _as_utc(now) or _now()
         access_until = _as_utc(row.access_until)
@@ -361,7 +394,12 @@ class AccessPolicyService:
         traffic_exceeded = bool(traffic_state.get("traffic_limit_exceeded"))
         changed = False
         if traffic_exceeded:
-            if row.is_permanent_blocked and not row.is_temp_blocked and not (row.updated_by or "").strip():
+            if (
+                row.is_permanent_blocked
+                and not row.is_temp_blocked
+                and not (row.updated_by or "").strip()
+                and not _sticky_reason(row)
+            ):
                 row.is_permanent_blocked = False
                 row.block_started_at = None
                 row.block_days = None
@@ -373,7 +411,13 @@ class AccessPolicyService:
             row.block_days = None
             row.block_until = None
             changed = True
-        if traffic_limit_changed and not traffic_exceeded and row.is_permanent_blocked and not row.is_temp_blocked:
+        if (
+            traffic_limit_changed
+            and not traffic_exceeded
+            and row.is_permanent_blocked
+            and not row.is_temp_blocked
+            and not _sticky_reason(row)
+        ):
             row.is_permanent_blocked = False
             row.block_started_at = None
             row.block_days = None
@@ -424,8 +468,9 @@ class AccessPolicyService:
         if self._cleanup_ovpn_traffic_limit(row, traffic_state, traffic_limit_changed=traffic_limit_changed):
             changed = True
         state = self._ovpn_state(row, now)
-        if row.block_reason != (state["block_mode"] if state["is_blocked"] else None):
-            row.block_reason = state["block_mode"] if state["is_blocked"] else None
+        target_reason = self._ovpn_target_reason(state, row=row)
+        if row.block_reason != target_reason:
+            row.block_reason = target_reason
             changed = True
         if state["is_blocked"]:
             banned.add(client_name)
@@ -489,6 +534,45 @@ class AccessPolicyService:
         else:
             self.reconcile_openvpn(client_name)
         return self._ovpn_state(row)
+
+    def _policy_row_by_protocol(self, protocol: str, client_name: str):
+        if protocol == "openvpn":
+            return self._get_ovpn(client_name)
+        if protocol == "wireguard":
+            return self._get_wg(client_name)
+        if protocol == "amneziawg2":
+            return self._get_awg2(client_name)
+        raise ValueError(f"unsupported protocol: {protocol}")
+
+    def set_reason_block(self, protocol: str, client_name: str, reason: str, *, actor: str | None = None) -> dict:
+        """Set a sticky user-level block reason (user_suspended / user_traffic_limit)."""
+        if reason not in USER_LEVEL_BLOCK_REASONS:
+            raise ValueError(f"unsupported reason: {reason}")
+        row = self._policy_row_by_protocol(protocol, client_name)
+        now = _now()
+        row.is_temp_blocked = False
+        row.is_permanent_blocked = True
+        row.block_reason = reason
+        row.block_started_at = now
+        row.block_days = None
+        row.block_until = None
+        row.updated_by = actor
+        self.db.commit()
+        getattr(self, f"reconcile_{protocol}")(client_name)
+        return getattr(self, f"get_{protocol}_policy")(client_name)
+
+    def lift_reason_block(self, protocol: str, client_name: str, reason: str, *, actor: str | None = None) -> dict:
+        """Lift only the matching sticky reason; no-op when the row carries another reason."""
+        row = self._policy_row_by_protocol(protocol, client_name)
+        if (row.block_reason or "") != reason:
+            return getattr(self, f"get_{protocol}_policy")(client_name)
+        row.is_permanent_blocked = False
+        row.block_reason = None
+        row.block_started_at = None
+        row.updated_by = actor
+        self.db.commit()
+        getattr(self, f"reconcile_{protocol}")(client_name)
+        return getattr(self, f"get_{protocol}_policy")(client_name)
 
     def openvpn_set_traffic_limit(
         self,
@@ -555,7 +639,10 @@ class AccessPolicyService:
             self.db.flush()
         return row
 
-    def _wg_target_reason(self, state: dict) -> str | None:
+    def _wg_target_reason(self, state: dict, row=None) -> str | None:
+        sticky = _sticky_reason(row) if row is not None else None
+        if sticky:
+            return sticky
         if not state["is_blocked"]:
             return None
         mode = state["block_mode"]
@@ -704,7 +791,10 @@ class AccessPolicyService:
             consumed_bytes=consumed,
         )
 
-    def _awg2_target_reason(self, state: dict) -> str | None:
+    def _awg2_target_reason(self, state: dict, row=None) -> str | None:
+        sticky = _sticky_reason(row) if row is not None else None
+        if sticky:
+            return sticky
         if not state["is_blocked"]:
             return None
         mode = state["block_mode"]
@@ -777,25 +867,28 @@ class AccessPolicyService:
             # Keep is_permanent_blocked — access schedule must not wipe a manual ban.
             row.block_reason = None
         traffic_state = self._awg2_traffic_state(row)
-        if row.block_reason == "traffic_limit" and not traffic_state.get("traffic_limit_exceeded"):
+        sticky = _sticky_reason(row)
+        if not sticky and row.block_reason == "traffic_limit" and not traffic_state.get("traffic_limit_exceeded"):
             row.block_reason = None
         state = self._awg2_state(row, now)
-        if state["is_blocked"] and state["block_mode"] in {"traffic_limit", "access_expired"}:
-            row.block_reason = state["block_mode"]
-        elif row.block_reason == "traffic_limit" and not state["is_blocked"]:
-            row.block_reason = None
-        elif row.block_reason == "access_expired" and not state["is_blocked"]:
-            row.block_reason = None
+        if not sticky:
+            if state["is_blocked"] and state["block_mode"] in {"traffic_limit", "access_expired"}:
+                row.block_reason = state["block_mode"]
+            elif row.block_reason == "traffic_limit" and not state["is_blocked"]:
+                row.block_reason = None
+            elif row.block_reason == "access_expired" and not state["is_blocked"]:
+                row.block_reason = None
         if (
             traffic_limit_changed
             and not state["traffic_limit_exceeded"]
             and row.is_permanent_blocked
             and not row.is_temp_blocked
+            and not sticky
         ):
             row.is_permanent_blocked = False
             row.block_reason = None
         state = self._awg2_state(row, now)
-        target_reason = self._awg2_target_reason(state)
+        target_reason = self._awg2_target_reason(state, row=row)
         if row.block_reason != target_reason:
             row.block_reason = target_reason
         after_blocked = bool(state["is_blocked"])
@@ -1004,20 +1097,28 @@ class AccessPolicyService:
             # Keep is_permanent_blocked — access schedule must not wipe a manual ban.
             row.block_reason = None
         traffic_state = self._wg_traffic_state(row)
-        if row.block_reason == "traffic_limit" and not traffic_state.get("traffic_limit_exceeded"):
+        sticky = _sticky_reason(row)
+        if not sticky and row.block_reason == "traffic_limit" and not traffic_state.get("traffic_limit_exceeded"):
             row.block_reason = None
         state = self._wg_state(row, now)
-        if state["is_blocked"] and state["block_mode"] in {"traffic_limit", "access_expired"}:
-            row.block_reason = state["block_mode"]
-        elif row.block_reason == "traffic_limit" and not state["is_blocked"]:
-            row.block_reason = None
-        elif row.block_reason == "access_expired" and not state["is_blocked"]:
-            row.block_reason = None
-        if traffic_limit_changed and not state["traffic_limit_exceeded"] and row.is_permanent_blocked and not row.is_temp_blocked:
+        if not sticky:
+            if state["is_blocked"] and state["block_mode"] in {"traffic_limit", "access_expired"}:
+                row.block_reason = state["block_mode"]
+            elif row.block_reason == "traffic_limit" and not state["is_blocked"]:
+                row.block_reason = None
+            elif row.block_reason == "access_expired" and not state["is_blocked"]:
+                row.block_reason = None
+        if (
+            traffic_limit_changed
+            and not state["traffic_limit_exceeded"]
+            and row.is_permanent_blocked
+            and not row.is_temp_blocked
+            and not sticky
+        ):
             row.is_permanent_blocked = False
             row.block_reason = None
         state = self._wg_state(row, now)
-        target_reason = self._wg_target_reason(state)
+        target_reason = self._wg_target_reason(state, row=row)
         if row.block_reason != target_reason:
             row.block_reason = target_reason
         after_blocked = bool(state["is_blocked"])

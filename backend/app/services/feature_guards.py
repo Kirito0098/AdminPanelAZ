@@ -66,9 +66,10 @@ CONFIGS_QR_PATH_MARKERS = ("/download", "/qr", "/one-time-link")
 # §8.1: user_provisioning has no broad api_prefixes (user_management owns /api/users).
 # Provisioning routes are gated by explicit path checks only:
 #   POST /api/users/provisioned, /api/users/{id}/provisioning*, /api/users/{id}/configs/*
+#   POST /api/users/{id}/suspend, /api/users/{id}/resume (Stage 3)
 # GET /api/users, PATCH /api/users/{id} and /api/tg-mini/me/* are NOT gated here.
 _USER_PROVISIONING_PATH_RE = re.compile(r"^/api/users/provisioned(?:/|$)")
-_USER_PROVISIONING_ITEM_RE = re.compile(r"^/api/users/\d+/provisioning(?:/|$)")
+_USER_PROVISIONING_ITEM_RE = re.compile(r"^/api/users/\d+/(?:provisioning|suspend|resume)(?:/|$)")
 _USER_CONFIGS_ITEM_RE = re.compile(r"^/api/users/\d+/configs(?:/|$)")
 
 PATH_TO_MODULES: dict[str, tuple[str, ...]] = {}

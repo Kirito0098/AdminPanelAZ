@@ -105,6 +105,13 @@ class User(Base):
     provision_state: Mapped[str] = mapped_column(String(16), default="unmanaged")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     last_read_notification_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Stage 3: admin suspend/resume + per-user traffic limit.
+    suspended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    suspend_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    suspend_reason_visible: Mapped[bool] = mapped_column(Boolean, default=False)
+    traffic_limit_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    traffic_counter_reset_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    traffic_limit_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
 
     vpn_configs: Mapped[list["VpnConfig"]] = relationship(back_populates="owner")
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user")
@@ -485,6 +492,7 @@ class UnlockCode(Base):
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    comment: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     redemptions: Mapped[list["UnlockCodeRedemption"]] = relationship(
         back_populates="code",

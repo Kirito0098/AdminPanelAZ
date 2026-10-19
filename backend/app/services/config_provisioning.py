@@ -6,11 +6,14 @@ The routers stay thin wrappers and behave exactly as before.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import Node, User, VpnConfig, VpnType
-from app.services.access_policy import forget_deleted_openvpn_client
+from app.services.access_policy import AccessPolicyService, forget_deleted_openvpn_client
 from app.services.admin_notify import admin_notify_service
 from app.services.awg2 import compute_expires_at, require_awg2_installed
 from app.services.client_names import (
@@ -19,7 +22,7 @@ from app.services.client_names import (
 )
 from app.services.client_portal import cleanup_deleted_client_records
 from app.services.feature_guards import get_feature_service, require_vpn_type
-from app.services.node_manager import get_adapter_for_node
+from app.services.node_manager import get_adapter_for_node, node_metadata_dict
 from app.services.node_sync.client_sync import (
     format_ha_replicate_errors,
     maybe_replicate_create,
@@ -37,6 +40,12 @@ from app.services.user_subscription import (
     replicate_inherited_access_until,
 )
 from app.services.vpn_profile_visibility import enforce_can_create_vpn_type
+
+_VPN_PROTOCOLS = {
+    VpnType.openvpn: "openvpn",
+    VpnType.wireguard: "wireguard",
+    VpnType.amneziawg2: "amneziawg2",
+}
 
 
 def provision_config(
@@ -115,6 +124,30 @@ def provision_config(
     inherit = apply_owner_access_until_to_config(
         db, config, actor=actor.username, commit=True, replicate=False
     )
+
+    # Stage 3: a config created for a suspended / traffic-limited owner inherits the sticky block.
+    owner = config.owner
+    if owner is not None:
+        protocol = _VPN_PROTOCOLS.get(config.vpn_type)
+        if protocol is not None:
+            if owner.suspended_at is not None:
+                reason = "user_suspended"
+            elif owner.traffic_limit_blocked:
+                reason = "user_traffic_limit"
+            else:
+                reason = None
+            if reason is not None:
+                antizapret_path = Path(
+                    str(node_metadata_dict(node).get("antizapret_path") or get_settings().antizapret_path)
+                )
+                svc = AccessPolicyService(
+                    db,
+                    antizapret_path=antizapret_path,
+                    node_id=node.id,
+                    node_name=node.name,
+                    adapter=adapter,
+                )
+                svc.set_reason_block(protocol, config.client_name, reason, actor=actor.username)
 
     ha_replicate_warning: str | None = None
     group = find_sync_group_for_primary(db, node_id=node.id)

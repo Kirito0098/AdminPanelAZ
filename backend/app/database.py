@@ -1748,6 +1748,7 @@ def _run_db_migrations() -> None:
     _migrate_user_access_until_backfill()
     _migrate_users_provisioning()
     _migrate_user_provisioning_stage2()
+    _migrate_users_stage3()
     _migrate_revoke_unmanaged_client_portal_links()
     _seed_client_templates_for_nodes()
 
@@ -2004,6 +2005,37 @@ def _migrate_user_provisioning_stage2() -> None:
                     )
                 )
                 logger.info("DB migration: added users.last_read_notification_id")
+
+
+def _migrate_users_stage3() -> None:
+    """Stage 3: user suspend/traffic-limit columns and unlock_codes.comment."""
+    inspector = inspect(engine)
+    tables = {r[0] for r in inspector.get_table_names()}
+
+    with _migration_transaction() as conn:
+        if "users" in tables:
+            cols = _table_columns(conn, "users")
+            for name, typ in [
+                ("suspended_at", "DATETIME"),
+                ("suspend_reason", "VARCHAR(200)"),
+                ("suspend_reason_visible", "BOOLEAN DEFAULT 0"),
+                ("traffic_limit_bytes", "BIGINT"),
+                ("traffic_counter_reset_at", "DATETIME"),
+                ("traffic_limit_blocked", "BOOLEAN DEFAULT 0"),
+            ]:
+                if name not in cols:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {typ}"))
+                    logger.info("DB migration: added users.%s", name)
+        if "unlock_codes" in tables:
+            cols = _table_columns(conn, "unlock_codes")
+            if "comment" not in cols:
+                conn.execute(text("ALTER TABLE unlock_codes ADD COLUMN comment VARCHAR(128)"))
+                logger.info("DB migration: added unlock_codes.comment")
+        if "provisioning_presets" in tables:
+            cols = _table_columns(conn, "provisioning_presets")
+            if "traffic_limit_bytes" not in cols:
+                conn.execute(text("ALTER TABLE provisioning_presets ADD COLUMN traffic_limit_bytes BIGINT"))
+                logger.info("DB migration: added provisioning_presets.traffic_limit_bytes")
 
 
 def _migrate_user_config_access_table() -> None:

@@ -282,6 +282,16 @@ class UserUpdate(BaseModel):
         return value
 
 
+class UserSuspendRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=200)
+    show_reason: bool = False
+    notify_telegram: bool = False
+
+
+class UserResumeRequest(BaseModel):
+    notify_telegram: bool = False
+
+
 class UserResponse(UserBase):
     id: int
     must_change_password: bool

@@ -52,8 +52,10 @@ from app.schemas import (
     UserProvisioningDesired,
     UserProvisioningSuggested,
     UserProvisioningUpdate,
+    UserResumeRequest,
     UserResponse,
     UserStatsResponse,
+    UserSuspendRequest,
     UserTrafficStatRow,
     UserTrafficTotals,
     UserUpdate,
@@ -61,6 +63,7 @@ from app.schemas import (
 from app.services.action_log import log_action
 from app.services.access_policy import AccessPolicyService
 from app.services.admin_notify import admin_notify_service
+from app.services.app_setting_store import _get_setting
 from app.services.active_web_session import active_web_session_service
 from app.services.background_tasks import background_task_service
 from app.services.client_names import (
@@ -71,7 +74,7 @@ from app.services.client_names import (
 )
 from app.services.client_portal import revoke_creator_portal_links
 from app.services.config_access import get_user_config_grants, set_user_config_access
-from app.services.feature_guards import get_feature_service
+from app.services.feature_guards import get_feature_service, module_disabled_message
 from app.services.user_access_requests import (
     AlreadyDecided,
     TelegramAlreadyBound,
@@ -81,6 +84,7 @@ from app.services.user_access_requests import (
     sync_admin_request_messages,
 )
 from app.services import telegram_api
+from app.services.telegram import send_tg_message
 from app.services.request_receipt_preview import ReceiptDecodeError, get_cached_or_build_preview
 from app.services.ip_restriction import ip_restriction_service
 from app.services.notify_time import get_client_timezone_from_request
@@ -88,6 +92,7 @@ from app.services.node_manager import get_adapter_for_node, get_node_antizapret_
 from app.services.node_sync.groups import require_ha_primary_for_client_ops
 from app.services.config_provisioning import deprovision_config
 from app.services.traffic.ha_aggregate import resolve_traffic_scope
+from app.services.user_blocks import apply_user_block, lift_user_block
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
 from app.services.file_download import attachment_response
@@ -871,6 +876,87 @@ def update_user(
     if cascade_warning:
         response.access_cascade_warning = cascade_warning
     return response
+
+
+@router.post("/{user_id}/suspend")
+def suspend_user(
+    user_id: int,
+    payload: UserSuspendRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Приостановить доступ пользователя: sticky user_suspended блок на все его конфиги."""
+    if not get_feature_service().is_enabled("user_provisioning"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=module_disabled_message("user_provisioning")
+        )
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    if user.role == UserRole.admin:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, detail="Нельзя приостановить администратора"
+        )
+    user.suspended_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    user.suspend_reason = (payload.reason or "").strip() or None
+    user.suspend_reason_visible = bool(payload.show_reason)
+    db.commit()
+    apply_user_block(db, user, "user_suspended", actor=current_user.username)
+    if payload.notify_telegram and user.telegram_id:
+        bot_token = _get_setting(db, "telegram_bot_token")
+        if bot_token:
+            text = "Доступ приостановлен администратором"
+            if user.suspend_reason_visible and user.suspend_reason:
+                text += f": {user.suspend_reason}"
+            send_tg_message(bot_token, user.telegram_id, text)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="user_suspend",
+            user_id=current_user.id,
+            username=current_user.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"target={user.username}",
+        )
+    return UserResponse.model_validate(user)
+
+
+@router.post("/{user_id}/resume")
+def resume_user(
+    user_id: int,
+    payload: UserResumeRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Возобновить доступ пользователя: снять user_suspended, при 필요 вернуть user_traffic_limit."""
+    if not get_feature_service().is_enabled("user_provisioning"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=module_disabled_message("user_provisioning")
+        )
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    user.suspended_at = None
+    user.suspend_reason = None
+    user.suspend_reason_visible = False
+    db.commit()
+    lift_user_block(db, user, "user_suspended", actor=current_user.username)
+    if payload.notify_telegram and user.telegram_id:
+        bot_token = _get_setting(db, "telegram_bot_token")
+        if bot_token:
+            send_tg_message(bot_token, user.telegram_id, "Доступ возобновлён.")
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="user_resume",
+            user_id=current_user.id,
+            username=current_user.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"target={user.username}",
+        )
+    return UserResponse.model_validate(user)
 
 
 def _last_provision_task(db: Session, user_id: int) -> dict | None:

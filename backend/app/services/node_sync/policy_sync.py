@@ -35,9 +35,17 @@ PolicyOp = Literal[
     "clear_traffic_limit",
     "set_wg_expiry",
     "set_access_until",
+    "set_block_reason",
+    "lift_block_reason",
 ]
 
 _COPY_OPS = frozenset({"set_traffic_limit", "clear_traffic_limit", "set_access_until"})
+
+_PROTOCOL_BY_VPN_TYPE = {
+    VpnType.openvpn: "openvpn",
+    VpnType.wireguard: "wireguard",
+    VpnType.amneziawg2: "amneziawg2",
+}
 
 
 def _antizapret_path_for_node(node: Node) -> Path:
@@ -66,6 +74,12 @@ def _apply_policy_op(
 ) -> dict:
     client_name = primary_config.client_name
     actor = kwargs.get("actor")
+    protocol = _PROTOCOL_BY_VPN_TYPE[primary_config.vpn_type]
+
+    if op == "set_block_reason":
+        return svc.set_reason_block(protocol, client_name, kwargs["reason"], actor=actor)
+    if op == "lift_block_reason":
+        return svc.lift_reason_block(protocol, client_name, kwargs["reason"], actor=actor)
 
     if primary_config.vpn_type == VpnType.openvpn:
         if op == "block_temp":
