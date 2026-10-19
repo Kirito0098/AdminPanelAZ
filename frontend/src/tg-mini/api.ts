@@ -161,6 +161,24 @@ export async function getTgMeConfigs(): Promise<{ configs: TgMeConfig[] }> {
   return tgFetch<{ configs: TgMeConfig[] }>('/me/configs')
 }
 
+/** Самосервис плана конфигов: добавить следующее свободное имя. */
+export async function createTgMePlanConfig(): Promise<{ index: number; task_id: string }> {
+  return panelApiFetch<{ index: number; task_id: string }>('/me/plan-configs', {
+    method: 'POST',
+  })
+}
+
+/** Самосервис плана конфигов: убрать имя по индексу. */
+export async function removeTgMePlanConfig(
+  index: number,
+  confirmDeletions = false,
+): Promise<{ task_id: string }> {
+  const qs = confirmDeletions ? '?confirm_deletions=true' : ''
+  return panelApiFetch<{ task_id: string }>(`/me/plan-configs/${index}${qs}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function getTgConfigFiles(configId: number): Promise<{ files: TgMiniConfigFile[] }> {
   return tgFetch<{ files: TgMiniConfigFile[] }>(`/configs/${configId}/files`)
 }

@@ -192,6 +192,16 @@ export interface User {
   noc_weekly_dow?: string
   noc_weekly_time?: string
   created_at: string
+  /** Режим предоставления конфигов (unmanaged / pending / partial / ok). */
+  provision_state?: string
+  client_base_name?: string | null
+  plan_config_indexes?: number[] | null
+  desired_protocols?: string[] | null
+  panel_login_enabled?: boolean
+  plan_node_ids?: number[]
+  plan_protocols?: string[]
+  plan_config_count?: number
+  active_task_id?: string | null
 }
 
 export interface UserUpdatePayload {
@@ -205,6 +215,7 @@ export interface UserUpdatePayload {
   can_create_configs?: boolean
   can_manage_configs?: boolean
   visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
+  panel_login_enabled?: boolean
 }
 
 export interface ClientAccessUntilResponse {
@@ -2374,4 +2385,154 @@ export interface ServerRebootScheduleResponse extends ServerRebootPendingItem {
 
 export interface ServerRebootPendingResponse {
   items: ServerRebootPendingItem[]
+}
+
+/* =====================================================================
+ * Пользователи (предоставление конфигов, Stage 1)
+ * Формы запросов/ответов miroir backend-схем (routers/users.py, schemas.py).
+ ===================================================================== */
+
+export interface ProvisionPlanItem {
+  node_id: number
+  node_label: string
+  client_name: string
+  vpn_type: string
+  action: string // create|delete|conflict|skipped|blocked
+  reason: string | null
+  config_id: number | null
+}
+
+export interface ProvisionPlanResponse {
+  create: ProvisionPlanItem[]
+  delete: ProvisionPlanItem[]
+  conflict: ProvisionPlanItem[]
+  skipped: ProvisionPlanItem[]
+  blocked: boolean
+  block_reason: string | null
+}
+
+export interface ProvisioningConfigNode {
+  node_id: number
+  node_label: string
+  vpn_type: string
+  config_id: number | null
+}
+
+export interface ProvisioningConfig {
+  name: string
+  nodes: ProvisioningConfigNode[]
+}
+
+export interface UserProvisioningDesired {
+  client_base_name: string | null
+  plan_config_indexes: number[]
+  desired_protocols: string[]
+  node_ids: number[]
+}
+
+export interface UserProvisioningSuggested {
+  client_base_name: string | null
+  plan_config_indexes: number[]
+  node_ids: number[]
+  protocols: string[]
+}
+
+export interface UserProvisioningCard {
+  user: UserProvisionSummary
+  has_plan: boolean
+  desired: UserProvisioningDesired
+  suggested: UserProvisioningSuggested | null
+  plan: ProvisionPlanResponse
+  configs: ProvisioningConfig[]
+  last_task: BackgroundTask | null
+}
+
+export interface UserProvisionedCreate {
+  username: string
+  client_base_name: string
+  node_ids: number[]
+  protocols: string[]
+  config_count: number
+  config_quota?: number | null
+  access_until?: string | null
+  panel_login_enabled: boolean
+  password?: string | null
+  telegram_id?: string | null
+}
+
+export interface UserProvisionedResponse {
+  user: UserProvisionSummary
+  task_id: string
+}
+
+export interface UserProvisioningUpdate {
+  node_ids: number[]
+  protocols: string[]
+  plan_config_indexes: number[]
+  client_base_name: string | null
+  confirm_deletions: boolean
+}
+
+export interface UserProvisioningApply {
+  confirm_deletions: boolean
+}
+
+export interface UserProvisionSummary {
+  id: number
+  username: string
+  role: string
+  client_base_name: string | null
+  plan_config_indexes: number[] | null
+  desired_protocols: string[] | null
+  panel_login_enabled: boolean
+  provision_state: string
+  access_until: string | null
+  node_ids: number[]
+  config_quota: number | null
+}
+
+export interface UserStatsResponse {
+  user_id: number
+  period_days: number
+  rows: UserTrafficStatRow[]
+  totals: UserTrafficTotals
+}
+
+export interface UserTrafficTotals {
+  received: number
+  sent: number
+  bytes: number
+  received_vpn: number
+  sent_vpn: number
+  received_antizapret: number
+  sent_antizapret: number
+  sessions: number
+  period_bytes: number
+}
+
+export interface UserTrafficStatRow {
+  node_id: number
+  client_name: string
+  vpn_type: string
+  total_received: number
+  total_sent: number
+  total_bytes: number
+  total_received_vpn: number
+  total_sent_vpn: number
+  total_received_antizapret: number
+  total_sent_antizapret: number
+  total_sessions: number
+  period_bytes: number
+  first_seen_at: string | null
+  last_seen_at: string | null
+  daily: Array<{ date: string; bytes: number }>
+}
+
+export interface TelegramLinkCodeResponse {
+  code: string
+  expires_in_seconds: number
+}
+
+export interface ConfirmDeletionsPayload {
+  configs: ProvisionPlanItem[]
 }

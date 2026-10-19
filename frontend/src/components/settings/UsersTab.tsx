@@ -14,6 +14,7 @@ import {
   EyeOff,
   X,
 } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { ApiError, getConfigs, getUserConfigAccess, getUserVpnVisibilityDefault, setUserConfigAccess, setUserVpnVisibilityDefault, updateUser } from '@/api/client'
 import AppDialog from '@/components/shared/AppDialog'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
@@ -50,6 +51,8 @@ import {
 } from '@/components/ui/table'
 import { dateInputToIso, isoToDateInput } from '@/lib/accessUntil'
 import { useNotifications } from '@/context/NotificationContext'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
+import SettingsAlert from '@/components/settings/SettingsAlert'
 import { SettingsCollapsible, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import { ROLE_HINTS, ROLE_LABELS } from '@/components/settings/settingsLabels'
 import { formatDate } from '@/lib/datetime'
@@ -200,6 +203,8 @@ export default function UsersTab({
   onDeleteUser,
 }: UsersTabProps) {
   const { success, error: notifyError } = useNotifications()
+  const { isEnabled } = useFeatureModules()
+  const provisioningOn = isEnabled('user_provisioning')
   const [configs, setConfigs] = useState<VpnConfig[]>([])
   const [configsLoading, setConfigsLoading] = useState(true)
   const [draftGroups, setDraftGroups] = useState<string[]>([])
@@ -250,20 +255,29 @@ export default function UsersTab({
     }
   }, [notifyError])
 
+  const displayedUsers = useMemo(() => {
+    if (!provisioningOn) return usersList
+    return usersList.filter(
+      (u) =>
+        u.role === 'admin' ||
+        (u.role === 'user' && u.provision_state === 'unmanaged' && !u.client_base_name),
+    )
+  }, [usersList, provisioningOn])
+
   const stats = useMemo(
     () => ({
-      total: usersList.length,
-      admins: usersList.filter((u) => u.role === 'admin').length,
-      regular: usersList.filter((u) => u.role === 'user').length,
-      active: usersList.filter((u) => u.is_active).length,
+      total: displayedUsers.length,
+      admins: displayedUsers.filter((u) => u.role === 'admin').length,
+      regular: displayedUsers.filter((u) => u.role === 'user').length,
+      active: displayedUsers.filter((u) => u.is_active).length,
     }),
-    [usersList],
+    [displayedUsers],
   )
 
   const filteredUsers = useMemo(() => {
     const q = userQuery.trim().toLowerCase()
-    if (!q) return usersList
-    return usersList.filter((u) => {
+    if (!q) return displayedUsers
+    return displayedUsers.filter((u) => {
       const tg = (u.telegram_id || '').toLowerCase()
       const role = (ROLE_LABELS[u.role] || u.role).toLowerCase()
       return (
@@ -460,6 +474,15 @@ export default function UsersTab({
 
   return (
     <div className="space-y-4">
+      {provisioningOn && (
+        <SettingsAlert variant="info">
+          Абоненты VPN перенесены в раздел{' '}
+          <Link to="/users" className="underline underline-offset-4 hover:text-primary transition-colors">
+            Пользователи
+          </Link>
+          .
+        </SettingsAlert>
+      )}
       <SettingsToolbar
         title="Учётные записи"
         count={stats.total}

@@ -27,6 +27,7 @@ const TrafficPage = lazyWithRetry(() => import('./pages/TrafficPage'))
 const EditFilesPage = lazyWithRetry(() => import('./pages/EditFilesPage'))
 const LogsPage = lazyWithRetry(() => import('./pages/LogsPage'))
 const ServerMonitorPage = lazyWithRetry(() => import('./pages/ServerMonitorPage'))
+const UsersPage = lazyWithRetry(() => import('./pages/UsersPage'))
 
 /** Everything behind login; loaded only once a session exists. */
 export default function AppShell() {
@@ -65,6 +66,14 @@ export default function AppShell() {
                   <Route path="logs" element={<LazyPage><FeatureGuardRoute anyOf={['logs_dashboard', 'action_logs']}><LogsPage /></FeatureGuardRoute></LazyPage>} />
                   <Route path="server-monitor" element={<LazyPage><FeatureGuardRoute feature="server_monitor"><ServerMonitorPage /></FeatureGuardRoute></LazyPage>} />
                   <Route path="nodes" element={<LazyPage><FeatureGuardRoute feature="nodes"><NodesPage /></FeatureGuardRoute></LazyPage>} />
+                  <Route
+                    path="users"
+                    element={<LazyPage><FeatureGuardRoute feature="user_provisioning"><UsersPage /></FeatureGuardRoute></LazyPage>}
+                  />
+                  <Route
+                    path="users/:userId"
+                    element={<LazyPage><FeatureGuardRoute feature="user_provisioning"><UsersPage /></FeatureGuardRoute></LazyPage>}
+                  />
                   <Route path="settings/:section?" element={<LazyPage><SettingsPage /></LazyPage>} />
                 </Route>
                 <Route path="*" element={<Navigate to="/" replace />} />

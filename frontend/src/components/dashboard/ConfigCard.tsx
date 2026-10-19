@@ -55,6 +55,7 @@ import {
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { cn } from '@/lib/utils'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 
 type ActionKey = 'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy'
 
@@ -100,6 +101,8 @@ interface MetaRow {
   tone?: 'default' | 'warning' | 'danger' | 'success'
   wide?: boolean
   mono?: boolean
+  /** Ссылка, если значение должно быть кликабельным (например, владелец → /users/:id). */
+  href?: string
 }
 
 function splitMetaText(text: string): { label: string; value: string } {
@@ -122,8 +125,9 @@ function metaRow(
   tone: MetaRow['tone'] = 'default',
   wide = false,
   mono = false,
+  href?: string,
 ): MetaRow {
-  return { key, icon, label, value, tone, wide, mono }
+  return { key, icon, label, value, tone, wide, mono, href }
 }
 
 function isNoiseMetaLine(
@@ -206,6 +210,7 @@ function buildCompactMeta(
   isAdmin: boolean,
   tone: 'active' | 'expiring' | 'expired',
   isOnline: boolean | null,
+  provisioningOn: boolean,
   openvpnGroup?: string | null,
   localIp?: string | null,
 ): MetaRow[] {
@@ -226,7 +231,18 @@ function buildCompactMeta(
   }
 
   if (isAdmin && config.owner_username) {
-    rows.push(metaRow('owner', UserRound, 'Владелец', config.owner_username))
+    rows.push(
+      metaRow(
+        'owner',
+        UserRound,
+        'Владелец',
+        config.owner_username,
+        undefined,
+        undefined,
+        undefined,
+        provisioningOn && config.owner_id != null ? `/users/${config.owner_id}` : undefined,
+      ),
+    )
   }
 
   rows.push(formatLocalIpMeta(localIp ?? config.local_ip))
@@ -277,7 +293,13 @@ function MetaLine({ row }: { row: MetaRow }) {
           row.mono && 'font-mono text-[11px]',
         )}
       >
-        {row.value}
+        {row.href ? (
+          <Link to={row.href} className="underline underline-offset-4 hover:text-primary transition-colors" title={row.value}>
+            {row.value}
+          </Link>
+        ) : (
+          row.value
+        )}
       </span>
     </div>
   )
@@ -445,6 +467,8 @@ export default function ConfigCard({
   const primaryFile = pickPrimaryFile(config, tab)
   const hasBothProfiles = Boolean(vpnFile && azFile)
   const isAdmin = userRole === 'admin'
+  const { isEnabled } = useFeatureModules()
+  const provisioningOn = isEnabled('user_provisioning')
   const canDelete = Boolean(onDelete)
   const isBlocked = policy?.is_blocked ?? false
   const { fields } = viewPrefs
@@ -458,6 +482,7 @@ export default function ConfigCard({
     isAdmin,
     tone,
     isOnline,
+    provisioningOn,
     openvpnGroup,
     resolvedLocalIp,
   ).filter((row) => {

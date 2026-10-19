@@ -4,6 +4,7 @@ import { LogIn, Send, Shield } from 'lucide-react'
 import {
   ApiError,
   getCaptchaRequired,
+  getFeatureModules,
   getPasskeyLoginOptions,
   getTelegramLoginConfig,
   login2FA,
@@ -59,6 +60,7 @@ export default function LoginPage() {
     () => (typeof window !== 'undefined' ? `${resolveApiBase()}/auth/telegram` : ''),
     [],
   )
+  const [redirectTo, setRedirectTo] = useState<string | null>(null)
 
   useEffect(() => {
     const { token, webSessionId, tgError } = readLoginRedirectParams(window.location.hash, searchParams)
@@ -178,7 +180,7 @@ export default function LoginPage() {
     )
   }
 
-  if (user) return <Navigate to="/" replace />
+  if (user) return <Navigate to={redirectTo ?? '/'} replace />
   if (unavailable) return <ServerUnavailableScreen message={unavailable} onRetry={() => void retry()} />
 
   const handleSubmit = async (e: FormEvent) => {
@@ -204,6 +206,15 @@ export default function LoginPage() {
       }
       if ('access_token' in res && res.access_token && setToken) {
         await setToken(res.access_token)
+        // Пост-логиновый редирект: если «Клиенты» выключен, а «Пользователи» включён — на /users.
+        try {
+          const modules = await getFeatureModules()
+          const clientsPage = Boolean(modules.features?.clients_page ?? true)
+          const userProvisioning = Boolean(modules.features?.user_provisioning ?? false)
+          setRedirectTo(!clientsPage && userProvisioning ? '/users' : '/')
+        } catch {
+          setRedirectTo('/')
+        }
       }
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : 'Ошибка входа'

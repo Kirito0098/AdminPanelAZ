@@ -20,6 +20,7 @@ import {
 } from '@/tg-mini/lib/vpnVisibility'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import {
+  createTgMePlanConfig,
   getTgConfigFiles,
   getTgConfigQuota,
   getTgMeConfigs,
@@ -31,10 +32,11 @@ import type {
   InstallPlatform,
   SelfServiceQuota,
   TgMeConfig,
-  TgMiniConfig,
+  TgMeConfigNode,
   TgMiniConfigFile,
   TgMiniQrLink,
 } from '@/types'
+import { Badge } from '@/components/ui/badge'
 
 const canShareInTelegram = typeof window.Telegram?.WebApp?.shareUrl === 'function'
 
@@ -50,14 +52,9 @@ function ConfigsSkeleton() {
   )
 }
 
-function ownerLabel(config: TgMiniConfig): string | null {
-  if (config.is_mine !== false) return null
-  return config.owner_username ? `@${config.owner_username}` : 'другой пользователь'
-}
-
 export default function Configs() {
   const { isAdmin, settings, features } = useTgAuth()
-  const [configs, setConfigs] = useState<TgMiniConfig[]>([])
+  const [configs, setConfigs] = useState<TgMeConfig[]>([])
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -65,7 +62,7 @@ export default function Configs() {
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [protocol, setProtocol] = useState<ProtocolFilter>('all')
-  const [activeConfig, setActiveConfig] = useState<TgMiniConfig | null>(null)
+  const [activeConfig, setActiveConfig] = useState<TgMeConfigNode & { clientName: string } | null>(null)
   const [files, setFiles] = useState<TgMiniConfigFile[]>([])
   const [selectedPath, setSelectedPath] = useState('')
   const [sheetLoading, setSheetLoading] = useState(false)
@@ -73,6 +70,7 @@ export default function Configs() {
   const [feedback, setFeedback] = useState<ConfigFeedback | null>(null)
   const [downloadLink, setDownloadLink] = useState<TgMiniQrLink | null>(null)
   const [platform, setPlatform] = useState<InstallPlatform>(() => guessInstallPlatform())
+  const [planAdding, setPlanAdding] = useState(false)
 
   const load = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false
@@ -84,15 +82,7 @@ export default function Configs() {
     setError(null)
     try {
       const [data, quotaData] = await Promise.all([getTgMeConfigs(), getTgConfigQuota()])
-      const flattened: TgMiniConfig[] = data.configs.flatMap((c) =>
-        c.nodes.map((n) => ({
-          id: n.config_id,
-          client_name: c.name,
-          vpn_type: n.vpn_type,
-          is_mine: true,
-        }))
-      )
-      setConfigs(flattened)
+      setConfigs(data.configs)
       setQuota(quotaData)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Ошибка загрузки')
@@ -104,8 +94,6 @@ export default function Configs() {
 
   const { openvpnEnabled, wireguardEnabled, awg2Enabled } = useMemo(() => {
     const policy = settings?.visible_vpn_profiles
-    // Missing keys (features fetch failed) keep default-on VPN modules available;
-    // awg2 stays opt-in (default off).
     const allowOpenvpn =
       Boolean(features.openvpn ?? true) &&
       isVpnTypeVisibleInPolicy('openvpn', policy, isAdmin)
@@ -136,37 +124,38 @@ export default function Configs() {
     }
   }, [protocol, protocolOptions])
 
-  const visibleConfigs = useMemo(
-    () =>
-      configs.filter((config) =>
-        isVpnTypeVisibleInPolicy(config.vpn_type, settings?.visible_vpn_profiles, isAdmin),
-      ),
-    [configs, isAdmin, settings?.visible_vpn_profiles],
-  )
+  const visibleGroups = useMemo(() => {
+    return configs.filter((group) =>
+      group.nodes.some((n) => isVpnTypeVisibleInPolicy(n.vpn_type, settings?.visible_vpn_profiles, isAdmin)),
+    )
+  }, [configs, isAdmin, settings?.visible_vpn_profiles])
 
   const protocolCounts = useMemo(
     () => ({
-      all: visibleConfigs.length,
-      openvpn: visibleConfigs.filter((c) => c.vpn_type === 'openvpn').length,
-      wireguard: visibleConfigs.filter((c) => c.vpn_type === 'wireguard').length,
-      amneziawg2: visibleConfigs.filter((c) => c.vpn_type === 'amneziawg2').length,
+      all: visibleGroups.reduce((s, g) => s + g.nodes.length, 0),
+      openvpn: visibleGroups.reduce((s, g) => s + g.nodes.filter((n) => n.vpn_type === 'openvpn').length, 0),
+      wireguard: visibleGroups.reduce((s, g) => s + g.nodes.filter((n) => n.vpn_type === 'wireguard').length, 0),
+      amneziawg2: visibleGroups.reduce((s, g) => s + g.nodes.filter((n) => n.vpn_type === 'amneziawg2').length, 0),
     }),
-    [visibleConfigs],
+    [visibleGroups],
   )
 
-  const filteredConfigs = useMemo(
+  const allNodes = useMemo(
     () =>
-      visibleConfigs.filter((config) => {
-        if (!matchesProtocolFilter(config.vpn_type, protocol)) return false
-        const q = search.trim()
-        if (!q) return true
-        return (
-          matchesSearchQuery(config.client_name, q) ||
-          matchesSearchQuery(config.owner_username || '', q)
-        )
-      }),
-    [visibleConfigs, protocol, search],
+      visibleGroups.flatMap((g) =>
+        g.nodes.map((n) => ({ ...n, clientName: g.name })),
+      ),
+    [visibleGroups],
   )
+
+  const filteredNodes = useMemo(() => {
+    const q = search.trim()
+    return allNodes.filter((n) => {
+      if (protocol !== 'all' && !matchesProtocolFilter(n.vpn_type, protocol)) return false
+      if (!q) return true
+      return matchesSearchQuery(n.clientName, q)
+    })
+  }, [allNodes, protocol, search])
 
   const resetFilters = () => {
     setSearch('')
@@ -174,22 +163,22 @@ export default function Configs() {
   }
 
   const hasActiveFilters = search.trim().length > 0 || protocol !== 'all'
-  const isForeignConfig = Boolean(activeConfig && activeConfig.is_mine === false)
+  const used = quota?.used ?? 0
+  const limit = quota?.limit
+  const unlimited = quota?.unlimited ?? false
   const canCreate =
     (openvpnEnabled || wireguardEnabled || awg2Enabled) &&
-    (quota?.can_create ?? true)
-  const canManageConfig = (config: TgMiniConfig) =>
-    isAdmin ||
-    (Boolean(quota?.can_manage ?? settings?.can_manage_configs) && config.is_mine !== false)
+    (quota?.can_create ?? true) &&
+    (unlimited || (limit != null && used < limit))
 
-  const openActions = async (config: TgMiniConfig) => {
-    setActiveConfig(config)
+  const openActions = async (entry: TgMeConfigNode & { clientName: string }) => {
+    setActiveConfig(entry)
     setFeedback(null)
     setDownloadLink(null)
     setPlatform(guessInstallPlatform())
     setSheetLoading(true)
     try {
-      const data = await getTgConfigFiles(config.id)
+      const data = await getTgConfigFiles(entry.config_id)
       setFiles(data.files)
       const { vpn, antizapret } = splitProfileFilesByRoute(data.files)
       const defaultFile = vpn[0] ?? antizapret[0] ?? data.files[0]
@@ -224,7 +213,7 @@ export default function Configs() {
     setActionLoading(true)
     setFeedback(null)
     try {
-      const result = await sendTgConfig(activeConfig.id, {
+      const result = await sendTgConfig(activeConfig.config_id, {
         path: selectedPath,
         destination,
         platform,
@@ -246,7 +235,7 @@ export default function Configs() {
     setFeedback(null)
     setDownloadLink(null)
     try {
-      const link = await getTgQrLink(activeConfig.id, selectedPath)
+      const link = await getTgQrLink(activeConfig.config_id, selectedPath)
       setDownloadLink(link)
       const copied = await copyText(link.url)
       setFeedback({
@@ -277,7 +266,7 @@ export default function Configs() {
 
   const handleShareDownloadLink = async () => {
     if (!downloadLink) return
-    if (shareViaTelegram(downloadLink.url, `VPN-конфиг: ${activeConfig?.client_name ?? ''}`)) {
+    if (shareViaTelegram(downloadLink.url, `VPN-конфиг: ${activeConfig?.clientName ?? ''}`)) {
       setFeedback({ tone: 'info', text: 'Выберите чат, куда отправить ссылку' })
       return
     }
@@ -299,6 +288,18 @@ export default function Configs() {
     })
   }
 
+  const handlePlanAdd = async () => {
+    setPlanAdding(true)
+    try {
+      await createTgMePlanConfig()
+      void load({ silent: true })
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Ошибка добавления конфига')
+    } finally {
+      setPlanAdding(false)
+    }
+  }
+
   const handleConfigDeleted = () => {
     closeSheet()
     void load({ silent: true })
@@ -312,13 +313,18 @@ export default function Configs() {
     return <ConfigsSkeleton />
   }
 
+  const nodeCount = allNodes.length
+  const groupCount = visibleGroups.length
+
   return (
     <div className="tg-mini-dashboard space-y-3">
       <MiniPageHeader
         title="Конфиги"
         subtitle={
-          visibleConfigs.length > 0
-            ? `${visibleConfigs.length} ${visibleConfigs.length === 1 ? 'конфиг' : visibleConfigs.length < 5 ? 'конфига' : 'конфигов'}`
+          nodeCount > 0
+            ? `${nodeCount} конфиг${nodeCount === 1 ? '' : 'а'} на ${groupCount} имени${
+                groupCount !== 1 ? 'ах' : ''
+              }`
             : 'Создайте или получите VPN-профиль'
         }
         onRefresh={() => void load({ silent: true })}
@@ -326,27 +332,32 @@ export default function Configs() {
       />
 
       {canCreate && (
-        <Button type="button" className="w-full gap-2" onClick={() => setShowCreate(true)}>
+        <Button type="button" className="w-full gap-2" onClick={handlePlanAdd} disabled={planAdding}>
           <Plus size={18} aria-hidden />
-          Новый конфиг
+          {planAdding ? 'Добавление…' : 'Добавить конфиг'}
         </Button>
       )}
 
-      {quota && !quota.unlimited && (
+      {!canCreate && (
         <p className="text-xs text-muted-foreground">
-          Лимит: {quota.used} из {quota.limit}
-          {!quota.can_create ? ' — достигнут' : ''}
+          Запросите ещё конфиг у администратора.
+        </p>
+      )}
+
+      {quota && !unlimited && (
+        <p className="text-xs text-muted-foreground">
+          Лимит: {used} из {limit} имён{!canCreate ? ' — лимит достигнут' : ''}
         </p>
       )}
 
       {error && <p className="text-destructive text-sm">{error}</p>}
 
-      {visibleConfigs.length > 0 && (
+      {allNodes.length > 0 && (
         <>
           <MiniListToolbar
             search={search}
             onSearchChange={setSearch}
-            searchPlaceholder={isAdmin ? 'Поиск по имени или владельцу…' : 'Поиск по имени…'}
+            searchPlaceholder={isAdmin ? 'Поиск по имени…' : 'Поиск по имени…'}
             protocol={protocol}
             onProtocolChange={setProtocol}
             protocolCounts={protocolCounts}
@@ -355,22 +366,22 @@ export default function Configs() {
 
           {hasActiveFilters && (
             <p className="tg-mini-results-meta">
-              Показано {filteredConfigs.length}
-              {filteredConfigs.length !== visibleConfigs.length ? ` из ${visibleConfigs.length}` : ''}
+              Показано {filteredNodes.length}
+              {filteredNodes.length !== allNodes.length ? ` из ${allNodes.length}` : ''}
             </p>
           )}
         </>
       )}
 
-      {visibleConfigs.length === 0 ? (
+      {visibleGroups.length === 0 ? (
         <div className="tg-mini-filter-empty">
           <FileKey size={22} className="text-muted-foreground" aria-hidden />
           <p className="text-sm font-medium">Нет конфигов</p>
           <p className="text-xs text-muted-foreground">
-            {canCreate ? 'Создайте первый профиль кнопкой выше' : 'Профили появятся после создания в панели'}
+            {canCreate ? 'Добавьте первый конфиг кнопкой выше' : 'Конфиги появятся после создания в панели'}
           </p>
         </div>
-      ) : filteredConfigs.length === 0 ? (
+      ) : filteredNodes.length === 0 ? (
         <div className="tg-mini-filter-empty">
           <Search size={20} className="text-muted-foreground" aria-hidden />
           <p className="text-sm font-medium">Ничего не найдено</p>
@@ -380,37 +391,70 @@ export default function Configs() {
           </Button>
         </div>
       ) : (
-        filteredConfigs.map((config) => {
-          const owner = ownerLabel(config)
-          return (
-            <Card key={config.id} className="tg-mini-config-card">
-              <CardContent className="p-0">
-                <button
-                  type="button"
-                  className="flex w-full items-center justify-between gap-3 p-4 text-left"
-                  onClick={() => void openActions(config)}
-                >
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate font-medium">{config.client_name}</span>
-                      <span className={`tg-mini-protocol-badge ${vpnTypeBadgeClass(config.vpn_type)}`}>
-                        {vpnTypeLabel(config.vpn_type)}
-                      </span>
+        <>
+          {visibleGroups.map((group) => {
+            const visibleNodes = group.nodes.filter((n) =>
+              protocol === 'all' || matchesProtocolFilter(n.vpn_type, protocol),
+            )
+            if (visibleNodes.length === 0) return null
+            return (
+              <Card key={group.name} className="tg-mini-config-card">
+                <CardContent className="p-0">
+                  <div className="flex w-full items-center justify-between gap-3 p-3 border-b border-border/80">
+                    <div className="min-w-0">
+                      <span className="font-medium truncate">{group.name}</span>
+                      <p className="text-xs text-muted-foreground">
+                        {visibleNodes.length} узел{visibleNodes.length !== 1 ? 'а' : ''}
+                      </p>
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {owner ? `Владелец: ${owner}` : 'Получить в Telegram с инструкцией'}
-                    </p>
                   </div>
-                  <ChevronRight size={18} className="shrink-0 text-muted-foreground" aria-hidden />
-                </button>
-              </CardContent>
-            </Card>
-          )
-        })
+                  <div className="divide-y divide-border/80">
+                    {visibleNodes.map((entry) => {
+                      const created = entry.config_id != null
+                      return (
+                        <button
+                          key={`${group.name}-${entry.config_id ?? entry.node_id}`}
+                          type="button"
+                          className="flex w-full items-center justify-between gap-3 p-3 text-left hover:bg-muted/50"
+                          onClick={() => void openActions({ ...entry, clientName: group.name })}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-medium">{entry.node_label}</span>
+                              <span className={`tg-mini-protocol-badge ${vpnTypeBadgeClass(entry.vpn_type)}`}>
+                                {vpnTypeLabel(entry.vpn_type)}
+                              </span>
+                              <Badge variant={created ? 'success' : 'secondary'} className="text-[10px]">
+                                {created ? 'создан' : 'не создан'}
+                              </Badge>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              узел ID {entry.node_id}{created ? ` · конфиг #${entry.config_id}` : ''}
+                            </p>
+                          </div>
+                          <ChevronRight size={18} className="shrink-0 text-muted-foreground" aria-hidden />
+                        </button>
+                      )
+                    })}
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </>
       )}
 
       <ConfigActionDialog
-        config={activeConfig}
+        config={
+          activeConfig
+            ? {
+                id: activeConfig.config_id,
+                client_name: activeConfig.clientName,
+                vpn_type: activeConfig.vpn_type,
+                is_mine: true,
+              }
+            : null
+        }
         files={files}
         selectedPath={selectedPath}
         onSelectedPathChange={handleSelectedPathChange}
@@ -421,9 +465,9 @@ export default function Configs() {
         feedback={feedback}
         downloadLink={downloadLink}
         canShareLink={canShareInTelegram}
-        isForeignConfig={isForeignConfig}
-        ownerLabel={activeConfig ? ownerLabel(activeConfig) : null}
-        canManage={activeConfig ? canManageConfig(activeConfig) : false}
+        isForeignConfig={false}
+        ownerLabel={null}
+        canManage={activeConfig ? true : false}
         isAdmin={isAdmin}
         onClose={closeSheet}
         onSend={(destination) => void handleSend(destination)}

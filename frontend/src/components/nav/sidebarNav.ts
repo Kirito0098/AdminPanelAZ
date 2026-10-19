@@ -16,6 +16,7 @@ import {
   Settings2,
   Shield,
   Ticket,
+  Users,
 } from 'lucide-react'
 
 export type SidebarNavItem = {
@@ -37,7 +38,15 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   {
     label: 'Клиенты',
     items: [
-      { to: '/', label: 'Клиенты', icon: LayoutDashboard, end: true, adminOnly: false, featureKey: null },
+      { to: '/', label: 'Клиенты', icon: LayoutDashboard, end: true, adminOnly: false, featureKey: 'clients_page' },
+      {
+        to: '/users',
+        label: 'Пользователи',
+        icon: Users,
+        end: false,
+        adminOnly: true,
+        featureKey: 'user_provisioning',
+      },
       {
         to: '/subscription',
         label: 'Подписка',
