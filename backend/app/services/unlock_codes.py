@@ -26,6 +26,7 @@ from app.models import (
 )
 from app.services.shared_helpers import as_utc as _as_utc
 from app.services.shared_helpers import normalize_client_name as _normalize_client_name
+from app.services.access_policy import USER_LEVEL_BLOCK_REASONS
 from app.services.access_until import _policy_service_for_node, _reconcile_access_until, get_access_until, set_access_until
 from app.services.feature_guards import get_feature_service, module_disabled_message
 
@@ -48,6 +49,9 @@ _REDEEM_CLIENT_NOT_ALLOWED_MESSAGE = "Этот unlock-ключ не предна
 _REDEEM_PROTOCOL_MISMATCH_MESSAGE = "Нет пересечения протоколов клиента и unlock-ключа"
 _REDEEM_MANUAL_BLOCK_MESSAGE = (
     "Данный пользователь заблокирован администратором вручную. Обратитесь к администратору."
+)
+_REDEEM_SUSPENDED_MESSAGE = (
+    "Доступ приостановлен администратором. Обратитесь к администратору."
 )
 _REDEEM_GENERIC_ERROR_MESSAGE = "Не удалось активировать unlock-ключ"
 _REDEEM_NOTHING_TO_EXTEND_MESSAGE = "Срок ваших профилей не ограничен — продлевать нечего"
@@ -421,14 +425,35 @@ def _is_manual_admin_block(row) -> bool:
     reason = (row.block_reason or "").strip().lower()
     if reason in {"manual_permanent", "manual_temp", "user_suspended"}:
         return True
+    if reason in USER_LEVEL_BLOCK_REASONS:
+        # user_traffic_limit — не админский бан: owner продлевает через unlock-код,
+        # хук продления (on_user_access_extended) снимает блок и сбрасывает счётчик.
+        # user_suspended обработан выше — такая активация запрещена.
+        return reason == "user_suspended"
     if row.is_permanent_blocked:
         # user_traffic_limit и per-config traffic_limit — это не админский бан:
-        # оuner-код может продлить через них, а хук продления снимет user_traffic_limit.
+        # owner-код может продлить через них, а хук продления снимет user_traffic_limit.
         # access_expired и прочие permanent остаются «ручными» — отказ без изменений.
         return reason not in {"user_traffic_limit", "traffic_limit"}
     if row.is_temp_blocked and reason.startswith("manual"):
         return True
     return False
+
+
+def _redeem_block_message(rows) -> str | None:
+    """Сообщение об отказе по блокировке (None — активация разрешена).
+
+    Приостановка администратором (``user_suspended``) отличается от прочих
+    ручных блокировок — для неё свой текст.
+    """
+    rows = [row for row in rows if row is not None]
+    for row in rows:
+        if (row.block_reason or "").strip().lower() == "user_suspended":
+            return _REDEEM_SUSPENDED_MESSAGE
+    for row in rows:
+        if _is_manual_admin_block(row):
+            return _REDEEM_MANUAL_BLOCK_MESSAGE
+    return None
 
 
 def _require_unlock_codes_enabled() -> None:
@@ -533,8 +558,11 @@ def redeem_unlock_code(
             "wireguard": _policy_rows_for_client(db, node_id, canonical_client_name.lower())["wireguard"],
             "amneziawg2": _policy_rows_for_client(db, node_id, canonical_client_name.lower())["amneziawg2"],
         }
-        if any(_is_manual_admin_block(policy_rows.get(protocol)) for protocol in protocols_applied):
-            raise ValueError(_REDEEM_MANUAL_BLOCK_MESSAGE)
+        block_message = _redeem_block_message(
+            policy_rows.get(protocol) for protocol in protocols_applied
+        )
+        if block_message is not None:
+            raise ValueError(block_message)
 
         # Atomic slot reservation — works on SQLite (page write lock) and Postgres.
         reserved = db.execute(

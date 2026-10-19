@@ -1064,6 +1064,135 @@ def test_redeem_owner_extends_user_and_all_owned_clients(db):
     assert bob_wg.block_reason == "manual_permanent"
 
 
+def test_redeem_owner_refused_when_user_suspended(db):
+    """Stage 3, Task 13: приостановка администратором — отказ с понятным сообщением."""
+    node = _make_node(db)
+    owner = _make_user(db, username="owner-suspended", role=UserRole.user)
+    _make_configs(db, node.id, owner.id, "Alice", [VpnType.openvpn])
+    fixed_now = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
+    owner.suspended_at = (fixed_now - timedelta(days=1)).replace(tzinfo=None)
+    db.add(owner)
+    db.add(
+        OpenVpnAccessPolicy(
+            node_id=node.id,
+            client_name="Alice",
+            is_temp_blocked=False,
+            is_permanent_blocked=True,
+            block_reason="user_suspended",
+        )
+    )
+    db.commit()
+    create_unlock_code(
+        db,
+        grant_days=7,
+        protocols=["openvpn"],
+        mode="multi",
+        max_redemptions=2,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=owner,
+        code="SUSP-RED-01",
+    )
+
+    with (
+        patch("app.services.unlock_codes._now", return_value=fixed_now),
+        patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()),
+        patch("app.services.user_blocks.get_adapter_for_node", return_value=_adapter()),
+    ):
+        with pytest.raises(ValueError, match="Доступ приостановлен администратором"):
+            redeem_unlock_code(db, code="SUSP-RED-01", client_name="Alice", node_id=node.id, user_id=owner.id)
+
+    row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").one()
+    assert row.block_reason == "user_suspended"
+    assert row.is_permanent_blocked is True
+
+
+def test_redeem_owner_allowed_under_user_traffic_limit(db):
+    """Stage 3, Task 13: под user_traffic_limit активация разрешена, блок снимается."""
+    node = _make_node(db)
+    owner = _make_user(db, username="owner-traffic", role=UserRole.user)
+    _make_configs(db, node.id, owner.id, "Alice", [VpnType.openvpn])
+    fixed_now = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
+    owner.access_until = (fixed_now + timedelta(days=2)).replace(tzinfo=None)
+    owner.traffic_limit_bytes = 1000
+    owner.traffic_limit_blocked = True
+    owner.traffic_counter_reset_at = (fixed_now - timedelta(days=1)).replace(tzinfo=None)
+    db.add(owner)
+    db.add(
+        OpenVpnAccessPolicy(
+            node_id=node.id,
+            client_name="Alice",
+            is_temp_blocked=False,
+            is_permanent_blocked=True,
+            block_reason="user_traffic_limit",
+        )
+    )
+    db.commit()
+    create_unlock_code(
+        db,
+        grant_days=7,
+        protocols=["openvpn"],
+        mode="multi",
+        max_redemptions=2,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=owner,
+        code="TRAFFIC-RED-01",
+    )
+
+    with (
+        patch("app.services.unlock_codes._now", return_value=fixed_now),
+        patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()),
+        patch("app.services.user_blocks.get_adapter_for_node", return_value=_adapter()),
+    ):
+        result = redeem_unlock_code(db, code="TRAFFIC-RED-01", client_name="Alice", node_id=node.id, user_id=owner.id)
+
+    assert result["grant_days"] == 7
+    db.refresh(owner)
+    row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Alice").one()
+    assert row.block_reason != "user_traffic_limit"
+    assert row.is_permanent_blocked is False
+    assert owner.traffic_limit_blocked is False
+    assert owner.traffic_counter_reset_at is not None
+
+
+def test_redeem_owner_allowed_under_per_config_traffic_limit(db):
+    """Stage 3, Task 13: per-config traffic_limit — активация не запрещена."""
+    node = _make_node(db)
+    owner = _make_user(db, username="owner-cfg-traffic", role=UserRole.user)
+    _make_configs(db, node.id, owner.id, "Alice", [VpnType.openvpn])
+    fixed_now = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
+    owner.access_until = (fixed_now + timedelta(days=2)).replace(tzinfo=None)
+    db.add(owner)
+    db.add(
+        OpenVpnAccessPolicy(
+            node_id=node.id,
+            client_name="Alice",
+            is_temp_blocked=False,
+            is_permanent_blocked=True,
+            block_reason="traffic_limit",
+        )
+    )
+    db.commit()
+    create_unlock_code(
+        db,
+        grant_days=7,
+        protocols=["openvpn"],
+        mode="multi",
+        max_redemptions=2,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=owner,
+        code="CFGTRAFFIC-01",
+    )
+
+    with (
+        patch("app.services.unlock_codes._now", return_value=fixed_now),
+        patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()),
+        patch("app.services.user_blocks.get_adapter_for_node", return_value=_adapter()),
+    ):
+        result = redeem_unlock_code(db, code="CFGTRAFFIC-01", client_name="Alice", node_id=node.id, user_id=owner.id)
+
+    assert result["grant_days"] == 7
+
+
 def test_redeem_owner_rollback_defers_reconcile_until_commit(db):
     node = _make_node(db)
     owner = _make_user(db, username="owner-rollback", role=UserRole.user)

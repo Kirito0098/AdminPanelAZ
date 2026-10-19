@@ -1,5 +1,5 @@
 import { apiFetch } from './http'
-import type { PortalLinkResponse } from '@/types'
+import type { ClosedAccessView, PortalLinkResponse } from '@/types'
 
 export interface PortalFileMeta {
   path: string
@@ -44,6 +44,8 @@ export interface UserPortalMetaResponse {
   kind: 'user'
   brand_title: string
   unlock_codes_enabled: boolean
+  /** Состояние закрытого доступа (спека 7.4); null — доступ открыт. */
+  closed_access: ClosedAccessView | null
   nodes: PortalNodeEntry[]
 }
 

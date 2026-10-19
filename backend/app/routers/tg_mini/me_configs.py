@@ -95,7 +95,12 @@ def me_configs(
         }
         for name, entries in sorted(by_name.items())
     ]
-    return {"configs": configs_out}
+    from app.services.user_closed_access import closed_access_payload
+
+    return {
+        "configs": configs_out,
+        "closed_access": closed_access_payload(db, current_user),
+    }
 
 
 @router.get("/me/configs/{config_id}/files")

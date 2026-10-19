@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ChevronRight, FileKey, Plus, Search } from 'lucide-react'
+import { ChevronRight, FileKey, KeyRound, Plus, Search } from 'lucide-react'
 import { ApiError } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import ConfigActionDialog, { type ConfigFeedback } from '@/tg-mini/components/ConfigActionDialog'
 import CreateConfigDialog from '@/tg-mini/components/CreateConfigDialog'
 import { splitProfileFilesByRoute } from '@/tg-mini/lib/profileFiles'
@@ -25,10 +26,14 @@ import {
   getTgConfigQuota,
   getTgMeConfigs,
   getTgQrLink,
+  redeemTgMeCode,
   sendTgConfig,
 } from '@/tg-mini/api'
+import { closedAccessCopy } from '@/lib/closedAccess'
+import { cn } from '@/lib/utils'
 import { copyText, openExternalLink, shareViaTelegram } from '@/tg-mini/lib/shareDownloadLink'
 import type {
+  ClosedAccessView,
   InstallPlatform,
   SelfServiceQuota,
   TgMeConfig,
@@ -55,6 +60,7 @@ function ConfigsSkeleton() {
 export default function Configs() {
   const { isAdmin, settings, features } = useTgAuth()
   const [configs, setConfigs] = useState<TgMeConfig[]>([])
+  const [closedAccess, setClosedAccess] = useState<ClosedAccessView | null>(null)
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -71,6 +77,8 @@ export default function Configs() {
   const [downloadLink, setDownloadLink] = useState<TgMiniQrLink | null>(null)
   const [platform, setPlatform] = useState<InstallPlatform>(() => guessInstallPlatform())
   const [planAdding, setPlanAdding] = useState(false)
+  const [redeemCode, setRedeemCode] = useState('')
+  const [redeeming, setRedeeming] = useState(false)
 
   const load = useCallback(async (options?: { silent?: boolean }) => {
     const silent = options?.silent ?? false
@@ -83,6 +91,7 @@ export default function Configs() {
     try {
       const [data, quotaData] = await Promise.all([getTgMeConfigs(), getTgConfigQuota()])
       setConfigs(data.configs)
+      setClosedAccess(data.closed_access ?? null)
       setQuota(quotaData)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Ошибка загрузки')
@@ -309,12 +318,36 @@ export default function Configs() {
     void load({ silent: true })
   }
 
+  const handleRedeem = async () => {
+    const code = redeemCode.trim()
+    if (!code || redeeming) return
+    setRedeeming(true)
+    setFeedback(null)
+    try {
+      const result = await redeemTgMeCode(code)
+      setRedeemCode('')
+      setFeedback({
+        tone: 'success',
+        text: `Ключ принят: доступ продлён на ${result.grant_days} дн.`,
+      })
+      void load({ silent: true })
+    } catch (err) {
+      setFeedback({
+        tone: 'error',
+        text: err instanceof ApiError ? err.message : 'Не удалось активировать ключ',
+      })
+    } finally {
+      setRedeeming(false)
+    }
+  }
+
   if (loading && configs.length === 0) {
     return <ConfigsSkeleton />
   }
 
   const nodeCount = allNodes.length
   const groupCount = visibleGroups.length
+  const accessCopy = closedAccessCopy(closedAccess)
 
   return (
     <div className="tg-mini-dashboard space-y-3">
@@ -330,6 +363,53 @@ export default function Configs() {
         onRefresh={() => void load({ silent: true })}
         refreshing={refreshing}
       />
+
+      {accessCopy && closedAccess && (
+        <div
+          className={cn(
+            'tg-mini-feedback',
+            accessCopy.tone === 'danger' ? 'is-error' : 'is-info',
+          )}
+          role="status"
+        >
+          <KeyRound size={18} className="shrink-0" aria-hidden />
+          <div className="min-w-0 flex-1 space-y-2">
+            <p className="text-sm font-medium leading-snug">{accessCopy.title}</p>
+            {accessCopy.description && (
+              <p className="text-xs leading-snug text-muted-foreground">{accessCopy.description}</p>
+            )}
+            {accessCopy.canRedeem && (
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  value={redeemCode}
+                  onChange={(e) => setRedeemCode(e.target.value)}
+                  placeholder="Введите unlock-ключ"
+                  autoComplete="off"
+                  spellCheck={false}
+                  aria-label="Unlock-ключ продления"
+                />
+                <Button type="button" onClick={handleRedeem} disabled={redeeming || !redeemCode.trim()}>
+                  {redeeming ? 'Проверка…' : 'Продлить'}
+                </Button>
+              </div>
+            )}
+            {accessCopy.canContact && closedAccess.contact_url && (
+              <Button type="button" size="sm" variant="outline" asChild>
+                <a href={closedAccess.contact_url} target="_blank" rel="noreferrer">
+                  Написать администратору
+                </a>
+              </Button>
+            )}
+            {accessCopy.canRequest && closedAccess.contact_url && (
+              <Button type="button" size="sm" variant="outline" asChild>
+                <a href={closedAccess.contact_url} target="_blank" rel="noreferrer">
+                  Запросить продление
+                </a>
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {canCreate && (
         <Button type="button" className="w-full gap-2" onClick={handlePlanAdd} disabled={planAdding}>

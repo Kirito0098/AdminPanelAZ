@@ -31,6 +31,7 @@ from app.schemas import (
     AccessRequestResponse,
     ApproveRequest,
     ConfigAccessOpRequest,
+    GraceHoldView,
     MessageResponse,
     PresetCreate,
     PresetResponse,
@@ -198,7 +199,9 @@ def _serialize_plan(plan) -> ProvisionPlanResponse:
     )
 
 
-def _user_summary(user: User, node_ids: list[int]) -> UserProvisionSummary:
+def _user_summary(
+    user: User, node_ids: list[int], *, traffic_consumed_bytes: int = 0
+) -> UserProvisionSummary:
     return UserProvisionSummary(
         id=user.id,
         username=user.username,
@@ -211,6 +214,13 @@ def _user_summary(user: User, node_ids: list[int]) -> UserProvisionSummary:
         access_until=user.access_until,
         node_ids=list(node_ids),
         config_quota=user.config_quota,
+        suspended_at=user.suspended_at,
+        suspend_reason=user.suspend_reason,
+        suspend_reason_visible=bool(user.suspend_reason_visible),
+        traffic_limit_bytes=user.traffic_limit_bytes,
+        traffic_counter_reset_at=user.traffic_counter_reset_at,
+        traffic_limit_blocked=bool(user.traffic_limit_blocked),
+        traffic_consumed_bytes=int(traffic_consumed_bytes),
     )
 
 
@@ -243,6 +253,29 @@ def _antizapret_path_for_node(db: Session, node: Node) -> Path:
     if raw:
         return Path(str(raw))
     return settings.antizapret_path
+
+
+def _set_user_traffic_limit(
+    db: Session, user: User, value: int | None, *, actor: str
+) -> None:
+    """Задать/снять лимит трафика пользователя.
+
+    ``None`` — снять лимит и поднять sticky-блок ``user_traffic_limit``.
+    Первое назначение лимита стартует новое окно отсчёта (``traffic_counter_reset_at``).
+    """
+    if value is None:
+        user.traffic_limit_bytes = None
+        user.traffic_limit_blocked = False
+        db.add(user)
+        db.flush()
+        # Снятие блока не трогает остальные причины (user_suspended и др.).
+        lift_user_block(db, user, "user_traffic_limit", actor=actor)
+        return
+    if user.traffic_limit_bytes is None:
+        user.traffic_counter_reset_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    user.traffic_limit_bytes = int(value)
+    db.add(user)
+    db.commit()
 
 
 @router.get("", response_model=list[UserResponse])
@@ -716,6 +749,24 @@ def update_user(
     old_telegram_id = user.telegram_id
     access_until_updated = False
     pending_access_until = None
+    traffic_limit_requested = "traffic_limit_bytes" in payload.model_fields_set
+
+    if traffic_limit_requested:
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только администратор может менять лимит трафика",
+            )
+        if payload.traffic_limit_bytes is not None and not get_feature_service().is_enabled(
+            "traffic_sync"
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Для лимита трафика включите модуль «Синхронизация трафика» "
+                    "в Настройках → Модули"
+                ),
+            )
 
     if payload.role is not None:
         if not is_admin:
@@ -851,6 +902,11 @@ def update_user(
     else:
         db.commit()
         db.refresh(user)
+    if traffic_limit_requested:
+        _set_user_traffic_limit(
+            db, user, payload.traffic_limit_bytes, actor=current_user.username
+        )
+        db.refresh(user)
     if payload.telegram_id is not None:
         notify_telegram_unlinked(
             db,
@@ -982,6 +1038,37 @@ def extend_user_access(
     return UserResponse.model_validate(user)
 
 
+@router.post("/{user_id}/traffic-counter/reset")
+def reset_user_traffic_counter_endpoint(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Сбросить счётчик трафика пользователя и снять блок user_traffic_limit."""
+    if not get_feature_service().is_enabled("user_provisioning"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=module_disabled_message("user_provisioning")
+        )
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    from app.services.user_traffic_limit import reset_user_traffic_counter
+
+    reset_user_traffic_counter(db, user, actor=current_user.username)
+    db.refresh(user)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="user_traffic_counter_reset",
+            user_id=current_user.id,
+            username=current_user.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"target={user.username}",
+        )
+    return UserResponse.model_validate(user)
+
+
 @router.post("/{user_id}/grace-cleanup")
 def grace_cleanup_user(
     user_id: int,
@@ -1074,14 +1161,22 @@ def get_provisioning(
     plan = compute_plan(db, user) if has_plan else None
     serialized_plan = _serialize_plan(plan) if plan is not None else ProvisionPlanResponse()
 
+    from app.services.user_closed_access import grace_hold_view
+    from app.services.user_grace import get_grace_months
+    from app.services.user_traffic_limit import user_consumed_bytes
+
+    grace_hold = grace_hold_view(user, get_grace_months(db))
+    consumed = user_consumed_bytes(db, user)
+
     return UserProvisioningCard(
-        user=_user_summary(user, node_ids),
+        user=_user_summary(user, node_ids, traffic_consumed_bytes=consumed),
         has_plan=has_plan,
         desired=desired,
         suggested=suggested,
         plan=serialized_plan,
         configs=_group_provision_configs(db, user, base, node_ids),
         last_task=_last_provision_task(db, user.id),
+        grace_hold=GraceHoldView(**grace_hold) if grace_hold else None,
     )
 
 

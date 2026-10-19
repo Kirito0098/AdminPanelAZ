@@ -1,24 +1,35 @@
-"""Per-user traffic accounting: `since=` window and `user_consumed_bytes` (Stage 3, Task 5)."""
+"""Per-user traffic accounting: `since=` window and `user_consumed_bytes` (Stage 3, Task 5).
+
+Also covers the admin traffic-limit API (PATCH /users/{id} + traffic-counter reset) —
+Stage 3, Task 11.
+"""
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.database import Base
+from app.auth import get_current_user, require_admin
+from app.database import Base, get_db
 from app.models import (
     Node,
     NodeStatus,
     OpenVpnAccessPolicy,
     User,
     UserReminderLog,
+    UserRole,
     UserTrafficSample,
     UserTrafficStatProtocol,
     VpnConfig,
     VpnType,
 )
+from app.routers import users as users_router
+from app.routers.users import require_admin
 from app.services.traffic_limit import get_client_consumed_traffic_bytes, human_bytes
 from app.services.user_traffic_limit import (
     reset_user_traffic_counter,
@@ -320,10 +331,115 @@ def test_reset_user_traffic_counter(db, node, monkeypatch):
     _make_policy_row(db, node, "hal", reason="user_traffic_limit", permanent=True)
 
     before = u.traffic_counter_reset_at
-    reset_user_traffic_counter(db, u, actor="admin")
+    reset_user_traffic_counter(db, user=u, actor="admin")
     db.refresh(u)
     assert u.traffic_counter_reset_at is not None
     assert u.traffic_counter_reset_at > before
     assert u.traffic_limit_blocked is False
     row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="hal").one()
     assert row.block_reason != "user_traffic_limit"
+
+
+# ---------------------------------------------------------------------------
+# Task 11: админский API лимита трафика (PATCH /users/{id}, сброс счётчика)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def admin_user(db):
+    u = User(
+        username="admin", password_hash="x", role=UserRole.admin, is_active=True,
+        theme="dark", timezone="", last_client_timezone="", noc_daily_time="",
+        noc_weekly_dow="", noc_weekly_time="", can_create_configs=True,
+        can_manage_configs=True, panel_login_enabled=True, provision_state="unmanaged",
+    )
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
+
+
+@pytest.fixture
+def regular_user(db):
+    u = User(
+        username="ivan", password_hash="x", role=UserRole.user, is_active=True,
+        theme="dark", timezone="", last_client_timezone="", noc_daily_time="",
+        noc_weekly_dow="", noc_weekly_time="", can_create_configs=True,
+        can_manage_configs=False, panel_login_enabled=True, provision_state="unmanaged",
+    )
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
+
+
+@pytest.fixture
+def api(db, admin_user, monkeypatch):
+    monkeypatch.setattr("app.routers.users.get_feature_service", lambda: _FeatureService(True))
+    adapter = MagicMock()
+    adapter.read_config_file.return_value = ""
+    adapter.write_config_file.return_value = None
+    adapter.get_profile_files.return_value = []
+    monkeypatch.setattr("app.services.user_blocks.get_adapter_for_node", lambda node: adapter)
+    app = FastAPI()
+    app.include_router(users_router.router, prefix="/api")
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_admin] = lambda: admin_user
+    app.dependency_overrides[get_current_user] = lambda: admin_user
+    return TestClient(app)
+
+
+def test_patch_sets_limit_and_reset_at(api, db, regular_user):
+    r = api.patch(
+        f"/api/users/{regular_user.id}",
+        json={"traffic_limit_bytes": 100_000_000_000},
+    )
+    assert r.status_code == 200, r.text
+    db.refresh(regular_user)
+    assert regular_user.traffic_limit_bytes == 100_000_000_000
+    assert regular_user.traffic_counter_reset_at is not None
+
+
+def test_patch_null_clears_limit_and_lifts_block(api, db, node, regular_user):
+    _make_config(db, node, regular_user, "ivan")
+    _make_policy_row(db, node, "ivan", reason="user_traffic_limit", permanent=True)
+    regular_user.traffic_limit_bytes = 1000
+    regular_user.traffic_limit_blocked = True
+    db.commit()
+
+    r = api.patch(f"/api/users/{regular_user.id}", json={"traffic_limit_bytes": None})
+    assert r.status_code == 200, r.text
+    db.refresh(regular_user)
+    assert regular_user.traffic_limit_bytes is None
+    assert regular_user.traffic_limit_blocked is False
+    row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="ivan").one()
+    assert row.block_reason != "user_traffic_limit"
+
+
+def test_patch_traffic_limit_requires_traffic_sync(api, db, regular_user, monkeypatch):
+    monkeypatch.setattr("app.routers.users.get_feature_service", lambda: _FeatureService(False))
+    r = api.patch(
+        f"/api/users/{regular_user.id}",
+        json={"traffic_limit_bytes": 100_000_000_000},
+    )
+    assert r.status_code == 400, r.text
+    db.refresh(regular_user)
+    assert regular_user.traffic_limit_bytes is None
+
+
+def test_admin_reset_counter(api, db, node, regular_user):
+    _make_config(db, node, regular_user, "ivan")
+    _make_policy_row(db, node, "ivan", reason="user_traffic_limit", permanent=True)
+    regular_user.traffic_limit_bytes = 1000
+    regular_user.traffic_limit_blocked = True
+    regular_user.traffic_counter_reset_at = datetime.now(timezone.utc) - timedelta(days=5)
+    db.commit()
+
+    r = api.post(f"/api/users/{regular_user.id}/traffic-counter/reset")
+    assert r.status_code == 200, r.text
+    db.refresh(regular_user)
+    assert regular_user.traffic_counter_reset_at is not None
+    assert regular_user.traffic_limit_blocked is False
+    row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="ivan").one()
+    assert row.block_reason != "user_traffic_limit"
+

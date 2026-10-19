@@ -13,6 +13,7 @@ const FILTERS: { id: string; label: string }[] = [
   { id: 'expiring', label: 'Истекать ≤ 7 дн.' },
   { id: 'expired', label: 'Истёк' },
   { id: 'suspended', label: 'Приостановлены' },
+  { id: 'inactive', label: 'Отключены' },
 ]
 
 export function UsersFilters({ filter, onFilterChange }: UsersFiltersProps) {

@@ -269,6 +269,8 @@ class UserUpdate(BaseModel):
     can_manage_configs: bool | None = None
     visible_vpn_profiles: dict | None = None
     panel_login_enabled: bool | None = None
+    # Stage 3: лимит трафика пользователя (None — без ограничения).
+    traffic_limit_bytes: int | None = Field(default=None, ge=0)
 
     @field_validator("access_until", mode="before")
     @classmethod
@@ -319,6 +321,13 @@ class UserResponse(UserBase):
     noc_weekly_dow: str = ""
     noc_weekly_time: str = ""
     created_at: datetime
+    # Stage 3: приостановка и лимит трафика пользователя.
+    suspended_at: datetime | None = None
+    suspend_reason: str | None = None
+    suspend_reason_visible: bool = False
+    traffic_limit_bytes: int | None = None
+    traffic_counter_reset_at: datetime | None = None
+    traffic_limit_blocked: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -384,6 +393,21 @@ class UserProvisionSummary(BaseModel):
     access_until: datetime | None = None
     node_ids: list[int] = []
     config_quota: int | None = None
+    # Stage 3: приостановка и лимит трафика.
+    suspended_at: datetime | None = None
+    suspend_reason: str | None = None
+    suspend_reason_visible: bool = False
+    traffic_limit_bytes: int | None = None
+    traffic_counter_reset_at: datetime | None = None
+    traffic_limit_blocked: bool = False
+    traffic_consumed_bytes: int = 0
+
+
+class GraceHoldView(BaseModel):
+    """Удержание после истечения срока (grace) — для шапки карточки абонента."""
+
+    elapsed_months: int
+    limit_months: int
 
 
 class UserProvisionedResponse(BaseModel):
@@ -437,6 +461,7 @@ class UserProvisioningCard(BaseModel):
     plan: ProvisionPlanResponse
     configs: list[ProvisioningConfig] = []
     last_task: dict | None = None
+    grace_hold: GraceHoldView | None = None
 
 
 class UserConfigAccessUpdate(BaseModel):
@@ -476,6 +501,17 @@ class VisibleVpnProfilesDefaultUpdate(BaseModel):
 class EffectiveVisibleVpnProfilesResponse(BaseModel):
     policy: VisibleVpnProfilesPolicy
     inherited: bool = True
+
+
+class UserGraceSettingsResponse(BaseModel):
+    """Срок удержания конфигов после истечения доступа (месяцы, 0 — выключено)."""
+
+    grace_months: int = 0
+    allowed_months: list[int] = [0, 1, 2, 3, 6, 12]
+
+
+class UserGraceSettingsUpdate(BaseModel):
+    grace_months: int = Field(ge=0, le=12)
 
 
 class PasswordChangeRequest(BaseModel):

@@ -95,3 +95,38 @@ def test_grace_cleanup_deletes_configs_keeps_plan(db, monkeypatch):
     db.refresh(user)
     assert user.client_base_name == "ivan"
     assert user.provision_state == "pending"
+
+
+def test_grace_settings_api_get_and_patch(db, monkeypatch):
+    """Task 12: настройка срока удержания доступна админу через /settings/user-grace."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from app.auth import require_admin
+    from app.database import get_db
+    from app.routers import settings as settings_router
+
+    admin = User(username="admin-grace", password_hash="x", role=UserRole.admin)
+    db.add(admin)
+    db.commit()
+
+    app = FastAPI()
+    app.include_router(settings_router.router, prefix="/api")
+    app.dependency_overrides[get_db] = lambda: db
+    app.dependency_overrides[require_admin] = lambda: admin
+    client = TestClient(app)
+
+    r = client.get("/api/settings/user-grace")
+    assert r.status_code == 200, r.text
+    assert r.json()["grace_months"] == 0
+    assert r.json()["allowed_months"] == [0, 1, 2, 3, 6, 12]
+
+    r = client.patch("/api/settings/user-grace", json={"grace_months": 3})
+    assert r.status_code == 200, r.text
+    assert r.json()["grace_months"] == 3
+    assert get_grace_months(db) == 3
+
+    r = client.patch("/api/settings/user-grace", json={"grace_months": 5})
+    assert r.status_code == 400, r.text
+    assert get_grace_months(db) == 3
+

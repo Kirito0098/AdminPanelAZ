@@ -202,6 +202,39 @@ export interface User {
   plan_protocols?: string[]
   plan_config_count?: number
   active_task_id?: string | null
+  /** Stage 3: админская приостановка доступа. */
+  suspended_at?: string | null
+  suspend_reason?: string | null
+  suspend_reason_visible?: boolean
+  /** Stage 3: общий лимит трафика пользователя (null — без ограничения). */
+  traffic_limit_bytes?: number | null
+  traffic_counter_reset_at?: string | null
+  traffic_limit_blocked?: boolean
+}
+
+/** Состояние закрытого доступа для портала и Mini App (спека 7.4). */
+export type ClosedAccessState = 'suspended' | 'traffic_limit' | 'expired' | 'expiring'
+
+export interface ClosedAccessView {
+  state: ClosedAccessState
+  reason: string | null
+  access_until: string | null
+  /** Stage 2: приём заявок на продление включён. */
+  requests_enabled?: boolean
+  /** Ссылка на бота для «Написать администратору». */
+  contact_url?: string | null
+}
+
+/** Удержание конфигов после истечения срока (grace). */
+export interface GraceHold {
+  elapsed_months: number
+  limit_months: number
+}
+
+/** Настройка grace-периода (месяцы удержания после истечения доступа). */
+export interface UserGraceSettings {
+  grace_months: number
+  allowed_months: number[]
 }
 
 export interface UserUpdatePayload {
@@ -216,6 +249,8 @@ export interface UserUpdatePayload {
   can_manage_configs?: boolean
   visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
   panel_login_enabled?: boolean
+  /** Stage 3: лимит трафика пользователя (null — снять ограничение). */
+  traffic_limit_bytes?: number | null
 }
 
 export interface ClientAccessUntilResponse {
@@ -2447,6 +2482,8 @@ export interface UserProvisioningCard {
   plan: ProvisionPlanResponse
   configs: ProvisioningConfig[]
   last_task: BackgroundTask | null
+  /** Удержание после истечения срока (grace), null — не в grace. */
+  grace_hold: GraceHold | null
 }
 
 export interface UserProvisionedCreate {
@@ -2491,6 +2528,15 @@ export interface UserProvisionSummary {
   access_until: string | null
   node_ids: number[]
   config_quota: number | null
+  /** Stage 3: админская приостановка доступа. */
+  suspended_at?: string | null
+  suspend_reason?: string | null
+  suspend_reason_visible?: boolean
+  /** Stage 3: общий лимит трафика пользователя. */
+  traffic_limit_bytes?: number | null
+  traffic_counter_reset_at?: string | null
+  traffic_limit_blocked?: boolean
+  traffic_consumed_bytes?: number
 }
 
 export interface UserStatsResponse {

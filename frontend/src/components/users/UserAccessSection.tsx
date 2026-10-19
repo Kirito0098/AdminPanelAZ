@@ -63,7 +63,10 @@ export default function UserAccessSection({ card, onSave }: UserAccessSectionPro
   }, [])
 
   const hasPlan = user.client_base_name != null && user.client_base_name.length > 0
-  const expired = Boolean(user.access_until && new Date(user.access_until) < new Date())
+  // План заблокирован, пока срок доступа истёк (Stage 1) — изменения и применение недоступны.
+  const expired =
+    Boolean(card.plan?.blocked) ||
+    Boolean(user.access_until && new Date(user.access_until) < new Date())
 
   const handleSave = async () => {
     setSaving(true)

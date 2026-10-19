@@ -366,7 +366,7 @@ def test_redeem_refused_when_user_suspended(db, regular_user, node, monkeypatch)
         creator=regular_user,
         code="REDEEM-SUSP-1",
     )
-    with pytest.raises(ValueError, match="заблокирован администратором"):
+    with pytest.raises(ValueError, match="Доступ приостановлен администратором"):
         redeem_unlock_code(
             db, code=code.code, client_name="alice", node_id=node.id, user_id=regular_user.id
         )

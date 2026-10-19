@@ -7,6 +7,7 @@ import {
 } from '@/tg-mini/lib/telegramInitData'
 import type {
   AdminNotifySettings,
+  ClosedAccessView,
   FeatureModulesResponse,
   InstallPlatform,
   SelfServiceLimits,
@@ -157,8 +158,27 @@ export async function getTgConfigs(): Promise<{ configs: TgMiniConfig[] }> {
   return tgFetch<{ configs: TgMiniConfig[] }>('/configs')
 }
 
-export async function getTgMeConfigs(): Promise<{ configs: TgMeConfig[] }> {
-  return tgFetch<{ configs: TgMeConfig[] }>('/me/configs')
+export async function getTgMeConfigs(): Promise<{
+  configs: TgMeConfig[]
+  closed_access: ClosedAccessView | null
+}> {
+  return tgFetch<{ configs: TgMeConfig[]; closed_access: ClosedAccessView | null }>('/me/configs')
+}
+
+/** Продление доступа unlock-кодом (owner scope) — Mini App. */
+export async function redeemTgMeCode(code: string): Promise<{
+  grant_days: number
+  protocols_applied: string[]
+  access_until_by_protocol: Record<string, string | null>
+}> {
+  return tgFetch<{
+    grant_days: number
+    protocols_applied: string[]
+    access_until_by_protocol: Record<string, string | null>
+  }>('/me/redeem-code', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  })
 }
 
 /** Самосервис плана конфигов: добавить следующее свободное имя. */

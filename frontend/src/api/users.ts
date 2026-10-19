@@ -7,6 +7,7 @@ import type {
   PresetUpdate,
   RejectRequest,
   TelegramLinkCodeResponse,
+  User,
   UserProvisionedCreate,
   UserProvisionedResponse,
   UserProvisioningApply,
@@ -118,6 +119,51 @@ export async function setUserConfigAccessOp(userId: number, configId: number, op
 export async function deleteUserConfig(userId: number, configId: number) {
   return apiFetch<{ message: string }>(`/users/${userId}/configs/${configId}`, {
     method: 'DELETE',
+  })
+}
+
+/* ------------------------- Статус доступа (Stage 3) ------------------------- */
+
+/** POST /users/{id}/suspend — приостановить доступ (sticky user_suspended). */
+export async function suspendUser(
+  userId: number,
+  data: { reason?: string | null; show_reason?: boolean; notify_telegram?: boolean },
+) {
+  return apiFetch<User>(`/users/${userId}/suspend`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+/** POST /users/{id}/resume — снять приостановку (user_suspended). */
+export async function resumeUser(
+  userId: number,
+  data: { notify_telegram?: boolean } = {},
+) {
+  return apiFetch<User>(`/users/${userId}/resume`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+/** POST /users/{id}/extend — продлить доступ на N дней (max(now, access_until) + days). */
+export async function extendUserAccess(userId: number, days: number) {
+  return apiFetch<User>(`/users/${userId}/extend`, {
+    method: 'POST',
+    body: JSON.stringify({ days }),
+  })
+}
+
+/** POST /users/{id}/traffic-counter/reset — сбросить счётчик трафика абонента. */
+export async function resetUserTrafficCounter(userId: number) {
+  return apiFetch<User>(`/users/${userId}/traffic-counter/reset`, { method: 'POST' })
+}
+
+/** PATCH /users/{id} — лимит трафика абонента (null — снять ограничение). */
+export async function setUserTrafficLimit(userId: number, trafficLimitBytes: number | null) {
+  return apiFetch<User>(`/users/${userId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ traffic_limit_bytes: trafficLimitBytes }),
   })
 }
 

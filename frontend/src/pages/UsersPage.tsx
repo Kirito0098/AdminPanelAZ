@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Navigate, useParams, useNavigate } from 'react-router-dom'
 import { MoreHorizontal, Ticket, UserPlus, Users } from 'lucide-react'
 import {
@@ -142,6 +142,9 @@ export default function UsersPage() {
         })
         break
       case 'suspended':
+        list = list.filter((u) => Boolean(u.suspended_at))
+        break
+      case 'inactive':
         list = list.filter((u) => u.is_active === false)
         break
       default:
@@ -509,15 +512,26 @@ function UserCardView({
   const [loading, setLoading] = useState(true)
   const { error: notifyError } = useNotifications()
 
+  const load = useCallback(async () => {
+    try {
+      const data = await getProvisioning(userId)
+      setCard(data)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить карточку')
+    }
+  }, [userId, notifyError])
+
   useEffect(() => {
     let cancelled = false
+    setLoading(true)
     void (async () => {
-      setLoading(true)
       try {
         const data = await getProvisioning(userId)
         if (!cancelled) setCard(data)
       } catch (err) {
-        if (!cancelled) notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить карточку')
+        if (!cancelled) {
+          notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить карточку')
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -530,5 +544,13 @@ function UserCardView({
   if (loading) return <Spinner label="Загрузка карточки…" />
   if (!card) return <Navigate to="/users" replace />
 
-  return <UserCard card={card} onBack={onBack} onSave={onSave} onDelete={onDelete} />
+  return (
+    <UserCard
+      card={card}
+      onBack={onBack}
+      onSave={onSave}
+      onDelete={onDelete}
+      onRefresh={() => void load()}
+    />
+  )
 }

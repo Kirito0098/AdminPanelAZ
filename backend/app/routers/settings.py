@@ -19,6 +19,8 @@ from app.schemas import (
     RetentionSettingsUpdate,
     SelfServiceLimitsResponse,
     SelfServiceLimitsUpdate,
+    UserGraceSettingsResponse,
+    UserGraceSettingsUpdate,
     VisibleVpnProfilesDefaultResponse,
     VisibleVpnProfilesDefaultUpdate,
     VisibleVpnProfilesPolicy,
@@ -38,6 +40,7 @@ from app.services.notify_time import (
 from app.services.openvpn_profile_repair import recreate_openvpn_profiles
 from app.services.profile_delivery import load_node_remote_hosts
 from app.services.self_service import get_self_service_limits, set_self_service_limits
+from app.services.user_grace import ALLOWED_MONTHS, get_grace_months, set_grace_months
 from app.services.vpn_profile_visibility import (
     get_default_visible_vpn_profiles,
     set_default_visible_vpn_profiles,
@@ -410,6 +413,40 @@ def put_user_vpn_visibility_default(
         client_timezone=get_client_timezone_from_request(request),
     )
     return VisibleVpnProfilesDefaultResponse(policy=VisibleVpnProfilesPolicy(**policy))
+
+
+@router.get("/user-grace", response_model=UserGraceSettingsResponse)
+def get_user_grace_settings(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """Срок удержания конфигов после истечения доступа (месяцы; 0 — выключено)."""
+    return UserGraceSettingsResponse(
+        grace_months=get_grace_months(db),
+        allowed_months=sorted(ALLOWED_MONTHS),
+    )
+
+
+@router.patch("/user-grace", response_model=UserGraceSettingsResponse)
+def update_user_grace_settings(
+    payload: UserGraceSettingsUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    try:
+        months = set_grace_months(db, payload.grace_months)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    db.commit()
+    admin_notify_service.send_settings_change(
+        db,
+        actor_username=admin.username,
+        settings_key="inactive_user_grace_period_months",
+        details=f"grace_months={months}",
+        client_timezone=get_client_timezone_from_request(request),
+    )
+    return UserGraceSettingsResponse(grace_months=months, allowed_months=sorted(ALLOWED_MONTHS))
 
 
 @router.get("/self-service", response_model=SelfServiceLimitsResponse)

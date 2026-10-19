@@ -7,6 +7,7 @@ import type {
   SelfServiceQuota,
   SelfServiceLimits,
   EffectiveVisibleVpnProfilesResponse,
+  UserGraceSettings,
   VisibleVpnProfilesDefaultResponse,
   VisibleVpnProfilesPolicy,
   VpnType,
@@ -55,6 +56,18 @@ export async function updateSelfServiceLimits(data: Partial<SelfServiceLimits>) 
   return apiFetch<SelfServiceLimits>('/settings/self-service', {
     method: 'PATCH',
     body: JSON.stringify(data),
+  })
+}
+
+/** Срок удержания конфигов после истечения доступа (месяцы; 0 — выключено). */
+export async function getUserGraceSettings() {
+  return apiFetch<UserGraceSettings>('/settings/user-grace')
+}
+
+export async function updateUserGraceSettings(graceMonths: number) {
+  return apiFetch<UserGraceSettings>('/settings/user-grace', {
+    method: 'PATCH',
+    body: JSON.stringify({ grace_months: graceMonths }),
   })
 }
 

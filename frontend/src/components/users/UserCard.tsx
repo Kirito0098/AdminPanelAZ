@@ -4,12 +4,14 @@ import { ApiError, updateUser } from '@/api/client'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { formatDate } from '@/lib/datetime'
+import { formatBytes } from '@/lib/trafficFormat'
 import type { UserUpdatePayload, UserProvisioningCard, UserProvisionSummary } from '@/types'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import UserAccessSection from './UserAccessSection'
+import UserAccessControlSection from './UserAccessControlSection'
 import UserConfigsSection from './UserConfigsSection'
 import UserStatsSection from './UserStatsSection'
 import UserAccountSection from './UserAccountSection'
@@ -19,6 +21,7 @@ interface UserCardProps {
   onBack: () => void
   onSave: (id: number, data: Partial<UserUpdatePayload>) => void
   onDelete: (user: UserProvisionSummary) => void
+  onRefresh: () => void
 }
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'
@@ -30,7 +33,7 @@ const STATE_LABEL: Record<string, { label: string; variant: BadgeVariant }> = {
   ok: { label: 'OK', variant: 'success' },
 }
 
-export default function UserCard({ card, onBack, onSave, onDelete }: UserCardProps) {
+export default function UserCard({ card, onBack, onSave, onDelete, onRefresh }: UserCardProps) {
   const { user } = card
   const { isEnabled } = useFeatureModules()
   const { success, error: notifyError } = useNotifications()
@@ -61,6 +64,16 @@ export default function UserCard({ card, onBack, onSave, onDelete }: UserCardPro
               <Badge variant={stateMeta?.variant ?? 'secondary'} className="text-[10px]">
                 {stateMeta?.label ?? user.provision_state}
               </Badge>
+              {user.suspended_at && (
+                <Badge variant="destructive" className="text-[10px]">
+                  Приостановлен
+                </Badge>
+              )}
+              {card.grace_hold && (
+                <Badge variant="warning" className="text-[10px]">
+                  Истёк: удержание {card.grace_hold.elapsed_months} из {card.grace_hold.limit_months} мес.
+                </Badge>
+              )}
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               ID {user.id} · {user.plan_config_indexes?.length ?? 0} имён конфигов ·{' '}
@@ -71,10 +84,29 @@ export default function UserCard({ card, onBack, onSave, onDelete }: UserCardPro
                 Срок доступа: {formatDate(user.access_until)}
               </p>
             )}
+            {user.traffic_limit_bytes != null && (
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Трафик: {formatBytes(user.traffic_consumed_bytes ?? 0)} из{' '}
+                {formatBytes(user.traffic_limit_bytes)}
+                {user.traffic_counter_reset_at
+                  ? ` (с ${formatDate(user.traffic_counter_reset_at)})`
+                  : ''}
+                {user.traffic_limit_blocked ? ' — лимит исчерпан' : ''}
+              </p>
+            )}
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
             {provisioningOn && (
-              <Button type="button" onClick={handleSavePlan} disabled={user.provision_state === 'unmanaged'}>
+              <Button
+                type="button"
+                onClick={handleSavePlan}
+                disabled={user.provision_state === 'unmanaged' || card.plan.blocked}
+                title={
+                  card.plan.blocked
+                    ? 'Срок доступа истёк — сначала продлите доступ'
+                    : undefined
+                }
+              >
                 <Save size={15} />
                 Применить план
               </Button>
@@ -93,7 +125,8 @@ export default function UserCard({ card, onBack, onSave, onDelete }: UserCardPro
               <TabsTrigger value="account">Учётная запись</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="access" className="mt-3">
+            <TabsContent value="access" className="mt-3 space-y-4">
+              <UserAccessControlSection card={card} onRefresh={onRefresh} />
               <UserAccessSection card={card} onSave={onSave} />
             </TabsContent>
             <TabsContent value="configs" className="mt-3">

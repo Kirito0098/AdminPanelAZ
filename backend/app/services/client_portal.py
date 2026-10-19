@@ -1132,10 +1132,13 @@ def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
         for node_id, entries in clients_by_node.items()
     ]
     nodes.sort(key=lambda node: (node["label"].casefold(), node["node_id"]))
+    from app.services.user_closed_access import closed_access_payload
+
     return {
         "kind": "user",
         "brand_title": _portal_brand_title(db),
         "unlock_codes_enabled": get_feature_service().is_enabled("unlock_codes"),
+        "closed_access": closed_access_payload(db, user),
         "nodes": nodes,
     }
 

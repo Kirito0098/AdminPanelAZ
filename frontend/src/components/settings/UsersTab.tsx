@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
+  CalendarDays,
   Gauge,
   MoreHorizontal,
   Pencil,
@@ -20,6 +21,7 @@ import AppDialog from '@/components/shared/AppDialog'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import PasswordChangePolicyRow from '@/components/settings/PasswordChangePolicyRow'
 import SelfServiceLimitsSection from '@/components/settings/SelfServiceLimitsSection'
+import UserGraceSection from '@/components/settings/UserGraceSection'
 import VpnVisibilityPolicyEditor, {
   copyVisibleVpnPolicy,
   FULL_VISIBLE_VPN_POLICY,
@@ -214,6 +216,7 @@ export default function UsersTab({
   const [createOpen, setCreateOpen] = useState(false)
   const [policyOpen, setPolicyOpen] = useState(false)
   const [limitsOpen, setLimitsOpen] = useState(false)
+  const [graceOpen, setGraceOpen] = useState(false)
   const [ownerFilter, setOwnerFilter] = useState<string>('all')
   const [activeEditor, setActiveEditor] = useState<PanelUser | null>(null)
   const [draftRole, setDraftRole] = useState<UserRole>('user')
@@ -756,6 +759,16 @@ export default function UsersTab({
         icon={<Gauge size={16} />}
       >
         {limitsOpen ? <SelfServiceLimitsSection /> : null}
+      </SettingsCollapsible>
+
+      <SettingsCollapsible
+        open={graceOpen}
+        onOpenChange={setGraceOpen}
+        title="Удержание после истечения доступа"
+        description="Сколько месяцев держать конфиги истёкшего абонента до ручной очистки"
+        icon={<CalendarDays size={16} />}
+      >
+        {graceOpen ? <UserGraceSection /> : null}
       </SettingsCollapsible>
 
       <AppDialog

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   ArrowLeftRight,
@@ -22,9 +22,11 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import Spinner from '@/components/ui/Spinner'
+import { closedAccessCopy } from '@/lib/closedAccess'
 import { parseTimestamp } from '@/lib/datetime'
 import { normalizePortalNodes, pickPortalSelection, portalClientKey, portalProfileLabel } from '@/lib/portalNodes'
 import { cn } from '@/lib/utils'
+import type { ClosedAccessView } from '@/types'
 
 type OsId = 'windows' | 'android' | 'ios' | 'mac' | 'linux'
 type KitStep = 'install' | 'profile' | 'connect'
@@ -421,6 +423,60 @@ function preferredClientProtocol(client: PortalClientEntry | null | undefined): 
   return preferredProtocol(client.protocols.length ? client.protocols : client.files.map((file) => file.vpn_type))
 }
 
+/** Баннер закрытого доступа (спека 7.4): конфиги остаются доступны. */
+function ClosedAccessBanner({
+  view,
+  onRedeem,
+  redeemAvailable,
+}: {
+  view: ClosedAccessView
+  onRedeem: () => void
+  redeemAvailable: boolean
+}) {
+  const copy = closedAccessCopy(view)
+  if (!copy) return null
+  const danger = copy.tone === 'danger'
+  return (
+    <section
+      role="status"
+      className={cn(
+        'space-y-3 rounded-3xl border p-4 backdrop-blur-sm sm:p-5',
+        danger
+          ? 'border-rose-400/40 bg-rose-500/10'
+          : 'border-amber-400/40 bg-amber-500/10',
+      )}
+    >
+      <div>
+        <h2 className={cn('text-base font-semibold', danger ? 'text-rose-200' : 'text-amber-200')}>
+          {copy.title}
+        </h2>
+        {copy.description && <p className="mt-1 text-xs text-slate-300">{copy.description}</p>}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {copy.canRedeem && redeemAvailable && (
+          <Button type="button" size="sm" onClick={onRedeem}>
+            {copy.redeemLabel}
+          </Button>
+        )}
+        {copy.canRequest && view.contact_url && (
+          <Button type="button" size="sm" variant="outline" asChild>
+            <a href={view.contact_url} target="_blank" rel="noreferrer">
+              Запросить продление
+            </a>
+          </Button>
+        )}
+        {copy.canContact && view.contact_url && (
+          <Button type="button" size="sm" variant="outline" asChild>
+            <a href={view.contact_url} target="_blank" rel="noreferrer">
+              Написать администратору
+            </a>
+          </Button>
+        )}
+      </div>
+    </section>
+  )
+}
+
 export default function PortalPage() {
   const { token = '' } = useParams()
   const [data, setData] = useState<PortalMetaResponse | null>(null)
@@ -435,6 +491,8 @@ export default function PortalPage() {
   const [redeemCode, setRedeemCode] = useState('')
   const [redeeming, setRedeeming] = useState(false)
   const [redeemError, setRedeemError] = useState<string | null>(null)
+  const redeemSectionRef = useRef<HTMLElement | null>(null)
+  const redeemInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (!token) {
@@ -528,6 +586,13 @@ export default function PortalPage() {
 
   const appLink = protocol ? APP_DOWNLOADS[protocol]?.[os] : undefined
   const status = activeClient?.status
+  const closedAccess: ClosedAccessView | null =
+    data && data.kind === 'user' ? (data.closed_access ?? null) : null
+
+  const focusRedeem = () => {
+    redeemSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    redeemInputRef.current?.focus()
+  }
 
   if (loading) {
     return (
@@ -595,6 +660,14 @@ export default function PortalPage() {
             <Link2 size={16} />
           </Button>
         </header>
+
+        {closedAccess && (
+          <ClosedAccessBanner
+            view={closedAccess}
+            onRedeem={focusRedeem}
+            redeemAvailable={data.unlock_codes_enabled}
+          />
+        )}
 
         <section className="grid grid-cols-2 gap-3">
           <StatCard
@@ -702,13 +775,17 @@ export default function PortalPage() {
         )}
 
         {data.unlock_codes_enabled && (
-          <section className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
+          <section
+            ref={redeemSectionRef}
+            className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5"
+          >
             <div>
               <h2 className="text-base font-semibold">Активировать ключ</h2>
               <p className="text-xs text-slate-400">Введите unlock-код, чтобы продлить доступ к порталу и подключению.</p>
             </div>
             <form className="flex flex-col gap-3 sm:flex-row" onSubmit={handleRedeem}>
               <Input
+                ref={redeemInputRef}
                 value={redeemCode}
                 onChange={(event) => {
                   setRedeemCode(event.target.value)
