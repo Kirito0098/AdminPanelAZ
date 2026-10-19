@@ -56,6 +56,7 @@ _PIPELINE_TASK_TYPES = {
     "node_update_roll",
     "user_provision",
     "user_delete_cleanup",
+    "bulk_user_nodes",
 }
 
 _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
@@ -81,6 +82,7 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "node_update_roll": ("Rolling update узлов…", "Подготовка очереди…", 3),
     "user_provision": ("Применение плана конфигов…", "Подготовка плана…", 5),
     "user_delete_cleanup": ("Удаление пользователя…", "Подготовка очистки…", 5),
+    "bulk_user_nodes": ("Массовая выдача серверов…", "Запуск…", 5),
 }
 
 _TASK_DONE_PROGRESS: dict[str, str] = {
@@ -106,6 +108,7 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "node_update_roll": "Rolling update завершён",
     "user_provision": "План конфигов применён",
     "user_delete_cleanup": "Пользователь удалён",
+    "bulk_user_nodes": "Массовая операция с серверами завершена",
 }
 
 

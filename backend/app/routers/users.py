@@ -30,6 +30,9 @@ from app.models import (
 from app.schemas import (
     AccessRequestResponse,
     ApproveRequest,
+    BulkNodesPreviewItem,
+    BulkNodesPreviewResponse,
+    BulkNodesRequest,
     ConfigAccessOpRequest,
     GraceHoldView,
     MessageResponse,
@@ -68,6 +71,12 @@ from app.services.admin_notify import admin_notify_service
 from app.services.app_setting_store import _get_setting
 from app.services.active_web_session import active_web_session_service
 from app.services.background_tasks import background_task_service
+from app.services.bulk_user_nodes import (
+    BulkNodesPreview,
+    assert_assignable_vpn_node,
+    build_bulk_nodes_preview,
+    enqueue_bulk_user_nodes,
+)
 from app.services.client_names import (
     assert_client_base_name_valid,
     assert_name_not_reserved_by_other_user,
@@ -104,6 +113,7 @@ from app.services.telegram_link import create_link_code
 from app.services.user_provisioning import (
     TASK_TYPE,
     USER_DELETE_CLEANUP_TASK_TYPE,
+    apply_users_list_filters,
     compute_plan,
     enqueue_user_delete_cleanup,
     enqueue_user_provision,
@@ -224,6 +234,36 @@ def _user_summary(
     )
 
 
+def _bulk_nodes_preview_response(preview: BulkNodesPreview) -> BulkNodesPreviewResponse:
+    """Предпросмотр → ответ API (одна и та же форма для affected/skipped/без Telegram)."""
+
+    def item(data: dict[str, Any]) -> BulkNodesPreviewItem:
+        return BulkNodesPreviewItem(
+            user_id=int(data.get("user_id") or 0),
+            username=str(data.get("username") or ""),
+            configs_create=int(data.get("configs_create") or 0),
+            configs_delete=int(data.get("configs_delete") or 0),
+            expired=bool(data.get("expired")),
+            detail=data.get("detail"),
+        )
+
+    return BulkNodesPreviewResponse(
+        action=preview.action,
+        node_id=preview.node_id,
+        to_node_id=preview.to_node_id,
+        node_label=preview.node_label,
+        to_node_label=preview.to_node_label,
+        affected=[item(row) for row in preview.affected],
+        skipped={
+            reason: [item(row) for row in rows] for reason, rows in preview.skipped.items()
+        },
+        without_telegram=[item(row) for row in preview.without_telegram],
+        notify_text_preview=preview.notify_text_preview,
+        configs_to_create=preview.configs_to_create,
+        configs_to_delete=preview.configs_to_delete,
+    )
+
+
 def _get_owned_config(db: Session, user_id: int, config_id: int) -> VpnConfig:
     """Конфиг пользователя; несоответствие владельца → 404 «не найдено»
     (без утечки чужих id)."""
@@ -288,15 +328,7 @@ def list_users(
     _: User = Depends(require_admin),
 ):
     query = db.query(User).filter(User.provision_state != "pending_deletion")
-    if role:
-        try:
-            query = query.filter(User.role == UserRole(role))
-        except ValueError:
-            pass  # неизвестное значение фильтра — игнорируем
-    if q:
-        query = query.filter(User.username.ilike(f"%{q}%"))
-    if state:
-        query = query.filter(User.provision_state == state)
+    query = apply_users_list_filters(query, role=role, q=q, state=state)
     users = query.order_by(User.id).all()
 
     assignment_rows: list[UserNodeAssignment] = []
@@ -723,6 +755,46 @@ def get_request_receipt(
             "Cache-Control": "private, no-store",
         },
     )
+
+
+@router.post("/bulk/nodes/preview", response_model=BulkNodesPreviewResponse)
+def bulk_nodes_preview(
+    body: BulkNodesRequest,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Предпросмотр массовой операции с серверами: что изменится и кто пропущен."""
+    _require_provisioning()
+    preview = build_bulk_nodes_preview(
+        db,
+        action=body.action,
+        node_id=body.node_id,
+        to_node_id=body.to_node_id,
+        scope=body.scope,
+        notify_telegram=body.notify_telegram,
+        note=body.note,
+    )
+    return _bulk_nodes_preview_response(preview)
+
+
+@router.post("/bulk/nodes", status_code=status.HTTP_202_ACCEPTED)
+def bulk_nodes_start(
+    body: BulkNodesRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Запустить массовую операцию с серверами (одна фоновая задача за раз)."""
+    _require_provisioning()
+    if body.action in ("remove", "replace"):
+        # Удаляет конфиги у многих пользователей — подтверждаем именем сервера.
+        node = assert_assignable_vpn_node(db, body.node_id)
+        if (body.confirm_node_name or "").strip() != node.name:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Введите имя сервера «{node.name}» для подтверждения",
+            )
+    task = enqueue_bulk_user_nodes(db, body=body, actor=admin)
+    return {"task_id": task.id}
 
 
 @router.patch("/{user_id}", response_model=UserResponse)

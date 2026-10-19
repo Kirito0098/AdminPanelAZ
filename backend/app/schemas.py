@@ -464,6 +464,53 @@ class UserProvisioningCard(BaseModel):
     grace_hold: GraceHoldView | None = None
 
 
+class BulkNodesScope(BaseModel):
+    """Область массовой операции с серверами.
+
+    ``all`` — все пользователи с планом, ``user_ids`` — выбранные в списке,
+    ``filter`` — текущий фильтр списка пользователей.
+    """
+
+    mode: Literal["all", "user_ids", "filter"] = "all"
+    user_ids: list[int] | None = None
+    state: str | None = None
+    q: str | None = None
+
+
+class BulkNodesRequest(BaseModel):
+    action: Literal["add", "remove", "replace"]
+    node_id: int
+    to_node_id: int | None = None
+    scope: BulkNodesScope = Field(default_factory=BulkNodesScope)
+    notify_telegram: bool = False
+    note: str | None = Field(default=None, max_length=500)
+    # Для «Убрать»/«Перенести» — имя сервера, введённое админом вручную.
+    confirm_node_name: str | None = None
+
+
+class BulkNodesPreviewItem(BaseModel):
+    user_id: int
+    username: str
+    configs_create: int = 0
+    configs_delete: int = 0
+    expired: bool = False
+    detail: str | None = None
+
+
+class BulkNodesPreviewResponse(BaseModel):
+    action: str
+    node_id: int
+    to_node_id: int | None = None
+    node_label: str
+    to_node_label: str | None = None
+    affected: list[BulkNodesPreviewItem] = []
+    skipped: dict[str, list[BulkNodesPreviewItem]] = {}
+    without_telegram: list[BulkNodesPreviewItem] = []
+    notify_text_preview: str | None = None
+    configs_to_create: int = 0
+    configs_to_delete: int = 0
+
+
 class UserConfigAccessUpdate(BaseModel):
     config_groups: list[str] = []
 

@@ -16,14 +16,14 @@ import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 import logging
 
 from fastapi import HTTPException, status
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Query, Session
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +222,49 @@ def validate_plan_nodes(db: Session, node_ids: list[int]) -> list[Node]:
                 f"Узел «{node.name}» — реплика HA, назначьте первичный узел группы",
             )
     return nodes
+
+
+def apply_users_list_filters(
+    query: Query,
+    *,
+    role: str | None = None,
+    q: str | None = None,
+    state: str | None = None,
+) -> Query:
+    """Фильтры списка пользователей — общие для ``GET /users`` и массовых операций.
+
+    Единый DSL: неизвестный ``role`` игнорируется, ``q`` ищет по имени,
+    ``state`` — состояние предоставления либо чипы списка
+    (attention / unmanaged / expiring_7d / expired / suspended).
+    """
+    if role:
+        try:
+            query = query.filter(User.role == UserRole(role))
+        except ValueError:
+            pass  # неизвестное значение фильтра — игнорируем
+    if q:
+        query = query.filter(User.username.ilike(f"%{q}%"))
+    if state:
+        query = _apply_users_state_filter(query, state)
+    return query
+
+
+def _apply_users_state_filter(query: Query, state: str) -> Query:
+    text = (state or "").strip().lower()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if text == "attention":
+        return query.filter(User.provision_state.in_(["partial", "pending"]))
+    if text == "expired":
+        return query.filter(User.access_until.isnot(None), User.access_until < now)
+    if text in ("expiring", "expiring_7d"):
+        return query.filter(
+            User.access_until.isnot(None),
+            User.access_until >= now,
+            User.access_until <= now + timedelta(days=7),
+        )
+    if text == "suspended":
+        return query.filter(User.suspended_at.isnot(None))
+    return query.filter(User.provision_state == state)
 
 
 def compute_plan(db: Session, user: User) -> ProvisionPlan:
