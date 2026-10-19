@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { LogOut, Menu, Moon, Radio, Shield, Sun, User } from 'lucide-react'
 import NodeSelector from '@/components/NodeSelector'
+import NotificationBell from '@/components/notifications/NotificationBell'
 import ActiveNodeChangedBanner from '@/components/ActiveNodeChangedBanner'
 import HaScopeEnforcer from '@/components/HaScopeEnforcer'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
@@ -258,9 +259,11 @@ export default function Layout() {
           </div>
           <div className="shrink-0 sm:hidden">
             <NodeSelector compact />
+            <NotificationBell />
           </div>
           <div className="hidden items-center gap-3 sm:flex">
             <NodeSelector />
+            <NotificationBell />
             <span className="mono text-xs text-muted-foreground">SESS · {user?.username?.toUpperCase()}</span>
             <span className="orientation-compact-header-subtitle">
               <LiveClock />

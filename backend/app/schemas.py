@@ -1628,6 +1628,39 @@ class BackgroundTaskResponse(BaseModel):
     status_url: str | None = None
 
 
+class PresetBase(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    node_ids: list[int] = Field(default_factory=list)
+    protocols: list[str] = Field(default_factory=list)
+    config_count: int = Field(default=1, ge=1, le=20)
+    config_quota: int | None = Field(default=None, ge=0, le=1000)
+    traffic_limit_bytes: int | None = Field(default=None, ge=0)
+    access_days: int | None = Field(default=None, ge=1)
+    is_default: bool = False
+
+
+class PresetCreate(PresetBase):
+    pass
+
+
+class PresetUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    node_ids: list[int] | None = None
+    protocols: list[str] | None = None
+    config_count: int | None = Field(default=None, ge=1, le=20)
+    config_quota: int | None = Field(default=None, ge=0, le=1000)
+    traffic_limit_bytes: int | None = Field(default=None, ge=0)
+    access_days: int | None = Field(default=None, ge=1)
+    is_default: bool | None = None
+
+
+class PresetResponse(PresetBase):
+    id: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class NodeBase(BaseModel):
     name: str = Field(min_length=1, max_length=128)
     host: str = Field(min_length=1, max_length=255)

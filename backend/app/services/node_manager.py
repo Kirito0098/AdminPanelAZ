@@ -410,6 +410,11 @@ def purge_node_related(db: Session, node_id: int) -> None:
             if user_row is not None and user_has_plan(user_row):
                 user_row.provision_state = "pending"
 
+    # Шаблоны предоставления доступа не должны ссылаться на удалённый узел.
+    from app.services.provisioning_presets import remove_node_from_presets
+
+    remove_node_from_presets(db, node_id)
+
 
 def _remove_local_node(db: Session, local: Node) -> None:
     active_id = get_active_node_id(db)

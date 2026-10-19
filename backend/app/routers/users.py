@@ -26,6 +26,9 @@ from app.models import (
 from app.schemas import (
     ConfigAccessOpRequest,
     MessageResponse,
+    PresetCreate,
+    PresetResponse,
+    PresetUpdate,
     ProvisionPlanItem,
     ProvisionPlanResponse,
     ProvisioningConfig,
@@ -61,6 +64,7 @@ from app.services.client_names import (
 )
 from app.services.client_portal import revoke_creator_portal_links
 from app.services.config_access import get_user_config_grants, set_user_config_access
+from app.services.feature_guards import get_feature_service
 from app.services.ip_restriction import ip_restriction_service
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.node_manager import get_adapter_for_node, get_node_antizapret_path, node_metadata_dict
@@ -70,6 +74,7 @@ from app.services.traffic.ha_aggregate import resolve_traffic_scope
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
 from app.services.file_download import attachment_response
+from app.services.provisioning_presets import create_preset, delete_preset, list_presets, update_preset
 from app.services.qr_generator import generate_qr_png, prefers_download_link_qr
 from app.services.telegram_link import create_link_code
 from app.services.user_provisioning import (
@@ -400,6 +405,96 @@ def create_provisioned_user(
             ),
         )
     return UserProvisionedResponse(user=_user_summary(user, [n.id for n in nodes]), task_id=task.id)
+
+
+@router.get("/presets", response_model=list[PresetResponse])
+def list_presets_endpoint(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Список шаблонов предоставления доступа (только если модуль включён)."""
+    if not get_feature_service().is_enabled("user_provisioning"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="Раздел «Предоставление доступа» отключён администратором.",
+        )
+    return list_presets(db)
+
+
+@router.post(
+    "/presets",
+    response_model=PresetResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_preset_endpoint(
+    payload: PresetCreate,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Создать шаблон. При is_default флаг снимается со всех остальных."""
+    if not get_feature_service().is_enabled("user_provisioning"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="Раздел «Предоставление доступа» отключён администратором.",
+        )
+    return create_preset(
+        db,
+        name=payload.name,
+        node_ids=payload.node_ids,
+        protocols=payload.protocols,
+        config_count=payload.config_count,
+        config_quota=payload.config_quota,
+        traffic_limit_bytes=payload.traffic_limit_bytes,
+        access_days=payload.access_days,
+        is_default=payload.is_default,
+    )
+
+
+@router.put("/presets/{preset_id}", response_model=PresetResponse)
+def update_preset_endpoint(
+    preset_id: int,
+    payload: PresetUpdate,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Обновить шаблон."""
+    if not get_feature_service().is_enabled("user_provisioning"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="Раздел «Предоставление доступа» отключён администратором.",
+        )
+    row = update_preset(
+        db,
+        preset_id,
+        name=payload.name,
+        node_ids=payload.node_ids,
+        protocols=payload.protocols,
+        config_count=payload.config_count,
+        config_quota=payload.config_quota,
+        traffic_limit_bytes=payload.traffic_limit_bytes,
+        access_days=payload.access_days,
+        is_default=payload.is_default,
+    )
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Шаблон не найден")
+    return row
+
+
+@router.delete("/presets/{preset_id}", response_model=MessageResponse)
+def delete_preset_endpoint(
+    preset_id: int,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Удалить шаблон."""
+    if not get_feature_service().is_enabled("user_provisioning"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="Раздел «Предоставление доступа» отключён администратором.",
+        )
+    if not delete_preset(db, preset_id):
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Шаблон не найден")
+    return MessageResponse(message="Шаблон удалён")
 
 
 @router.patch("/{user_id}", response_model=UserResponse)

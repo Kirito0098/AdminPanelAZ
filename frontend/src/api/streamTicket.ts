@@ -1,6 +1,11 @@
 import { API_BASE, apiFetch } from './http'
 
-export type StreamName = 'monitoring' | 'warper_update' | 'awg2_install' | 'server_monitor'
+export type StreamName =
+  | 'monitoring'
+  | 'warper_update'
+  | 'awg2_install'
+  | 'server_monitor'
+  | 'notifications'
 
 export interface StreamHandle {
   close: () => void
