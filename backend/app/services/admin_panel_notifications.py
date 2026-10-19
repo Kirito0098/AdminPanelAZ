@@ -43,15 +43,17 @@ EVENT_CATEGORY: dict[str, str] = {
     "user_delete": "tasks",
     "client_ban": "tasks",
     "user_provision_summary": "tasks",
-    "access_request_new": "requests",
+    "access_request_new_user": "requests",
     "access_request_add_config": "requests",
-    "access_request_extend": "requests",
+    "access_request_extend_access": "requests",
     "access_request_delivery_failed": "requests",
 }
 
 
 def category_for_event(event_type: str) -> str:
     """Map an ``event_type`` to a bell tab category (default ``tasks``)."""
+    if event_type.startswith("access_request_"):
+        return "requests"
     return EVENT_CATEGORY.get(event_type, "tasks")
 
 
@@ -118,18 +120,28 @@ def list_notifications_for_admin(
         unread_query = unread_query.filter(AdminPanelNotification.category == category)
     unread_count = unread_query.count()
 
-    items = [
-        {
-            "id": row.id,
-            "category": row.category,
-            "level": row.level,
-            "event_type": row.event_type,
-            "title": row.title,
-            "message": row.message,
-            "created_at": row.created_at.isoformat() if row.created_at else "",
-        }
-        for row in rows
-    ]
+    items = []
+    for row in rows:
+        payload: dict[str, object] | None = None
+        if row.action_payload:
+            try:
+                raw = json.loads(row.action_payload)
+                if isinstance(raw, dict):
+                    payload = raw
+            except (TypeError, json.JSONDecodeError):
+                payload = None
+        items.append(
+            {
+                "id": row.id,
+                "category": row.category,
+                "level": row.level,
+                "event_type": row.event_type,
+                "title": row.title,
+                "message": row.message,
+                "created_at": row.created_at.isoformat() if row.created_at else "",
+                "action_payload": payload,
+            }
+        )
     return items, unread_count
 
 

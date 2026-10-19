@@ -73,8 +73,24 @@ USER_DELETE_CLEANUP_TASK_TYPE = "user_delete_cleanup"
 # пропускаются (та же политика, что у портала).
 _NODE_NETWORK_ERRORS = (HTTPException, httpx.HTTPError, OSError, SshTunnelError)
 
-# Протоколы, наличие включения которых проверяется через флаги модулей панели.
-_FEATURE_PROTOCOLS = ("openvpn", "wireguard", "amneziawg")
+# Протоколы → ключ модуля (как require_vpn_type): WG доступен при wireguard ИЛИ amneziawg.
+_PROTOCOL_FEATURE_KEYS: dict[str, tuple[str, ...]] = {
+    "openvpn": ("openvpn",),
+    "wireguard": ("wireguard", "amneziawg"),
+    "amneziawg": ("amneziawg", "wireguard"),
+    "amneziawg2": ("awg2",),
+}
+
+# Совместимость для bulk_user_nodes и тестов, которые импортируют имя.
+_FEATURE_PROTOCOLS = tuple(_PROTOCOL_FEATURE_KEYS)
+
+
+def _protocol_feature_enabled(feature, protocol: str) -> bool:
+    keys = _PROTOCOL_FEATURE_KEYS.get(protocol)
+    if keys is None:
+        return True
+    return any(feature.is_enabled(key) for key in keys)
+
 
 ACTION_CREATE = "create"
 ACTION_DELETE = "delete"
@@ -385,7 +401,7 @@ def compute_plan(db: Session, user: User) -> ProvisionPlan:
             skip_reason = "node_not_found"
         elif node.status != NodeStatus.online:
             skip_reason = "node_offline"
-        elif protocol in _FEATURE_PROTOCOLS and not feature.is_enabled(protocol):
+        elif not _protocol_feature_enabled(feature, protocol):
             skip_reason = "protocol_disabled"
 
         item = PlanItem(

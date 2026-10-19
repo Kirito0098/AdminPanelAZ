@@ -8,6 +8,7 @@ from app.services.telegram_bot_handlers.menu import build_reply_keyboard
 from app.services.telegram_bot_handlers import settings_fsm
 from app.services.telegram_bot_handlers.ui import role_label
 from app.services import telegram_bot_i18n as i18n
+from app.services.user_access_requests import _accept_requests
 
 
 def _start_role_display(role: str | None) -> str:
@@ -18,7 +19,12 @@ def _start_role_display(role: str | None) -> str:
 async def handle_start(ctx: BotContext) -> None:
     settings_fsm.clear_pending(ctx.telegram_user_id)
     if ctx.user is None:
-        text = i18n.START_UNLINKED.format(title=i18n.START_TITLE)
+        template = (
+            i18n.START_UNLINKED_WITH_REQUESTS
+            if _accept_requests(ctx.db)
+            else i18n.START_UNLINKED
+        )
+        text = template.format(title=i18n.START_TITLE)
         await send_message(
             ctx.bot_token,
             ctx.chat_id,

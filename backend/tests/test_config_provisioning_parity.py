@@ -92,6 +92,47 @@ def test_provision_config_uses_given_node_adapter(db, monkeypatch):
     notify_mock.assert_not_called()
 
 
+def test_provision_config_openvpn_defaults_cert_days_when_none(db, monkeypatch):
+    """Regression: None must not become str('None') for Easy-RSA (interactive prompt / fail)."""
+    node = _node(db, name="primary", port=9100)
+    owner = _user(db, username="ivan", role=UserRole.user)
+    actor = _user(db, username="admin", role=UserRole.admin)
+
+    adapter = MagicMock()
+    monkeypatch.setattr("app.services.config_provisioning.get_adapter_for_node", lambda n: adapter)
+    monkeypatch.setattr(
+        "app.services.config_provisioning.require_vpn_type",
+        lambda *a, **k: None,
+    )
+    monkeypatch.setattr(
+        "app.services.config_provisioning.enforce_can_create_vpn_type",
+        lambda *a, **k: None,
+    )
+
+    patches = {
+        "recreate_openvpn_profiles_after_admin_change": MagicMock(),
+        "load_node_remote_hosts": MagicMock(return_value=[]),
+        "refresh_config_cert_expiry": MagicMock(),
+        "purge_traffic_history_for_reused_name": MagicMock(),
+        "apply_owner_access_until_to_config": MagicMock(return_value={}),
+        "find_sync_group_for_primary": MagicMock(return_value=None),
+    }
+    with patch.multiple("app.services.config_provisioning", **patches):
+        cfg, _warn = provision_config(
+            db,
+            node=node,
+            client_name="bob",
+            vpn_type=VpnType.openvpn,
+            owner=owner,
+            actor=actor,
+            notify=False,
+            cert_expire_days=None,
+        )
+
+    adapter.add_openvpn_client.assert_called_once_with("bob", 3650)
+    assert cfg.cert_expire_days == 3650
+
+
 def test_provision_config_notify_true_sends_admin_notify(db, monkeypatch):
     other = _node(db, name="other", port=9101)
     owner = _user(db, username="ivan", role=UserRole.user)

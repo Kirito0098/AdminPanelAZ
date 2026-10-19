@@ -10,6 +10,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { formatDate } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 
@@ -33,17 +34,29 @@ interface CreateUserDialogProps {
   }) => void | Promise<void>
 }
 
-const PROTOCOLS: { id: string; label: string }[] = [
-  { id: 'wireguard', label: 'WireGuard' },
-  { id: 'openvpn', label: 'OpenVPN' },
-  { id: 'amneziawg2', label: 'AmneziaWG 2.0' },
+const PROTOCOLS: { id: string; label: string; featureKeys: string[] }[] = [
+  { id: 'wireguard', label: 'WireGuard', featureKeys: ['wireguard', 'amneziawg'] },
+  { id: 'openvpn', label: 'OpenVPN', featureKeys: ['openvpn'] },
+  { id: 'amneziawg2', label: 'AmneziaWG 2.0', featureKeys: ['awg2'] },
 ]
+
+function protocolEnabled(
+  isEnabled: (key: string) => boolean,
+  featureKeys: string[],
+): boolean {
+  return featureKeys.some((key) => isEnabled(key))
+}
 
 export default function CreateUserDialog({
   open,
   onOpenChange,
   onCreate,
 }: CreateUserDialogProps) {
+  const { isEnabled } = useFeatureModules()
+  const availableProtocols = useMemo(
+    () => PROTOCOLS.filter((p) => protocolEnabled(isEnabled, p.featureKeys)),
+    [isEnabled],
+  )
   const [step, setStep] = useState<Step>('who')
   const [nodes, setNodes] = useState<Node[]>([])
   const [nodesLoading, setNodesLoading] = useState(false)
@@ -56,7 +69,7 @@ export default function CreateUserDialog({
   const [panelLogin, setPanelLogin] = useState(false)
   const [password, setPassword] = useState('')
   const [selectedNodeIds, setSelectedNodeIds] = useState<number[]>([])
-  const [selectedProtocols, setSelectedProtocols] = useState<string[]>(['wireguard'])
+  const [selectedProtocols, setSelectedProtocols] = useState<string[]>([])
   const [configCount, setConfigCount] = useState(1)
   const [configQuota, setConfigQuota] = useState('')
   const [accessUntil, setAccessUntil] = useState('')
@@ -72,13 +85,23 @@ export default function CreateUserDialog({
       setPanelLogin(false)
       setPassword('')
       setSelectedNodeIds([])
-      setSelectedProtocols(['wireguard'])
+      setSelectedProtocols([])
       setConfigCount(1)
       setConfigQuota('')
       setAccessUntil('')
       setSelectedPresetId(null)
     }
   }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    setSelectedProtocols((prev) => {
+      const allowed = new Set(availableProtocols.map((p) => p.id))
+      const kept = prev.filter((id) => allowed.has(id))
+      if (kept.length > 0) return kept
+      return availableProtocols[0] ? [availableProtocols[0].id] : []
+    })
+  }, [open, availableProtocols])
 
   useEffect(() => {
     let cancelled = false
@@ -359,7 +382,13 @@ export default function CreateUserDialog({
               <Label>Протоколы</Label>
               <fieldset className="border-none p-0 m-0 flex gap-3">
                 <legend className="sr-only">Протоколы</legend>
-                {PROTOCOLS.map((proto) => {
+                {availableProtocols.length === 0 ? (
+                  <p className="text-xs text-destructive">
+                    Нет включённых VPN-модулей. Включите OpenVPN / WireGuard / AmneziaWG 2.0 в
+                    Настройках → Разделы.
+                  </p>
+                ) : null}
+                {availableProtocols.map((proto) => {
                   const checked = selectedProtocols.includes(proto.id)
                   return (
                     <label key={proto.id} className="flex items-center gap-2 cursor-pointer">

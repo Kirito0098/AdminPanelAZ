@@ -186,6 +186,7 @@ def env(db, admin, subscriber, monkeypatch):
         "app.services.telegram_bot_handlers.access_requests.send_message", send_message
     )
     monkeypatch.setattr("app.services.telegram_bot_handlers.menu.send_message", send_message)
+    monkeypatch.setattr("app.services.telegram_bot_handlers.start.send_message", send_message)
     monkeypatch.setattr(
         "app.services.telegram_bot_handlers.access_requests.edit_message_reply_markup",
         AsyncMock(return_value=True),
@@ -281,6 +282,40 @@ def test_link_code_hint(env):
     _run(env, _message("У меня есть код привязки", "300", "300"))
     env.send_message.assert_awaited()
     assert "/link" in env.send_message.await_args.args[2]
+
+
+def test_start_unlinked_shows_request_access_when_accept_on(env, db):
+    """Приём включён: /start для нового TG — кнопка «Запросить доступ» и подсказка в тексте."""
+    _set_setting(db, "telegram_accept_access_requests", "true")
+    db.commit()
+    _run(env, _message("/start", "300", "300"))
+    env.send_message.assert_awaited()
+    args = env.send_message.await_args
+    text = args.args[2]
+    markup = args.kwargs.get("reply_markup") or {}
+    buttons = [
+        btn.get("text")
+        for row in markup.get("keyboard", [])
+        for btn in row
+    ]
+    assert "Запросить доступ" in buttons
+    assert "Запросить доступ" in text
+    assert "/link" in text
+
+
+def test_start_unlinked_hides_request_access_when_accept_off(env, db):
+    _set_setting(db, "telegram_accept_access_requests", "false")
+    db.commit()
+    _run(env, _message("/start", "300", "300"))
+    env.send_message.assert_awaited()
+    markup = env.send_message.await_args.kwargs.get("reply_markup") or {}
+    buttons = [
+        btn.get("text")
+        for row in markup.get("keyboard", [])
+        for btn in row
+    ]
+    assert "Запросить доступ" not in buttons
+    assert "У меня есть код привязки" in buttons
 
 
 def test_admin_approve_new_user_with_default_preset(env, pending_new_user, default_preset):

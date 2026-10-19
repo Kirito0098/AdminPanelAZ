@@ -232,6 +232,32 @@ def test_compute_plan_case_insensitive_match(db, features_on):
     assert plan.conflict == []
 
 
+def test_compute_plan_wireguard_allowed_when_amneziawg_enabled(db, monkeypatch):
+    """Align with require_vpn_type: WG OK if wireguard OR amneziawg module is on."""
+
+    class _Service:
+        def is_enabled(self, key):
+            return key == "amneziawg"
+
+    monkeypatch.setattr("app.services.user_provisioning.get_feature_service", lambda: _Service())
+    ivan = _user(
+        db,
+        username="ivan",
+        client_base_name="ivan",
+        plan_config_indexes=[1],
+        desired_protocols=["wireguard", "openvpn", "amneziawg2"],
+    )
+    node = _node(db, name="Germany")
+    _assign(db, ivan, node)
+
+    plan = compute_plan(db, ivan)
+    create_types = sorted(it.vpn_type for it in plan.create)
+    skipped = {it.vpn_type: it.reason for it in plan.skipped}
+    assert "wireguard" in create_types
+    assert skipped.get("openvpn") == "protocol_disabled"
+    assert skipped.get("amneziawg2") == "protocol_disabled"
+
+
 def test_compute_plan_node_offline_skips(db, features_on):
     ivan = _user(db, username="ivan", client_base_name="ivan", plan_config_indexes=[1], desired_protocols=["wireguard"])
     offline = _node(db, name="Offline", status=NodeStatus.offline)

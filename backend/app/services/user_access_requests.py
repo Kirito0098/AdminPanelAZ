@@ -444,7 +444,7 @@ def _resolve_plan(
                 protocols = json.loads(preset.protocols or "[]")
             except (ValueError, TypeError):
                 node_ids, protocols = [], []
-            return {
+            plan = {
                 "node_ids": [int(n) for n in node_ids],
                 "protocols": [str(p) for p in protocols],
                 "config_count": preset.config_count or 1,
@@ -452,6 +452,14 @@ def _resolve_plan(
                 "traffic_limit_bytes": preset.traffic_limit_bytes,
                 "username": None,
             }
+            # Логин/срок из формы панели поверх шаблона.
+            if ad_hoc:
+                if ad_hoc.get("username"):
+                    plan["username"] = ad_hoc["username"]
+                if ad_hoc.get("access_until") is not None:
+                    plan["access_until"] = ad_hoc["access_until"]
+                    plan["access_days"] = None
+            return plan
         if not ad_hoc:
             raise ValueError("Укажите preset_id или параметры плана")
         node_ids = list(ad_hoc.get("node_ids") or [])
@@ -685,17 +693,19 @@ def reject_request(
 # ---------------------------------------------------------------------------
 
 
-def send_message_sync_or_async(token: str, chat_id: str, text: str, **_kwargs: Any) -> None:
+def send_message_sync_or_async(token: str, chat_id: str, text: str, **_kwargs: Any) -> bool:
     """Отправить сообщение в личный чат requester'а (только его telegram_id).
 
     ``link_preview_options`` отключён внутри ``send_message`` (E2).
+    Возвращает ``True`` только при успешной доставке в Telegram API.
     """
     if not token:
-        return
+        return False
     try:
-        asyncio.run(send_message(token, chat_id, text))
+        return bool(_run_async(send_message(token, chat_id, text)))
     except Exception as exc:  # никогда не ломает доставку
         logger.warning("delivery DM to %s failed: %s", chat_id, exc)
+        return False
 
 
 def _delivery_text(portal_url: str, traffic_limit_bytes: int | None) -> str:
@@ -750,7 +760,8 @@ def maybe_send_delivery_after_task(db: Session, *, user_id: int, created_count: 
     """После завершения задачи provision: отправить «Доступ одобрен» один раз.
 
     Сообщение только в личный чат requester'а; портал-ссылка не логируется.
-    Если конфигов не создано — админ получает колокол access_request_delivery_failed.
+    ``delivered_at`` ставится только после успешной отправки — иначе можно повторить.
+    Если конфигов не создано / Telegram не принял — админ получает колокол.
     """
     user = db.get(User, user_id)
     if user is None:
@@ -777,6 +788,29 @@ def maybe_send_delivery_after_task(db: Session, *, user_id: int, created_count: 
             level="warning",
         )
         return
+    bot_token = _get_setting(db, SETTING_BOT_TOKEN, "").strip()
+    if not bot_token or not user.telegram_id:
+        write_admin_panel_notification(
+            db,
+            event_type="access_request_delivery_failed",
+            title=f"{user.username}: не удалось написать в Telegram",
+            message="Нет токена бота или у пользователя нет telegram_id",
+            action_payload={"request_id": req.id, "user_id": user_id},
+            level="warning",
+        )
+        return
+    portal = user_link_response(db, get_or_create_user_portal_token(db, user_id=user_id))
+    text = _delivery_text(portal["url"], user.traffic_limit_bytes)
+    if not send_message_sync_or_async(bot_token, str(user.telegram_id), text):
+        write_admin_panel_notification(
+            db,
+            event_type="access_request_delivery_failed",
+            title=f"{user.username}: Telegram не принял сообщение",
+            message="Проверьте, что пользователь нажал /start у бота и не заблокировал его",
+            action_payload={"request_id": req.id, "user_id": user_id},
+            level="warning",
+        )
+        return
     updated = (
         db.query(UserAccessRequest)
         .filter(UserAccessRequest.id == req.id, UserAccessRequest.delivered_at.is_(None))
@@ -784,13 +818,8 @@ def maybe_send_delivery_after_task(db: Session, *, user_id: int, created_count: 
     )
     db.commit()
     if not updated:
-        return
-    bot_token = _get_setting(db, SETTING_BOT_TOKEN, "").strip()
-    if not bot_token or not user.telegram_id:
-        return
-    portal = user_link_response(db, get_or_create_user_portal_token(db, user_id=user_id))
-    text = _delivery_text(portal["url"], user.traffic_limit_bytes)
-    send_message_sync_or_async(bot_token, str(user.telegram_id), text)
+        # Гонка: другой воркер уже пометил — сообщение могло уйти дважды, это редкость.
+        logger.info("delivery already marked for request_id=%s user_id=%s", req.id, user_id)
 
 
 async def sync_admin_request_messages(db: Session, req: UserAccessRequest, *, text: str) -> None:

@@ -169,6 +169,13 @@ START_UNLINKED = (
     "<code>/link &lt;код&gt;</code>\n\n"
     "Код — в панели: <b>Мой профиль</b>."
 )
+START_UNLINKED_WITH_REQUESTS = (
+    "{title}\n\n"
+    "Нет аккаунта — нажмите <b>Запросить доступ</b> внизу.\n\n"
+    "Уже есть аккаунт — привяжите Telegram:\n"
+    "<code>/link &lt;код&gt;</code>\n"
+    "Код — в панели: <b>Мой профиль</b>."
+)
 START_LINKED = (
     "{title}\n\n"
     "Привет, <b>{username}</b> · {role_display}\n\n"

@@ -12,7 +12,7 @@ from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import Node, User, VpnConfig, VpnType
+from app.models import Node, User, UserRole, VpnConfig, VpnType
 from app.services.access_policy import AccessPolicyService, forget_deleted_openvpn_client
 from app.services.admin_notify import admin_notify_service
 from app.services.awg2 import compute_expires_at, require_awg2_installed
@@ -84,8 +84,14 @@ def provision_config(
     adapter = get_adapter_for_node(node)
 
     awg2_expires_at = None
+    resolved_cert_days = cert_expire_days
     if vpn_type == VpnType.openvpn:
-        adapter.add_openvpn_client(client_name, cert_expire_days)
+        # Не передавать None в Easy-RSA (становится строкой "None" → интерактивный сбой).
+        if actor.role == UserRole.admin:
+            resolved_cert_days = cert_expire_days or 3650
+        else:
+            resolved_cert_days = 3650
+        adapter.add_openvpn_client(client_name, resolved_cert_days)
         recreate_openvpn_profiles_after_admin_change(
             adapter,
             client_names=[client_name],
@@ -111,7 +117,7 @@ def provision_config(
         client_name=client_name,
         vpn_type=vpn_type,
         owner_id=owner.id,
-        cert_expire_days=cert_expire_days,
+        cert_expire_days=resolved_cert_days,
         expires_at=awg2_expires_at,
         description=description,
     )

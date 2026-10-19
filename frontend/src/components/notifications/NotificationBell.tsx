@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Bell } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -12,6 +13,15 @@ import {
   type NotificationItem,
 } from '@/api/notifications'
 import NotificationPopover from './NotificationPopover'
+
+function pathForNotification(item: NotificationItem): string | null {
+  if (item.event_type.startsWith('access_request_') || item.category === 'requests') {
+    return '/users?requests=1'
+  }
+  if (item.category === 'security') return '/logs'
+  if (item.category === 'nodes') return '/nodes'
+  return null
+}
 
 type TabKey = 'all' | 'requests' | 'security' | 'nodes' | 'services' | 'tasks'
 
@@ -27,17 +37,20 @@ function bellBadge(unreadCount: number) {
 }
 
 export default function NotificationBell() {
+  const navigate = useNavigate()
   const { isEnabled } = useFeatureModules()
   const { info } = useNotifications()
   const requestsTabEnabled = isEnabled('user_provisioning')
 
-  const [open, setOpen] = useState(false)
+  const [desktopOpen, setDesktopOpen] = useState(false)
+  const [mobileOpen, setMobileOpen] = useState(false)
   const [category, setCategory] = useState<TabKey>('all')
   const [items, setItems] = useState<NotificationItem[]>([])
   const [unreadCount, setUnreadCount] = useState(0)
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0)
   const streamRef = useRef<ReturnType<typeof openNotificationsStream> | null>(null)
-  const prevPendingRef = useRef(pendingRequestsCount)
+  /** null = ещё не было успешного fetch; тост только при реальном росте после baseline. */
+  const prevPendingRef = useRef<number | null>(null)
 
   const refetch = useCallback(async () => {
     try {
@@ -49,12 +62,13 @@ export default function NotificationBell() {
       setUnreadCount(data.unread_count)
       const pending = data.pending_requests_count
       setPendingRequestsCount(pending)
+      const prev = prevPendingRef.current
       if (
-        pending > prevPendingRef.current &&
-        prevPendingRef.current >= 0 &&
+        prev != null &&
+        pending > prev &&
         (category === 'all' || category === 'requests')
       ) {
-        info(`Новых заявок на доступ: ${pending - prevPendingRef.current}`)
+        info(`Новых заявок на доступ: ${pending - prev}`)
       }
       prevPendingRef.current = pending
     } catch {
@@ -83,33 +97,47 @@ export default function NotificationBell() {
     void refetch()
   }
 
+  const handleItemClick = useCallback(
+    (item: NotificationItem) => {
+      const path = pathForNotification(item)
+      if (!path) return
+      setDesktopOpen(false)
+      setMobileOpen(false)
+      navigate(path)
+    },
+    [navigate],
+  )
+
   const activeCategory: TabKey = category === 'requests' && !requestsTabEnabled ? 'all' : category
 
   return (
     <>
-      {/* Desktop: popover next to NodeSelector / LiveClock. */}
+      {/* Desktop: dropdown next to NodeSelector / LiveClock. */}
       <div className="hidden sm:flex items-center gap-2">
-        <DropdownMenu>
+        <DropdownMenu open={desktopOpen} onOpenChange={setDesktopOpen}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="relative h-8 w-8 shrink-0" aria-label="Уведомления">
               <Bell size={18} />
               {bellBadge(unreadCount)}
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" sideOffset={6}>
+          <DropdownMenuContent
+            align="end"
+            sideOffset={6}
+            className="w-96 max-w-[min(24rem,calc(100vw-1.5rem))] p-0"
+            onCloseAutoFocus={(e) => e.preventDefault()}
+          >
             <NotificationPopover
-              open={open}
-              onOpenChange={setOpen}
+              open={desktopOpen}
+              onOpenChange={setDesktopOpen}
               sheet={false}
               items={items}
               unreadCount={unreadCount}
               pendingRequestsCount={pendingRequestsCount}
               category={activeCategory}
-              onCategoryChange={(key) => {
-                setCategory(key)
-                setOpen(false)
-              }}
+              onCategoryChange={setCategory}
               onMarkAllRead={handleMarkAllRead}
+              onItemClick={handleItemClick}
             />
           </DropdownMenuContent>
         </DropdownMenu>
@@ -122,14 +150,14 @@ export default function NotificationBell() {
           size="icon"
           className="relative h-8 w-8 shrink-0"
           aria-label="Уведомления"
-          onClick={() => setOpen(true)}
+          onClick={() => setMobileOpen(true)}
         >
           <Bell size={18} />
           {bellBadge(unreadCount)}
         </Button>
         <NotificationPopover
-          open={open}
-          onOpenChange={setOpen}
+          open={mobileOpen}
+          onOpenChange={setMobileOpen}
           sheet
           items={items}
           unreadCount={unreadCount}
@@ -137,6 +165,7 @@ export default function NotificationBell() {
           category={activeCategory}
           onCategoryChange={setCategory}
           onMarkAllRead={handleMarkAllRead}
+          onItemClick={handleItemClick}
         />
       </div>
     </>

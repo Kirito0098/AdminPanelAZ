@@ -112,7 +112,7 @@ export default function UserCard({ card, onBack, onSave, onDelete, onRefresh }: 
               </Button>
             )}
             <Button type="button" onClick={onBack} variant="outline">
-              Назад к списку
+              Закрыть
             </Button>
           </div>
         </CardHeader>
@@ -127,7 +127,7 @@ export default function UserCard({ card, onBack, onSave, onDelete, onRefresh }: 
 
             <TabsContent value="access" className="mt-3 space-y-4">
               <UserAccessControlSection card={card} onRefresh={onRefresh} />
-              <UserAccessSection card={card} onSave={onSave} />
+              <UserAccessSection card={card} onSave={onSave} onRefresh={onRefresh} />
             </TabsContent>
             <TabsContent value="configs" className="mt-3">
               <UserConfigsSection userId={user.id} card={card} />

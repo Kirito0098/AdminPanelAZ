@@ -19,6 +19,7 @@ export interface NotificationItem {
   title: string
   message: string
   created_at: string
+  action_payload?: Record<string, unknown> | null
 }
 
 export interface NotificationPopoverProps {
@@ -31,6 +32,7 @@ export interface NotificationPopoverProps {
   category: TabKey
   onCategoryChange: (key: TabKey) => void
   onMarkAllRead: () => void
+  onItemClick?: (item: NotificationItem) => void
 }
 
 const CATEGORY_ICON: Record<TabKey, React.ElementType> = {
@@ -80,19 +82,24 @@ function formatCreatedAt(value: string): string {
 
 function renderItem(item: NotificationItem, onItemClick?: (item: NotificationItem) => void) {
   const Icon = CATEGORY_ICON[item.category as TabKey] ?? Bell
+  const clickable = Boolean(onItemClick)
   return (
     <div
       key={item.id}
-      className="border-b border-border/60 last:border-0 py-2"
+      className={`border-b border-border/60 last:border-0 py-2${clickable ? ' cursor-pointer hover:bg-muted/40' : ''}`}
       onClick={() => onItemClick?.(item)}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(ev) => {
-        if (ev.key === 'Enter' || ev.key === ' ') {
-          ev.preventDefault()
-          onItemClick?.(item)
-        }
-      }}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={
+        clickable
+          ? (ev) => {
+              if (ev.key === 'Enter' || ev.key === ' ') {
+                ev.preventDefault()
+                onItemClick?.(item)
+              }
+            }
+          : undefined
+      }
     >
       <div className="flex items-start gap-2">
         <Icon size={14} className="shrink-0 mt-0.5 text-muted-foreground" aria-hidden />
@@ -125,6 +132,7 @@ export default function NotificationPopover({
   category,
   onCategoryChange,
   onMarkAllRead,
+  onItemClick,
 }: NotificationPopoverProps) {
   const { isEnabled } = useFeatureModules()
   const requestsTabEnabled = isEnabled('user_provisioning')
@@ -170,7 +178,9 @@ export default function NotificationPopover({
                 Нет уведомлений
               </div>
             ) : (
-              <div className="space-y-0">{visibleItems.map((item) => renderItem(item))}</div>
+              <div className="space-y-0">
+                {visibleItems.map((item) => renderItem(item, onItemClick))}
+              </div>
             )}
           </TabsContent>
         ))}
@@ -204,12 +214,6 @@ export default function NotificationPopover({
     )
   }
 
-  return (
-    <div
-      className="fixed right-0 top-14 z-50 w-96 rounded-xl border border-border/80 bg-background shadow-lg"
-      hidden={!open}
-    >
-      {body}
-    </div>
-  )
+  // Desktop: mounted inside DropdownMenuContent — parent owns open/close.
+  return <div className="w-full">{body}</div>
 }

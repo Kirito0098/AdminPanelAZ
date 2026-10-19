@@ -652,6 +652,13 @@ def approve_access_request(
                 "traffic_limit_bytes": payload.traffic_limit_bytes,
                 "username": payload.username,
             }
+        elif payload.username or payload.access_until is not None:
+            # Поверх шаблона: логин и/или срок из формы одобрения.
+            ad_hoc = {}
+            if payload.username:
+                ad_hoc["username"] = payload.username
+            if payload.access_until is not None:
+                ad_hoc["access_until"] = payload.access_until
     elif row.request_type == "add_config":
         ad_hoc = {"count": payload.count}
     elif row.request_type == "extend_access":

@@ -37,7 +37,9 @@ def test_category_map_covers_known_events():
     assert category_for_event("node_offline") == "nodes"
     assert category_for_event("cidr_deploy_failed") == "services"
     assert category_for_event("user_provision_summary") == "tasks"
-    assert category_for_event("access_request_new") == "requests"
+    assert category_for_event("access_request_new_user") == "requests"
+    assert category_for_event("access_request_extend_access") == "requests"
+    assert category_for_event("access_request_delivery_failed") == "requests"
     assert category_for_event("unknown_event") == "tasks"
 
 

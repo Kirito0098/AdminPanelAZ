@@ -288,15 +288,19 @@ export default function Layout() {
             <p className="orientation-compact-header-subtitle text-xs text-muted-foreground">Network Operations Center</p>
             <h1 className="truncate text-sm font-semibold leading-tight">AntiZapret VPN</h1>
           </div>
-          <div className="shrink-0 sm:hidden">
-            <NodeSelector compact />
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <div className="sm:hidden">
+              <NodeSelector compact />
+            </div>
+            <div className="hidden sm:block">
+              <NodeSelector />
+            </div>
+            {/* Один экземпляр: два колокола давали дубли тостов и SSE. */}
             <NotificationBell />
-          </div>
-          <div className="hidden items-center gap-3 sm:flex">
-            <NodeSelector />
-            <NotificationBell />
-            <span className="mono text-xs text-muted-foreground">SESS · {user?.username?.toUpperCase()}</span>
-            <span className="orientation-compact-header-subtitle">
+            <span className="mono hidden text-xs text-muted-foreground sm:inline">
+              SESS · {user?.username?.toUpperCase()}
+            </span>
+            <span className="orientation-compact-header-subtitle hidden sm:inline">
               <LiveClock />
             </span>
           </div>

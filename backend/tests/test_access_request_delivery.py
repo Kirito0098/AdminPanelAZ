@@ -117,9 +117,13 @@ def test_delivery_message_sent_once_only_to_requester(
     _set_setting(db, "telegram_bot_token", "TOKEN")
     db.commit()
     sent = []
+    def _fake_send(token, chat_id, text, **k):
+        sent.append((str(chat_id), text))
+        return True
+
     monkeypatch.setattr(
         "app.services.user_access_requests.send_message_sync_or_async",
-        lambda token, chat_id, text, **k: sent.append((str(chat_id), text)),
+        _fake_send,
     )
     monkeypatch.setattr(
         "app.services.user_access_requests.user_link_response",
@@ -130,6 +134,8 @@ def test_delivery_message_sent_once_only_to_requester(
     assert sent[0][0] == user.telegram_id
     assert "Доступ одобрен" in sent[0][1]
     assert "/p/" in sent[0][1] or "u_" in sent[0][1]
+    db.refresh(approved_request)
+    assert approved_request.delivered_at is not None
     # Повтор — идемпотентно, сообщение не дублируется.
     maybe_send_delivery_after_task(db, user_id=user.id, created_count=2)
     assert len(sent) == 1
@@ -139,11 +145,33 @@ def test_no_requester_message_when_zero_configs(db, approved_request, user, monk
     sent = []
     monkeypatch.setattr(
         "app.services.user_access_requests.send_message_sync_or_async",
-        lambda *a, **k: sent.append(1),
+        lambda *a, **k: sent.append(1) or True,
     )
     maybe_send_delivery_after_task(db, user_id=user.id, created_count=0)
     assert sent == []
     # Админ получает колокол о неудачной доставке.
+    from app.models import AdminPanelNotification
+
+    rows = db.query(AdminPanelNotification).filter(
+        AdminPanelNotification.event_type == "access_request_delivery_failed"
+    ).all()
+    assert len(rows) == 1
+
+
+def test_delivery_not_marked_when_telegram_send_fails(db, approved_request, user, monkeypatch):
+    _set_setting(db, "telegram_bot_token", "TOKEN")
+    db.commit()
+    monkeypatch.setattr(
+        "app.services.user_access_requests.send_message_sync_or_async",
+        lambda *a, **k: False,
+    )
+    monkeypatch.setattr(
+        "app.services.user_access_requests.user_link_response",
+        lambda db, row: {"url": "https://portal.example.com/p/u_abc123", "token": "u_abc123"},
+    )
+    maybe_send_delivery_after_task(db, user_id=user.id, created_count=2)
+    db.refresh(approved_request)
+    assert approved_request.delivered_at is None
     from app.models import AdminPanelNotification
 
     rows = db.query(AdminPanelNotification).filter(

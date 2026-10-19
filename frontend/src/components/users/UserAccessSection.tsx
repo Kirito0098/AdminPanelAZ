@@ -10,6 +10,7 @@ import {
 import { Node, ProvisionPlanItem, UserUpdatePayload, UserProvisioningCard } from '@/types'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useProgress } from '@/context/ProgressContext'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -21,20 +22,35 @@ import ConfirmDialog from '@/components/shared/ConfirmDialog'
 interface UserAccessSectionProps {
   card: UserProvisioningCard
   onSave: (id: number, data: Partial<UserUpdatePayload>) => void
+  onRefresh?: () => void
 }
 
-export default function UserAccessSection({ card, onSave }: UserAccessSectionProps) {
-  const { user, desired, configs } = card
+export default function UserAccessSection({ card, onSave, onRefresh }: UserAccessSectionProps) {
+  const { user, desired, configs, suggested } = card
   const { isEnabled } = useFeatureModules()
   const { success, error: notifyError } = useNotifications()
+  const { trackBackgroundTask } = useProgress()
   const provisioningOn = isEnabled('user_provisioning')
   const [nodes, setNodes] = useState<Node[]>([])
   const [nodesLoading, setNodesLoading] = useState(false)
 
-  const [draftBaseName, setDraftBaseName] = useState(desired.client_base_name ?? '')
-  const [draftNodeIds, setDraftNodeIds] = useState<number[]>(desired.node_ids ?? [])
-  const [draftProtocols, setDraftProtocols] = useState<string[]>(desired.desired_protocols ?? [])
-  const [draftIndexes, setDraftIndexes] = useState<number[]>(desired.plan_config_indexes ?? [])
+  // Без плана подставляем suggested (из уже существующих конфигов) или логин.
+  const [draftBaseName, setDraftBaseName] = useState(
+    desired.client_base_name ?? suggested?.client_base_name ?? user.username ?? '',
+  )
+  const [draftNodeIds, setDraftNodeIds] = useState<number[]>(
+    desired.node_ids?.length ? desired.node_ids : (suggested?.node_ids ?? []),
+  )
+  const [draftProtocols, setDraftProtocols] = useState<string[]>(
+    desired.desired_protocols?.length
+      ? desired.desired_protocols
+      : (suggested?.protocols ?? []),
+  )
+  const [draftIndexes, setDraftIndexes] = useState<number[]>(
+    desired.plan_config_indexes?.length
+      ? desired.plan_config_indexes
+      : (suggested?.plan_config_indexes ?? []),
+  )
   const [saving, setSaving] = useState(false)
 
   // confirm-deletions flow
@@ -67,19 +83,46 @@ export default function UserAccessSection({ card, onSave }: UserAccessSectionPro
   const expired =
     Boolean(card.plan?.blocked) ||
     Boolean(user.access_until && new Date(user.access_until) < new Date())
+  const canSave =
+    provisioningOn &&
+    !expired &&
+    !saving &&
+    draftBaseName.trim().length > 0 &&
+    draftNodeIds.length > 0 &&
+    draftProtocols.length > 0 &&
+    draftIndexes.length > 0
+
+  const trackTask = (taskId?: string | null) => {
+    if (!taskId) {
+      onRefresh?.()
+      return
+    }
+    trackBackgroundTask(taskId, {
+      onComplete: () => {
+        onRefresh?.()
+        success('План применён')
+      },
+      onError: (_task, message) => {
+        onRefresh?.()
+        notifyError(message)
+      },
+    })
+  }
 
   const handleSave = async () => {
     setSaving(true)
     try {
-      await updateProvisioning(user.id, {
+      const res = await updateProvisioning(user.id, {
         node_ids: draftNodeIds,
         protocols: draftProtocols,
         plan_config_indexes: draftIndexes,
-        client_base_name: draftBaseName || null,
+        client_base_name: draftBaseName.trim() || null,
         confirm_deletions: false,
       })
       success('План сохранён — применяется')
       onSave(user.id, { panel_login_enabled: user.panel_login_enabled })
+      onRefresh?.()
+      trackTask(res.task_id)
     } catch (err) {
       const apiErr = err as ApiError
       const payload = apiErr.payload as { code?: string; configs?: ProvisionPlanItem[] } | undefined
@@ -98,15 +141,17 @@ export default function UserAccessSection({ card, onSave }: UserAccessSectionPro
     if (!confirmPending) return
     setSaving(true)
     try {
-      await updateProvisioning(user.id, {
+      const res = await updateProvisioning(user.id, {
         node_ids: draftNodeIds,
         protocols: draftProtocols,
         plan_config_indexes: draftIndexes,
-        client_base_name: draftBaseName || null,
+        client_base_name: draftBaseName.trim() || null,
         confirm_deletions: true,
       })
       success('План сохранён — удаления применены')
       onSave(user.id, { panel_login_enabled: user.panel_login_enabled })
+      onRefresh?.()
+      trackTask(res.task_id)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка применения удалений')
     } finally {
@@ -117,10 +162,24 @@ export default function UserAccessSection({ card, onSave }: UserAccessSectionPro
   }
 
   const handleAddIndex = async () => {
+    // Плана ещё нет — индекс только в черновик, создастся при «Сохранить».
+    if (!hasPlan) {
+      const free = Array.from({ length: 20 }, (_, i) => i + 1).find(
+        (i) => !draftIndexes.includes(i),
+      )
+      if (free == null) return
+      setDraftIndexes((prev) => [...prev, free].sort((a, b) => a - b))
+      return
+    }
     setSaving(true)
     try {
-      await addProvisioningConfig(user.id)
+      const res = await addProvisioningConfig(user.id)
+      setDraftIndexes((prev) =>
+        prev.includes(res.index) ? prev : [...prev, res.index].sort((a, b) => a - b),
+      )
       success('Имя конфигов добавлено')
+      onRefresh?.()
+      trackTask(res.task_id)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка добавления имени')
     } finally {
@@ -129,6 +188,10 @@ export default function UserAccessSection({ card, onSave }: UserAccessSectionPro
   }
 
   const handleRemoveIndex = async (index: number) => {
+    if (!hasPlan) {
+      setDraftIndexes((prev) => prev.filter((i) => i !== index))
+      return
+    }
     // optimistic: try remove; backend may return 409 confirm_deletions
     setSaving(true)
     try {
@@ -175,31 +238,33 @@ export default function UserAccessSection({ card, onSave }: UserAccessSectionPro
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {hasPlan ? (
-            <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">
-              <Label htmlFor="accessBaseName">Базовое имя конфигов</Label>
-              <Input
-                id="accessBaseName"
-                value={draftBaseName}
-                onChange={(e) => setDraftBaseName(e.target.value)}
-                disabled={!provisioningOn || expired}
-                className="h-9 font-mono"
-              />
-              {expired && (
-                <p className="text-xs text-destructive">
-                  Срок доступа истёк — изменение плана недоступно до продления.
-                </p>
-              )}
-            </div>
-          ) : (
-            <div className="rounded-xl border bg-muted/20 p-3">
-              <Label>Базовое имя конфигов</Label>
+          <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">
+            <Label htmlFor="accessBaseName">Базовое имя конфигов</Label>
+            <Input
+              id="accessBaseName"
+              value={draftBaseName}
+              onChange={(e) => setDraftBaseName(e.target.value)}
+              disabled={!provisioningOn || expired}
+              className="h-9 font-mono"
+              placeholder={user.username}
+            />
+            {!hasPlan && suggested ? (
               <p className="text-xs text-muted-foreground">
-                У абонента ещё нет плана конфигов. Настройте узлы, протоколы и нажмите «Сохранить» —
-                панель создаст конфиги и присвоит базовое имя.
+                Найдены существующие конфиги этого пользователя — узлы, протоколы и имя
+                подставлены из них. Проверьте и нажмите «Сохранить», чтобы привязать их к плану.
               </p>
-            </div>
-          )}
+            ) : !hasPlan ? (
+              <p className="text-xs text-muted-foreground">
+                У абонента ещё нет плана конфигов. Задайте имя, узлы, протоколы, хотя бы одно
+                имя конфига и нажмите «Сохранить» — панель создаст конфиги.
+              </p>
+            ) : null}
+            {expired && (
+              <p className="text-xs text-destructive">
+                Срок доступа истёк — изменение плана недоступно до продления.
+              </p>
+            )}
+          </div>
 
           <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">
             <Label>Узлы</Label>
@@ -305,7 +370,9 @@ export default function UserAccessSection({ card, onSave }: UserAccessSectionPro
                           size="icon"
                           className="h-7 w-7 text-[10px] p-0"
                           onClick={() => void handleRemoveIndex(index)}
-                          disabled={!provisioningOn || expired || draftIndexes.length <= 1}
+                          disabled={
+                            !provisioningOn || expired || (hasPlan && draftIndexes.length <= 1)
+                          }
                           aria-label={`Убрать ${name}`}
                         >
                           <Trash2 size={12} />
@@ -321,12 +388,13 @@ export default function UserAccessSection({ card, onSave }: UserAccessSectionPro
             )}
           </div>
 
-          <div className="flex justify-end">
-            <Button
-              type="button"
-              onClick={handleSave}
-              disabled={saving || !provisioningOn || expired || !hasPlan}
-            >
+          <div className="flex items-center justify-end gap-3">
+            {!canSave && !saving && provisioningOn && !expired && (
+              <p className="text-xs text-muted-foreground">
+                Нужно: имя, хотя бы один узел, протокол и имя конфига
+              </p>
+            )}
+            <Button type="button" onClick={handleSave} disabled={!canSave}>
               {saving ? 'Сохранение…' : 'Сохранить'}
             </Button>
           </div>

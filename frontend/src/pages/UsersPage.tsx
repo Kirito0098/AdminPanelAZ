@@ -1,44 +1,70 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Navigate, useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { MoreHorizontal, Ticket, UserPlus, Users } from 'lucide-react'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import {
+  AlertTriangle,
+  CalendarClock,
+  PauseCircle,
+  Search,
+  Ticket,
+  UserPlus,
+  Users,
+  X,
+} from 'lucide-react'
 import {
   ApiError,
   deleteUser,
   getUsers,
   updateUser,
 } from '@/api/client'
+import { getNodes } from '@/api/nodes'
 import {
   createProvisionedUser,
   deleteProvisionedUser,
   downloadBulkNodesReport,
   getProvisioning,
+  listPresets,
   listRequests,
   approveRequest,
   rejectRequest,
 } from '@/api/users'
+import AppDialog from '@/components/shared/AppDialog'
+import DocsLink from '@/components/shared/DocsLink'
+import ToolbarButton from '@/components/shared/ToolbarButton'
+import MetricCard from '@/components/noc/MetricCard'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
-import { formatDate } from '@/lib/datetime'
+import { DOCS } from '@/lib/docsUrls'
+import { gridColsClass } from '@/lib/configCardViewPrefs'
 import { triggerFileDownload } from '@/lib/triggerFileDownload'
+import { cn } from '@/lib/utils'
 import type {
+  AccessRequestResponse,
+  Node,
+  PresetResponse,
   User,
   UserUpdatePayload,
   UserProvisioningCard,
   UserProvisionSummary,
   BulkNodesAction,
 } from '@/types'
+
+const REQUEST_PROTOCOLS: { id: string; label: string; featureKeys: string[] }[] = [
+  { id: 'wireguard', label: 'WireGuard', featureKeys: ['wireguard', 'amneziawg'] },
+  { id: 'openvpn', label: 'OpenVPN', featureKeys: ['openvpn'] },
+  { id: 'amneziawg2', label: 'AmneziaWG 2.0', featureKeys: ['awg2'] },
+]
 import { UsersFilters } from '@/components/users/UsersFilters'
 import CreateUserDialog from '@/components/users/CreateUserDialog'
 import BulkNodesDialog from '@/components/users/BulkNodesDialog'
 import UsersBulkBar from '@/components/users/UsersBulkBar'
+import SubscriberCard from '@/components/users/SubscriberCard'
 import UserCard from '@/components/users/UserCard'
 
 export default function UsersPage() {
@@ -55,8 +81,16 @@ export default function UsersPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [requestsOpen, setRequestsOpen] = useState(false)
-  const [requests, setRequests] = useState<{ id: number; request_type: string; telegram_id: string; telegram_name: string | null; status: string; created_at: string }[]>([])
+  const [requests, setRequests] = useState<AccessRequestResponse[]>([])
   const [requestsLoading, setRequestsLoading] = useState(false)
+  const [requestPresets, setRequestPresets] = useState<PresetResponse[]>([])
+  const [requestNodes, setRequestNodes] = useState<Node[]>([])
+  const [approvePresetId, setApprovePresetId] = useState<number | null>(null)
+  const [approveNodeIds, setApproveNodeIds] = useState<number[]>([])
+  const [approveProtocols, setApproveProtocols] = useState<string[]>([])
+  const [approveUsername, setApproveUsername] = useState('')
+  const [approveAccessDays, setApproveAccessDays] = useState('')
+  const [approvingId, setApprovingId] = useState<number | null>(null)
   const [bulkDialog, setBulkDialog] = useState<{
     open: boolean
     action: BulkNodesAction
@@ -64,6 +98,37 @@ export default function UsersPage() {
   }>({ open: false, action: 'add' })
 
   const provisioningOn = isEnabled('user_provisioning')
+  const availableRequestProtocols = useMemo(
+    () =>
+      REQUEST_PROTOCOLS.filter((p) => p.featureKeys.some((key) => isEnabled(key))),
+    [isEnabled],
+  )
+  const hasNewUserRequests = requests.some((r) => r.request_type === 'new_user')
+  const canApproveNewUser =
+    approvePresetId != null ||
+    (approveNodeIds.length > 0 && approveProtocols.length > 0)
+
+  const reloadUsers = useCallback(async () => {
+    try {
+      const list = await getUsers()
+      setUsers(list)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить пользователей')
+    }
+  }, [notifyError])
+
+  const reloadRequests = useCallback(async () => {
+    if (!provisioningOn) return
+    setRequestsLoading(true)
+    try {
+      const list = await listRequests({ status: 'pending' })
+      setRequests(list)
+    } catch {
+      /* вложенная опциональна */
+    } finally {
+      setRequestsLoading(false)
+    }
+  }, [provisioningOn])
 
   useEffect(() => {
     let cancelled = false
@@ -85,24 +150,8 @@ export default function UsersPage() {
   }, [notifyError])
 
   useEffect(() => {
-    if (!provisioningOn) return
-    let cancelled = false
-    const loadRequests = async () => {
-      setRequestsLoading(true)
-      try {
-        const list = await listRequests({ status: 'pending' })
-        if (!cancelled) setRequests(list)
-      } catch {
-        /* вложенная опциональна */
-      } finally {
-        if (!cancelled) setRequestsLoading(false)
-      }
-    }
-    void loadRequests()
-    return () => {
-      cancelled = true
-    }
-  }, [provisioningOn, notifyError])
+    void reloadRequests()
+  }, [reloadRequests])
 
   // Смена фильтра сбрасывает выбор — иначе в область попадут скрытые пользователи.
   useEffect(() => {
@@ -119,6 +168,48 @@ export default function UsersPage() {
     next.delete('bulkAddNode')
     setSearchParams(next, { replace: true })
   }, [searchParams, setSearchParams])
+
+  // Колокол: /users?requests=1 → открыть диалог заявок
+  useEffect(() => {
+    if (!provisioningOn) return
+    if (searchParams.get('requests') !== '1') return
+    setRequestsOpen(true)
+    const next = new URLSearchParams(searchParams)
+    next.delete('requests')
+    setSearchParams(next, { replace: true })
+  }, [provisioningOn, searchParams, setSearchParams])
+
+  // План для одобрения new_user: шаблон или узлы+протоколы.
+  useEffect(() => {
+    if (!requestsOpen || !provisioningOn) return
+    let cancelled = false
+    const load = async () => {
+      try {
+        const [presets, nodes] = await Promise.all([listPresets(), getNodes()])
+        if (cancelled) return
+        setRequestPresets(presets)
+        setRequestNodes(nodes)
+        const defaultPreset = presets.find((p) => p.is_default) ?? presets[0] ?? null
+        setApprovePresetId(defaultPreset?.id ?? null)
+        setApproveNodeIds(nodes.filter((n) => n.node_kind !== 'proxy').map((n) => n.id))
+        setApproveProtocols((prev) => {
+          const allowed = new Set(availableRequestProtocols.map((p) => p.id))
+          const kept = prev.filter((id) => allowed.has(id))
+          if (kept.length > 0) return kept
+          return availableRequestProtocols[0] ? [availableRequestProtocols[0].id] : []
+        })
+      } catch {
+        if (!cancelled) {
+          setRequestPresets([])
+          setRequestNodes([])
+        }
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [requestsOpen, provisioningOn, availableRequestProtocols])
 
   const handleBulkStarted = (taskId: string) => {
     success('Массовая операция запущена')
@@ -138,21 +229,85 @@ export default function UsersPage() {
     }
   }
 
-  const handleApproveRequest = async (requestId: number, presetId?: number) => {
+  const handleApproveRequest = async (requestId: number, requestType: string) => {
+    if (requestType === 'new_user' && !canApproveNewUser) {
+      notifyError('Выберите шаблон или узлы и протоколы')
+      return
+    }
+    const telegramId = requests.find((r) => r.id === requestId)?.telegram_id
+    const username = approveUsername.trim() || undefined
+    let accessUntil: string | undefined
+    const daysRaw = approveAccessDays.trim()
+    if (daysRaw !== '') {
+      const days = Number.parseInt(daysRaw, 10)
+      if (!Number.isFinite(days) || days < 1) {
+        notifyError('Срок в днях — целое число от 1')
+        return
+      }
+      const until = new Date()
+      until.setUTCDate(until.getUTCDate() + days)
+      accessUntil = until.toISOString()
+    }
+    setApprovingId(requestId)
     try {
-      await approveRequest(requestId, { preset_id: presetId ?? undefined })
-      setRequests((prev) => prev.filter((r) => r.id !== requestId))
-      success('Заявка одобрена')
+      if (requestType === 'new_user') {
+        if (approvePresetId != null) {
+          await approveRequest(requestId, {
+            preset_id: approvePresetId,
+            username,
+            access_until: accessUntil,
+          })
+        } else {
+          await approveRequest(requestId, {
+            node_ids: approveNodeIds,
+            protocols: approveProtocols,
+            config_count: 1,
+            username,
+            access_until: accessUntil,
+          })
+        }
+      } else if (requestType === 'add_config') {
+        await approveRequest(requestId, { count: 1 })
+      } else if (requestType === 'extend_access') {
+        const days = daysRaw !== '' ? Number.parseInt(daysRaw, 10) : 30
+        await approveRequest(requestId, {
+          days: Number.isFinite(days) && days >= 1 ? days : 30,
+        })
+      } else {
+        await approveRequest(requestId, {})
+      }
+      success('Заявка одобрена — создаётся абонент и конфиги')
+      const list = await getUsers()
+      setUsers(list)
+      await reloadRequests()
+      const userRow = telegramId
+        ? list.find((u) => u.telegram_id === telegramId)
+        : undefined
+      if (userRow?.active_task_id) {
+        trackBackgroundTask(userRow.active_task_id, {
+          onComplete: () => {
+            void reloadUsers()
+            success('Конфиги для заявки применены')
+          },
+          onError: (_task, message) => notifyError(message),
+        })
+      } else {
+        window.setTimeout(() => {
+          void reloadUsers()
+        }, 2500)
+      }
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка одобрения')
+    } finally {
+      setApprovingId(null)
     }
   }
 
   const handleRejectRequest = async (requestId: number) => {
     try {
       await rejectRequest(requestId, { ban: false })
-      setRequests((prev) => prev.filter((r) => r.id !== requestId))
       success('Заявка отклонена')
+      await reloadRequests()
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка отказа')
     }
@@ -202,6 +357,27 @@ export default function UsersPage() {
     return list.sort((a, b) => a.username.localeCompare(b.username, 'ru'))
   }, [users, filter, search])
 
+  const listMetrics = useMemo(() => {
+    const now = Date.now()
+    const week = now + 7 * 86400000
+    let withPlan = 0
+    let expiringOrExpired = 0
+    let suspended = 0
+    for (const u of users) {
+      if (u.client_base_name && u.provision_state && u.provision_state !== 'unmanaged') withPlan += 1
+      if (u.suspended_at) suspended += 1
+      if (u.access_until) {
+        const t = new Date(u.access_until).getTime()
+        if (t < now || t <= week) expiringOrExpired += 1
+      }
+    }
+    return {
+      total: users.length,
+      withPlan,
+      expiringOrExpired,
+      suspended,
+    }
+  }, [users])
   const handleCreate = async (data: {
     username: string
     client_base_name: string
@@ -230,11 +406,38 @@ export default function UsersPage() {
       })
       setCreateOpen(false)
       success(`Пользователь «${data.username}» создан — применяется план конфигов`)
+      await reloadUsers()
+      if (created.task_id) {
+        trackBackgroundTask(created.task_id, {
+          onComplete: () => {
+            void reloadUsers()
+            success(`План для «${data.username}» применён`)
+          },
+          onError: (_task, message) => notifyError(message),
+        })
+      }
       void navigate(`/users/${created.user.id}`, { replace: false })
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка создания пользователя')
     }
   }
+
+  const closeDetail = useCallback(() => {
+    void navigate('/users', { replace: true })
+  }, [navigate])
+
+  const openDetail = useCallback(
+    (id: number) => {
+      void navigate(`/users/${id}`)
+    },
+    [navigate],
+  )
+
+  const detailId = useMemo(() => {
+    if (!userId) return null
+    const id = Number.parseInt(userId, 10)
+    return Number.isFinite(id) && id > 0 ? id : null
+  }, [userId])
 
   const handleDeleteUser = async (user: UserProvisionSummary) => {
     if (!window.confirm(`Удалить пользователя «${user.username}"?`)) return
@@ -246,6 +449,7 @@ export default function UsersPage() {
       }
       success(`Пользователь «${user.username}» удалён`)
       setUsers((prev) => prev.filter((u) => u.id !== user.id))
+      if (detailId === user.id) closeDetail()
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка удаления пользователя')
     }
@@ -263,264 +467,189 @@ export default function UsersPage() {
 
   if (loading) return <Spinner label="Загрузка пользователей…" />
 
-  // Отдельная карточка абонента по маршруту /users/:id
-  if (userId) {
-    const targetId = Number.parseInt(userId, 10)
-    return (
-      <div className="flex flex-col gap-4">
-        <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => void navigate('/users', { replace: true })}
-          >
-            Назад к списку
-          </Button>
-        </CardHeader>
-        <UserCardView
-          userId={targetId}
-          onBack={() => void navigate('/users', { replace: true })}
-          onSave={(id, data) => void handleSaveUser(id, data)}
-          onDelete={(user) => void handleDeleteUser(user)}
+  return (
+    <div className="space-y-4">
+      <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-gradient-to-br from-primary/5 via-card to-card p-5 shadow-sm">
+        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
+        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary shadow-sm">
+              <Users size={26} strokeWidth={2} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">Пользователи</h2>
+                <DocsLink href={DOCS.users} />
+              </div>
+              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                Учётные записи панели и привязка к VPN-клиентам на узлах.
+                {provisioningOn
+                  ? ' Предоставление конфигов включено.'
+                  : ' Модуль выключен в Настройках → Разделы.'}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex w-full flex-wrap gap-2 lg:max-w-xl lg:justify-end">
+            {provisioningOn && (
+              <ToolbarButton
+                variant="outline"
+                className="relative bg-card/80"
+                icon={<Ticket size={16} />}
+                label={requests.length > 0 ? `Заявки (${requests.length})` : 'Заявки'}
+                shortLabel="Заявки"
+                onClick={() => setRequestsOpen(true)}
+              />
+            )}
+            <ToolbarButton
+              size="lg"
+              variant="default"
+              icon={<UserPlus size={18} />}
+              label="Создать пользователя"
+              shortLabel="Создать"
+              onClick={() => setCreateOpen(true)}
+              disabled={!provisioningOn}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <MetricCard
+          label="Всего"
+          value={String(listMetrics.total)}
+          sub={`${filteredUsers.length} на экране`}
+          icon={Users}
+          accent="cyan"
+        />
+        <MetricCard
+          label="С тарифом"
+          value={String(listMetrics.withPlan)}
+          sub="план конфигов на узлах"
+          icon={Ticket}
+          accent="green"
+        />
+        <MetricCard
+          label="Срок / истекли"
+          value={String(listMetrics.expiringOrExpired)}
+          sub="истекают в 7 дней или уже истекли"
+          icon={listMetrics.expiringOrExpired > 0 ? AlertTriangle : CalendarClock}
+          accent={listMetrics.expiringOrExpired > 0 ? 'amber' : 'default'}
+        />
+        <MetricCard
+          label="На паузе"
+          value={String(listMetrics.suspended)}
+          sub="приостановленный доступ"
+          icon={PauseCircle}
+          accent={listMetrics.suspended > 0 ? 'red' : 'default'}
         />
       </div>
-    )
-  }
 
-  return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3 sm:space-y-0 sm:pb-4">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Users size={18} />
-              Пользователи
-            </CardTitle>
-            <CardDescription className="mt-1">
-              {filteredUsers.length} пользовател{filteredUsers.length === 1 ? 'ь' : filteredUsers.length < 5 ? 'я' : 'й'} ·{
-                ' '
-              }
-              {provisioningOn ? 'Предоставление конфигов включено' : 'Модуль выключен в Настройках → Разделы'}
-            </CardDescription>
-          </div>
-          <Button
-            type="button"
-            onClick={() => setCreateOpen(true)}
-            disabled={!provisioningOn}
-            aria-label="Создать пользователя"
-          >
-            <UserPlus size={15} />
-            Создать пользователя
-          </Button>
-          {provisioningOn && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setRequestsOpen(true)}
-              aria-label="Заявки на доступ"
-              className="relative"
-            >
-              <Ticket size={14} />
-              Заявки
-              {requests.length > 0 && (
-                <span className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center">
-                  <Badge variant="destructive" className="text-[10px] px-1.5">
-                    {requests.length}
-                  </Badge>
-                </span>
-              )}
-            </Button>
-          )}
-        </CardHeader>
-        <CardContent className="space-y-4 p-4 sm:p-5">
-          <div className="flex flex-wrap items-center gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="relative flex-1 min-w-0 sm:w-80">
-              <Input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Поиск по логину…"
-                className="h-10 bg-background pl-9 pr-9"
-                aria-label="Поиск пользователей"
-              />
-              {search ? (
-                <button
-                  type="button"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  onClick={() => setSearch('')}
-                  aria-label="Очистить поиск"
-                >
-                  <MoreHorizontal size={14} />
-                </button>
-              ) : null}
-            </div>
-            <UsersFilters filter={filter} onFilterChange={setFilter} />
-          </div>
-
-          {provisioningOn && (
-            <UsersBulkBar
-              selectedCount={selectedIds.length}
-              busy={backgroundTask?.task_type === 'bulk_user_nodes' && ['queued', 'running'].includes(backgroundTask.status)}
-              task={backgroundTask?.task_type === 'bulk_user_nodes' ? backgroundTask : null}
-              onAction={(action) => setBulkDialog({ open: true, action })}
-              onDownloadReport={(taskId) => void handleDownloadReport(taskId)}
+      <section className="space-y-3 rounded-xl border bg-card p-4 shadow-sm sm:p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <UsersFilters filter={filter} onFilterChange={setFilter} />
+          <div className="relative w-full max-w-sm">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
             />
-          )}
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Поиск по логину…"
+              className="h-10 bg-background pl-9 pr-9"
+              aria-label="Поиск пользователей"
+            />
+            {search.trim() !== '' ? (
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                onClick={() => setSearch('')}
+                aria-label="Очистить поиск"
+              >
+                <X size={14} />
+              </button>
+            ) : null}
+          </div>
+        </div>
 
-          {filteredUsers.length === 0 ? (
-            <EmptyState
-              icon={Users}
-              title="Пока нет пользователей"
-              description={
-                provisioningOn
+        {provisioningOn && (
+          <UsersBulkBar
+            selectedCount={selectedIds.length}
+            busy={
+              backgroundTask?.task_type === 'bulk_user_nodes' &&
+              ['queued', 'running'].includes(backgroundTask.status)
+            }
+            task={backgroundTask?.task_type === 'bulk_user_nodes' ? backgroundTask : null}
+            onAction={(action) => setBulkDialog({ open: true, action })}
+            onDownloadReport={(taskId) => void handleDownloadReport(taskId)}
+          />
+        )}
+
+        {filteredUsers.length === 0 ? (
+          <EmptyState
+            icon={Users}
+            title="Пока нет пользователей"
+            description={
+              search || filter !== 'all'
+                ? 'Измените фильтр или поисковый запрос'
+                : provisioningOn
                   ? 'Создайте первого абонента — панель sama выпустит конфиги на выбранных серверах.'
                   : 'Включите модуль «Пользователи (абоненты)» в настройках разделов, чтобы управлять абонентами VPN.'
-              }
-              className="py-10"
-              action={
-                provisioningOn ? (
-                  <Button type="button" onClick={() => setCreateOpen(true)} aria-label="Создать первого пользователя">
-                    <UserPlus size={15} />
-                    Создать пользователя
-                  </Button>
-                ) : null
-              }
-            />
-          ) : (
-            <div className="overflow-x-auto border rounded-lg">
-              <table className="min-w-full align-middle text-sm">
-                <thead>
-                  <tr className="text-muted-foreground bg-muted/50">
-                    {provisioningOn && (
-                      <th className="w-8 p-3 text-left">
-                        <Checkbox
-                          checked={
-                            filteredUsers.length > 0 &&
-                            filteredUsers.every((u) => selectedIds.includes(u.id))
-                          }
-                          onCheckedChange={(next) =>
-                            setSelectedIds(
-                              next ? filteredUsers.map((u) => u.id) : [],
-                            )
-                          }
-                          aria-label="Выбрать всех"
-                        />
-                      </th>
-                    )}
-                    <th className="p-3 text-left">Пользователь</th>
-                    <th className="p-3 text-left">Узлы</th>
-                    <th className="p-3 text-left">Протоколы</th>
-                    <th className="p-3 text-left">Срок доступа</th>
-                    <th className="p-3 text-left">Режим</th>
-                    <th className="p-3 text-left">Задача</th>
-                    <th className="p-3 text-right">Действия</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredUsers.map((u) => {
-                    const nodeLabels = (u.plan_node_ids ?? []).map((n) => String(n)).join(', ') || '—'
-                    const protocols = (u.plan_protocols ?? []).length
-                      ? (u.plan_protocols ?? []).join(', ')
-                      : '—'
-                    let termText = '—'
-                    let termTone: 'default' | 'warning' | 'danger' = 'default'
-                    if (u.access_until) {
-                      const d = new Date(u.access_until)
-                      if (d < new Date()) {
-                        termText = `Истёк ${formatDate(u.access_until)}`
-                        termTone = 'danger'
-                      } else if (d <= new Date(Date.now() + 7 * 86400000)) {
-                        termText = `До ${formatDate(u.access_until)}`
-                        termTone = 'warning'
-                      } else {
-                        termText = formatDate(u.access_until)
-                      }
-                    }
-                    const stateLabel = {
-                      unmanaged: 'Без набора',
-                      pending: 'Применяется',
-                      partial: 'Требует внимания',
-                      ok: 'OK',
-                    }[u.provision_state ?? 'unmanaged'] || u.provision_state
-                    return (
-                      <tr key={u.id} className="border-b hover:bg-muted/50 group">
-                        {provisioningOn && (
-                          <td className="p-3">
-                            <Checkbox
-                              checked={selectedIds.includes(u.id)}
-                              onCheckedChange={(next) =>
-                                setSelectedIds((prev) =>
-                                  next ? [...prev, u.id] : prev.filter((id) => id !== u.id),
-                                )
-                              }
-                              aria-label={`Выбрать ${u.username}`}
-                            />
-                          </td>
-                        )}
-                        <td className="p-3">
-                          <div className="flex items-center gap-2">
-                            <span className="font-medium truncate">{u.username}</span>
-                            <Badge variant={u.role === 'admin' ? 'default' : 'secondary'} className="text-[10px]">
-                              {u.role === 'admin' ? 'Админ' : 'Абонент'}
-                            </Badge>
-                          </div>
-                          <p className="mt-0.5 text-[11px] text-muted-foreground">
-                            {u.client_base_name ? `Базовое имя: ${u.client_base_name}` : 'Базовое имя не задано'}
-                            {u.telegram_id ? ` · TG ${u.telegram_id}` : ''}
-                          </p>
-                        </td>
-                        <td className="p-3 text-[11px] text-muted-foreground">{nodeLabels}</td>
-                        <td className="p-3 text-[11px] font-mono">{protocols}</td>
-                        <td className="p-3">
-                          <Badge
-                            variant={termTone === 'danger' ? 'destructive' : termTone === 'warning' ? 'warning' : 'secondary'}
-                            className="text-[11px]"
-                          >
-                            {termText}
-                          </Badge>
-                        </td>
-                        <td className="p-3">
-                          <Badge variant="outline" className="text-[11px]">
-                            {stateLabel}
-                          </Badge>
-                          {u.plan_config_count != null && u.plan_config_count > 0 && (
-                            <span className="ml-1 text-[11px] text-muted-foreground">
-                              {u.plan_config_count} им.
-                            </span>
-                          )}
-                        </td>
-                        <td className="p-3">
-                          {u.active_task_id ? (
-                            <div className="flex items-center gap-2 text-xs">
-                              <span className="text-muted-foreground">Выполняется…</span>
-                            </div>
-                          ) : (
-                            <span className="text-[11px] text-muted-foreground">—</span>
-                          )}
-                        </td>
-                        <td className="p-3 text-right">
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              onClick={() => void navigate(`/users/${u.id}`, { replace: false })}
-                              aria-label={`Карточка ${u.username}`}
-                            >
-                              <MoreHorizontal size={14} />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+            }
+            className="py-10"
+            action={
+              provisioningOn && !search && filter === 'all' ? (
+                <Button
+                  type="button"
+                  onClick={() => setCreateOpen(true)}
+                  aria-label="Создать первого пользователя"
+                >
+                  <UserPlus size={15} />
+                  Создать пользователя
+                </Button>
+              ) : null
+            }
+          />
+        ) : (
+          <div className={cn('grid gap-3', gridColsClass('auto'))}>
+            {filteredUsers.map((u) => (
+              <SubscriberCard
+                key={u.id}
+                user={u}
+                selected={selectedIds.includes(u.id)}
+                showSelect={provisioningOn}
+                onSelectChange={(checked) =>
+                  setSelectedIds((prev) =>
+                    checked ? [...prev, u.id] : prev.filter((id) => id !== u.id),
+                  )
+                }
+                onOpen={() => openDetail(u.id)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+
+      <AppDialog
+        open={detailId != null}
+        onOpenChange={(open) => {
+          if (!open) closeDetail()
+        }}
+        title="Профиль абонента"
+        description="План конфигов, доступ и учётная запись"
+        size="xl"
+        bodyClassName="px-4 py-3 sm:px-6"
+      >
+        {detailId != null ? (
+          <UserCardView
+            userId={detailId}
+            onBack={closeDetail}
+            onSave={(id, data) => void handleSaveUser(id, data)}
+            onDelete={(user) => void handleDeleteUser(user)}
+          />
+        ) : null}
+      </AppDialog>
 
       {createOpen ? (
         <CreateUserDialog
@@ -544,9 +673,12 @@ export default function UsersPage() {
 
       {provisioningOn && requestsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
-          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setRequestsOpen(false)} />
-          <div className="relative bg-background w-full max-w-2xl p-4 max-h-[80vh] overflow-y-auto shadow-xl rounded-lg border">
-            <div className="flex items-center justify-between mb-4">
+          <div
+            className="fixed inset-0 bg-black/40 backdrop-blur-sm"
+            onClick={() => setRequestsOpen(false)}
+          />
+          <div className="relative max-h-[80vh] w-full max-w-2xl overflow-y-auto rounded-lg border bg-background p-4 shadow-xl">
+            <div className="mb-4 flex items-center justify-between">
               <h2 className="text-lg font-semibold">Заявки на доступ</h2>
               <Button type="button" variant="ghost" size="sm" onClick={() => setRequestsOpen(false)}>
                 Закрыть
@@ -555,38 +687,165 @@ export default function UsersPage() {
             {requestsLoading ? (
               <Spinner label="Загрузка заявок…" />
             ) : requests.length === 0 ? (
-              <div className="text-center py-8 text-sm text-muted-foreground">Нет ожидающих заявок</div>
+              <div className="py-8 text-center text-sm text-muted-foreground">Нет ожидающих заявок</div>
             ) : (
-              <div className="space-y-2">
-                {requests.map((r) => (
-                  <div key={r.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-medium text-sm">{r.telegram_name || r.telegram_id}</p>
+              <div className="space-y-4">
+                {hasNewUserRequests && (
+                  <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
+                    <p className="text-sm font-medium">План для новых пользователей</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="approve-username">Логин (необязательно)</Label>
+                        <Input
+                          id="approve-username"
+                          value={approveUsername}
+                          onChange={(e) => setApproveUsername(e.target.value)}
+                          placeholder="пусто → tg… или @ник"
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="approve-days">Срок, дней (необязательно)</Label>
+                        <Input
+                          id="approve-days"
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={approveAccessDays}
+                          onChange={(e) => setApproveAccessDays(e.target.value)}
+                          placeholder="пусто → без срока"
+                        />
+                      </div>
+                    </div>
+                    {requestPresets.length > 0 ? (
+                      <div className="space-y-1.5">
+                        <Label htmlFor="approve-preset">Шаблон предоставления</Label>
+                        <select
+                          id="approve-preset"
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                          value={approvePresetId ?? ''}
+                          onChange={(e) => {
+                            const raw = e.target.value
+                            setApprovePresetId(raw === '' ? null : Number.parseInt(raw, 10))
+                          }}
+                        >
+                          <option value="">Без шаблона — выбрать узлы ниже</option>
+                          {requestPresets.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name}
+                              {p.is_default ? ' (по умолчанию)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ) : (
                       <p className="text-xs text-muted-foreground">
-                        TG {r.telegram_id} · {r.request_type} · {new Date(r.created_at).toLocaleString('ru-RU')}
+                        Шаблонов пока нет — укажите узлы и протоколы для создания абонента.
                       </p>
-                    </div>
-                    <div className="flex gap-1">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="default"
-                        onClick={() => void handleApproveRequest(r.id)}
-                        disabled={r.request_type === 'new_user'}
-                      >
-                        Одобрить
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => void handleRejectRequest(r.id)}
-                      >
-                        Отклонить
-                      </Button>
-                    </div>
+                    )}
+                    {approvePresetId == null && (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>Узлы</Label>
+                          {requestNodes.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">Нет узлов</p>
+                          ) : (
+                            requestNodes
+                              .filter((n) => n.node_kind !== 'proxy')
+                              .map((n) => (
+                                <label key={n.id} className="flex items-center gap-2 text-sm">
+                                  <Checkbox
+                                    checked={approveNodeIds.includes(n.id)}
+                                    onCheckedChange={(checked) => {
+                                      setApproveNodeIds((prev) =>
+                                        checked
+                                          ? prev.includes(n.id)
+                                            ? prev
+                                            : [...prev, n.id]
+                                          : prev.filter((id) => id !== n.id),
+                                      )
+                                    }}
+                                  />
+                                  {n.name}
+                                </label>
+                              ))
+                          )}
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Протоколы</Label>
+                          {availableRequestProtocols.length === 0 ? (
+                            <p className="text-xs text-muted-foreground">Нет включённых протоколов</p>
+                          ) : (
+                            availableRequestProtocols.map((p) => (
+                              <label key={p.id} className="flex items-center gap-2 text-sm">
+                                <Checkbox
+                                  checked={approveProtocols.includes(p.id)}
+                                  onCheckedChange={(checked) => {
+                                    setApproveProtocols((prev) =>
+                                      checked
+                                        ? prev.includes(p.id)
+                                          ? prev
+                                          : [...prev, p.id]
+                                        : prev.filter((id) => id !== p.id),
+                                    )
+                                  }}
+                                />
+                                {p.label}
+                              </label>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
-                ))}
+                )}
+                <div className="space-y-2">
+                  {requests.map((r) => {
+                    const approveDisabled =
+                      approvingId === r.id ||
+                      (r.request_type === 'new_user' && !canApproveNewUser)
+                    const title =
+                      r.telegram_name ||
+                      (r.telegram_username ? `@${r.telegram_username}` : r.telegram_id)
+                    const metaParts = [
+                      r.telegram_username ? `@${r.telegram_username}` : null,
+                      `TG ${r.telegram_id}`,
+                      r.request_type,
+                      new Date(r.created_at).toLocaleString('ru-RU'),
+                    ].filter(Boolean)
+                    return (
+                      <div
+                        key={r.id}
+                        className="flex items-center justify-between gap-3 rounded-lg border p-3"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium">{title}</p>
+                          <p className="text-xs text-muted-foreground">{metaParts.join(' · ')}</p>
+                        </div>
+                        <div className="flex gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="default"
+                            onClick={() => void handleApproveRequest(r.id, r.request_type)}
+                            disabled={approveDisabled}
+                          >
+                            {approvingId === r.id ? '…' : 'Одобрить'}
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => void handleRejectRequest(r.id)}
+                            disabled={approvingId === r.id}
+                          >
+                            Отклонить
+                          </Button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
               </div>
             )}
           </div>
@@ -596,7 +855,7 @@ export default function UsersPage() {
   )
 }
 
-/** Роутуемая карточка абонента (открывается по /users/:id). */
+/** Карточка абонента внутри диалога (маршрут /users/:id). */
 function UserCardView({
   userId,
   onBack,
@@ -624,6 +883,7 @@ function UserCardView({
   useEffect(() => {
     let cancelled = false
     setLoading(true)
+    setCard(null)
     void (async () => {
       try {
         const data = await getProvisioning(userId)
@@ -631,6 +891,7 @@ function UserCardView({
       } catch (err) {
         if (!cancelled) {
           notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить карточку')
+          onBack()
         }
       } finally {
         if (!cancelled) setLoading(false)
@@ -639,10 +900,10 @@ function UserCardView({
     return () => {
       cancelled = true
     }
-  }, [userId, notifyError])
+  }, [userId, notifyError, onBack])
 
   if (loading) return <Spinner label="Загрузка карточки…" />
-  if (!card) return <Navigate to="/users" replace />
+  if (!card) return null
 
   return (
     <UserCard

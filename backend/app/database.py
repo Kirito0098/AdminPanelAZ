@@ -2007,6 +2007,22 @@ def _migrate_user_provisioning_stage2() -> None:
                 )
                 logger.info("DB migration: added users.last_read_notification_id")
 
+    # access_request_* писались с category=tasks из‑за неверных ключей EVENT_CATEGORY.
+    if "admin_panel_notifications" in tables:
+        with _migration_transaction() as conn:
+            result = conn.execute(
+                text(
+                    "UPDATE admin_panel_notifications SET category = 'requests' "
+                    "WHERE event_type LIKE 'access_request_%' AND category != 'requests'"
+                )
+            )
+            fixed = result.rowcount or 0
+            if fixed:
+                logger.info(
+                    "DB migration: reclassified %s access_request notifications → requests",
+                    fixed,
+                )
+
 
 def _migrate_user_portal_banner() -> None:
     """Stage 4: users.portal_banner_text / portal_banner_at (баннер портала)."""

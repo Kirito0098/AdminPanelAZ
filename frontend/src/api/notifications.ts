@@ -11,6 +11,7 @@ export interface NotificationItem {
   title: string
   message: string
   created_at: string
+  action_payload?: Record<string, unknown> | null
 }
 
 export interface NotificationsResponse {

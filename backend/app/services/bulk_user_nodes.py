@@ -48,8 +48,8 @@ from app.services.expected_node import forget_confirmed_node
 from app.services.feature_guards import get_feature_service
 from app.services.node_sync.groups import find_sync_group_containing_node
 from app.services.user_provisioning import (
-    _FEATURE_PROTOCOLS,
     TASK_TYPE as USER_PROVISION_TASK_TYPE,
+    _protocol_feature_enabled,
     apply_users_list_filters,
     is_in_plan_config,
     recompute_provision_state,
@@ -177,7 +177,7 @@ def _missing_plan_items(
     feature = get_feature_service()
     items: list[tuple[str, VpnType]] = []
     for protocol in protocols:
-        if protocol in _FEATURE_PROTOCOLS and not feature.is_enabled(protocol):
+        if not _protocol_feature_enabled(feature, protocol):
             continue
         try:
             vpn_type = VpnType(protocol)
