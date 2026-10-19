@@ -17,31 +17,53 @@ def _outbound_enabled() -> bool:
         return False
 
 
+def _send_message_sync(bot_token: str, chat_id: str, text: str) -> tuple[bool, int | None]:
+    """Отправить сообщение: (доставлено, код ошибки Telegram)."""
+    try:
+        body = telegram_transport.bot_api_post_sync(
+            bot_token,
+            "sendMessage",
+            json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "link_preview_options": {"is_disabled": True},
+            },
+            timeout=10,
+        )
+    except Exception as exc:
+        from app.services.telegram_api import redact_bot_token
+
+        logger.warning("TG notify failed chat_id=%s: %s", chat_id, redact_bot_token(str(exc)))
+        return False, None
+    if not body.get("ok"):
+        logger.warning("TG notify failed chat_id=%s: %s", chat_id, body.get("description"))
+        try:
+            code = int(body.get("error_code") or 0)
+        except (TypeError, ValueError):
+            code = 0
+        return False, code or None
+    return True, None
+
+
+def send_tg_message_result(bot_token: str, chat_id: str, text: str) -> tuple[bool, int | None]:
+    """Отправить сообщение и вернуть результат доставки.
+
+    403 от Telegram — пользователь заблокировал бота: сообщение не доставлено
+    и повторять его не нужно.
+    """
+    if not _outbound_enabled():
+        return False, None
+    return _send_message_sync(bot_token, chat_id, text)
+
+
 def send_tg_message(bot_token: str, chat_id: str, text: str, *, run_async: bool = True) -> bool:
     if not _outbound_enabled():
         return False
-    def _send() -> bool:
-        try:
-            body = telegram_transport.bot_api_post_sync(
-                bot_token,
-                "sendMessage",
-                json={
-                    "chat_id": chat_id,
-                    "text": text,
-                    "parse_mode": "HTML",
-                    "link_preview_options": {"is_disabled": True},
-                },
-                timeout=10,
-            )
-        except Exception as exc:
-            from app.services.telegram_api import redact_bot_token
 
-            logger.warning("TG notify failed chat_id=%s: %s", chat_id, redact_bot_token(str(exc)))
-            return False
-        if not body.get("ok"):
-            logger.warning("TG notify failed chat_id=%s: %s", chat_id, body.get("description"))
-            return False
-        return True
+    def _send() -> bool:
+        ok, _ = _send_message_sync(bot_token, chat_id, text)
+        return ok
 
     if run_async:
         threading.Thread(target=_send, daemon=True).start()

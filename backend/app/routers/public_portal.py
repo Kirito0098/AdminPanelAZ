@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models import User
+from app.services.bulk_user_nodes_notify import clear_portal_banner
 from app.services.client_portal import (
     assert_portal_host,
     build_public_portal_payload,
@@ -59,6 +61,26 @@ def portal_download(
     row = get_valid_portal_token(db, token)
     filename, content = read_portal_profile(db, row, path, node_id=node_id, client_name=client_name)
     return attachment_response(content, filename)
+
+
+@router.post("/{token}/banner/dismiss", status_code=status.HTTP_204_NO_CONTENT)
+def portal_banner_dismiss(
+    token: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Скрыть баннер портала (уведомление о массовой операции с серверами)."""
+    assert_portal_host(db, request.headers.get("host"))
+    client_ip = ip_restriction_service.get_client_ip(request)
+    public_download_rate_limit_service.consume(client_ip)
+    row = get_valid_portal_token(db, token)
+    if row.kind != "user" or row.user_row is None:
+        raise HTTPException(status_code=404, detail="Баннер недоступен")
+    user = db.get(User, row.user_row.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    clear_portal_banner(db, user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{token}/redeem")

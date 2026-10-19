@@ -13,8 +13,10 @@ import {
   UserRound,
 } from 'lucide-react'
 import {
+  dismissPublicPortalBanner,
   fetchPublicPortalMeta,
   redeemPublicPortalCode,
+  type PortalBanner,
   type PortalClientEntry,
   type PortalFileMeta,
   type PortalMetaResponse,
@@ -477,6 +479,29 @@ function ClosedAccessBanner({
   )
 }
 
+/** Баннер портала (Stage 4): уведомление о массовой операции с серверами. */
+function PortalBannerCard({ banner, onDismiss }: { banner: PortalBanner; onDismiss: () => void }) {
+  return (
+    <section
+      role="status"
+      className="flex items-start gap-3 rounded-3xl border border-cyan-400/40 bg-cyan-500/10 p-4 backdrop-blur-sm sm:p-5"
+    >
+      <div className="min-w-0 flex-1">
+        <p className="whitespace-pre-line text-sm text-slate-100">{banner.text}</p>
+      </div>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="shrink-0 border-white/15 bg-white/[0.03] text-slate-100 hover:bg-white/10"
+        onClick={onDismiss}
+      >
+        Понятно
+      </Button>
+    </section>
+  )
+}
+
 export default function PortalPage() {
   const { token = '' } = useParams()
   const [data, setData] = useState<PortalMetaResponse | null>(null)
@@ -491,6 +516,7 @@ export default function PortalPage() {
   const [redeemCode, setRedeemCode] = useState('')
   const [redeeming, setRedeeming] = useState(false)
   const [redeemError, setRedeemError] = useState<string | null>(null)
+  const [bannerDismissed, setBannerDismissed] = useState(false)
   const redeemSectionRef = useRef<HTMLElement | null>(null)
   const redeemInputRef = useRef<HTMLInputElement | null>(null)
 
@@ -589,6 +615,18 @@ export default function PortalPage() {
   const closedAccess: ClosedAccessView | null =
     data && data.kind === 'user' ? (data.closed_access ?? null) : null
 
+  const portalBanner: PortalBanner | null =
+    data && data.kind === 'user' && !bannerDismissed ? (data.portal_banner ?? null) : null
+
+  const handleDismissBanner = async () => {
+    setBannerDismissed(true)
+    try {
+      await dismissPublicPortalBanner(token)
+    } catch {
+      /* баннер скрыт локально — повторная попытка не нужна */
+    }
+  }
+
   const focusRedeem = () => {
     redeemSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     redeemInputRef.current?.focus()
@@ -660,6 +698,10 @@ export default function PortalPage() {
             <Link2 size={16} />
           </Button>
         </header>
+
+        {portalBanner && (
+          <PortalBannerCard banner={portalBanner} onDismiss={() => void handleDismissBanner()} />
+        )}
 
         {closedAccess && (
           <ClosedAccessBanner

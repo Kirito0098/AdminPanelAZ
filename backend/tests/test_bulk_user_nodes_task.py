@@ -153,6 +153,29 @@ def _auth(user):
     return {"Authorization": f"Bearer {create_user_access_token(user)}"}
 
 
+@pytest.fixture()
+def finished_bulk_task(db):
+    task = BackgroundTask(
+        id="done-task",
+        task_type="bulk_user_nodes",
+        status="completed",
+        output=json.dumps(
+            {
+                "action": "add",
+                "node_label": "Finland",
+                "ok_count": 1,
+                "failed_count": 0,
+                "results": [{"user_id": 1, "username": "ivan", "status": "ok"}],
+            },
+            ensure_ascii=False,
+        ),
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return task
+
+
 # --- Task 3: маршруты ----------------------------------------------------
 
 
@@ -397,3 +420,166 @@ def test_run_output_contains_report(db, monkeypatch, admin, finland):
     assert report["failed_count"] == 1
     assert report["results"][0]["user_id"] == user.id
     assert report["results"][0]["error"] == "agent down"
+
+
+# --- Task 8: уведомления, сводка админу, отчёт ----------------------------
+
+
+def test_task_calls_notify_only_for_ok_users(db, monkeypatch, admin, finland):
+    ok_user = _planned_user(db, username="ok", base="ok")
+    bad_user = _planned_user(db, username="bad", base="bad")
+
+    def fake_apply(**kwargs):
+        good = kwargs["user"].id == ok_user.id
+        return BulkUserNodeResult(
+            user_id=kwargs["user"].id,
+            username=kwargs["user"].username,
+            status="ok" if good else "failed",
+            skip_reason=None,
+            created=1 if good else 0,
+            deleted=0,
+            error=None if good else "boom",
+        )
+
+    calls = []
+    monkeypatch.setattr("app.services.bulk_user_nodes.apply_bulk_user_node", fake_apply)
+    monkeypatch.setattr(
+        "app.services.bulk_user_nodes.maybe_notify_after_user",
+        lambda **k: calls.append(k["user"].id) or "sent",
+    )
+
+    run_bulk_user_nodes_task(
+        "tid",
+        {
+            "action": "add",
+            "node_id": finland.id,
+            "to_node_id": None,
+            "user_ids": [ok_user.id, bad_user.id],
+            "notify_telegram": True,
+            "note": None,
+            "actor_username": admin.username,
+        },
+    )
+    assert calls == [ok_user.id]
+
+
+def test_task_counts_notify_statuses(db, monkeypatch, admin, finland):
+    user = _planned_user(db)
+    monkeypatch.setattr(
+        "app.services.bulk_user_nodes.apply_bulk_user_node",
+        lambda **kwargs: BulkUserNodeResult(
+            user_id=kwargs["user"].id,
+            username=kwargs["user"].username,
+            status="ok",
+            skip_reason=None,
+            created=1,
+            deleted=0,
+            error=None,
+        ),
+    )
+    monkeypatch.setattr(
+        "app.services.bulk_user_nodes.maybe_notify_after_user",
+        lambda **k: "no_telegram",
+    )
+    out = run_bulk_user_nodes_task(
+        "tid",
+        {
+            "action": "add",
+            "node_id": finland.id,
+            "to_node_id": None,
+            "user_ids": [user.id],
+            "notify_telegram": True,
+            "note": None,
+            "actor_username": admin.username,
+        },
+    )
+    report = json.loads(out["output"])
+    assert report["notify"]["no_telegram"] == 1
+    assert report["notify"]["sent"] == 0
+
+
+def test_task_notify_disabled_counts_all(db, monkeypatch, admin, finland):
+    user = _planned_user(db)
+    out = run_bulk_user_nodes_task(
+        "tid",
+        {
+            "action": "add",
+            "node_id": finland.id,
+            "to_node_id": None,
+            "user_ids": [user.id],
+            "notify_telegram": False,
+            "note": None,
+            "actor_username": admin.username,
+        },
+    )
+    report = json.loads(out["output"])
+    assert report["notify"]["disabled"] == 1
+
+
+def test_admin_notify_once(db, monkeypatch, admin, finland):
+    user = _planned_user(db)
+    monkeypatch.setattr(
+        "app.services.bulk_user_nodes.apply_bulk_user_node",
+        lambda **kwargs: BulkUserNodeResult(
+            user_id=kwargs["user"].id,
+            username=kwargs["user"].username,
+            status="ok",
+            skip_reason=None,
+            created=1,
+            deleted=0,
+            error=None,
+        ),
+    )
+    sent = []
+    monkeypatch.setattr(
+        "app.services.bulk_user_nodes.admin_notify_service.send",
+        lambda *a, **k: sent.append(k.get("target_name")),
+    )
+    run_bulk_user_nodes_task(
+        "tid",
+        {
+            "action": "add",
+            "node_id": finland.id,
+            "to_node_id": None,
+            "user_ids": [user.id],
+            "notify_telegram": False,
+            "note": None,
+            "actor_username": admin.username,
+        },
+    )
+    assert len(sent) == 1
+    assert "Finland" in str(sent[0])
+
+
+def test_report_endpoint_returns_json(client, db, admin, finished_bulk_task):
+    response = client.get(
+        f"/api/users/bulk/nodes/tasks/{finished_bulk_task.id}/report",
+        headers=_auth(admin),
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert "attachment" in response.headers.get("content-disposition", "")
+    body = response.json()
+    assert "results" in body
+
+
+def test_report_endpoint_404_for_other_task(client, db, admin):
+    other = BackgroundTask(id="other-task", task_type="user_provision", status="completed")
+    db.add(other)
+    db.commit()
+    response = client.get(
+        "/api/users/bulk/nodes/tasks/other-task/report",
+        headers=_auth(admin),
+    )
+    assert response.status_code == 404
+
+
+def test_report_endpoint_409_while_running(client, db, admin):
+    running = BackgroundTask(id="running-task", task_type="bulk_user_nodes", status="running")
+    db.add(running)
+    db.commit()
+    response = client.get(
+        "/api/users/bulk/nodes/tasks/running-task/report",
+        headers=_auth(admin),
+    )
+    assert response.status_code == 409

@@ -2,6 +2,8 @@ import { apiFetch, apiFetchResponse } from './http'
 import type {
   AccessRequestResponse,
   ApproveRequest,
+  BulkNodesPreviewResponse,
+  BulkNodesRequest,
   PresetCreate,
   PresetResponse,
   PresetUpdate,
@@ -250,4 +252,27 @@ export async function rejectRequest(requestId: number, data: RejectRequest) {
     method: 'POST',
     body: JSON.stringify(data),
   })
+}
+
+/* ------------------- Массовые операции с серверами (Stage 4) ------------------- */
+
+/** POST /users/bulk/nodes/preview — что изменится у пользователей и кто будет пропущен. */
+export async function previewBulkNodes(body: BulkNodesRequest) {
+  return apiFetch<BulkNodesPreviewResponse>('/users/bulk/nodes/preview', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/** POST /users/bulk/nodes — запустить фоновую задачу (202 → {task_id}). */
+export async function startBulkNodes(body: BulkNodesRequest) {
+  return apiFetch<{ task_id: string }>('/users/bulk/nodes', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  })
+}
+
+/** GET /users/bulk/nodes/tasks/{task_id}/report — JSON-отчёт по завершённой задаче. */
+export async function downloadBulkNodesReport(taskId: string) {
+  return apiFetchResponse(`/users/bulk/nodes/tasks/${encodeURIComponent(taskId)}/report`)
 }

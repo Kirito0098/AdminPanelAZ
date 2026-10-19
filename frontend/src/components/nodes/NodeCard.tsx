@@ -30,6 +30,8 @@ type NodeCardProps = {
   onTransportChange: (transport: NodeTransportId) => void
   onEdit: () => void
   onDelete: () => void
+  /** Stage 4: выдать сервер пользователям (показывается только для доступных серверов). */
+  onAssignToUsers?: () => void
   onProxyUpdated?: () => void | Promise<void>
 }
 
@@ -51,6 +53,7 @@ export default function NodeCard({
   onTransportChange,
   onEdit,
   onDelete,
+  onAssignToUsers,
   onProxyUpdated,
 }: NodeCardProps) {
   const meta = getNodeMeta(node)
@@ -219,6 +222,7 @@ export default function NodeCard({
           onTransportChange={onTransportChange}
           onEdit={onEdit}
           onDelete={onDelete}
+          onAssignToUsers={onAssignToUsers}
         />
       </CardContent>
     </Card>

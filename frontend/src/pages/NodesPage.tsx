@@ -1,4 +1,5 @@
 import { FormEvent, Fragment, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Activity,
   BellOff,
@@ -134,6 +135,7 @@ const EMPTY_SSH_FORM: SshTransportFormState = {
 
 export default function NodesPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const {
     activeNode,
     nodes,
@@ -150,6 +152,7 @@ export default function NodesPage() {
   // Default-off toggle: treat missing key as disabled (isEnabled() falls back to true).
   const proxyNodesEnabled = features.proxy_nodes === true
   const telegramEnabled = isEnabled('telegram')
+  const provisioningOn = isEnabled('user_provisioning')
   const { success, warning, error: notifyError } = useNotifications()
   const [loading, setLoading] = useState(true)
   const [showDialog, setShowDialog] = useState(false)
@@ -191,6 +194,15 @@ export default function NodesPage() {
     const membership = findNodeHaMembership(node.id, syncGroups)
     if (!membership) return null
     return nodeDeleteBlockedMessage(node, membership)
+  }
+
+  // Stage 4: выдать сервер пользователям можно только standalone VPN или primary HA-группы.
+  const canAssignToUsers = (node: Node): boolean => {
+    if (!provisioningOn) return false
+    if (isProxyNode(node)) return false
+    const membership = findNodeHaMembership(node.id, syncGroups)
+    if (!membership) return true
+    return syncGroups.some((group) => group.primary_node_id === node.id)
   }
 
   const showHaDeleteBlockedDialog = (blockedNodes: Node[]) => {
@@ -1162,6 +1174,11 @@ export default function NodesPage() {
                     onTransportChange={(transport) => handleTransportChange(node, transport)}
                     onEdit={() => openEdit(node)}
                     onDelete={() => handleDelete(node)}
+                    onAssignToUsers={
+                      canAssignToUsers(node)
+                        ? () => void navigate(`/users?bulkAddNode=${node.id}`)
+                        : undefined
+                    }
                     onProxyUpdated={() => void load()}
                   />
                 ))}

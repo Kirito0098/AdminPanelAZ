@@ -62,6 +62,7 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("noc_report", "NOC: ежедневная/еженедельная сводка"),
     ("alert_rule", "Alert rule: срабатывание порога"),
     ("openvpn_buffer_guard_triggered", "OpenVPN Buffer Guard"),
+    ("bulk_user_nodes", "Массовая операция с серверами"),
 ]
 
 TG_NOTIFY_EVENT_GROUPS: list[tuple[str, str, str, tuple[str, ...]]] = [
@@ -70,7 +71,15 @@ TG_NOTIFY_EVENT_GROUPS: list[tuple[str, str, str, tuple[str, ...]]] = [
         "clients",
         "Клиенты и пользователи",
         "👥",
-        ("config_create", "config_delete", "user_create", "user_delete", "client_ban", "traffic_limit"),
+        (
+            "config_create",
+            "config_delete",
+            "user_create",
+            "user_delete",
+            "client_ban",
+            "traffic_limit",
+            "bulk_user_nodes",
+        ),
     ),
     (
         "reminders",
@@ -1258,6 +1267,19 @@ class AdminNotifyService:
             return _format_notify_card(
                 "🧱 <b>OpenVPN Buffer Guard</b>",
                 when,
+                detail_lines=detail_lines,
+            )
+
+        if event_type == "bulk_user_nodes":
+            detail_lines = []
+            if target_name:
+                detail_lines.append(_line_text("🗄️", "Операция", target_name))
+            if details:
+                detail_lines.append(_line_text("📋", "Детали", details))
+            return _format_notify_card(
+                "📦 <b>Массовая операция с серверами</b>",
+                when,
+                actor_line=_fmt_actor(actor_username, as_admin=True) if actor_username else None,
                 detail_lines=detail_lines,
             )
 

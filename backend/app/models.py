@@ -62,6 +62,7 @@ DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
     "noc_report": True,
     "alert_rule": True,
     "openvpn_buffer_guard_triggered": True,
+    "bulk_user_nodes": True,
 }
 
 # Event split out of an older one: until the user saves prefs again, it follows the old event,
@@ -112,6 +113,9 @@ class User(Base):
     traffic_limit_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     traffic_counter_reset_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     traffic_limit_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Stage 4: баннер портала для пользователей без привязанного Telegram.
+    portal_banner_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    portal_banner_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     vpn_configs: Mapped[list["VpnConfig"]] = relationship(back_populates="owner")
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user")

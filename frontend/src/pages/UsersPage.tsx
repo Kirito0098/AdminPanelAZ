@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Navigate, useParams, useNavigate } from 'react-router-dom'
+import { Navigate, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { MoreHorizontal, Ticket, UserPlus, Users } from 'lucide-react'
 import {
   ApiError,
@@ -10,6 +10,7 @@ import {
 import {
   createProvisionedUser,
   deleteProvisionedUser,
+  downloadBulkNodesReport,
   getProvisioning,
   listRequests,
   approveRequest,
@@ -20,33 +21,47 @@ import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useProgress } from '@/context/ProgressContext'
 import { formatDate } from '@/lib/datetime'
+import { triggerFileDownload } from '@/lib/triggerFileDownload'
 import type {
   User,
   UserUpdatePayload,
   UserProvisioningCard,
   UserProvisionSummary,
+  BulkNodesAction,
 } from '@/types'
 import { UsersFilters } from '@/components/users/UsersFilters'
 import CreateUserDialog from '@/components/users/CreateUserDialog'
+import BulkNodesDialog from '@/components/users/BulkNodesDialog'
+import UsersBulkBar from '@/components/users/UsersBulkBar'
 import UserCard from '@/components/users/UserCard'
 
 export default function UsersPage() {
   const { userId } = useParams<{ userId: string }>()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { isEnabled } = useFeatureModules()
   const { success, error: notifyError } = useNotifications()
+  const { backgroundTask, trackBackgroundTask } = useProgress()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<string>('all')
   const [search, setSearch] = useState('')
+  const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [requestsOpen, setRequestsOpen] = useState(false)
   const [requests, setRequests] = useState<{ id: number; request_type: string; telegram_id: string; telegram_name: string | null; status: string; created_at: string }[]>([])
   const [requestsLoading, setRequestsLoading] = useState(false)
+  const [bulkDialog, setBulkDialog] = useState<{
+    open: boolean
+    action: BulkNodesAction
+    presetNodeId?: number
+  }>({ open: false, action: 'add' })
 
   const provisioningOn = isEnabled('user_provisioning')
 
@@ -88,6 +103,40 @@ export default function UsersPage() {
       cancelled = true
     }
   }, [provisioningOn, notifyError])
+
+  // Смена фильтра сбрасывает выбор — иначе в область попадут скрытые пользователи.
+  useEffect(() => {
+    setSelectedIds([])
+  }, [filter, search])
+
+  // Вход с карточки сервера: /users?bulkAddNode={id}
+  useEffect(() => {
+    const raw = searchParams.get('bulkAddNode')
+    const id = Number.parseInt(raw ?? '', 10)
+    if (!Number.isFinite(id) || id <= 0) return
+    setBulkDialog({ open: true, action: 'add', presetNodeId: id })
+    const next = new URLSearchParams(searchParams)
+    next.delete('bulkAddNode')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
+
+  const handleBulkStarted = (taskId: string) => {
+    success('Массовая операция запущена')
+    trackBackgroundTask(taskId, {
+      onComplete: (task) => success(task.message || 'Массовая операция завершена'),
+      onError: (_task, message) => notifyError(message),
+    })
+  }
+
+  const handleDownloadReport = async (taskId: string) => {
+    try {
+      const res = await downloadBulkNodesReport(taskId)
+      const blob = await res.blob()
+      triggerFileDownload(blob, `bulk-nodes-${taskId}.json`)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось скачать отчёт')
+    }
+  }
 
   const handleApproveRequest = async (requestId: number, presetId?: number) => {
     try {
@@ -308,6 +357,16 @@ export default function UsersPage() {
             <UsersFilters filter={filter} onFilterChange={setFilter} />
           </div>
 
+          {provisioningOn && (
+            <UsersBulkBar
+              selectedCount={selectedIds.length}
+              busy={backgroundTask?.task_type === 'bulk_user_nodes' && ['queued', 'running'].includes(backgroundTask.status)}
+              task={backgroundTask?.task_type === 'bulk_user_nodes' ? backgroundTask : null}
+              onAction={(action) => setBulkDialog({ open: true, action })}
+              onDownloadReport={(taskId) => void handleDownloadReport(taskId)}
+            />
+          )}
+
           {filteredUsers.length === 0 ? (
             <EmptyState
               icon={Users}
@@ -332,6 +391,22 @@ export default function UsersPage() {
               <table className="min-w-full align-middle text-sm">
                 <thead>
                   <tr className="text-muted-foreground bg-muted/50">
+                    {provisioningOn && (
+                      <th className="w-8 p-3 text-left">
+                        <Checkbox
+                          checked={
+                            filteredUsers.length > 0 &&
+                            filteredUsers.every((u) => selectedIds.includes(u.id))
+                          }
+                          onCheckedChange={(next) =>
+                            setSelectedIds(
+                              next ? filteredUsers.map((u) => u.id) : [],
+                            )
+                          }
+                          aria-label="Выбрать всех"
+                        />
+                      </th>
+                    )}
                     <th className="p-3 text-left">Пользователь</th>
                     <th className="p-3 text-left">Узлы</th>
                     <th className="p-3 text-left">Протоколы</th>
@@ -369,6 +444,19 @@ export default function UsersPage() {
                     }[u.provision_state ?? 'unmanaged'] || u.provision_state
                     return (
                       <tr key={u.id} className="border-b hover:bg-muted/50 group">
+                        {provisioningOn && (
+                          <td className="p-3">
+                            <Checkbox
+                              checked={selectedIds.includes(u.id)}
+                              onCheckedChange={(next) =>
+                                setSelectedIds((prev) =>
+                                  next ? [...prev, u.id] : prev.filter((id) => id !== u.id),
+                                )
+                              }
+                              aria-label={`Выбрать ${u.username}`}
+                            />
+                          </td>
+                        )}
                         <td className="p-3">
                           <div className="flex items-center gap-2">
                             <span className="font-medium truncate">{u.username}</span>
@@ -441,6 +529,18 @@ export default function UsersPage() {
           onCreate={handleCreate}
         />
       ) : null}
+
+      {provisioningOn && (
+        <BulkNodesDialog
+          open={bulkDialog.open}
+          onOpenChange={(open) => setBulkDialog((prev) => ({ ...prev, open }))}
+          presetNodeId={bulkDialog.presetNodeId}
+          presetAction={bulkDialog.action}
+          selectedUserIds={selectedIds}
+          listFilter={{ state: filter, q: search }}
+          onStarted={handleBulkStarted}
+        />
+      )}
 
       {provisioningOn && requestsOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">

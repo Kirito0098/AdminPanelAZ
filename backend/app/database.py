@@ -1749,6 +1749,7 @@ def _run_db_migrations() -> None:
     _migrate_users_provisioning()
     _migrate_user_provisioning_stage2()
     _migrate_users_stage3()
+    _migrate_user_portal_banner()
     _migrate_revoke_unmanaged_client_portal_links()
     _seed_client_templates_for_nodes()
 
@@ -2005,6 +2006,19 @@ def _migrate_user_provisioning_stage2() -> None:
                     )
                 )
                 logger.info("DB migration: added users.last_read_notification_id")
+
+
+def _migrate_user_portal_banner() -> None:
+    """Stage 4: users.portal_banner_text / portal_banner_at (баннер портала)."""
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    with _migration_transaction() as conn:
+        cols = _table_columns(conn, "users")
+        for name, typ in [("portal_banner_text", "TEXT"), ("portal_banner_at", "DATETIME")]:
+            if name not in cols:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {typ}"))
+                logger.info("DB migration: added users.%s", name)
 
 
 def _migrate_users_stage3() -> None:

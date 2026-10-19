@@ -40,12 +40,19 @@ export interface ClientPortalMetaResponse extends PortalClientEntry {
   unlock_codes_enabled: boolean
 }
 
+export interface PortalBanner {
+  text: string
+  created_at: string | null
+}
+
 export interface UserPortalMetaResponse {
   kind: 'user'
   brand_title: string
   unlock_codes_enabled: boolean
   /** Состояние закрытого доступа (спека 7.4); null — доступ открыт. */
   closed_access: ClosedAccessView | null
+  /** Баннер портала (Stage 4) — уведомление о массовой операции с серверами. */
+  portal_banner: PortalBanner | null
   nodes: PortalNodeEntry[]
 }
 
@@ -140,4 +147,16 @@ export async function redeemPublicPortalCode(token: string, code: string) {
     throw new Error(detail)
   }
   return (await res.json()) as PortalRedeemResponse
+}
+
+/** Скрыть баннер портала (Stage 4) — уведомление о массовой операции с серверами. */
+export async function dismissPublicPortalBanner(token: string) {
+  const { apiBase } = await import('../lib/panelBase')
+  const res = await fetch(`${apiBase}/public/portal/${encodeURIComponent(token)}/banner/dismiss`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  })
+  if (!res.ok) {
+    throw new Error('Не удалось скрыть уведомление')
+  }
 }

@@ -797,6 +797,34 @@ def bulk_nodes_start(
     return {"task_id": task.id}
 
 
+@router.get("/bulk/nodes/tasks/{task_id}/report")
+def bulk_nodes_report(
+    task_id: str,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Скачать JSON-отчёт по массовой операции с серверами."""
+    _require_provisioning()
+    task = db.get(BackgroundTask, task_id)
+    if task is None or task.task_type != "bulk_user_nodes":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Отчёт не найден")
+    if task.status not in ("completed", "failed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Задача ещё выполняется"
+        )
+    try:
+        data = json.loads(task.output or "{}")
+    except (TypeError, ValueError):
+        data = {}
+    return Response(
+        content=json.dumps(data, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="bulk-nodes-{task_id}.json"'
+        },
+    )
+
+
 @router.patch("/{user_id}", response_model=UserResponse)
 def update_user(
     user_id: int,

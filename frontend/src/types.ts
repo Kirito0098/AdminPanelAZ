@@ -2648,3 +2648,52 @@ export interface RejectRequest {
 export interface ConfirmDeletionsPayload {
   configs: ProvisionPlanItem[]
 }
+
+/* =====================================================================
+ * Массовые операции с серверами (Stage 4)
+ * Формы запроса/ответа mirror backend-схем (routers/users.py).
+ * ===================================================================== */
+
+export type BulkNodesAction = 'add' | 'remove' | 'replace'
+
+export type BulkNodesScopeMode = 'all' | 'user_ids' | 'filter'
+
+export interface BulkNodesScope {
+  mode: BulkNodesScopeMode
+  user_ids?: number[] | null
+  state?: string | null
+  q?: string | null
+}
+
+export interface BulkNodesRequest {
+  action: BulkNodesAction
+  node_id: number
+  to_node_id?: number | null
+  scope: BulkNodesScope
+  notify_telegram?: boolean
+  note?: string | null
+  confirm_node_name?: string | null
+}
+
+export interface BulkNodesPreviewItem {
+  user_id: number
+  username: string
+  configs_create: number
+  configs_delete: number
+  expired: boolean
+  detail: string | null
+}
+
+export interface BulkNodesPreviewResponse {
+  action: string
+  node_id: number
+  to_node_id: number | null
+  node_label: string
+  to_node_label: string | null
+  affected: BulkNodesPreviewItem[]
+  skipped: Record<string, BulkNodesPreviewItem[]>
+  without_telegram: BulkNodesPreviewItem[]
+  notify_text_preview: string | null
+  configs_to_create: number
+  configs_to_delete: number
+}

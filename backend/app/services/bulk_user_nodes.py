@@ -34,8 +34,14 @@ from app.models import (
 
 # Реэкспорт моделей запроса: диалог и тесты импортируют их отсюда.
 from app.schemas import BulkNodesRequest, BulkNodesScope
+from app.services.admin_notify import admin_notify_service
 from app.services.background_tasks import _submit_in_current_context, background_task_service
-from app.services.bulk_user_nodes_notify import ACTION_TITLES, render_bulk_notify_text
+from app.services.bulk_user_nodes_notify import (
+    ACTION_TITLES,
+    TelegramBulkThrottle,
+    maybe_notify_after_user,
+    render_bulk_notify_text,
+)
 from app.services.client_names import parse_plan_indexes, plan_name_for_index
 from app.services.config_provisioning import deprovision_config, provision_config
 from app.services.expected_node import forget_confirmed_node
@@ -541,6 +547,8 @@ def run_bulk_user_nodes_task(task_id: str, payload: dict[str, Any]) -> dict[str,
     action = str(payload.get("action") or "add")
     user_ids = [int(item) for item in (payload.get("user_ids") or [])]
     actor_username = payload.get("actor_username")
+    notify_telegram = bool(payload.get("notify_telegram"))
+    note = payload.get("note")
 
     db = SessionLocal()
     try:
@@ -555,6 +563,7 @@ def run_bulk_user_nodes_task(task_id: str, payload: dict[str, Any]) -> dict[str,
                 ),
             }
         label = _node_label(node)
+        to_node_label = _node_label(to_node) if to_node else None
         node_id = node.id
         to_node_id = to_node.id if to_node else None
         users = (
@@ -562,11 +571,21 @@ def run_bulk_user_nodes_task(task_id: str, payload: dict[str, Any]) -> dict[str,
             if user_ids
             else []
         )
+        bot_token = ""
+        portal_base = None
+        if notify_telegram:
+            from app.services.app_setting_store import _get_setting
+            from app.services.client_portal import resolve_portal_base_url
+
+            bot_token = _get_setting(db, "telegram_bot_token", "").strip()
+            portal_base = resolve_portal_base_url(db)
     finally:
         db.close()
 
     total = len(users)
     results: list[dict[str, Any]] = []
+    notify_stats = _empty_notify_stats()
+    throttle = TelegramBulkThrottle()
     for index, user in enumerate(users, start=1):
         stage = f"{label}: {index - 1} / {total} пользователей"
         background_task_service.update_background_task(
@@ -620,7 +639,30 @@ def run_bulk_user_nodes_task(task_id: str, payload: dict[str, Any]) -> dict[str,
                 )
             results.append(asdict(result))
 
-    summary = _build_bulk_summary(action=action, label=label, results=results)
+            if notify_telegram:
+                # Уведомляем только тех, у кого операция прошла успешно.
+                status = "skipped_status"
+                if result.status == "ok":
+                    status = _notify_user(
+                        session,
+                        user=fresh_user,
+                        result=result,
+                        action=action,
+                        label=label,
+                        to_node_label=to_node_label,
+                        note=note,
+                        bot_token=bot_token,
+                        portal_base=portal_base,
+                        throttle=throttle,
+                    )
+                _count_notify_status(notify_stats, status)
+
+    if not notify_telegram:
+        notify_stats["disabled"] = total
+    summary = _build_bulk_summary(
+        action=action, label=label, results=results, notify=notify_stats
+    )
+    _notify_admin(actor_username=actor_username, summary=summary)
     return {
         "message": summary["title"],
         "action": action,
@@ -633,8 +675,112 @@ def run_bulk_user_nodes_task(task_id: str, payload: dict[str, Any]) -> dict[str,
     }
 
 
+def _empty_notify_stats() -> dict[str, int]:
+    """Счётчики доставки уведомлений (отчёт по задаче)."""
+    return {
+        "sent": 0,
+        "undelivered": 0,
+        "no_telegram": 0,
+        "disabled": 0,
+        "error": 0,
+        "skipped": 0,
+    }
+
+
+def _count_notify_status(stats: dict[str, int], status: str) -> None:
+    if status in ("sent", "undelivered", "no_telegram", "error"):
+        stats[status] += 1
+        return
+    # Нечего сообщать: операция не удалась или конфиги не создавались.
+    stats["skipped"] += 1
+
+
+def _user_portal_url(db: Session, user: User, portal_base: str) -> str | None:
+    """Личная ссылка портала пользователя (только ему в Telegram)."""
+    try:
+        from app.services.client_portal import get_or_create_user_portal_token
+
+        row = get_or_create_user_portal_token(db, user_id=user.id)
+    except Exception:
+        logger.warning("bulk_user_nodes: нет ссылки портала для user_id=%s", user.id)
+        return None
+    return f"{portal_base.rstrip('/')}/p/{row.token}"
+
+
+def _remaining_node_labels(db: Session, user: User) -> list[str]:
+    """Серверы пользователя после операции — «используйте конфиг для …»."""
+    rows = db.query(UserNodeAssignment).filter_by(user_id=user.id).all()
+    labels: list[str] = []
+    for row in rows:
+        node = db.get(Node, row.node_id)
+        if node is not None:
+            labels.append(_node_label(node))
+    return labels
+
+
+def _notify_user(
+    db: Session,
+    *,
+    user: User,
+    result: BulkUserNodeResult,
+    action: BulkNodesAction,
+    label: str,
+    to_node_label: str | None,
+    note: str | None,
+    bot_token: str,
+    portal_base: str | None,
+    throttle: TelegramBulkThrottle,
+) -> str:
+    """Уведомить пользователя о его части операции (Telegram или баннер портала).
+
+    Сбой доставки не должен прерывать саму операцию — он попадает в отчёт.
+    """
+    try:
+        portal_url = _user_portal_url(db, user, portal_base) if portal_base else None
+        remaining = _remaining_node_labels(db, user) if action == "remove" else None
+        return maybe_notify_after_user(
+            enabled=True,
+            user=user,
+            result=result,
+            action=action,
+            node_label=label,
+            to_node_label=to_node_label,
+            note=note,
+            remaining_labels=remaining,
+            bot_token=bot_token,
+            portal_url=portal_url,
+            throttle=throttle,
+            db=db,
+        )
+    except Exception:
+        logger.exception("bulk_user_nodes: не удалось уведомить пользователя user_id=%s", user.id)
+        return "error"
+
+
+def _notify_admin(*, actor_username: str | None, summary: dict[str, Any]) -> None:
+    """Одна сводка админу за задачу (колокольчик + Telegram)."""
+    try:
+        session = SessionLocal()
+        try:
+            details = (
+                f"успешно {summary['ok_count']}, ошибок {summary['failed_count']}, "
+                f"пропущено {summary['skipped_count']}"
+            )
+            admin_notify_service.send(
+                session,
+                "bulk_user_nodes",
+                actor_username=actor_username,
+                target_name=str(summary["title"]),
+                details=details,
+            )
+        finally:
+            session.close()
+    except Exception:
+        logger.exception("bulk_user_nodes: не удалось отправить сводку админу")
+
+
 def _build_bulk_summary(
-    *, action: str, label: str, results: list[dict[str, Any]]
+    *, action: str, label: str, results: list[dict[str, Any]], notify: dict[str, int] | None = None
 ) -> dict[str, Any]:
     """Сводка по задаче: сколько удалось, сколько с ошибкой, кого пропустили."""
     ok = [row for row in results if row.get("status") == "ok"]
@@ -653,6 +799,7 @@ def _build_bulk_summary(
         "failed_count": len(failed),
         "skipped_count": len(skipped),
         "skipped": dict(skipped_by_reason),
+        "notify": dict(notify or _empty_notify_stats()),
     }
 
 
