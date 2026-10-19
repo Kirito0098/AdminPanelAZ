@@ -1,4 +1,6 @@
+import asyncio
 import json
+import logging
 import secrets
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -76,7 +78,10 @@ from app.services.user_access_requests import (
     approve_request,
     delete_user_write_archive,
     reject_request,
+    sync_admin_request_messages,
 )
+from app.services import telegram_api
+from app.services.request_receipt_preview import ReceiptDecodeError, get_cached_or_build_preview
 from app.services.ip_restriction import ip_restriction_service
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.node_manager import get_adapter_for_node, get_node_antizapret_path, node_metadata_dict
@@ -517,6 +522,22 @@ def _require_provisioning() -> None:
         )
 
 
+def _sync_request_messages_after_decide(
+    db: Session, request: UserAccessRequest, *, admin_username: str, approved: bool
+) -> None:
+    """Task 11: после решения в веб-панели обновить карточки заявки в чатах админов."""
+    text = (
+        f"✅ Одобрено в веб-панели: {admin_username}"
+        if approved
+        else f"❌ Отклонено в веб-панели: {admin_username}"
+    )
+    try:
+        telegram_api.reset_bot_api_client_for_tests()
+        asyncio.run(sync_admin_request_messages(db, request, text=text))
+    except Exception as exc:  # never fail a panel decision because of Telegram
+        logging.warning("telegram request cards sync failed: %s", exc)
+
+
 @router.get("/requests", response_model=list[AccessRequestResponse])
 def list_access_requests(
     status: str | None = None,
@@ -596,6 +617,7 @@ def approve_access_request(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"request_id={request_id}, type={row.request_type}",
         )
+    _sync_request_messages_after_decide(db, decided, admin_username=admin.username, approved=True)
     return AccessRequestResponse.model_validate(decided)
 
 
@@ -634,7 +656,33 @@ def reject_access_request(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"request_id={request_id}, ban={payload.ban}",
         )
+    _sync_request_messages_after_decide(db, decided, admin_username=admin.username, approved=False)
     return AccessRequestResponse.model_validate(decided)
+
+
+@router.get("/users/requests/{request_id}/receipt")
+def get_request_receipt(
+    request_id: int,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Превью чека оплаты заявки (только админ). Перекодировка Pillow в памяти, без диска."""
+    req = db.get(UserAccessRequest, request_id)
+    if not req or not req.receipt_file_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Чек не найден")
+    try:
+        data = get_cached_or_build_preview(db, req)
+    except ReceiptDecodeError:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Не удалось открыть чек")
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={
+            "Content-Disposition": "inline",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 @router.patch("/{user_id}", response_model=UserResponse)

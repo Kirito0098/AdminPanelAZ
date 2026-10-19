@@ -238,6 +238,66 @@ async def send_message(
     return (await call_bot_api(bot_token, "sendMessage", payload=payload)) is not None
 
 
+async def send_photo(
+    bot_token: str,
+    chat_id: str | int,
+    photo: str,
+    *,
+    caption: str | None = None,
+    parse_mode: str = "HTML",
+    reply_markup: dict[str, Any] | None = None,
+) -> bool:
+    """Отправить фото по Telegram file_id (байты не скачиваются панелью)."""
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "photo": photo,
+        "parse_mode": parse_mode,
+        "link_preview_options": {"is_disabled": True},
+    }
+    if caption:
+        payload["caption"] = caption
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    return (await call_bot_api(bot_token, "sendPhoto", payload=payload)) is not None
+
+
+async def get_file(bot_token: str, file_id: str) -> dict[str, Any] | None:
+    """Telegram getFile → {file_id, file_unique_id, file_size, file_path} or None."""
+    return await call_bot_api(bot_token, "getFile", payload={"file_id": file_id})
+
+
+MAX_FILE_BYTES = 5 * 1024 * 1024
+
+
+async def download_file_bytes(bot_token: str, file_path: str) -> bytes:
+    """Скачать файл из Telegram по file_path с жёстким лимитом 5 МБ."""
+    url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        async with client.stream("GET", url) as response:
+            response.raise_for_status()
+            total = 0
+            chunks: list[bytes] = []
+            async for chunk in response.aiter_bytes():
+                total += len(chunk)
+                if total > MAX_FILE_BYTES:
+                    raise ValueError("файл превышает лимит 5 МБ")
+                chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def edit_message_reply_markup(
+    bot_token: str,
+    chat_id: str | int,
+    message_id: int,
+    *,
+    reply_markup: dict[str, Any] | None = None,
+) -> bool:
+    payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id}
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    return (await call_bot_api(bot_token, "editMessageReplyMarkup", payload=payload)) is not None
+
+
 async def edit_message_text(
     bot_token: str,
     chat_id: str | int,

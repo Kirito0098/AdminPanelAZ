@@ -146,7 +146,18 @@ async def _dispatch_command(ctx: BotContext, command: str, args: str) -> None:
         )
 
 
-async def _dispatch_callback(ctx: BotContext, data: str, *, message_id: int | None) -> None:
+async def _dispatch_callback(
+    ctx: BotContext, data: str, *, message_id: int | None, callback_id: str = ""
+) -> None:
+    if data.startswith("ar:"):
+        from app.services.telegram_bot_handlers.access_requests import (
+            handle_admin_request_callback,
+        )
+
+        await handle_admin_request_callback(
+            ctx, data, message_id=message_id, callback_id=callback_id
+        )
+        return
     if await handle_menu_callback(ctx, data, message_id=message_id):
         return
     if data == "help":
@@ -243,7 +254,9 @@ class TelegramBotService:
 
         from_user = message.get("from") or {}
         chat = message.get("chat") or {}
-        if _is_shared_chat(chat):
+        # Stage 2 privacy: заявки и прочие сообщения бота — только личный чат,
+        # и только когда chat.id == from.id (никогда не чужой/групповой id).
+        if chat.get("type") != "private" or chat.get("id") != from_user.get("id"):
             return
         telegram_user_id = str(from_user.get("id", ""))
         chat_id = chat.get("id", telegram_user_id)
@@ -264,6 +277,20 @@ class TelegramBotService:
                 return
             if text.strip() and await handle_unlock_codes_text(ctx, text):
                 return
+            if message.get("photo"):
+                from app.services.telegram_bot_handlers.access_requests import (
+                    handle_request_photo,
+                )
+
+                if await handle_request_photo(ctx, message):
+                    return
+            if message.get("document"):
+                from app.services.telegram_bot_handlers.access_requests import (
+                    handle_request_document,
+                )
+
+                if await handle_request_document(ctx, message):
+                    return
             if text.strip():
                 await handle_unknown_text(ctx)
             return
@@ -308,7 +335,7 @@ class TelegramBotService:
             await send_message(ctx.bot_token, ctx.chat_id, unlinked_message())
             return
 
-        await _dispatch_callback(ctx, data, message_id=message_id)
+        await _dispatch_callback(ctx, data, message_id=message_id, callback_id=callback_id)
 
     async def _handle_inline_query(
         self,

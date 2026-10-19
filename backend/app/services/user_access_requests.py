@@ -11,6 +11,7 @@ import json
 import logging
 import re
 import secrets
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -31,9 +32,13 @@ from app.models import (
 from app.services.admin_panel_notifications import write_admin_panel_notification
 from app.services.app_setting_store import _get_setting, _set_setting
 from app.auth import get_password_hash
+from app.services.feature_guards import get_feature_service
 from app.services.client_portal import get_or_create_user_portal_token, user_link_response
+from app.services.rate_limit.backends import MemoryRateLimitBackend
+from app.services.rate_limit.sliding_window import SlidingWindowLimiter
 from app.services.telegram import send_tg_message
-from app.services.telegram_api import send_message
+from app.services import telegram_api
+from app.services.telegram_api import edit_message_text, send_message
 from app.services.user_provisioning import enqueue_user_provision, validate_plan_nodes
 
 logger = logging.getLogger(__name__)
@@ -50,6 +55,11 @@ SETTING_BOT_TOKEN = "telegram_bot_token"
 
 COOLDOWN_HOURS = 24
 TELEGRAM_USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{5,32}$")
+
+# Приём чеков (Task 11): фото только, лимит 5 шт на 600 с.
+_RECEIPT_LIMIT = 5
+_RECEIPT_WINDOW_SECONDS = 600
+_receipt_rate_limit = SlidingWindowLimiter(MemoryRateLimitBackend())
 
 
 class RequestError(Exception):
@@ -88,6 +98,10 @@ class TelegramAlreadyBound(RequestError):
         self.admin_detail = admin_detail
         self.user_id = user_id
         self.username = username
+
+
+class ReceiptMustBePhoto(RequestError):
+    """Пользователь прислал не фото (документ/файл) вместо чека."""
 
 
 def _accept_requests(db: Session) -> bool:
@@ -225,9 +239,75 @@ def submit_access_request(
     return row
 
 
+def _bot_token(db: Session) -> str:
+    return _get_setting(db, SETTING_BOT_TOKEN, "").strip()
+
+
+def _default_preset_id(db: Session) -> int | None:
+    preset = (
+        db.query(ProvisioningPreset)
+        .filter(ProvisioningPreset.is_default.is_(True))
+        .first()
+    )
+    return preset.id if preset is not None else None
+
+
+def _admin_request_keyboard(db: Session, request: UserAccessRequest) -> dict[str, Any] | None:
+    """Клавиатура под карточкой заявки для админа. Только callback_data id — без ссылок в кнопках."""
+    from app.services import telegram_bot_i18n as i18n
+    from app.services.telegram_bot_handlers.base import inline_button, inline_keyboard
+
+    rid = request.id
+    rows: list[list[dict[str, str]]] = []
+    if request.request_type == REQUEST_TYPE_NEW_USER:
+        if _default_preset_id(db) is not None:
+            rows.append([inline_button(i18n.BTN_REQUEST_APPROVE, callback_data=f"ar:a:{rid}")])
+        rows.append([inline_button(i18n.BTN_REQUEST_REJECT, callback_data=f"ar:r:{rid}")])
+    elif request.request_type == REQUEST_TYPE_ADD_CONFIG:
+        rows.append([inline_button(i18n.BTN_REQUEST_APPROVE_MORE, callback_data=f"ar:a:{rid}")])
+        rows.append([inline_button(i18n.BTN_REQUEST_REJECT, callback_data=f"ar:r:{rid}")])
+    elif request.request_type == REQUEST_TYPE_EXTEND:
+        rows.append(
+            [
+                inline_button(i18n.BTN_REQUEST_EXTEND_30, callback_data=f"ar:e30:{rid}"),
+                inline_button(i18n.BTN_REQUEST_EXTEND_60, callback_data=f"ar:e60:{rid}"),
+            ]
+        )
+        rows.append([inline_button(i18n.BTN_REQUEST_EXTEND_CUSTOM, callback_data=f"ar:ec:{rid}")])
+        rows.append([inline_button(i18n.BTN_REQUEST_REJECT, callback_data=f"ar:r:{rid}")])
+    if not rows:
+        return None
+    return inline_keyboard(rows)
+
+
+def _run_async(coro) -> Any:
+    """Запустить корутину синхронно, не блокируя рабочий цикл бота."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+    # В потоке бота цикл уже крутится — выполняем в auxiliar-потоке со своим циклом,
+    # чтобы общий HTTP-клиент не привязался к чужому event loop.
+    box: dict[str, Any] = {}
+
+    def _target() -> None:
+        try:
+            telegram_api.reset_bot_api_client_for_tests()
+            box["value"] = asyncio.run(coro)
+        except BaseException as exc:  # нет права падать при уведомлении
+            box["exc"] = exc
+
+    thread = threading.Thread(target=_target, daemon=True)
+    thread.start()
+    thread.join(timeout=30)
+    if "exc" in box:
+        raise box["exc"]
+    return box.get("value")
+
+
 def _notify_admins_new_request(db: Session, request: UserAccessRequest) -> None:
-    bot_token = _get_setting(db, SETTING_BOT_TOKEN, "").strip()
-    if not bot_token:
+    bot_token = _bot_token(db)
+    if not bot_token or not get_feature_service().is_enabled("telegram"):
         return
     admins = (
         db.query(User)
@@ -236,6 +316,7 @@ def _notify_admins_new_request(db: Session, request: UserAccessRequest) -> None:
     )
     if not admins:
         return
+    history = format_requester_history(db, request.telegram_id)
     lines = [
         f"Новая заявка на доступ: {request.request_type}",
         f"Telegram: {request.telegram_name or request.telegram_id}",
@@ -244,12 +325,73 @@ def _notify_admins_new_request(db: Session, request: UserAccessRequest) -> None:
         lines.append(f"Ник: @{request.telegram_username}")
     if request.user_note:
         lines.append(f"Комментарий: {request.user_note}")
+    if history:
+        lines.append(f"История: {history}")
     text = "\n".join(lines)
+    keyboard = _admin_request_keyboard(db, request)
+    refs: list[dict[str, Any]] = []
     for admin in admins:
+        chat_id = str(admin.telegram_id)
         try:
-            send_tg_message(bot_token, str(admin.telegram_id), text, run_async=False)
-        except Exception as exc:  #never blocks submit
-            logger.warning("new request notify to admin %s failed: %s", admin.id, exc)
+            if request.receipt_file_id:
+                result = _run_async(
+                    telegram_api.send_photo(
+                        bot_token,
+                        chat_id,
+                        request.receipt_file_id,
+                        caption=text,
+                        reply_markup=keyboard,
+                    )
+                )
+            else:
+                payload: dict[str, Any] = {
+                    "chat_id": chat_id,
+                    "text": text,
+                    "parse_mode": "HTML",
+                    "link_preview_options": {"is_disabled": True},
+                }
+                if keyboard is not None:
+                    payload["reply_markup"] = keyboard
+                result = _run_async(telegram_api.call_bot_api(bot_token, "sendMessage", payload=payload))
+        except Exception as exc:  # никогда не блокирует подачу
+            logger.warning("new request card to admin %s failed: %s", admin.id, exc)
+            continue
+        if isinstance(result, dict) and result.get("message_id") is not None:
+            refs.append({"chat_id": chat_id, "message_id": int(result["message_id"])})
+    if refs:
+        request.admin_message_refs = json.dumps(refs, ensure_ascii=False)
+        db.add(request)
+        db.commit()
+
+
+def attach_receipt_from_update(
+    db: Session,
+    *,
+    request_id: int,
+    message: dict[str, Any],
+    telegram_id: str,
+) -> UserAccessRequest:
+    """Прикрепить чек-фото к pending-заявке requester'а (только фото, largest file_id)."""
+    photo = message.get("photo") if isinstance(message, dict) else None
+    if not photo:
+        raise ReceiptMustBePhoto("Пришлите чек фотографией (не файлом)")
+    telegram_id = str(telegram_id).strip()
+    _receipt_rate_limit.consume(
+        f"tg-receipt:{telegram_id}", _RECEIPT_LIMIT, _RECEIPT_WINDOW_SECONDS,
+        detail="Слишком много попыток прислать чек. Повторите позже.",
+    )
+    req = db.get(UserAccessRequest, int(request_id))
+    if req is None:
+        raise ValueError("Заявка не найдена")
+    if str(req.telegram_id) != telegram_id:
+        raise ValueError("Заявка не найдена")
+    if req.status != "pending":
+        raise ValueError("Заявка уже обработана")
+    req.receipt_file_id = str(photo[-1]["file_id"])
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    return req
 
 
 def format_requester_history(db: Session, telegram_id: str) -> str:
@@ -490,6 +632,15 @@ def reject_request(
     db.add(request)
     db.commit()
     db.refresh(request)
+    # Requester learns only the neutral fact (E1 — reason stays admin-only).
+    bot_token = _bot_token(db)
+    if bot_token and request.telegram_id:
+        try:
+            _run_async(
+                send_message(bot_token, str(request.telegram_id), "Вашу заявку рассмотрели администратором.")
+            )
+        except Exception as exc:  # уведомление не ломает решение
+            logger.warning("requester reject notify to %s failed: %s", request.telegram_id, exc)
     return request
 
 
@@ -604,6 +755,28 @@ def maybe_send_delivery_after_task(db: Session, *, user_id: int, created_count: 
     portal = user_link_response(db, get_or_create_user_portal_token(db, user_id=user_id))
     text = _delivery_text(portal["url"], None)
     send_message_sync_or_async(bot_token, str(user.telegram_id), text)
+
+
+async def sync_admin_request_messages(db: Session, req: UserAccessRequest, *, text: str) -> None:
+    """Отредактировать все карточки админов (убрать клавиатуру) после решения по заявке.
+
+    Писать в чужие чаты нельзя — только chat_id из admin_message_refs (личные чаты админов).
+    """
+    token = _bot_token(db)
+    if not token:
+        return
+    refs = json.loads(req.admin_message_refs or "[]")
+    for ref in refs:
+        try:
+            await edit_message_text(
+                token,
+                str(ref["chat_id"]),
+                int(ref["message_id"]),
+                text,
+                reply_markup={"inline_keyboard": []},
+            )
+        except Exception as exc:
+            logger.warning("sync request message %s failed: %s", ref, exc)
 
 
 def delete_user_write_archive(db: Session, user: User) -> None:

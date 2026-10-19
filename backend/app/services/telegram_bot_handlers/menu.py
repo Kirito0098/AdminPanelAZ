@@ -15,6 +15,7 @@ from app.services.telegram_bot_handlers.base import (
 from app.services.telegram_bot_handlers.ui import send_or_edit
 from app.services import telegram_bot_i18n as i18n
 from app.services.telegram_bot_handlers import settings_fsm
+from app.services.user_access_requests import _accept_requests
 
 _ADMIN_ACTIONS = frozenset({"settings", "nodes", "cidr", "warper", "awg2", "unlock"})
 
@@ -81,10 +82,11 @@ def _more_menu_row_actions(ctx: BotContext) -> list[list[str]]:
 
 def build_reply_keyboard(ctx: BotContext) -> dict:
     if not _linked_user_menu_visible(ctx):
-        return reply_keyboard(
-            [[reply_button(i18n.BTN_MENU_HELP)]],
-            placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER,
-        )
+        rows = [[reply_button(i18n.BTN_MENU_HELP)]]
+        if _accept_requests(ctx.db):
+            rows.append([reply_button(i18n.BTN_REQUEST_ACCESS)])
+        rows.append([reply_button(i18n.BTN_LINK_CODE)])
+        return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
 
     rows = [
         [
@@ -92,6 +94,7 @@ def build_reply_keyboard(ctx: BotContext) -> dict:
             reply_button(i18n.BTN_MENU_STATUS),
         ],
         [reply_button(i18n.BTN_MENU_MORE)],
+        [reply_button(i18n.BTN_REQUEST_MORE_CONFIG)],
     ]
     return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
 
@@ -170,6 +173,20 @@ async def _dispatch_action(ctx: BotContext, action: str, *, message_id: int | No
         from app.services.telegram_bot_handlers.unlock_codes import handle_unlock_codes_root
 
         await handle_unlock_codes_root(ctx, message_id=message_id)
+    elif action == "request_access":
+        from app.services.telegram_bot_handlers.access_requests import (
+            handle_request_access,
+        )
+
+        await handle_request_access(ctx)
+    elif action == "request_more_config":
+        from app.services.telegram_bot_handlers.access_requests import (
+            handle_request_more_config,
+        )
+
+        await handle_request_more_config(ctx)
+    elif action == "link_code":
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.REQUEST_LINK_HINT)
 
 
 async def handle_menu_text(ctx: BotContext, text: str) -> bool:

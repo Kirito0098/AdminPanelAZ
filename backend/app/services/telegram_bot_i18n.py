@@ -107,9 +107,39 @@ MENU_ACTIONS: dict[str, str] = {
     BTN_MENU_CIDR: "cidr",
     BTN_MENU_WARPER: "warper",
     BTN_MENU_AWG2: "awg2",
+    "Запросить доступ": "request_access",
+    "Запросить ещё конфиг": "request_more_config",
+    "У меня есть код привязки": "link_code",
     # Старые подписи кнопок (до обновления меню)
     "🌐 AZ-WARP": "warper",
 }
+
+# --- Access requests (Stage 2) ---
+
+BTN_REQUEST_ACCESS = "Запросить доступ"
+BTN_REQUEST_MORE_CONFIG = "Запросить ещё конфиг"
+BTN_LINK_CODE = "У меня есть код привязки"
+
+BTN_REQUEST_APPROVE = "Одобрить"
+BTN_REQUEST_APPROVE_MORE = "Одобрить (+1)"
+BTN_REQUEST_REJECT = "Отклонить"
+BTN_REQUEST_EXTEND_30 = "+30"
+BTN_REQUEST_EXTEND_60 = "+60"
+BTN_REQUEST_EXTEND_CUSTOM = "Свой срок"
+
+REQUESTS_CLOSED = "Приём заявок временно закрыт"
+RECEIPT_NOT_PHOTO = "Пришлите чек фотографией (не файлом)"
+REQUEST_ALREADY_DECIDED = "Заявка уже обработана"
+REQUEST_E1 = "Заявка не может быть принята, напишите администратору"
+REQUEST_SUBMITTED = "Заявка отправлена администратору. Ожидайте решения."
+REQUEST_MORE_SUBMITTED = "Заявка на ещё один конфиг отправлена администратору. Ожидайте решения."
+REQUEST_RECEIPT_OK = "Чек принят. Администратор проверит оплату."
+REQUEST_LINK_HINT = "Привязка: отправьте боту <code>/link &lt;код&gt;</code>. Код — в панели: «Мой профиль» → Telegram."
+ADMIN_NO_RIGHTS = "Недостаточно прав."
+ADMIN_REQUEST_APPROVED = "✅ Одобрено в веб-панели: {admin}"
+ADMIN_REQUEST_REJECTED = "❌ Отклонено в веб-панели: {admin}"
+REQUEST_OPEN_IN_PANEL = "Параметры заявки настройте в веб-панели: <code>/users?request={request_id}</code>"
+REQUEST_EXTEND_CUSTOM_TEXT = "Задайте срок доступа в веб-панели по заявке."
 
 BOT_COMMANDS: tuple[tuple[str, str], ...] = (
     ("start", "Главное меню"),
