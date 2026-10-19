@@ -1747,6 +1747,7 @@ def _run_db_migrations() -> None:
     _migrate_user_telegram_backfill()
     _migrate_user_access_until_backfill()
     _migrate_users_provisioning()
+    _migrate_user_provisioning_stage2()
     _migrate_revoke_unmanaged_client_portal_links()
     _seed_client_templates_for_nodes()
 
@@ -1813,6 +1814,196 @@ def _migrate_users_provisioning() -> None:
                 )
             )
             logger.info("DB migration: created user_node_assignments table")
+
+
+def _migrate_user_provisioning_stage2() -> None:
+    """Stage 2: admin_panel_notifications, provisioning_presets, user_access_requests,
+    telegram_request_bans, telegram_user_archive; users.last_read_notification_id."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    with _migration_transaction() as conn:
+        if "admin_panel_notifications" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE admin_panel_notifications (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        category VARCHAR(16) NOT NULL,
+                        level VARCHAR(16) NOT NULL DEFAULT 'info',
+                        event_type VARCHAR(64) NOT NULL,
+                        title VARCHAR(200) NOT NULL,
+                        message TEXT NOT NULL DEFAULT '',
+                        action_payload TEXT,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_admin_panel_notifications_category "
+                    "ON admin_panel_notifications (category)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_admin_panel_notifications_event_type "
+                    "ON admin_panel_notifications (event_type)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_admin_panel_notifications_created_at "
+                    "ON admin_panel_notifications (created_at)"
+                )
+            )
+            logger.info("DB migration: created admin_panel_notifications table")
+
+        if "provisioning_presets" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE provisioning_presets (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        name VARCHAR(64) NOT NULL UNIQUE,
+                        node_ids TEXT NOT NULL DEFAULT '[]',
+                        protocols TEXT NOT NULL DEFAULT '[]',
+                        config_count INTEGER NOT NULL DEFAULT 1,
+                        config_quota INTEGER,
+                        traffic_limit_bytes BIGINT,
+                        access_days INTEGER,
+                        is_default INTEGER NOT NULL DEFAULT 0,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_provisioning_presets_name "
+                    "ON provisioning_presets (name)"
+                )
+            )
+            logger.info("DB migration: created provisioning_presets table")
+
+        if "user_access_requests" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE user_access_requests (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        request_type VARCHAR(16) NOT NULL,
+                        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                        telegram_id VARCHAR(32) NOT NULL,
+                        telegram_username VARCHAR(64),
+                        telegram_name VARCHAR(128),
+                        requested_count INTEGER NOT NULL DEFAULT 1,
+                        user_note VARCHAR(256),
+                        status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                        admin_message_refs TEXT,
+                        reviewed_by_id INTEGER REFERENCES users(id),
+                        reviewed_at DATETIME,
+                        reject_reason VARCHAR(256),
+                        delivered_at DATETIME,
+                        receipt_file_id VARCHAR(256),
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_access_requests_request_type "
+                    "ON user_access_requests (request_type)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_access_requests_user_id "
+                    "ON user_access_requests (user_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_access_requests_telegram_id "
+                    "ON user_access_requests (telegram_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_access_requests_status "
+                    "ON user_access_requests (status)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_access_requests_created_at "
+                    "ON user_access_requests (created_at)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_request_per_tg_type "
+                    "ON user_access_requests (telegram_id, request_type) WHERE status = 'pending'"
+                )
+            )
+            logger.info("DB migration: created user_access_requests table")
+
+        if "telegram_request_bans" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE telegram_request_bans (
+                        telegram_id VARCHAR(32) NOT NULL PRIMARY KEY,
+                        banned_by_id INTEGER REFERENCES users(id),
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        note VARCHAR(256)
+                    )
+                    """
+                )
+            )
+            logger.info("DB migration: created telegram_request_bans table")
+
+        if "telegram_user_archive" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE telegram_user_archive (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        telegram_id VARCHAR(32) NOT NULL,
+                        username VARCHAR(64) NOT NULL,
+                        created_at DATETIME,
+                        deleted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        last_access_until DATETIME,
+                        last_term_days INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_telegram_user_archive_telegram_id "
+                    "ON telegram_user_archive (telegram_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_telegram_user_archive_deleted_at "
+                    "ON telegram_user_archive (deleted_at)"
+                )
+            )
+            logger.info("DB migration: created telegram_user_archive table")
+
+    if "users" in tables:
+        with _migration_transaction() as conn:
+            if "last_read_notification_id" not in _table_columns(conn, "users"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE users ADD COLUMN last_read_notification_id INTEGER"
+                    )
+                )
+                logger.info("DB migration: added users.last_read_notification_id")
 
 
 def _migrate_user_config_access_table() -> None:

@@ -104,6 +104,7 @@ class User(Base):
     panel_login_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     provision_state: Mapped[str] = mapped_column(String(16), default="unmanaged")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_read_notification_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     vpn_configs: Mapped[list["VpnConfig"]] = relationship(back_populates="owner")
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user")
@@ -970,3 +971,84 @@ class SharedState(Base):
     key: Mapped[str] = mapped_column(String(128), primary_key=True)
     payload: Mapped[str] = mapped_column(Text, nullable=False)
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)
+
+
+class AdminPanelNotification(Base):
+    __tablename__ = "admin_panel_notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    category: Mapped[str] = mapped_column(String(16), index=True)
+    level: Mapped[str] = mapped_column(String(16), default="info")
+    event_type: Mapped[str] = mapped_column(String(64), index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    message: Mapped[str] = mapped_column(Text, default="")
+    action_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class ProvisioningPreset(Base):
+    __tablename__ = "provisioning_presets"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    node_ids: Mapped[str] = mapped_column(Text, default="[]")
+    protocols: Mapped[str] = mapped_column(Text, default="[]")
+    config_count: Mapped[int] = mapped_column(Integer, default=1)
+    config_quota: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    traffic_limit_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    access_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class UserAccessRequest(Base):
+    __tablename__ = "user_access_requests"
+    __table_args__ = (
+        Index(
+            "uq_pending_request_per_tg_type",
+            "telegram_id",
+            "request_type",
+            unique=True,
+            sqlite_where=text("status = 'pending'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    request_type: Mapped[str] = mapped_column(String(16), index=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    telegram_id: Mapped[str] = mapped_column(String(32), index=True)
+    telegram_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    telegram_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    requested_count: Mapped[int] = mapped_column(Integer, default=1)
+    user_note: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    admin_message_refs: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    reject_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    receipt_file_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class TelegramRequestBan(Base):
+    __tablename__ = "telegram_request_bans"
+
+    telegram_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    banned_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    note: Mapped[str | None] = mapped_column(String(256), nullable=True)
+
+
+class TelegramUserArchive(Base):
+    __tablename__ = "telegram_user_archive"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    telegram_id: Mapped[str] = mapped_column(String(32), index=True)
+    username: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    last_access_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_term_days: Mapped[int | None] = mapped_column(Integer, nullable=True)

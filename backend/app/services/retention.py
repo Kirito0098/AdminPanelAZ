@@ -20,6 +20,11 @@ from app.models import (
     UserTrafficSample,
 )
 
+from app.models import (
+    AdminPanelNotification,
+    TelegramUserArchive,
+    UserAccessRequest,
+)
 from app.services.server_reboot import ACTIVE_STATUSES as REBOOT_ACTIVE_STATUSES
 from app.services.telegram_update_dedup import PROCESSED_UPDATE_RETENTION
 from app.services.shared_helpers import utcnow_naive as _utcnow
@@ -28,6 +33,11 @@ from app.services.shared_helpers import utcnow_naive as _utcnow
 REFRESH_TOKEN_EXPIRED_GRACE_DAYS = 7
 REBOOT_REQUEST_RETENTION_DAYS = 30
 BUFFER_GUARD_EVENT_RETENTION_DAYS = 30
+
+NOTIFICATION_RETENTION_DAYS = 30
+RECEIPT_CLEAR_DAYS = 30
+ARCHIVE_RETENTION_DAYS = 365
+PENDING_REQUEST_EXPIRE_DAYS = 14
 
 
 def _purge_where(db: Session, model, *criteria, batch_size: int) -> int:
@@ -143,6 +153,48 @@ def run_retention_purge(db: Session) -> dict[str, int]:
         db,
         PanelResourceSample,
         now - timedelta(days=panel_days),
+        batch_size=batch_size,
+    )
+
+    # Notifications older than 30 days are purged from the bell center.
+    counts["admin_panel_notifications"] = _purge_model_before(
+        db,
+        AdminPanelNotification,
+        now - timedelta(days=NOTIFICATION_RETENTION_DAYS),
+        batch_size=batch_size,
+    )
+
+    # Pending requests older than 14 days expire.
+    expired = (
+        db.query(UserAccessRequest)
+        .filter(
+            UserAccessRequest.status == "pending",
+            UserAccessRequest.created_at < now - timedelta(days=PENDING_REQUEST_EXPIRE_DAYS),
+        )
+        .update({UserAccessRequest.status: "expired"}, synchronize_session=False)
+    )
+    db.commit()
+    counts["user_access_requests_expired"] = int(expired or 0)
+
+    # receipt_file_id is cleared on decided requests after 30 days.
+    cleared = (
+        db.query(UserAccessRequest)
+        .filter(
+            UserAccessRequest.receipt_file_id.isnot(None),
+            UserAccessRequest.status != "pending",
+            UserAccessRequest.reviewed_at.isnot(None),
+            UserAccessRequest.reviewed_at < now - timedelta(days=RECEIPT_CLEAR_DAYS),
+        )
+        .update({UserAccessRequest.receipt_file_id: None}, synchronize_session=False)
+    )
+    db.commit()
+    counts["receipt_file_id_cleared"] = int(cleared or 0)
+
+    # Telegram user archive is purged after 12 months (tracked by deleted_at).
+    counts["telegram_user_archive"] = _purge_where(
+        db,
+        TelegramUserArchive,
+        TelegramUserArchive.deleted_at < now - timedelta(days=ARCHIVE_RETENTION_DAYS),
         batch_size=batch_size,
     )
 
