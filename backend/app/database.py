@@ -2024,7 +2024,9 @@ def _migrate_user_portal_banner() -> None:
 def _migrate_users_stage3() -> None:
     """Stage 3: user suspend/traffic-limit columns and unlock_codes.comment."""
     inspector = inspect(engine)
-    tables = {r[0] for r in inspector.get_table_names()}
+    # get_table_names() returns list[str] — must use set(...), not {r[0] for r in ...}
+    # (r[0] would be the first character of each name, so "users" never matches).
+    tables = set(inspector.get_table_names())
 
     with _migration_transaction() as conn:
         if "users" in tables:

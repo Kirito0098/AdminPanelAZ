@@ -171,6 +171,7 @@ def test_approve_new_user_creates_bound_user(
     assert decided.status == "approved"
     assert decided.reviewed_by_id == admin.id
     user = db.query(User).filter(User.telegram_id == "111").one()
+    assert decided.user_id == user.id  # delivery lookup after provision
     assert user.panel_login_enabled is False
     assert user.can_create_configs is False
     assert user.client_base_name == "ivan_user"

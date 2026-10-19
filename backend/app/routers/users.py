@@ -732,7 +732,7 @@ def reject_access_request(
     return AccessRequestResponse.model_validate(decided)
 
 
-@router.get("/users/requests/{request_id}/receipt")
+@router.get("/requests/{request_id}/receipt")
 def get_request_receipt(
     request_id: int,
     admin: User = Depends(require_admin),

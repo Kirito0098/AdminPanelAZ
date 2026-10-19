@@ -109,10 +109,14 @@ class User(Base):
     # Stage 3: admin suspend/resume + per-user traffic limit.
     suspended_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     suspend_reason: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    suspend_reason_visible: Mapped[bool] = mapped_column(Boolean, default=False)
+    suspend_reason_visible: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
     traffic_limit_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     traffic_counter_reset_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    traffic_limit_blocked: Mapped[bool] = mapped_column(Boolean, default=False)
+    traffic_limit_blocked: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0"
+    )
     # Stage 4: баннер портала для пользователей без привязанного Telegram.
     portal_banner_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     portal_banner_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

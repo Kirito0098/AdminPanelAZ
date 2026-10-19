@@ -38,9 +38,11 @@ from app.models import (
     QrDownloadAuditLog,
     QrDownloadToken,
     RefreshToken,
+    TelegramRequestBan,
     UnlockCode,
     UnlockCodeRedemption,
     User,
+    UserAccessRequest,
     UserActionLog,
     UserConfigAccess,
     UserNodeAssignment,
@@ -557,6 +559,19 @@ def purge_user_before_delete(db: Session, user: User, successor: User) -> None:
     )
     db.query(UserActionLog).filter(UserActionLog.user_id == user.id).update(
         {UserActionLog.user_id: None},
+        synchronize_session=False,
+    )
+    # Stage 2: заявки / баны ссылаются на users без ON DELETE CASCADE.
+    db.query(UserAccessRequest).filter(UserAccessRequest.reviewed_by_id == user.id).update(
+        {UserAccessRequest.reviewed_by_id: None},
+        synchronize_session=False,
+    )
+    db.query(UserAccessRequest).filter(UserAccessRequest.user_id == user.id).update(
+        {UserAccessRequest.user_id: None},
+        synchronize_session=False,
+    )
+    db.query(TelegramRequestBan).filter(TelegramRequestBan.banned_by_id == user.id).update(
+        {TelegramRequestBan.banned_by_id: None},
         synchronize_session=False,
     )
 

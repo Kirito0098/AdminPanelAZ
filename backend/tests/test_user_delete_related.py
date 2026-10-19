@@ -59,11 +59,13 @@ def _dummy(column, tag: str) -> object:
 
 def _insert_row(db, table_name: str, user_column: str, user_id: int) -> None:
     table = Base.metadata.tables[table_name]
-    values = {
-        column.name: _dummy(column, f"{user_column}-{user_id}")
-        for column in table.columns
-        if not column.primary_key and not column.nullable
-    }
+    values = {}
+    for column in table.columns:
+        # Skip autoincrement integer PKs; fill string/composite PKs (e.g. telegram_id).
+        if column.primary_key and isinstance(column.type, Integer):
+            continue
+        if column.primary_key or not column.nullable:
+            values[column.name] = _dummy(column, f"{user_column}-{user_id}")
     values[user_column] = user_id
     names = ", ".join(values)
     params = ", ".join(f":{name}" for name in values)

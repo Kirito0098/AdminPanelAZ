@@ -525,9 +525,10 @@ def approve_request(
 ) -> UserAccessRequest | None:
     """Одобрить заявку.
 
-    Условное обновление pending→approved; при проигрыше гонки — AlreadyDecided.
-    Для new_user перепроверяет привязку Telegram → TelegramAlreadyBound.
-    Вызывает deliver_approved_request после смены статуса.
+    Сначала условный claim pending→approved (гонка → AlreadyDecided), затем
+    побочные эффекты. Для new_user: привязка Telegram → TelegramAlreadyBound;
+    после создания пользователя пишется ``request.user_id`` (нужно для
+    ``maybe_send_delivery_after_task``).
     """
     request = db.get(UserAccessRequest, request_id)
     if request is None:
@@ -537,8 +538,9 @@ def approve_request(
 
     plan: dict[str, Any] | None = None
     user: User | None = None
+
+    # Pre-checks without mutating plan/user (so a lost race leaves no orphans).
     if request.request_type == REQUEST_TYPE_NEW_USER:
-        # Перепроверка привязки Telegram на момент одобрения.
         bound = _is_bound(db, request.telegram_id)
         if bound is not None:
             raise TelegramAlreadyBound(
@@ -553,32 +555,17 @@ def approve_request(
             validate_plan_nodes(db, plan["node_ids"])
         except HTTPException as exc:
             raise ValueError(exc.detail if isinstance(exc.detail, str) else "Неверные узлы плана") from exc
-        user = _create_user_for_request(db, request, plan, actor_username=admin.username)
     elif request.request_type == REQUEST_TYPE_ADD_CONFIG:
         plan = _resolve_plan(db, request, preset_id=None, ad_hoc=ad_hoc)
         user = db.get(User, request.user_id) if request.user_id else None
         if user is None:
             raise ValueError("Пользователь заявки не найден")
-        # Добавляем запрошенное число имён в план пользователя.
-        from app.services.user_provisioning import plan_add_index
-
-        for _ in range(max(1, int(plan["count"]))):
-            plan_add_index(db, user)
-        db.commit()
-        db.refresh(user)
     elif request.request_type == REQUEST_TYPE_EXTEND:
         plan = _resolve_plan(db, request, preset_id=None, ad_hoc=ad_hoc)
         user = db.get(User, request.user_id) if request.user_id else None
         if user is None:
             raise ValueError("Пользователь заявки не найден")
-        from app.services.user_subscription import set_user_access_until
 
-        new_until = max(datetime.now(timezone.utc).replace(tzinfo=None), user.access_until or datetime.now(timezone.utc).replace(tzinfo=None)) + timedelta(
-            days=int(plan["days"])
-        )
-        set_user_access_until(db, user, new_until, actor=admin.username, sync_clients=False, commit=True)
-
-    # Условный переход pending → approved (защита от двойного одобрения).
     updated = (
         db.query(UserAccessRequest)
         .filter(UserAccessRequest.id == request_id, UserAccessRequest.status == "pending")
@@ -596,7 +583,29 @@ def approve_request(
         raise AlreadyDecided("Заявка уже обработана")
     db.refresh(request)
 
-    # Доставка (Task 9): new_user/add_config создают пользователя и ставят задачу provision.
+    if request.request_type == REQUEST_TYPE_NEW_USER:
+        assert plan is not None
+        user = _create_user_for_request(db, request, plan, actor_username=admin.username)
+        request.user_id = user.id
+        db.add(request)
+        db.commit()
+        db.refresh(request)
+    elif request.request_type == REQUEST_TYPE_ADD_CONFIG:
+        assert user is not None and plan is not None
+        from app.services.user_provisioning import plan_add_index
+
+        for _ in range(max(1, int(plan["count"]))):
+            plan_add_index(db, user)
+        db.commit()
+        db.refresh(user)
+    elif request.request_type == REQUEST_TYPE_EXTEND:
+        assert user is not None and plan is not None
+        from app.services.user_subscription import set_user_access_until
+
+        now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+        new_until = max(now_naive, user.access_until or now_naive) + timedelta(days=int(plan["days"]))
+        set_user_access_until(db, user, new_until, actor=admin.username, sync_clients=False, commit=True)
+
     if request.request_type in (REQUEST_TYPE_NEW_USER, REQUEST_TYPE_ADD_CONFIG):
         assert user is not None
         deliver_approved_request(db, request=request, user=user, plan=plan, actor=admin)
@@ -611,16 +620,34 @@ def reject_request(
     reason: str | None = None,
     ban: bool = False,
 ) -> UserAccessRequest | None:
-    """Отклонить заявку. Опционально забанить telegram_id."""
+    """Отклонить заявку. Опционально забанить telegram_id.
+
+    Условный claim pending→rejected (как у approve) — гонка → AlreadyDecided.
+    """
     request = db.get(UserAccessRequest, request_id)
     if request is None:
         return None
     if request.status != "pending":
         raise AlreadyDecided("Заявка уже обработана")
-    request.status = "rejected"
-    request.reviewed_by_id = admin.id
-    request.reviewed_at = datetime.utcnow()
-    request.reject_reason = reason
+
+    updated = (
+        db.query(UserAccessRequest)
+        .filter(UserAccessRequest.id == request_id, UserAccessRequest.status == "pending")
+        .update(
+            {
+                UserAccessRequest.status: "rejected",
+                UserAccessRequest.reviewed_by_id: admin.id,
+                UserAccessRequest.reviewed_at: datetime.utcnow(),
+                UserAccessRequest.reject_reason: reason,
+            },
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    if updated == 0:
+        raise AlreadyDecided("Заявка уже обработана")
+    db.refresh(request)
+
     if ban:
         ban_row = (
             db.query(TelegramRequestBan)
@@ -629,9 +656,8 @@ def reject_request(
         )
         if ban_row is None:
             db.add(TelegramRequestBan(telegram_id=request.telegram_id, banned_by_id=admin.id, note=reason))
-    db.add(request)
-    db.commit()
-    db.refresh(request)
+            db.commit()
+
     # Requester learns only the neutral fact (E1 — reason stays admin-only).
     bot_token = _bot_token(db)
     if bot_token and request.telegram_id:
