@@ -151,6 +151,35 @@ async def handle_admin_request_callback(
     """Админские callback по заявке: ar:a:{id} / ar:r:{id} / ar:e30:{id} / ar:e60:{id} / ar:ec:{id}."""
     if not data.startswith("ar:"):
         return False
+    # «Запросить продление у админа» из напоминания — доступно любому привязанному пользователю.
+    if data == "ar:ext":
+        if ctx.user is None:
+            await send_message(ctx.bot_token, ctx.chat_id, i18n.UNLINKED)
+            await _tg_answer(ctx.bot_token, callback_id)
+            return True
+        try:
+            submit_access_request(
+                ctx.db,
+                request_type="extend_access",
+                telegram_id=ctx.telegram_user_id,
+                user_id=ctx.user.id,
+                requested_count=1,
+            )
+        except RequestsClosed as exc:
+            await send_message(ctx.bot_token, ctx.chat_id, str(exc) or i18n.REQUESTS_CLOSED)
+            await _tg_answer(ctx.bot_token, callback_id)
+            return True
+        except AlreadyPending as exc:
+            await send_message(ctx.bot_token, ctx.chat_id, str(exc))
+            await _tg_answer(ctx.bot_token, callback_id)
+            return True
+        except NotBound:
+            await send_message(ctx.bot_token, ctx.chat_id, "Ваш Telegram не привязан к пользователю панели.")
+            await _tg_answer(ctx.bot_token, callback_id)
+            return True
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.REQUEST_MORE_SUBMITTED)
+        await _tg_answer(ctx.bot_token, callback_id)
+        return True
     if not is_admin(ctx.user):
         await _tg_answer(ctx.bot_token, callback_id, text=i18n.ADMIN_NO_RIGHTS, show_alert=True)
         return True

@@ -1250,6 +1250,8 @@ class TelegramSettingsResponse(BaseModel):
     relay_last_error: str = ""
     relay_last_node: str = ""
     relay_check: list[TelegramRelayCheck] = Field(default_factory=list)
+    accept_access_requests: bool = False
+    pending_request_cap: int = 50
 
 
 class TelegramRelayUpdate(BaseModel):
@@ -1279,6 +1281,8 @@ class TelegramSettingsUpdate(BaseModel):
     legacy_login_enabled: bool | None = None
     bot_command_rate_max: int | None = Field(default=None, ge=0, le=1000)
     bot_command_rate_window_seconds: int | None = Field(default=None, ge=10, le=3600)
+    accept_access_requests: bool | None = None
+    pending_request_cap: int | None = Field(default=None, ge=0, le=10000)
 
 
 class SelfServiceLimitsResponse(BaseModel):

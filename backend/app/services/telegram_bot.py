@@ -320,6 +320,10 @@ class TelegramBotService:
 
         if not data or not telegram_user_id or _is_shared_chat(chat):
             return
+        # Stage 2 privacy 6.9: заявки и админские колбэки — только из личного чата,
+        # когда chat.id == from.id (никогда не чужой/групповой id).
+        if chat.get("id") != from_user.get("id"):
+            return
 
         ctx = _build_context(
             db,

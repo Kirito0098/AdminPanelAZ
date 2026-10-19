@@ -722,6 +722,8 @@ export interface TelegramSettings {
   relay_last_error: string
   relay_last_node: string
   relay_check: TelegramRelayCheck[]
+  accept_access_requests: boolean
+  pending_request_cap: number
 }
 
 export interface TelegramLinkCode {
@@ -2531,6 +2533,70 @@ export interface UserTrafficStatRow {
 export interface TelegramLinkCodeResponse {
   code: string
   expires_in_seconds: number
+}
+
+export interface PresetBase {
+  name: string
+  node_ids: number[]
+  protocols: string[]
+  config_count: number
+  config_quota: number | null
+  traffic_limit_bytes: number | null
+  access_days: number | null
+  is_default: boolean
+}
+
+export type PresetCreate = PresetBase
+
+export interface PresetUpdate {
+  name?: string
+  node_ids?: number[]
+  protocols?: string[]
+  config_count?: number
+  config_quota?: number | null
+  traffic_limit_bytes?: number | null
+  access_days?: number | null
+  is_default?: boolean
+}
+
+export interface PresetResponse extends PresetBase {
+  id: number
+  created_at: string
+}
+
+export interface AccessRequestResponse {
+  id: number
+  request_type: string
+  user_id: number | null
+  telegram_id: string
+  telegram_username: string | null
+  telegram_name: string | null
+  requested_count: number
+  user_note: string | null
+  status: string
+  reviewed_by_id: number | null
+  reviewed_at: string | null
+  reject_reason: string | null
+  delivered_at: string | null
+  receipt_file_id: string | null
+  created_at: string
+}
+
+export interface ApproveRequest {
+  preset_id?: number
+  node_ids?: number[]
+  protocols?: string[]
+  config_count?: number
+  access_until?: string | null
+  traffic_limit_bytes?: number | null
+  username?: string
+  count?: number
+  days?: number
+}
+
+export interface RejectRequest {
+  reason?: string | null
+  ban?: boolean
 }
 
 export interface ConfirmDeletionsPayload {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Navigate, useParams, useNavigate } from 'react-router-dom'
-import { MoreHorizontal, UserPlus, Users } from 'lucide-react'
+import { MoreHorizontal, Ticket, UserPlus, Users } from 'lucide-react'
 import {
   ApiError,
   deleteUser,
@@ -11,6 +11,9 @@ import {
   createProvisionedUser,
   deleteProvisionedUser,
   getProvisioning,
+  listRequests,
+  approveRequest,
+  rejectRequest,
 } from '@/api/users'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
@@ -41,6 +44,9 @@ export default function UsersPage() {
   const [filter, setFilter] = useState<string>('all')
   const [search, setSearch] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
+  const [requestsOpen, setRequestsOpen] = useState(false)
+  const [requests, setRequests] = useState<{ id: number; request_type: string; telegram_id: string; telegram_name: string | null; status: string; created_at: string }[]>([])
+  const [requestsLoading, setRequestsLoading] = useState(false)
 
   const provisioningOn = isEnabled('user_provisioning')
 
@@ -62,6 +68,46 @@ export default function UsersPage() {
       cancelled = true
     }
   }, [notifyError])
+
+  useEffect(() => {
+    if (!provisioningOn) return
+    let cancelled = false
+    const loadRequests = async () => {
+      setRequestsLoading(true)
+      try {
+        const list = await listRequests({ status: 'pending' })
+        if (!cancelled) setRequests(list)
+      } catch {
+        /* вложенная опциональна */
+      } finally {
+        if (!cancelled) setRequestsLoading(false)
+      }
+    }
+    void loadRequests()
+    return () => {
+      cancelled = true
+    }
+  }, [provisioningOn, notifyError])
+
+  const handleApproveRequest = async (requestId: number, presetId?: number) => {
+    try {
+      await approveRequest(requestId, { preset_id: presetId ?? undefined })
+      setRequests((prev) => prev.filter((r) => r.id !== requestId))
+      success('Заявка одобрена')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка одобрения')
+    }
+  }
+
+  const handleRejectRequest = async (requestId: number) => {
+    try {
+      await rejectRequest(requestId, { ban: false })
+      setRequests((prev) => prev.filter((r) => r.id !== requestId))
+      success('Заявка отклонена')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка отказа')
+    }
+  }
 
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -115,6 +161,7 @@ export default function UsersPage() {
     panel_login_enabled: boolean
     password?: string | null
     telegram_id?: string | null
+    preset_id?: number | null
   }) => {
     try {
       const created = await createProvisionedUser({
@@ -214,6 +261,25 @@ export default function UsersPage() {
             <UserPlus size={15} />
             Создать пользователя
           </Button>
+          {provisioningOn && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setRequestsOpen(true)}
+              aria-label="Заявки на доступ"
+              className="relative"
+            >
+              <Ticket size={14} />
+              Заявки
+              {requests.length > 0 && (
+                <span className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center">
+                  <Badge variant="destructive" className="text-[10px] px-1.5">
+                    {requests.length}
+                  </Badge>
+                </span>
+              )}
+            </Button>
+          )}
         </CardHeader>
         <CardContent className="space-y-4 p-4 sm:p-5">
           <div className="flex flex-wrap items-center gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -372,6 +438,57 @@ export default function UsersPage() {
           onCreate={handleCreate}
         />
       ) : null}
+
+      {provisioningOn && requestsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center" role="dialog" aria-modal="true">
+          <div className="fixed inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setRequestsOpen(false)} />
+          <div className="relative bg-background w-full max-w-2xl p-4 max-h-[80vh] overflow-y-auto shadow-xl rounded-lg border">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold">Заявки на доступ</h2>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setRequestsOpen(false)}>
+                Закрыть
+              </Button>
+            </div>
+            {requestsLoading ? (
+              <Spinner label="Загрузка заявок…" />
+            ) : requests.length === 0 ? (
+              <div className="text-center py-8 text-sm text-muted-foreground">Нет ожидающих заявок</div>
+            ) : (
+              <div className="space-y-2">
+                {requests.map((r) => (
+                  <div key={r.id} className="flex items-center justify-between gap-3 rounded-lg border p-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium text-sm">{r.telegram_name || r.telegram_id}</p>
+                      <p className="text-xs text-muted-foreground">
+                        TG {r.telegram_id} · {r.request_type} · {new Date(r.created_at).toLocaleString('ru-RU')}
+                      </p>
+                    </div>
+                    <div className="flex gap-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="default"
+                        onClick={() => void handleApproveRequest(r.id)}
+                        disabled={r.request_type === 'new_user'}
+                      >
+                        Одобрить
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => void handleRejectRequest(r.id)}
+                      >
+                        Отклонить
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

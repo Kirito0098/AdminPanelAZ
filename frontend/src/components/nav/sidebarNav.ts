@@ -27,6 +27,7 @@ export type SidebarNavItem = {
   adminOnly: boolean
   featureKey: string | null
   featureAnyOf?: readonly string[]
+  badge?: number
 }
 
 type SidebarNavGroup = {

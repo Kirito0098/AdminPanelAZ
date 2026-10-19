@@ -1,11 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { LogOut, Menu, Moon, Radio, Shield, Sun, User } from 'lucide-react'
 import NodeSelector from '@/components/NodeSelector'
 import NotificationBell from '@/components/notifications/NotificationBell'
 import ActiveNodeChangedBanner from '@/components/ActiveNodeChangedBanner'
 import HaScopeEnforcer from '@/components/HaScopeEnforcer'
+import { fetchNotifications } from '@/api/notifications'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
@@ -71,6 +73,11 @@ function SidebarNavLink({
             <Icon size={17} strokeWidth={2} />
           </span>
           <span className="min-w-0 truncate leading-snug">{item.label}</span>
+          {item.badge != null && item.badge > 0 ? (
+            <Badge variant="destructive" className="text-[10px] shrink-0">
+              {item.badge > 9 ? '9+' : item.badge}
+            </Badge>
+          ) : null}
         </>
       )}
     </NavLink>
@@ -81,6 +88,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { user, logout } = useAuth()
   const { isEnabled } = useFeatureModules()
   const { theme, toggleTheme } = useTheme()
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0)
   const initials = user?.username?.slice(0, 2).toUpperCase() ?? '?'
   const isAdmin = user?.role === 'admin'
   const profileItem: SidebarNavItem = {
@@ -92,6 +100,29 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     featureKey: null,
   }
   let visibleGroups = getVisibleSidebarNavGroups(user?.role, isEnabled)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchNotifications({ limit: 1 })
+      .then((data) => {
+        if (!cancelled) setPendingRequestsCount(data.pending_requests_count)
+      })
+      .catch(() => {
+        // бейдж не критичен — оставляем 0
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  visibleGroups = visibleGroups.map((group) => ({
+    ...group,
+    items: group.items.map((item) =>
+      item.to === '/users'
+        ? { ...item, badge: pendingRequestsCount }
+        : item,
+    ),
+  }))
 
   if (!isAdmin) {
     const panelIndex = visibleGroups.findIndex((group) => group.label === 'Панель')

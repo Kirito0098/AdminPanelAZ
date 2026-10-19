@@ -1,5 +1,11 @@
 import { apiFetch, apiFetchResponse } from './http'
 import type {
+  AccessRequestResponse,
+  ApproveRequest,
+  PresetCreate,
+  PresetResponse,
+  PresetUpdate,
+  RejectRequest,
   TelegramLinkCodeResponse,
   UserProvisionedCreate,
   UserProvisionedResponse,
@@ -134,4 +140,68 @@ export async function createUserTelegramLinkCode(userId: number) {
 
 export async function deleteProvisionedUser(userId: number) {
   return apiFetch<{ message: string }>(`/users/${userId}`, { method: 'DELETE' })
+}
+
+/* ------------------------- пресеты предоставления доступа ------------------------- */
+
+export interface PresetSummary {
+  id: number
+  name: string
+  node_ids: number[]
+  protocols: string[]
+  config_count: number
+  config_quota: number | null
+  traffic_limit_bytes: number | null
+  access_days: number | null
+  is_default: boolean
+  created_at: string
+}
+
+/** GET /users/presets — список шаблонов (только если модуль включён). */
+export async function listPresets() {
+  return apiFetch<PresetResponse[]>('/users/presets')
+}
+
+/** POST /users/presets — создать шаблон. */
+export async function createPreset(data: PresetCreate) {
+  return apiFetch<PresetResponse>('/users/presets', { method: 'POST', body: JSON.stringify(data) })
+}
+
+/** PUT /users/presets/{id} — обновить шаблон. */
+export async function updatePreset(presetId: number, data: PresetUpdate) {
+  return apiFetch<PresetResponse>(`/users/presets/${presetId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+/** DELETE /users/presets/{id} — удалить шаблон. */
+export async function deletePreset(presetId: number) {
+  return apiFetch<{ message: string }>(`/users/presets/${presetId}`, { method: 'DELETE' })
+}
+
+/* ------------------------- заявки на доступ ------------------------- */
+
+/** GET /users/requests — список заявок (с фильтрами ?status=&type=). */
+export async function listRequests(params?: { status?: string; type?: string }) {
+  const qs = new URLSearchParams()
+  if (params?.status) qs.set('status', params.status)
+  if (params?.type) qs.set('type', params.type)
+  return apiFetch<AccessRequestResponse[]>(`/users/requests${qs.toString() ? `?${qs}` : ''}`)
+}
+
+/** POST /users/requests/{id}/approve — одобрить заявку. */
+export async function approveRequest(requestId: number, data: ApproveRequest) {
+  return apiFetch<AccessRequestResponse>(`/users/requests/${requestId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+/** POST /users/requests/{id}/reject — отклонить заявку. */
+export async function rejectRequest(requestId: number, data: RejectRequest) {
+  return apiFetch<AccessRequestResponse>(`/users/requests/${requestId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
 }

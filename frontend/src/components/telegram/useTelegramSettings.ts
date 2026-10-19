@@ -40,6 +40,8 @@ export function useTelegramSettings() {
   const [notifyOnBackup, setNotifyOnBackup] = useState(false)
   const [interactiveEnabled, setInteractiveEnabled] = useState(false)
   const [eventToggles, setEventToggles] = useState<Record<string, boolean>>({})
+  const [acceptAccessRequests, setAcceptAccessRequests] = useState(false)
+  const [pendingRequestCap, setPendingRequestCap] = useState(50)
   const [nodeOfflineGraceMinutes, setNodeOfflineGraceMinutes] = useState('3')
   const [saving, setSaving] = useState(false)
   const [savingInteractive, setSavingInteractive] = useState(false)
@@ -80,6 +82,8 @@ export function useTelegramSettings() {
       setNotifyEnabled(tg.notify_enabled)
       setNotifyOnBackup(tg.notify_on_backup)
       setInteractiveEnabled(tg.interactive_enabled)
+      setAcceptAccessRequests(Boolean(tg.accept_access_requests))
+      setPendingRequestCap(tg.pending_request_cap ?? 50)
       setAdminNotify(notify)
       setTelegramId(notify.telegram_id)
       setNotifyRecipientIds(notify.recipient_user_ids ?? [])
@@ -127,6 +131,8 @@ export function useTelegramSettings() {
         auth_max_age_seconds: authMethod === 'legacy' && Number.isFinite(maxAge) ? maxAge : undefined,
         oidc_client_id: authMethod === 'oidc' ? oidcClientId.trim() || undefined : undefined,
         oidc_client_secret: authMethod === 'oidc' && oidcClientSecret ? oidcClientSecret : undefined,
+        accept_access_requests: acceptAccessRequests,
+        pending_request_cap: pendingRequestCap,
       })
       setSettings(updated)
       setBotUsername(updated.bot_username)
@@ -135,6 +141,8 @@ export function useTelegramSettings() {
       setOidcClientId(updated.oidc_client_id || '')
       setOidcClientSecret('')
       setBotToken('')
+      setAcceptAccessRequests(Boolean(updated.accept_access_requests))
+      setPendingRequestCap(updated.pending_request_cap ?? 50)
       success('Настройки бота сохранены')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
@@ -386,6 +394,10 @@ export function useTelegramSettings() {
     linkedAdmins,
     linkedAccounts,
     unlinkingUserId,
+    acceptAccessRequests,
+    setAcceptAccessRequests,
+    pendingRequestCap,
+    setPendingRequestCap,
     load,
     loginConfigured,
     oidcLoginReady,

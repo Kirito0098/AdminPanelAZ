@@ -191,6 +191,8 @@ export async function updateTelegramSettings(data: {
   legacy_login_enabled?: boolean
   bot_command_rate_max?: number
   bot_command_rate_window_seconds?: number
+  accept_access_requests?: boolean
+  pending_request_cap?: number
 }) {
   return apiFetch<TelegramSettings>('/settings/telegram', {
     method: 'PATCH',

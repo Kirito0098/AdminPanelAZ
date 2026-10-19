@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, ChevronLeft, Users as UsersIcon } from 'lucide-react'
 import { getNodes } from '@/api/nodes'
-import { Node } from '@/types'
+import { listPresets } from '@/api/users'
+import { Node, PresetResponse } from '@/types'
 import AppDialog from '@/components/shared/AppDialog'
 import { Button } from '@/components/ui/button'
 import { CardDescription, CardTitle } from '@/components/ui/card'
@@ -28,6 +29,7 @@ interface CreateUserDialogProps {
     panel_login_enabled: boolean
     password?: string | null
     telegram_id?: string | null
+    preset_id?: number | null
   }) => void | Promise<void>
 }
 
@@ -45,6 +47,8 @@ export default function CreateUserDialog({
   const [step, setStep] = useState<Step>('who')
   const [nodes, setNodes] = useState<Node[]>([])
   const [nodesLoading, setNodesLoading] = useState(false)
+  const [presets, setPresets] = useState<PresetResponse[]>([])
+  const [selectedPresetId, setSelectedPresetId] = useState<number | null>(null)
 
   const [username, setUsername] = useState('')
   const [clientBaseName, setClientBaseName] = useState('')
@@ -72,6 +76,7 @@ export default function CreateUserDialog({
       setConfigCount(1)
       setConfigQuota('')
       setAccessUntil('')
+      setSelectedPresetId(null)
     }
   }, [open])
 
@@ -93,6 +98,23 @@ export default function CreateUserDialog({
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    const loadPresets = async () => {
+      try {
+        const list = await listPresets()
+        if (!cancelled) setPresets(list)
+      } catch {
+        /* пресеты опциональны — без них будет подсказка */
+      }
+    }
+    void loadPresets()
+    return () => {
+      cancelled = true
+    }
+  }, [open])
 
   const planNames = useMemo(() => {
     const names: string[] = []
@@ -134,6 +156,7 @@ export default function CreateUserDialog({
         panel_login_enabled: panelLogin,
         password: panelLogin ? password : undefined,
         telegram_id: telegramId.trim() === '' ? undefined : telegramId.trim(),
+        preset_id: selectedPresetId,
       })
     } finally {
       setSubmitting(false)
@@ -241,6 +264,30 @@ export default function CreateUserDialog({
               </div>
               <Switch id="createPanelLogin" checked={panelLogin} onCheckedChange={setPanelLogin} />
             </div>
+            {presets.length > 0 && (
+              <div className="space-y-1.5">
+                <Label htmlFor="createPreset">Шаблон предоставления (необязательно)</Label>
+                <select
+                  id="createPreset"
+                  value={String(selectedPresetId ?? '')}
+                  onChange={(e) => {
+                    const v = Number.parseInt(e.target.value, 10)
+                    setSelectedPresetId(Number.isFinite(v) ? v : null)
+                  }}
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                >
+                  <option value="">Без шаблона</option>
+                  {presets.map((p) => (
+                    <option key={p.id} value={String(p.id)}>
+                      {p.name} {p.is_default ? ' (по умолчанию)' : ''}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Шаблон задаёт узлы, протоколы, число конфигов и срок доступа при одобрении заявки.
+                </p>
+              </div>
+            )}
             {panelLogin && (
               <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">
                 <Label htmlFor="createPassword">Пароль</Label>

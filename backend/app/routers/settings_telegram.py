@@ -143,6 +143,8 @@ def _telegram_settings_response(db: Session, request: Request) -> TelegramSettin
         relay_last_ok_at=_get_setting(db, "telegram_relay_last_ok_at"),
         relay_last_error=_get_setting(db, "telegram_relay_last_error"),
         relay_last_node=_get_setting(db, "telegram_relay_last_node"),
+        accept_access_requests=_get_setting(db, "telegram_accept_access_requests", "false") == "true",
+        pending_request_cap=int(_get_setting(db, "telegram_new_user_request_pending_cap", "50") or 50),
     )
 
 
@@ -212,6 +214,10 @@ def update_telegram_settings(
             max_requests=payload.bot_command_rate_max,
             window_seconds=payload.bot_command_rate_window_seconds,
         )
+    if payload.accept_access_requests is not None:
+        _set_setting(db, "telegram_accept_access_requests", "true" if payload.accept_access_requests else "false")
+    if payload.pending_request_cap is not None:
+        _set_setting(db, "telegram_new_user_request_pending_cap", str(payload.pending_request_cap))
     db.commit()
     admin_notify_service.send_settings_change(
         db,

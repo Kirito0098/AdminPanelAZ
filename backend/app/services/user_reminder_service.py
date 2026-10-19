@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from datetime import datetime, timezone
@@ -18,6 +19,7 @@ from app.services.node_manager import is_vpn_node, get_adapter_for_node, node_me
 from app.services.openvpn_cert import days_remaining_until
 from app.services.self_service import record_reminder_sent, reminder_recently_sent, self_service_reminder_enabled
 from app.services.telegram import send_tg_message
+from app.services.telegram_api import send_message
 
 logger = logging.getLogger(__name__)
 
@@ -124,7 +126,17 @@ def _send_owner_reminder(
                 config=config,
                 client_timezone=owner_tz,
             )
-            send_tg_message(bot_token, owner.telegram_id, text)
+            if reminder_type == REMINDER_ACCESS:
+                reply_markup = {
+                    "inline_keyboard": [
+                        [{"text": "Запросить продление у админа", "callback_data": "ar:ext"}],
+                    ]
+                }
+                asyncio.run(
+                    send_message(bot_token, str(owner.telegram_id), text, reply_markup=reply_markup)
+                )
+            else:
+                send_tg_message(bot_token, owner.telegram_id, text)
 
     admin_event = ADMIN_EVENT_MAP[reminder_type]
     admin_notify_service.send(
