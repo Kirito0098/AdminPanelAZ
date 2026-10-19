@@ -982,6 +982,26 @@ def extend_user_access(
     return UserResponse.model_validate(user)
 
 
+@router.post("/{user_id}/grace-cleanup")
+def grace_cleanup_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """Удалить все конфиги пользователя после grace; план (base/indexes) сохранить → pending."""
+    if not get_feature_service().is_enabled("user_provisioning"):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=module_disabled_message("user_provisioning")
+        )
+    from app.services.user_grace import run_grace_cleanup
+
+    user = db.get(User, user_id)
+    if user is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    result = run_grace_cleanup(db, user, actor=current_user)
+    return {"ok": True, **result}
+
+
 def _last_provision_task(db: Session, user_id: int) -> dict | None:
     task = (
         db.query(BackgroundTask)

@@ -31,6 +31,10 @@ def _run_once() -> dict[str, int]:
         for counts in (access_counts, subscription_counts):
             for key, value in counts.items():
                 merged[key] = merged.get(key, 0) + value
+        from app.services.user_grace import scan_grace_period_alerts
+
+        grace = scan_grace_period_alerts(db)
+        merged["grace_alerts"] = grace.get("alerted", 0)
         return merged
     finally:
         db.close()

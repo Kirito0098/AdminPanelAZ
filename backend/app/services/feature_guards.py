@@ -70,7 +70,7 @@ CONFIGS_QR_PATH_MARKERS = ("/download", "/qr", "/one-time-link")
 # GET /api/users, PATCH /api/users/{id} and /api/tg-mini/me/* are NOT gated here.
 _USER_PROVISIONING_PATH_RE = re.compile(r"^/api/users/provisioned(?:/|$)")
 _USER_PROVISIONING_ITEM_RE = re.compile(
-    r"^/api/users/\d+/(?:provisioning|suspend|resume|extend)(?:/|$)"
+    r"^/api/users/\d+/(?:provisioning|suspend|resume|extend|grace-cleanup)(?:/|$)"
 )
 _USER_CONFIGS_ITEM_RE = re.compile(r"^/api/users/\d+/configs(?:/|$)")
 
