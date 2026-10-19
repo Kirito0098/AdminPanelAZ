@@ -1202,17 +1202,17 @@ _wiz_should_apply() {
   [[ "$WIZARD_RAN" == true || -n "${!wiz_var:-}" ]]
 }
 
-apply_wiz_resource_profile() {
-  local profile="${1:-standard}"
-  local script="$ROOT_DIR/scripts/apply-resource-profile.py"
+apply_wiz_scenario_preset() {
+  local preset="${1:-home}"
+  local script="$ROOT_DIR/scripts/apply-scenario-preset.py"
   if [[ ! -f "$script" ]]; then
     die "Не найден $script"
   fi
   if [[ ! -f "$ENV_FILE" ]]; then
-    die "Не найден $ENV_FILE для профиля ресурсов"
+    die "Не найден $ENV_FILE для сценария"
   fi
-  log "Применение resource profile: $profile (scripts/apply-resource-profile.py)"
-  PYTHONPATH="$BACKEND_DIR" "$(ap_require_python)" "$script" "$profile" --env "$ENV_FILE"
+  log "Применение scenario preset: $preset (scripts/apply-scenario-preset.py)"
+  PYTHONPATH="$BACKEND_DIR" "$(ap_require_python)" "$script" "$preset" --env "$ENV_FILE"
 }
 
 apply_wiz_env_settings() {
@@ -1299,10 +1299,10 @@ apply_wiz_env_settings() {
   if _wiz_should_apply WIZ_REDIS_URL; then
     env_set REDIS_URL "$WIZ_REDIS_URL"
   fi
-  if [[ "$WIZARD_RAN" == true && -n "${WIZ_RESOURCE_PROFILE:-}" ]] \
-    || _wiz_should_apply WIZ_RESOURCE_PROFILE; then
-    apply_wiz_resource_profile "${WIZ_RESOURCE_PROFILE:-standard}"
-    if [[ "$WIZARD_RAN" == true && "${WIZ_RESOURCE_PROFILE:-standard}" != "minimal" ]]; then
+  if [[ "$WIZARD_RAN" == true && -n "${WIZ_SCENARIO_PRESET:-}" ]] \
+    || _wiz_should_apply WIZ_SCENARIO_PRESET; then
+    apply_wiz_scenario_preset "${WIZ_SCENARIO_PRESET:-home}"
+    if [[ "$WIZARD_RAN" == true && "${WIZ_SCENARIO_PRESET:-home}" != "panel_only" ]]; then
       if [[ -n "${WIZ_TRAFFIC_SYNC_ENABLED:-}" ]]; then
         env_set TRAFFIC_SYNC_ENABLED "$WIZ_TRAFFIC_SYNC_ENABLED"
       fi
@@ -1406,8 +1406,8 @@ setup_env() {
   fi
 
   if [[ "$NON_INTERACTIVE" == true ]] && ! wiz_config_active; then
-    if [[ -f "$ROOT_DIR/scripts/apply-resource-profile.py" ]]; then
-      apply_wiz_resource_profile "minimal"
+    if [[ -f "$ROOT_DIR/scripts/apply-scenario-preset.py" ]]; then
+      apply_wiz_scenario_preset "panel_only"
     fi
     env_set LOCAL_ANTIZAPRET_ENABLED "false"
   fi

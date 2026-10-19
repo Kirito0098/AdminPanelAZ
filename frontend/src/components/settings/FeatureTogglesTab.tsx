@@ -11,17 +11,19 @@ import {
 } from 'lucide-react'
 import {
   ApiError,
-  applyResourceProfile,
+  applyScenarioPreset,
   getFeatureToggles,
   getLightHealth,
   getPanelResourceCurrent,
   getPanelResourceHistory,
-  getResourceProfiles,
+  getScenarioPresets,
+  previewScenarioPreset,
   updateFeatureToggles,
 } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import PanelRestartCard from '@/components/settings/PanelRestartCard'
 import { SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
+import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -31,6 +33,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import {
   buildProfileLiveCopy,
   formatComparedProfileHint,
@@ -40,15 +43,21 @@ import {
 } from '@/lib/panelResourceStats'
 import { parseTimestamp } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
-import type { FeatureToggleItem, ResourceProfileImpact, ResourceProfileItem } from '@/types'
+import type {
+  FeatureToggleItem,
+  ScenarioPresetImpact,
+  ScenarioPresetItem,
+  ScenarioPresetPreview,
+  ScenarioResolved,
+} from '@/types'
 
 const RESTART_BANNER_KEY = 'featureTogglesPendingRestart'
 const RESTART_BANNER_AT_KEY = 'featureTogglesPendingRestartAt'
 
-const PROFILE_META: Record<string, { icon: LucideIcon }> = {
-  minimal: { icon: Leaf },
-  standard: { icon: Gauge },
-  full: { icon: Rocket },
+const PRESET_META: Record<string, { icon: LucideIcon }> = {
+  panel_only: { icon: Leaf },
+  home: { icon: Gauge },
+  commercial: { icon: Rocket },
 }
 
 /** «Клиенты» и «Пользователи (абоненты)» не выключаются одновременно. */
@@ -194,34 +203,34 @@ function ModuleToggleRow({
   )
 }
 
-function ProfileCard({
-  profile,
+function PresetCard({
+  preset,
   current,
-  currentProfileKey,
+  currentPresetKey,
   applying,
   ramSummary,
   onApply,
 }: {
-  profile: ResourceProfileItem
+  preset: ScenarioPresetItem
   current: boolean
-  currentProfileKey: string
+  currentPresetKey: string
   applying: boolean
   ramSummary: PanelResourceSummary | null
   onApply: () => void
 }) {
-  const meta = PROFILE_META[profile.key] ?? { icon: Server }
+  const meta = PRESET_META[preset.key] ?? { icon: Server }
   const Icon = meta.icon
-  const workers = profile.workers_disabled ?? []
+  const workers = preset.workers_disabled ?? []
   const liveCopy =
-    current && ramSummary?.hasData ? buildProfileLiveCopy(profile, ramSummary) : null
-  const description = liveCopy?.description ?? stripPresetRamLine(profile.description)
-  const impactRam = liveCopy?.ram ?? profile.impact?.ram
-  const impactCpuDisk = liveCopy?.cpuDisk ?? profile.impact?.cpu_disk
-  const impactNote = liveCopy?.note ?? profile.impact?.note
+    current && ramSummary?.hasData ? buildProfileLiveCopy(preset, ramSummary) : null
+  const description = liveCopy?.description ?? stripPresetRamLine(preset.description)
+  const impactRam = liveCopy?.ram ?? preset.impact?.ram
+  const impactCpuDisk = liveCopy?.cpuDisk ?? preset.impact?.cpu_disk
+  const impactNote = liveCopy?.note ?? preset.impact?.note
   const subtitle =
     current && ramSummary?.hasData
       ? liveCopy?.subtitle ?? formatMeasuredSubtitle(ramSummary)
-      : formatComparedProfileHint(profile, ramSummary, currentProfileKey)
+      : formatComparedProfileHint(preset, ramSummary, currentPresetKey)
 
   return (
     <button
@@ -246,7 +255,7 @@ function ProfileCard({
             <Icon size={16} />
           </div>
           <div className="min-w-0">
-            <p className="text-sm font-semibold leading-tight">{profile.label}</p>
+            <p className="text-sm font-semibold leading-tight">{preset.label}</p>
             {subtitle && <p className="text-[11px] text-primary">{subtitle}</p>}
           </div>
         </div>
@@ -290,17 +299,48 @@ function ProfileCard({
   )
 }
 
+/** Diff-подсказка перед применением сценария: точный список включаемых/выключаемых модулей. */
+function PresetDiff({ preview }: { preview: ScenarioPresetPreview }) {
+  const grace = preview.settings_changes?.inactive_user_grace_period_months
+  return (
+    <div className="space-y-2 text-sm">
+      {preview.will_enable.length > 0 && (
+        <div>
+          <p className="font-medium">Включится</p>
+          <p className="text-muted-foreground">{preview.will_enable.join(', ')}</p>
+        </div>
+      )}
+      {preview.will_disable.length > 0 && (
+        <div>
+          <p className="font-medium">Выключится</p>
+          <p className="text-muted-foreground">{preview.will_disable.join(', ')}</p>
+        </div>
+      )}
+      {grace && (
+        <p className="text-muted-foreground">
+          Льготный период неактивных пользователей: {grace.from} → {grace.to} мес.
+        </p>
+      )}
+      {preview.will_enable.length === 0 && preview.will_disable.length === 0 && !grace && (
+        <p className="text-muted-foreground">
+          Модули уже соответствуют сценарию — изменения не требуются.
+        </p>
+      )}
+    </div>
+  )
+}
+
 function ImpactSummary({
   impact,
   workers,
 }: {
-  impact: ResourceProfileImpact | null | undefined
+  impact: ScenarioPresetImpact | null | undefined
   workers: string[]
 }) {
   if (!impact && workers.length === 0) return null
   return (
     <div className="rounded-xl border bg-muted/15 p-4 text-sm">
-      <p className="mb-2 font-medium">Экономия после применения профиля</p>
+      <p className="mb-2 font-medium">Экономия после применения сценария</p>
       <div className="space-y-1 text-muted-foreground">
         {impact?.ram && <p>RAM: {impact.ram}</p>}
         {impact?.cpu_disk && <p>CPU/диск: {impact.cpu_disk}</p>}
@@ -314,18 +354,19 @@ function ImpactSummary({
 export default function FeatureTogglesTab() {
   const { refresh: refreshModules } = useFeatureModules()
   const { success, error: notifyError } = useNotifications()
+  const { confirm, dialogProps } = useConfirmDialog()
   const [items, setItems] = useState<FeatureToggleItem[]>([])
-  const [profiles, setProfiles] = useState<ResourceProfileItem[]>([])
-  const [currentProfile, setCurrentProfile] = useState('standard')
+  const [presets, setPresets] = useState<ScenarioPresetItem[]>([])
+  const [resolved, setResolved] = useState<ScenarioResolved | null>(null)
   const [draft, setDraft] = useState<Record<string, boolean>>({})
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [applyingProfile, setApplyingProfile] = useState<string | null>(null)
+  const [applyingPreset, setApplyingPreset] = useState<string | null>(null)
   const [pendingRestart, setPendingRestart] = useState(
     () => sessionStorage.getItem(RESTART_BANNER_KEY) === '1',
   )
-  const [lastImpact, setLastImpact] = useState<ResourceProfileImpact | null>(null)
+  const [lastImpact, setLastImpact] = useState<ScenarioPresetImpact | null>(null)
   const [lastWorkersDisabled, setLastWorkersDisabled] = useState<string[]>([])
   const [ramSummary, setRamSummary] = useState<PanelResourceSummary | null>(null)
 
@@ -371,11 +412,11 @@ export default function FeatureTogglesTab() {
   const load = async () => {
     setLoading(true)
     try {
-      const [data, profileData] = await Promise.all([getFeatureToggles(), getResourceProfiles()])
+      const [data, presetData] = await Promise.all([getFeatureToggles(), getScenarioPresets()])
       setItems(data.items)
       setDraft(Object.fromEntries(data.items.map((item) => [item.key, item.enabled])))
-      setProfiles(profileData.items)
-      setCurrentProfile(profileData.current_profile)
+      setPresets(presetData.items)
+      setResolved(presetData.resolved)
       await syncRestartBanner()
       void loadPanelRam()
     } catch (err) {
@@ -385,24 +426,51 @@ export default function FeatureTogglesTab() {
     }
   }
 
-  const applyProfile = async (profile: string) => {
-    setApplyingProfile(profile)
+  /** Пересчитывает вычисленный сценарий («Кастомный» / активный пресет) по текущим модулям. */
+  const refreshPresetState = async () => {
     try {
-      const result = await applyResourceProfile(profile)
-      setCurrentProfile(result.profile)
-      setProfiles(result.profiles.items)
-      setLastImpact(result.impact ?? null)
-      setLastWorkersDisabled(result.workers_disabled ?? [])
-      const data = await getFeatureToggles()
-      setItems(data.items)
-      setDraft(Object.fromEntries(data.items.map((item) => [item.key, item.enabled])))
-      await refreshModules()
-      markRestartPending()
-      success(`Профиль «${profile}» применён. Перезапустите панель для фоновых задач.`)
+      const presetData = await getScenarioPresets()
+      setPresets(presetData.items)
+      setResolved(presetData.resolved)
+    } catch {
+      // бейдж сценария не критичен — молча оставляем предыдущее значение
+    }
+  }
+
+  /** Сценарий никогда не применяется сразу: сначала показываем diff и ждём подтверждения. */
+  const requestApply = async (preset: string) => {
+    try {
+      const preview = await previewScenarioPreset(preset)
+      confirm({
+        title: `Применить сценарий «${preview.label}»?`,
+        description: preview.summary_ru,
+        confirmLabel: 'Применить',
+        children: <PresetDiff preview={preview} />,
+        onConfirm: async () => {
+          setApplyingPreset(preview.preset)
+          try {
+            const result = await applyScenarioPreset(preview.preset)
+            setPresets(result.presets.items)
+            setResolved(result.presets.resolved)
+            setLastImpact(result.impact ?? null)
+            setLastWorkersDisabled(result.workers_disabled ?? [])
+            const data = await getFeatureToggles()
+            setItems(data.items)
+            setDraft(Object.fromEntries(data.items.map((item) => [item.key, item.enabled])))
+            await refreshModules()
+            markRestartPending()
+            success(
+              `Сценарий «${preview.label}» применён. Перезапустите панель для фоновых задач.`,
+            )
+          } catch (err) {
+            notifyError(err instanceof ApiError ? err.message : 'Не удалось применить сценарий')
+          } finally {
+            setApplyingPreset(null)
+          }
+        },
+      })
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Не удалось применить профиль')
-    } finally {
-      setApplyingProfile(null)
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось получить diff сценария')
     }
   }
 
@@ -429,8 +497,9 @@ export default function FeatureTogglesTab() {
       .concat([...map.entries()].filter(([g]) => !order.includes(g)))
   }, [filteredItems])
 
-  const activeProfileMeta = profiles.find((p) => p.key === currentProfile)
-  const profileLabel = activeProfileMeta?.label ?? currentProfile
+  const currentPresetKey = resolved && !resolved.is_custom ? resolved.key : ''
+  const activePresetMeta = presets.find((p) => p.key === currentPresetKey)
+  const resetTarget = resolved?.last_applied || resolved?.based_on || ''
 
   const enabledCount = Object.values(draft).filter(Boolean).length
   const dirtyCount = items.filter((item) => draft[item.key] !== item.enabled).length
@@ -454,6 +523,8 @@ export default function FeatureTogglesTab() {
       const data = await updateFeatureToggles(updates)
       setItems(data.items)
       setDraft(Object.fromEntries(data.items.map((item) => [item.key, item.enabled])))
+      // Ручная правка модулей меняет вычисленный сценарий: «Кастомный» должен появиться сразу.
+      await refreshPresetState()
       await refreshModules()
       markRestartPending()
       success('Модули сохранены. Перезапустите панель для применения фоновых задач.')
@@ -470,7 +541,7 @@ export default function FeatureTogglesTab() {
 
   return (
     <div className="space-y-4">
-      <InlineProgressBar active={saving || applyingProfile !== null} label="Сохранение..." />
+      <InlineProgressBar active={saving || applyingPreset !== null} label="Сохранение..." />
 
       <SettingsToolbar
         title="Разделы панели"
@@ -479,7 +550,7 @@ export default function FeatureTogglesTab() {
             items={[
               { label: 'вкл.', value: enabledCount },
               { label: 'всего модулей', value: items.length },
-              { label: 'профиль', value: profileLabel },
+              { label: 'сценарий', value: resolved?.badge_label ?? '—' },
             ]}
           />
         }
@@ -535,28 +606,46 @@ export default function FeatureTogglesTab() {
 
       <Card className="shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Профили ресурсов</CardTitle>
+          <CardTitle className="text-base">Сценарии</CardTitle>
           <CardDescription>
-            Быстрые пресеты нагрузки. Minimal и Standard экономят RAM панели; VPN на том же хосте почти не меняется.
+            Быстрые пресеты нагрузки: «Только панель» (без локального AntiZapret), «Домашнее» и
+            «Коммерческое». VPN на том же хосте почти не меняется.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
+          {resolved?.is_custom && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+              <Badge variant="outline" className="text-[11px] font-normal">
+                {resolved.badge_label}
+              </Badge>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8"
+                disabled={!resetTarget || applyingPreset !== null}
+                onClick={() => void requestApply(resetTarget)}
+              >
+                Сбросить к пресету
+              </Button>
+            </div>
+          )}
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-            {profiles.map((profile) => (
-              <ProfileCard
-                key={profile.key}
-                profile={profile}
-                current={profile.key === currentProfile}
-                currentProfileKey={currentProfile}
-                applying={applyingProfile === profile.key}
+            {presets.map((preset) => (
+              <PresetCard
+                key={preset.key}
+                preset={preset}
+                current={preset.key === currentPresetKey}
+                currentPresetKey={currentPresetKey}
+                applying={applyingPreset === preset.key}
                 ramSummary={ramSummary}
-                onApply={() => void applyProfile(profile.key)}
+                onApply={() => void requestApply(preset.key)}
               />
             ))}
           </div>
-          {pendingRestart && (lastImpact || activeProfileMeta?.impact || lastWorkersDisabled.length > 0) && (
+          {pendingRestart && (lastImpact || activePresetMeta?.impact || lastWorkersDisabled.length > 0) && (
             <ImpactSummary
-              impact={lastImpact ?? activeProfileMeta?.impact}
+              impact={lastImpact ?? activePresetMeta?.impact}
               workers={lastWorkersDisabled}
             />
           )}
@@ -651,6 +740,8 @@ export default function FeatureTogglesTab() {
           </Button>
         </div>
       )}
+
+      <ConfirmDialogHost dialogProps={dialogProps} />
     </div>
   )
 }

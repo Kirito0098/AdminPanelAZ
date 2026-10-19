@@ -48,7 +48,7 @@ WIZ_PROXY_AGENT_MTLS_ENABLED="${WIZ_PROXY_AGENT_MTLS_ENABLED:-false}"
 WIZ_AUTH_RATE_LIMIT_BACKEND="${WIZ_AUTH_RATE_LIMIT_BACKEND:-memory}"
 WIZ_API_RATE_LIMIT_BACKEND="${WIZ_API_RATE_LIMIT_BACKEND:-memory}"
 WIZ_REDIS_URL="${WIZ_REDIS_URL:-}"
-WIZ_RESOURCE_PROFILE="${WIZ_RESOURCE_PROFILE:-full}"
+WIZ_SCENARIO_PRESET="${WIZ_SCENARIO_PRESET:-commercial}"
 WIZ_NODE_AGENT_MTLS_ENABLED="${WIZ_NODE_AGENT_MTLS_ENABLED:-false}"
 WIZ_NODE_API_KEY_ROTATION_DAYS="${WIZ_NODE_API_KEY_ROTATION_DAYS:-0}"
 WIZ_RUN_MODE="${WIZ_RUN_MODE:-systemd}"
@@ -803,18 +803,18 @@ wizard_ask_services() {
   fi
 }
 
-# Профиль ресурсов всегда full (apply-resource-profile вызывается из install.sh).
-wizard_ask_resource_profile() {
+# Сценарий всегда commercial (apply-scenario-preset вызывается из install.sh).
+wizard_ask_scenario_preset() {
   if [[ "$WIZ_INSTALL_TYPE" == "node" || "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
     return 0
   fi
-  WIZ_RESOURCE_PROFILE="full"
+  WIZ_SCENARIO_PRESET="commercial"
   WIZ_CIDR_DB_REFRESH_ENABLED="true"
   WIZ_TRAFFIC_SYNC_ENABLED="true"
 }
 
 # Опциональные функции (Telegram/CIDR/backup) — не спрашиваем в install.
-# Telegram token не сеем; CIDR/traffic задаёт full profile; автобэкап — дефолт выше.
+# Telegram token не сеем; CIDR/traffic задаёт commercial-сценарий; автобэкап — дефолт выше.
 
 wizard_ask_paths() {
   local default_state="$ROOT_DIR/.runtime"
@@ -980,7 +980,7 @@ wizard_show_summary() {
 
     wiz_summary_section "Производительность и задачи"
     ui_summary_row "Uvicorn workers" "$WIZ_UVICORN_WORKERS"
-    ui_summary_row "Профиль ресурсов" "$WIZ_RESOURCE_PROFILE"
+    ui_summary_row "Сценарий" "$WIZ_SCENARIO_PRESET"
     ui_summary_row "Обновление CIDR" "$WIZ_CIDR_DB_REFRESH_ENABLED"
     ui_summary_row "Сбор трафика" "$WIZ_TRAFFIC_SYNC_ENABLED"
     ui_summary_row "Авто-бэкап" "$WIZ_AUTO_BACKUP_ENABLED"
@@ -1058,7 +1058,7 @@ run_install_wizard() {
   wizard_ask_proxy_agent
   wizard_ask_services
   wizard_ask_security_hardening
-  wizard_ask_resource_profile
+  wizard_ask_scenario_preset
   # optional (Telegram/CIDR/backup prompts) и firewall — не спрашиваем
   WIZ_CONFIGURE_FIREWALL="false"
   wizard_ask_paths

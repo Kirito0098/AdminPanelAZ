@@ -938,10 +938,6 @@ SCENARIO_PRESETS: dict[str, dict] = {
 }
 
 VALID_SCENARIO_PRESETS = frozenset(SCENARIO_PRESETS.keys())
-# Legacy shim: `scripts/apply-resource-profile.py` (called by install.sh until
-# Stage 5 Task 6 switches it to `scripts/apply-scenario-preset.py`) still needs
-# the old profile names. Removed together with that script in Task 6.
-VALID_RESOURCE_PROFILES = frozenset(LEGACY_RESOURCE_PROFILE_TO_SCENARIO)
 
 FRONTEND_PATH_TO_MODULE: dict[str, str] = {}
 SETTINGS_TAB_TO_MODULE: dict[str, str] = {}
@@ -1246,14 +1242,6 @@ class FeatureToggleService:
             "requires_restart": True,
             "items": items,
         }
-
-    def apply_resource_profile(self, profile: str) -> dict:
-        """Legacy shim for `scripts/apply-resource-profile.py` (dropped in Task 6)."""
-        scenario = map_legacy_resource_profile(profile)
-        if scenario is None:
-            raise ValueError(f"Неизвестный профиль: {profile}")
-        result = self.apply_scenario_preset(scenario)
-        return {**result, "profile": profile}
 
     def migrate_resource_profile_label_only(self) -> bool:
         """Rename RESOURCE_PROFILE → SCENARIO_PRESET. Never rewrite toggles."""

@@ -14,8 +14,9 @@ import type {
   LatestChangelog,
   FeatureModulesResponse,
   FeatureTogglesResponse,
-  ResourceProfilesResponse,
-  ResourceProfileImpact,
+  ScenarioPresetsResponse,
+  ScenarioPresetImpact,
+  ScenarioPresetPreview,
   RetentionSettings,
   GeoIpStatus,
   RouteBudgetInfo,
@@ -187,7 +188,7 @@ export async function getLightHealth() {
     status: string
     app: string
     env: string
-    resource_profile: string
+    scenario_preset: string
     started_at?: string
   }>('/health')
 }
@@ -199,18 +200,25 @@ export async function updateFeatureToggles(toggles: Record<string, boolean>) {
   })
 }
 
-export async function getResourceProfiles() {
-  return apiFetch<ResourceProfilesResponse>('/feature-toggles/profiles')
+export async function getScenarioPresets() {
+  return apiFetch<ScenarioPresetsResponse>('/feature-toggles/presets')
 }
 
-export async function applyResourceProfile(profile: string) {
+export async function previewScenarioPreset(preset: string) {
+  return apiFetch<ScenarioPresetPreview>(
+    `/feature-toggles/preview-preset?preset=${encodeURIComponent(preset)}`,
+    { method: 'POST' },
+  )
+}
+
+export async function applyScenarioPreset(preset: string) {
   return apiFetch<{
-    profile: string
+    preset: string
     requires_restart: boolean
-    impact?: ResourceProfileImpact
+    impact?: ScenarioPresetImpact
     workers_disabled?: string[]
-    profiles: ResourceProfilesResponse
-  }>(`/feature-toggles/apply-profile?profile=${encodeURIComponent(profile)}`, {
+    presets: ScenarioPresetsResponse
+  }>(`/feature-toggles/apply-preset?preset=${encodeURIComponent(preset)}`, {
     method: 'POST',
   })
 }

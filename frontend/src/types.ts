@@ -675,27 +675,52 @@ export interface RouteBudgetInfo {
   message?: string | null
 }
 
-export interface ResourceProfileImpact {
+export interface ScenarioPresetImpact {
   ram?: string
   cpu_disk?: string
   note?: string
 }
 
-export interface ResourceProfileItem {
+export interface ScenarioPresetItem {
   key: string
   label: string
   description: string
   recommended_ram_gb?: number | null
   panel_mb_delta?: number | null
   active: boolean
-  impact?: ResourceProfileImpact
+  impact?: ScenarioPresetImpact
   workers_disabled?: string[]
 }
 
-export interface ResourceProfilesResponse {
-  current_profile: string
+export interface ScenarioResolved {
+  key: string
+  label: string
+  is_custom: boolean
+  based_on: string
+  changed_count: number
+  badge_label: string
+  last_applied: string
+}
+
+export interface ScenarioPresetsResponse {
+  current_preset: string
+  last_applied: string
+  resolved: ScenarioResolved
   requires_restart: boolean
-  items: ResourceProfileItem[]
+  items: ScenarioPresetItem[]
+}
+
+export interface ScenarioPresetPreview {
+  preset: string
+  label: string
+  will_enable: string[]
+  will_disable: string[]
+  will_enable_keys: string[]
+  will_disable_keys: string[]
+  settings_changes: Record<string, { from: number; to: number }>
+  summary_ru: string
+  workers_disabled: string[]
+  impact?: ScenarioPresetImpact
 }
 
 export interface ChangelogSection {
