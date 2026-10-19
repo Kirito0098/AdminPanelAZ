@@ -45,6 +45,7 @@ from app.routers import (
     logs,
     maintenance,
     monitoring,
+    notifications,
     nodes,
     node_sync,
     openvpn_buffer_guard,
@@ -312,6 +313,7 @@ app.include_router(configs_bulk.router, prefix=_API_PREFIX)
 app.include_router(config_tags.router, prefix=_API_PREFIX)
 app.include_router(client_templates.router, prefix=_API_PREFIX)
 app.include_router(monitoring.router, prefix=_API_PREFIX)
+app.include_router(notifications.router, prefix=_API_PREFIX)
 app.include_router(alert_rules.router, prefix=_API_PREFIX)
 app.include_router(openvpn_buffer_guard.router, prefix=_API_PREFIX)
 app.include_router(dns_aaaa.router, prefix=_API_PREFIX)

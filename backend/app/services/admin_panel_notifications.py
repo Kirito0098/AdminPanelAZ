@@ -11,9 +11,10 @@ import json
 import logging
 from typing import Any
 
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
-from app.models import AdminPanelNotification
+from app.models import AdminPanelNotification, BackgroundTask, User, UserAccessRequest
 
 logger = logging.getLogger(__name__)
 
@@ -86,3 +87,91 @@ def write_admin_panel_notification(
         except Exception:
             pass
         return None
+
+
+def list_notifications_for_admin(
+    db: Session,
+    admin: User,
+    *,
+    category: str | None = None,
+    limit: int = 50,
+    before_id: int | None = None,
+) -> tuple[list[dict[str, object]], int]:
+    """Список уведомлений админа (id DESC) и число непрочитанных.
+
+    Непрочитанное: ``id > coalesce(last_read_notification_id, 0)`` — считается
+    отдельно для каждого админа по его ``last_read_notification_id``.
+    """
+    limit = max(1, min(int(limit), 100))
+    query = db.query(AdminPanelNotification).order_by(desc(AdminPanelNotification.id))
+    if category:
+        query = query.filter(AdminPanelNotification.category == category)
+    if before_id is not None:
+        query = query.filter(AdminPanelNotification.id < before_id)
+    rows = query.limit(limit).all()
+
+    last_read = admin.last_read_notification_id or 0
+    unread_query = db.query(AdminPanelNotification).filter(
+        AdminPanelNotification.id > last_read
+    )
+    if category:
+        unread_query = unread_query.filter(AdminPanelNotification.category == category)
+    unread_count = unread_query.count()
+
+    items = [
+        {
+            "id": row.id,
+            "category": row.category,
+            "level": row.level,
+            "event_type": row.event_type,
+            "title": row.title,
+            "message": row.message,
+            "created_at": row.created_at.isoformat() if row.created_at else "",
+        }
+        for row in rows
+    ]
+    return items, unread_count
+
+
+def mark_notifications_read(db: Session, admin: User, up_to_id: int) -> None:
+    """last_read = max(existing or 0, up_to_id). Только растёт, никогда не откатывается."""
+    if up_to_id < 1:
+        return
+    current = admin.last_read_notification_id or 0
+    admin.last_read_notification_id = max(current, int(up_to_id))
+    db.add(admin)
+    db.commit()
+
+
+def notifications_stream_snapshot(db: Session) -> dict:
+    """Снимок состояния для SSE-потока: верхнее id уведомлений, заявки, задачи."""
+    max_n = db.query(func.max(AdminPanelNotification.id)).scalar() or 0
+    pending = [
+        int(r[0])
+        for r in (
+            db.query(UserAccessRequest.id)
+            .filter(UserAccessRequest.status == "pending")
+            .order_by(desc(UserAccessRequest.id))
+            .limit(20)
+            .all()
+        )
+    ]
+    tasks = (
+        db.query(BackgroundTask)
+        .filter(BackgroundTask.task_type == "user_provision")
+        .filter(BackgroundTask.status.in_(("pending", "running")))
+        .all()
+    )
+    return {
+        "max_notification_id": int(max_n),
+        "pending_request_ids": pending,
+        "tasks": [
+            {
+                "id": t.id,
+                "subject_key": t.subject_key,
+                "progress": t.progress_percent,
+                "status": t.status,
+            }
+            for t in tasks
+        ],
+    }

@@ -13,7 +13,9 @@ from sqlalchemy.orm import Session
 from app.models import User, UserRole
 from app.services.shared_state import pop_state, put_state
 
-StreamName = Literal["monitoring", "warper_update", "awg2_install", "server_monitor"]
+StreamName = Literal[
+    "monitoring", "warper_update", "awg2_install", "server_monitor", "notifications"
+]
 STREAM_TICKET_TTL = timedelta(seconds=30)
 _NAMESPACE = "stream_ticket"
 

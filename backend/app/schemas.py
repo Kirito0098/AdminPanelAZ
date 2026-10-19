@@ -2338,9 +2338,35 @@ class Awg2ObfuscationApply(BaseModel):
 
 
 class StreamTicketRequest(BaseModel):
-    stream: Literal["monitoring", "warper_update", "awg2_install", "server_monitor"]
+    stream: Literal[
+        "monitoring", "warper_update", "awg2_install", "server_monitor", "notifications"
+    ]
 
 
 class StreamTicketResponse(BaseModel):
     ticket: str
     expires_in_seconds: int
+
+
+class NotificationItem(BaseModel):
+    id: int
+    category: str
+    level: str
+    event_type: str
+    title: str
+    message: str
+    created_at: str
+
+
+class NotificationsListResponse(BaseModel):
+    items: list[NotificationItem]
+    unread_count: int
+    pending_requests_count: int
+
+
+class MarkReadRequest(BaseModel):
+    up_to_id: int = Field(ge=1)
+
+
+class MarkReadResponse(BaseModel):
+    ok: bool = True
