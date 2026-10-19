@@ -144,7 +144,12 @@ class Settings(BaseSettings):
     nightly_idle_restart_cron: str = "0 4 * * *"
     admin_panel_az_service_name: str = "adminpanelaz.service"
     uvicorn_workers: int = 1
-    resource_profile: str = "standard"
+    # Stage 5 (§8.2): scenario preset label (last applied). Legacy RESOURCE_PROFILE
+    # is accepted as an alias and mapped (minimal/standard/full → panel_only/home/commercial).
+    scenario_preset: str = Field(
+        default="home",
+        validation_alias=AliasChoices("scenario_preset", "resource_profile"),
+    )
     retention_enabled: bool = True
     retention_interval_hours: int = 24
     traffic_sample_retention_days: int = 90
@@ -213,6 +218,20 @@ class Settings(BaseSettings):
         if normalized not in {"development", "production"}:
             raise ValueError("APP_ENV must be 'development' or 'production'")
         return normalized
+
+    @field_validator("scenario_preset", mode="before")
+    @classmethod
+    def normalize_scenario_preset(cls, value: str) -> str:
+        from app.services.feature_toggles import (
+            VALID_SCENARIO_PRESETS,
+            map_legacy_resource_profile,
+        )
+
+        normalized = (value or "").strip().lower()
+        if normalized in VALID_SCENARIO_PRESETS:
+            return normalized
+        mapped = map_legacy_resource_profile(normalized)
+        return mapped or "home"
 
     @field_validator("cidr_db_deploy_target")
     @classmethod

@@ -72,7 +72,7 @@ def build_deep_health(db: Session, *, app_root: Path) -> dict[str, Any]:
         **build_light_health(),
         "app": settings.app_name,
         "env": settings.app_env,
-        "resource_profile": settings.resource_profile,
+        "scenario_preset": settings.scenario_preset,
         "checks": {},
         "timestamp": _utcnow_iso(),
     }

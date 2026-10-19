@@ -203,6 +203,14 @@ def run_leader_startup_actions() -> None:
     except Exception:
         logger.debug("Systemd unit migration skipped", exc_info=True)
     try:
+        from app.services.feature_guards import get_feature_service
+
+        # Stage 5 (§8.2): RESOURCE_PROFILE → SCENARIO_PRESET, label only.
+        if get_feature_service().migrate_resource_profile_label_only():
+            logger.info("Migrated RESOURCE_PROFILE label to SCENARIO_PRESET in .env (toggles untouched)")
+    except Exception:
+        logger.exception("Failed to migrate RESOURCE_PROFILE label to SCENARIO_PRESET on startup")
+    try:
         ip_restriction_service.sync_firewall()
     except Exception:
         logger.exception("Failed to sync IP restriction firewall on startup")

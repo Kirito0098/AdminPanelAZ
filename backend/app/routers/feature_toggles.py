@@ -11,7 +11,7 @@ from app.services.feature_toggles import (
     FRONTEND_PATH_TO_MODULE,
     SETTINGS_TAB_TO_MODULE,
     FeatureToggleService,
-    VALID_RESOURCE_PROFILES,
+    VALID_SCENARIO_PRESETS,
 )
 
 router = APIRouter(prefix="/feature-toggles", tags=["feature-toggles"])
@@ -52,17 +52,25 @@ def update_feature_toggles(payload: FeatureToggleUpdate, _: User = Depends(requi
     return result
 
 
-@router.get("/profiles")
-def list_resource_profiles(_: User = Depends(require_admin)):
-    return _service().list_resource_profiles()
+@router.get("/presets")
+def list_scenario_presets(_: User = Depends(require_admin)):
+    return _service().list_scenario_presets()
 
 
-@router.post("/apply-profile")
-def apply_resource_profile(profile: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
+@router.post("/preview-preset")
+def preview_scenario_preset(preset: str, _: User = Depends(require_admin)):
+    try:
+        return _service().preview_scenario_preset(preset)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/apply-preset")
+def apply_scenario_preset(preset: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
     service = _service()
     telegram_was_enabled = service.is_enabled("telegram")
     try:
-        result = service.apply_resource_profile(profile)
+        result = service.apply_scenario_preset(preset)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if telegram_was_enabled and not service.is_enabled("telegram"):
@@ -74,13 +82,16 @@ def apply_resource_profile(profile: str, _: User = Depends(require_admin), db: S
     return result
 
 
-@router.get("/current-profile")
-def get_current_resource_profile(_: User = Depends(require_admin)):
+@router.get("/current-preset")
+def get_current_scenario_preset(_: User = Depends(require_admin)):
     service = _service()
+    resolved = service.resolve_scenario_state()
     return {
-        "profile": service.get_resource_profile(),
+        "preset": resolved["key"],
+        "last_applied": resolved["last_applied"],
+        "resolved": resolved,
         "requires_restart": True,
-        "valid_profiles": sorted(VALID_RESOURCE_PROFILES),
+        "valid_presets": sorted(VALID_SCENARIO_PRESETS),
     }
 
 

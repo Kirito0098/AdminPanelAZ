@@ -684,10 +684,26 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
 FEATURE_TOGGLE_BY_KEY = {item.key: item for item in FEATURE_TOGGLES}
 FEATURE_TOGGLE_BY_ENV = {item.env_key: item for item in FEATURE_TOGGLES}
 
-RESOURCE_PROFILES: dict[str, dict] = {
-    "minimal": {
-        "label": "Minimal (panel-only)",
-        "description": "Минимум фоновых задач: без traffic/CIDR/metrics collectors, 1 worker.",
+# Stage 5 (§8.2): resource profiles (Minimal/Standard/Full) are replaced by
+# scenario presets. `SCENARIO_PRESETS` is the single source of truth for
+# toggles + env + disabled workers + grace months.
+LEGACY_RESOURCE_PROFILE_TO_SCENARIO: dict[str, str] = {
+    "minimal": "panel_only",
+    "standard": "home",
+    "full": "commercial",
+}
+
+
+def map_legacy_resource_profile(raw: str) -> str | None:
+    """Map a legacy `RESOURCE_PROFILE` value to a scenario key (label only)."""
+    key = (raw or "").strip().lower()
+    return LEGACY_RESOURCE_PROFILE_TO_SCENARIO.get(key)
+
+
+SCENARIO_PRESETS: dict[str, dict] = {
+    "panel_only": {
+        "label": "🖥 Только панель",
+        "description": "Панель без локального AntiZapret-набора фоновых задач; минимум collectors.",
         "recommended_ram_gb": 1,
         "panel_mb_delta": -40,
         "impact": {
@@ -704,48 +720,59 @@ RESOURCE_PROFILES: dict[str, dict] = {
             "cert_sync",
             "resource_monitor",
         ],
+        "settings": {"inactive_user_grace_period_months": 0},
         "toggles": {
+            # §8.2 + former Minimal remainder
+            "clients_page": True,
+            "user_provisioning": False,
+            "unlock_codes": False,
+            "client_portal": False,
             "traffic_sync": False,
-            "wg_policy_sync": False,
-            "resource_monitor": False,
-            "logs_dashboard": False,
-            "server_monitor": False,
-            "routing": False,
-            "antizapret_config": False,
+            "noc_reports": False,
+            "alert_rules": False,
             "warper": False,
-            "awg2": False,
+            "server_monitor": False,
             "telegram": False,
             "proxy_nodes": False,
+            "node_sync_reconcile": False,
+            "cloudflare_ips_update": False,
+            "edit_files": True,
+            "node_ssh_transport": True,
+            "server_resources": False,
+            # Bridge until platform-cleanup 03 merges `server_resources`.
+            "resource_monitor": False,
+            "resource_metrics": False,
+            "panel_resource_metrics": False,
+            "wg_policy_sync": False,
+            "logs_dashboard": False,
+            "routing": False,
+            "antizapret_config": False,
+            "awg2": False,
             "diagnostics_tests": False,
             "runtime_backup_cleanup": True,
             "nightly_idle_restart": True,
             "active_web_sessions": True,
             "node_health": False,
             "cert_sync": False,
-            "resource_metrics": False,
-            "panel_resource_metrics": False,
             "cidr_scheduler": False,
-            "node_sync_reconcile": False,
             "retention": True,
             "key_rotation": True,
             "user_reminders": False,
-            "alert_rules": False,
-            "noc_reports": False,
-            "cloudflare_ips_update": False,
             "access_expiry": True,
             "connection_history": False,
         },
         "env": {
-            "RESOURCE_PROFILE": "minimal",
+            "SCENARIO_PRESET": "panel_only",
             "UVICORN_WORKERS": "1",
             "TRAFFIC_SYNC_ENABLED": "false",
             "WG_POLICY_SYNC_ENABLED": "false",
+            "SERVER_RESOURCES_ENABLED": "false",
+            "MONITOR_ENABLED": "false",
             "RESOURCE_METRICS_ENABLED": "false",
             "PANEL_RESOURCE_METRICS_ENABLED": "false",
             "NODE_HEALTH_SYNC_ENABLED": "false",
             "CERT_SYNC_ENABLED": "false",
             "CIDR_DB_REFRESH_ENABLED": "false",
-            "MONITOR_ENABLED": "false",
             "NODE_SYNC_RECONCILE_ENABLED": "false",
             "RETENTION_ENABLED": "true",
             "FEATURE_KEY_ROTATION_ENABLED": "true",
@@ -755,141 +782,166 @@ RESOURCE_PROFILES: dict[str, dict] = {
             "CLOUDFLARE_IPS_AUTO_UPDATE": "false",
             "FEATURE_ACCESS_EXPIRY_ENABLED": "true",
             "FEATURE_CONNECTION_HISTORY_ENABLED": "false",
+            "INACTIVE_USER_GRACE_PERIOD_MONTHS": "0",
         },
     },
-    "standard": {
-        "label": "Standard",
-        "description": "Баланс: traffic sync, health poll, retention; без тяжёлого CIDR auto-scheduler.",
+    "home": {
+        "label": "🏠 Домашнее",
+        "description": "Семейный/личный сервер: мониторинг и узлы без коммерческих модулей.",
         "recommended_ram_gb": 1,
         "panel_mb_delta": -20,
         "impact": {
-            "ram": "чуть меньше RAM панели, чем Full; VPN на хосте тот же",
-            "cpu_disk": "traffic + metrics без nightly CIDR auto-scheduler",
-            "note": "Ориентир 1 GB+; замер стека — на карточке текущего профиля в UI",
+            "ram": "чуть меньше RAM панели, чем Коммерческое; VPN на хосте тот же",
+            "cpu_disk": "без CIDR auto-scheduler и без commercial toggles",
+            "note": "Ориентир 1 GB+; замер стека — на карточке текущего пресета в UI",
         },
         "workers_disabled": ["cidr_scheduler"],
+        "settings": {"inactive_user_grace_period_months": 0},
         "toggles": {
-            "traffic_sync": True,
-            "wg_policy_sync": True,
-            "resource_monitor": True,
-            "logs_dashboard": True,
+            "clients_page": True,
+            "user_provisioning": False,
+            "unlock_codes": False,
+            "client_portal": False,
+            "traffic_sync": False,
+            "noc_reports": False,
+            "alert_rules": False,
+            "warper": False,
             "server_monitor": True,
+            "telegram": True,
+            "proxy_nodes": True,
+            "node_sync_reconcile": True,
+            "cloudflare_ips_update": True,
+            "edit_files": True,
+            "node_ssh_transport": True,
+            "server_resources": True,
+            # Bridge until platform-cleanup 03 merges `server_resources`.
+            "resource_monitor": True,
+            "resource_metrics": True,
+            "panel_resource_metrics": True,
+            "wg_policy_sync": True,
+            "logs_dashboard": True,
             "routing": True,
             "antizapret_config": True,
-            "warper": False,
             "awg2": False,
-            "telegram": False,
-            "proxy_nodes": False,
             "diagnostics_tests": True,
             "runtime_backup_cleanup": True,
             "nightly_idle_restart": True,
             "active_web_sessions": True,
             "node_health": True,
             "cert_sync": True,
-            "resource_metrics": True,
-            "panel_resource_metrics": True,
             "cidr_scheduler": False,
-            "node_sync_reconcile": True,
             "retention": True,
             "key_rotation": True,
             "user_reminders": True,
-            "alert_rules": True,
-            "noc_reports": True,
-            "cloudflare_ips_update": False,
             "access_expiry": True,
             "connection_history": True,
         },
         "env": {
-            "RESOURCE_PROFILE": "standard",
+            "SCENARIO_PRESET": "home",
             "UVICORN_WORKERS": "1",
-            "TRAFFIC_SYNC_ENABLED": "true",
+            "TRAFFIC_SYNC_ENABLED": "false",
             "WG_POLICY_SYNC_ENABLED": "true",
+            "SERVER_RESOURCES_ENABLED": "true",
+            "MONITOR_ENABLED": "true",
             "RESOURCE_METRICS_ENABLED": "true",
             "PANEL_RESOURCE_METRICS_ENABLED": "true",
             "NODE_HEALTH_SYNC_ENABLED": "true",
             "CERT_SYNC_ENABLED": "true",
             "CIDR_DB_REFRESH_ENABLED": "false",
-            "MONITOR_ENABLED": "true",
             "NODE_SYNC_RECONCILE_ENABLED": "true",
             "RETENTION_ENABLED": "true",
             "FEATURE_KEY_ROTATION_ENABLED": "true",
             "SELF_SERVICE_REMINDER_ENABLED": "true",
-            "ALERT_RULES_ENABLED": "true",
-            "NOC_REPORT_ENABLED": "true",
-            "CLOUDFLARE_IPS_AUTO_UPDATE": "false",
+            "ALERT_RULES_ENABLED": "false",
+            "NOC_REPORT_ENABLED": "false",
+            "CLOUDFLARE_IPS_AUTO_UPDATE": "true",
             "FEATURE_ACCESS_EXPIRY_ENABLED": "true",
             "FEATURE_CONNECTION_HISTORY_ENABLED": "true",
+            "INACTIVE_USER_GRACE_PERIOD_MONTHS": "0",
         },
     },
-    "full": {
-        "label": "Full",
-        "description": "Все фоновые задачи и разделы.",
+    "commercial": {
+        "label": "💼 Коммерческое",
+        "description": "Все разделы для распространения доступа: provisioning, портал, unlock, отчёты.",
         "recommended_ram_gb": 1,
         "panel_mb_delta": 0,
         "impact": {
             "ram": "максимум фоновых задач панели; VPN на хосте тот же",
             "cpu_disk": "полная фоновая нагрузка collectors",
-            "note": "Замер «панель + VPN на сервере»: ≈411 MB (358+53); лучше 2 GB с запасом под ОС",
+            "note": "Замер «панель + VPN на сервере»; лучше 2 GB с запасом под ОС",
         },
         "workers_disabled": [],
+        "settings": {"inactive_user_grace_period_months": 3},
         "toggles": {
+            "clients_page": True,
+            "user_provisioning": True,
+            "unlock_codes": True,
+            "client_portal": True,
             "traffic_sync": True,
-            "wg_policy_sync": True,
-            "resource_monitor": True,
-            "logs_dashboard": True,
+            "noc_reports": True,
+            "alert_rules": True,
+            "warper": True,
             "server_monitor": True,
+            "telegram": True,
+            "proxy_nodes": True,
+            "node_sync_reconcile": True,
+            "cloudflare_ips_update": True,
+            "edit_files": True,
+            "node_ssh_transport": True,
+            "server_resources": True,
+            # Bridge until platform-cleanup 03 merges `server_resources`.
+            "resource_monitor": True,
+            "resource_metrics": True,
+            "panel_resource_metrics": True,
+            "wg_policy_sync": True,
+            "logs_dashboard": True,
             "routing": True,
             "antizapret_config": True,
-            "warper": True,
             "awg2": False,
-            "telegram": False,
-            "proxy_nodes": False,
             "diagnostics_tests": True,
             "runtime_backup_cleanup": True,
             "nightly_idle_restart": True,
             "active_web_sessions": True,
             "node_health": True,
             "cert_sync": True,
-            "resource_metrics": True,
-            "panel_resource_metrics": True,
             "cidr_scheduler": True,
-            "node_sync_reconcile": True,
             "retention": True,
             "key_rotation": True,
             "user_reminders": True,
-            "alert_rules": True,
-            "noc_reports": True,
-            "cloudflare_ips_update": False,
             "access_expiry": True,
             "connection_history": True,
         },
         "env": {
-            "RESOURCE_PROFILE": "full",
+            "SCENARIO_PRESET": "commercial",
             "UVICORN_WORKERS": "1",
             "TRAFFIC_SYNC_ENABLED": "true",
             "WG_POLICY_SYNC_ENABLED": "true",
+            "SERVER_RESOURCES_ENABLED": "true",
+            "MONITOR_ENABLED": "true",
             "RESOURCE_METRICS_ENABLED": "true",
             "PANEL_RESOURCE_METRICS_ENABLED": "true",
             "NODE_HEALTH_SYNC_ENABLED": "true",
             "CERT_SYNC_ENABLED": "true",
             "CIDR_DB_REFRESH_ENABLED": "true",
-            "MONITOR_ENABLED": "true",
             "NODE_SYNC_RECONCILE_ENABLED": "true",
             "RETENTION_ENABLED": "true",
             "FEATURE_KEY_ROTATION_ENABLED": "true",
             "SELF_SERVICE_REMINDER_ENABLED": "true",
             "ALERT_RULES_ENABLED": "true",
             "NOC_REPORT_ENABLED": "true",
-            "CLOUDFLARE_IPS_AUTO_UPDATE": "false",
+            "CLOUDFLARE_IPS_AUTO_UPDATE": "true",
             "FEATURE_ACCESS_EXPIRY_ENABLED": "true",
             "FEATURE_CONNECTION_HISTORY_ENABLED": "true",
+            "INACTIVE_USER_GRACE_PERIOD_MONTHS": "3",
         },
     },
 }
 
-VALID_RESOURCE_PROFILES = frozenset(RESOURCE_PROFILES.keys())
-# Alias used in docs/prompts (Etapy 1.8)
-PROFILE_PRESETS = RESOURCE_PROFILES
+VALID_SCENARIO_PRESETS = frozenset(SCENARIO_PRESETS.keys())
+# Legacy shim: `scripts/apply-resource-profile.py` (called by install.sh until
+# Stage 5 Task 6 switches it to `scripts/apply-scenario-preset.py`) still needs
+# the old profile names. Removed together with that script in Task 6.
+VALID_RESOURCE_PROFILES = frozenset(LEGACY_RESOURCE_PROFILE_TO_SCENARIO)
 
 FRONTEND_PATH_TO_MODULE: dict[str, str] = {}
 SETTINGS_TAB_TO_MODULE: dict[str, str] = {}
@@ -1035,16 +1087,148 @@ class FeatureToggleService:
             _lift_all_user_traffic_blocks(db)
         return self.list_toggles()
 
-    def get_resource_profile(self) -> str:
-        raw = (self._raw_env("RESOURCE_PROFILE", "") or "").strip().lower()
-        if raw in VALID_RESOURCE_PROFILES:
+    def get_scenario_preset(self) -> str:
+        """Last applied scenario (label only — never rewrites stored toggles)."""
+        raw = (self._raw_env("SCENARIO_PRESET", "") or "").strip().lower()
+        if raw in VALID_SCENARIO_PRESETS:
             return raw
-        return "standard"
+        mapped = map_legacy_resource_profile(self._raw_env("RESOURCE_PROFILE", ""))
+        if mapped:
+            return mapped
+        return "home"
 
-    def list_resource_profiles(self) -> dict:
-        current = self.get_resource_profile()
+    def _current_grace_months(self) -> int:
+        raw = (self._raw_env("INACTIVE_USER_GRACE_PERIOD_MONTHS", "0") or "0").strip()
+        try:
+            return int(raw)
+        except ValueError:
+            return 0
+
+    def _toggle_diff_against_preset(self, preset_key: str) -> tuple[list[str], list[str]]:
+        want = SCENARIO_PRESETS[preset_key]["toggles"]
+        will_enable: list[str] = []
+        will_disable: list[str] = []
+        for key, enabled in want.items():
+            if key not in FEATURE_TOGGLE_BY_KEY:
+                continue
+            current = self.is_enabled(key)
+            if current == enabled:
+                continue
+            (will_enable if enabled else will_disable).append(key)
+        return will_enable, will_disable
+
+    def _settings_diff_against_preset(self, preset_key: str) -> dict:
+        grace_want = SCENARIO_PRESETS[preset_key]["settings"]["inactive_user_grace_period_months"]
+        grace_now = self._current_grace_months()
+        if grace_now == grace_want:
+            return {}
+        return {
+            "inactive_user_grace_period_months": {
+                "from": grace_now,
+                "to": grace_want,
+            }
+        }
+
+    def diff_scenario_preset(self, preset: str) -> dict:
+        """Raw diff (toggle keys + settings) between the current .env and a preset."""
+        normalized = (preset or "").strip().lower()
+        if normalized not in SCENARIO_PRESETS:
+            raise ValueError(f"Неизвестный сценарий: {preset}")
+        will_enable_keys, will_disable_keys = self._toggle_diff_against_preset(normalized)
+        return {
+            "preset": normalized,
+            "will_enable": will_enable_keys,
+            "will_disable": will_disable_keys,
+            "settings_changes": self._settings_diff_against_preset(normalized),
+        }
+
+    def preview_scenario_preset(self, preset: str) -> dict:
+        """Diff + labels for the UI confirm dialog (nothing is written)."""
+        normalized = (preset or "").strip().lower()
+        if normalized not in SCENARIO_PRESETS:
+            raise ValueError(f"Неизвестный сценарий: {preset}")
+        meta = SCENARIO_PRESETS[normalized]
+        will_enable_keys, will_disable_keys = self._toggle_diff_against_preset(normalized)
+
+        def labels(keys: list[str]) -> list[str]:
+            return [FEATURE_TOGGLE_BY_KEY[k].label for k in keys]
+
+        settings_changes = self._settings_diff_against_preset(normalized)
+        return {
+            "preset": normalized,
+            "label": meta["label"],
+            "will_enable_keys": will_enable_keys,
+            "will_disable_keys": will_disable_keys,
+            "will_enable": labels(will_enable_keys),
+            "will_disable": labels(will_disable_keys),
+            "settings_changes": settings_changes,
+            "summary_ru": (
+                f"Выключится: {', '.join(labels(will_disable_keys)) or '—'}. "
+                f"Включится: {', '.join(labels(will_enable_keys)) or '—'}."
+            ),
+            "workers_disabled": meta.get("workers_disabled", []),
+            "impact": meta.get("impact", {}),
+        }
+
+    def apply_scenario_preset(self, preset: str) -> dict:
+        """Apply a scenario: write env + toggles + grace, drop the legacy label."""
+        normalized = (preset or "").strip().lower()
+        if normalized not in SCENARIO_PRESETS:
+            raise ValueError(f"Неизвестный сценарий: {preset}")
+        meta = SCENARIO_PRESETS[normalized]
+        for env_key, value in meta.get("env", {}).items():
+            self.env.set_env_value(env_key, str(value))
+        for toggle_key, enabled in meta.get("toggles", {}).items():
+            definition = FEATURE_TOGGLE_BY_KEY.get(toggle_key)
+            if definition is None:
+                continue
+            self.env.set_env_value(definition.env_key, "true" if enabled else "false")
+        self.env.remove_env_key("RESOURCE_PROFILE")
+        self._invalidate_env_map()
+        return {
+            "preset": normalized,
+            "requires_restart": True,
+            "impact": meta.get("impact", {}),
+            "workers_disabled": meta.get("workers_disabled", []),
+            "toggles": self.list_toggles(),
+            "presets": self.list_scenario_presets(),
+        }
+
+    def resolve_scenario_state(self) -> dict:
+        """Current scenario or the computed «Кастомный» state."""
+        last = self.get_scenario_preset()
+        for key, meta in SCENARIO_PRESETS.items():
+            enable, disable = self._toggle_diff_against_preset(key)
+            grace_want = meta["settings"]["inactive_user_grace_period_months"]
+            grace_now = self._current_grace_months()
+            if not enable and not disable and grace_now == grace_want:
+                return {
+                    "key": key,
+                    "label": meta["label"],
+                    "is_custom": False,
+                    "based_on": key,
+                    "changed_count": 0,
+                    "badge_label": meta["label"],
+                    "last_applied": last,
+                }
+        based = last if last in SCENARIO_PRESETS else "home"
+        enable, disable = self._toggle_diff_against_preset(based)
+        changed = len(enable) + len(disable)
+        base_label = SCENARIO_PRESETS[based]["label"]
+        return {
+            "key": "custom",
+            "label": "⚙️ Кастомный",
+            "is_custom": True,
+            "based_on": based,
+            "changed_count": changed,
+            "badge_label": f"⚙️ Кастомный (на основе {base_label}, изменено: {changed})",
+            "last_applied": last,
+        }
+
+    def list_scenario_presets(self) -> dict:
+        resolved = self.resolve_scenario_state()
         items = []
-        for key, meta in RESOURCE_PROFILES.items():
+        for key, meta in SCENARIO_PRESETS.items():
             items.append({
                 "key": key,
                 "label": meta["label"],
@@ -1053,35 +1237,40 @@ class FeatureToggleService:
                 "panel_mb_delta": meta.get("panel_mb_delta", 0),
                 "impact": meta.get("impact", {}),
                 "workers_disabled": meta.get("workers_disabled", []),
-                "active": key == current,
+                "active": (not resolved["is_custom"]) and resolved["key"] == key,
             })
         return {
-            "current_profile": current,
+            "current_preset": resolved["key"] if not resolved["is_custom"] else "custom",
+            "last_applied": resolved["last_applied"],
+            "resolved": resolved,
             "requires_restart": True,
             "items": items,
         }
 
     def apply_resource_profile(self, profile: str) -> dict:
-        normalized = (profile or "").strip().lower()
-        if normalized not in RESOURCE_PROFILES:
+        """Legacy shim for `scripts/apply-resource-profile.py` (dropped in Task 6)."""
+        scenario = map_legacy_resource_profile(profile)
+        if scenario is None:
             raise ValueError(f"Неизвестный профиль: {profile}")
-        preset = RESOURCE_PROFILES[normalized]
-        for env_key, value in preset.get("env", {}).items():
-            self.env.set_env_value(env_key, str(value))
-        for toggle_key, enabled in preset.get("toggles", {}).items():
-            definition = FEATURE_TOGGLE_BY_KEY.get(toggle_key)
-            if definition is None:
-                continue
-            self.env.set_env_value(definition.env_key, "true" if enabled else "false")
-        self._invalidate_env_map()
-        return {
-            "profile": normalized,
-            "requires_restart": True,
-            "impact": preset.get("impact", {}),
-            "workers_disabled": preset.get("workers_disabled", []),
-            "toggles": self.list_toggles(),
-            "profiles": self.list_resource_profiles(),
-        }
+        result = self.apply_scenario_preset(scenario)
+        return {**result, "profile": profile}
+
+    def migrate_resource_profile_label_only(self) -> bool:
+        """Rename RESOURCE_PROFILE → SCENARIO_PRESET. Never rewrite toggles."""
+        changed = False
+        has_scenario = self.env.env_key_defined_in_file("SCENARIO_PRESET")
+        legacy_raw = self.env.get_env_value("RESOURCE_PROFILE", "")
+        if not has_scenario:
+            mapped = map_legacy_resource_profile(legacy_raw)
+            if mapped:
+                self.env.set_env_value("SCENARIO_PRESET", mapped)
+                changed = True
+        if self.env.env_key_defined_in_file("RESOURCE_PROFILE"):
+            self.env.remove_env_key("RESOURCE_PROFILE")
+            changed = True
+        if changed:
+            self._invalidate_env_map()
+        return changed
 
 
 def is_proxy_nodes_enabled(db=None) -> bool:
