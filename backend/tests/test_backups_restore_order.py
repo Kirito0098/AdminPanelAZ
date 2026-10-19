@@ -57,10 +57,15 @@ def test_restore_panel_disposes_engines_before_applying_files(monkeypatch, tmp_p
     env = tmp_path / ".env"
     sqlite3.connect(db).close()
     env.write_text("", encoding="utf-8")
+    archive = tmp_path / "panel.tar.gz"
+    archive.write_bytes(b"plain-backup")
 
     class FakeManager:
         db_path = db
         env_path = env
+
+        def get_backup_path(self, file_name: str):
+            return archive
 
         def load_restore_payload(self, file_name: str) -> dict:
             order.append("load")
@@ -102,7 +107,7 @@ def test_restore_backup_records_audit_after_db_replace(monkeypatch):
     monkeypatch.setattr(
         backups_mod,
         "_restore_panel_and_restart",
-        lambda manager, file_name, db: order.append("restore") or {
+        lambda manager, file_name, db, password=None: order.append("restore") or {
             "restored": ["db"],
             "file_name": file_name,
         },
@@ -244,12 +249,17 @@ def test_pre_restore_list_and_delete_use_the_manager(monkeypatch):
 def _gate_manager(tmp_path, order, *, apply_error=None):
     db = tmp_path / "adminpanel.db"
     env = tmp_path / ".env"
+    archive = tmp_path / "panel.tar.gz"
     sqlite3.connect(db).close()
     env.write_text("", encoding="utf-8")
+    archive.write_bytes(b"plain-backup")
 
     class FakeManager:
         db_path = db
         env_path = env
+
+        def get_backup_path(self, file_name: str):
+            return archive
 
         def load_restore_payload(self, file_name: str) -> dict:
             order.append("load")

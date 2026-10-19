@@ -13,6 +13,7 @@ from app.models import Node, NodeStatus, User, UserRole, VpnConfig, VpnType
 from app.routers import configs as configs_router
 from app.schemas import VpnConfigCreate
 from app.services import awg2
+from app.services.awg2 import compute_expires_at
 import app.services.awg2_expire_worker as awg2_expire_worker
 
 
@@ -111,20 +112,33 @@ def test_create_amneziawg2_sets_expires_at_and_passes_ttl():
             "expires_at": config.expires_at,
         }
 
+    def fake_provision(db, *, node, client_name, vpn_type, owner, actor, notify, ttl=None, **kwargs):
+        expires_at = compute_expires_at(ttl)
+        if ttl:
+            adapter.awg2_add_client(client_name, ttl=ttl)
+        else:
+            adapter.awg2_add_client(client_name)
+        config = VpnConfig(
+            node_id=node.id,
+            client_name=client_name,
+            vpn_type=vpn_type,
+            owner_id=owner.id,
+            expires_at=expires_at,
+        )
+        db.add(config)
+        return config, None
+
     before = datetime.utcnow()
     with (
         patch.object(configs_router, "enforce_user_can_create_config"),
         patch.object(configs_router, "require_ha_primary_for_client_ops"),
         patch.object(configs_router, "require_vpn_type"),
         patch.object(configs_router, "enforce_can_create_vpn_type"),
+        patch.object(configs_router, "validate_new_client_name"),
         patch.object(configs_router, "_active_node_id", return_value=1),
         patch.object(configs_router, "get_active_adapter", return_value=adapter),
-        patch.object(configs_router, "find_sync_group_for_primary", return_value=None),
-        patch.object(configs_router, "refresh_config_cert_expiry"),
-        patch.object(configs_router, "purge_traffic_history_for_reused_name"),
         patch.object(configs_router, "get_active_node", return_value=SimpleNamespace(id=1, name="node-1")),
-        patch.object(configs_router.admin_notify_service, "send_config_create"),
-        patch.object(configs_router, "get_client_timezone_from_request", return_value="UTC"),
+        patch.object(configs_router, "provision_config", side_effect=fake_provision),
         patch.object(configs_router, "_viewer_visibility_policy", return_value={}),
         patch.object(configs_router, "resolve_openvpn_group_for_user", return_value=None),
         patch.object(configs_router, "_local_ip_for_config", return_value=None),

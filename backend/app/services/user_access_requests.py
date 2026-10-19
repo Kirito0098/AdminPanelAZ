@@ -492,6 +492,14 @@ def _create_user_for_request(
     access_until = plan.get("access_until")
     if access_until is None and access_days:
         access_until = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=int(access_days))
+    traffic_limit = plan.get("traffic_limit_bytes")
+    if traffic_limit is not None:
+        try:
+            traffic_limit = int(traffic_limit)
+        except (TypeError, ValueError):
+            traffic_limit = None
+        if traffic_limit is not None and traffic_limit <= 0:
+            traffic_limit = None
     user = User(
         username=username,
         password_hash=get_password_hash(secrets.token_urlsafe(32)),
@@ -504,6 +512,8 @@ def _create_user_for_request(
         desired_protocols=json.dumps(protocols, ensure_ascii=False),
         access_until=access_until,
         provision_state="unmanaged",
+        traffic_limit_bytes=traffic_limit,
+        traffic_counter_reset_at=datetime.utcnow() if traffic_limit is not None else None,
     )
     db.add(user)
     db.flush()
@@ -779,7 +789,7 @@ def maybe_send_delivery_after_task(db: Session, *, user_id: int, created_count: 
     if not bot_token or not user.telegram_id:
         return
     portal = user_link_response(db, get_or_create_user_portal_token(db, user_id=user_id))
-    text = _delivery_text(portal["url"], None)
+    text = _delivery_text(portal["url"], user.traffic_limit_bytes)
     send_message_sync_or_async(bot_token, str(user.telegram_id), text)
 
 

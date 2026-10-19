@@ -100,7 +100,7 @@ async def notifications_stream(
     ticket: str = Query(..., description="Разовый ticket из POST /api/stream-ticket"),
 ):
     # Билет разовый: проверяем один раз при подключении на короткой сессии.
-    auth_db = SessionLocal()
+    auth_db = _db_session_factory()
     try:
         admin_from_stream_ticket(auth_db, ticket, _STREAM_NAME)
     finally:

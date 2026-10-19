@@ -69,6 +69,12 @@ def test_link_reads_file_from_its_own_node(method):
     response, calls = _download(db, _row(7), method=method, adapter=adapter)
 
     assert response.status_code == 200
+    if method == "GET":
+        assert "text/html" in response.headers.get("content-type", "")
+        assert b"<!DOCTYPE html" in response.content
+        calls.read.assert_not_called()
+        return
+
     assert response.content == b"cfg\n"
     db.get.assert_called_once_with(Node, 7)
     calls.active.assert_not_called()
@@ -81,7 +87,7 @@ def test_link_of_deleted_node_is_gone_without_spending_a_download():
     db = MagicMock()
     db.get.return_value = None
 
-    response, calls = _download(db, _row(7))
+    response, calls = _download(db, _row(7), method="POST")
 
     assert response.status_code == 410
     assert response.json()["detail"] == "Сервер этой ссылки удалён — запросите новую ссылку"
@@ -91,7 +97,7 @@ def test_link_of_deleted_node_is_gone_without_spending_a_download():
 def test_legacy_link_without_node_uses_active_node():
     active = SimpleNamespace(id=1, name="local")
 
-    response, calls = _download(MagicMock(), _row(None), active_node=active)
+    response, calls = _download(MagicMock(), _row(None), method="POST", active_node=active)
 
     assert response.status_code == 200
     calls.for_node.assert_called_once_with(active)

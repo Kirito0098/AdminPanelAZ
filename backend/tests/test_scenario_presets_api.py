@@ -85,14 +85,25 @@ def test_list_presets_requires_admin(client):
     assert r.status_code in (401, 403)
 
 
-def test_preview_and_apply_preset(admin_client, env_path):
+def test_preview_and_apply_preset(admin_client, env_path, db_session):
+    from app.services.user_grace import get_grace_months
+
     r = admin_client.post("/api/feature-toggles/preview-preset?preset=commercial")
     assert r.status_code == 200
     body = r.json()
     assert "will_enable" in body and "summary_ru" in body
-    r2 = admin_client.post("/api/feature-toggles/apply-preset?preset=panel_only")
+    # Preview diffs AppSetting grace (default 0) → commercial 3.
+    assert body["settings_changes"]["inactive_user_grace_period_months"]["to"] == 3
+
+    r2 = admin_client.post("/api/feature-toggles/apply-preset?preset=commercial")
     assert r2.status_code == 200
-    assert r2.json()["preset"] == "panel_only"
+    assert r2.json()["preset"] == "commercial"
+    assert get_grace_months(db_session) == 3
+
+    r3 = admin_client.post("/api/feature-toggles/apply-preset?preset=panel_only")
+    assert r3.status_code == 200
+    assert r3.json()["preset"] == "panel_only"
+    assert get_grace_months(db_session) == 0
     cur = admin_client.get("/api/feature-toggles/current-preset")
     assert cur.json()["preset"] in ("panel_only", "custom")
     assert "SCENARIO_PRESET=panel_only" in env_path.read_text(encoding="utf-8")

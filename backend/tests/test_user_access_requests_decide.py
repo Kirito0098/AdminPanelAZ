@@ -177,6 +177,36 @@ def test_approve_new_user_creates_bound_user(
     assert user.client_base_name == "ivan_user"
 
 
+def test_approve_applies_preset_traffic_limit(
+    db, pending_new_user_request, admin, node, monkeypatch
+):
+    from app.services.provisioning_presets import create_preset
+
+    monkeypatch.setattr(
+        "app.services.user_access_requests.enqueue_user_provision", _no_enqueue
+    )
+    limit = 50 * 1024 * 1024 * 1024
+    preset = create_preset(
+        db,
+        name="with-limit",
+        node_ids=[node.id],
+        protocols=["wireguard"],
+        config_count=1,
+        access_days=30,
+        traffic_limit_bytes=limit,
+        is_default=False,
+    )
+    decided = approve_request(
+        db,
+        request_id=pending_new_user_request.id,
+        admin=admin,
+        preset_id=preset.id,
+    )
+    user = db.query(User).filter(User.id == decided.user_id).one()
+    assert user.traffic_limit_bytes == limit
+    assert user.traffic_counter_reset_at is not None
+
+
 def test_reject_request(db, pending_new_user_request, admin):
     decided = reject_request(
         db, request_id=pending_new_user_request.id, admin=admin, reason="не подходит", ban=True

@@ -72,6 +72,10 @@ def test_run_once_applies_access_and_subscription_passes(monkeypatch):
     monkeypatch.setattr(worker, "SessionLocal", lambda: db)
     monkeypatch.setattr(worker, "apply_due_access_blocks", lambda session: {"blocked": 2, "errors": 0})
     monkeypatch.setattr(worker, "apply_due_user_subscription_blocks", lambda session: {"users_due": 1, "cascaded": 3, "skipped": 4, "errors": 0})
+    monkeypatch.setattr(
+        "app.services.user_grace.scan_grace_period_alerts",
+        lambda session: {"alerted": 0},
+    )
 
     result = worker._run_once()
 
@@ -81,5 +85,6 @@ def test_run_once_applies_access_and_subscription_passes(monkeypatch):
         "cascaded": 3,
         "skipped": 4,
         "errors": 0,
+        "grace_alerts": 0,
     }
     assert closed["value"] is True

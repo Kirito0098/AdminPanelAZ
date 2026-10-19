@@ -2,20 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from types import SimpleNamespace
 
 import anyio
 import pytest
-from fastapi import FastAPI, HTTPException, status
-from httpx import ASGITransport, AsyncClient
+from fastapi import HTTPException, status
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from starlette.requests import Request
 
-from app.auth import create_user_access_token
-from app.database import Base, get_db
-from app.models import AdminPanelNotification, User, UserRole
-from app.routers.notifications import _db_session_factory, router as notifications_router
+from app.database import Base
+from app.models import User, UserRole
+from app.routers import notifications as notifications_mod
 from app.services.admin_panel_notifications import notifications_stream_snapshot, write_admin_panel_notification
 from app.services.stream_ticket import admin_from_stream_ticket, issue_stream_ticket
 
@@ -46,22 +47,37 @@ def admin(db):
     return user
 
 
-def _make_app(db):
-    app = FastAPI()
-    app.include_router(notifications_router, prefix="/api")
-
-    def _get_db():
-        try:
-            yield db
-        finally:
-            pass
-
-    app.dependency_overrides[get_db] = _get_db
-    return app
-
-
 def _run_async(func):
     return anyio.run(func)
+
+
+def _stream_request() -> Request:
+    request = Request(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0"},
+            "method": "GET",
+            "path": "/",
+            "headers": [],
+            "query_string": b"",
+            "client": ("127.0.0.1", 1),
+            "server": ("test", 80),
+        }
+    )
+    request.is_disconnected = lambda: asyncio.sleep(0, result=False)
+    return request
+
+
+async def _first_data_payload(ticket: str) -> dict:
+    response = await notifications_mod.notifications_stream(_stream_request(), ticket=ticket)
+    assert response.media_type == "text/event-stream"
+    assert response.headers["cache-control"] == "no-cache"
+    async for chunk in response.body_iterator:
+        text = chunk.decode() if isinstance(chunk, (bytes, bytearray)) else chunk
+        for line in text.splitlines():
+            if line.startswith("data: "):
+                return json.loads(line[len("data: ") :])
+    raise AssertionError("SSE stream did not emit a data event")
 
 
 # ---------- ticket ----------
@@ -106,54 +122,48 @@ def test_poll_snapshot_changes_when_max_id_grows(db, admin):
 # ---------- SSE endpoint ----------
 
 
-async def _first_data_event(client, ticket):
-    async with client.stream(
-        "GET", "/api/notifications/stream", params={"ticket": ticket}
-    ) as response:
-        assert response.status_code == status.HTTP_200_OK
-        assert response.headers["content-type"] == "text/event-stream"
-        assert response.headers["cache-control"] == "no-cache"
-
-        async for line in response.aiter_lines():
-            if line.startswith("data: "):
-                return json.loads(line[len("data: "):])
-        raise AssertionError("SSE stream did not emit a data event")
-
-
 def test_stream_endpoint_emits_update_on_change(db, admin, monkeypatch):
-    monkeypatch.setattr("app.routers.notifications._db_session_factory", lambda: db)
+    # Stream auth/ticks open+close their own sessions — do not reuse the fixture
+    # session (it would be closed mid-test). Avoid httpx ASGITransport SSE deadlock
+    # by driving StreamingResponse.body_iterator directly.
+    StreamSession = sessionmaker(bind=db.get_bind())
+    monkeypatch.setattr(notifications_mod, "_db_session_factory", StreamSession)
+    monkeypatch.setattr(notifications_mod, "SessionLocal", StreamSession)
+    monkeypatch.setattr(notifications_mod, "_POLL_INTERVAL_SECONDS", 0.05)
 
-    ticket = issue_stream_ticket(admin, "notifications")
-    app = _make_app(db)
+    async def run_sync(func, /, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(notifications_mod.asyncio, "to_thread", run_sync)
+
+    ticket_user = SimpleNamespace(id=admin.id, token_version=admin.token_version or 0)
+    ticket = issue_stream_ticket(ticket_user, "notifications")
+    db.commit()
+    db.close()
 
     async def main():
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-            # Первый тик всегда шлёт текущий снимок.
-            first = await _first_data_event(client, ticket)
-            assert first["max_notification_id"] == 0
+        first = await _first_data_payload(ticket)
+        assert first["max_notification_id"] == 0
 
-            write_admin_panel_notification(db, event_type="node_offline", title="новое")
+        with StreamSession() as write_db:
+            write_admin_panel_notification(write_db, event_type="node_offline", title="новое")
 
-            # Новый поток с новым билетом — снимок уже с ростом max id.
-            second = await _first_data_event(
-                client, issue_stream_ticket(admin, "notifications")
-            )
-            assert second["max_notification_id"] == 1
+        second = await _first_data_payload(issue_stream_ticket(ticket_user, "notifications"))
+        assert second["max_notification_id"] == 1
 
     _run_async(main)
 
 
 def test_stream_endpoint_rejects_unknown_ticket(db, admin, monkeypatch):
-    monkeypatch.setattr("app.routers.notifications._db_session_factory", lambda: db)
-    app = _make_app(db)
+    StreamSession = sessionmaker(bind=db.get_bind())
+    monkeypatch.setattr(notifications_mod, "_db_session_factory", StreamSession)
+    monkeypatch.setattr(notifications_mod, "SessionLocal", StreamSession)
+    db.commit()
+    db.close()
 
     async def main():
-        transport = ASGITransport(app=app)
-        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-            async with client.stream(
-                "GET", "/api/notifications/stream", params={"ticket": "unknown"}
-            ) as response:
-                assert response.status_code == status.HTTP_401_UNAUTHORIZED
+        with pytest.raises(HTTPException) as exc:
+            await notifications_mod.notifications_stream(_stream_request(), ticket="unknown")
+        assert exc.value.status_code == status.HTTP_401_UNAUTHORIZED
 
     _run_async(main)

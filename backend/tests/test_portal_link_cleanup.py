@@ -100,10 +100,13 @@ def test_recreated_client_gets_new_link(factory, monkeypatch):
 
 def test_delete_config_route_revokes_link(factory, monkeypatch):
     monkeypatch.setattr(configs_router, "require_ha_primary_for_client_ops", lambda _db: None)
-    monkeypatch.setattr(configs_router, "get_active_adapter", lambda _db: MagicMock())
-    monkeypatch.setattr(configs_router, "get_active_node", lambda _db: SimpleNamespace(id=1, name="local"))
-    monkeypatch.setattr(configs_router.admin_notify_service, "send_config_delete", lambda *_a, **_k: None)
-    monkeypatch.setattr(configs_router, "get_client_timezone_from_request", lambda _r: "UTC")
+    monkeypatch.setattr("app.services.config_provisioning.get_adapter_for_node", lambda _node: MagicMock())
+    monkeypatch.setattr("app.services.config_provisioning.find_sync_group_for_primary", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "app.services.config_provisioning.admin_notify_service.send_config_delete",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr("app.services.config_provisioning.get_client_timezone_from_request", lambda _r: "UTC")
     with factory() as db:
         config = _config(db, "alice")
         _link(db, "alice", "c_alice")

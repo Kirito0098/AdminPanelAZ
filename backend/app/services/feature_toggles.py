@@ -1093,12 +1093,18 @@ class FeatureToggleService:
             return mapped
         return "home"
 
-    def _current_grace_months(self) -> int:
+    def _current_grace_months(self, db: Session | None = None) -> int:
+        """Runtime grace: AppSetting when ``db`` is given; else .env (install/CLI)."""
+        if db is not None:
+            from app.services.user_grace import get_grace_months
+
+            return get_grace_months(db)
         raw = (self._raw_env("INACTIVE_USER_GRACE_PERIOD_MONTHS", "0") or "0").strip()
         try:
-            return int(raw)
+            value = int(raw)
         except ValueError:
             return 0
+        return value if value in {0, 1, 2, 3, 6, 12} else 0
 
     def _toggle_diff_against_preset(self, preset_key: str) -> tuple[list[str], list[str]]:
         want = SCENARIO_PRESETS[preset_key]["toggles"]
@@ -1113,9 +1119,9 @@ class FeatureToggleService:
             (will_enable if enabled else will_disable).append(key)
         return will_enable, will_disable
 
-    def _settings_diff_against_preset(self, preset_key: str) -> dict:
+    def _settings_diff_against_preset(self, preset_key: str, db: Session | None = None) -> dict:
         grace_want = SCENARIO_PRESETS[preset_key]["settings"]["inactive_user_grace_period_months"]
-        grace_now = self._current_grace_months()
+        grace_now = self._current_grace_months(db)
         if grace_now == grace_want:
             return {}
         return {
@@ -1125,7 +1131,7 @@ class FeatureToggleService:
             }
         }
 
-    def diff_scenario_preset(self, preset: str) -> dict:
+    def diff_scenario_preset(self, preset: str, db: Session | None = None) -> dict:
         """Raw diff (toggle keys + settings) between the current .env and a preset."""
         normalized = (preset or "").strip().lower()
         if normalized not in SCENARIO_PRESETS:
@@ -1135,10 +1141,10 @@ class FeatureToggleService:
             "preset": normalized,
             "will_enable": will_enable_keys,
             "will_disable": will_disable_keys,
-            "settings_changes": self._settings_diff_against_preset(normalized),
+            "settings_changes": self._settings_diff_against_preset(normalized, db),
         }
 
-    def preview_scenario_preset(self, preset: str) -> dict:
+    def preview_scenario_preset(self, preset: str, db: Session | None = None) -> dict:
         """Diff + labels for the UI confirm dialog (nothing is written)."""
         normalized = (preset or "").strip().lower()
         if normalized not in SCENARIO_PRESETS:
@@ -1149,7 +1155,7 @@ class FeatureToggleService:
         def labels(keys: list[str]) -> list[str]:
             return [FEATURE_TOGGLE_BY_KEY[k].label for k in keys]
 
-        settings_changes = self._settings_diff_against_preset(normalized)
+        settings_changes = self._settings_diff_against_preset(normalized, db)
         return {
             "preset": normalized,
             "label": meta["label"],
@@ -1166,8 +1172,13 @@ class FeatureToggleService:
             "impact": meta.get("impact", {}),
         }
 
-    def apply_scenario_preset(self, preset: str) -> dict:
-        """Apply a scenario: write env + toggles + grace, drop the legacy label."""
+    def apply_scenario_preset(self, preset: str, db: Session | None = None) -> dict:
+        """Apply a scenario: write env + toggles + grace, drop the legacy label.
+
+        With ``db`` (API path): also writes AppSetting via ``user_grace.set_grace_months``
+        — that is what the grace worker reads. Install/CLI may omit ``db`` and only
+        touch ``.env``.
+        """
         normalized = (preset or "").strip().lower()
         if normalized not in SCENARIO_PRESETS:
             raise ValueError(f"Неизвестный сценарий: {preset}")
@@ -1181,22 +1192,27 @@ class FeatureToggleService:
             self.env.set_env_value(definition.env_key, "true" if enabled else "false")
         self.env.remove_env_key("RESOURCE_PROFILE")
         self._invalidate_env_map()
+        grace_months = int(meta["settings"]["inactive_user_grace_period_months"])
+        if db is not None:
+            from app.services.user_grace import set_grace_months
+
+            set_grace_months(db, grace_months)
         return {
             "preset": normalized,
             "requires_restart": True,
             "impact": meta.get("impact", {}),
             "workers_disabled": meta.get("workers_disabled", []),
             "toggles": self.list_toggles(),
-            "presets": self.list_scenario_presets(),
+            "presets": self.list_scenario_presets(db),
         }
 
-    def resolve_scenario_state(self) -> dict:
+    def resolve_scenario_state(self, db: Session | None = None) -> dict:
         """Current scenario or the computed «Кастомный» state."""
         last = self.get_scenario_preset()
         for key, meta in SCENARIO_PRESETS.items():
             enable, disable = self._toggle_diff_against_preset(key)
             grace_want = meta["settings"]["inactive_user_grace_period_months"]
-            grace_now = self._current_grace_months()
+            grace_now = self._current_grace_months(db)
             if not enable and not disable and grace_now == grace_want:
                 return {
                     "key": key,
@@ -1221,8 +1237,8 @@ class FeatureToggleService:
             "last_applied": last,
         }
 
-    def list_scenario_presets(self) -> dict:
-        resolved = self.resolve_scenario_state()
+    def list_scenario_presets(self, db: Session | None = None) -> dict:
+        resolved = self.resolve_scenario_state(db)
         items = []
         for key, meta in SCENARIO_PRESETS.items():
             items.append({

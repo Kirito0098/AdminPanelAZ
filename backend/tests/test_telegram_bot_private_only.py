@@ -45,12 +45,13 @@ def _message(chat_type: str) -> dict:
 
 
 def _callback(chat_type: str) -> dict:
+    chat_id = 42 if chat_type == "private" else -100
     return {
         "callback_query": {
             "id": "cb",
             "data": "configs",
             "from": {"id": 42},
-            "message": {"message_id": 1, "chat": {"id": -100, "type": chat_type}},
+            "message": {"message_id": 1, "chat": {"id": chat_id, "type": chat_type}},
         }
     }
 

@@ -5,6 +5,7 @@ Replica policy ops look up the shadow ``VpnConfig``; it exists only after the cr
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -89,16 +90,10 @@ def _create_via_route(db, node: Node, owner: User, timeline: _Timeline, **overri
         "require_ha_primary_for_client_ops": MagicMock(),
         "require_vpn_type": MagicMock(),
         "enforce_can_create_vpn_type": MagicMock(),
+        "validate_new_client_name": MagicMock(),
         "_active_node_id": MagicMock(return_value=node.id),
         "get_active_adapter": MagicMock(return_value=adapter),
-        "recreate_openvpn_profiles_after_admin_change": MagicMock(),
-        "load_node_remote_hosts": MagicMock(return_value=[]),
-        "find_sync_group_for_primary": MagicMock(return_value=SimpleNamespace(id=7)),
-        "maybe_replicate_create": MagicMock(side_effect=timeline.replicate_create),
-        "refresh_config_cert_expiry": MagicMock(),
-        "purge_traffic_history_for_reused_name": MagicMock(),
         "get_active_node": MagicMock(return_value=node),
-        "get_client_timezone_from_request": MagicMock(return_value="UTC"),
         "_viewer_visibility_policy": MagicMock(return_value={}),
         "resolve_openvpn_group_for_user": MagicMock(return_value=None),
         "_local_ip_for_config": MagicMock(return_value=None),
@@ -108,12 +103,26 @@ def _create_via_route(db, node: Node, owner: User, timeline: _Timeline, **overri
     }
     admin = SimpleNamespace(id=999, username="admin", role=UserRole.admin)
     payload = VpnConfigCreate(client_name="mira", vpn_type=VpnType.openvpn, owner_id=owner.id)
-    with (
-        patch.multiple(configs_router, **patches),
-        patch.object(configs_router.admin_notify_service, "send_config_create"),
-        patch("app.services.access_until.get_adapter_for_node", return_value=MagicMock()),
-        patch("app.services.node_sync.policy_sync.maybe_replicate_policy_op", side_effect=timeline.replicate_policy),
-    ):
+    with ExitStack() as stack:
+        stack.enter_context(patch.multiple(configs_router, **patches))
+        for path, kwargs in (
+            ("app.services.config_provisioning.validate_new_client_name", {}),
+            ("app.services.config_provisioning.assert_name_not_reserved_by_other_user", {}),
+            ("app.services.config_provisioning.require_vpn_type", {}),
+            ("app.services.config_provisioning.enforce_can_create_vpn_type", {}),
+            ("app.services.config_provisioning.get_adapter_for_node", {"return_value": adapter}),
+            ("app.services.config_provisioning.recreate_openvpn_profiles_after_admin_change", {}),
+            ("app.services.config_provisioning.load_node_remote_hosts", {"return_value": []}),
+            ("app.services.config_provisioning.find_sync_group_for_primary", {"return_value": SimpleNamespace(id=7)}),
+            ("app.services.config_provisioning.maybe_replicate_create", {"side_effect": timeline.replicate_create}),
+            ("app.services.config_provisioning.refresh_config_cert_expiry", {}),
+            ("app.services.config_provisioning.purge_traffic_history_for_reused_name", {}),
+            ("app.services.config_provisioning.admin_notify_service", {}),
+            ("app.services.config_provisioning.get_client_timezone_from_request", {"return_value": "UTC"}),
+            ("app.services.access_until.get_adapter_for_node", {"return_value": MagicMock()}),
+            ("app.services.node_sync.policy_sync.maybe_replicate_policy_op", {"side_effect": timeline.replicate_policy}),
+        ):
+            stack.enter_context(patch(path, **kwargs))
         configs_router.create_config(payload, SimpleNamespace(client=SimpleNamespace(host="127.0.0.1")), db, admin)
     return response.call_args.kwargs
 

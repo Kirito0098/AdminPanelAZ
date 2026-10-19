@@ -53,14 +53,16 @@ def update_feature_toggles(payload: FeatureToggleUpdate, _: User = Depends(requi
 
 
 @router.get("/presets")
-def list_scenario_presets(_: User = Depends(require_admin)):
-    return _service().list_scenario_presets()
+def list_scenario_presets(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    return _service().list_scenario_presets(db)
 
 
 @router.post("/preview-preset")
-def preview_scenario_preset(preset: str, _: User = Depends(require_admin)):
+def preview_scenario_preset(
+    preset: str, _: User = Depends(require_admin), db: Session = Depends(get_db)
+):
     try:
-        return _service().preview_scenario_preset(preset)
+        return _service().preview_scenario_preset(preset, db=db)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -70,9 +72,10 @@ def apply_scenario_preset(preset: str, _: User = Depends(require_admin), db: Ses
     service = _service()
     telegram_was_enabled = service.is_enabled("telegram")
     try:
-        result = service.apply_scenario_preset(preset)
+        result = service.apply_scenario_preset(preset, db=db)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    db.commit()
     if telegram_was_enabled and not service.is_enabled("telegram"):
         from app.services.telegram_module import shutdown_telegram_integration
 
@@ -83,9 +86,9 @@ def apply_scenario_preset(preset: str, _: User = Depends(require_admin), db: Ses
 
 
 @router.get("/current-preset")
-def get_current_scenario_preset(_: User = Depends(require_admin)):
+def get_current_scenario_preset(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     service = _service()
-    resolved = service.resolve_scenario_state()
+    resolved = service.resolve_scenario_state(db)
     return {
         "preset": resolved["key"],
         "last_applied": resolved["last_applied"],

@@ -134,11 +134,10 @@ def test_delete_route_drops_the_policy(db):
         patch.object(configs_router, "_get_config_for_active_node", return_value=config),
         patch.object(configs_router, "_can_mutate_config", return_value=True),
         patch.object(configs_router, "require_ha_primary_for_client_ops"),
-        patch.object(configs_router, "get_active_adapter", return_value=MagicMock()),
-        patch.object(configs_router, "get_active_node", return_value=node),
-        patch.object(configs_router, "find_sync_group_for_primary", return_value=None),
-        patch.object(configs_router.admin_notify_service, "send_config_delete"),
-        patch.object(configs_router, "get_client_timezone_from_request", return_value="UTC"),
+        patch("app.services.config_provisioning.get_adapter_for_node", return_value=MagicMock()),
+        patch("app.services.config_provisioning.find_sync_group_for_primary", return_value=None),
+        patch("app.services.config_provisioning.admin_notify_service"),
+        patch("app.services.config_provisioning.get_client_timezone_from_request", return_value="UTC"),
     ):
         configs_router.delete_config(config.id, SimpleNamespace(client=SimpleNamespace(host="127.0.0.1")), db, user)
 
