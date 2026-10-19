@@ -78,6 +78,7 @@ def post_unlock_code(
             creator=current_user,
             code=payload.code,
             allowed_client_names=payload.allowed_client_names,
+            comment=payload.comment,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
