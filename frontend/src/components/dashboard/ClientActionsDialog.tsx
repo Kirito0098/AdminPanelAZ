@@ -1157,7 +1157,7 @@ export default function ClientActionsDialog({
                       onChange={(ownerId) => void handleOwnerChange(ownerId)}
                       disabled={busyAction !== null}
                       currentOwner={
-                        config.owner_username
+                        config.owner_id != null && config.owner_username
                           ? { id: config.owner_id, username: config.owner_username }
                           : undefined
                       }

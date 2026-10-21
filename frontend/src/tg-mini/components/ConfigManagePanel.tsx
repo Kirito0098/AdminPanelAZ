@@ -148,7 +148,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
         setCertDays(String(details.cert_expire_days ?? 3650))
         setCertExpiry(formatCertExpiry(details))
         setOwnerId(details.owner_id)
-        setOwnerUsername(details.owner_username)
+        setOwnerUsername(details.owner_username ?? undefined)
         setPolicy(policyData)
         setUsers(panelUsers)
       })
