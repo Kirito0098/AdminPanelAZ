@@ -85,13 +85,18 @@ class ProxyNodeAdapter:
 
         if response.status_code >= 400:
             detail = response.text
+            from_agent = False
             try:
                 data = response.json()
                 detail = data.get("detail", detail)
+                from_agent = True
             except Exception:
                 pass
             code, message = classify_http_status(
-                response.status_code, detail, mtls_enabled=self._mtls_enabled
+                response.status_code,
+                detail,
+                mtls_enabled=self._mtls_enabled,
+                from_agent=from_agent,
             )
             raise_link_error(code, message, upstream_status=response.status_code)
 

@@ -115,6 +115,8 @@
 
 ### 🐛 Fixed
 
+- **Узел / ошибки удаления OpenVPN** — панель больше не выдаёт ответ агента за проблему TLS. Если агент вернул JSON-ошибку (например EasyRSA «Cannot revoke this certificate, a conflicting file exists»), показывается её текст с кодом `node_error`, а не совет «проверьте mTLS». Признаки TLS-прокси (`plain http request was sent to https port`, `wrong version number`) по-прежнему распознаются, транспортные SSL-ошибки не изменились.
+- **Удаление клиента с уже отозванным сертификатом** — если EasyRSA не может отозвать сертификат, потому что он уже отозван, агент проверяет PKI по `index.txt` и серийникам профилей и дочищает файлы клиента (`client/openvpn/*`, `ccd`) вместо падения с HTTP 500. Для клиента с валидным сертификатом или при посторонней ошибке поведение прежнее: ошибка и никаких удалений.
 - **HA / синхронизация AZ-AWG2** — если на primary нет конфигов AZ-AWG2 или на реплике модуль не установлен, Push full больше не показывает голый `Internal Server Error`. На шаге «синхронизация AZ-AWG2» виден понятный русский текст; пустой архив на реплику не применяется. Агент при той же ошибке импорта отвечает HTTP 400 вместо 500.
 
 ### 🗑️ Removed
@@ -129,6 +131,8 @@
 
 ### 🧪 Tests
 
+- `test_node_link_errors.py` — JSON-ошибка агента с упоминанием SSL остаётся `node_error` с текстом агента, а страница TLS-прокси и транспортная SSL-ошибка по-прежнему дают `node_tls_mismatch`.
+- `test_openvpn_delete_already_revoked.py` — фолбэк-очистка клиента с уже отозванным сертификатом (профили + `ccd`), сохранение ошибки при валидном сертификате и при постороннем сбое скрипта.
 - Новые pytest (stage 2): privacy §6.9 для заявок и инлайна (`test_telegram_request_privacy.py`), анти-злоупотребления заявок, гонка двойного одобрения, единая доставка с портал-ссылкой, перекодировка чека (`test_request_receipt_preview.py`), SSE-билет (`test_notifications_stream.py`), колокольчик + удержание (`test_admin_panel_notification_writer.py`). Всего 43 новых критических теста Stage 2.
 - `test_privacy_upgrade.py` — два прогона privacy upgrade на фикстуре pre-2.26.6 дают одно конечное состояние; сбой `setWebhook` не включает обязательный secret-заголовок.
 - Stage 5: `scripts/test-install-scenario-preset.sh` — неинтерактивная установка применяет `panel_only`, мастер по умолчанию `commercial`, старый `apply-resource-profile.py` и `WIZ_RESOURCE_PROFILE` больше не используются.

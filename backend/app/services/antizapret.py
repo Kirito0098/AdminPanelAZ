@@ -1,4 +1,5 @@
 import io
+import logging
 import os
 import re
 import shutil
@@ -22,14 +23,24 @@ from app.services.path_stash import stashed
 from app.services.profile_files import iter_client_profile_paths, profile_filename_matches_client
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
 CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 WIREGUARD_SERVER_INTERFACES = frozenset({"antizapret", "vpn"})
 WIREGUARD_SERVER_CONFIG_DIR = Path("/etc/wireguard")
 WIREGUARD_CLIENT_PROFILE_DIRS = ("wireguard", "amneziawg")
 OPENVPN_CLIENT_PROFILE_DIR = "openvpn"
+OPENVPN_CCD_DIR = Path("/etc/openvpn/ccd")
 PROFILE_FILE_SUFFIXES = frozenset({".ovpn", ".conf"})
 EASYRSA3_ROOT = Path("/etc/openvpn/easyrsa3")
 EASYRSA_INDEX_PATH = EASYRSA3_ROOT / "pki" / "index.txt"
+
+# EasyRSA refuses to revoke a certificate that is already revoked. Such a client is already dead,
+# so deleting it must clean the leftover files instead of failing the whole operation.
+_ALREADY_REVOKED_MARKERS = (
+    "a conflicting file exists",
+    "already revoked",
+    "already been revoked",
+)
 
 
 
@@ -67,6 +78,7 @@ class AntiZapretService:
         self.config_dir = self.base_path / "config"
         self.knot_resolver_dir = Path("/etc/knot-resolver")
         self.openvpn_logs = Path("/etc/openvpn/server/logs")
+        self.openvpn_ccd_dir = OPENVPN_CCD_DIR
 
     def _run_client_script(self, *args: str, timeout: int = 120) -> str:
         if not self.client_script.exists():
@@ -116,7 +128,59 @@ class AntiZapretService:
 
     def delete_openvpn_client(self, client_name: str) -> str:
         self.validate_client_name(client_name)
-        return self._run_client_script("2", client_name)
+        try:
+            return self._run_client_script("2", client_name)
+        except HTTPException as exc:
+            if not self._openvpn_client_cert_only_revoked(client_name, exc):
+                raise
+            removed = self._purge_openvpn_client_artifacts(client_name)
+            logger.warning(
+                "AntiZapret cannot revoke OpenVPN client %s (certificate already revoked); "
+                "removed %d leftover file(s) instead",
+                client_name,
+                removed,
+            )
+            return f"Клиент {client_name} удалён: сертификат уже отозван, файлов удалено {removed}"
+
+    def _openvpn_client_cert_only_revoked(self, client_name: str, exc: HTTPException) -> bool:
+        """True only when the script failed because every profile cert is already revoked/expired.
+
+        Purging files on any other error would delete a client whose certificate is still valid,
+        so the PKI state is verified before falling back.
+        """
+        detail = str(exc.detail or "").lower()
+        if not any(marker in detail for marker in _ALREADY_REVOKED_MARKERS):
+            return False
+        try:
+            from app.services.openvpn_pki import validate_client_profiles
+
+            result = validate_client_profiles(self, client_name)
+        except Exception as verify_exc:  # noqa: BLE001 — verification must never mask the delete error
+            logger.warning("Cannot verify PKI state of OpenVPN client %s: %s", client_name, verify_exc)
+            return False
+        if result.ready or not result.issues:
+            return False
+        return all(issue.status in {"revoked", "expired"} for issue in result.issues)
+
+    def _purge_openvpn_client_artifacts(self, client_name: str) -> int:
+        """Remove profile files and the ccd entry of a client whose certificate is already dead."""
+        paths: set[Path] = {self.openvpn_ccd_dir / client_name}
+        try:
+            for entry in self.get_profile_files(client_name, VpnType.openvpn):
+                path = entry.get("path")
+                if path:
+                    paths.add(Path(path))
+        except Exception as exc:  # noqa: BLE001 — a broken listing must not block the cleanup
+            logger.warning("Cannot list OpenVPN profiles of %s: %s", client_name, exc)
+        removed = 0
+        for path in sorted(paths):
+            try:
+                if path.is_file():
+                    path.unlink()
+                    removed += 1
+            except OSError as exc:
+                logger.warning("Cannot remove %s: %s", path, exc)
+        return removed
 
     def list_openvpn_clients(self) -> list[str]:
         output = self._run_client_script("3")
