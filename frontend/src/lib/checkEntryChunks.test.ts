@@ -74,6 +74,8 @@ describe('check-entry-chunks', () => {
         'src/pages/ServerMonitorPage.tsx': { file: 'assets/Zz13.js' },
         'src/pages/SettingsPage.tsx': { file: 'assets/Aa12.js' },
         'src/lib/pageHelpers.ts': { file: 'assets/Cc12.js' },
+        '_Qq12.js': { file: 'assets/Qq12.js', name: 'UsersPage' },
+        '_Rr12.js': { file: 'assets/Rr12.js', name: 'UserStatsWidget' },
       }),
     )
     write('assets/Ab_1.js', 'recharts-surface')
@@ -84,8 +86,10 @@ describe('check-entry-chunks', () => {
     write('assets/Aa12.js', 'import"./Bb12.js"')
     write('assets/Bb12.js', 'import"./Ab_1.js"')
     write('assets/Cc12.js', 'import"./Ab_1.js"')
+    write('assets/Qq12.js', 'import{C}from"./Ab_1.js"')
+    write('assets/Rr12.js', 'import{C}from"./Ab_1.js"')
 
-    expect(pagesWithChartCode(dist)).toEqual(['SettingsPage', 'TrafficPage'])
+    expect(pagesWithChartCode(dist)).toEqual(['SettingsPage', 'TrafficPage', 'UsersPage'])
   })
 
   it('reports stop words in the page, eager chunks and any asset file name', () => {

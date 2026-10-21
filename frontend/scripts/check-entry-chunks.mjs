@@ -12,6 +12,8 @@ const CHART_PAGES = new Set(['MonitoringPage', 'ServerMonitorPage'])
 const HTML_CHUNK_RE = /(?:src|href)="\.\/([^"]+\.js)"/g
 const STATIC_IMPORT_RE = /(?:\bfrom|\bimport)\s*["']\.\/([^"']+\.js)["']/g
 const PAGE_SOURCE_RE = /^src\/pages\/([A-Z][A-Za-z0-9]*Page)\.tsx$/
+// A page chunk split by Vite keeps only its `name` in the manifest (key looks like `_ClXDNeCL.js`).
+const PAGE_CHUNK_NAME_RE = /^[A-Z][A-Za-z0-9]*Page$/
 // The backend serves other JS chunks only to signed-in browsers (backend/app/services/frontend_assets.py).
 const PUBLIC_ROOTS = ['index.html', 'src/pages/PortalPage.tsx']
 const LOGIN_ONLY_SHELL = 'AppShell'
@@ -79,11 +81,15 @@ export function pagesWithChartCode(distDir) {
   const manifest = readManifest(distDir)
   if (!manifest) return []
   return Object.entries(manifest)
-    .map(([src, entry]) => ({ file: entry.file, page: PAGE_SOURCE_RE.exec(src)?.[1] }))
+    .map(([src, entry]) => ({ file: entry.file, page: pageName(src, entry) }))
     .filter(({ page }) => page && !CHART_PAGES.has(page))
     .filter(({ file }) => withChartCode(distDir, staticClosure(distDir, [file])).length > 0)
     .map(({ page }) => page)
     .sort()
+}
+
+function pageName(src, entry) {
+  return PAGE_SOURCE_RE.exec(src)?.[1] ?? (PAGE_CHUNK_NAME_RE.test(entry.name ?? '') ? entry.name : undefined)
 }
 
 function publicManifestKeys(manifest) {

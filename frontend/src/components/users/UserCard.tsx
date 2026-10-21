@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { Suspense, lazy, useState } from 'react'
 import { Activity, BarChart3, CalendarClock, KeyRound, Save, UserCog } from 'lucide-react'
 import { ApiError, updateUser } from '@/api/client'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
@@ -11,12 +11,15 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import Spinner from '@/components/ui/Spinner'
 import UserMetric from './UserMetric'
 import UserAccessSection from './UserAccessSection'
 import UserAccessControlSection from './UserAccessControlSection'
 import UserConfigsSection from './UserConfigsSection'
-import UserStatsSection from './UserStatsSection'
 import UserAccountSection from './UserAccountSection'
+
+// Графики статистики тянут recharts: грузим вкладку отдельным чанком, а не вместе со страницей «Пользователи».
+const UserStatsSection = lazy(() => import('./UserStatsSection'))
 
 interface UserCardProps {
   card: UserProvisioningCard
@@ -201,7 +204,9 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
               <UserConfigsSection userId={user.id} card={card} />
             </TabsContent>
             <TabsContent value="stats" className="mt-4">
-              <UserStatsSection userId={user.id} />
+              <Suspense fallback={<Spinner label="Загрузка статистики..." className="py-8" />}>
+                <UserStatsSection userId={user.id} />
+              </Suspense>
             </TabsContent>
             <TabsContent value="account" className="mt-4">
               <UserAccountSection user={user} onSave={onSave} onDelete={onDelete} />
