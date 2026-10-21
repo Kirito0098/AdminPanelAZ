@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Layers, LogIn, Phone, Trash2 } from 'lucide-react'
+import { Layers, LogIn, Phone, Trash2, Copy } from 'lucide-react'
 import { createUserTelegramLinkCode } from '@/api/users'
 import { useNotifications } from '@/context/NotificationContext'
 import { Badge } from '@/components/ui/badge'
@@ -53,6 +53,16 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
     }
   }
 
+  const handleCopyLinkCode = async () => {
+    if (!linkCode) return
+    try {
+      await navigator.clipboard.writeText(linkCode)
+      success('Код скопирован')
+    } catch {
+      notifyError('Не удалось скопировать код')
+    }
+  }
+
   const handleDelete = () => {
     onDelete(user)
     setDeleteOpen(false)
@@ -89,8 +99,8 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
               Оставьте пустым, чтобы не менять пароль
             </p>
           </div>
-          <Button type="button" onClick={handleSave} disabled={!hasChanges}>
-            {hasChanges ? 'Сохранить' : 'Изменений нет'}
+          <Button type="button" onClick={handleSave} disabled={!hasChanges} title={!hasChanges ? 'Нет изменений' : undefined}>
+            Сохранить
           </Button>
         </div>
       </UserSection>
@@ -98,18 +108,14 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
       <UserSection
         icon={Layers}
         title="Квота конфигов"
-        description="Лимит имён конфигов на всех серверах (имена, не файлы)."
+        description="Лимит имён конфигов на всех серверах."
         actions={
           <Badge variant="secondary">
             {used} / {limit ?? '∞'}
           </Badge>
         }
       >
-        <div className="space-y-3">
-          <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-semibold leading-none">{used}</span>
-            <span className="text-sm text-muted-foreground">из {limit ?? '∞'}</span>
-          </div>
+        <div className="space-y-2">
           {limit != null && limit > 0 && (
             <PercentBar
               value={used}
@@ -121,7 +127,7 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
           )}
           <p className="text-xs text-muted-foreground">
             {limit == null
-              ? 'Без лимита — действует общий лимит панели.'
+              ? 'Без личной квоты — действует общий лимит панели.'
               : 'Достижение квоты блокирует добавление имён.'}
           </p>
         </div>
@@ -143,21 +149,31 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
               'Создание…'
             ) : (
               <>
-                <Phone size={15} /> Получить код привязки
+                <Phone size={15} /> Получить код
               </>
             )}
           </Button>
           {linkCode && (
             <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2.5">
               <span className="font-mono text-sm font-medium">{linkCode}</span>
-              <Button type="button" size="sm" variant="outline" onClick={() => setLinkCode(null)}>
-                Скрыть
-              </Button>
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  size="icon"
+                  variant="ghost"
+                  className="h-8 w-8"
+                  onClick={() => void handleCopyLinkCode()}
+                  aria-label="Скопировать код привязки"
+                  title="Скопировать"
+                >
+                  <Copy size={14} />
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => setLinkCode(null)}>
+                  Скрыть
+                </Button>
+              </div>
             </div>
           )}
-          <p className="text-xs text-muted-foreground">
-            Код для команды <code className="font-mono">/link</code> в боте. Действует 10 минут.
-          </p>
         </div>
       </UserSection>
 
@@ -165,7 +181,7 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
         icon={Trash2}
         tone="danger"
         title="Удаление аккаунта"
-        description="Удалить абонента и все его конфиги. Действие необратимо."
+        description="Абонент и все его конфиги будут удалены без возможности восстановления."
       >
         <Button
           type="button"
@@ -174,7 +190,7 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
           className="w-full sm:w-auto"
         >
           <Trash2 size={15} />
-          Удалить пользователя
+          Удалить абонента
         </Button>
       </UserSection>
 

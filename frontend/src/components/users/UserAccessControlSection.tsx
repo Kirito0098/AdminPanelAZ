@@ -56,6 +56,7 @@ function AccessLifecycleCard({
   const suspended = Boolean(user.suspended_at)
   // Администраторов приостановить нельзя (API отклоняет) — прячем действие.
   const canSuspend = user.role !== 'admin'
+  const accessExpired = Boolean(user.access_until && new Date(user.access_until) < new Date())
 
   const handleCustomExtend = () => {
     const days = Number.parseInt(customDays, 10)
@@ -71,11 +72,19 @@ function AccessLifecycleCard({
       <UserSection
         icon={CalendarPlus}
         title="Срок доступа"
-        description="Продление отсчитывается от max(сейчас, текущий срок) и сбрасывает счётчик трафика."
+        description={
+          user.access_until
+            ? `Сейчас доступ до ${formatDate(user.access_until)}. Продление сбрасывает счётчик трафика.`
+            : 'Бессрочный доступ. Продление сбрасывает счётчик трафика.'
+        }
         actions={
           suspended ? (
             <Badge variant="destructive" className="text-[10px]">
               Приостановлен
+            </Badge>
+          ) : accessExpired ? (
+            <Badge variant="destructive" className="text-[10px]">
+              Истёк
             </Badge>
           ) : (
             <Badge variant="success" className="text-[10px]">
@@ -130,7 +139,7 @@ function AccessLifecycleCard({
               <>
                 <Button type="button" size="sm" onClick={() => onResume(resumeNotify)} disabled={busy}>
                   <PlayCircle size={15} />
-                  Возобновить доступ
+                  Возобновить
                 </Button>
                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Checkbox
@@ -150,7 +159,7 @@ function AccessLifecycleCard({
                 disabled={busy}
               >
                 <PauseCircle size={15} />
-                Приостановить доступ
+                Приостановить
               </Button>
             ) : null}
           </div>
@@ -273,7 +282,7 @@ function TrafficLimitCard({
       <UserSection
         icon={Gauge}
         title="Лимит трафика"
-        description="Общий лимит пользователя на все его конфиги. По умолчанию ограничений нет."
+        description="Общий лимит на все конфиги. По умолчанию без ограничений."
         actions={
           <Button
             type="button"
@@ -289,14 +298,12 @@ function TrafficLimitCard({
         <div className="space-y-3">
           {!trafficSyncOn && (
             <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-              Модуль «Синхронизация трафика» выключен — учёт трафика не идёт, лимит не работает.
-              Включите его в Настройках → Модули.
+              Модуль «Синхронизация трафика» выключен — лимит не работает. Включите его в
+              Настройках → Модули.
             </p>
           )}
           {limitBytes == null ? (
-            <p className="text-sm text-muted-foreground">
-              Без ограничения — трафик абонента не ограничивается.
-            </p>
+            <p className="text-sm text-muted-foreground">Без ограничений.</p>
           ) : (
             <>
               <div className="flex flex-wrap items-end justify-between gap-3">
@@ -333,7 +340,7 @@ function TrafficLimitCard({
               />
               {user.traffic_limit_blocked && (
                 <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                  Лимит исчерпан — доступ абонента заблокирован.
+                  Лимит исчерпан — доступ заблокирован.
                 </p>
               )}
               <div className="flex flex-wrap gap-2">

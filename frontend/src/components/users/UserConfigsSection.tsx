@@ -172,7 +172,7 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
       <UserSection
         icon={KeyRound}
         title="Конфиги"
-        description="Сгруппированы по имени, затем по узлу. Действия выполняются на узле конфига."
+        description="По имени и узлу. Действия выполняются на узле конфига."
         actions={
           <Badge variant="secondary">
             {card.configs.length} имён ·{' '}
@@ -183,16 +183,15 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
         <div className="space-y-3">
           {!base && (
             <p className="rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              У абонента нет плана — показаны все его записи конфигов из базы панели. Это не
-              проверка узла: конфиги, удалённые на узле напрямую, остаются здесь до синхронизации
-              панели с этим узлом.
+              Плана нет — показаны записи конфигов из базы панели. Конфиги, удалённые на узле
+              напрямую, остаются здесь до синхронизации.
             </p>
           )}
           {card.configs.length === 0 ? (
             <EmptyState
               icon={KeyRound}
-              title="Нет конфигов в плане"
-              description="Создайте конфиги в разделе «Доступ» или дождитесь применения плана."
+              title="Конфигов нет"
+              description="Создайте их во вкладке «План» или дождитесь применения."
               className="py-10"
             />
           ) : (
@@ -216,7 +215,7 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
                       )}
                     </div>
                     <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {group.nodes.length} узел{group.nodes.length !== 1 ? 'а' : ''}
+                      узлов: {group.nodes.length}
                     </span>
                   </div>
                   <div className="p-3">

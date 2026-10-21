@@ -9,6 +9,7 @@ import {
   Search,
   Ticket,
   UserPlus,
+  UserRound,
   Users,
   X,
 } from 'lucide-react'
@@ -502,8 +503,8 @@ export default function UsersPage() {
     return Number.isFinite(id) && id > 0 ? id : null
   }, [userId])
 
-  const handleDeleteUser = async (user: DeletableUser) => {
-    if (!window.confirm(`Удалить пользователя «${user.username}"?`)) return
+  const handleDeleteUser = async (user: DeletableUser, opts?: { skipConfirm?: boolean }) => {
+    if (!opts?.skipConfirm && !window.confirm(`Удалить пользователя «${user.username}»?`)) return
     try {
       if (user.provision_state === 'unmanaged' || !user.client_base_name) {
         await deleteUser(user.id)
@@ -827,16 +828,18 @@ export default function UsersPage() {
           if (!open) closeDetail()
         }}
         title="Профиль абонента"
-        description="План конфигов, доступ и учётная запись"
+        description="Доступ, конфиги и учётная запись"
+        icon={UserRound}
         size="xl"
-        bodyClassName="px-4 py-3 sm:px-6"
+        bodyClassName="px-0 py-0"
       >
         {detailId != null ? (
           <UserCardView
+            key={detailId}
             userId={detailId}
             onBack={closeDetail}
             onSave={(id, data) => void handleSaveUser(id, data)}
-            onDelete={(user) => void handleDeleteUser(user)}
+            onDelete={(user) => void handleDeleteUser(user, { skipConfirm: true })}
           />
         ) : null}
       </AppDialog>
@@ -1095,7 +1098,7 @@ function UserCardView({
     }
   }, [userId, notifyError, onBack])
 
-  if (loading) return <Spinner label="Загрузка карточки…" />
+  if (loading) return <Spinner label="Загрузка карточки…" className="py-16" />
   if (!card) return null
 
   return (
