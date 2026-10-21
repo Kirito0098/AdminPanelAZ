@@ -63,14 +63,26 @@ export default function TelegramOverviewCards({ tg, loading = false, onNavigate 
       icon: Bot,
       value: !tg.settings?.bot_token_set
         ? '—'
+        : !tg.interactiveEnabled
+          ? 'Выключено'
+          : !tg.commandsConnected
+            ? 'Нужно подключить'
+            : tg.relayError
+              ? 'Узел не отвечает'
+              : tg.webhookReady
+                ? 'Работает'
+                : 'Через узел',
+      sub: tg.interactiveEnabled
+        ? tg.relayEnabled
+          ? '/start, /status · через узел'
+          : '/start, /status и др.'
+        : 'Ответы бота в чате',
+      accent: tg.commandsReady
+        ? 'border-l-emerald-500'
         : tg.interactiveEnabled
-          ? tg.webhookReady
-            ? 'Работает'
-            : 'Нужно подключить'
-          : 'Выключено',
-      sub: tg.interactiveEnabled ? '/start, /status и др.' : 'Ответы бота в чате',
-      accent: tg.webhookReady ? 'border-l-emerald-500' : tg.interactiveEnabled ? 'border-l-amber-500' : 'border-l-muted-foreground/30',
-      tone: tg.webhookReady ? 'text-emerald-600 dark:text-emerald-400' : undefined,
+          ? 'border-l-amber-500'
+          : 'border-l-muted-foreground/30',
+      tone: tg.commandsReady ? 'text-emerald-600 dark:text-emerald-400' : undefined,
     },
     {
       key: 'notify',

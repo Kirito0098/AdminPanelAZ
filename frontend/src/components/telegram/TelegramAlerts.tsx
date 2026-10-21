@@ -18,10 +18,18 @@ export default function TelegramAlerts({ tg }: TelegramAlertsProps) {
         </SettingsAlert>
       )}
 
-      {tg.interactiveEnabled && !tg.webhookReady && tg.settings.bot_token_set && (
+      {tg.interactiveEnabled && !tg.commandsConnected && tg.settings.bot_token_set && (
         <SettingsAlert variant="warning" title="Команды бота не подключены">
           Вы включили ответы бота, но связь с панелью ещё не настроена. Нажмите «Подключить бота» на вкладке{' '}
-          <strong>Команды бота</strong> (нужен доступ к панели по HTTPS из интернета).
+          <strong>Команды бота</strong> (нужен доступ к панели по HTTPS из интернета) или включите{' '}
+          <strong>Связь через узел</strong>, если панель в РФ.
+        </SettingsAlert>
+      )}
+
+      {tg.interactiveEnabled && tg.settings.bot_token_set && tg.relayError && (
+        <SettingsAlert variant="danger" title="Связь с Telegram через узел не работает">
+          {tg.relayError} — пока узел не ответит, бот не получит команды. Проверьте узлы на вкладке{' '}
+          <strong>Связь через узел</strong>.
         </SettingsAlert>
       )}
 

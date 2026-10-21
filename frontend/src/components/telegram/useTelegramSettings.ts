@@ -112,6 +112,11 @@ export function useTelegramSettings() {
   )
   const miniAppReady = Boolean(settings?.mini_app_url)
   const webhookReady = Boolean(settings?.webhook_registered)
+  const relayEnabled = Boolean(settings?.relay_node_ids.length)
+  const relayError = relayEnabled ? (settings?.relay_last_error ?? '') : ''
+  // Через узел панель сама опрашивает Telegram (getUpdates), webhook при этом не регистрируется.
+  const commandsConnected = webhookReady || relayEnabled
+  const commandsReady = commandsConnected && !relayError
   const notifyEventsEnabled = useMemo(
     () => Object.values(eventToggles).filter(Boolean).length,
     [eventToggles],
@@ -404,6 +409,10 @@ export function useTelegramSettings() {
     legacyLoginReady,
     miniAppReady,
     webhookReady,
+    relayEnabled,
+    relayError,
+    commandsConnected,
+    commandsReady,
     notifyEventsEnabled,
     handleSaveBot,
     handleCopyMiniAppUrl,

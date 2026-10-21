@@ -138,6 +138,10 @@ export default function TelegramBotCommandsGuide() {
         <GuideStep step={3} title="Подключите webhook">
           Нажмите <strong>«Подключить бота к панели»</strong>. Telegram начнёт отправлять сообщения пользователей
           на ваш сервер — бот сможет отвечать без long polling.
+          <span className="mt-1 block">
+            Если включена <strong>«Связь через узел»</strong>, webhook не нужен: панель сама забирает сообщения бота
+            через узел.
+          </span>
         </GuideStep>
         <GuideStep step={4} title="Проверьте в Telegram">
           Откройте бота в личных сообщениях и отправьте <code>/start</code>. Должно появиться меню с кнопками внизу

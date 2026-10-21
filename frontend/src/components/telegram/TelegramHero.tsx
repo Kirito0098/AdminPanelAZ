@@ -16,8 +16,11 @@ function overallStatus(tg: TelegramSettingsHook) {
   if (!tg.settings?.bot_token_set) {
     return { label: 'Не настроен', variant: 'secondary' as const, dot: 'bg-muted-foreground' }
   }
-  if (tg.interactiveEnabled && !tg.webhookReady) {
+  if (tg.interactiveEnabled && !tg.commandsConnected) {
     return { label: 'Нужно подключить бота', variant: 'warning' as const, dot: 'bg-amber-500' }
+  }
+  if (tg.interactiveEnabled && tg.relayError) {
+    return { label: 'Узел не отвечает', variant: 'warning' as const, dot: 'bg-amber-500' }
   }
   if (tg.loginConfigured) {
     return { label: 'Всё работает', variant: 'success' as const, dot: 'bg-emerald-500' }
@@ -60,7 +63,10 @@ export default function TelegramHero({ tg }: TelegramHeroProps) {
                 <>
                   Ваш бот: <span className="font-mono text-foreground">{botLabel}</span>
                   {tg.settings?.bot_token_set && (
-                    <span className="text-muted-foreground/60"> · подключён к панели</span>
+                    <span className="text-muted-foreground/60">
+                      {' '}
+                      · {tg.relayEnabled ? 'связь с Telegram через узел' : 'подключён к панели'}
+                    </span>
                   )}
                 </>
               ) : (
