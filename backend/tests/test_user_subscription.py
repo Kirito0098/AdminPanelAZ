@@ -723,6 +723,35 @@ def test_apply_owner_access_until_skips_unlimited_owner(db):
     assert db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="Free").count() == 0
 
 
+def test_apply_owner_access_until_admin_uses_cert_term(db):
+    """Конфиг админа не бессрочный: срок блокировки = notAfter сертификата."""
+    node = _make_node(db)
+    admin = User(username="owner-admin", password_hash="x", role=UserRole.admin, is_active=True)
+    db.add(admin)
+    db.commit()
+    db.refresh(admin)
+    cert_not_after = (datetime.now(timezone.utc) + timedelta(days=3650)).replace(tzinfo=None)
+    config = VpnConfig(
+        node_id=node.id,
+        client_name="AdminOwn",
+        vpn_type=VpnType.openvpn,
+        owner_id=admin.id,
+        cert_expire_days=3650,
+        cert_expires_at=cert_not_after,
+    )
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+
+    with patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()):
+        with patch("app.services.user_subscription._replicate_access_until_queue", return_value=[]):
+            result = usub.apply_owner_access_until_to_config(db, config, actor="admin")
+
+    assert result["applied"] is True
+    row = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="AdminOwn").one()
+    assert row.access_until == cert_not_after
+
+
 def test_sync_owned_clients_replicates_ha(db):
     node = _make_node(db)
     future = datetime.now(timezone.utc) + timedelta(days=10)

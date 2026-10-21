@@ -696,6 +696,8 @@ export interface ScenarioPresetItem {
   active: boolean
   impact?: ScenarioPresetImpact
   workers_disabled?: string[]
+  required?: string[]
+  required_labels?: string[]
 }
 
 export interface ScenarioResolved {
@@ -706,6 +708,10 @@ export interface ScenarioResolved {
   changed_count: number
   badge_label: string
   last_applied: string
+  base_label?: string
+  locks_active?: boolean
+  required?: string[]
+  required_labels?: string[]
 }
 
 export interface ScenarioPresetsResponse {
@@ -725,6 +731,8 @@ export interface ScenarioPresetPreview {
   will_disable_keys: string[]
   settings_changes: Record<string, { from: number; to: number }>
   summary_ru: string
+  required_keys?: string[]
+  required_labels?: string[]
   workers_disabled: string[]
   impact?: ScenarioPresetImpact
 }
@@ -1694,6 +1702,8 @@ export interface FeatureToggleItem {
   resource_impact_label: string
   resource_savings: string
   enabled: boolean
+  locked?: boolean
+  lock_reason?: string | null
   group_meta: { label?: string; description?: string; badge?: string }
 }
 

@@ -5,12 +5,15 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, User, VpnConfig, VpnType, WgAccessPolicy
+from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, User, UserRole, VpnConfig, VpnType, WgAccessPolicy
 from app.services.access_until import _policy_service_for_node, _reconcile_access_until, _row_access_until, set_access_until
 from app.services.shared_helpers import as_utc as _as_utc
 from app.services.unlock_codes import _is_manual_admin_block
 
 logger = logging.getLogger(__name__)
+
+# Верхняя граница срока доступа: 10 лет (максимальный срок сертификата OpenVPN).
+MAX_ACCESS_TERM_DAYS = 3650
 
 _VPN_PROTOCOLS = {
     VpnType.openvpn: "openvpn",
@@ -34,6 +37,23 @@ def normalize_access_until(value: datetime | None) -> datetime | None:
 
 def get_user_access_until(user: User) -> datetime | None:
     return _as_utc(getattr(user, "access_until", None))
+
+
+def admin_config_access_term(config: VpnConfig) -> datetime:
+    """Срок блокировки для конфигов самого админа.
+
+    Админ не продлевает свои конфиги, поэтому берём максимальный срок
+    сертификата (notAfter), TTL AWG2 или 10 лет по умолчанию.
+    """
+    if config.vpn_type == VpnType.openvpn and config.cert_expires_at is not None:
+        value = _as_utc(config.cert_expires_at)
+        if value is not None:
+            return value
+    if config.expires_at is not None:
+        value = _as_utc(config.expires_at)
+        if value is not None:
+            return value
+    return datetime.now(timezone.utc) + timedelta(days=MAX_ACCESS_TERM_DAYS)
 
 
 def user_subscription_expired(user: User, *, now: datetime | None = None) -> bool:
@@ -249,7 +269,11 @@ def apply_owner_access_until_to_config(
         return {"applied": False, "reason": "no_owner"}
     access_until = get_user_access_until(owner)
     if access_until is None:
-        return {"applied": False, "reason": "owner_unlimited"}
+        if owner.role != UserRole.admin:
+            return {"applied": False, "reason": "owner_unlimited"}
+        # Конфиги админа не продлеваются: сроком блокировки служит срок
+        # сертификата (до 10 лет), а не «бесконечность».
+        access_until = admin_config_access_term(config)
     protocol = _VPN_PROTOCOLS.get(config.vpn_type)
     if protocol is None:
         return {"applied": False, "reason": "unsupported_vpn_type"}

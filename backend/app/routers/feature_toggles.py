@@ -85,6 +85,15 @@ def apply_scenario_preset(preset: str, _: User = Depends(require_admin), db: Ses
     return result
 
 
+@router.post("/clear-locks")
+def clear_scenario_locks(_: User = Depends(require_admin), db: Session = Depends(get_db)):
+    """Снять обязательные ограничения сценария, не меняя модули."""
+    result = _service().clear_scenario_locks(db)
+    db.commit()
+    get_settings.cache_clear()
+    return result
+
+
 @router.get("/current-preset")
 def get_current_scenario_preset(_: User = Depends(require_admin), db: Session = Depends(get_db)):
     service = _service()

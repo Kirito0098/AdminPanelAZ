@@ -700,6 +700,23 @@ def map_legacy_resource_profile(raw: str) -> str | None:
     return LEGACY_RESOURCE_PROFILE_TO_SCENARIO.get(key)
 
 
+# Scenario presets describe loading, not host layout. Host-dependent app modules
+# (`awg2`, `proxy_nodes`, `warper`, `routing`, `antizapret_config`,
+# `cloudflare_ips_update`, `node_ssh_transport`, VPN protocols) are deliberately
+# absent from every preset: enabling a section the operator does not use (or
+# hiding one they do) is not a preset's job.
+#
+# Each preset has three levels:
+#   * `required` — hard core: applied and locked against switching off while the
+#     scenario is active (only «Коммерческое» has one);
+#   * `toggles` — soft defaults: applied once, editable afterwards;
+#   * everything else — untouched.
+SCENARIO_CUSTOM = "custom"
+SCENARIO_BASED_ON_ENV = "SCENARIO_BASED_ON"
+
+# Хотя бы один из этих протоколов должен оставаться включённым всегда.
+VPN_PROTOCOL_TOGGLES: tuple[str, ...] = ("openvpn", "wireguard", "amneziawg", "awg2")
+
 SCENARIO_PRESETS: dict[str, dict] = {
     "panel_only": {
         "label": "🖥 Только панель",
@@ -720,6 +737,8 @@ SCENARIO_PRESETS: dict[str, dict] = {
             "cert_sync",
             "resource_monitor",
         ],
+        "required": [],
+        "match": "full",
         "settings": {"inactive_user_grace_period_months": 0},
         "toggles": {
             # §8.2 + former Minimal remainder
@@ -733,7 +752,6 @@ SCENARIO_PRESETS: dict[str, dict] = {
             "warper": False,
             "server_monitor": False,
             "telegram": False,
-            "proxy_nodes": False,
             "node_sync_reconcile": False,
             "cloudflare_ips_update": False,
             "edit_files": True,
@@ -747,7 +765,6 @@ SCENARIO_PRESETS: dict[str, dict] = {
             "logs_dashboard": False,
             "routing": False,
             "antizapret_config": False,
-            "awg2": False,
             "diagnostics_tests": False,
             "runtime_backup_cleanup": True,
             "nightly_idle_restart": True,
@@ -796,6 +813,8 @@ SCENARIO_PRESETS: dict[str, dict] = {
             "note": "Ориентир 1 GB+; замер стека — на карточке текущего пресета в UI",
         },
         "workers_disabled": ["cidr_scheduler"],
+        "required": [],
+        "match": "on",
         "settings": {"inactive_user_grace_period_months": 0},
         "toggles": {
             "clients_page": True,
@@ -808,7 +827,6 @@ SCENARIO_PRESETS: dict[str, dict] = {
             "warper": False,
             "server_monitor": True,
             "telegram": True,
-            "proxy_nodes": True,
             "node_sync_reconcile": True,
             "cloudflare_ips_update": True,
             "edit_files": True,
@@ -822,7 +840,6 @@ SCENARIO_PRESETS: dict[str, dict] = {
             "logs_dashboard": True,
             "routing": True,
             "antizapret_config": True,
-            "awg2": False,
             "diagnostics_tests": True,
             "runtime_backup_cleanup": True,
             "nightly_idle_restart": True,
@@ -871,45 +888,39 @@ SCENARIO_PRESETS: dict[str, dict] = {
             "note": "Замер «панель + VPN на сервере»; лучше 2 GB с запасом под ОС",
         },
         "workers_disabled": [],
+        # Жёсткое ядро: без этих модулей коммерческий сценарий работает
+        # неполноценно или падает. Заблокированы от выключения, пока сценарий активен.
+        "required": [
+            "user_management",
+            "clients_page",
+            "user_provisioning",
+            "telegram",
+            "traffic_sync",
+            "unlock_codes",
+            "client_portal",
+            "access_expiry",
+            "connection_history",
+            "noc_reports",
+            "alert_rules",
+        ],
+        "match": "required",
         "settings": {"inactive_user_grace_period_months": 3},
+        # Мягкие дефолты: включаются сценарием, но админ может выключить.
         "toggles": {
-            "clients_page": True,
-            "user_provisioning": True,
-            "unlock_codes": True,
-            "client_portal": True,
-            "traffic_sync": True,
-            "noc_reports": True,
-            "alert_rules": True,
-            "warper": True,
+            "user_reminders": True,
+            "qr_downloads": True,
             "server_monitor": True,
-            "telegram": True,
-            "proxy_nodes": True,
-            "node_sync_reconcile": True,
-            "cloudflare_ips_update": True,
-            "edit_files": True,
-            "node_ssh_transport": True,
+            "logs_dashboard": True,
             "server_resources": True,
             # Bridge until platform-cleanup 03 merges `server_resources`.
             "resource_monitor": True,
             "resource_metrics": True,
             "panel_resource_metrics": True,
-            "wg_policy_sync": True,
-            "logs_dashboard": True,
-            "routing": True,
-            "antizapret_config": True,
-            "awg2": False,
-            "diagnostics_tests": True,
-            "runtime_backup_cleanup": True,
-            "nightly_idle_restart": True,
-            "active_web_sessions": True,
             "node_health": True,
             "cert_sync": True,
+            "wg_policy_sync": True,
+            "node_sync_reconcile": True,
             "cidr_scheduler": True,
-            "retention": True,
-            "key_rotation": True,
-            "user_reminders": True,
-            "access_expiry": True,
-            "connection_history": True,
         },
         "env": {
             "SCENARIO_PRESET": "commercial",
@@ -929,7 +940,6 @@ SCENARIO_PRESETS: dict[str, dict] = {
             "SELF_SERVICE_REMINDER_ENABLED": "true",
             "ALERT_RULES_ENABLED": "true",
             "NOC_REPORT_ENABLED": "true",
-            "CLOUDFLARE_IPS_AUTO_UPDATE": "true",
             "FEATURE_ACCESS_EXPIRY_ENABLED": "true",
             "FEATURE_CONNECTION_HISTORY_ENABLED": "true",
             "INACTIVE_USER_GRACE_PERIOD_MONTHS": "3",
@@ -1015,6 +1025,10 @@ class FeatureToggleService:
 
     def list_toggles(self) -> dict:
         self._env_map()
+        required = self._scenario_required_keys()
+        scenario = self.get_scenario_preset()
+        scenario_label = SCENARIO_PRESETS.get(scenario, {}).get("label", "")
+        last_protocol = self._last_protocol_toggle()
         items = []
         enabled_count = 0
         for definition in FEATURE_TOGGLES:
@@ -1022,11 +1036,23 @@ class FeatureToggleService:
             if enabled:
                 enabled_count += 1
             impact = RESOURCE_IMPACT_LEVELS.get(definition.resource_impact_level, RESOURCE_IMPACT_LEVELS["low"])
+            lock_reason = None
+            if enabled and definition.key in required:
+                lock_reason = (
+                    f"Обязательный модуль сценария «{scenario_label}». "
+                    "Чтобы отключить, смените сценарий или снимите ограничения."
+                )
+            elif enabled and definition.key == last_protocol:
+                lock_reason = (
+                    "Должен оставаться хотя бы один VPN-протокол — сначала включите другой."
+                )
             items.append({
                 **asdict(definition),
                 "enabled": enabled,
                 "resource_impact_label": impact["label"],
                 "group_meta": FEATURE_TOGGLE_GROUPS.get(definition.group, {}),
+                "locked": lock_reason is not None,
+                "lock_reason": lock_reason,
             })
         return {
             "items": items,
@@ -1047,12 +1073,21 @@ class FeatureToggleService:
         intended = {key: self.is_enabled(key) for key in FEATURE_TOGGLE_BY_KEY}
         intended.update({key: bool(value) for key, value in updates.items()})
 
-        # «Клиенты» и «Пользователи (абоненты)» не выключаются одновременно.
-        if not intended.get("clients_page", True) and not intended.get("user_provisioning", False):
-            raise ValueError(
-                "Нельзя отключить «Клиенты» и «Пользователи (абоненты)» одновременно — "
-                "хотя бы один раздел должен оставаться включённым."
-            )
+        required = self._scenario_required_keys()
+        if required:
+            scenario = self.get_scenario_preset()
+            scenario_label = SCENARIO_PRESETS[scenario]["label"]
+            blocked = [
+                FEATURE_TOGGLE_BY_KEY[key].label
+                for key, value in updates.items()
+                if value is False and key in required and self.is_enabled(key)
+            ]
+            if blocked:
+                names = ", ".join(f"«{label}»" for label in blocked)
+                raise ValueError(
+                    f"{names} — обязательные модули сценария «{scenario_label}». "
+                    "Смените сценарий или снимите ограничения, чтобы отключить их."
+                )
 
         # «Пользователи (абоненты)» работают поверх «Пользователи и доступ»:
         # выключение user_management тянет за собой user_provisioning.
@@ -1061,11 +1096,7 @@ class FeatureToggleService:
             updates["user_provisioning"] = False
             intended["user_provisioning"] = False
 
-        # Включение user_provisioning требует включённого user_management.
-        if intended.get("user_provisioning", False) and not intended.get("user_management", True):
-            raise ValueError(
-                "«Пользователи (абоненты)» требуют включённый модуль «Пользователи и доступ»."
-            )
+        self._validate_intended_toggles(intended)
 
         for key, enabled in updates.items():
             definition = FEATURE_TOGGLE_BY_KEY[key]
@@ -1084,8 +1115,13 @@ class FeatureToggleService:
         return self.list_toggles()
 
     def get_scenario_preset(self) -> str:
-        """Last applied scenario (label only — never rewrites stored toggles)."""
+        """Last applied scenario (label only — never rewrites stored toggles).
+
+        ``custom`` means «сняты ограничения»: toggles are free, no locks apply.
+        """
         raw = (self._raw_env("SCENARIO_PRESET", "") or "").strip().lower()
+        if raw == SCENARIO_CUSTOM:
+            return SCENARIO_CUSTOM
         if raw in VALID_SCENARIO_PRESETS:
             return raw
         mapped = map_legacy_resource_profile(self._raw_env("RESOURCE_PROFILE", ""))
@@ -1106,8 +1142,113 @@ class FeatureToggleService:
             return 0
         return value if value in {0, 1, 2, 3, 6, 12} else 0
 
+    def _scenario_required_keys(self) -> frozenset[str]:
+        """Toggles locked by the scenario that is currently applied."""
+        meta = SCENARIO_PRESETS.get(self.get_scenario_preset())
+        if meta is None:
+            return frozenset()
+        return frozenset(meta.get("required", ()))
+
+    def _last_protocol_toggle(self) -> str | None:
+        """The only enabled VPN protocol, if exactly one is left."""
+        enabled = [key for key in VPN_PROTOCOL_TOGGLES if self.is_enabled(key)]
+        return enabled[0] if len(enabled) == 1 else None
+
+    def _preset_toggles(self, preset_key: str) -> dict[str, bool]:
+        """What a preset applies: hard ``required`` core + soft ``toggles``."""
+        meta = SCENARIO_PRESETS[preset_key]
+        merged = {key: True for key in meta.get("required", ())}
+        merged.update(meta.get("toggles", {}))
+        return merged
+
+    def _scenario_mismatches(self, preset_key: str) -> tuple[list[str], list[str]]:
+        """Toggles that keep the label from matching this scenario.
+
+        ``required`` (Коммерческое) — only the hard core matters; soft defaults
+        and extra modules never demote the badge.
+        ``on`` (Домашнее) — the preset's explicit "on" set must be present;
+        enabling extra modules does not demote it.
+        ``full`` (Только панель) — exact match: an extra module leaves the
+        minimal profile.
+        """
+        meta = SCENARIO_PRESETS[preset_key]
+        match = meta.get("match")
+        if match == "required":
+            return [key for key in meta.get("required", ()) if not self.is_enabled(key)], []
+        toggles = {
+            key: enabled
+            for key, enabled in meta.get("toggles", {}).items()
+            if key in FEATURE_TOGGLE_BY_KEY
+        }
+        missing = [key for key, enabled in toggles.items() if enabled and not self.is_enabled(key)]
+        extra: list[str] = []
+        if match == "full":
+            extra = [key for key, enabled in toggles.items() if not enabled and self.is_enabled(key)]
+        return missing, extra
+
+    def _scenario_changed_count(self, preset_key: str) -> int:
+        """How many preset-owned toggles differ, for the «изменено: N» badge."""
+        missing, extra = self._scenario_mismatches(preset_key)
+        changed = set(missing) | set(extra)
+        meta = SCENARIO_PRESETS[preset_key]
+        if meta.get("match") == "required":
+            for key, enabled in meta.get("toggles", {}).items():
+                if key in FEATURE_TOGGLE_BY_KEY and self.is_enabled(key) != enabled:
+                    changed.add(key)
+        return len(changed)
+
+    def _scenario_changed_total(self, preset_key: str, db: Session | None = None) -> int:
+        """Toggle changes + a changed grace period, for the custom badge."""
+        changed = self._scenario_changed_count(preset_key)
+        grace_want = SCENARIO_PRESETS[preset_key]["settings"]["inactive_user_grace_period_months"]
+        if self._current_grace_months(db) != grace_want:
+            changed += 1
+        return changed
+
+    def _validate_intended_toggles(self, intended: dict[str, bool]) -> None:
+        # «Клиенты» и «Пользователи (абоненты)» не выключаются одновременно.
+        if not intended.get("clients_page", True) and not intended.get("user_provisioning", False):
+            raise ValueError(
+                "Нельзя отключить «Клиенты» и «Пользователи (абоненты)» одновременно — "
+                "хотя бы один раздел должен оставаться включённым."
+            )
+        # Включение user_provisioning требует включённого user_management.
+        if intended.get("user_provisioning", False) and not intended.get("user_management", True):
+            raise ValueError(
+                "«Пользователи (абоненты)» требуют включённый модуль «Пользователи и доступ»."
+            )
+        # Панель без VPN-протокола бессмысленна в любом сценарии.
+        if not any(intended.get(key, False) for key in VPN_PROTOCOL_TOGGLES):
+            raise ValueError(
+                "Должен оставаться включённым хотя бы один VPN-протокол: "
+                "OpenVPN, WireGuard, AmneziaWG или AZ-AWG2."
+            )
+
+    def _custom_scenario_state(
+        self, based: str, changed: int, *, last_applied: str | None = None
+    ) -> dict:
+        base_label = SCENARIO_PRESETS[based]["label"]
+        required = sorted(self._scenario_required_keys())
+        return {
+            "key": SCENARIO_CUSTOM,
+            "label": "⚙️ Кастомный",
+            "is_custom": True,
+            "based_on": based,
+            "changed_count": changed,
+            "badge_label": f"⚙️ Кастомный (на основе {base_label}, изменено: {changed})",
+            "base_label": base_label,
+            "last_applied": last_applied or based,
+            "locks_active": bool(required),
+            "required": required,
+            "required_labels": [
+                FEATURE_TOGGLE_BY_KEY[item].label
+                for item in required
+                if item in FEATURE_TOGGLE_BY_KEY
+            ],
+        }
+
     def _toggle_diff_against_preset(self, preset_key: str) -> tuple[list[str], list[str]]:
-        want = SCENARIO_PRESETS[preset_key]["toggles"]
+        want = self._preset_toggles(preset_key)
         will_enable: list[str] = []
         will_disable: list[str] = []
         for key, enabled in want.items():
@@ -1156,18 +1297,30 @@ class FeatureToggleService:
             return [FEATURE_TOGGLE_BY_KEY[k].label for k in keys]
 
         settings_changes = self._settings_diff_against_preset(normalized, db)
+        enable_labels = labels(will_enable_keys)
+        disable_labels = labels(will_disable_keys)
+        summary_parts: list[str] = []
+        if disable_labels:
+            summary_parts.append(f"Выключится: {', '.join(disable_labels)}")
+        if enable_labels:
+            summary_parts.append(f"Включится: {', '.join(enable_labels)}")
+        if not summary_parts:
+            summary_parts.append("Модули уже соответствуют сценарию")
         return {
             "preset": normalized,
             "label": meta["label"],
             "will_enable_keys": will_enable_keys,
             "will_disable_keys": will_disable_keys,
-            "will_enable": labels(will_enable_keys),
-            "will_disable": labels(will_disable_keys),
+            "will_enable": enable_labels,
+            "will_disable": disable_labels,
             "settings_changes": settings_changes,
-            "summary_ru": (
-                f"Выключится: {', '.join(labels(will_disable_keys)) or '—'}. "
-                f"Включится: {', '.join(labels(will_enable_keys)) or '—'}."
-            ),
+            "summary_ru": ". ".join(summary_parts) + ".",
+            "required_keys": list(meta.get("required", ())),
+            "required_labels": [
+                FEATURE_TOGGLE_BY_KEY[key].label
+                for key in meta.get("required", ())
+                if key in FEATURE_TOGGLE_BY_KEY
+            ],
             "workers_disabled": meta.get("workers_disabled", []),
             "impact": meta.get("impact", {}),
         }
@@ -1183,15 +1336,25 @@ class FeatureToggleService:
         if normalized not in SCENARIO_PRESETS:
             raise ValueError(f"Неизвестный сценарий: {preset}")
         meta = SCENARIO_PRESETS[normalized]
+        toggles = self._preset_toggles(normalized)
+        intended = {key: self.is_enabled(key) for key in FEATURE_TOGGLE_BY_KEY}
+        intended.update(toggles)
+        self._validate_intended_toggles(intended)
+        traffic_was_enabled = self.is_enabled("traffic_sync")
         for env_key, value in meta.get("env", {}).items():
             self.env.set_env_value(env_key, str(value))
-        for toggle_key, enabled in meta.get("toggles", {}).items():
+        for toggle_key, enabled in toggles.items():
             definition = FEATURE_TOGGLE_BY_KEY.get(toggle_key)
             if definition is None:
                 continue
             self.env.set_env_value(definition.env_key, "true" if enabled else "false")
         self.env.remove_env_key("RESOURCE_PROFILE")
+        self.env.remove_env_key(SCENARIO_BASED_ON_ENV)
         self._invalidate_env_map()
+        if db is not None and traffic_was_enabled and not intended.get("traffic_sync", False):
+            from app.services.user_traffic_limit import _lift_all_user_traffic_blocks
+
+            _lift_all_user_traffic_blocks(db)
         grace_months = int(meta["settings"]["inactive_user_grace_period_months"])
         if db is not None:
             from app.services.user_grace import set_grace_months
@@ -1207,40 +1370,54 @@ class FeatureToggleService:
         }
 
     def resolve_scenario_state(self, db: Session | None = None) -> dict:
-        """Current scenario or the computed «Кастомный» state."""
+        """Current scenario or the computed «Кастомный» state.
+
+        The label follows the last applied scenario: «Коммерческое» matches by
+        its locked core, while soft defaults and extra modules never demote the
+        badge. «Домашнее» / «Только панель» match by their explicit "on" set
+        (panel_only additionally rejects extra modules). A different preset is
+        never guessed from the toggle soup — switching scenarios is explicit.
+        """
         last = self.get_scenario_preset()
-        for key, meta in SCENARIO_PRESETS.items():
-            enable, disable = self._toggle_diff_against_preset(key)
-            grace_want = meta["settings"]["inactive_user_grace_period_months"]
-            grace_now = self._current_grace_months(db)
-            if not enable and not disable and grace_now == grace_want:
-                return {
-                    "key": key,
-                    "label": meta["label"],
-                    "is_custom": False,
-                    "based_on": key,
-                    "changed_count": 0,
-                    "badge_label": meta["label"],
-                    "last_applied": last,
-                }
+        if last == SCENARIO_CUSTOM:
+            based = (self._raw_env(SCENARIO_BASED_ON_ENV, "") or "").strip().lower()
+            if based not in SCENARIO_PRESETS:
+                based = "home"
+            return self._custom_scenario_state(based, self._scenario_changed_total(based, db))
+
         based = last if last in SCENARIO_PRESETS else "home"
-        enable, disable = self._toggle_diff_against_preset(based)
-        changed = len(enable) + len(disable)
-        base_label = SCENARIO_PRESETS[based]["label"]
-        return {
-            "key": "custom",
-            "label": "⚙️ Кастомный",
-            "is_custom": True,
-            "based_on": based,
-            "changed_count": changed,
-            "badge_label": f"⚙️ Кастомный (на основе {base_label}, изменено: {changed})",
-            "last_applied": last,
-        }
+        meta = SCENARIO_PRESETS[based]
+        missing, extra = self._scenario_mismatches(based)
+        grace_want = meta["settings"]["inactive_user_grace_period_months"]
+        if not missing and not extra and self._current_grace_months(db) == grace_want:
+            required = list(meta.get("required", ()))
+            return {
+                "key": based,
+                "label": meta["label"],
+                "is_custom": False,
+                "based_on": based,
+                "changed_count": 0,
+                "badge_label": meta["label"],
+                "last_applied": last,
+                "locks_active": bool(required),
+                "required": required,
+                "required_labels": [
+                    FEATURE_TOGGLE_BY_KEY[item].label
+                    for item in required
+                    if item in FEATURE_TOGGLE_BY_KEY
+                ],
+            }
+        return self._custom_scenario_state(
+            based,
+            self._scenario_changed_total(based, db),
+            last_applied=last if last in SCENARIO_PRESETS else None,
+        )
 
     def list_scenario_presets(self, db: Session | None = None) -> dict:
         resolved = self.resolve_scenario_state(db)
         items = []
         for key, meta in SCENARIO_PRESETS.items():
+            required = list(meta.get("required", ()))
             items.append({
                 "key": key,
                 "label": meta["label"],
@@ -1249,15 +1426,38 @@ class FeatureToggleService:
                 "panel_mb_delta": meta.get("panel_mb_delta", 0),
                 "impact": meta.get("impact", {}),
                 "workers_disabled": meta.get("workers_disabled", []),
+                "required": required,
+                "required_labels": [
+                    FEATURE_TOGGLE_BY_KEY[item].label
+                    for item in required
+                    if item in FEATURE_TOGGLE_BY_KEY
+                ],
                 "active": (not resolved["is_custom"]) and resolved["key"] == key,
             })
         return {
-            "current_preset": resolved["key"] if not resolved["is_custom"] else "custom",
+            "current_preset": resolved["key"] if not resolved["is_custom"] else SCENARIO_CUSTOM,
             "last_applied": resolved["last_applied"],
             "resolved": resolved,
             "requires_restart": True,
             "items": items,
         }
+
+    def clear_scenario_locks(self, db: Session | None = None) -> dict:
+        """Drop the strict-mode locks without touching any toggle.
+
+        The scenario becomes «Кастомный»; the previous preset is remembered as
+        the base for the badge and for «Сбросить к пресету».
+        """
+        last = self.get_scenario_preset()
+        based = last if last in SCENARIO_PRESETS else (
+            (self._raw_env(SCENARIO_BASED_ON_ENV, "") or "").strip().lower()
+        )
+        if based not in SCENARIO_PRESETS:
+            based = "home"
+        self.env.set_env_value("SCENARIO_PRESET", SCENARIO_CUSTOM)
+        self.env.set_env_value(SCENARIO_BASED_ON_ENV, based)
+        self._invalidate_env_map()
+        return self.list_scenario_presets(db)
 
     def migrate_resource_profile_label_only(self) -> bool:
         """Rename RESOURCE_PROFILE → SCENARIO_PRESET. Never rewrite toggles."""

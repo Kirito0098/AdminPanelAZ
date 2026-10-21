@@ -47,7 +47,6 @@ def test_spec_table_toggle_matrix():
             "warper": False,
             "server_monitor": False,
             "telegram": False,
-            "proxy_nodes": False,
             "node_sync_reconcile": False,
             "cloudflare_ips_update": False,
             "edit_files": True,
@@ -65,7 +64,6 @@ def test_spec_table_toggle_matrix():
             "warper": False,
             "server_monitor": True,
             "telegram": True,
-            "proxy_nodes": True,
             "node_sync_reconcile": True,
             "cloudflare_ips_update": True,
             "edit_files": True,
@@ -73,6 +71,7 @@ def test_spec_table_toggle_matrix():
             "server_resources": True,
         },
         "commercial": {
+            "user_management": True,
             "clients_page": True,
             "user_provisioning": True,
             "unlock_codes": True,
@@ -80,21 +79,70 @@ def test_spec_table_toggle_matrix():
             "traffic_sync": True,
             "noc_reports": True,
             "alert_rules": True,
-            "warper": True,
-            "server_monitor": True,
+            "access_expiry": True,
+            "connection_history": True,
             "telegram": True,
-            "proxy_nodes": True,
+            "server_monitor": True,
             "node_sync_reconcile": True,
-            "cloudflare_ips_update": True,
-            "edit_files": True,
-            "node_ssh_transport": True,
             "server_resources": True,
+            "logs_dashboard": True,
+            "user_reminders": True,
+            "qr_downloads": True,
+            "node_health": True,
+            "cert_sync": True,
+            "wg_policy_sync": True,
+            "cidr_scheduler": True,
         },
     }
     for key, want in expected.items():
-        toggles = SCENARIO_PRESETS[key]["toggles"]
+        meta = SCENARIO_PRESETS[key]
+        toggles = {item: True for item in meta.get("required", ())}
+        toggles.update(meta["toggles"])
         for tkey, val in want.items():
             assert toggles[tkey] is val, f"{key}.{tkey}"
+
+
+def test_commercial_required_core():
+    """Жёсткое ядро «Коммерческого»: без него соседние функции деградируют."""
+    required = set(SCENARIO_PRESETS["commercial"]["required"])
+    assert required == {
+        "user_management",
+        "clients_page",
+        "user_provisioning",
+        "telegram",
+        "traffic_sync",
+        "unlock_codes",
+        "client_portal",
+        "access_expiry",
+        "connection_history",
+        "noc_reports",
+        "alert_rules",
+    }
+    # Удобные функции и хостовые модули ядром не являются.
+    for soft in (
+        "qr_downloads",
+        "user_reminders",
+        "awg2",
+        "proxy_nodes",
+        "warper",
+        "routing",
+        "antizapret_config",
+        "cloudflare_ips_update",
+        "node_ssh_transport",
+        "openvpn",
+        "wireguard",
+        "amneziawg",
+    ):
+        assert soft not in required
+    assert SCENARIO_PRESETS["home"]["required"] == []
+    assert SCENARIO_PRESETS["panel_only"]["required"] == []
+
+
+def test_host_dependent_toggles_are_not_managed_by_presets():
+    """`awg2` / `proxy_nodes` depend on the host, not on the scenario."""
+    for key, meta in SCENARIO_PRESETS.items():
+        assert "awg2" not in meta["toggles"], key
+        assert "proxy_nodes" not in meta["toggles"], key
 
 
 def test_grace_and_workers_from_spec():
@@ -139,6 +187,40 @@ def test_apply_writes_scenario_and_removes_legacy(env_file: Path):
     assert "RESOURCE_PROFILE=" not in text
     assert result["preset"] == "panel_only"
     assert svc.is_enabled("traffic_sync") is False
+
+
+def test_apply_keeps_host_dependent_toggles_as_is(env_file: Path):
+    """Commercial neither disables AZ-AWG2 nor enables proxy nodes."""
+    env_file.write_text(
+        "FEATURE_AWG2_ENABLED=true\n"
+        "FEATURE_PROXY_NODES_ENABLED=false\n",
+        encoding="utf-8",
+    )
+    svc = FeatureToggleService(env_file)
+
+    preview = svc.preview_scenario_preset("commercial")
+    assert "awg2" not in preview["will_disable_keys"]
+    assert "proxy_nodes" not in preview["will_enable_keys"]
+    assert "AZ-AWG2" not in preview["summary_ru"]
+    assert "Прокси-узлы" not in preview["summary_ru"]
+
+    svc.apply_scenario_preset("commercial")
+    text = env_file.read_text(encoding="utf-8")
+    assert "FEATURE_AWG2_ENABLED=true" in text
+    assert "FEATURE_PROXY_NODES_ENABLED=false" in text
+    assert svc.is_enabled("awg2") is True
+    assert svc.is_enabled("proxy_nodes") is False
+
+
+def test_preview_summary_without_module_changes(env_file: Path):
+    """Повторное применение не обещает «Включится: —»."""
+    svc = FeatureToggleService(env_file)
+    svc.apply_scenario_preset("commercial")
+    preview = svc.preview_scenario_preset("commercial")
+    assert preview["will_enable_keys"] == []
+    assert preview["will_disable_keys"] == []
+    assert preview["settings_changes"] == {}
+    assert preview["summary_ru"] == "Модули уже соответствуют сценарию."
 
 
 def test_preview_lists_enable_and_disable(env_file: Path):
@@ -231,3 +313,140 @@ def test_cli_apply_scenario_preset(tmp_path: Path):
     finally:
         sys.argv = old
     assert "SCENARIO_PRESET=panel_only" in env.read_text(encoding="utf-8")
+
+
+def test_commercial_keeps_host_modules_untouched(env_file: Path):
+    """Сценарий не включает и не выключает то, что зависит от хоста."""
+    env_file.write_text(
+        "CLOUDFLARE_IPS_AUTO_UPDATE=false\n"
+        "FEATURE_WARPER_ENABLED=false\n"
+        "FEATURE_ROUTING_ENABLED=false\n"
+        "FEATURE_ANTIZAPRET_CONFIG_ENABLED=false\n"
+        "FEATURE_NODE_SSH_TRANSPORT_ENABLED=false\n",
+        encoding="utf-8",
+    )
+    svc = FeatureToggleService(env_file)
+    svc.apply_scenario_preset("commercial")
+
+    text = env_file.read_text(encoding="utf-8")
+    assert "CLOUDFLARE_IPS_AUTO_UPDATE=false" in text
+    assert "FEATURE_WARPER_ENABLED=false" in text
+    assert "FEATURE_ROUTING_ENABLED=false" in text
+    assert "FEATURE_ANTIZAPRET_CONFIG_ENABLED=false" in text
+    assert "FEATURE_NODE_SSH_TRANSPORT_ENABLED=false" in text
+    assert svc.is_enabled("cloudflare_ips_update") is False
+
+
+def test_commercial_locks_required_but_not_soft_defaults(env_file: Path):
+    svc = FeatureToggleService(env_file)
+    svc.apply_scenario_preset("commercial")
+
+    items = {item["key"]: item for item in svc.list_toggles()["items"]}
+    assert items["telegram"]["locked"] is True
+    assert "Коммерческое" in items["telegram"]["lock_reason"]
+    assert items["user_reminders"]["locked"] is False
+    assert items["qr_downloads"]["locked"] is False
+
+    with pytest.raises(ValueError, match="обязательные модули"):
+        svc.update_toggles({"telegram": False})
+
+    # Мягкий дефолт выключается свободно и метку не меняет.
+    svc.update_toggles({"user_reminders": False})
+    state = svc.resolve_scenario_state()
+    assert state["key"] == "commercial"
+    assert state["is_custom"] is False
+
+
+def test_clear_locks_keeps_toggles_and_unlocks_required(env_file: Path):
+    svc = FeatureToggleService(env_file)
+    svc.apply_scenario_preset("commercial")
+
+    presets = svc.clear_scenario_locks()
+    assert presets["resolved"]["key"] == "custom"
+    assert presets["resolved"]["based_on"] == "commercial"
+    assert presets["resolved"]["locks_active"] is False
+    assert svc.is_enabled("telegram") is True
+
+    svc.update_toggles({"telegram": False})
+    assert svc.is_enabled("telegram") is False
+    items = {item["key"]: item for item in svc.list_toggles()["items"]}
+    assert items["telegram"]["locked"] is False
+    assert svc.resolve_scenario_state()["is_custom"] is True
+
+
+def test_last_protocol_cannot_be_disabled(env_file: Path):
+    env_file.write_text(
+        "FEATURE_OPENVPN_ENABLED=true\n"
+        "FEATURE_WIREGUARD_ENABLED=false\n"
+        "FEATURE_AMNEZIAWG_ENABLED=false\n"
+        "FEATURE_AWG2_ENABLED=false\n",
+        encoding="utf-8",
+    )
+    svc = FeatureToggleService(env_file)
+    items = {item["key"]: item for item in svc.list_toggles()["items"]}
+    assert items["openvpn"]["locked"] is True
+
+    with pytest.raises(ValueError, match="VPN-протокол"):
+        svc.update_toggles({"openvpn": False})
+
+    # Переключение на другой протокол одним запросом разрешено.
+    svc.update_toggles({"openvpn": False, "wireguard": True})
+    assert svc.is_enabled("openvpn") is False
+    assert svc.is_enabled("wireguard") is True
+
+
+def test_apply_requires_at_least_one_protocol(env_file: Path):
+    env_file.write_text(
+        "FEATURE_OPENVPN_ENABLED=false\n"
+        "FEATURE_WIREGUARD_ENABLED=false\n"
+        "FEATURE_AMNEZIAWG_ENABLED=false\n"
+        "FEATURE_AWG2_ENABLED=false\n",
+        encoding="utf-8",
+    )
+    svc = FeatureToggleService(env_file)
+    with pytest.raises(ValueError, match="VPN-протокол"):
+        svc.apply_scenario_preset("commercial")
+
+
+def test_home_allows_extra_modules(env_file: Path):
+    svc = FeatureToggleService(env_file)
+    svc.apply_scenario_preset("home")
+    svc.update_toggles({"user_provisioning": True})
+    state = svc.resolve_scenario_state()
+    assert state["key"] == "home"
+    assert state["is_custom"] is False
+
+
+def test_home_telegram_off_becomes_custom(env_file: Path):
+    svc = FeatureToggleService(env_file)
+    svc.apply_scenario_preset("home")
+    svc.update_toggles({"telegram": False})
+    state = svc.resolve_scenario_state()
+    assert state["is_custom"] is True
+    assert state["based_on"] == "home"
+
+
+def test_custom_state_keeps_commercial_locks(env_file: Path):
+    """Правка .env мимо API не должна тихо снимать замки."""
+    svc = FeatureToggleService(env_file)
+    svc.apply_scenario_preset("commercial")
+    svc.env.set_env_value("FEATURE_TELEGRAM_ENABLED", "false")
+    svc._invalidate_env_map()
+
+    state = svc.resolve_scenario_state()
+    assert state["is_custom"] is True
+    assert state["locks_active"] is True
+    assert "telegram" in state["required"]
+
+    presets = svc.clear_scenario_locks()
+    assert presets["resolved"]["locks_active"] is False
+
+
+def test_panel_only_is_exact_profile(env_file: Path):
+    svc = FeatureToggleService(env_file)
+    svc.apply_scenario_preset("panel_only")
+    assert svc.resolve_scenario_state()["key"] == "panel_only"
+
+    svc.update_toggles({"server_monitor": True})
+    state = svc.resolve_scenario_state()
+    assert state["is_custom"] is True

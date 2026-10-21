@@ -223,6 +223,12 @@ export async function applyScenarioPreset(preset: string) {
   })
 }
 
+export async function clearScenarioLocks() {
+  return apiFetch<ScenarioPresetsResponse>('/feature-toggles/clear-locks', {
+    method: 'POST',
+  })
+}
+
 export async function getRetentionSettings() {
   return apiFetch<RetentionSettings>('/settings/retention')
 }

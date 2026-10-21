@@ -119,6 +119,25 @@ def test_list_presets_payload(admin_client):
     assert body["requires_restart"] is True
 
 
+def test_clear_locks_endpoint(admin_client, env_path):
+    admin_client.post("/api/feature-toggles/apply-preset?preset=commercial")
+    r = admin_client.post("/api/feature-toggles/clear-locks")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["resolved"]["key"] == "custom"
+    assert body["resolved"]["based_on"] == "commercial"
+    assert body["resolved"]["locks_active"] is False
+    assert "SCENARIO_PRESET=custom" in env_path.read_text(encoding="utf-8")
+
+
+def test_update_required_toggle_is_rejected(admin_client, env_path):
+    admin_client.post("/api/feature-toggles/apply-preset?preset=commercial")
+    r = admin_client.put("/api/feature-toggles", json={"toggles": {"telegram": False}})
+    assert r.status_code == 400
+    assert "обязательные" in r.json()["detail"]
+    assert "SCENARIO_PRESET=commercial" in env_path.read_text(encoding="utf-8")
+
+
 def test_unknown_preset_rejected(admin_client):
     r = admin_client.post("/api/feature-toggles/preview-preset?preset=minimal")
     assert r.status_code == 400

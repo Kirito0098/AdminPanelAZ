@@ -12,6 +12,7 @@ import {
 import {
   ApiError,
   applyScenarioPreset,
+  clearScenarioLocks,
   getFeatureToggles,
   getLightHealth,
   getPanelResourceCurrent,
@@ -270,6 +271,12 @@ function PresetCard({
 
       <p className="line-clamp-2 text-xs leading-snug text-muted-foreground">{description}</p>
 
+      {preset.required_labels && preset.required_labels.length > 0 && (
+        <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+          Обязательные: {preset.required_labels.join(', ')}
+        </p>
+      )}
+
       {(impactRam || impactCpuDisk || impactNote) && (
         <div className="mt-2 space-y-0.5 text-[11px] leading-snug text-muted-foreground">
           {impactRam && <p className="line-clamp-1">RAM: {impactRam}</p>}
@@ -314,6 +321,12 @@ function PresetDiff({ preview }: { preview: ScenarioPresetPreview }) {
         <div>
           <p className="font-medium">Выключится</p>
           <p className="text-muted-foreground">{preview.will_disable.join(', ')}</p>
+        </div>
+      )}
+      {preview.required_labels && preview.required_labels.length > 0 && (
+        <div>
+          <p className="font-medium">Обязательные (нельзя будет отключить)</p>
+          <p className="text-muted-foreground">{preview.required_labels.join(', ')}</p>
         </div>
       )}
       {grace && (
@@ -363,6 +376,7 @@ export default function FeatureTogglesTab() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [applyingPreset, setApplyingPreset] = useState<string | null>(null)
+  const [unlinking, setUnlinking] = useState(false)
   const [pendingRestart, setPendingRestart] = useState(
     () => sessionStorage.getItem(RESTART_BANNER_KEY) === '1',
   )
@@ -477,6 +491,25 @@ export default function FeatureTogglesTab() {
   useEffect(() => {
     void load()
   }, [])
+
+  /** Снимает обязательные ограничения сценария, не меняя ни один модуль. */
+  const unlinkScenario = async () => {
+    setUnlinking(true)
+    try {
+      const presetData = await clearScenarioLocks()
+      setPresets(presetData.items)
+      setResolved(presetData.resolved)
+      const data = await getFeatureToggles()
+      setItems(data.items)
+      setDraft(Object.fromEntries(data.items.map((item) => [item.key, item.enabled])))
+      await refreshModules()
+      success('Ограничения сняты: обязательные модули больше не заблокированы.')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось снять ограничения')
+    } finally {
+      setUnlinking(false)
+    }
+  }
 
   const filteredItems = useMemo(
     () => items.filter((item) => matchesQuery(item, query)),
@@ -630,6 +663,28 @@ export default function FeatureTogglesTab() {
               </Button>
             </div>
           )}
+          {resolved?.locks_active && (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2">
+              <p className="text-xs text-muted-foreground">
+                Сценарий «{resolved.is_custom ? resolved.base_label ?? resolved.label : resolved.label}»:
+                обязательные модули
+                {resolved.required_labels?.length
+                  ? ` (${resolved.required_labels.join(', ')})`
+                  : ''}{' '}
+                нельзя отключить, пока действуют ограничения.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8"
+                disabled={unlinking || applyingPreset !== null}
+                onClick={() => void unlinkScenario()}
+              >
+                {unlinking ? 'Снятие...' : 'Снять ограничения'}
+              </Button>
+            </div>
+          )}
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
             {presets.map((preset) => (
               <PresetCard
@@ -706,17 +761,21 @@ export default function FeatureTogglesTab() {
                 <div className="grid grid-cols-1 gap-x-8 md:grid-cols-2">
                   {groupItems.map((item) => {
                     const coreBlocked = isLastEnabledCoreModule(item.key, draft)
+                    const lockedByScenario = Boolean(item.locked && (draft[item.key] ?? false))
                     return (
                       <ModuleToggleRow
                         key={item.key}
                         item={item}
                         enabled={draft[item.key] ?? false}
                         onChange={(checked) => setDraft((prev) => ({ ...prev, [item.key]: checked }))}
-                        disabledSwitch={coreBlocked}
+                        disabledSwitch={coreBlocked || lockedByScenario}
                         blockHint={
                           coreBlocked
                             ? 'Нельзя выключить «Клиенты» и «Пользователи (абоненты)» одновременно — оставьте хотя бы один из этих разделов включённым.'
-                            : undefined
+                            : lockedByScenario
+                              ? item.lock_reason ??
+                                'Модуль заблокирован сценарием или правилом протоколов.'
+                              : undefined
                         }
                       />
                     )
