@@ -90,6 +90,7 @@ from app.services.user_access_requests import (
     AlreadyDecided,
     TelegramAlreadyBound,
     approve_request,
+    backfill_missing_request_profiles,
     delete_user_write_archive,
     reject_request,
     sync_admin_request_messages,
@@ -625,6 +626,12 @@ def list_access_requests(
     if type:
         query = query.filter(UserAccessRequest.request_type == type)
     rows = query.order_by(UserAccessRequest.id.desc()).all()
+    # Старые заявки создавались без имени/@ника — дозаполняем из Telegram
+    # (best-effort, не чаще одного getChat на telegram_id в 10 минут).
+    backfill_missing_request_profiles(
+        db,
+        [row for row in rows if not row.telegram_name and not row.telegram_username],
+    )
     return [AccessRequestResponse.model_validate(row) for row in rows]
 
 

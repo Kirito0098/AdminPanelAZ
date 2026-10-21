@@ -123,11 +123,13 @@ BTN_REQUEST_MORE_CONFIG = "Запросить ещё конфиг"
 BTN_LINK_CODE = "У меня есть код привязки"
 
 BTN_REQUEST_APPROVE = "Одобрить"
+BTN_REQUEST_CONFIGURE = "Настроить"
 BTN_REQUEST_APPROVE_MORE = "Одобрить (+1)"
 BTN_REQUEST_REJECT = "Отклонить"
 BTN_REQUEST_EXTEND_30 = "+30"
 BTN_REQUEST_EXTEND_60 = "+60"
 BTN_REQUEST_EXTEND_CUSTOM = "Свой срок"
+BTN_OPEN_REQUEST_PANEL = "Открыть заявку в панели"
 
 REQUESTS_CLOSED = "Приём заявок временно закрыт"
 RECEIPT_NOT_PHOTO = "Пришлите чек фотографией (не файлом)"
@@ -141,6 +143,10 @@ ADMIN_NO_RIGHTS = "Недостаточно прав."
 ADMIN_REQUEST_APPROVED = "✅ Одобрено в веб-панели: {admin}"
 ADMIN_REQUEST_REJECTED = "❌ Отклонено в веб-панели: {admin}"
 REQUEST_OPEN_IN_PANEL = "Параметры заявки настройте в веб-панели: <code>/users?request={request_id}</code>"
+REQUEST_NEED_PRESET = (
+    "Шаблон по умолчанию не задан — одобрить в один клик нельзя. "
+    "Откройте заявку в панели и выберите узлы и протоколы."
+)
 REQUEST_EXTEND_CUSTOM_TEXT = "Задайте срок доступа в веб-панели по заявке."
 
 BOT_COMMANDS: tuple[tuple[str, str], ...] = (

@@ -13,6 +13,8 @@ import re
 import secrets
 import threading
 from datetime import datetime, timedelta, timezone
+from html import escape
+from time import monotonic
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -48,6 +50,12 @@ REQUEST_TYPE_ADD_CONFIG = "add_config"
 REQUEST_TYPE_EXTEND = "extend_access"
 
 REQUEST_TYPES = (REQUEST_TYPE_NEW_USER, REQUEST_TYPE_ADD_CONFIG, REQUEST_TYPE_EXTEND)
+
+REQUEST_TYPE_LABELS: dict[str, str] = {
+    REQUEST_TYPE_NEW_USER: "новый пользователь",
+    REQUEST_TYPE_ADD_CONFIG: "дополнительный конфиг",
+    REQUEST_TYPE_EXTEND: "продление доступа",
+}
 
 SETTING_ACCEPT_REQUESTS = "telegram_accept_access_requests"
 SETTING_PENDING_CAP = "telegram_new_user_request_pending_cap"
@@ -130,6 +138,21 @@ def _propose_login(db: Session, telegram_username: str | None, telegram_id: str)
     return f"tg{telegram_id}"
 
 
+def _requester_label(
+    telegram_name: str | None,
+    telegram_username: str | None,
+    telegram_id: str,
+) -> str:
+    """«Иван · @ivan · ID 123» для ленты уведомлений (без HTML)."""
+    parts: list[str] = []
+    if telegram_name:
+        parts.append(telegram_name.strip())
+    if telegram_username:
+        parts.append(f"@{telegram_username.strip()}")
+    parts.append(f"ID {telegram_id}")
+    return " · ".join(parts)
+
+
 def submit_access_request(
     db: Session,
     *,
@@ -149,6 +172,9 @@ def submit_access_request(
     if request_type not in REQUEST_TYPES:
         raise ValueError(f"Неизвестный тип заявки: {request_type}")
     telegram_id = str(telegram_id).strip()
+    # Профиль из Telegram: подрезаем под размеры колонок (64 / 128).
+    telegram_username = (telegram_username or "").strip().lstrip("@")[:64] or None
+    telegram_name = (telegram_name or "").strip()[:128] or None
 
     if request_type == REQUEST_TYPE_NEW_USER:
         # Новые пользователи из Telegram по умолчанию не принимаются.
@@ -230,8 +256,8 @@ def submit_access_request(
     write_admin_panel_notification(
         db,
         event_type=f"access_request_{request_type}",
-        title=f"Новая заявка на доступ: {request_type}",
-        message=f"Telegram ID {telegram_id}" + (f" ({telegram_name})" if telegram_name else ""),
+        title=f"Новая заявка на доступ: {REQUEST_TYPE_LABELS[request_type]}",
+        message=_requester_label(telegram_name, telegram_username, telegram_id),
         action_payload={"request_id": row.id, "request_type": request_type},
     )
     # Админы — только в личные чаты (telegram_id), никогда не в telegram_chat_id (группа).
@@ -260,8 +286,15 @@ def _admin_request_keyboard(db: Session, request: UserAccessRequest) -> dict[str
     rid = request.id
     rows: list[list[dict[str, str]]] = []
     if request.request_type == REQUEST_TYPE_NEW_USER:
-        if _default_preset_id(db) is not None:
-            rows.append([inline_button(i18n.BTN_REQUEST_APPROVE, callback_data=f"ar:a:{rid}")])
+        # «Одобрить» одним кликом возможно только с шаблоном по умолчанию.
+        # Без шаблона всё равно показываем кнопку («Настроить»), иначе админу
+        # остаётся только «Отклонить» и заявку негде принять.
+        label = (
+            i18n.BTN_REQUEST_APPROVE
+            if _default_preset_id(db) is not None
+            else i18n.BTN_REQUEST_CONFIGURE
+        )
+        rows.append([inline_button(label, callback_data=f"ar:a:{rid}")])
         rows.append([inline_button(i18n.BTN_REQUEST_REJECT, callback_data=f"ar:r:{rid}")])
     elif request.request_type == REQUEST_TYPE_ADD_CONFIG:
         rows.append([inline_button(i18n.BTN_REQUEST_APPROVE_MORE, callback_data=f"ar:a:{rid}")])
@@ -285,7 +318,14 @@ def _run_async(coro) -> Any:
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        return asyncio.run(coro)
+        # Синхронный endpoint (FastAPI threadpool): у каждого asyncio.run свой
+        # event loop, поэтому общий HTTP-клиент нельзя переиспользовать между
+        # вызовами — сбрасываем его до и после.
+        telegram_api.reset_bot_api_client_for_tests()
+        try:
+            return asyncio.run(coro)
+        finally:
+            telegram_api.reset_bot_api_client_for_tests()
     # В потоке бота цикл уже крутится — выполняем в auxiliar-потоке со своим циклом,
     # чтобы общий HTTP-клиент не привязался к чужому event loop.
     box: dict[str, Any] = {}
@@ -305,6 +345,27 @@ def _run_async(coro) -> Any:
     return box.get("value")
 
 
+def _admin_request_text(db: Session, request: UserAccessRequest) -> str:
+    """Текст карточки заявки для админа (HTML). Общий для отправки и обновления."""
+    history = format_requester_history(db, request.telegram_id)
+    type_label = REQUEST_TYPE_LABELS.get(request.request_type, request.request_type)
+    lines = [f"<b>Заявка на доступ</b>: {escape(type_label, quote=False)}"]
+    if request.user_id:
+        bound = db.get(User, request.user_id)
+        if bound is not None:
+            lines.append(f"Абонент: <code>{escape(bound.username, quote=False)}</code>")
+    if request.telegram_name:
+        lines.append(f"Имя: {escape(request.telegram_name, quote=False)}")
+    if request.telegram_username:
+        lines.append(f"Ник: @{escape(request.telegram_username, quote=False)}")
+    lines.append(f"Telegram ID: <code>{escape(request.telegram_id, quote=False)}</code>")
+    if request.user_note:
+        lines.append(f"Комментарий: {escape(request.user_note, quote=False)}")
+    if history:
+        lines.append(f"История: {escape(history, quote=False)}")
+    return "\n".join(lines)
+
+
 def _notify_admins_new_request(db: Session, request: UserAccessRequest) -> None:
     bot_token = _bot_token(db)
     if not bot_token or not get_feature_service().is_enabled("telegram"):
@@ -316,18 +377,7 @@ def _notify_admins_new_request(db: Session, request: UserAccessRequest) -> None:
     )
     if not admins:
         return
-    history = format_requester_history(db, request.telegram_id)
-    lines = [
-        f"Новая заявка на доступ: {request.request_type}",
-        f"Telegram: {request.telegram_name or request.telegram_id}",
-    ]
-    if request.telegram_username:
-        lines.append(f"Ник: @{request.telegram_username}")
-    if request.user_note:
-        lines.append(f"Комментарий: {request.user_note}")
-    if history:
-        lines.append(f"История: {history}")
-    text = "\n".join(lines)
+    text = _admin_request_text(db, request)
     keyboard = _admin_request_keyboard(db, request)
     refs: list[dict[str, Any]] = []
     for admin in admins:
@@ -362,6 +412,124 @@ def _notify_admins_new_request(db: Session, request: UserAccessRequest) -> None:
         request.admin_message_refs = json.dumps(refs, ensure_ascii=False)
         db.add(request)
         db.commit()
+
+
+async def refresh_admin_request_card(db: Session, request: UserAccessRequest) -> None:
+    """Обновить текст уже отправленных админам карточек (сохранив кнопки заявки)."""
+    token = _bot_token(db)
+    if not token:
+        return
+    refs = json.loads(request.admin_message_refs or "[]")
+    if not refs:
+        return
+    text = _admin_request_text(db, request)
+    keyboard = _admin_request_keyboard(db, request)
+    for ref in refs:
+        try:
+            if request.receipt_file_id:
+                await telegram_api.call_bot_api(
+                    token,
+                    "editMessageCaption",
+                    payload={
+                        "chat_id": str(ref["chat_id"]),
+                        "message_id": int(ref["message_id"]),
+                        "caption": text,
+                        "parse_mode": "HTML",
+                        "reply_markup": keyboard,
+                    },
+                )
+            else:
+                await edit_message_text(
+                    token,
+                    str(ref["chat_id"]),
+                    int(ref["message_id"]),
+                    text,
+                    reply_markup=keyboard,
+                )
+        except Exception as exc:
+            logger.warning("refresh request card %s failed: %s", ref, exc)
+
+
+# Не чаще одного запроса getChat на telegram_id в 10 минут: старые заявки
+# дозаполняются при первом открытии списка, неудачи не долбят Bot API.
+_PROFILE_BACKFILL_TTL_SECONDS = 600
+_profile_backfill_attempted: dict[str, float] = {}
+
+
+def _profile_from_chat(info: dict[str, Any]) -> tuple[str | None, str | None]:
+    username = str(info.get("username") or "").strip().lstrip("@")[:64] or None
+    name = " ".join(
+        str(part).strip()
+        for part in (info.get("first_name"), info.get("last_name"))
+        if part
+    ).strip()[:128] or None
+    return username, name
+
+
+def backfill_request_profile(db: Session, request: UserAccessRequest) -> bool:
+    """Дозаполнить имя/@ник заявки через Telegram ``getChat`` (старые записи).
+
+    Нужно для заявок, созданных до того, как бот начал сохранять профиль:
+    в БД у них только ``telegram_id``. Любая ошибка Telegram не ломает список.
+    """
+    if request.telegram_name or request.telegram_username:
+        return False
+    token = _bot_token(db)
+    if not token or not get_feature_service().is_enabled("telegram"):
+        return False
+    telegram_id = str(request.telegram_id).strip()
+    if not telegram_id:
+        return False
+    last_attempt = _profile_backfill_attempted.get(telegram_id)
+    now = monotonic()
+    if last_attempt is not None and now - last_attempt < _PROFILE_BACKFILL_TTL_SECONDS:
+        return False
+    _profile_backfill_attempted[telegram_id] = now
+    try:
+        info = _run_async(
+            telegram_api.call_bot_api(token, "getChat", payload={"chat_id": telegram_id})
+        )
+    except Exception as exc:
+        logger.info("telegram getChat for request %s failed: %s", request.id, exc)
+        return False
+    if not isinstance(info, dict):
+        return False
+    username, name = _profile_from_chat(info)
+    if not username and not name:
+        return False
+    if username:
+        request.telegram_username = request.telegram_username or username
+    if name:
+        request.telegram_name = request.telegram_name or name
+    db.add(request)
+    db.commit()
+    db.refresh(request)
+    _profile_backfill_attempted.pop(telegram_id, None)
+    if request.status == "pending":
+        try:
+            _run_async(refresh_admin_request_card(db, request))
+        except Exception as exc:
+            logger.info("refresh request card %s failed: %s", request.id, exc)
+    return True
+
+
+def backfill_missing_request_profiles(
+    db: Session,
+    requests: list[UserAccessRequest],
+    *,
+    limit: int = 5,
+) -> int:
+    """Дозаполнить профили у нескольких заявок; вернуть число обновлённых."""
+    updated = 0
+    for request in requests:
+        if updated >= limit:
+            break
+        if request.telegram_name or request.telegram_username:
+            continue
+        if backfill_request_profile(db, request):
+            updated += 1
+    return updated
+
 
 
 def attach_receipt_from_update(

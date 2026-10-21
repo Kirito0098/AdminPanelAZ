@@ -31,21 +31,33 @@ def _send(files: list[dict], **kwargs):
     adapter.get_profile_files.return_value = [dict(item) for item in files]
     send_doc = MagicMock(return_value=(True, None))
     read = MagicMock(return_value="conf")
+    db = MagicMock()
+    node = SimpleNamespace(id=2, name="2 serv")
+    db.get.return_value = node
     with ExitStack() as stack:
-        stack.enter_context(patch(f"{MOD}.get_active_adapter", return_value=adapter))
+        adapter_for_node = stack.enter_context(
+            patch(f"{MOD}.get_adapter_for_node", return_value=adapter)
+        )
         stack.enter_context(patch(f"{MOD}.load_node_remote_hosts", return_value=[]))
         stack.enter_context(patch(f"{MOD}.read_profile_file_for_delivery", new=read))
         stack.enter_context(patch(f"{MOD}.send_tg_document_result", new=send_doc))
         stack.enter_context(patch(f"{MOD}.resolve_effective_visible_vpn_profiles", return_value=ONLY_WG_AZ))
         sent, error = send_config_for_user(
-            MagicMock(),
+            db,
             _config(),
             _user(),
             bot_token="token",
             run_async=False,
             **kwargs,
         )
-    return SimpleNamespace(sent=sent, error=error, send_doc=send_doc, read=read)
+    return SimpleNamespace(
+        sent=sent,
+        error=error,
+        send_doc=send_doc,
+        read=read,
+        adapter_for_node=adapter_for_node,
+        node=node,
+    )
 
 
 def _read_paths(result) -> list[str]:
@@ -74,6 +86,13 @@ def test_all_files_hidden_sends_nothing():
     assert result.sent == 0
     assert result.error
     result.send_doc.assert_not_called()
+
+
+def test_files_are_read_from_the_config_node_not_the_active_node():
+    result = _send([WG_AZ])
+
+    assert result.sent == 1
+    result.adapter_for_node.assert_called_once_with(result.node)
 
 
 def test_send_all_skips_hidden_files():

@@ -175,6 +175,8 @@ export default function Configs() {
   const used = quota?.used ?? 0
   const limit = quota?.limit
   const unlimited = quota?.unlimited ?? false
+  const quotaReached = limit != null && used >= limit
+  const createDisabledByAdmin = quota ? !quota.can_create && !quotaReached : false
   const canCreate =
     (openvpnEnabled || wireguardEnabled || awg2Enabled) &&
     (quota?.can_create ?? true) &&
@@ -420,13 +422,15 @@ export default function Configs() {
 
       {!canCreate && (
         <p className="text-xs text-muted-foreground">
-          Запросите ещё конфиг у администратора.
+          {createDisabledByAdmin
+            ? 'Создание новых конфигов отключено администратором.'
+            : 'Запросите ещё конфиг у администратора.'}
         </p>
       )}
 
       {quota && !unlimited && (
         <p className="text-xs text-muted-foreground">
-          Лимит: {used} из {limit} имён{!canCreate ? ' — лимит достигнут' : ''}
+          Лимит: {used} из {limit} имён{quotaReached ? ' — лимит достигнут' : ''}
         </p>
       )}
 

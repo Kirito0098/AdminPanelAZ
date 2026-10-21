@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -43,6 +43,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
+import { useNotificationCenter } from '@/context/NotificationCenterContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { DOCS } from '@/lib/docsUrls'
@@ -78,6 +79,12 @@ import UsersBulkBar from '@/components/users/UsersBulkBar'
 import SubscriberCard from '@/components/users/SubscriberCard'
 import UserCard from '@/components/users/UserCard'
 
+const REQUEST_TYPE_LABELS: Record<string, string> = {
+  new_user: 'Новый пользователь',
+  add_config: 'Дополнительный конфиг',
+  extend_access: 'Продление доступа',
+}
+
 type DeletableUser = {
   id: number
   username: string
@@ -91,6 +98,7 @@ export default function UsersPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { isEnabled } = useFeatureModules()
   const { success, error: notifyError } = useNotifications()
+  const { pendingRequestsCount } = useNotificationCenter()
   const { backgroundTask, trackBackgroundTask } = useProgress()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
@@ -101,6 +109,9 @@ export default function UsersPage() {
   const [requestsOpen, setRequestsOpen] = useState(false)
   const [requests, setRequests] = useState<AccessRequestResponse[]>([])
   const [requestsLoading, setRequestsLoading] = useState(false)
+  const [focusRequestId, setFocusRequestId] = useState<number | null>(null)
+  /** Уже обработанный deep-link (?requests=1 / ?request=<id>), чтобы не открывать диалог циклично. */
+  const consumedRequestsParamRef = useRef<string | null>(null)
   const [requestPresets, setRequestPresets] = useState<PresetResponse[]>([])
   const [requestNodes, setRequestNodes] = useState<Node[]>([])
   const [approvePresetId, setApprovePresetId] = useState<number | null>(null)
@@ -169,9 +180,11 @@ export default function UsersPage() {
     }
   }, [notifyError])
 
+  // Список заявок перечитываем при каждом изменении pending-счётчика из SSE:
+  // новая заявка из Telegram появляется в диалоге без перезагрузки страницы.
   useEffect(() => {
     void reloadRequests()
-  }, [reloadRequests])
+  }, [reloadRequests, pendingRequestsCount])
 
   // Смена фильтра сбрасывает выбор — иначе в область попадут скрытые пользователи.
   useEffect(() => {
@@ -189,15 +202,45 @@ export default function UsersPage() {
     setSearchParams(next, { replace: true })
   }, [searchParams, setSearchParams])
 
-  // Колокол: /users?requests=1 → открыть диалог заявок
+  // Колокол: /users?requests=1, карточка в Telegram: /users?request=<id>.
+  // Всегда перечитываем заявки — иначе диалог показывает снимок, снятый
+  // при монтировании страницы, и пишет «Нет ожидающих заявок».
   useEffect(() => {
     if (!provisioningOn) return
-    if (searchParams.get('requests') !== '1') return
+    const rawRequests = searchParams.get('requests')
+    const rawRequest = searchParams.get('request')
+    if (rawRequests !== '1' && rawRequest == null) {
+      consumedRequestsParamRef.current = null
+      return
+    }
+    const key = `${rawRequests ?? ''}|${rawRequest ?? ''}`
+    if (consumedRequestsParamRef.current === key) return
+    consumedRequestsParamRef.current = key
     setRequestsOpen(true)
+    if (rawRequest != null) {
+      const parsed = Number.parseInt(rawRequest, 10)
+      setFocusRequestId(Number.isFinite(parsed) && parsed > 0 ? parsed : null)
+    }
+    void reloadRequests()
     const next = new URLSearchParams(searchParams)
     next.delete('requests')
+    next.delete('request')
     setSearchParams(next, { replace: true })
-  }, [provisioningOn, searchParams, setSearchParams])
+  }, [provisioningOn, searchParams, setSearchParams, reloadRequests])
+
+  // Открытие диалога всегда сопровождается свежим запросом списка.
+  useEffect(() => {
+    if (!requestsOpen) return
+    void reloadRequests()
+  }, [requestsOpen, reloadRequests])
+
+  // Подсветить и подскроллить заявку, к которой вела ссылка из Telegram.
+  useEffect(() => {
+    if (!requestsOpen || focusRequestId == null) return
+    document
+      .getElementById(`access-request-${focusRequestId}`)
+      ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }, [requestsOpen, focusRequestId, requests])
 
   // План для одобрения new_user: шаблон или узлы+протоколы.
   useEffect(() => {
@@ -821,7 +864,10 @@ export default function UsersPage() {
       {provisioningOn && (
         <AppDialog
           open={requestsOpen}
-          onOpenChange={setRequestsOpen}
+          onOpenChange={(open) => {
+            setRequestsOpen(open)
+            if (!open) setFocusRequestId(null)
+          }}
           title="Заявки на доступ"
           description="Запросы доступа из Telegram-бота: одобрите или отклоните"
           size="lg"
@@ -954,13 +1000,17 @@ export default function UsersPage() {
                   const metaParts = [
                     r.telegram_username ? `@${r.telegram_username}` : null,
                     `TG ${r.telegram_id}`,
-                    r.request_type,
+                    REQUEST_TYPE_LABELS[r.request_type] ?? r.request_type,
                     new Date(r.created_at).toLocaleString('ru-RU'),
                   ].filter(Boolean)
                   return (
                     <div
                       key={r.id}
-                      className="flex items-center justify-between gap-3 rounded-lg border p-3"
+                      id={`access-request-${r.id}`}
+                      className={cn(
+                        'flex items-center justify-between gap-3 rounded-lg border p-3',
+                        focusRequestId === r.id && 'border-primary ring-2 ring-primary/30',
+                      )}
                     >
                       <div className="min-w-0 flex-1">
                         <p className="text-sm font-medium">{title}</p>

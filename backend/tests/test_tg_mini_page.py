@@ -18,3 +18,5 @@ def test_mini_app_page_loads(tmp_path, monkeypatch):
     response = TestClient(app).get("/api/tg-mini")
 
     assert response.status_code == 200
+    # Обновление Mini App не должно залипать на старом index в Telegram WebView.
+    assert "no-cache" in response.headers.get("cache-control", "")

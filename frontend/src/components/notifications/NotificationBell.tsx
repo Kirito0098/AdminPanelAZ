@@ -1,20 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Bell } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
-import { useNotifications } from '@/context/NotificationContext'
-import {
-  fetchNotifications,
-  markNotificationsRead,
-  openNotificationsStream,
-  type NotificationItem,
-} from '@/api/notifications'
+import { useNotificationCenter } from '@/context/NotificationCenterContext'
+import type { NotificationItem } from '@/api/notifications'
 import NotificationPopover from './NotificationPopover'
 
 function pathForNotification(item: NotificationItem): string | null {
+  if (item.action_payload) {
+    const requestId = item.action_payload.request_id
+    if (
+      item.event_type.startsWith('access_request_') &&
+      typeof requestId === 'number' &&
+      Number.isFinite(requestId)
+    ) {
+      return `/users?request=${requestId}`
+    }
+  }
   if (item.event_type.startsWith('access_request_') || item.category === 'requests') {
     return '/users?requests=1'
   }
@@ -39,63 +44,27 @@ function bellBadge(unreadCount: number) {
 export default function NotificationBell() {
   const navigate = useNavigate()
   const { isEnabled } = useFeatureModules()
-  const { info } = useNotifications()
+  const {
+    items,
+    unreadCount,
+    pendingRequestsCount,
+    category,
+    setCategory,
+    markAllRead,
+    markReadUpTo,
+  } = useNotificationCenter()
   const requestsTabEnabled = isEnabled('user_provisioning')
 
   const [desktopOpen, setDesktopOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
-  const [category, setCategory] = useState<TabKey>('all')
-  const [items, setItems] = useState<NotificationItem[]>([])
-  const [unreadCount, setUnreadCount] = useState(0)
-  const [pendingRequestsCount, setPendingRequestsCount] = useState(0)
-  const streamRef = useRef<ReturnType<typeof openNotificationsStream> | null>(null)
-  /** null = ещё не было успешного fetch; тост только при реальном росте после baseline. */
-  const prevPendingRef = useRef<number | null>(null)
 
-  const refetch = useCallback(async () => {
-    try {
-      const data = await fetchNotifications({
-        ...(category === 'all' ? {} : { category }),
-        limit: 100,
-      })
-      setItems(data.items)
-      setUnreadCount(data.unread_count)
-      const pending = data.pending_requests_count
-      setPendingRequestsCount(pending)
-      const prev = prevPendingRef.current
-      if (
-        prev != null &&
-        pending > prev &&
-        (category === 'all' || category === 'requests')
-      ) {
-        info(`Новых заявок на доступ: ${pending - prev}`)
-      }
-      prevPendingRef.current = pending
-    } catch {
-      // Keep stale data; the stream keeps reconnecting and refetching.
-    }
-  }, [category, info])
-
+  // Открыли центр уведомлений — считаем ленту просмотренной и гасим бейдж.
+  // Иначе непрочитанные копятся и «1 новая заявка» выглядит как «8 новых».
   useEffect(() => {
-    void refetch()
-    streamRef.current = openNotificationsStream((_data) => {
-      void refetch()
-    })
-    const onFocus = () => void refetch()
-    window.addEventListener('focus', onFocus)
-    return () => {
-      window.removeEventListener('focus', onFocus)
-      streamRef.current?.close()
+    if ((desktopOpen || mobileOpen) && unreadCount > 0) {
+      void markAllRead()
     }
-  }, [refetch])
-
-  const handleMarkAllRead = async () => {
-    if (!items.length) return
-    const maxId = Math.max(...items.map((item) => item.id))
-    await markNotificationsRead(maxId)
-    setUnreadCount(0)
-    void refetch()
-  }
+  }, [desktopOpen, mobileOpen, unreadCount, markAllRead])
 
   const handleItemClick = useCallback(
     (item: NotificationItem) => {
@@ -103,9 +72,10 @@ export default function NotificationBell() {
       if (!path) return
       setDesktopOpen(false)
       setMobileOpen(false)
+      void markReadUpTo(item.id)
       navigate(path)
     },
-    [navigate],
+    [navigate, markReadUpTo],
   )
 
   const activeCategory: TabKey = category === 'requests' && !requestsTabEnabled ? 'all' : category
@@ -136,7 +106,7 @@ export default function NotificationBell() {
               pendingRequestsCount={pendingRequestsCount}
               category={activeCategory}
               onCategoryChange={setCategory}
-              onMarkAllRead={handleMarkAllRead}
+              onMarkAllRead={markAllRead}
               onItemClick={handleItemClick}
             />
           </DropdownMenuContent>
@@ -164,10 +134,11 @@ export default function NotificationBell() {
           pendingRequestsCount={pendingRequestsCount}
           category={activeCategory}
           onCategoryChange={setCategory}
-          onMarkAllRead={handleMarkAllRead}
+          onMarkAllRead={markAllRead}
           onItemClick={handleItemClick}
         />
       </div>
     </>
   )
 }
+

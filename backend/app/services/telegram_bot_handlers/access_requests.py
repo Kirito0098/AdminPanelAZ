@@ -13,7 +13,13 @@ from sqlalchemy.orm import Session
 from app.models import User, UserAccessRequest
 from app.services.rate_limit.sliding_window import RateLimitExceeded
 from app.services.telegram_api import answer_callback_query, edit_message_reply_markup, send_message
-from app.services.telegram_bot_handlers.base import BotContext, is_admin
+from app.services.telegram_bot_handlers.base import (
+    BotContext,
+    inline_button,
+    inline_keyboard,
+    is_admin,
+    panel_root_url,
+)
 from app.services import telegram_bot_i18n as i18n
 from app.services.user_access_requests import (
     AlreadyDecided,
@@ -42,6 +48,25 @@ async def _tg_answer(bot_token: str, callback_id: str, **kwargs: object) -> None
         pass
 
 
+def _panel_request_markup(ctx: BotContext, request_id: int) -> dict | None:
+    """Кнопка-ссылка на заявку в панели (если известен публичный адрес Mini App)."""
+    root = panel_root_url(ctx.mini_app_url)
+    if not root.startswith(("http://", "https://")):
+        return None
+    return inline_keyboard(
+        [[inline_button(i18n.BTN_OPEN_REQUEST_PANEL, url=f"{root}/users?request={request_id}")]]
+    )
+
+
+async def _send_open_in_panel(ctx: BotContext, request_id: int, text: str | None = None) -> None:
+    await send_message(
+        ctx.bot_token,
+        ctx.chat_id,
+        text or i18n.REQUEST_OPEN_IN_PANEL.format(request_id=request_id),
+        reply_markup=_panel_request_markup(ctx, request_id),
+    )
+
+
 async def handle_request_access(ctx: BotContext) -> None:
     """«Запросить доступ» — новая заявка new_user (только если приём включён)."""
     try:
@@ -49,8 +74,8 @@ async def handle_request_access(ctx: BotContext) -> None:
             ctx.db,
             request_type="new_user",
             telegram_id=ctx.telegram_user_id,
-            telegram_username=None,
-            telegram_name=None,
+            telegram_username=ctx.telegram_username or None,
+            telegram_name=ctx.telegram_name or None,
         )
     except RequestsClosed as exc:
         await send_message(ctx.bot_token, ctx.chat_id, str(exc) or i18n.REQUESTS_CLOSED)
@@ -71,6 +96,8 @@ async def handle_request_more_config(ctx: BotContext) -> None:
             ctx.db,
             request_type="add_config",
             telegram_id=ctx.telegram_user_id,
+            telegram_username=ctx.telegram_username or None,
+            telegram_name=ctx.telegram_name or None,
             user_id=ctx.user.id,
             requested_count=1,
         )
@@ -162,6 +189,8 @@ async def handle_admin_request_callback(
                 ctx.db,
                 request_type="extend_access",
                 telegram_id=ctx.telegram_user_id,
+                telegram_username=ctx.telegram_username or None,
+                telegram_name=ctx.telegram_name or None,
                 user_id=ctx.user.id,
                 requested_count=1,
             )
@@ -205,11 +234,7 @@ async def handle_admin_request_callback(
 
                 preset_id = _default_preset_id(db)
                 if preset_id is None:
-                    await send_message(
-                        ctx.bot_token,
-                        ctx.chat_id,
-                        i18n.REQUEST_OPEN_IN_PANEL.format(request_id=request_id),
-                    )
+                    await _send_open_in_panel(ctx, request_id, i18n.REQUEST_NEED_PRESET)
                     await _tg_answer(ctx.bot_token, callback_id)
                     return True
                 approve_request(db, request_id=request_id, admin=admin, preset_id=preset_id)
@@ -241,11 +266,7 @@ async def handle_admin_request_callback(
             )
         elif action == "ec":
             await send_message(ctx.bot_token, ctx.chat_id, i18n.REQUEST_EXTEND_CUSTOM_TEXT)
-            await send_message(
-                ctx.bot_token,
-                ctx.chat_id,
-                i18n.REQUEST_OPEN_IN_PANEL.format(request_id=request_id),
-            )
+            await _send_open_in_panel(ctx, request_id)
             await _tg_answer(ctx.bot_token, callback_id)
             return True
         else:

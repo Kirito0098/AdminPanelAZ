@@ -200,14 +200,16 @@ export async function removeTgMePlanConfig(
 }
 
 export async function getTgConfigFiles(configId: number): Promise<{ files: TgMiniConfigFile[] }> {
-  return tgFetch<{ files: TgMiniConfigFile[] }>(`/configs/${configId}/files`)
+  // /me/... ищет конфиг на его собственном узле; /configs/{id}/files работает
+  // только с активным узлом и даёт 404 для конфига на другом сервере.
+  return tgFetch<{ files: TgMiniConfigFile[] }>(`/me/configs/${configId}/files`)
 }
 
 export async function sendTgConfig(
   configId: number,
   data: { path?: string; destination: 'self' | 'owner'; platform?: InstallPlatform },
 ): Promise<{ message: string }> {
-  return tgFetch<{ message: string }>(`/configs/${configId}/send`, {
+  return tgFetch<{ message: string }>(`/me/configs/${configId}/send`, {
     method: 'POST',
     body: JSON.stringify(data),
   })
@@ -215,7 +217,7 @@ export async function sendTgConfig(
 
 export async function getTgQrLink(configId: number, path: string): Promise<TgMiniQrLink> {
   const params = new URLSearchParams({ config_id: String(configId), path })
-  return tgFetch<TgMiniQrLink>(`/qr-link?${params.toString()}`)
+  return tgFetch<TgMiniQrLink>(`/me/qr-link?${params.toString()}`)
 }
 
 export async function getTgSettings(opts?: { retry?: boolean }): Promise<TgMiniSettings> {

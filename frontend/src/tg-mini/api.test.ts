@@ -171,4 +171,53 @@ describe('Mini App session refresh', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
+
+describe('Mini App owner config actions', () => {
+  let api: Awaited<ReturnType<typeof loadApi>>
+
+  beforeEach(async () => {
+    initData.value = 'init-data'
+    api = await loadApi()
+    api.setTgToken('token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('reads files through the owning node (/me), not the active node', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => json(200, { files: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.getTgConfigFiles(132)
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/tg-mini/me/configs/132/files')
+  })
+
+  it('sends the file through the owning node (/me)', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      json(200, { message: 'ok' }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.sendTgConfig(132, { path: '/root/profile.ovpn', destination: 'self' })
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/tg-mini/me/configs/132/send')
+  })
+
+  it('builds the QR link on the owning node (/me)', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      json(200, { url: 'https://example/dl', expires_at: null }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.getTgQrLink(132, '/root/profile.ovpn')
+
+    const url = String(fetchMock.mock.calls[0][0])
+    expect(url).toContain('/tg-mini/me/qr-link?')
+    expect(url).toContain('config_id=132')
+  })
+})
+
 })

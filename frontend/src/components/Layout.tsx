@@ -1,11 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { LogOut, Menu, Moon, Radio, Shield, Sun, User } from 'lucide-react'
 import NodeSelector from '@/components/NodeSelector'
 import NotificationBell from '@/components/notifications/NotificationBell'
 import ActiveNodeChangedBanner from '@/components/ActiveNodeChangedBanner'
 import HaScopeEnforcer from '@/components/HaScopeEnforcer'
-import { fetchNotifications } from '@/api/notifications'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -14,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { DOCS, FEEDBACK_URL } from '@/lib/docsUrls'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
+import { useNotificationCenter } from '@/context/NotificationCenterContext'
 import { useTheme } from '@/context/ThemeContext'
 import {
   getVisibleSidebarNavGroups,
@@ -88,7 +88,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { user, logout } = useAuth()
   const { isEnabled } = useFeatureModules()
   const { theme, toggleTheme } = useTheme()
-  const [pendingRequestsCount, setPendingRequestsCount] = useState(0)
+  // Живой счётчик из общего SSE-потока: не застывает до перезагрузки страницы.
+  const { pendingRequestsCount } = useNotificationCenter()
   const initials = user?.username?.slice(0, 2).toUpperCase() ?? '?'
   const isAdmin = user?.role === 'admin'
   const profileItem: SidebarNavItem = {
@@ -100,20 +101,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     featureKey: null,
   }
   let visibleGroups = getVisibleSidebarNavGroups(user?.role, isEnabled)
-
-  useEffect(() => {
-    let cancelled = false
-    fetchNotifications({ limit: 1 })
-      .then((data) => {
-        if (!cancelled) setPendingRequestsCount(data.pending_requests_count)
-      })
-      .catch(() => {
-        // бейдж не критичен — оставляем 0
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
 
   visibleGroups = visibleGroups.map((group) => ({
     ...group,

@@ -44,4 +44,10 @@ def mini_app_page(request: Request):
         from app.middleware.http_security import generate_csp_nonce
 
         nonce = generate_csp_nonce()
-    return HTMLResponse(inject_csp_nonce(html, nonce), media_type="text/html")
+    return HTMLResponse(
+        inject_csp_nonce(html, nonce),
+        media_type="text/html",
+        # Telegram WebView кеширует index и после обновления Mini App
+        # продолжает грузить старый бандл; хешированные ассеты не страдают.
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate"},
+    )

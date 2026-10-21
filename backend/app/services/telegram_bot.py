@@ -76,6 +76,8 @@ def _build_context(
     telegram_user_id: str,
     mini_app_url: str,
     settings: TelegramBotSettingsSnapshot | None = None,
+    telegram_username: str = "",
+    telegram_name: str = "",
 ) -> BotContext:
     snap = settings or load_telegram_bot_settings_snapshot(db)
     user = resolve_user(db, telegram_user_id)
@@ -87,7 +89,20 @@ def _build_context(
         user=user,
         settings=snap,
         mini_app_url=mini_app_url,
+        telegram_username=telegram_username,
+        telegram_name=telegram_name,
     )
+
+
+def _profile_from_user(from_user: dict[str, Any]) -> tuple[str, str]:
+    """Ник и отображаемое имя из Telegram ``from`` (пустые строки, если не пришло)."""
+    username = str(from_user.get("username") or "").strip()
+    name = " ".join(
+        str(part).strip()
+        for part in (from_user.get("first_name"), from_user.get("last_name"))
+        if part
+    ).strip()
+    return username, name
 
 
 async def _dispatch_command(ctx: BotContext, command: str, args: str) -> None:
@@ -263,12 +278,15 @@ class TelegramBotService:
         if not telegram_user_id:
             return
 
+        tg_username, tg_name = _profile_from_user(from_user)
         ctx = _build_context(
             db,
             chat_id=chat_id,
             telegram_user_id=telegram_user_id,
             mini_app_url=mini_app_url,
             settings=snap,
+            telegram_username=tg_username,
+            telegram_name=tg_name,
         )
         if not command:
             if text.strip() and await handle_menu_text(ctx, text):
@@ -335,12 +353,15 @@ class TelegramBotService:
         if chat.get("id") != from_user.get("id"):
             return
 
+        tg_username, tg_name = _profile_from_user(from_user)
         ctx = _build_context(
             db,
             chat_id=chat_id,
             telegram_user_id=telegram_user_id,
             mini_app_url=mini_app_url,
             settings=snap,
+            telegram_username=tg_username,
+            telegram_name=tg_name,
         )
         if ctx.user is None and not (data == "help" or data.startswith("nav:help")):
             from app.services.telegram_api import send_message
@@ -364,12 +385,15 @@ class TelegramBotService:
         if not telegram_user_id:
             return
 
+        tg_username, tg_name = _profile_from_user(from_user)
         ctx = _build_context(
             db,
             chat_id=telegram_user_id,
             telegram_user_id=telegram_user_id,
             mini_app_url=mini_app_url,
             settings=settings,
+            telegram_username=tg_username,
+            telegram_name=tg_name,
         )
         await handle_inline_query(ctx, inline_query)
 
@@ -386,12 +410,15 @@ class TelegramBotService:
         if not telegram_user_id:
             return
 
+        tg_username, tg_name = _profile_from_user(from_user)
         ctx = _build_context(
             db,
             chat_id=telegram_user_id,
             telegram_user_id=telegram_user_id,
             mini_app_url=mini_app_url,
             settings=settings,
+            telegram_username=tg_username,
+            telegram_name=tg_name,
         )
         if ctx.user is None:
             return

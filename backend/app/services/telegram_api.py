@@ -59,12 +59,20 @@ def reset_bot_api_client_for_tests() -> None:
         _bot_api_client = None
     if client is None:
         return
+    # Клиент мог быть создан в уже закрытом event loop (несколько asyncio.run
+    # подряд в синхронном коде) — закрытие не должно ронять вызывающего.
+    async def _close() -> None:
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        asyncio.run(client.aclose())
+        asyncio.run(_close())
     else:
-        loop.create_task(client.aclose())
+        loop.create_task(_close())
 
 
 def _get_bot_api_client() -> httpx.AsyncClient:

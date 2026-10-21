@@ -8,8 +8,8 @@ from typing import Literal
 
 from sqlalchemy.orm import Session
 
-from app.models import User, VpnConfig, VpnType
-from app.services.node_manager import get_active_adapter
+from app.models import Node, User, VpnConfig, VpnType
+from app.services.node_manager import get_adapter_for_node
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename
 from app.services.telegram_profile_ui import file_caption
@@ -45,7 +45,12 @@ def send_config_files_to_chat(
     if not chat_id:
         return 0, "Chat ID не задан"
 
-    adapter = get_active_adapter(db)
+    # Файлы ищем на узле самого конфига, а не на активном: у пользователя
+    # могут быть конфиги на нескольких серверах одновременно.
+    node = db.get(Node, config.node_id)
+    if node is None:
+        return 0, "Узел конфигурации не найден"
+    adapter = get_adapter_for_node(node)
     files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
     files = filter_profile_files(files, visible_policy)
     if not files:

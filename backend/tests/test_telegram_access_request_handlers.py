@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -17,6 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.models import (
+    AdminPanelNotification,
     Base,
     Node,
     NodeStatus,
@@ -31,7 +33,10 @@ from app.services.telegram_bot import TelegramBotService
 from app.services.telegram_bot_handlers.access_requests import RateLimitExceeded
 from app.services.telegram_bot_handlers.base import TelegramBotSettingsSnapshot
 from app.services.user_access_requests import (
+    _admin_request_keyboard,
+    _notify_admins_new_request,
     approve_request,
+    backfill_request_profile,
     reject_request,
     submit_access_request,
     sync_admin_request_messages,
@@ -224,8 +229,24 @@ def _callback(data, from_id, chat_id, message_id=5, callback_id="cb"):
     }
 
 
-def _message(text, from_id, chat_id, photo=None, document=None):
-    message = {"text": text, "from": {"id": from_id}, "chat": {"id": chat_id, "type": "private"}}
+def _message(
+    text,
+    from_id,
+    chat_id,
+    photo=None,
+    document=None,
+    username=None,
+    first_name=None,
+    last_name=None,
+):
+    from_user = {"id": from_id}
+    if username is not None:
+        from_user["username"] = username
+    if first_name is not None:
+        from_user["first_name"] = first_name
+    if last_name is not None:
+        from_user["last_name"] = last_name
+    message = {"text": text, "from": from_user, "chat": {"id": chat_id, "type": "private"}}
     if photo is not None:
         message["photo"] = photo
     if document is not None:
@@ -441,3 +462,174 @@ def test_submit_already_pending(env, subscriber, db, pending_new_user):
     _run(env, _message("Запросить доступ", "200", "200"))
     env.send_message.assert_awaited()
     assert "У вас уже есть заявка" in str(env.send_message.await_args.args[2])
+
+def test_request_access_stores_telegram_name_and_username(env, db):
+    """Имя и @ник из update попадают в заявку и в ленту уведомлений."""
+    _set_setting(db, "telegram_accept_access_requests", "true")
+    db.commit()
+    _run(
+        env,
+        _message(
+            "Запросить доступ",
+            "300",
+            "300",
+            username="ivan_petrov",
+            first_name="Иван",
+            last_name="Петров",
+        ),
+    )
+    row = (
+        db.query(UserAccessRequest)
+        .filter(UserAccessRequest.telegram_id == "300")
+        .one()
+    )
+    assert row.telegram_username == "ivan_petrov"
+    assert row.telegram_name == "Иван Петров"
+
+    notification = (
+        db.query(AdminPanelNotification)
+        .filter(AdminPanelNotification.event_type == "access_request_new_user")
+        .one()
+    )
+    assert "новый пользователь" in notification.title
+    assert "Иван Петров" in notification.message
+    assert "@ivan_petrov" in notification.message
+
+
+def test_new_user_keyboard_offers_configure_without_default_preset(db, pending_new_user):
+    """Без шаблона по умолчанию админ видит «Настроить», а не только «Отклонить»."""
+    keyboard = _admin_request_keyboard(db, pending_new_user)
+    assert keyboard is not None
+    buttons = [button["text"] for row in keyboard["inline_keyboard"] for button in row]
+    assert buttons == ["Настроить", "Отклонить"]
+
+
+def test_new_user_keyboard_offers_approve_with_default_preset(db, pending_new_user, default_preset):
+    keyboard = _admin_request_keyboard(db, pending_new_user)
+    assert keyboard is not None
+    buttons = [button["text"] for row in keyboard["inline_keyboard"] for button in row]
+    assert buttons == ["Одобрить", "Отклонить"]
+
+
+def test_admin_card_shows_name_username_and_human_type(env, db, admin, monkeypatch):
+    """Карточка админу: человеческий тип заявки, имя, @ник и Telegram ID."""
+    req = UserAccessRequest(
+        request_type="new_user",
+        telegram_id="777",
+        telegram_username="ivan_p",
+        telegram_name="Иван Петров",
+        status="pending",
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+
+    sent: dict[str, str] = {}
+
+    async def fake_call_bot_api(_token, _method, payload=None):
+        sent["text"] = (payload or {}).get("text", "")
+        return {"message_id": 10}
+
+    monkeypatch.setattr(
+        "app.services.user_access_requests.telegram_api.call_bot_api", fake_call_bot_api
+    )
+    monkeypatch.setattr(
+        "app.services.user_access_requests.get_feature_service",
+        lambda: SimpleNamespace(is_enabled=lambda _key: True),
+    )
+    monkeypatch.setattr(
+        "app.services.user_access_requests._bot_token", lambda _db: "bot-token"
+    )
+
+    _notify_admins_new_request(db, req)
+
+    assert "новый пользователь" in sent["text"]
+    assert "Имя: Иван Петров" in sent["text"]
+    assert "Ник: @ivan_p" in sent["text"]
+    assert "Telegram ID: <code>777</code>" in sent["text"]
+    assert "new_user" not in sent["text"].splitlines()[0]
+
+
+def test_no_preset_approve_click_sends_panel_link(env, db, admin, pending_new_user):
+    """«Настроить» без шаблона: бот отправляет ссылку на заявку в панели."""
+    _run(env, _callback(f"ar:a:{pending_new_user.id}", "100", "100"))
+    assert env.send_message.await_args.kwargs.get("reply_markup") == {
+        "inline_keyboard": [
+            [
+                {
+                    "text": "Открыть заявку в панели",
+                    "url": f"https://p/users?request={pending_new_user.id}",
+                }
+            ]
+        ]
+    }
+    assert "Шаблон по умолчанию не задан" in env.send_message.await_args.args[2]
+    row = env.db.get(UserAccessRequest, pending_new_user.id)
+    assert row.status == "pending"
+
+
+def test_backfill_request_profile_from_getchat(env, db, pending_new_user, monkeypatch):
+    """Старая заявка без имени дозаполняется через getChat, карточка обновляется."""
+    pending_new_user.telegram_name = None
+    pending_new_user.telegram_username = None
+    pending_new_user.admin_message_refs = json.dumps([{"chat_id": "100", "message_id": 5}])
+    db.commit()
+
+    calls: list[str] = []
+
+    async def fake_call_bot_api(_token, method, payload=None):
+        calls.append(method)
+        if method == "getChat":
+            return {
+                "id": 200,
+                "first_name": "Иван",
+                "last_name": "Петров",
+                "username": "ivan_p",
+            }
+        return {"message_id": 5}
+
+    monkeypatch.setattr(
+        "app.services.user_access_requests.telegram_api.call_bot_api", fake_call_bot_api
+    )
+    monkeypatch.setattr(
+        "app.services.user_access_requests._bot_token", lambda _db: "bot-token"
+    )
+    monkeypatch.setattr(
+        "app.services.user_access_requests.get_feature_service",
+        lambda: SimpleNamespace(is_enabled=lambda _key: True),
+    )
+    monkeypatch.setattr("app.services.user_access_requests._profile_backfill_attempted", {})
+    edit = AsyncMock(return_value=True)
+    monkeypatch.setattr("app.services.user_access_requests.edit_message_text", edit)
+
+    assert backfill_request_profile(db, pending_new_user) is True
+    db.refresh(pending_new_user)
+    assert pending_new_user.telegram_name == "Иван Петров"
+    assert pending_new_user.telegram_username == "ivan_p"
+    assert "getChat" in calls
+    edit.assert_awaited()
+    assert "Имя: Иван Петров" in edit.await_args.args[3]
+    assert "Ник: @ivan_p" in edit.await_args.args[3]
+
+
+def test_backfill_skips_requests_with_profile(db, pending_new_user, monkeypatch):
+    pending_new_user.telegram_name = "Уже есть"
+    db.commit()
+    calls: list[str] = []
+
+    async def fake_call_bot_api(_token, method, _payload=None):
+        calls.append(method)
+        return {}
+
+    monkeypatch.setattr(
+        "app.services.user_access_requests.telegram_api.call_bot_api", fake_call_bot_api
+    )
+    monkeypatch.setattr(
+        "app.services.user_access_requests._bot_token", lambda _db: "bot-token"
+    )
+    monkeypatch.setattr(
+        "app.services.user_access_requests.get_feature_service",
+        lambda: SimpleNamespace(is_enabled=lambda _key: True),
+    )
+    assert backfill_request_profile(db, pending_new_user) is False
+    assert calls == []
