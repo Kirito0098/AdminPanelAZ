@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Save } from 'lucide-react'
+import { Activity, BarChart3, CalendarClock, KeyRound, Save, UserCog } from 'lucide-react'
 import { ApiError, updateUser } from '@/api/client'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
@@ -9,7 +9,9 @@ import type { UserUpdatePayload, UserProvisioningCard, UserProvisionSummary } fr
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { PercentBar } from '@/components/ui/percent-bar'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import UserMetric from './UserMetric'
 import UserAccessSection from './UserAccessSection'
 import UserAccessControlSection from './UserAccessControlSection'
 import UserConfigsSection from './UserConfigsSection'
@@ -18,7 +20,6 @@ import UserAccountSection from './UserAccountSection'
 
 interface UserCardProps {
   card: UserProvisioningCard
-  onBack: () => void
   onSave: (id: number, data: Partial<UserUpdatePayload>) => void
   onDelete: (user: UserProvisionSummary) => void
   onRefresh: () => void
@@ -33,7 +34,7 @@ const STATE_LABEL: Record<string, { label: string; variant: BadgeVariant }> = {
   ok: { label: 'OK', variant: 'success' },
 }
 
-export default function UserCard({ card, onBack, onSave, onDelete, onRefresh }: UserCardProps) {
+export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCardProps) {
   const { user } = card
   const { isEnabled } = useFeatureModules()
   const { success, error: notifyError } = useNotifications()
@@ -41,6 +42,31 @@ export default function UserCard({ card, onBack, onSave, onDelete, onRefresh }: 
   const [activeTab, setActiveTab] = useState<string>('access')
 
   const stateMeta = STATE_LABEL[user.provision_state ?? 'unmanaged']
+
+  const now = new Date()
+  const accessUntil = user.access_until ? new Date(user.access_until) : null
+  const accessExpired = accessUntil != null && accessUntil.getTime() < now.getTime()
+  const accessExpiring =
+    accessUntil != null && !accessExpired && accessUntil.getTime() <= now.getTime() + 7 * 86400000
+  const accessDaysLeft = accessUntil ? Math.round((accessUntil.getTime() - now.getTime()) / 86400000) : null
+  const trafficLimit = user.traffic_limit_bytes ?? 0
+  const trafficConsumed = user.traffic_consumed_bytes ?? 0
+  const trafficPercent = trafficLimit > 0 ? Math.min((trafficConsumed / trafficLimit) * 100, 100) : 0
+  const configCount = user.plan_config_indexes?.length ?? 0
+  const quota = user.config_quota ?? null
+  const initials = user.username.trim().slice(0, 2).toUpperCase()
+
+  const accessLabel = !accessUntil
+    ? 'Бессрочно'
+    : accessDaysLeft == null
+      ? '—'
+      : accessDaysLeft < 0
+        ? `истёк ${Math.abs(accessDaysLeft)} дн.`
+        : accessDaysLeft === 0
+          ? 'истекает сегодня'
+          : `осталось ${accessDaysLeft} дн.`
+  const accessTone = accessExpired ? 'danger' : accessExpiring ? 'warning' : 'default'
+  const trafficTone = user.traffic_limit_blocked ? 'danger' : trafficPercent >= 80 ? 'warning' : 'default'
 
   const handleSavePlan = async () => {
     try {
@@ -52,90 +78,132 @@ export default function UserCard({ card, onBack, onSave, onDelete, onRefresh }: 
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3 sm:space-y-0 sm:pb-4">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold truncate">{user.username}</span>
-              <Badge variant={user.role === 'admin' ? 'default' : 'secondary'} className="text-[10px]">
-                {user.role === 'admin' ? 'Администратор' : 'Абонент'}
-              </Badge>
-              <Badge variant={stateMeta?.variant ?? 'secondary'} className="text-[10px]">
-                {stateMeta?.label ?? user.provision_state}
-              </Badge>
-              {user.suspended_at && (
-                <Badge variant="destructive" className="text-[10px]">
-                  Приостановлен
-                </Badge>
-              )}
-              {card.grace_hold && (
-                <Badge variant="warning" className="text-[10px]">
-                  Истёк: удержание {card.grace_hold.elapsed_months} из {card.grace_hold.limit_months} мес.
-                </Badge>
-              )}
+    <div className="flex flex-col gap-3">
+      <Card className="border-0 bg-transparent shadow-none">
+        <CardHeader className="gap-0 space-y-0 rounded-xl border bg-muted/20 p-4 sm:p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex min-w-0 items-start gap-3">
+              <span
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold uppercase text-primary"
+                aria-hidden
+              >
+                {initials}
+              </span>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="truncate text-base font-semibold leading-tight">{user.username}</span>
+                  <Badge variant={user.role === 'admin' ? 'default' : 'secondary'} className="text-[10px]">
+                    {user.role === 'admin' ? 'Администратор' : 'Абонент'}
+                  </Badge>
+                  <Badge variant={stateMeta?.variant ?? 'secondary'} className="text-[10px]">
+                    {stateMeta?.label ?? user.provision_state}
+                  </Badge>
+                  {user.suspended_at && (
+                    <Badge variant="destructive" className="text-[10px]">
+                      Приостановлен
+                    </Badge>
+                  )}
+                  {card.grace_hold && (
+                    <Badge variant="warning" className="text-[10px]">
+                      Удержание {card.grace_hold.elapsed_months}/{card.grace_hold.limit_months} мес.
+                    </Badge>
+                  )}
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  ID {user.id} · {configCount} имён конфигов · {user.node_ids.length} узел
+                  {user.node_ids.length !== 1 ? 'а' : ''}
+                </p>
+              </div>
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              ID {user.id} · {user.plan_config_indexes?.length ?? 0} имён конфигов ·{' '}
-              {user.node_ids.length} узел{user.node_ids.length !== 1 ? 'а' : ''}
-            </p>
-            {user.access_until && (
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Срок доступа: {formatDate(user.access_until)}
-              </p>
-            )}
-            {user.traffic_limit_bytes != null && (
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Трафик: {formatBytes(user.traffic_consumed_bytes ?? 0)} из{' '}
-                {formatBytes(user.traffic_limit_bytes)}
-                {user.traffic_counter_reset_at
-                  ? ` (с ${formatDate(user.traffic_counter_reset_at)})`
-                  : ''}
-                {user.traffic_limit_blocked ? ' — лимит исчерпан' : ''}
-              </p>
-            )}
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
             {provisioningOn && (
               <Button
                 type="button"
                 onClick={handleSavePlan}
                 disabled={user.provision_state === 'unmanaged' || card.plan.blocked}
-                title={
-                  card.plan.blocked
-                    ? 'Срок доступа истёк — сначала продлите доступ'
-                    : undefined
-                }
+                className="shrink-0"
+                title={card.plan.blocked ? 'Срок доступа истёк — сначала продлите доступ' : undefined}
               >
                 <Save size={15} />
                 Применить план
               </Button>
             )}
-            <Button type="button" onClick={onBack} variant="outline">
-              Закрыть
-            </Button>
+          </div>
+
+          <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <UserMetric
+              icon={CalendarClock}
+              label="Срок доступа"
+              tone={accessTone}
+              value={accessLabel}
+              hint={accessUntil ? `до ${formatDate(accessUntil)}` : 'срок не задан'}
+            />
+            <UserMetric
+              icon={Activity}
+              label="Трафик"
+              tone={trafficTone}
+              value={trafficLimit > 0 ? `${Math.round(trafficPercent)}%` : 'Без лимита'}
+              hint={
+                trafficLimit > 0
+                  ? `${formatBytes(trafficConsumed)} из ${formatBytes(trafficLimit)}`
+                  : 'ограничений нет'
+              }
+            >
+              {trafficLimit > 0 && (
+                <PercentBar
+                  value={trafficConsumed}
+                  max={trafficLimit}
+                  className="h-1.5"
+                  barClassName={
+                    user.traffic_limit_blocked
+                      ? 'fill-destructive'
+                      : trafficPercent >= 80
+                        ? 'fill-amber-500'
+                        : 'fill-primary'
+                  }
+                  label="Использование трафика"
+                />
+              )}
+            </UserMetric>
+            <UserMetric
+              icon={KeyRound}
+              label="Конфиги"
+              value={`${configCount}${quota != null ? ` / ${quota}` : ''}`}
+              hint={quota != null ? 'квота имён' : 'квота не задана'}
+            />
           </div>
         </CardHeader>
-        <CardContent className="space-y-3 p-4 sm:p-5">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="w-auto gap-1 bg-muted/40 p-1 sm:w-auto">
-              <TabsTrigger value="access">Доступ</TabsTrigger>
-              <TabsTrigger value="configs">Конфиги</TabsTrigger>
-              <TabsTrigger value="stats">Статистика</TabsTrigger>
-              <TabsTrigger value="account">Учётная запись</TabsTrigger>
+        <CardContent className="p-0 sm:p-0">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="mt-3 w-full">
+            <TabsList className="w-full justify-start gap-1 overflow-x-auto bg-muted/50 p-1 sm:w-auto">
+              <TabsTrigger value="access" className="gap-1.5">
+                <CalendarClock size={14} aria-hidden />
+                Доступ
+              </TabsTrigger>
+              <TabsTrigger value="configs" className="gap-1.5">
+                <KeyRound size={14} aria-hidden />
+                Конфиги
+              </TabsTrigger>
+              <TabsTrigger value="stats" className="gap-1.5">
+                <BarChart3 size={14} aria-hidden />
+                Статистика
+              </TabsTrigger>
+              <TabsTrigger value="account" className="gap-1.5">
+                <UserCog size={14} aria-hidden />
+                Учётная запись
+              </TabsTrigger>
             </TabsList>
 
-            <TabsContent value="access" className="mt-3 space-y-4">
+            <TabsContent value="access" className="mt-4 space-y-4">
               <UserAccessControlSection card={card} onRefresh={onRefresh} />
               <UserAccessSection card={card} onSave={onSave} onRefresh={onRefresh} />
             </TabsContent>
-            <TabsContent value="configs" className="mt-3">
+            <TabsContent value="configs" className="mt-4">
               <UserConfigsSection userId={user.id} card={card} />
             </TabsContent>
-            <TabsContent value="stats" className="mt-3">
+            <TabsContent value="stats" className="mt-4">
               <UserStatsSection userId={user.id} />
             </TabsContent>
-            <TabsContent value="account" className="mt-3">
+            <TabsContent value="account" className="mt-4">
               <UserAccountSection user={user} onSave={onSave} onDelete={onDelete} />
             </TabsContent>
           </Tabs>

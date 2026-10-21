@@ -11,7 +11,9 @@ import {
 import AppDialog from '@/components/shared/AppDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { PercentBar } from '@/components/ui/percent-bar'
+import { cn } from '@/lib/utils'
+import UserSection from './UserSection'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -66,17 +68,23 @@ function AccessLifecycleCard({
 
   return (
     <>
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <CalendarPlus size={16} />
-            Продление и приостановка
-          </CardTitle>
-          <CardDescription>
-            Продление отсчитывается от max(сейчас, текущий срок) и сбрасывает счётчик трафика.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <UserSection
+        icon={CalendarPlus}
+        title="Срок доступа"
+        description="Продление отсчитывается от max(сейчас, текущий срок) и сбрасывает счётчик трафика."
+        actions={
+          suspended ? (
+            <Badge variant="destructive" className="text-[10px]">
+              Приостановлен
+            </Badge>
+          ) : (
+            <Badge variant="success" className="text-[10px]">
+              Активен
+            </Badge>
+          )
+        }
+      >
+        <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <Button
               type="button"
@@ -103,7 +111,7 @@ function AccessLifecycleCard({
                 placeholder="дней"
                 inputMode="numeric"
                 aria-label="Свой срок продления в днях"
-                className="h-9 w-24"
+                className="h-9 w-20"
               />
               <Button
                 type="button"
@@ -117,12 +125,9 @@ function AccessLifecycleCard({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+          <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2.5">
             {suspended ? (
               <>
-                <Badge variant="destructive" className="text-[10px]">
-                  Приостановлен
-                </Badge>
                 <Button type="button" size="sm" onClick={() => onResume(resumeNotify)} disabled={busy}>
                   <PlayCircle size={15} />
                   Возобновить доступ
@@ -155,8 +160,8 @@ function AccessLifecycleCard({
               {user.suspend_reason_visible ? '' : ' (скрыта от пользователя)'}
             </p>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </UserSection>
 
       <AppDialog
         open={suspendOpen}
@@ -257,19 +262,31 @@ function TrafficLimitCard({
     return true
   }
 
+  const percent = limitBytes ? Math.min((consumedBytes / limitBytes) * 100, 100) : 0
+  const openTraffic = () => {
+    setTrafficGb(limitBytes != null ? String(Math.round((limitBytes / GIGABYTE) * 100) / 100) : '')
+    setTrafficOpen(true)
+  }
+
   return (
     <>
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-sm">
-            <Gauge size={16} />
-            Лимит трафика
-          </CardTitle>
-          <CardDescription>
-            Общий лимит пользователя на все его конфиги. По умолчанию ограничений нет.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
+      <UserSection
+        icon={Gauge}
+        title="Лимит трафика"
+        description="Общий лимит пользователя на все его конфиги. По умолчанию ограничений нет."
+        actions={
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={openTraffic}
+            disabled={busy || !trafficSyncOn}
+          >
+            {limitBytes == null ? 'Задать лимит' : 'Изменить лимит'}
+          </Button>
+        }
+      >
+        <div className="space-y-3">
           {!trafficSyncOn && (
             <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
               Модуль «Синхронизация трафика» выключен — учёт трафика не идёт, лимит не работает.
@@ -277,41 +294,49 @@ function TrafficLimitCard({
             </p>
           )}
           {limitBytes == null ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-muted-foreground">Без ограничения</span>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  setTrafficGb('')
-                  setTrafficOpen(true)
-                }}
-                disabled={busy || !trafficSyncOn}
-              >
-                Задать лимит
-              </Button>
-            </div>
+            <p className="text-sm text-muted-foreground">
+              Без ограничения — трафик абонента не ограничивается.
+            </p>
           ) : (
-            <div className="space-y-2">
-              <p className="text-sm">
-                {formatBytes(consumedBytes)} из {formatBytes(limitBytes)}
-                {user.traffic_counter_reset_at ? ` (с ${formatDate(user.traffic_counter_reset_at)})` : ''}
-                {user.traffic_limit_blocked ? ' — лимит исчерпан, доступ заблокирован' : ''}
-              </p>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setTrafficGb(String(Math.round((limitBytes / GIGABYTE) * 100) / 100))
-                    setTrafficOpen(true)
-                  }}
-                  disabled={busy || !trafficSyncOn}
+            <>
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-2xl font-semibold leading-none">{formatBytes(consumedBytes)}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    из {formatBytes(limitBytes)}
+                    {user.traffic_counter_reset_at
+                      ? ` · счётчик с ${formatDate(user.traffic_counter_reset_at)}`
+                      : ''}
+                  </p>
+                </div>
+                <span
+                  className={cn(
+                    'text-sm font-semibold',
+                    user.traffic_limit_blocked ? 'text-destructive' : 'text-muted-foreground',
+                  )}
                 >
-                  Изменить лимит
-                </Button>
+                  {Math.round(percent)}%
+                </span>
+              </div>
+              <PercentBar
+                value={consumedBytes}
+                max={limitBytes}
+                className="h-2"
+                barClassName={
+                  user.traffic_limit_blocked
+                    ? 'fill-destructive'
+                    : percent >= 80
+                      ? 'fill-amber-500'
+                      : 'fill-primary'
+                }
+                label="Использование лимита трафика"
+              />
+              {user.traffic_limit_blocked && (
+                <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                  Лимит исчерпан — доступ абонента заблокирован.
+                </p>
+              )}
+              <div className="flex flex-wrap gap-2">
                 <Button
                   type="button"
                   size="sm"
@@ -326,10 +351,10 @@ function TrafficLimitCard({
                   Снять ограничение
                 </Button>
               </div>
-            </div>
+            </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </UserSection>
 
       <AppDialog
         open={trafficOpen}

@@ -11,8 +11,10 @@ import {
   Loader2,
   Network,
   PauseCircle,
+  Play,
   Server,
   Shield,
+  Trash2,
   UserRound,
 } from 'lucide-react'
 import type { User } from '@/types'
@@ -22,6 +24,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { formatDate } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
+import { DEFAULT_USERS_CARD_VIEW_PREFS, type UsersCardViewPrefs } from '@/lib/usersCardViewPrefs'
 
 type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'
 type CardTone = 'active' | 'expiring' | 'expired' | 'suspended' | 'attention' | 'neutral'
@@ -124,6 +127,11 @@ export interface SubscriberCardProps {
   showSelect?: boolean
   onSelectChange?: (checked: boolean) => void
   onOpen: () => void
+  viewPrefs?: UsersCardViewPrefs
+  actionBusy?: boolean
+  onSuspend?: () => void
+  onResume?: () => void
+  onDelete?: () => void
 }
 
 export default function SubscriberCard({
@@ -132,6 +140,11 @@ export default function SubscriberCard({
   showSelect = false,
   onSelectChange,
   onOpen,
+  viewPrefs = DEFAULT_USERS_CARD_VIEW_PREFS,
+  actionBusy = false,
+  onSuspend,
+  onResume,
+  onDelete,
 }: SubscriberCardProps) {
   const status = resolveCardState(user)
   const StatusIcon = status.icon
@@ -141,6 +154,7 @@ export default function SubscriberCard({
     : (user.desired_protocols ?? [])
   const nodeCount = user.plan_node_ids?.length ?? 0
   const nameCount = user.plan_config_count ?? user.plan_config_indexes?.length ?? 0
+  const fields = viewPrefs.fields
 
   const metaRows: MetaRow[] = [
     {
@@ -199,7 +213,7 @@ export default function SubscriberCard({
           } satisfies MetaRow,
         ]
       : []),
-  ]
+  ].filter((row) => fields[row.key as keyof typeof fields])
 
   const copyName = async (e: MouseEvent) => {
     e.stopPropagation()
@@ -303,6 +317,49 @@ export default function SubscriberCard({
         </div>
 
         <div className="mt-auto flex flex-wrap gap-2 pt-1">
+          {user.suspended_at ? (
+            onResume ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                onClick={onResume}
+                disabled={actionBusy}
+                aria-label={`Возобновить доступ ${user.username}`}
+              >
+                <Play size={14} />
+                Возобновить
+              </Button>
+            ) : null
+          ) : onSuspend ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={onSuspend}
+              disabled={actionBusy}
+              aria-label={`Приостановить доступ ${user.username}`}
+            >
+              <PauseCircle size={14} />
+              Приостановить
+            </Button>
+          ) : null}
+          {onDelete ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+              onClick={onDelete}
+              disabled={actionBusy}
+              aria-label={`Удалить ${user.username}`}
+            >
+              <Trash2 size={14} />
+              Удалить
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="outline"

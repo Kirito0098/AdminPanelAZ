@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Download, QrCode, Trash2 } from 'lucide-react'
+import { Download, KeyRound, QrCode, Trash2 } from 'lucide-react'
 import {
   deleteUserConfig,
   downloadUserConfigFile,
@@ -7,11 +7,12 @@ import {
   qrUserConfigFile,
   setUserConfigAccessOp,
 } from '@/api/users'
-import { ProvisioningConfig, ProvisioningConfigNode } from '@/types'
+import { ProvisioningConfigNode, UserProvisioningCard } from '@/types'
 import { useNotifications } from '@/context/NotificationContext'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import EmptyState from '@/components/ui/EmptyState'
+import UserSection from './UserSection'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 
 interface ConfigEntry extends ProvisioningConfigNode {
@@ -21,11 +22,20 @@ interface ConfigEntry extends ProvisioningConfigNode {
 
 interface UserConfigsSectionProps {
   userId: number
-  card: { configs: ProvisioningConfig[] }
+  card: UserProvisioningCard
 }
 
 export default function UserConfigsSection({ userId, card }: UserConfigsSectionProps) {
   const { success, error: notifyError } = useNotifications()
+
+  // Имена плана: индекс 1 → base, k → base-k (как plan_name_for_index на бэкенде).
+  const base = (card.user.client_base_name ?? '').trim()
+  const planNames = new Set(
+    (card.user.plan_config_indexes ?? []).map((index) =>
+      (index === 1 ? base : `${base}-${index}`).toLowerCase(),
+    ),
+  )
+  const inPlan = (name: string) => planNames.has(name.toLowerCase())
 
   const [filesByEntry, setFilesByEntry] = useState<Record<string, string[]>>({})
   const [filesLoading, setFilesLoading] = useState<Set<string>>(new Set())
@@ -159,32 +169,57 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Конфиги</CardTitle>
-          <CardDescription>
-            Конфиги, сгруппированные по имени, затем по узлу. D2-действия ведутся на узле конфига.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <UserSection
+        icon={KeyRound}
+        title="Конфиги"
+        description="Сгруппированы по имени, затем по узлу. Действия выполняются на узле конфига."
+        actions={
+          <Badge variant="secondary">
+            {card.configs.length} имён ·{' '}
+            {card.configs.reduce((total, group) => total + group.nodes.length, 0)} узлов
+          </Badge>
+        }
+      >
+        <div className="space-y-3">
+          {!base && (
+            <p className="rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              У абонента нет плана — показаны все его записи конфигов из базы панели. Это не
+              проверка узла: конфиги, удалённые на узле напрямую, остаются здесь до синхронизации
+              панели с этим узлом.
+            </p>
+          )}
           {card.configs.length === 0 ? (
-            <div className="flex flex-col items-center justify-center text-center py-10 text-muted-foreground">
-              <p className="text-sm font-medium">Нет конфигов в плане</p>
-              <p className="mt-1 text-xs">
-                Создайте конфиги в разделе «Доступ» или дождитесь применения плана.
-              </p>
-            </div>
+            <EmptyState
+              icon={KeyRound}
+              title="Нет конфигов в плане"
+              description="Создайте конфиги в разделе «Доступ» или дождитесь применения плана."
+              className="py-10"
+            />
           ) : (
             <div className="space-y-3">
               {card.configs.map((group) => (
-                <div key={group.name} className="rounded-xl border bg-muted/20 p-0 overflow-hidden">
-                  <CardHeader className="border-b px-4 py-3 bg-muted/50">
-                    <CardTitle className="text-sm font-medium">{group.name}</CardTitle>
-                    <CardDescription className="mt-0 text-[10px] text-muted-foreground">
+                <div key={group.name} className="overflow-hidden rounded-xl border">
+                  <div className="flex items-center justify-between gap-2 border-b bg-muted/50 px-3 py-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate font-mono text-sm font-medium">{group.name}</span>
+                      {base ? (
+                        <Badge
+                          variant={inPlan(group.name) ? 'success' : 'secondary'}
+                          className="text-[10px]"
+                        >
+                          {inPlan(group.name) ? 'в плане' : 'вне плана'}
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="text-[10px]">
+                          без плана
+                        </Badge>
+                      )}
+                    </div>
+                    <span className="shrink-0 text-[11px] text-muted-foreground">
                       {group.nodes.length} узел{group.nodes.length !== 1 ? 'а' : ''}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-3">
+                    </span>
+                  </div>
+                  <div className="p-3">
                     <div className="space-y-2">
                       {group.nodes.map((entry: ProvisioningConfigNode) => {
                         const configEntry: ConfigEntry = {
@@ -202,9 +237,6 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-1.5">
                                 <span className="text-sm font-medium">{entry.node_label}</span>
-                                <Badge variant={created ? 'success' : 'secondary'} className="text-[10px]">
-                                  {created ? 'создан' : 'не создан'}
-                                </Badge>
                                 <Badge variant="outline" className="text-[10px]">
                                   {entry.vpn_type}
                                 </Badge>
@@ -253,13 +285,13 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
                         )
                       })}
                     </div>
-                  </CardContent>
+                  </div>
                 </div>
               ))}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </UserSection>
 
       <ConfirmDialog
         open={deleteTarget != null}

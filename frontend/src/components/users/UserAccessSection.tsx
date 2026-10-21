@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { ListChecks, Plus, Trash2 } from 'lucide-react'
 import { ApiError } from '@/api/client'
 import { getNodes } from '@/api/nodes'
 import {
@@ -12,7 +12,7 @@ import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import UserSection from './UserSection'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -230,14 +230,24 @@ export default function UserAccessSection({ card, onSave, onRefresh }: UserAcces
 
   return (
     <div className="space-y-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>Развёртывание</CardTitle>
-          <CardDescription>
-            Какие узлы, протоколы и имена конфигов должны быть у абонента.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+      <UserSection
+        icon={ListChecks}
+        title="Развёртывание"
+        description="Какие узлы, протоколы и имена конфигов должны быть у абонента."
+        actions={
+          <div className="flex items-center gap-2">
+            {!canSave && !saving && provisioningOn && !expired && (
+              <span className="text-xs text-muted-foreground">
+                Нужны имя, узел, протокол и имя конфига
+              </span>
+            )}
+            <Button type="button" onClick={handleSave} disabled={!canSave}>
+              {saving ? 'Сохранение…' : 'Сохранить'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
           <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">
             <Label htmlFor="accessBaseName">Базовое имя конфигов</Label>
             <Input
@@ -388,18 +398,8 @@ export default function UserAccessSection({ card, onSave, onRefresh }: UserAcces
             )}
           </div>
 
-          <div className="flex items-center justify-end gap-3">
-            {!canSave && !saving && provisioningOn && !expired && (
-              <p className="text-xs text-muted-foreground">
-                Нужно: имя, хотя бы один узел, протокол и имя конфига
-              </p>
-            )}
-            <Button type="button" onClick={handleSave} disabled={!canSave}>
-              {saving ? 'Сохранение…' : 'Сохранить'}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+        </div>
+      </UserSection>
 
       <ConfirmDialog
         open={confirmOpen}
