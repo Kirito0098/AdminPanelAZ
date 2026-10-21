@@ -80,14 +80,12 @@ def _more_menu_row_actions(ctx: BotContext) -> list[list[str]]:
     return rows
 
 
-def build_reply_keyboard(ctx: BotContext) -> dict:
-    if not _linked_user_menu_visible(ctx):
-        rows = [[reply_button(i18n.BTN_MENU_HELP)]]
-        if _accept_requests(ctx.db):
-            rows.append([reply_button(i18n.BTN_REQUEST_ACCESS)])
-        rows.append([reply_button(i18n.BTN_LINK_CODE)])
-        return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
+def build_linked_reply_keyboard() -> dict:
+    """Reply-клавиатура привязанного пользователя — без «Запросить доступ».
 
+    Используется и после одобрения заявки: сообщение «Доступ одобрен» приходит
+    с этой клавиатурой, чтобы устаревшая кнопка «Запросить доступ» пропала.
+    """
     rows = [
         [
             reply_button(i18n.BTN_MENU_CONFIGS),
@@ -99,6 +97,17 @@ def build_reply_keyboard(ctx: BotContext) -> dict:
     if get_feature_service().is_enabled("unlock_codes"):
         rows.append([reply_button(i18n.BTN_REDEEM_UNLOCK)])
     return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
+
+
+def build_reply_keyboard(ctx: BotContext) -> dict:
+    if not _linked_user_menu_visible(ctx):
+        rows = [[reply_button(i18n.BTN_MENU_HELP)]]
+        if _accept_requests(ctx.db):
+            rows.append([reply_button(i18n.BTN_REQUEST_ACCESS)])
+        rows.append([reply_button(i18n.BTN_LINK_CODE)])
+        return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
+
+    return build_linked_reply_keyboard()
 
 
 def build_more_inline_menu(ctx: BotContext) -> dict:

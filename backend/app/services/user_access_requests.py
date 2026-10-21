@@ -82,6 +82,10 @@ class AlreadyPending(RequestError):
     """У requester'а уже есть pending-заявка этого типа."""
 
 
+class AlreadyHasAccess(RequestError):
+    """Telegram уже привязан к аккаунту: заявка new_user не нужна (устаревшая кнопка)."""
+
+
 class CooldownActive(RequestError):
     """После отказа можно подать заново не ранее чем через 24 ч."""
 
@@ -177,6 +181,14 @@ def submit_access_request(
     telegram_name = (telegram_name or "").strip()[:128] or None
 
     if request_type == REQUEST_TYPE_NEW_USER:
+        # Telegram уже привязан к активному абоненту — доступ есть. Так бывает, когда
+        # после одобрения в чате осталась старая клавиатура «Запросить доступ»:
+        # повторная заявка не создаётся, пользователю возвращается меню абонента.
+        bound = _is_bound(db, telegram_id)
+        if bound is not None and bound.is_active:
+            raise AlreadyHasAccess(
+                "У вас уже есть доступ. Нужно ещё устройство — нажмите «Запросить ещё конфиг»."
+            )
         # Новые пользователи из Telegram по умолчанию не принимаются.
         if not _accept_requests(db):
             raise RequestsClosed("Приём заявок временно закрыт")
@@ -861,7 +873,7 @@ def reject_request(
 # ---------------------------------------------------------------------------
 
 
-def send_message_sync_or_async(token: str, chat_id: str, text: str, **_kwargs: Any) -> bool:
+def send_message_sync_or_async(token: str, chat_id: str, text: str, **kwargs: Any) -> bool:
     """Отправить сообщение в личный чат requester'а (только его telegram_id).
 
     ``link_preview_options`` отключён внутри ``send_message`` (E2).
@@ -870,10 +882,21 @@ def send_message_sync_or_async(token: str, chat_id: str, text: str, **_kwargs: A
     if not token:
         return False
     try:
-        return bool(_run_async(send_message(token, chat_id, text)))
+        return bool(_run_async(send_message(token, chat_id, text, **kwargs)))
     except Exception as exc:  # никогда не ломает доставку
         logger.warning("delivery DM to %s failed: %s", chat_id, exc)
         return False
+
+
+def _linked_reply_keyboard(user: User) -> dict[str, Any] | None:
+    """Reply-клавиатура абонента: после одобрения убирает кнопку «Запросить доступ»."""
+    try:
+        from app.services.telegram_bot_handlers.menu import build_linked_reply_keyboard
+
+        return build_linked_reply_keyboard()
+    except Exception as exc:  # клавиатура не должна ломать доставку
+        logger.warning("delivery keyboard build failed for user_id=%s: %s", user.id, exc)
+        return None
 
 
 def _delivery_text(portal_url: str, traffic_limit_bytes: int | None) -> str:
@@ -969,7 +992,12 @@ def maybe_send_delivery_after_task(db: Session, *, user_id: int, created_count: 
         return
     portal = user_link_response(db, get_or_create_user_portal_token(db, user_id=user_id))
     text = _delivery_text(portal["url"], user.traffic_limit_bytes)
-    if not send_message_sync_or_async(bot_token, str(user.telegram_id), text):
+    if not send_message_sync_or_async(
+        bot_token,
+        str(user.telegram_id),
+        text,
+        reply_markup=_linked_reply_keyboard(user),
+    ):
         write_admin_panel_notification(
             db,
             event_type="access_request_delivery_failed",

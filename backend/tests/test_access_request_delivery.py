@@ -141,6 +141,31 @@ def test_delivery_message_sent_once_only_to_requester(
     assert len(sent) == 1
 
 
+def test_delivery_message_carries_bound_reply_keyboard(db, approved_request, user, monkeypatch):
+    """«Доступ одобрен» приходит с меню абонента, чтобы пропала кнопка «Запросить доступ»."""
+    _set_setting(db, "telegram_bot_token", "TOKEN")
+    db.commit()
+    sent = []
+
+    def _fake_send(token, chat_id, text, **kwargs):
+        sent.append((str(chat_id), text, kwargs.get("reply_markup")))
+        return True
+
+    monkeypatch.setattr(
+        "app.services.user_access_requests.send_message_sync_or_async", _fake_send
+    )
+    monkeypatch.setattr(
+        "app.services.user_access_requests.user_link_response",
+        lambda db, row: {"url": "https://portal.example.com/p/u_abc123", "token": "u_abc123"},
+    )
+    maybe_send_delivery_after_task(db, user_id=user.id, created_count=1)
+    assert len(sent) == 1
+    markup = sent[0][2] or {}
+    buttons = [btn.get("text") for row in markup.get("keyboard", []) for btn in row]
+    assert "Запросить ещё конфиг" in buttons
+    assert "Запросить доступ" not in buttons
+
+
 def test_no_requester_message_when_zero_configs(db, approved_request, user, monkeypatch):
     sent = []
     monkeypatch.setattr(

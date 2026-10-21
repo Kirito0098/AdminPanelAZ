@@ -23,6 +23,7 @@ from app.services.telegram_bot_handlers.base import (
 from app.services import telegram_bot_i18n as i18n
 from app.services.user_access_requests import (
     AlreadyDecided,
+    AlreadyHasAccess,
     AlreadyPending,
     NotBound,
     ReceiptMustBePhoto,
@@ -67,6 +68,15 @@ async def _send_open_in_panel(ctx: BotContext, request_id: int, text: str | None
     )
 
 
+def _linked_keyboard(ctx: BotContext) -> dict | None:
+    """Reply-клавиатура абонента (``None``, если Telegram не привязан к пользователю)."""
+    if ctx.user is None:
+        return None
+    from app.services.telegram_bot_handlers.menu import build_linked_reply_keyboard
+
+    return build_linked_reply_keyboard()
+
+
 async def handle_request_access(ctx: BotContext) -> None:
     """«Запросить доступ» — новая заявка new_user (только если приём включён)."""
     try:
@@ -77,6 +87,16 @@ async def handle_request_access(ctx: BotContext) -> None:
             telegram_username=ctx.telegram_username or None,
             telegram_name=ctx.telegram_name or None,
         )
+    except AlreadyHasAccess as exc:
+        # Старая клавиатура «Запросить доступ» после одобрения: заявку не создаём,
+        # а присылаем меню абонента — так кнопка «Запросить доступ» пропадает.
+        await send_message(
+            ctx.bot_token,
+            ctx.chat_id,
+            str(exc),
+            reply_markup=_linked_keyboard(ctx),
+        )
+        return
     except RequestsClosed as exc:
         await send_message(ctx.bot_token, ctx.chat_id, str(exc) or i18n.REQUESTS_CLOSED)
         return

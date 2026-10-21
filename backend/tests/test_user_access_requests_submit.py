@@ -14,9 +14,10 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.models import Base, TelegramRequestBan, User, UserRole
+from app.models import Base, TelegramRequestBan, User, UserAccessRequest, UserRole
 from app.services.app_setting_store import _set_setting
 from app.services.user_access_requests import (
+    AlreadyHasAccess,
     AlreadyPending,
     Banned,
     CooldownActive,
@@ -85,13 +86,20 @@ def test_new_user_requests_off_by_default(db):
 
 
 def test_one_pending_per_telegram_and_type(db, enable_new_user_requests, bound_user_111):
-    submit_access_request(db, request_type="new_user", telegram_id="111")
+    submit_access_request(db, request_type="new_user", telegram_id="222")
     with pytest.raises(AlreadyPending):
-        submit_access_request(db, request_type="new_user", telegram_id="111")
+        submit_access_request(db, request_type="new_user", telegram_id="222")
     # Другой тип для того же Telegram — можно (пользователь привязан).
     submit_access_request(
         db, request_type="add_config", telegram_id="111", user_id=bound_user_111.id
     )
+
+
+def test_new_user_rejected_for_bound_telegram(db, enable_new_user_requests, bound_user):
+    """Привязанный Telegram не может подать new_user повторно — заявка не создаётся."""
+    with pytest.raises(AlreadyHasAccess):
+        submit_access_request(db, request_type="new_user", telegram_id=bound_user.telegram_id)
+    assert db.query(UserAccessRequest).count() == 0
 
 
 def test_reject_cooldown_24h(db, enable_new_user_requests):

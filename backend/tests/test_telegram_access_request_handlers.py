@@ -456,12 +456,36 @@ def test_receipt_rate_limit(env, pending_extend, monkeypatch):
     assert "Слишком много попыток" in str(env.send_message.await_args.args[2])
 
 
-def test_submit_already_pending(env, subscriber, db, pending_new_user):
+def test_submit_already_pending(env, db):
+    _set_setting(db, "telegram_accept_access_requests", "true")
+    db.add(
+        UserAccessRequest(request_type="new_user", telegram_id="300", status="pending")
+    )
+    db.commit()
+    _run(env, _message("Запросить доступ", "300", "300"))
+    env.send_message.assert_awaited()
+    assert "У вас уже есть заявка" in str(env.send_message.await_args.args[2])
+
+
+def test_request_access_from_bound_user_returns_menu_and_no_duplicate(env, subscriber, db):
+    """Старая кнопка «Запросить доступ» после одобрения: заявки нет, вернулось меню абонента."""
     _set_setting(db, "telegram_accept_access_requests", "true")
     db.commit()
     _run(env, _message("Запросить доступ", "200", "200"))
     env.send_message.assert_awaited()
-    assert "У вас уже есть заявка" in str(env.send_message.await_args.args[2])
+    sent = env.send_message.await_args
+    assert "У вас уже есть доступ" in str(sent.args[2])
+    markup = sent.kwargs.get("reply_markup") or {}
+    buttons = [btn.get("text") for row in markup.get("keyboard", []) for btn in row]
+    assert "Запросить доступ" not in buttons
+    assert "Запросить ещё конфиг" in buttons
+    assert (
+        db.query(UserAccessRequest)
+        .filter(UserAccessRequest.telegram_id == subscriber.telegram_id)
+        .count()
+        == 0
+    )
+
 
 def test_request_access_stores_telegram_name_and_username(env, db):
     """Имя и @ник из update попадают в заявку и в ленту уведомлений."""
