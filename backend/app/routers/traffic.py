@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -7,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_admin
 from app.config import get_settings
 from app.database import get_db
-from app.models import User
+from app.models import User, UserRole
 from app.schemas import (
     MessageResponse,
     TrafficClientSessionsResponse,
@@ -18,6 +19,7 @@ from app.schemas import (
     TrafficOverview,
 )
 from app.services.chart_timezone import resolve_chart_timezone
+from app.services.client_owners import find_client_owner, load_client_owners, owner_fields_for_viewer
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.models import Node
 from app.services.config_access import accessible_client_names
@@ -143,6 +145,21 @@ def traffic_overview(
         summary.total_received_antizapret = sum(row.total_received_antizapret for row in rows)
         summary.total_sent_antizapret = sum(row.total_sent_antizapret for row in rows)
 
+    # Attribute every config to its owner so the UI can group by user. Rows for
+    # clients without a panel config (deleted/orphan names) keep owner = None.
+    # Owner identity follows the config ACL: grantees must not learn it.
+    owner_map = load_client_owners(db, scope.node_ids)
+    is_admin = current_user.role == UserRole.admin
+    for row in rows:
+        owner = find_client_owner(owner_map, scope.node_ids, row.common_name)
+        fields = owner_fields_for_viewer(
+            owner,
+            viewer_id=current_user.id,
+            is_admin=is_admin,
+        )
+        row.owner_id = cast("int | None", fields["owner_id"])
+        row.owner_username = cast("str | None", fields["owner_username"])
+
     ha_context = None
     if scope.is_ha and scope.ha_info is not None:
         ha_context = TrafficHaContext(
@@ -185,6 +202,12 @@ def never_connected_client_traffic(
     allowed = _scoped_client_names(db, current_user, node.id)
     service = TrafficMaintenanceService(db, node.id)
     rows, summary = service.get_never_connected_config_rows(allowed)
+    # Same ACL privacy as /overview: a grantee keeps the row but not the owner.
+    is_admin = current_user.role == UserRole.admin
+    for row in rows:
+        if not is_admin and row.get("owner_id") != current_user.id:
+            row["owner_id"] = None
+            row["owner_username"] = None
     return TrafficNeverConnectedResponse(
         rows=[TrafficNeverConnectedRow(**row) for row in rows],
         summary=TrafficNeverConnectedSummary(**summary),

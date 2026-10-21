@@ -752,6 +752,10 @@ class OpenVpnClient(BaseModel):
     active_node_name: str | None = None
     ha_nodes: list[HaNodePresence] = Field(default_factory=list)
     ha: VpnConfigHaInfo | None = None
+    # Owner of the matching VpnConfig; ``None`` when the connection has no config
+    # in the panel (legacy/orphan client) or the owner was removed.
+    owner_id: int | None = None
+    owner_username: str | None = None
 
 
 class WireGuardPeer(BaseModel):
@@ -778,6 +782,8 @@ class WireGuardPeer(BaseModel):
     active_node_name: str | None = None
     ha_nodes: list[HaNodePresence] = Field(default_factory=list)
     ha: VpnConfigHaInfo | None = None
+    owner_id: int | None = None
+    owner_username: str | None = None
 
 
 class MonitoringNodeSummary(BaseModel):
@@ -2387,6 +2393,8 @@ class TrafficClientRow(BaseModel):
     ha: VpnConfigHaInfo | None = None
     ha_aggregated: bool = False
     ha_node_breakdown: list[TrafficHaNodeBreakdown] | None = None
+    owner_id: int | None = None
+    owner_username: str | None = None
 
 
 class TrafficSummary(BaseModel):
@@ -2431,6 +2439,8 @@ class TrafficNeverConnectedRow(BaseModel):
     protocol_type: str
     created_at: str | None = None
     config_id: int | None = None
+    owner_id: int | None = None
+    owner_username: str | None = None
 
 
 class TrafficNeverConnectedSummary(BaseModel):

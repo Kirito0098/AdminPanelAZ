@@ -19,6 +19,13 @@ from app.schemas import (
     WireGuardPeer,
 )
 from app.services.awg2_noc import fetch_awg2_peers_for_adapter
+from app.services.client_owners import (
+    ClientOwner,
+    OwnerMap,
+    find_client_owner,
+    load_client_owners,
+    owner_fields,
+)
 from app.services.feature_toggles import is_awg2_enabled, is_proxy_nodes_enabled
 from app.services.node_sync.groups import build_ha_metadata
 from app.services.ip_geo import is_local_geoip_loaded, lookup_ips_geo, parse_client_endpoint
@@ -387,6 +394,34 @@ def enrich_wireguard_peers(
     return enriched
 
 
+def _with_client_owner(
+    item: OpenVpnClient | WireGuardPeer,
+    owners: OwnerMap,
+    node_ids: list[int],
+) -> OpenVpnClient | WireGuardPeer:
+    name = getattr(item, "common_name", None) or getattr(item, "client_name", None)
+    owner: ClientOwner | None = find_client_owner(owners, node_ids, name)
+    if owner is None:
+        return item
+    return item.model_copy(update=owner_fields(owner))
+
+
+def _attach_client_owners(
+    items: list[OpenVpnClient] | list[WireGuardPeer],
+    owners: OwnerMap,
+    node_ids: list[int] | None = None,
+) -> list:
+    """Copy owner fields onto connections that have a matching config."""
+    attached = []
+    for item in items:
+        scope = node_ids
+        if scope is None:
+            node_id = getattr(item, "node_id", None)
+            scope = [node_id] if node_id is not None else []
+        attached.append(_with_client_owner(item, owners, scope))
+    return attached
+
+
 def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOverview:
     if not is_vpn_node(node):
         try:
@@ -448,28 +483,37 @@ def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOve
             mappings_by_proxy_ip=mappings_by_proxy_ip,
         )
     )
+    owners = load_client_owners(db, [node.id])
     enriched_awg2 = enrich_wireguard_peers(
         amneziawg2_peers,
         geo_map,
+        node_id=node.id,
+        node_name=node.name,
+        proxy_ips=proxy_ips,
+        mappings_by_proxy_ip=mappings_by_proxy_ip,
+    )
+    enriched_openvpn = enrich_openvpn_clients(
+        ovpn_clients,
+        geo_map,
+        node_id=node.id,
+        node_name=node.name,
+        proxy_ips=proxy_ips,
+        mappings_by_proxy_ip=mappings_by_proxy_ip,
+    )
+    enriched_wireguard = enrich_wireguard_peers(
+        wireguard_peers,
+        geo_map,
+        node_id=node.id,
+        node_name=node.name,
         proxy_ips=proxy_ips,
         mappings_by_proxy_ip=mappings_by_proxy_ip,
     )
     return MonitoringOverview(
         scope="node",
         services=services,
-        openvpn_clients=enrich_openvpn_clients(
-            ovpn_clients,
-            geo_map,
-            proxy_ips=proxy_ips,
-            mappings_by_proxy_ip=mappings_by_proxy_ip,
-        ),
-        wireguard_peers=enrich_wireguard_peers(
-            wireguard_peers,
-            geo_map,
-            proxy_ips=proxy_ips,
-            mappings_by_proxy_ip=mappings_by_proxy_ip,
-        ),
-        amneziawg2_peers=enriched_awg2,
+        openvpn_clients=_attach_client_owners(enriched_openvpn, owners, [node.id]),
+        wireguard_peers=_attach_client_owners(enriched_wireguard, owners, [node.id]),
+        amneziawg2_peers=_attach_client_owners(enriched_awg2, owners, [node.id]),
         server_ip=adapter.get_server_ip(),
         timestamp=datetime.utcnow(),
         node_id=node.id,
@@ -721,6 +765,7 @@ def build_federated_monitoring_overview(
 ) -> MonitoringOverview:
     node_payloads = _collect_nodes_monitoring_data(db)
     proxy_ips, mappings_by_proxy_ip = _load_proxy_noc_context(db)
+    owners = load_client_owners(db)
     lookup_ips: list[str | None] = []
     for payload in node_payloads:
         lookup_ips.extend(
@@ -758,33 +803,42 @@ def build_federated_monitoring_overview(
         if payload["server_ip"]:
             server_ips.append(payload["server_ip"])
         all_openvpn.extend(
-            enrich_openvpn_clients(
-                ovpn_clients,
-                geo_map,
-                node_id=node.id,
-                node_name=node.name,
-                proxy_ips=proxy_ips,
-                mappings_by_proxy_ip=mappings_by_proxy_ip,
+            _attach_client_owners(
+                enrich_openvpn_clients(
+                    ovpn_clients,
+                    geo_map,
+                    node_id=node.id,
+                    node_name=node.name,
+                    proxy_ips=proxy_ips,
+                    mappings_by_proxy_ip=mappings_by_proxy_ip,
+                ),
+                owners,
             )
         )
         all_wireguard.extend(
-            enrich_wireguard_peers(
-                wireguard_peers,
-                geo_map,
-                node_id=node.id,
-                node_name=node.name,
-                proxy_ips=proxy_ips,
-                mappings_by_proxy_ip=mappings_by_proxy_ip,
+            _attach_client_owners(
+                enrich_wireguard_peers(
+                    wireguard_peers,
+                    geo_map,
+                    node_id=node.id,
+                    node_name=node.name,
+                    proxy_ips=proxy_ips,
+                    mappings_by_proxy_ip=mappings_by_proxy_ip,
+                ),
+                owners,
             )
         )
         all_amneziawg2.extend(
-            enrich_wireguard_peers(
-                amneziawg2_peers,
-                geo_map,
-                node_id=node.id,
-                node_name=node.name,
-                proxy_ips=proxy_ips,
-                mappings_by_proxy_ip=mappings_by_proxy_ip,
+            _attach_client_owners(
+                enrich_wireguard_peers(
+                    amneziawg2_peers,
+                    geo_map,
+                    node_id=node.id,
+                    node_name=node.name,
+                    proxy_ips=proxy_ips,
+                    mappings_by_proxy_ip=mappings_by_proxy_ip,
+                ),
+                owners,
             )
         )
         nodes_summary.append(summary)

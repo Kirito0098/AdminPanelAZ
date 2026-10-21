@@ -8,7 +8,14 @@ from datetime import datetime, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import TrafficSessionState, UserTrafficSample, UserTrafficStatProtocol, VpnConfig, VpnType
+from app.models import (
+    TrafficSessionState,
+    User,
+    UserTrafficSample,
+    UserTrafficStatProtocol,
+    VpnConfig,
+    VpnType,
+)
 from app.services.traffic.collector import (
     _parse_status_timestamp,
     build_session_key,
@@ -146,7 +153,8 @@ class TrafficMaintenanceService:
                     openvpn_identities.add(identity)
 
         configs = (
-            self.db.query(VpnConfig)
+            self.db.query(VpnConfig, User.username)
+            .outerjoin(User, User.id == VpnConfig.owner_id)
             .filter(
                 VpnConfig.node_id == self.node_id,
                 VpnConfig.ha_primary_config_id.is_(None),
@@ -156,7 +164,7 @@ class TrafficMaintenanceService:
         )
 
         rows_out: list[dict] = []
-        for cfg in configs:
+        for cfg, owner_username in configs:
             name = (cfg.client_name or "").strip()
             identity = normalize_traffic_client_identity(name)
             if not identity:
@@ -180,6 +188,8 @@ class TrafficMaintenanceService:
                 "protocol_type": proto,
                 "created_at": cfg.created_at.isoformat() if cfg.created_at else None,
                 "config_id": cfg.id,
+                "owner_id": cfg.owner_id,
+                "owner_username": owner_username,
             })
 
         summary = {

@@ -43,7 +43,7 @@ type SortDir = 'asc' | 'desc'
 
 type MonitoringConnectionProtocol = 'openvpn' | 'wireguard' | 'amneziawg2'
 
-type MonitoringConnectionRow = {
+export type MonitoringConnectionRow = {
   key: string
   protocol: MonitoringConnectionProtocol
   clientName: string
@@ -52,6 +52,8 @@ type MonitoringConnectionRow = {
   activeNodeName?: string | null
   haNodes?: HaNodePresence[]
   ha?: VpnConfigHaInfo | null
+  ownerId?: number | null
+  ownerName?: string | null
   address: string
   geoLabel: string | null
   city?: string | null
@@ -121,6 +123,8 @@ function pushWireGuardStyleRows(
       activeNodeName: peer.active_node_name ?? peer.node_name,
       haNodes: peer.ha_nodes,
       ha: peer.ha,
+      ownerId: peer.owner_id ?? null,
+      ownerName: peer.owner_username ?? null,
       address: getConnectionDisplayAddress(peer, 'endpoint'),
       geoLabel: getConnectionGeoLabel(peer),
       city: peer.city,
@@ -170,6 +174,8 @@ export function buildMonitoringConnectionRows(
         activeNodeName: client.active_node_name ?? client.node_name,
         haNodes: client.ha_nodes,
         ha: client.ha,
+        ownerId: client.owner_id ?? null,
+        ownerName: client.owner_username ?? null,
         address: getConnectionDisplayAddress(client),
         geoLabel: getConnectionGeoLabel(client),
         city: client.city,

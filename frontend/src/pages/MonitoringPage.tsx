@@ -33,12 +33,14 @@ import MonitoringConnectionsList, {
   buildMonitoringConnectionRows,
 } from '@/components/monitoring/MonitoringConnectionsList'
 import MonitoringGeoSummary from '@/components/monitoring/MonitoringGeoSummary'
+import MonitoringUsersList from '@/components/monitoring/MonitoringUsersList'
 import NodeSummaryCard from '@/components/monitoring/NodeSummaryCard'
 import {
   HealthScoreBadge,
   ResourceMetricInline,
 } from '@/components/monitoring/nodeSummaryMetrics'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
+import ViewModeToggle from '@/components/shared/ViewModeToggle'
 import { DOCS } from '@/lib/docsUrls'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
@@ -91,6 +93,7 @@ import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useConnectionRates } from '@/hooks/useConnectionRates'
 import { isDocumentHidden } from '@/hooks/useIntervalWhenVisible'
 import { formatDateTime } from '@/lib/datetime'
+import { groupConnectionsByOwner } from '@/lib/connectionUserGroups'
 import { cn } from '@/lib/utils'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
 import type {
@@ -109,6 +112,7 @@ const STORAGE_PREFIX = 'noc-monitoring'
 
 type MonitoringScope = 'node' | 'all'
 type ProtocolFilter = 'all' | 'openvpn' | 'wireguard' | 'amneziawg2'
+type ConnectionsViewMode = 'configs' | 'users'
 const PROTOCOL_FILTER_VALUES = ['all', 'openvpn', 'wireguard', 'amneziawg2'] as const
 
 function readStored<T extends string>(key: string, allowed: readonly T[]): T | null {
@@ -224,6 +228,9 @@ export default function MonitoringPage() {
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL)
   const [search, setSearch] = useState('')
+  const [connectionsView, setConnectionsView] = useState<ConnectionsViewMode>(
+    () => readStored('connectionsView', ['configs', 'users'] as const) ?? 'configs',
+  )
   const [onlineOnly, setOnlineOnly] = useState(() => readStored('onlineOnly', ['true', 'false'] as const) !== 'false')
   const [protocolFilter, setProtocolFilter] = useState<ProtocolFilter>(
     () => readStored('protocol', PROTOCOL_FILTER_VALUES) ?? 'all',
@@ -494,6 +501,10 @@ export default function MonitoringPage() {
 
   const searchQuery = search.trim().toLowerCase()
 
+  useEffect(() => {
+    writeStored('connectionsView', connectionsView)
+  }, [connectionsView])
+
   const matchesWgPeerSearch = useCallback(
     (p: (typeof wireguardPeers)[number]) => {
       if (!searchQuery) return true
@@ -504,6 +515,7 @@ export default function MonitoringPage() {
         name.includes(searchQuery) ||
         address.includes(searchQuery) ||
         geo.includes(searchQuery) ||
+        (p.owner_username ?? '').toLowerCase().includes(searchQuery) ||
         (p.endpoint ?? '').toLowerCase().includes(searchQuery) ||
         (p.allowed_ips ?? '').toLowerCase().includes(searchQuery) ||
         p.interface.toLowerCase().includes(searchQuery) ||
@@ -524,6 +536,7 @@ export default function MonitoringPage() {
         c.common_name.toLowerCase().includes(searchQuery) ||
         address.includes(searchQuery) ||
         geo.includes(searchQuery) ||
+        (c.owner_username ?? '').toLowerCase().includes(searchQuery) ||
         c.virtual_address.toLowerCase().includes(searchQuery) ||
         (c.node_name || '').toLowerCase().includes(searchQuery) ||
         (c.ha?.shared_domain || '').toLowerCase().includes(searchQuery)
@@ -619,6 +632,15 @@ export default function MonitoringPage() {
         return true
       })
   }, [baseConnectionRows, rates, filterNode, filterCity, filterIsp, minDuration])
+
+  const connectionUserGroups = useMemo(
+    () => (connectionsView === 'users' ? groupConnectionsByOwner(connectionRows) : []),
+    [connectionsView, connectionRows],
+  )
+  const onlineUserGroupsCount = useMemo(
+    () => connectionUserGroups.filter((group) => group.onlineCount > 0).length,
+    [connectionUserGroups],
+  )
 
   const nodeFilterOptions = useMemo(() => {
     const names = new Set<string>()
@@ -1259,12 +1281,23 @@ export default function MonitoringPage() {
                       <CardDescription>
                         {totalConnections === 0
                           ? 'Нет активных подключений'
-                          : onlineOnly
-                            ? `${visibleCount} онлайн${filteredTotalCount > visibleCount ? ` из ${filteredTotalCount}` : ''}`
-                            : `${visibleCount} из ${openvpnClients.length + wireguardPeers.length + amneziawg2Peers.length} записей`}
+                          : connectionsView === 'users'
+                            ? `${connectionUserGroups.length} пользователей · ${onlineUserGroupsCount} онлайн · ${visibleCount} подключений`
+                            : onlineOnly
+                              ? `${visibleCount} онлайн${filteredTotalCount > visibleCount ? ` из ${filteredTotalCount}` : ''}`
+                              : `${visibleCount} из ${openvpnClients.length + wireguardPeers.length + amneziawg2Peers.length} записей`}
                       </CardDescription>
                     </div>
                     <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:w-auto lg:justify-end">
+                      <ViewModeToggle
+                        value={connectionsView}
+                        onChange={setConnectionsView}
+                        ariaLabel="Группировка VPN-подключений"
+                        options={[
+                          { value: 'configs', label: 'Конфиги', icon: Server },
+                          { value: 'users', label: 'Пользователи', icon: Users },
+                        ]}
+                      />
                       <div className="relative w-full sm:w-56">
                         <Search
                           size={14}
@@ -1273,7 +1306,7 @@ export default function MonitoringPage() {
                         <Input
                           value={search}
                           onChange={(e) => setSearch(e.target.value)}
-                          placeholder="Поиск по имени, IP, городу..."
+                          placeholder="Поиск по имени, пользователю, IP, городу..."
                           className="h-9 pl-9 text-xs"
                         />
                       </div>
@@ -1341,6 +1374,12 @@ export default function MonitoringPage() {
                             : 'Измените поисковый запрос или сбросьте фильтр протокола'
                         }
                         className="py-8"
+                      />
+                    ) : connectionsView === 'users' ? (
+                      <MonitoringUsersList
+                        rows={connectionRows}
+                        showNodeColumn={showNodeColumn}
+                        onDisconnectOpenVpn={handleDisconnectOpenVpn}
                       />
                     ) : (
                       <MonitoringConnectionsList

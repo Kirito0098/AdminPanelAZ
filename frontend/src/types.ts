@@ -411,6 +411,9 @@ export interface OpenVpnClient {
   via_proxy?: boolean
   /** Mapping found → home IP used for display/geo */
   proxy_resolved?: boolean
+  /** Owner of the matching config; null for clients without a panel config */
+  owner_id?: number | null
+  owner_username?: string | null
 }
 
 export interface WireGuardPeer {
@@ -439,6 +442,9 @@ export interface WireGuardPeer {
   via_proxy?: boolean
   /** Mapping found → home IP used for display/geo */
   proxy_resolved?: boolean
+  /** Owner of the matching config; null for peers without a panel config */
+  owner_id?: number | null
+  owner_username?: string | null
 }
 
 export interface MonitoringNodeSummary {
@@ -1556,6 +1562,8 @@ export interface TrafficClientRow {
   ha?: VpnConfigHaInfo | null
   ha_aggregated?: boolean
   ha_node_breakdown?: TrafficHaNodeBreakdown[] | null
+  owner_id?: number | null
+  owner_username?: string | null
 }
 
 export interface TrafficSummary {
@@ -1600,6 +1608,8 @@ export interface TrafficNeverConnectedRow {
   protocol_type: string
   created_at?: string | null
   config_id?: number | null
+  owner_id?: number | null
+  owner_username?: string | null
 }
 
 export interface TrafficNeverConnectedResponse {

@@ -16,3 +16,18 @@ export function totalTraffic(data: MonitoringOverview) {
   const awg2 = (data.amneziawg2_peers ?? []).reduce((s, p) => s + p.transfer_rx + p.transfer_tx, 0)
   return ovpn + wg + awg2
 }
+
+export function protocolLabel(protocol: string) {
+  const value = (protocol || '').toLowerCase()
+  if (value === 'wireguard') return 'WireGuard'
+  if (value === 'openvpn') return 'OpenVPN'
+  if (value === 'amneziawg2') return 'AWG 2.0'
+  return protocol
+}
+
+export function protocolBadgeVariant(protocol: string): 'default' | 'secondary' | 'outline' {
+  const value = (protocol || '').toLowerCase()
+  if (value === 'openvpn') return 'default'
+  if (value === 'wireguard') return 'secondary'
+  return 'outline'
+}
