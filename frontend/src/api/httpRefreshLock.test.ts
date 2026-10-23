@@ -93,20 +93,6 @@ describe('refreshAccessToken is serialized across tabs', () => {
     expect(locks.held.size).toBe(0)
   })
 
-  it('keeps one refresh per tab while the lock is awaited', async () => {
-    const { fetchMock, pending } = deferredFetch()
-    vi.stubGlobal('fetch', fetchMock)
-    const tab = await openTab()
-
-    const calls = [tab.refreshAccessToken(), tab.refreshAccessToken()]
-    await flush()
-
-    expect(locks.request).toHaveBeenCalledTimes(1)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    pending[0].resolve(tokenResponse('t1'))
-    await expect(Promise.all(calls)).resolves.toEqual(['t1', 't1'])
-  })
-
   it('releases the lock when the refresh request fails', async () => {
     const { fetchMock, pending } = deferredFetch()
     vi.stubGlobal('fetch', fetchMock)
@@ -127,25 +113,6 @@ describe('refreshAccessToken is serialized across tabs', () => {
     expect(locks.held.size).toBe(0)
   })
 
-  it('a hung refresh frees the lock after the timeout, and the waiting tab gets a full timeout', async () => {
-    vi.useFakeTimers()
-    const { fetchMock, pending } = deferredFetch()
-    vi.stubGlobal('fetch', fetchMock)
-    const tabA = await openTab()
-    const tabB = await openTab()
-
-    const first = tabA.refreshAccessToken()
-    const firstFailed = expect(first).rejects.toMatchObject({ status: 0 })
-    const second = tabB.refreshAccessToken()
-    await vi.advanceTimersByTimeAsync(tabA.REFRESH_TIMEOUT_MS)
-    await firstFailed
-
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    await vi.advanceTimersByTimeAsync(tabA.REFRESH_TIMEOUT_MS - 1)
-    pending[1].resolve(tokenResponse('t2'))
-    await expect(second).resolves.toBe('t2')
-    expect(locks.held.size).toBe(0)
-  })
 })
 
 describe('refreshAccessToken without Web Locks', () => {

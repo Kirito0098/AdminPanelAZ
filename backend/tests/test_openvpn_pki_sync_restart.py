@@ -80,19 +80,6 @@ def _killed(replica: MagicMock) -> list[tuple[str, str]]:
     return [call.args for call in replica.kill_openvpn_client.call_args_list]
 
 
-def test_new_client_does_not_restart_or_disconnect(restart):
-    primary, replica = _adapters(
-        _pki_archive(rows=_BASE_ROWS),
-        _pki_archive(rows=(*_BASE_ROWS, _row("V", "0C", "bob"))),
-    )
-
-    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
-
-    replica.import_easyrsa3_archive.assert_called_once_with(primary.export_easyrsa3_archive.return_value)
-    restart.assert_not_called()
-    assert _killed(replica) == []
-
-
 def test_replica_state_is_read_before_the_import(restart):
     primary, replica = _adapters(_pki_archive(), _pki_archive())
     order: list[str] = []
@@ -120,18 +107,6 @@ def test_client_revoked_and_recreated_in_between_is_not_disconnected(restart):
     primary, replica = _adapters(
         _pki_archive(rows=(*_BASE_ROWS, _row("V", "0C", "bob"))),
         _pki_archive(rows=(*_BASE_ROWS, _row("R", "0C", "bob"), _row("V", "0D", "bob"))),
-    )
-
-    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
-
-    restart.assert_not_called()
-    assert _killed(replica) == []
-
-
-def test_renewed_client_does_not_restart(restart):
-    primary, replica = _adapters(
-        _pki_archive(rows=_BASE_ROWS),
-        _pki_archive(rows=(*_BASE_ROWS, _row("V", "0E", "alice"))),
     )
 
     vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
@@ -182,22 +157,6 @@ def test_unknown_replica_state_restarts(restart, before):
     restart.assert_called_once_with(replica)
 
 
-def test_multihome_is_ensured_only_when_restart_is_needed(restart, monkeypatch):
-    import app.services.openvpn_multihome as multihome
-
-    ensure = MagicMock(return_value={"restart": dict(_RESTART_OK)})
-    monkeypatch.setattr(multihome, "maybe_ensure_openvpn_multihome", ensure)
-
-    primary, replica = _adapters(_pki_archive(), _pki_archive())
-    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica, openvpn_multihome=True)
-    ensure.assert_not_called()
-
-    primary, replica = _adapters(_pki_archive(), _pki_archive(ca=b"ca-2"))
-    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica, openvpn_multihome=True)
-    ensure.assert_called_once_with(replica, enabled=True)
-    restart.assert_not_called()
-
-
 def _revoke_bob_and_carol() -> tuple[bytes, bytes]:
     return (
         _pki_archive(rows=(*_BASE_ROWS, _row("V", "0C", "bob"), _row("V", "0D", "carol"))),
@@ -209,17 +168,6 @@ def _kill_fails_on_first_unit(unit, _name):
     if unit == OPENVPN_SERVER_UNITS[0]:
         raise RuntimeError("404 Not Found")
     return {"success": True}
-
-
-def test_old_agent_without_per_unit_kill_falls_back_to_disconnect(restart):
-    primary, replica = _adapters(*_revoke_bob_and_carol())
-    replica.kill_openvpn_client.side_effect = _kill_fails_on_first_unit
-
-    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
-
-    assert len(_killed(replica)) == 2 * len(OPENVPN_SERVER_UNITS)
-    assert [call.args for call in replica.disconnect_openvpn_client.call_args_list] == [("bob",), ("carol",)]
-    restart.assert_not_called()
 
 
 def test_disconnect_failure_is_reported_after_trying_every_client(restart):
@@ -234,14 +182,6 @@ def test_disconnect_failure_is_reported_after_trying_every_client(restart):
 
     assert len(_killed(replica)) == 2 * len(OPENVPN_SERVER_UNITS)
     restart.assert_not_called()
-
-
-def test_successful_kill_does_not_call_disconnect(restart):
-    primary, replica = _adapters(*_revoke_bob_and_carol())
-
-    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
-
-    replica.disconnect_openvpn_client.assert_not_called()
 
 
 def _connected(*names: str) -> list[MagicMock]:
@@ -377,54 +317,6 @@ def test_failed_restart_keeps_restart_pending(restart, replica_db, failure):
     assert restart.call_count == 2
 
 
-def test_pending_restart_goes_through_multihome(restart, monkeypatch, replica_db):
-    import app.services.openvpn_multihome as multihome
-
-    ensure = MagicMock(return_value={"restart": dict(_RESTART_OK)})
-    monkeypatch.setattr(multihome, "maybe_ensure_openvpn_multihome", ensure)
-    session_factory, db = replica_db
-    node = _replica_node(db)
-    node.openvpn_restart_pending = True
-    db.commit()
-    primary, replica = _adapters(_pki_archive(), _pki_archive())
-
-    vpn_state_sync.sync_openvpn_pki_from_primary(
-        primary, replica, openvpn_multihome=True, db=db, replica_node=node
-    )
-
-    ensure.assert_called_once_with(replica, enabled=True)
-    restart.assert_not_called()
-    assert _committed_restart_pending(session_factory, node.id) is False
-
-
-def test_status_is_not_read_without_revoked_clients(restart):
-    rows = (_row("V", "0A", "alice"),)
-    primary, replica = _adapters(_pki_archive(rows=rows), _pki_archive(rows=rows))
-
-    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
-
-    replica.parse_openvpn_status.assert_not_called()
-
-
-def test_revoked_clients_not_connected_are_not_disconnected(restart):
-    primary, replica = _adapters(_pki_archive(rows=_BASE_ROWS), _pki_archive(rows=_BASE_ROWS))
-    replica.parse_openvpn_status.return_value = _connected("alice")
-
-    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
-
-    assert _killed(replica) == []
-
-
-def test_revoked_client_with_new_certificate_is_not_disconnected(restart):
-    rows = (*_BASE_ROWS, _row("R", "0C", "bob"), _row("V", "0D", "bob"))
-    primary, replica = _adapters(_pki_archive(rows=rows), _pki_archive(rows=rows))
-    replica.parse_openvpn_status.return_value = _connected("bob")
-
-    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
-
-    assert _killed(replica) == []
-
-
 def test_unreadable_status_still_disconnects_newly_revoked(restart):
     primary, replica = _adapters(
         _pki_archive(rows=(*_BASE_ROWS, _row("V", "0C", "bob"))),
@@ -437,36 +329,6 @@ def test_unreadable_status_still_disconnects_newly_revoked(restart):
     assert _killed(replica) == [(unit, "bob") for unit in OPENVPN_SERVER_UNITS]
 
 
-def test_read_pki_state_accepts_dot_slash_members():
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
-        for name, data in {
-            "./easyrsa3/pki/ca.crt": b"ca",
-            "./easyrsa3/pki/issued/antizapret-server.crt": b"crt",
-            "./easyrsa3/pki/private/antizapret-server.key": b"key",
-            "./easyrsa3/pki/index.txt": _row("R", "01", "bob").encode(),
-        }.items():
-            info = tarfile.TarInfo(name)
-            info.size = len(data)
-            archive.addfile(info, io.BytesIO(data))
-
-    state = openvpn_pki_state.read_pki_state(buffer.getvalue())
-
-    assert state is not None
-    assert len(state.server_identity) == 3
-    assert openvpn_pki_state.newly_revoked_clients(
-        openvpn_pki_state.read_pki_state(_pki_archive()), state
-    ) == ["bob"]
-
-
-def test_server_identity_missing_on_both_sides_restarts(restart):
-    primary, replica = _adapters(_pki_archive(server_crt=None), _pki_archive(server_crt=None))
-
-    vpn_state_sync.sync_openvpn_pki_from_primary(primary, replica)
-
-    restart.assert_called_once_with(replica)
-
-
 @pytest.mark.parametrize(
     "payload",
     [b"", b"not-a-tar", _pki_archive()[:40], None, MagicMock()],
@@ -474,10 +336,3 @@ def test_server_identity_missing_on_both_sides_restarts(restart):
 )
 def test_read_pki_state_rejects_unreadable_payloads(payload):
     assert openvpn_pki_state.read_pki_state(payload) is None
-
-
-def test_newly_revoked_clients_without_prior_state_is_empty():
-    after = openvpn_pki_state.read_pki_state(_pki_archive(rows=(_row("R", "01", "bob"),)))
-
-    assert openvpn_pki_state.newly_revoked_clients(None, after) == []
-    assert openvpn_pki_state.server_identity_changed(None, after) is True

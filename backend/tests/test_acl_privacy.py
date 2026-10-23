@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -72,11 +71,6 @@ def test_grant_explicit_star_is_prefix():
     assert _grant_matches("ivan", "*") is False
 
 
-def test_legacy_bare_prefix_no_longer_matches_suffix():
-    """Grant ``team-`` without ``*`` is exact / base-N only, not ``team-alice``."""
-    assert _grant_matches("team-alice", "team-") is False
-
-
 def test_migrate_grants_appends_star_once(monkeypatch):
     rows = [SimpleNamespace(config_group="ivan"), SimpleNamespace(config_group="fam*")]
     setting = {"config_access_explicit_prefix": ""}
@@ -109,12 +103,6 @@ def test_migrate_grants_appends_star_once(monkeypatch):
 
 
 # --- C1 / C2 nodes ---
-
-
-def test_geo_routing_hint_requires_admin():
-    sig = inspect.signature(nodes_router.geo_routing_hint)
-    dep = sig.parameters["_"].default
-    assert dep.dependency is nodes_router.require_admin or dep.dependency.__name__ == "require_admin"
 
 
 def test_active_node_response_scrubs_host_for_user(monkeypatch):

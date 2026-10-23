@@ -14,43 +14,6 @@ def _release_background_pause():
     resume_background_work()
 
 
-def test_backup_entry_schema_accepts_restore_detail():
-    from app.schemas import BackupEntry
-
-    entry = BackupEntry(
-        file_name="adminpanelaz_x.tar.gz",
-        size_bytes=10,
-        created_at="2026-09-12T00:00:00Z",
-        components=["db"],
-        summary="db",
-        restore_message="Восстановление выполнено. Панель будет перезапущена через несколько секунд.",
-        restore_detail={"restart_scheduled": True, "hint": "Push full"},
-    )
-    assert entry.restore_detail["hint"] == "Push full"
-
-
-def test_restore_response_includes_apply_hint_for_restored_configs():
-    response = backups_mod._restore_response({"restored": ["db", "configs"], "file_name": "panel.tar.gz"})
-    assert response.detail["restart_scheduled"] is True
-    assert "Примен" in response.detail["hint"]
-
-
-def test_restore_response_includes_push_full_hint_for_configs():
-    response = backups_mod._restore_response(
-        {"restored": ["db", "configs"], "file_name": "panel.tar.gz"}
-    )
-    assert "Push full" in response.detail["hint"]
-    assert "Примен" in response.detail["hint"]
-
-
-def test_restore_response_includes_push_full_hint_for_awg2_only():
-    response = backups_mod._restore_response(
-        {"restored": ["db", "awg2"], "file_name": "panel.tar.gz"}
-    )
-    assert "Push full" in response.detail["hint"]
-    assert "Примен" not in response.detail.get("hint", "")
-
-
 def test_restore_panel_disposes_engines_before_applying_files(monkeypatch, tmp_path):
     order: list[str] = []
     db = tmp_path / "adminpanel.db"

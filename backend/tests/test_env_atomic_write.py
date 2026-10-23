@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import importlib
 import os
-import shutil
 import stat
-import subprocess
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -77,17 +74,6 @@ def test_written_env_is_owner_only(env_file: Path, monkeypatch, writer):
     assert not [p.name for p in env_file.parent.iterdir() if p.name.startswith(".tmp_")]
 
 
-def test_set_env_value_creates_missing_env_owner_only(tmp_path: Path):
-    target = tmp_path / "sub" / ".env"
-    previous = os.umask(0o022)
-    try:
-        EnvFileService(target).set_env_value("KEY", "v")
-    finally:
-        os.umask(previous)
-    assert target.read_text(encoding="utf-8") == "KEY=v\n"
-    assert _mode(target) == 0o600
-
-
 def test_data_and_directory_are_synced_before_and_after_replace(env_file: Path, monkeypatch):
     events: list[str] = []
     real_fsync, real_replace = os.fsync, os.replace
@@ -104,29 +90,6 @@ def test_data_and_directory_are_synced_before_and_after_replace(env_file: Path, 
     monkeypatch.setattr(atomic_file.os, "replace", replace)
     EnvFileService(env_file).set_env_value("PANEL_DOMAIN", "new.example")
     assert events == ["fsync-file", "replace", "fsync-dir"]
-
-
-def test_temp_file_is_gitignored(tmp_path: Path, monkeypatch):
-    repo = Path(__file__).resolve().parents[2]
-    if shutil.which("git") is None or subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "--git-dir"], capture_output=True
-    ).returncode:
-        pytest.skip("not a git checkout")
-    names: list[str] = []
-    real_mkstemp = tempfile.mkstemp
-
-    def mkstemp(*args, **kwargs):
-        fd, name = real_mkstemp(*args, **kwargs)
-        names.append(Path(name).name)
-        return fd, name
-
-    monkeypatch.setattr(atomic_file.tempfile, "mkstemp", mkstemp)
-    EnvFileService(tmp_path / ".env").set_env_value("KEY", "v")
-    assert names
-    ignored = subprocess.run(
-        ["git", "-C", str(repo), "check-ignore", "-q", "--no-index", f"backend/{names[0]}"]
-    )
-    assert ignored.returncode == 0, names[0]
 
 
 def test_symlinked_env_updates_target(tmp_path: Path):

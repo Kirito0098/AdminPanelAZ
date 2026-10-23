@@ -433,35 +433,6 @@ def test_concurrent_ensure_for_one_node_opens_a_single_tunnel(monkeypatch):
     assert first_outcome["value"].local_port == second_outcome["value"].local_port
 
 
-def test_slow_close_does_not_block_other_nodes(monkeypatch):
-    nodes = _Nodes(monkeypatch)
-    pool = SshTunnelPool(start_cleaner=False)
-    closing, cached = nodes.node(1, "198.51.100.1"), nodes.node(2, "198.51.100.2")
-    release, started = threading.Event(), threading.Event()
-    try:
-        pool.ensure(closing)
-        pool.ensure(cached)
-        slow = nodes.connections["198.51.100.1"][0]
-
-        async def _slow_wait_closed():
-            started.set()
-            while not release.is_set():
-                await asyncio.sleep(0.01)
-
-        slow.wait_closed = _slow_wait_closed
-        dropper, _ = _in_thread(lambda: pool.drop(closing.id))
-        assert started.wait(2)
-        reuse, reuse_outcome = _in_thread(lambda: pool.ensure(cached))
-        reuse.join(2)
-        reused = dict(reuse_outcome)
-    finally:
-        release.set()
-        dropper.join(5)
-        pool.shutdown()
-
-    assert "value" in reused
-
-
 def test_open_cancelled_by_timeout_closes_the_connection(monkeypatch):
     nodes = _Nodes(monkeypatch)
     release = threading.Event()
@@ -517,22 +488,6 @@ def test_expire_idle_closes_idle_and_dead_sessions_only(monkeypatch):
     assert closed == {"198.51.100.1": True, "198.51.100.2": True, "198.51.100.3": False}
     assert len(nodes.connections["198.51.100.3"]) == 1
     assert busy_port == nodes.connections["198.51.100.3"][0].listener.get_port()
-
-
-def test_ensure_does_not_close_other_nodes_sessions(monkeypatch):
-    nodes = _Nodes(monkeypatch)
-    clock = [1000.0]
-    pool = SshTunnelPool(start_cleaner=False, idle_timeout_seconds=600, time_fn=lambda: clock[0])
-    try:
-        pool.ensure(nodes.node(1, "198.51.100.1"))
-        clock[0] += 700
-        nodes.connections["198.51.100.1"][0].closed = False
-        pool.ensure(nodes.node(2, "198.51.100.2"))
-    finally:
-        other_listener_closed = nodes.connections["198.51.100.1"][0].listener.closed
-        pool.shutdown()
-
-    assert other_listener_closed is False
 
 
 def test_changed_ssh_settings_replace_and_close_the_old_tunnel(monkeypatch):

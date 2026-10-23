@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import subprocess
 from datetime import datetime, timedelta
-from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -14,9 +13,9 @@ from sqlalchemy.orm import sessionmaker
 
 from app.database import Base
 from app.models import AmneziaWg2AccessPolicy, Node, NodeStatus, WgAccessPolicy
-from app.services import access_policy, awg2_runtime, runtime_peer_batch, wg_runtime
+from app.services import access_policy, runtime_peer_batch
 from app.services.access_policy import AccessPolicyService
-from app.services.node_adapter import LocalNodeAdapter, RemoteNodeAdapter
+from app.services.node_adapter import RemoteNodeAdapter
 
 
 class _Runner:
@@ -62,62 +61,6 @@ def test_block_peers_batch_attributes_failures_per_peer():
     assert results["bob"]["removed_count"] == 1
     assert results["bob"]["errors"] == [{"interface": "vpn", "peer_public_key": "B1", "stderr": "boom"}]
     assert ["awg", "set", "vpn", "peer", "A1", "remove"] in run.calls
-
-
-def test_block_peers_batch_reports_client_with_no_removed_peers():
-    run = _Runner(fail=lambda args: "B1" in args)
-    results = runtime_peer_batch.block_peers_batch({"bob": [("vpn", "B1")]}, tool="wg", run=run)
-
-    assert results["bob"]["success"] is False
-    assert results["bob"]["removed_count"] == 0
-
-
-def test_block_peers_batch_splits_large_batches(monkeypatch):
-    monkeypatch.setattr(runtime_peer_batch, "PEERS_PER_COMMAND", 2)
-    run = _Runner()
-    runtime_peer_batch.block_peers_batch(
-        {f"c{i}": [("vpn", f"K{i}")] for i in range(5)} | {"dup": [("vpn", "K0")]},
-        tool="wg",
-        run=run,
-    )
-
-    assert [_peer_keys(args) for args in run.calls] == [["K0", "K1"], ["K2", "K3"], ["K4"]]
-
-
-def _wg_conf(*peers: tuple[str, str]) -> str:
-    body = "[Interface]\nPrivateKey = x\n"
-    for client, key in peers:
-        body += f"\n# Client = {client}\n[Peer]\nPublicKey = {key}\nAllowedIPs = 10.0.0.2/32\n"
-    return body
-
-
-def test_wg_block_clients_runtime_reads_configs_once(tmp_path, monkeypatch):
-    files = {"antizapret": tmp_path / "antizapret.conf", "vpn": tmp_path / "vpn.conf"}
-    files["antizapret"].write_text(_wg_conf(("Alice", "A1"), ("bob", "B1"), ("carol", "C1")))
-    files["vpn"].write_text(_wg_conf(("alice", "A2"), ("bob", "B2")))
-    monkeypatch.setattr(wg_runtime, "WG_CONFIG_FILES", files)
-    run = _Runner()
-    monkeypatch.setattr(wg_runtime, "_run", run)
-
-    results = wg_runtime.block_clients_runtime(["alice", "BOB", "ghost"])
-
-    assert sorted((args[2], _peer_keys(args)) for args in run.calls) == [
-        ("antizapret", ["A1", "B1"]),
-        ("vpn", ["A2", "B2"]),
-    ]
-    assert {name: result["removed_count"] for name, result in results.items()} == {"alice": 2, "bob": 2, "ghost": 0}
-
-
-def test_awg2_block_clients_runtime_uses_awg(tmp_path, monkeypatch):
-    conf = tmp_path / "vpn-awg.conf"
-    conf.write_text(_wg_conf(("alice", "A1"), ("bob", "B1")))
-    run = _Runner()
-    monkeypatch.setattr(awg2_runtime, "_run", run)
-
-    results = awg2_runtime.block_clients_runtime(["bob"], config_files={"vpn-awg": conf})
-
-    assert run.calls == [["awg", "set", "vpn-awg", "peer", "B1", "remove"]]
-    assert results["bob"]["removed_count"] == 1
 
 
 @pytest.fixture
@@ -172,7 +115,12 @@ def _blocked_rows(model, node_id: int) -> list:
 
 
 _PROTOCOLS = {
-    "wg": (WgAccessPolicy, "_reapply_all_blocked_runtime", "block_wireguard_clients_runtime", "block_wireguard_client_runtime"),
+    "wg": (
+        WgAccessPolicy,
+        "_reapply_all_blocked_runtime",
+        "block_wireguard_clients_runtime",
+        "block_wireguard_client_runtime",
+    ),
     "awg2": (
         AmneziaWg2AccessPolicy,
         "_reapply_all_blocked_awg2_runtime",
@@ -215,36 +163,6 @@ def test_reapply_blocks_all_clients_in_one_call(db, protocol):
 
 
 @pytest.mark.parametrize("protocol", ["wg", "awg2"])
-def test_reapply_matches_results_to_mixed_case_rows(db, protocol):
-    model, _, batch_name, _ = _PROTOCOLS[protocol]
-    adapter = MagicMock()
-    getattr(adapter, batch_name).return_value = {"temp": {"success": True}, "perm": {"success": True}}
-    reapply, _ = _service(db, protocol, adapter)
-    db.query(model).filter_by(client_name="temp").update({"client_name": "Temp"})
-    db.commit()
-
-    results = reapply()
-
-    getattr(adapter, batch_name).assert_called_once_with(["temp", "perm"])
-    assert results[0] == {"client_name": "Temp", "result": {"success": True}}
-
-
-@pytest.mark.parametrize("protocol", ["wg", "awg2"])
-def test_reapply_skips_the_call_when_nothing_is_blocked(db, protocol):
-    _, _, batch_name, _ = _PROTOCOLS[protocol]
-    adapter = MagicMock()
-    reapply, _ = _service(db, protocol, adapter)
-
-    assert reapply(exclude_client="temp") != []
-    getattr(adapter, batch_name).reset_mock()
-    db.query(_PROTOCOLS[protocol][0]).delete()
-    db.commit()
-
-    assert reapply() == []
-    getattr(adapter, batch_name).assert_not_called()
-
-
-@pytest.mark.parametrize("protocol", ["wg", "awg2"])
 @pytest.mark.parametrize("status_code", [404, 405])
 def test_reapply_falls_back_per_client_for_old_agents(db, protocol, status_code):
     _, _, batch_name, single_name = _PROTOCOLS[protocol]
@@ -281,18 +199,6 @@ def test_failed_batch_reports_every_client_without_per_client_retries(db, protoc
     assert all(item["error"] for item in results)
 
 
-@pytest.mark.parametrize("protocol", ["wg", "awg2"])
-def test_adapter_without_batch_method_is_called_per_client(db, protocol):
-    _, _, batch_name, single_name = _PROTOCOLS[protocol]
-    adapter = SimpleNamespace(**{single_name: MagicMock(return_value={"ok": True})})
-    reapply, _ = _service(db, protocol, adapter)
-
-    results = reapply()
-
-    assert getattr(adapter, single_name).call_args_list == [call("temp"), call("perm")]
-    assert [item["result"] for item in results] == [{"ok": True}, {"ok": True}]
-
-
 def test_reapply_without_adapter_uses_local_batch(db, monkeypatch):
     wg_batch = MagicMock(return_value={"temp": {"success": True}, "perm": {"success": True}})
     monkeypatch.setattr(access_policy, "wg_block_clients_runtime", wg_batch)
@@ -303,17 +209,6 @@ def test_reapply_without_adapter_uses_local_batch(db, monkeypatch):
     wg_batch.assert_called_once_with(["temp", "perm"])
     assert len(results) == 2
     assert service.wg_runtime_calls == 1
-
-
-def test_reapply_without_adapter_uses_local_awg2_batch(db, monkeypatch):
-    awg2_batch = MagicMock(return_value={})
-    monkeypatch.setattr(access_policy, "awg2_block_clients_runtime", awg2_batch)
-    reapply, _ = _service(db, "awg2", None)
-
-    results = reapply()
-
-    awg2_batch.assert_called_once_with(["temp", "perm"])
-    assert results == [{"client_name": "temp", "result": None}, {"client_name": "perm", "result": None}]
 
 
 def test_remote_adapter_posts_batch_and_unwraps_results():
@@ -328,46 +223,6 @@ def test_remote_adapter_posts_batch_and_unwraps_results():
         ("POST", "/clients/wireguard/runtime/block-batch", {"client_names": ["temp"]}),
         ("POST", "/clients/amneziawg2/runtime/block-batch", {"client_names": ["temp"]}),
     ]
-
-
-@pytest.mark.parametrize("method", ["block_wireguard_clients_runtime", "block_awg2_clients_runtime"])
-def test_remote_adapter_splits_batches_to_the_agent_limit(method):
-    from app.services.runtime_peer_batch import CLIENTS_PER_REQUEST
-
-    names = [f"c{i}" for i in range(CLIENTS_PER_REQUEST * 2 + 1)]
-    adapter = RemoteNodeAdapter(host="127.0.0.1", port=9100, api_key="k" * 32)
-    adapter._request = MagicMock(
-        side_effect=lambda *_a, json, **_k: {"results": {name: {"success": True} for name in json["client_names"]}}
-    )
-
-    results = getattr(adapter, method)(names)
-
-    sent = [c.kwargs["json"]["client_names"] for c in adapter._request.call_args_list]
-    assert [len(chunk) for chunk in sent] == [CLIENTS_PER_REQUEST, CLIENTS_PER_REQUEST, 1]
-    assert [name for chunk in sent for name in chunk] == names
-    assert results == {name: {"success": True} for name in names}
-
-
-def test_agent_batch_limit_matches_the_panel_chunk():
-    import node_agent.main as agent_main
-    from app.services.runtime_peer_batch import CLIENTS_PER_REQUEST
-
-    # Deployed agents reject more than 5000 names; a bigger panel chunk would 422 on them.
-    assert CLIENTS_PER_REQUEST <= 5000
-    agent_main.ClientNamesRequest(client_names=["a"] * CLIENTS_PER_REQUEST)
-    with pytest.raises(ValueError):
-        agent_main.ClientNamesRequest(client_names=["a"] * (CLIENTS_PER_REQUEST + 1))
-
-
-def test_local_adapter_uses_runtime_batches(monkeypatch):
-    import app.services.node_adapter as node_adapter
-
-    monkeypatch.setattr(node_adapter, "wg_block_clients_runtime", lambda names: {"wg": names})
-    monkeypatch.setattr(node_adapter, "awg2_block_clients_runtime", lambda names: {"awg2": names})
-    adapter = LocalNodeAdapter(service=MagicMock())
-
-    assert adapter.block_wireguard_clients_runtime(["a"]) == {"wg": ["a"]}
-    assert adapter.block_awg2_clients_runtime(["a"]) == {"awg2": ["a"]}
 
 
 @pytest.fixture

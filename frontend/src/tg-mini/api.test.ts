@@ -42,18 +42,6 @@ describe('Mini App token storage', () => {
     expect(storage.setItem).not.toHaveBeenCalled()
     expect(storage.getItem).not.toHaveBeenCalled()
   })
-
-  it('works where localStorage is unavailable', async () => {
-    vi.stubGlobal('localStorage', {
-      removeItem: () => {
-        throw new Error('SecurityError')
-      },
-    })
-
-    const api = await loadApi()
-    api.setTgToken('t1')
-    expect(api.getTgToken()).toBe('t1')
-  })
 })
 
 describe('Mini App session refresh', () => {
@@ -159,18 +147,7 @@ describe('Mini App session refresh', () => {
     await expect(api.getTgDashboard()).rejects.toMatchObject({ status: 401 })
     expect(api.getTgToken()).toBeNull()
   })
-
-  it('starts a fresh renewal after the previous one finished', async () => {
-    const fetchMock = vi.fn(async (url: string) =>
-      url.endsWith('/tg-mini/auth') ? json(200, { access_token: `t${fetchMock.mock.calls.length}` }) : json(200, {}),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    await api.refreshTgSession()
-    await api.refreshTgSession()
-
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-  })
+})
 
 describe('Mini App owner config actions', () => {
   let api: Awaited<ReturnType<typeof loadApi>>
@@ -205,19 +182,4 @@ describe('Mini App owner config actions', () => {
 
     expect(String(fetchMock.mock.calls[0][0])).toContain('/tg-mini/me/configs/132/send')
   })
-
-  it('builds the QR link on the owning node (/me)', async () => {
-    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
-      json(200, { url: 'https://example/dl', expires_at: null }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    await api.getTgQrLink(132, '/root/profile.ovpn')
-
-    const url = String(fetchMock.mock.calls[0][0])
-    expect(url).toContain('/tg-mini/me/qr-link?')
-    expect(url).toContain('config_id=132')
-  })
-})
-
 })

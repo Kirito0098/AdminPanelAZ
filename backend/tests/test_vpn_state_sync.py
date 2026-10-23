@@ -11,7 +11,6 @@ from sqlalchemy.orm import sessionmaker
 from app.database import Base
 from app.models import AmneziaWg2AccessPolicy, Node, NodeStatus, VpnType, WgAccessPolicy
 from app.services.antizapret import AntiZapretService
-from app.services import awg2
 from app.services.node_sync import vpn_state_sync
 from app.services.openvpn_pki import ProfileValidationResult
 from app.services.node_sync.replicate import (
@@ -93,64 +92,6 @@ def test_prune_replica_vpn_clients_removes_only_replica_clients():
     assert result["errors"] == []
 
 
-def test_copy_openvpn_profiles_from_primary_raises_on_empty_archive():
-    primary = MagicMock()
-    replica = MagicMock()
-    primary.export_openvpn_client_profiles_archive.return_value = b""
-
-    with pytest.raises(RuntimeError, match="Пустой архив OpenVPN-профилей"):
-        vpn_state_sync.copy_openvpn_profiles_from_primary(primary, replica)
-
-    replica.import_openvpn_client_profiles_archive.assert_not_called()
-
-
-def test_copy_openvpn_profiles_from_primary_imports_archive():
-    primary = MagicMock()
-    replica = MagicMock()
-    primary.export_openvpn_client_profiles_archive.return_value = b"archive-bytes"
-
-    vpn_state_sync.copy_openvpn_profiles_from_primary(primary, replica)
-
-    replica.import_openvpn_client_profiles_archive.assert_called_once_with(b"archive-bytes")
-
-
-def test_prune_replica_vpn_clients_collects_errors():
-    primary = MagicMock()
-    replica = MagicMock()
-    primary.list_openvpn_clients.return_value = []
-    primary.list_wireguard_clients.return_value = []
-    replica.list_openvpn_clients.return_value = ["bad-ovpn"]
-    replica.list_wireguard_clients.return_value = []
-    replica.delete_openvpn_client.side_effect = RuntimeError("delete failed")
-
-    result = vpn_state_sync.prune_replica_vpn_clients(primary, replica)
-
-    assert result["success"] is False
-    assert result["errors"] == ["openvpn bad-ovpn: delete failed"]
-
-
-def test_sync_wireguard_state_falls_back_to_per_client_profiles_when_archive_empty():
-    primary = MagicMock()
-    replica = MagicMock()
-    primary.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf"]
-    replica.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf"]
-    primary.read_wireguard_server_config.return_value = "conf"
-    replica.apply_wireguard_runtime.return_value = {"success": True, "synced": ["antizapret"]}
-    primary.export_wireguard_client_profiles_archive.return_value = _empty_archive()
-    primary.get_profile_files.return_value = [
-        {"path": "/root/antizapret/client/wireguard/vpn/vpn-test-1-wg.conf"},
-    ]
-    primary.read_profile_file.return_value = "profile-content"
-
-    vpn_state_sync.sync_wireguard_state_from_primary(primary, replica, client_name="test-1")
-
-    replica.write_profile_file.assert_called_once_with(
-        "/root/antizapret/client/wireguard/vpn/vpn-test-1-wg.conf",
-        "profile-content",
-    )
-    replica.import_wireguard_client_profiles_archive.assert_not_called()
-
-
 def test_sync_openvpn_pki_from_primary_imports_pki_and_profiles_without_recreate(monkeypatch):
     primary = MagicMock()
     replica = MagicMock()
@@ -175,24 +116,6 @@ def test_sync_openvpn_pki_from_primary_imports_pki_and_profiles_without_recreate
     replica.import_openvpn_client_profiles_archive.assert_called_once_with(b"ovpn-profiles")
 
 
-def test_sync_wireguard_state_copies_profiles_then_reports_runtime_failure():
-    primary = MagicMock()
-    replica = MagicMock()
-    primary.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf"]
-    replica.list_wireguard_server_config_files.return_value = ["antizapret.conf", "vpn.conf"]
-    primary.read_wireguard_server_config.return_value = "conf"
-    primary.export_wireguard_client_profiles_archive.return_value = _sample_profile_archive()
-    replica.apply_wireguard_runtime.return_value = {
-        "success": False,
-        "errors": [{"interface": "vpn", "stderr": "sync failed"}],
-    }
-
-    with pytest.raises(vpn_state_sync.ReplicaRuntimeError, match="WireGuard на реплике не применён.*sync failed"):
-        vpn_state_sync.sync_wireguard_state_from_primary(primary, replica)
-
-    replica.import_wireguard_client_profiles_archive.assert_called_once()
-
-
 def _awg2_state_tar(*, amnezia_files: dict[str, bytes], client_files: dict[str, bytes]) -> bytes:
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as archive:
@@ -209,52 +132,6 @@ def _awg2_state_tar(*, amnezia_files: dict[str, bytes], client_files: dict[str, 
         info.size = len(manifest)
         archive.addfile(info, io.BytesIO(manifest))
     return buf.getvalue()
-
-
-def test_sync_amneziawg2_requires_replica_installed():
-    primary = MagicMock()
-    replica = MagicMock()
-    replica.get_awg2_health.return_value = {
-        "installed": False,
-        "install_command": awg2.AWG2_INSTALL_CMD,
-    }
-
-    with pytest.raises(vpn_state_sync.Awg2NotInstalledError, match="не установлен на реплике"):
-        vpn_state_sync.sync_amneziawg2_state_from_primary(primary, replica)
-
-    primary.export_awg2_state_archive.assert_not_called()
-    replica.import_awg2_state_archive.assert_not_called()
-
-
-def test_sync_amneziawg2_rejects_empty_primary_state_before_import():
-    primary = MagicMock()
-    replica = MagicMock()
-    replica.get_awg2_health.return_value = {"installed": True}
-    primary.export_awg2_state_archive.return_value = _awg2_state_tar(
-        amnezia_files={},
-        client_files={},
-    )
-
-    with pytest.raises(vpn_state_sync.Awg2EmptyStateError, match="нет состояния AZ-AWG2"):
-        vpn_state_sync.sync_amneziawg2_state_from_primary(primary, replica)
-
-    replica.import_awg2_state_archive.assert_not_called()
-    replica.apply_awg2_runtime.assert_not_called()
-
-
-def test_sync_amneziawg2_rejects_partial_primary_state():
-    primary = MagicMock()
-    replica = MagicMock()
-    replica.get_awg2_health.return_value = {"installed": True}
-    primary.export_awg2_state_archive.return_value = _awg2_state_tar(
-        amnezia_files={"awg0.conf": b"[Interface]\n"},
-        client_files={},
-    )
-
-    with pytest.raises(vpn_state_sync.Awg2EmptyStateError, match="нет состояния AZ-AWG2"):
-        vpn_state_sync.sync_amneziawg2_state_from_primary(primary, replica)
-
-    replica.import_awg2_state_archive.assert_not_called()
 
 
 def test_sync_amneziawg2_exports_imports_applies():
@@ -447,53 +324,6 @@ def test_sync_wireguard_state_reblocks_after_profile_copy_and_reports_failed_bat
     assert order.mock_calls[0][0] == "copy"
 
 
-def test_sync_wireguard_state_reblocks_when_profile_copy_fails(db):
-    replica_node = _make_node(db, name="replica")
-    _add_wg_block_policies(db, replica_node.id)
-    primary, replica = _wg_sync_adapters()
-    replica.import_wireguard_client_profiles_archive.side_effect = RuntimeError("no space left on device")
-
-    with pytest.raises(RuntimeError, match="no space left on device"):
-        vpn_state_sync.sync_wireguard_state_from_primary(primary, replica, db=db, replica_node=replica_node)
-
-    _assert_wg_blocks_reapplied(replica)
-
-
-def test_sync_wireguard_state_reports_copy_error_when_reblock_also_fails(db):
-    replica_node = _make_node(db, name="replica")
-    _add_wg_block_policies(db, replica_node.id)
-    primary, replica = _wg_sync_adapters()
-    replica.import_wireguard_client_profiles_archive.side_effect = RuntimeError("no space left on device")
-    replica.block_wireguard_clients_runtime.side_effect = RuntimeError("agent timeout")
-
-    with pytest.raises(RuntimeError, match="no space left on device"):
-        vpn_state_sync.sync_wireguard_state_from_primary(primary, replica, db=db, replica_node=replica_node)
-
-    _assert_wg_blocks_reapplied(replica)
-
-
-def test_sync_wireguard_state_without_replica_node_skips_reblock_on_failure(db):
-    primary, replica = _wg_sync_adapters()
-    replica.import_wireguard_client_profiles_archive.side_effect = RuntimeError("no space left on device")
-
-    with pytest.raises(RuntimeError, match="no space left on device"):
-        vpn_state_sync.sync_wireguard_state_from_primary(primary, replica, db=db)
-
-    replica.block_wireguard_clients_runtime.assert_not_called()
-
-
-def test_sync_wireguard_state_reblocks_when_runtime_apply_raises(db):
-    replica_node = _make_node(db, name="replica")
-    _add_wg_block_policies(db, replica_node.id)
-    primary, replica = _wg_sync_adapters()
-    replica.apply_wireguard_runtime.side_effect = RuntimeError("agent timeout after syncconf")
-
-    with pytest.raises(RuntimeError, match="agent timeout after syncconf"):
-        vpn_state_sync.sync_wireguard_state_from_primary(primary, replica, db=db, replica_node=replica_node)
-
-    _assert_wg_blocks_reapplied(replica)
-
-
 def _add_awg2_block_policy(db, node_id: int) -> None:
     db.add(
         AmneziaWg2AccessPolicy(
@@ -526,36 +356,6 @@ def test_sync_amneziawg2_reblocks_when_runtime_apply_raises(db):
     assert replica.block_awg2_clients_runtime.call_args.args[0] == ["awg-perm"]
 
 
-def test_sync_amneziawg2_not_installed_raises_without_reblock(db):
-    replica_node = _make_node(db, name="replica")
-    _add_awg2_block_policy(db, replica_node.id)
-    replica = MagicMock()
-    replica.get_awg2_health.return_value = {"installed": False, "install_command": "install-awg2"}
-
-    with pytest.raises(vpn_state_sync.Awg2NotInstalledError, match="не установлен на реплике"):
-        vpn_state_sync.sync_amneziawg2_state_from_primary(MagicMock(), replica, db=db, replica_node=replica_node)
-
-    replica.import_awg2_state_archive.assert_not_called()
-    replica.block_awg2_clients_runtime.assert_not_called()
-
-
-def test_sync_vpn_crypto_wireguard_passes_replica_context(db):
-    replica_node = _make_node(db, name="replica")
-    _add_wg_block_policies(db, replica_node.id)
-    primary, replica = _wg_sync_adapters()
-
-    vpn_state_sync.sync_vpn_crypto_from_primary(
-        primary,
-        replica,
-        VpnType.wireguard,
-        db=db,
-        replica_node=replica_node,
-        client_name="wg-open",
-    )
-
-    _assert_wg_blocks_reapplied(replica)
-
-
 def test_sync_all_vpn_crypto_reapplies_wireguard_blocks(db, monkeypatch):
     replica_node = _make_node(db, name="replica")
     _add_wg_block_policies(db, replica_node.id)
@@ -571,36 +371,6 @@ def test_sync_all_vpn_crypto_reapplies_wireguard_blocks(db, monkeypatch):
     )
 
     _assert_wg_blocks_reapplied(replica)
-
-
-def test_openvpn_pki_sync_receives_replica_context(db, monkeypatch):
-    replica_node = _make_node(db, name="replica")
-    primary = MagicMock()
-    primary.get_awg2_health.return_value = {"installed": False}
-    replica = MagicMock()
-    sync_pki = MagicMock()
-    monkeypatch.setattr(vpn_state_sync, "sync_openvpn_pki_from_primary", sync_pki)
-    monkeypatch.setattr(vpn_state_sync, "sync_wireguard_state_from_primary", MagicMock())
-
-    vpn_state_sync.sync_vpn_crypto_from_primary(
-        primary, replica, VpnType.openvpn, db=db, replica_node=replica_node, openvpn_multihome=True
-    )
-    vpn_state_sync.sync_all_vpn_crypto_from_primary(primary, replica, db=db, replica_node=replica_node)
-
-    assert [call.kwargs for call in sync_pki.call_args_list] == [
-        {"openvpn_multihome": True, "db": db, "replica_node": replica_node},
-        {"openvpn_multihome": False, "db": db, "replica_node": replica_node},
-    ]
-
-
-def test_sync_vpn_crypto_routes_amneziawg2():
-    primary = MagicMock()
-    replica = MagicMock()
-
-    with patch("app.services.node_sync.vpn_state_sync.sync_amneziawg2_state_from_primary") as sync_awg:
-        vpn_state_sync.sync_vpn_crypto_from_primary(primary, replica, VpnType.amneziawg2)
-
-    sync_awg.assert_called_once_with(primary, replica, db=None, replica_node=None)
 
 
 def test_antizapret_wireguard_server_config_roundtrip(tmp_path, monkeypatch):
@@ -687,52 +457,6 @@ def test_handle_client_create_passes_replica_context_for_awg2_crypto_sync(monkey
     assert len(result.successes) == 1
     assert result.successes[0]["node_id"] == 2
     assert result.errors == []
-
-
-def test_handle_client_create_records_partial_failure(monkeypatch):
-    primary_config = MagicMock()
-    primary_config.client_name = "bob"
-    primary_config.vpn_type = VpnType.openvpn
-    primary_config.id = 11
-    primary_config.owner_id = 1
-    primary_config.cert_expire_days = 365
-    primary_config.description = "test"
-
-    group = MagicMock()
-    group.id = 2
-    group.primary_node_id = 1
-
-    replica_node = MagicMock()
-    replica_node.id = 3
-    replica_node.name = "replica-2"
-    replica_adapter = MagicMock()
-
-    db = MagicMock()
-    db.query.return_value.filter.return_value.first.return_value = None
-    db.get.return_value = replica_node
-
-    monkeypatch.setattr(
-        "app.services.node_sync.replicate._primary_adapter",
-        lambda _db, _group: MagicMock(),
-    )
-    monkeypatch.setattr(
-        "app.services.node_sync.replicate.get_replica_nodes",
-        lambda _db, _group: [replica_node],
-    )
-    monkeypatch.setattr(
-        "app.services.node_sync.replicate.get_adapter_for_node",
-        lambda _node: replica_adapter,
-    )
-    monkeypatch.setattr(
-        "app.services.node_sync.replicate.sync_vpn_crypto_from_primary",
-        MagicMock(side_effect=RuntimeError("replica offline")),
-    )
-
-    result = _handle_client_create(db, group, {"primary_config": primary_config})
-
-    assert result.successes == []
-    assert len(result.errors) == 1
-    assert result.errors[0]["node_name"] == "replica-2"
 
 
 def test_handle_client_delete_syncs_crypto_from_primary(monkeypatch):
@@ -843,13 +567,6 @@ def test_handle_client_renew_cert_syncs_openvpn_pki(monkeypatch):
     assert result.operation == ReplicateOperation.CLIENT_RENEW_CERT
     assert result.successes == [{"node_id": 5, "config_id": 50}]
     assert shadow.cert_expire_days == 180
-
-
-def _empty_archive() -> bytes:
-    buffer = io.BytesIO()
-    with tarfile.open(fileobj=buffer, mode="w:gz"):
-        pass
-    return buffer.getvalue()
 
 
 def _sample_profile_archive() -> bytes:

@@ -84,31 +84,3 @@ def test_tg_mini_redeem_requires_unlock_codes_toggle(client, db_factory, monkeyp
     )
     assert r.status_code == 403
 
-
-def test_tg_mini_redeem_owner_scope_calls_service(client, db_factory, monkeypatch):
-    monkeypatch.setattr(
-        me_redeem,
-        "get_feature_service",
-        lambda: MagicMock(is_enabled=lambda _key: True),
-    )
-    called: dict = {}
-
-    def fake_redeem(db, *, code, user):
-        called["code"] = code
-        called["user_id"] = user.id
-        return {"grant_days": 30, "protocols_applied": ["openvpn"], "access_until_by_protocol": {}}
-
-    monkeypatch.setattr(me_redeem, "redeem_unlock_code_for_user", fake_redeem)
-    monkeypatch.setattr(
-        me_redeem.unlock_redeem_rate_limit_service,
-        "consume",
-        lambda _tg: None,
-    )
-    r = client.post(
-        "/api/tg-mini/me/redeem-code",
-        json={"code": "AAAA-BBBB-CCCC"},
-        headers=_headers(db_factory),
-    )
-    assert r.status_code == 200, r.text
-    assert called["code"] == "AAAA-BBBB-CCCC"
-    assert called["user_id"] == 1

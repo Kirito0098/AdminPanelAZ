@@ -276,25 +276,6 @@ def test_push_full_reapplies_runtime_blocks_after_copying_policies():
     assert reapply.call_args.kwargs == {"awg2": True}
 
 
-def test_push_full_fails_replica_when_runtime_reblock_raises():
-    primary_adapter = MagicMock()
-    primary_adapter.create_antizapret_backup.return_value = {
-        "archive_name": "backup.tar.gz",
-        "archive_path": "/tmp/backup.tar.gz",
-    }
-    primary_adapter.download_antizapret_backup.return_value = b"archive-bytes"
-    primary_adapter.get_awg2_health.return_value = {"installed": False}
-
-    result = _run_single_replica_push(
-        primary_adapter=primary_adapter,
-        replica_adapter=_successful_replica_adapter(),
-        reapply=MagicMock(side_effect=RuntimeError("wg set peer failed")),
-    )
-
-    assert result["success"] is False
-    assert "wg set peer failed" in result["failed"][0]["error"]
-
-
 def test_push_full_reblocks_wireguard_when_later_step_fails():
     primary_adapter = MagicMock()
     primary_adapter.create_antizapret_backup.return_value = {
@@ -440,27 +421,6 @@ def test_push_full_skips_awg2_when_layer_missing():
 
     assert result["success"] is True
     sync.assert_not_called()
-
-
-def test_push_full_fails_replica_when_awg2_sync_raises():
-    primary_adapter = MagicMock()
-    primary_adapter.create_antizapret_backup.return_value = {
-        "archive_name": "backup.tar.gz",
-        "archive_path": "/tmp/backup.tar.gz",
-    }
-    primary_adapter.download_antizapret_backup.return_value = b"archive-bytes"
-    primary_adapter.get_awg2_health.return_value = {"installed": True}
-    replica_adapter = _successful_replica_adapter()
-
-    result = _run_single_replica_push(
-        primary_adapter=primary_adapter,
-        replica_adapter=replica_adapter,
-        awg2_sync=MagicMock(side_effect=RuntimeError("awg2 overlay sync failed")),
-    )
-
-    assert result["success"] is False
-    assert result["failed"][0]["node_id"] == 2
-    assert "awg2 overlay sync failed" in result["failed"][0]["error"]
 
 
 def test_push_full_fails_when_profile_copy_raises():

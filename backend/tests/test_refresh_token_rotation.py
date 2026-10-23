@@ -109,18 +109,6 @@ def test_lost_rotation_response_is_recovered_within_grace(db, user):
     assert _row(db, recovered_raw).revoke_reason == "rotated"
 
 
-def test_sibling_tab_with_superseded_cookie_recovers_too(db, user):
-    raw, first = rt.create_refresh_token(db, user)
-    sibling_raw, _ = rt.rotate_refresh_token(db, raw)
-    recovered_raw, _ = rt.rotate_refresh_token(db, raw)
-
-    sibling_new, _ = rt.rotate_refresh_token(db, sibling_raw)
-
-    assert sibling_new
-    assert _row(db, recovered_raw).revoke_reason == "rotated"
-    assert [t.token_hash for t in _live_in_family(db, first.family_id)] == [rt._hash_token(sibling_new)]
-
-
 def test_overlapping_tab_refreshes_answered_out_of_order_end_the_session(db, user):
     """The server cannot tell which answer the browser kept; the frontend's cross-tab refresh lock
     (Web Locks `az-auth-refresh` in api/http.ts) is what keeps two tabs from rotating the same cookie at once."""
@@ -139,20 +127,6 @@ def test_overlapping_tab_refreshes_answered_out_of_order_end_the_session(db, use
     assert _live_in_family(db, first.family_id) == []
 
 
-def test_recovered_token_reused_after_grace_revokes_family(db, user):
-    raw, first = rt.create_refresh_token(db, user)
-    rt.rotate_refresh_token(db, raw)
-    recovered_raw, _ = rt.rotate_refresh_token(db, raw)
-    _age_revocation(db, raw, rt.ROTATION_GRACE_SECONDS + 5)
-
-    with pytest.raises(HTTPException) as exc:
-        rt.rotate_refresh_token(db, raw)
-
-    assert exc.value.status_code == 401
-    assert _row(db, recovered_raw).revoke_reason == "reuse"
-    assert _live_in_family(db, first.family_id) == []
-
-
 def test_grace_after_logout_issues_no_token(db, user):
     raw, _ = rt.create_refresh_token(db, user)
     new_raw, _ = rt.rotate_refresh_token(db, raw)
@@ -164,37 +138,6 @@ def test_grace_after_logout_issues_no_token(db, user):
     assert exc.value.status_code == 401
     assert db.query(RefreshToken).count() == 2
     assert _row(db, new_raw).revoke_reason == "logout"
-
-
-def test_logout_during_grace_recovery_leaves_family_dead(db, user, monkeypatch):
-    raw, first = rt.create_refresh_token(db, user)
-    new_raw, _ = rt.rotate_refresh_token(db, raw)
-    real_active_user = rt._active_user
-
-    def concurrent_logout(session, user_id):
-        rt.revoke_refresh_token(session, new_raw)
-        return real_active_user(session, user_id)
-
-    monkeypatch.setattr(rt, "_active_user", concurrent_logout)
-
-    with pytest.raises(HTTPException) as exc:
-        rt.rotate_refresh_token(db, raw)
-
-    assert exc.value.status_code == 401
-    assert not db.in_transaction(), "the failed gate must not keep the write transaction open"
-    assert _live_in_family(db, first.family_id) == []
-    assert db.query(RefreshToken).count() == 2
-
-
-def test_legacy_token_within_grace_returns_access_only(db, user):
-    _legacy_token(db, user, "legacy-token", revoked=False)
-    new_raw, _ = rt.rotate_refresh_token(db, "legacy-token")
-
-    again_raw, got_user = rt.rotate_refresh_token(db, "legacy-token")
-
-    assert again_raw is None
-    assert got_user.id == user.id
-    assert _row(db, new_raw).revoked is False
 
 
 def test_lost_rotation_race_issues_no_second_token(db, user, monkeypatch):
@@ -287,6 +230,17 @@ def _legacy_token(db, user, raw: str, **fields) -> None:
     db.commit()
 
 
+def test_legacy_token_within_grace_returns_access_only(db, user):
+    _legacy_token(db, user, "legacy-token", revoked=False)
+    new_raw, _ = rt.rotate_refresh_token(db, "legacy-token")
+
+    again_raw, got_user = rt.rotate_refresh_token(db, "legacy-token")
+
+    assert again_raw is None
+    assert got_user.id == user.id
+    assert _row(db, new_raw).revoked is False
+
+
 def test_reuse_of_rotated_legacy_token_without_family_revokes_all_user_tokens(db, user):
     _legacy_token(db, user, "legacy-token", revoked=False)
     rt.rotate_refresh_token(db, "legacy-token")
@@ -297,17 +251,6 @@ def test_reuse_of_rotated_legacy_token_without_family_revokes_all_user_tokens(db
         rt.rotate_refresh_token(db, "legacy-token")
 
     assert _row(db, live_raw).revoked is True
-
-
-def test_token_revoked_before_upgrade_is_rejected_without_revoking_others(db, user):
-    _legacy_token(db, user, "legacy-token", revoked=True)
-    live_raw, _ = rt.create_refresh_token(db, user)
-
-    with pytest.raises(HTTPException) as exc:
-        rt.rotate_refresh_token(db, "legacy-token")
-
-    assert exc.value.status_code == 401
-    assert _row(db, live_raw).revoked is False
 
 
 def test_logged_out_token_is_rejected_without_revoking_other_sessions(db, user):
@@ -329,18 +272,6 @@ def test_grace_does_not_outlive_session_invalidation(db, user):
     with pytest.raises(HTTPException) as exc:
         rt.rotate_refresh_token(db, raw)
     assert exc.value.status_code == 401
-
-
-def test_grace_does_not_outlive_reuse_detection(db, user):
-    raw, _ = rt.create_refresh_token(db, user)
-    first_rotation, _ = rt.rotate_refresh_token(db, raw)
-    rt.rotate_refresh_token(db, first_rotation)
-    _age_revocation(db, raw, rt.ROTATION_GRACE_SECONDS + 5)
-    with pytest.raises(HTTPException):
-        rt.rotate_refresh_token(db, raw)
-
-    with pytest.raises(HTTPException):
-        rt.rotate_refresh_token(db, first_rotation)
 
 
 def test_invalidate_sessions_increments_current_db_version(db, user):

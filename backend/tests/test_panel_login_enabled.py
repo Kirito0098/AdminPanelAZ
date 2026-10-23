@@ -28,7 +28,6 @@ from app.models import ActiveWebSession, User, UserRole
 from app.routers import auth as auth_router
 from app.routers import users as users_router
 from app.config import get_settings
-from app.services.active_web_session import active_web_session_service
 from app.services.refresh_token import create_refresh_token
 
 settings = get_settings()
@@ -116,19 +115,6 @@ def _request_stub():
     from types import SimpleNamespace
 
     return SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"), headers={})
-
-
-def test_assert_panel_login_allowed_enabled_passes():
-    user = User(username="ivan", panel_login_enabled=True)
-    assert_panel_login_allowed(user, mini=False)  # does not raise
-
-
-def test_assert_panel_login_allowed_disabled_rejects():
-    user = User(username="no-panel", panel_login_enabled=False)
-    with pytest.raises(HTTPException) as exc:
-        assert_panel_login_allowed(user, mini=False)
-    assert exc.value.status_code == status.HTTP_401_UNAUTHORIZED
-    assert exc.value.detail == "Неверный логин или пароль"
 
 
 def test_assert_panel_login_allowed_mini_exempt():

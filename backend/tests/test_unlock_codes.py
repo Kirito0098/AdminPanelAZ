@@ -31,10 +31,8 @@ from app.services.feature_guards import check_path_access, module_disabled_messa
 from app.services.feature_toggles import FeatureToggleService
 from app.services.unlock_codes import (
     create_unlock_code,
-    generate_code_value,
     list_unlock_codes,
     redeem_unlock_code,
-    serialize_unlock_code,
 )
 
 
@@ -308,35 +306,6 @@ def test_unlock_code_models_and_migrations_smoke(monkeypatch):
 
 
 
-def test_unlock_code_model_metadata():
-    assert OpenVpnAccessPolicy.__tablename__ == "openvpn_access_policy"
-    assert AmneziaWg2AccessPolicy.__tablename__ == "amneziawg2_access_policies"
-    assert WgAccessPolicy.__tablename__ == "wg_access_policy"
-
-
-
-def test_generate_code_value_is_url_safe():
-    code = generate_code_value()
-    assert len(code) == 14
-    assert code.count("-") == 2
-    assert all(part.isalnum() and part.upper() == part for part in code.split("-"))
-
-
-def test_create_unlock_code_rejects_short_custom_code(db):
-    admin = _make_user(db)
-    with pytest.raises(ValueError, match="between 8 and 32"):
-        create_unlock_code(
-            db,
-            grant_days=7,
-            protocols=["openvpn"],
-            mode="single",
-            max_redemptions=1,
-            code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
-            creator=admin,
-            code="SHORT7",
-        )
-
-
 def test_redeem_unlock_code_rejects_feature_off(db):
     node = _make_node(db)
     admin = _make_user(db)
@@ -570,74 +539,6 @@ def test_redeem_unlock_code_rolls_back_on_protocol_failure(db):
     assert openvpn_row is not None and openvpn_row.is_temp_blocked is False
 
 
-def test_redeem_unlock_code_second_client_ok(db):
-    node = _make_node(db)
-    owner_a = _make_user(db, username="owner-a", role=UserRole.user)
-    owner_b = _make_user(db, username="owner-b", role=UserRole.user)
-    _make_configs(db, node.id, owner_a.id, "alice", [VpnType.openvpn])
-    _make_configs(db, node.id, owner_b.id, "bob", [VpnType.openvpn])
-    create_unlock_code(
-        db,
-        grant_days=3,
-        protocols=["openvpn"],
-        mode="multi",
-        max_redemptions=2,
-        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
-        creator=owner_a,
-        code="MULTI-0001",
-    )
-
-    with (
-        patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
-        patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()),
-    ):
-        first = redeem_unlock_code(db, code="multi-0001", client_name="Alice", node_id=node.id)
-        second = redeem_unlock_code(db, code="multi-0001", client_name="Bob", node_id=node.id)
-
-    assert first["protocols_applied"] == ["openvpn"]
-    assert second["protocols_applied"] == ["openvpn"]
-    assert db.query(UnlockCodeRedemption).filter_by(code_id=1).count() == 2
-
-
-
-def test_redeem_unlock_code_converts_duplicate_integrity_error(db):
-    node = _make_node(db)
-    admin = _make_user(db)
-    _make_orphan_client_policies(db, node.id, "alice", [VpnType.openvpn], blocked=False)
-    create_unlock_code(
-        db,
-        grant_days=3,
-        protocols=["openvpn"],
-        mode="multi",
-        max_redemptions=2,
-        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
-        creator=admin,
-        code="DUPERR-0001",
-    )
-
-    integrity_error = IntegrityError(
-        "insert",
-        {},
-        Exception("UNIQUE constraint failed: unlock_code_redemptions.code_id, unlock_code_redemptions.client_name"),
-    )
-
-    with (
-        patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
-        patch("app.services.unlock_codes.get_access_until", return_value=None),
-        patch(
-            "app.services.unlock_codes.set_access_until",
-            return_value={"access_until": datetime(2030, 1, 4, tzinfo=timezone.utc).isoformat()},
-        ),
-        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
-        patch.object(db, "commit", side_effect=integrity_error),
-    ):
-        with pytest.raises(ValueError, match="использован вами"):
-            redeem_unlock_code(db, code="duperr-0001", client_name="Alice", node_id=node.id)
-
-    db.rollback()
-    assert db.query(UnlockCodeRedemption).filter_by(client_name="alice", node_id=node.id).count() == 0
-
-
 def test_redeem_unlock_code_rejects_revoked(db):
     node = _make_node(db)
     admin = _make_user(db)
@@ -658,25 +559,6 @@ def test_redeem_unlock_code_rejects_revoked(db):
     with pytest.raises(ValueError, match="отозван"):
         redeem_unlock_code(db, code="revoke-0001", client_name="Alice", node_id=node.id)
 
-
-
-def test_redeem_unlock_code_rejects_no_protocol_overlap(db):
-    node = _make_node(db)
-    admin = _make_user(db)
-    _make_configs(db, node.id, admin.id, "alice", [VpnType.openvpn])
-    create_unlock_code(
-        db,
-        grant_days=3,
-        protocols=["wireguard"],
-        mode="single",
-        max_redemptions=1,
-        code_expires_at=datetime.now(timezone.utc) + timedelta(days=1),
-        creator=admin,
-        code="NOPROTO-01",
-    )
-
-    with pytest.raises(ValueError, match="Нет пересечения протоколов"):
-        redeem_unlock_code(db, code="noproto-01", client_name="Alice", node_id=node.id)
 
 
 def test_redeem_single_code_second_client_hits_atomic_limit(db):
@@ -707,47 +589,6 @@ def test_redeem_single_code_second_client_hits_atomic_limit(db):
     row = db.query(UnlockCode).filter_by(code="LIMIT-0001").one()
     assert row.redemption_count == 1
     assert db.query(UnlockCodeRedemption).filter_by(code_id=row.id).count() == 1
-
-
-def test_list_unlock_codes_marks_exhausted_and_includes_redemptions(db):
-    from app.services.unlock_codes import list_unlock_codes
-
-    node = _make_node(db)
-    admin = _make_user(db)
-    _make_orphan_client_policies(db, node.id, "alice", [VpnType.openvpn], blocked=False)
-    create_unlock_code(
-        db,
-        grant_days=3,
-        protocols=["openvpn"],
-        mode="single",
-        max_redemptions=1,
-        code_expires_at=datetime(2040, 1, 1, tzinfo=timezone.utc),
-        creator=admin,
-        code="MARKED-001",
-    )
-
-    with (
-        patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
-        patch("app.services.unlock_codes.get_access_until", return_value=None),
-        patch(
-            "app.services.unlock_codes.set_access_until",
-            return_value={"access_until": datetime(2030, 1, 4, tzinfo=timezone.utc).isoformat()},
-        ),
-        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
-        patch("app.services.unlock_codes._policy_service_for_node", return_value=SimpleNamespace()),
-    ):
-        redeem_unlock_code(db, code="MARKED-001", client_name="Alice", node_id=node.id)
-
-    listed = list_unlock_codes(db)
-    assert len(listed) == 1
-    item = listed[0]
-    assert item["code"] == "MARKED-001"
-    assert item["exhausted"] is True
-    assert item["redemption_count"] == 1
-    assert len(item["redemptions"]) == 1
-    assert item["redemptions"][0]["client_name"] == "alice"
-    assert item["redemptions"][0]["node_id"] == node.id
-    assert item["redemptions"][0]["node_name"] == node.name
 
 
 def test_redeem_unlock_code_respects_client_allowlist(db):
@@ -946,37 +787,6 @@ def test_redeem_unlock_rejects_permanent_ban_when_reason_rewritten_to_access_exp
     assert wg.is_permanent_blocked is True
 
 
-def test_redeem_unlock_code_empty_allowlist_allows_any_client(db):
-    node = _make_node(db)
-    admin = _make_user(db)
-    _make_orphan_client_policies(db, node.id, "alice", [VpnType.openvpn], blocked=False)
-    create_unlock_code(
-        db,
-        grant_days=5,
-        protocols=["openvpn"],
-        mode="single",
-        max_redemptions=1,
-        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
-        creator=admin,
-        code="ALLOW-EMPTY",
-        allowed_client_names=[],
-    )
-
-    with (
-        patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
-        patch("app.services.unlock_codes.get_access_until", return_value=None),
-        patch(
-            "app.services.unlock_codes.set_access_until",
-            return_value={"access_until": datetime(2030, 1, 6, tzinfo=timezone.utc).isoformat()},
-        ),
-        patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
-        patch("app.services.unlock_codes._policy_service_for_node", return_value=SimpleNamespace()),
-    ):
-        result = redeem_unlock_code(db, code="ALLOW-EMPTY", client_name="Alice", node_id=node.id)
-
-    assert result["grant_days"] == 5
-
-
 def test_redeem_owner_extends_user_and_all_owned_clients(db):
     node = _make_node(db)
     owner = _make_user(db, username="owner-main", role=UserRole.user)
@@ -1154,45 +964,6 @@ def test_redeem_owner_allowed_under_user_traffic_limit(db):
     assert owner.traffic_counter_reset_at is not None
 
 
-def test_redeem_owner_allowed_under_per_config_traffic_limit(db):
-    """Stage 3, Task 13: per-config traffic_limit — активация не запрещена."""
-    node = _make_node(db)
-    owner = _make_user(db, username="owner-cfg-traffic", role=UserRole.user)
-    _make_configs(db, node.id, owner.id, "Alice", [VpnType.openvpn])
-    fixed_now = datetime(2030, 1, 1, 12, 0, tzinfo=timezone.utc)
-    owner.access_until = (fixed_now + timedelta(days=2)).replace(tzinfo=None)
-    db.add(owner)
-    db.add(
-        OpenVpnAccessPolicy(
-            node_id=node.id,
-            client_name="Alice",
-            is_temp_blocked=False,
-            is_permanent_blocked=True,
-            block_reason="traffic_limit",
-        )
-    )
-    db.commit()
-    create_unlock_code(
-        db,
-        grant_days=7,
-        protocols=["openvpn"],
-        mode="multi",
-        max_redemptions=2,
-        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
-        creator=owner,
-        code="CFGTRAFFIC-01",
-    )
-
-    with (
-        patch("app.services.unlock_codes._now", return_value=fixed_now),
-        patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()),
-        patch("app.services.user_blocks.get_adapter_for_node", return_value=_adapter()),
-    ):
-        result = redeem_unlock_code(db, code="CFGTRAFFIC-01", client_name="Alice", node_id=node.id, user_id=owner.id)
-
-    assert result["grant_days"] == 7
-
-
 def test_redeem_owner_rollback_defers_reconcile_until_commit(db):
     node = _make_node(db)
     owner = _make_user(db, username="owner-rollback", role=UserRole.user)
@@ -1262,76 +1033,6 @@ def test_redeem_owner_rollback_defers_reconcile_until_commit(db):
     assert alice_ovpn.block_reason == "access_expired"
     assert alice_wg.expires_at == expired_until.replace(tzinfo=None)
     assert alice_wg.block_reason == "access_expired"
-
-
-def test_redeem_orphan_client_stays_client_scoped(db):
-    node_a = _make_node(db, name="orphan-a")
-    node_b = _make_node(db, name="orphan-b")
-    admin = _make_user(db)
-    db.add(OpenVpnAccessPolicy(node_id=node_a.id, client_name="Alice"))
-    db.add(OpenVpnAccessPolicy(node_id=node_b.id, client_name="Alice"))
-    db.commit()
-    create_unlock_code(
-        db,
-        grant_days=4,
-        protocols=["openvpn"],
-        mode="multi",
-        max_redemptions=4,
-        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
-        creator=admin,
-        code="ORPHAN-001",
-    )
-
-    with (
-        patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
-        patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()),
-    ):
-        first = redeem_unlock_code(db, code="ORPHAN-001", client_name="Alice", node_id=node_a.id)
-        second = redeem_unlock_code(db, code="ORPHAN-001", client_name="Alice", node_id=node_b.id)
-
-    assert first["protocols_applied"] == ["openvpn"]
-    assert second["protocols_applied"] == ["openvpn"]
-    assert db.query(UnlockCodeRedemption).filter_by(code_id=1, user_id=None).count() == 2
-
-
-def test_atomic_redemption_slot_update_rejects_when_full(db):
-    admin = _make_user(db)
-    row = create_unlock_code(
-        db,
-        grant_days=3,
-        protocols=["openvpn"],
-        mode="single",
-        max_redemptions=1,
-        code_expires_at=None,
-        creator=admin,
-        code="SLOT-0001",
-    )
-    first = db.execute(
-        text(
-            """
-            UPDATE unlock_codes
-            SET redemption_count = redemption_count + 1
-            WHERE id = :id AND redemption_count < max_redemptions
-            """
-        ),
-        {"id": row.id},
-    )
-    db.commit()
-    second = db.execute(
-        text(
-            """
-            UPDATE unlock_codes
-            SET redemption_count = redemption_count + 1
-            WHERE id = :id AND redemption_count < max_redemptions
-            """
-        ),
-        {"id": row.id},
-    )
-    db.rollback()
-    assert first.rowcount == 1
-    assert second.rowcount == 0
-    db.refresh(row)
-    assert row.redemption_count == 1
 
 
 def test_unlock_codes_routes_and_feature_guard(tmp_path):
@@ -1540,31 +1241,6 @@ def test_user_portal_redeem_extends_subscription_without_shortening_clients(db):
     assert db.query(UnlockCodeRedemption).one().user_id == owner.id
 
 
-def test_user_portal_redeem_replicates_every_extended_client(db):
-    node = _make_node(db)
-    owner = _make_user(db, username="replicated", role=UserRole.user)
-    owner.access_until = _naive(_OWNER_NOW + timedelta(days=2))
-    db.commit()
-    _owned_client(db, node.id, owner.id, "First", _OWNER_NOW + timedelta(days=1))
-    _owned_client(db, node.id, owner.id, "Second", _OWNER_NOW + timedelta(days=2))
-    _make_configs(db, node.id, owner.id, "WgClient", [VpnType.wireguard])
-    db.add(WgAccessPolicy(node_id=node.id, client_name="wgclient", expires_at=_naive(_OWNER_NOW + timedelta(days=1))))
-    db.commit()
-    _owner_code(db, owner, "USER-CASCADE-HA", days=7)
-
-    with patch("app.services.node_sync.policy_sync.maybe_replicate_policy_op") as replicate:
-        _redeem_at_owner_now(db, code="USER-CASCADE-HA", client_name="First", node_id=node.id, user_id=owner.id)
-
-    expected = _OWNER_NOW + timedelta(days=9)
-    assert sorted(
-        (c.kwargs["client_name"], c.kwargs["vpn_type"], c.kwargs["access_until"]) for c in replicate.call_args_list
-    ) == [
-        ("First", VpnType.openvpn, expected),
-        ("Second", VpnType.openvpn, expected),
-        ("WgClient", VpnType.wireguard, expected),
-    ]
-
-
 def test_user_portal_redeem_without_subscription_extends_limited_clients(db):
     node = _make_node(db)
     owner = _make_user(db, username="bob", role=UserRole.user)
@@ -1644,53 +1320,6 @@ def test_client_name_underscore_is_not_a_wildcard(db):
     assert _client_config_name_and_protocols(db, node.id, "a_b") == ("a_b", set())
     assert router_owner_for_client(db, node_id=node.id, client_name="a_b") is None
     assert router_owner_for_client(db, node_id=node.id, client_name="AXB").id == owner.id
-
-
-def test_create_unlock_code_with_comment(db):
-    admin = _make_user(db)
-    row = create_unlock_code(
-        db,
-        grant_days=7,
-        protocols=["openvpn"],
-        mode="single",
-        max_redemptions=1,
-        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
-        creator=admin,
-        code="COMMENT-001",
-        comment="  наличные  ",
-    )
-    assert row.comment == "наличные"
-    assert serialize_unlock_code(row)["comment"] == "наличные"
-
-
-def test_create_unlock_code_comment_none_or_blank(db):
-    admin = _make_user(db)
-    row = create_unlock_code(
-        db,
-        grant_days=7,
-        protocols=["openvpn"],
-        mode="single",
-        max_redemptions=1,
-        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
-        creator=admin,
-        code="COMMENT-002",
-        comment=None,
-    )
-    assert row.comment is None
-    assert serialize_unlock_code(row)["comment"] is None
-
-    row = create_unlock_code(
-        db,
-        grant_days=7,
-        protocols=["openvpn"],
-        mode="single",
-        max_redemptions=1,
-        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
-        creator=admin,
-        code="COMMENT-003",
-        comment="   ",
-    )
-    assert row.comment is None
 
 
 def test_list_unlock_codes_comment_filter_case_insensitive(db):

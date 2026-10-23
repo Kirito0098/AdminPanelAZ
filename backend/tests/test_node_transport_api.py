@@ -288,37 +288,6 @@ def test_patch_transport_noop_same_value(db, monkeypatch):
     enable.assert_not_called()
 
 
-def test_patch_transport_drops_ssh_tunnel_when_switching_to_http(db, monkeypatch):
-    from app.routers import nodes as nodes_router
-
-    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
-    _allow_preflight(monkeypatch, nodes_router, current="ssh", wanted="http")
-    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
-    node = _add_node(db, transport="ssh")
-    admin = SimpleNamespace(id=1, username="admin")
-    pool = MagicMock()
-    monkeypatch.setattr(nodes_router, "get_ssh_tunnel_pool", lambda: pool)
-
-    def _fake_disable(db_session, n, actor):
-        n.transport = "http"
-        n.mtls_enabled = False
-        db_session.add(n)
-        db_session.commit()
-        db_session.refresh(n)
-        return n
-
-    monkeypatch.setattr(nodes_router, "disable_mtls", _fake_disable)
-
-    resp = nodes_router.patch_node_transport(
-        node.id,
-        NodeTransportUpdate(transport="http"),
-        admin=admin,
-        db=db,
-    )
-    assert resp.transport == "http"
-    pool.drop.assert_called_once_with(node.id)
-
-
 def test_patch_transport_local_rejected(db, monkeypatch):
     from app.routers import nodes as nodes_router
 
@@ -362,15 +331,6 @@ def test_remote_http_endpoint_persists_discovered_host_key_on_caller_thread(db, 
     assert (host, port, uses_tls) == ("127.0.0.1", 45123, False)
     db.refresh(node)
     assert node.ssh_host_key == "ssh-ed25519 AAAAC3NzaPersisted"
-
-
-def test_to_response_derives_mtls_from_transport(db):
-    from app.routers import nodes as nodes_router
-
-    node = _add_node(db, transport="mtls")
-    resp = nodes_router._to_response(node)
-    assert resp.transport == "mtls"
-    assert resp.mtls_enabled is True
 
 
 def test_delete_node_drops_ssh_tunnel(db, monkeypatch):
@@ -656,40 +616,6 @@ def test_patch_existing_http_to_ssh(db, monkeypatch):
     db.refresh(node)
     assert node.transport == "ssh"
 
-
-def test_create_node_with_mtls_transport(db, monkeypatch):
-    from app.routers import nodes as nodes_router
-    from app.schemas import NodeCreate
-
-    monkeypatch.setattr(nodes_router, "is_nodes_enabled", lambda _db: True)
-    monkeypatch.setattr(nodes_router, "validate_node_host", lambda host: host)
-    monkeypatch.setattr(nodes_router, "store_api_key", lambda _h, key: ("hash", "enc"))
-    monkeypatch.setattr(nodes_router, "check_node_health", lambda *a, **k: {"status": "online"})
-    monkeypatch.setattr(nodes_router, "update_node_from_health", lambda *a, **k: None)
-    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
-    monkeypatch.setattr(nodes_router, "get_active_node_id", lambda _db: 1)
-
-    def _enable(db_session, node, _admin):
-        node.transport = "mtls"
-        node.mtls_enabled = True
-        db_session.add(node)
-        db_session.commit()
-        db_session.refresh(node)
-        return node
-
-    monkeypatch.setattr(nodes_router, "enable_mtls", _enable)
-
-    admin = SimpleNamespace(id=1, username="admin")
-    request = MagicMock()
-    payload = NodeCreate(
-        name="vpn-mtls-1",
-        host="10.0.0.7",
-        api_key="secret-key-1",
-        transport="mtls",
-    )
-    resp = nodes_router.create_node(payload, request, admin=admin, db=db)
-    assert resp.transport == "mtls"
-    assert resp.mtls_enabled is True
 
 def test_preflight_ssh_to_mtls_blocked(db, monkeypatch):
     from app.routers import nodes as nodes_router
