@@ -11,6 +11,7 @@ from app.services.telegram_api import answer_callback_query, leave_chat
 from app.services.telegram_bot_handlers.base import (
     BotContext,
     TelegramBotSettingsSnapshot,
+    is_admin,
     load_telegram_bot_settings_snapshot,
     resolve_user,
 )
@@ -51,6 +52,17 @@ from app.services import telegram_bot_i18n as i18n
 logger = logging.getLogger(__name__)
 
 _PUBLIC_COMMANDS = frozenset({"/start", "/help", "/link"})
+
+# Префиксы callback'ов, которые не должны выполняться у обычного пользователя.
+# Fail-closed сеть: даже если хендлер забудет свою проверку, dispatch не пустит.
+_ADMIN_CALLBACK_PREFIXES = ("st:", "uc:", "nodes:", "nd:", "ndh:", "nda:", "ar:")
+
+
+def _is_admin_callback(data: str) -> bool:
+    """True for admin-only callback prefixes; ``ar:ext`` is a user renew request."""
+    if data == "ar:ext":
+        return False
+    return data.startswith(_ADMIN_CALLBACK_PREFIXES)
 
 
 def _is_shared_chat(chat: dict[str, Any]) -> bool:
@@ -164,6 +176,11 @@ async def _dispatch_command(ctx: BotContext, command: str, args: str) -> None:
 async def _dispatch_callback(
     ctx: BotContext, data: str, *, message_id: int | None, callback_id: str = ""
 ) -> None:
+    if _is_admin_callback(data) and not is_admin(ctx.user):
+        from app.services.telegram_api import send_message
+
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.ADMIN_ONLY)
+        return
     if data.startswith("ar:"):
         from app.services.telegram_bot_handlers.access_requests import (
             handle_admin_request_callback,

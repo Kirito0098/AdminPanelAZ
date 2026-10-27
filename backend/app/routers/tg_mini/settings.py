@@ -91,7 +91,8 @@ def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(ge
     policy = resolve_effective_visible_vpn_profiles(db, current_user)
     return {
         "server_ip": adapter.get_server_ip() if is_admin else "",
-        "bot_configured": bool(token),
+        # Состояние бота — админская информация; бейдж в Mini App и так скрыт у пользователя.
+        "bot_configured": bool(token) if is_admin else False,
         "user_id": current_user.id,
         "username": current_user.username,
         "role": current_user.role.value,
