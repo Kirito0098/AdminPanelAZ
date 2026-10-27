@@ -20,26 +20,6 @@ from app.services.user_access_requests import _accept_requests
 _ADMIN_ACTIONS = frozenset({"settings", "nodes", "cidr", "warper", "awg2", "unlock"})
 
 
-def _admin_menu_visible(ctx: BotContext) -> bool:
-    return is_admin(ctx.user)
-
-
-def _cidr_visible(ctx: BotContext) -> bool:
-    return _admin_menu_visible(ctx) and get_feature_service().is_enabled("routing")
-
-
-def _warper_visible(ctx: BotContext) -> bool:
-    return _admin_menu_visible(ctx) and get_feature_service().is_enabled("warper")
-
-
-def _awg2_visible(ctx: BotContext) -> bool:
-    return _admin_menu_visible(ctx) and get_feature_service().is_enabled("awg2")
-
-
-def _unlock_visible(ctx: BotContext) -> bool:
-    return _admin_menu_visible(ctx) and get_feature_service().is_enabled("unlock_codes")
-
-
 def _linked_user_menu_visible(ctx: BotContext) -> bool:
     return ctx.user is not None
 
@@ -47,6 +27,7 @@ def _linked_user_menu_visible(ctx: BotContext) -> bool:
 def _menu_button_label(action: str) -> str:
     return {
         "status": i18n.BTN_MENU_STATUS,
+        "overview": i18n.BTN_MENU_OVERVIEW,
         "configs": i18n.BTN_MENU_CONFIGS,
         "more": i18n.BTN_MENU_MORE,
         "traffic": i18n.BTN_MENU_TRAFFIC,
@@ -57,57 +38,73 @@ def _menu_button_label(action: str) -> str:
         "warper": i18n.BTN_MENU_WARPER,
         "awg2": i18n.BTN_MENU_AWG2,
         "unlock": i18n.BTN_MENU_UNLOCK_CODES,
+        "redeem_unlock": i18n.BTN_REDEEM_UNLOCK,
+        "request_more_config": i18n.BTN_REQUEST_MORE_CONFIG,
     }[action]
 
 
+def _action_visible(ctx: BotContext, action: str) -> bool:
+    """Модульные действия скрыты, если их фича выключена (как и раньше в меню)."""
+    if action in _ADMIN_ACTIONS and not is_admin(ctx.user):
+        return False
+    if action == "cidr":
+        return get_feature_service().is_enabled("routing")
+    if action == "warper":
+        return get_feature_service().is_enabled("warper")
+    if action == "awg2":
+        return get_feature_service().is_enabled("awg2")
+    if action in {"unlock", "redeem_unlock"}:
+        return get_feature_service().is_enabled("unlock_codes")
+    return True
+
+
 def _more_menu_row_actions(ctx: BotContext) -> list[list[str]]:
-    rows: list[list[str]] = [["traffic", "help"]]
-
-    if _admin_menu_visible(ctx):
-        rows.append(["settings", "nodes"])
-        module_row: list[str] = []
-        if _cidr_visible(ctx):
-            module_row.append("cidr")
-        if _warper_visible(ctx):
-            module_row.append("warper")
-        if _awg2_visible(ctx):
-            module_row.append("awg2")
-        if module_row:
-            rows.append(module_row)
-        if _unlock_visible(ctx):
+    """Второстепенные разделы: у админа — модули, у абонента — свои действия."""
+    rows: list[list[str]] = []
+    if is_admin(ctx.user):
+        modules = [action for action in ("cidr", "warper", "awg2") if _action_visible(ctx, action)]
+        if modules:
+            rows.append(modules)
+        if _action_visible(ctx, "unlock"):
             rows.append(["unlock"])
-
+        rows.append(["help"])
+        return rows
+    if _action_visible(ctx, "redeem_unlock"):
+        rows.append(["redeem_unlock"])
+    rows.append(["request_more_config"])
+    rows.append(["help"])
     return rows
 
 
 def build_linked_reply_keyboard(*, is_admin: bool = False) -> dict:
-    """Reply-клавиатура привязанного пользователя — без «Запросить доступ».
+    """Reply-клавиатура привязанного аккаунта — раскладка зависит от роли.
 
-    Используется и после одобрения заявки: сообщение «Доступ одобрен» приходит
-    с этой клавиатурой, чтобы устаревшая кнопка «Запросить доступ» пропала.
-    Пользовательские действия («Запросить ещё конфиг», «Продлить по ключу») админу
-    не нужны: он создаёт конфиги и коды сам.
+    Частые действия всегда на экране (2 кнопки в ряд), редкие убраны в «Ещё»:
+    у абонента это «Продлить по ключу» и «Запросить ещё конфиг», у админа —
+    CIDR/WARP/AWG2 и коды доступа. Используется и после одобрения заявки, чтобы
+    устаревшая кнопка «Запросить доступ» пропала.
     """
-    rows = [
-        [
-            reply_button(i18n.BTN_MENU_CONFIGS),
-            reply_button(i18n.BTN_MENU_STATUS),
-        ],
-        [reply_button(i18n.BTN_MENU_MORE)],
-    ]
-    if not is_admin:
-        rows.append([reply_button(i18n.BTN_REQUEST_MORE_CONFIG)])
-        if get_feature_service().is_enabled("unlock_codes"):
-            rows.append([reply_button(i18n.BTN_REDEEM_UNLOCK)])
+    if is_admin:
+        rows = [
+            [reply_button(i18n.BTN_MENU_NODES), reply_button(i18n.BTN_MENU_SETTINGS)],
+            [reply_button(i18n.BTN_MENU_OVERVIEW), reply_button(i18n.BTN_MENU_TRAFFIC)],
+            [reply_button(i18n.BTN_MENU_CONFIGS), reply_button(i18n.BTN_MENU_MORE)],
+        ]
+    else:
+        rows = [
+            [reply_button(i18n.BTN_MENU_CONFIGS), reply_button(i18n.BTN_MENU_TRAFFIC)],
+            [reply_button(i18n.BTN_MENU_STATUS), reply_button(i18n.BTN_MENU_MORE)],
+        ]
     return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
 
 
 def build_reply_keyboard(ctx: BotContext) -> dict:
     if not _linked_user_menu_visible(ctx):
-        rows = [[reply_button(i18n.BTN_MENU_HELP)]]
+        rows = []
         if _accept_requests(ctx.db):
             rows.append([reply_button(i18n.BTN_REQUEST_ACCESS)])
         rows.append([reply_button(i18n.BTN_LINK_CODE)])
+        rows.append([reply_button(i18n.BTN_MENU_HELP)])
         return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
 
     return build_linked_reply_keyboard(is_admin=is_admin(ctx.user))

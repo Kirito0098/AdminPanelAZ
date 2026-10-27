@@ -80,6 +80,7 @@ BTN_TG_WEBHOOK_DELETE = "🗑 Удалить webhook"
 # --- Main menu (Reply Keyboard + inline nav) ---
 
 BTN_MENU_STATUS = "📊 Статус"
+BTN_MENU_OVERVIEW = "📊 Сводка"
 BTN_MENU_CONFIGS = "📁 Конфиги"
 BTN_MENU_MORE = "⋯ Ещё"
 BTN_MENU_TRAFFIC = "📈 Трафик"
@@ -91,13 +92,14 @@ BTN_MENU_CIDR = "🗂 CIDR"
 BTN_MENU_WARPER = "🌐 WARP"
 BTN_MENU_AWG2 = "🛡️ AWG2"
 BTN_MENU_UNLOCK_CODES = "🎟 Коды доступа"
-BTN_REDEEM_UNLOCK = "Продлить по ключу"
+BTN_REDEEM_UNLOCK = "🎟 Продлить по ключу"
 
-MENU_KEYBOARD_PLACEHOLDER = "Конфиги, статус или Ещё…"
+MENU_KEYBOARD_PLACEHOLDER = "Раздел или «Ещё»…"
 MENU_MORE_TITLE = "📋 <b>Дополнительно</b>\n\n<i>Остальные разделы — кнопками ниже.</i>"
 
 MENU_ACTIONS: dict[str, str] = {
     BTN_MENU_STATUS: "status",
+    BTN_MENU_OVERVIEW: "status",
     BTN_MENU_CONFIGS: "configs",
     BTN_MENU_MORE: "more",
     BTN_MENU_TRAFFIC: "traffic",
@@ -110,6 +112,7 @@ MENU_ACTIONS: dict[str, str] = {
     BTN_MENU_AWG2: "awg2",
     "Запросить доступ": "request_access",
     "Запросить ещё конфиг": "request_more_config",
+    "Продлить по ключу": "redeem_unlock",
     BTN_REDEEM_UNLOCK: "redeem_unlock",
     "У меня есть код привязки": "link_code",
     # Старые подписи кнопок (до обновления меню)

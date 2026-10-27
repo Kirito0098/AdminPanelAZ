@@ -89,12 +89,13 @@ def sent(monkeypatch):
 
 
 def _context(db, role: UserRole) -> BotContext:
+    suffix = db.query(User).count() + 1
     user = User(
-        username=f"role_{role.value}",
+        username=f"role_{role.value}_{suffix}",
         password_hash="x",
         role=role,
         is_active=True,
-        telegram_id=f"100{role.value}",
+        telegram_id=f"100{role.value}{suffix}",
     )
     db.add(user)
     db.commit()
@@ -250,35 +251,71 @@ def test_renew_request_callback_stays_available_to_users():
     assert bot_module._is_admin_callback("ar:a:3") is True
 
 
-def test_admin_reply_keyboard_has_no_user_only_actions(monkeypatch):
-    monkeypatch.setattr(menu, "get_feature_service", lambda: SimpleNamespace(is_enabled=lambda _n: True))
+def _keyboard_rows(keyboard: dict) -> list[list[str]]:
+    return [[button["text"] for button in row] for row in keyboard["keyboard"]]
 
+
+def _inline_labels(keyboard: dict) -> list[str]:
+    return [button["text"] for row in keyboard["inline_keyboard"] for button in row]
+
+
+def _features(monkeypatch, *, enabled: set[str] | None = None):
+    always = {"unlock_codes", "routing", "warper", "awg2"}
+    on = always if enabled is None else enabled
+    monkeypatch.setattr(
+        menu, "get_feature_service", lambda: SimpleNamespace(is_enabled=lambda name: name in on)
+    )
+
+
+def test_admin_reply_layout_puts_admin_sections_first():
     keyboard = menu.build_linked_reply_keyboard(is_admin=True)
-    texts = [button["text"] for row in keyboard["keyboard"] for button in row]
 
-    assert i18n.BTN_REQUEST_MORE_CONFIG not in texts
-    assert i18n.BTN_REDEEM_UNLOCK not in texts
-    assert i18n.BTN_MENU_CONFIGS in texts
-    assert i18n.BTN_MENU_MORE in texts
+    assert _keyboard_rows(keyboard) == [
+        [i18n.BTN_MENU_NODES, i18n.BTN_MENU_SETTINGS],
+        [i18n.BTN_MENU_OVERVIEW, i18n.BTN_MENU_TRAFFIC],
+        [i18n.BTN_MENU_CONFIGS, i18n.BTN_MENU_MORE],
+    ]
 
 
-def test_user_reply_keyboard_keeps_user_only_actions(monkeypatch):
-    monkeypatch.setattr(menu, "get_feature_service", lambda: SimpleNamespace(is_enabled=lambda _n: True))
-
+def test_user_reply_layout_keeps_frequent_actions_on_screen():
     keyboard = menu.build_linked_reply_keyboard(is_admin=False)
-    texts = [button["text"] for row in keyboard["keyboard"] for button in row]
 
-    assert i18n.BTN_REQUEST_MORE_CONFIG in texts
-    assert i18n.BTN_REDEEM_UNLOCK in texts
+    assert _keyboard_rows(keyboard) == [
+        [i18n.BTN_MENU_CONFIGS, i18n.BTN_MENU_TRAFFIC],
+        [i18n.BTN_MENU_STATUS, i18n.BTN_MENU_MORE],
+    ]
 
 
-def test_linked_keyboard_is_role_aware(db, monkeypatch):
-    monkeypatch.setattr(menu, "get_feature_service", lambda: SimpleNamespace(is_enabled=lambda _n: True))
+def test_user_more_menu_holds_rare_actions(db, monkeypatch):
+    _features(monkeypatch)
 
-    admin_keyboard = menu.build_reply_keyboard(_context(db, UserRole.admin))
-    texts = [button["text"] for row in admin_keyboard["keyboard"] for button in row]
+    labels = _inline_labels(menu.build_more_inline_menu(_context(db, UserRole.user)))
 
-    assert i18n.BTN_REQUEST_MORE_CONFIG not in texts
+    assert i18n.BTN_REDEEM_UNLOCK in labels
+    assert i18n.BTN_REQUEST_MORE_CONFIG in labels
+    assert i18n.BTN_MENU_HELP in labels
+
+
+def test_admin_more_menu_holds_modules_not_user_actions(db, monkeypatch):
+    _features(monkeypatch)
+
+    labels = _inline_labels(menu.build_more_inline_menu(_context(db, UserRole.admin)))
+
+    assert i18n.BTN_MENU_CIDR in labels
+    assert i18n.BTN_MENU_WARPER in labels
+    assert i18n.BTN_MENU_AWG2 in labels
+    assert i18n.BTN_MENU_UNLOCK_CODES in labels
+    assert i18n.BTN_REQUEST_MORE_CONFIG not in labels
+
+
+def test_more_menu_hides_disabled_modules(db, monkeypatch):
+    _features(monkeypatch, enabled={"unlock_codes"})
+
+    labels = _inline_labels(menu.build_more_inline_menu(_context(db, UserRole.admin)))
+
+    assert i18n.BTN_MENU_CIDR not in labels
+    assert i18n.BTN_MENU_WARPER not in labels
+    assert i18n.BTN_MENU_UNLOCK_CODES in labels
 
 
 def test_mini_settings_hides_bot_state_from_a_regular_user(db, monkeypatch):
