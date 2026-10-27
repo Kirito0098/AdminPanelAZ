@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 
 from sqlalchemy import desc, func
@@ -17,6 +18,112 @@ from sqlalchemy.orm import Session
 from app.models import AdminPanelNotification, BackgroundTask, User, UserAccessRequest
 
 logger = logging.getLogger(__name__)
+
+# Человеческий заголовок в колокольчике: event_type видит только разработчик.
+BELL_TITLES: dict[str, str] = {
+    "login_success": "Вход в панель",
+    "login_failed": "Неудачный вход",
+    "tg_unlinked": "Telegram отвязан",
+    "tg_login_unlinked": "Вход через Telegram отвязан",
+    "tg_mini_login_unlinked": "Mini App: Telegram отвязан",
+    "node_offline": "Узел недоступен",
+    "node_online": "Узел снова в сети",
+    "node_sync_drift": "HA: расхождение узлов",
+    "cidr_deploy_failed": "CIDR: ошибка развёртывания",
+    "cidr_ingest_partial": "CIDR: частичная загрузка",
+    "cidr_rollback_failed": "CIDR: ошибка отката",
+    "high_cpu": "Высокая нагрузка CPU",
+    "high_ram": "Высокое потребление RAM",
+    "traffic_limit": "Лимит трафика",
+    "settings_change": "Изменены настройки",
+    "alert_rule": "Сработало правило алерта",
+    "openvpn_buffer_guard_triggered": "OpenVPN: перегрузка буфера",
+    "noc_report": "NOC-отчёт",
+    "config_create": "Создан конфиг",
+    "config_delete": "Удалён конфиг",
+    "user_create": "Создан пользователь",
+    "user_delete": "Удалён пользователь",
+    "client_ban": "Клиент заблокирован",
+    "user_provision_summary": "Итог выдачи конфигов",
+    "access_request_new_user": "Заявка: новый пользователь",
+    "access_request_add_config": "Заявка: новый конфиг",
+    "access_request_extend_access": "Заявка: продление доступа",
+    "access_request_delivery_failed": "Заявка: не удалось доставить",
+}
+
+# Подписи для технических ключей из details, чтобы не показывать сырой JSON.
+DETAIL_LABELS: dict[str, str] = {
+    "group_id": "Группа",
+    "name": "Группа",
+    "shared_domain": "Домен",
+    "summary": "Расхождения",
+    "hint": "Что сделать",
+    "username": "Пользователь",
+    "role": "Роль",
+    "preset": "Пресет",
+    "template": "Шаблон",
+    "target": "Объект",
+    "created": "Создано",
+    "deleted": "Удалено",
+    "node": "Узел",
+    "node_name": "Узел",
+    "profile": "Профиль",
+    "client": "Клиент",
+    "client_name": "Клиент",
+    "error": "Ошибка",
+    "reason": "Причина",
+    "days": "Дней",
+    "count": "Количество",
+    "value": "Значение",
+    "key": "Параметр",
+}
+
+_KEY_VALUE_RE = re.compile(r"(\w+)=([^,\s]+)")
+
+
+def bell_title(event_type: str) -> str:
+    """Human title for the bell; unknown events become a readable phrase."""
+    known = BELL_TITLES.get(event_type)
+    if known:
+        return known
+    return event_type.replace("_", " ").strip().capitalize() or event_type
+
+
+def _detail_label(key: str) -> str:
+    return DETAIL_LABELS.get(key) or key.replace("_", " ").capitalize()
+
+
+def _detail_value(value: Any) -> str:
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def humanize_bell_message(details: str | None, *, max_len: int = 2000) -> str:
+    """``details`` (JSON or ``key=value``) → короткие читаемые «Подпись: значение»."""
+    text = (details or "").strip()
+    if not text:
+        return ""
+    parsed: Any = None
+    try:
+        parsed = json.loads(text)
+    except ValueError:
+        parsed = None
+    if isinstance(parsed, dict):
+        parts = [
+            f"{_detail_label(str(key))}: {_detail_value(value)}"
+            for key, value in parsed.items()
+            if value not in (None, "", [], {})
+        ]
+        text = " · ".join(parts)
+    elif isinstance(parsed, list):
+        text = ", ".join(_detail_value(item) for item in parsed[:5])
+    else:
+        text = _KEY_VALUE_RE.sub(
+            lambda match: f"{_detail_label(match.group(1))}: {match.group(2)}", text
+        )
+    return text[:max_len]
+
 
 EVENT_CATEGORY: dict[str, str] = {
     "login_success": "security",

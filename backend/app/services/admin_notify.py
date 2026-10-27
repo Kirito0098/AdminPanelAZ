@@ -14,7 +14,11 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import User, UserRole
-from app.services.admin_panel_notifications import write_admin_panel_notification
+from app.services.admin_panel_notifications import (
+    bell_title,
+    humanize_bell_message,
+    write_admin_panel_notification,
+)
 from app.services.app_setting_store import _get_setting
 from app.services.admin_notify_settings_text import (
     parse_mini_details_kv,
@@ -557,12 +561,22 @@ class AdminNotifyService:
     ) -> None:
         # Bell first — must run even when Telegram is off; never blocks Telegram delivery.
         try:
-            title = target_name or actor_username or event_type
+            context = " · ".join(
+                part
+                for part in (
+                    f"Кто: {actor_username}" if actor_username else "",
+                    f"Объект: {target_name}" if target_name else "",
+                    f"Узел: {node_name}" if node_name else "",
+                )
+                if part
+            )
             write_admin_panel_notification(
                 db,
                 event_type=event_type,
-                title=str(title)[:200],
-                message=(details or "")[:2000],
+                title=bell_title(event_type)[:200],
+                message="\n".join(
+                    part for part in (context, humanize_bell_message(details)) if part
+                )[:2000],
                 level="error" if "fail" in event_type or event_type.endswith("_failed") else "info",
                 action_payload={"node_id": node_id} if node_id is not None else None,
             )

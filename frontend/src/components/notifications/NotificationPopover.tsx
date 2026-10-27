@@ -59,6 +59,12 @@ const LEVEL_VARIANT: Record<string, BadgeVariant> = {
   error: 'destructive',
 }
 
+const LEVEL_LABEL: Record<string, string> = {
+  info: 'Инфо',
+  warning: 'Внимание',
+  error: 'Ошибка',
+}
+
 type BadgeVariant =
   | 'default'
   | 'secondary'
@@ -107,15 +113,15 @@ function renderItem(item: NotificationItem, onItemClick?: (item: NotificationIte
           <div className="flex items-center gap-1.5">
             <span className="text-sm font-semibold">{item.title}</span>
             <Badge variant={LEVEL_VARIANT[item.level] ?? 'secondary'} className="text-[10px]">
-              {item.level}
+              {LEVEL_LABEL[item.level] ?? item.level}
             </Badge>
           </div>
           {item.message && (
-            <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{item.message}</p>
+            <p className="mt-0.5 whitespace-pre-line text-xs text-muted-foreground line-clamp-3">
+              {item.message}
+            </p>
           )}
-          <p className="mt-1 text-xs text-muted-foreground">
-            {item.event_type} · {formatCreatedAt(item.created_at)}
-          </p>
+          <p className="mt-1 text-xs text-muted-foreground">{formatCreatedAt(item.created_at)}</p>
         </div>
       </div>
     </div>
