@@ -213,10 +213,15 @@ def _build_node_rows(
     configs: list[VpnConfig],
     labels: dict[int, str],
     *,
+    readable_node_ids: set[int] | None = None,
     current_node_id: int = 0,
     filter_key: str = "all",
 ) -> list[list[dict]]:
-    """Переключатель узлов: показываем, только если конфиги есть на нескольких."""
+    """Переключатель узлов: показываем, только если конфиги есть на нескольких.
+
+    Узлы, у которых в базе конфиги есть, а файлов профилей нет (не пересозданы,
+    узел без связи), помечаются ⚠️ — иначе они молча исчезали из списка.
+    """
     node_ids = sorted({config.node_id for config in configs}, key=lambda value: labels.get(value, ""))
     if len(node_ids) < 2:
         return []
@@ -224,6 +229,7 @@ def _build_node_rows(
     counts: dict[int, int] = defaultdict(int)
     for config in configs:
         counts[config.node_id] += 1
+    readable = readable_node_ids if readable_node_ids is not None else set(node_ids)
 
     buttons: list[dict] = [
         inline_button(
@@ -233,7 +239,8 @@ def _build_node_rows(
     ]
     for node_id in node_ids:
         title = _short_name(labels.get(node_id, str(node_id)), max_len=14)
-        label = f"{title} ({counts[node_id]})"
+        mark = "" if node_id in readable else "⚠️ "
+        label = f"{mark}{title} ({counts[node_id]})"
         if current_node_id == node_id:
             label = f"✓ {label}"
         buttons.append(inline_button(label, callback_data=_configs_list_callback(0, filter_key, node_id)))
@@ -268,6 +275,7 @@ def _configs_keyboard(
     protocol_map: dict[int, frozenset[str]],
     node_labels: dict[int, str] | None = None,
     node_id: int = 0,
+    all_configs: list[VpnConfig] | None = None,
 ) -> dict:
     filter_key = _normalize_filter_key(filter_key)
     labels = node_labels or {}
@@ -280,7 +288,15 @@ def _configs_keyboard(
     chunk = filtered[start : start + _PAGE_SIZE]
 
     rows: list[list[dict]] = []
-    rows.extend(_build_node_rows(configs, labels, current_node_id=node_id, filter_key=filter_key))
+    rows.extend(
+        _build_node_rows(
+            all_configs if all_configs is not None else configs,
+            labels,
+            readable_node_ids={config.node_id for config in configs},
+            current_node_id=node_id,
+            filter_key=filter_key,
+        )
+    )
     rows.extend(_build_filter_rows(counts, filter_key, node_id=node_id))
 
     config_buttons = [
@@ -483,13 +499,19 @@ async def handle_configs(
 
     protocol_map = _load_config_protocol_map(ctx, configs)
     configs_with_files = _configs_with_files(configs, protocol_map)
+    labels = node_labels(ctx.db, {config.node_id for config in configs})
+    if node_id and node_id not in labels:
+        node_id = 0
+    if node_id and not any(config.node_id == node_id for config in configs_with_files):
+        await send_message(
+            ctx.bot_token,
+            ctx.chat_id,
+            i18n.CONFIGS_NODE_NO_FILES.format(node=escape(labels.get(node_id, str(node_id)))),
+        )
+        return
     if not configs_with_files:
         await send_message(ctx.bot_token, ctx.chat_id, EMPTY_CATALOG_MESSAGE)
         return
-
-    labels = node_labels(ctx.db, {config.node_id for config in configs_with_files})
-    if node_id and node_id not in labels:
-        node_id = 0
 
     filter_key = _normalize_filter_key(filter_key)
     scoped = [config for config in configs_with_files if node_id in (0, config.node_id)]
@@ -528,6 +550,7 @@ async def handle_configs(
         protocol_map=protocol_map,
         node_labels=labels,
         node_id=node_id,
+        all_configs=configs,
     )
     await send_or_edit(ctx, text, markup=markup, message_id=message_id)
 

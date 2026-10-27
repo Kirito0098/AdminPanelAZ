@@ -186,6 +186,42 @@ def test_parse_configs_callback_reads_the_node(nodes):
     assert handler.parse_configs_callback("configs:0:all") == (0, "all", 0)
 
 
+def test_node_without_profile_files_is_marked_in_the_switcher(nodes, configs):
+    germany, usa = nodes
+    local, remote = configs
+
+    markup = handler._configs_keyboard(
+        [local],
+        page=0,
+        filter_key="all",
+        protocol_map={local.id: frozenset({"ovpn"})},
+        node_labels={germany.id: "Germany", usa.id: "USA"},
+        all_configs=[local, remote],
+    )
+
+    labels = [button["text"] for row in markup["inline_keyboard"] for button in row if "callback_data" in button]
+    assert any(text.startswith("⚠️ USA (1)") for text in labels)
+    assert any(text.endswith("Germany (1)") and not text.startswith("⚠️") for text in labels)
+
+
+def test_selecting_a_node_without_files_explains_why(ctx, nodes, configs, monkeypatch):
+    _germany, usa = nodes
+    sent: list[str] = []
+
+    async def fake_send(_token, _chat, text, **_kwargs):
+        sent.append(text)
+
+    monkeypatch.setattr(handler, "send_message", fake_send)
+    monkeypatch.setattr(handler, "_load_config_protocol_map", lambda _ctx, items: {
+        item.id: frozenset({"ovpn"}) if item.node_id != usa.id else frozenset() for item in items
+    })
+
+    asyncio.run(handler.handle_configs(ctx, node_id=usa.id))
+
+    assert sent and "нет файлов профилей" in sent[0]
+    assert "USA" in sent[0]
+
+
 def test_configs_preview_numbers_rows_from_one(nodes, configs):
     germany, _usa = nodes
     local, _remote = configs
