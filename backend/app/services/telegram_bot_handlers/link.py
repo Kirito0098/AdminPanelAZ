@@ -4,7 +4,9 @@ from fastapi import HTTPException
 
 from app.services.action_log import log_action
 from app.services.auth_rate_limit import auth_rate_limit_service
+from app.models import UserRole
 from app.services.telegram_api import send_message
+from app.services.telegram_bot_commands import sync_admin_chat_commands
 from app.services.telegram_bot_handlers.base import BotContext
 from app.services.telegram_link import redeem_link_code
 
@@ -33,6 +35,8 @@ async def handle_link(ctx: BotContext, code: str) -> None:
             details=f"telegram_id={ctx.telegram_user_id}",
         )
         ctx.user = user
+        if user.role == UserRole.admin:
+            await sync_admin_chat_commands(ctx.bot_token, ctx.telegram_user_id)
         from app.services.telegram_bot_handlers.start import handle_start
 
         await handle_start(ctx)

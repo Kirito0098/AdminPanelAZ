@@ -438,6 +438,18 @@ def set_webhook_sync(bot_token: str, url: str, *, secret_token: str | None = Non
     )
 
 
+async def set_my_commands(
+    bot_token: str,
+    commands: list[dict[str, str]],
+    *,
+    scope: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    payload: dict[str, Any] = {"commands": commands}
+    if scope is not None:
+        payload["scope"] = scope
+    return await _post_checked(bot_token, "setMyCommands", payload, "настроить команды бота")
+
+
 def set_my_commands_sync(
     bot_token: str,
     commands: list[dict[str, str]],

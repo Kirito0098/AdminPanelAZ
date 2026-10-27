@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.models import User, UserRole
 from app.services import telegram_bot_i18n as i18n
 from app.services.feature_guards import get_feature_service
-from app.services.telegram_api import set_my_commands_sync
+from app.services.telegram_api import set_my_commands, set_my_commands_sync
 
 logger = logging.getLogger(__name__)
 
@@ -73,3 +73,18 @@ def sync_bot_commands(db: Session, bot_token: str) -> dict[str, Any]:
         if not ok_admin and err_admin:
             result["errors"].append(f"{admin.username}: {err_admin}")
     return result
+
+
+async def sync_admin_chat_commands(bot_token: str, telegram_id: str) -> bool:
+    """Выставить админский набор команд в конкретном чате (после привязки админа)."""
+    chat_id = (telegram_id or "").strip()
+    if not chat_id.lstrip("-").isdigit():
+        return False
+    ok, error = await set_my_commands(
+        bot_token,
+        build_commands(i18n.BOT_COMMANDS_ADMIN),
+        scope={"type": "chat", "chat_id": int(chat_id)},
+    )
+    if not ok:
+        logger.warning("bot commands: admin scope failed for chat %s: %s", chat_id, error)
+    return ok

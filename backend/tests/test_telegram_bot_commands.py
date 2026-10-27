@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -88,3 +89,54 @@ def test_disabled_features_drop_their_commands(db, calls, monkeypatch):
     _, names, _ = calls[-1]
     assert "unlock" not in names
     assert "nodes" in names
+
+
+def test_sync_admin_chat_commands_uses_the_admin_list(monkeypatch):
+    recorded = []
+
+    async def fake(token, command_list, *, scope=None):
+        recorded.append((token, [item["command"] for item in command_list], scope))
+        return True, ""
+
+    monkeypatch.setattr(commands, "set_my_commands", fake)
+    monkeypatch.setattr(
+        commands, "get_feature_service", lambda: SimpleNamespace(is_enabled=lambda _name: True)
+    )
+
+    assert asyncio.run(commands.sync_admin_chat_commands("token", " 777 ")) is True
+    token, names, scope = recorded[0]
+    assert token == "token"
+    assert scope == {"type": "chat", "chat_id": 777}
+    assert ADMIN_ONLY <= set(names)
+
+
+def test_set_my_commands_sync_sends_the_scope(monkeypatch):
+    from app.services import telegram_api, telegram_transport
+
+    captured: dict = {}
+
+    def fake_post(_token, method, json=None, **_kwargs):
+        captured.update(method=method, payload=json)
+        return {"ok": True, "result": True}
+
+    monkeypatch.setattr(telegram_transport, "bot_api_post_sync", fake_post)
+
+    ok, error = telegram_api.set_my_commands_sync(
+        "token", [{"command": "start", "description": "x"}], scope={"type": "chat", "chat_id": 1}
+    )
+
+    assert (ok, error) == (True, "")
+    assert captured["method"] == "setMyCommands"
+    assert captured["payload"] == {
+        "commands": [{"command": "start", "description": "x"}],
+        "scope": {"type": "chat", "chat_id": 1},
+    }
+
+
+def test_sync_admin_chat_commands_skips_non_numeric_chat(monkeypatch):
+    async def fake(*_args, **_kwargs):  # pragma: no cover — не должен вызываться
+        raise AssertionError("setMyCommands must not be called")
+
+    monkeypatch.setattr(commands, "set_my_commands", fake)
+
+    assert asyncio.run(commands.sync_admin_chat_commands("token", "not-a-chat")) is False

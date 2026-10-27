@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.config import get_settings
+from app.models import UserRole
 from app.services.auth_rate_limit import AuthRateLimitService
 from app.services.telegram_bot_handlers import link, start
 
@@ -28,7 +29,7 @@ def limiter(monkeypatch):
 
 @pytest.fixture
 def bot(monkeypatch):
-    state = SimpleNamespace(sent=[], redeemed=[])
+    state = SimpleNamespace(sent=[], redeemed=[], admin_menu=[])
 
     async def fake_send_message(_token, _chat, text, **_kw):
         state.sent.append(text)
@@ -36,15 +37,20 @@ def bot(monkeypatch):
     def fake_redeem(_db, code, telegram_id):
         state.redeemed.append((code, telegram_id))
         if code == GOOD_CODE:
-            return True, "linked", SimpleNamespace(id=1, username="carol")
+            return True, "linked", SimpleNamespace(id=1, username="carol", role=UserRole.user)
         return False, "Код не найден или истёк.", None
 
     async def fake_start(_ctx):
         return None
 
+    async def fake_admin_menu(_token, telegram_id):
+        state.admin_menu.append(telegram_id)
+        return True
+
     monkeypatch.setattr(link, "send_message", fake_send_message)
     monkeypatch.setattr(link, "redeem_link_code", fake_redeem)
     monkeypatch.setattr(link, "log_action", lambda *_a, **_k: None)
+    monkeypatch.setattr(link, "sync_admin_chat_commands", fake_admin_menu)
     monkeypatch.setattr(start, "handle_start", fake_start)
     return state
 
@@ -83,3 +89,20 @@ def test_successful_link_resets_counter(bot):
 
     assert LOCKED_MESSAGE not in bot.sent
     assert len(bot.redeemed) == 2 * MAX_ATTEMPTS - 1
+
+
+def test_admin_link_refreshes_the_admin_command_menu(bot, monkeypatch):
+    def fake_redeem(_db, _code, telegram_id):
+        return True, "linked", SimpleNamespace(id=2, username="boss", role=UserRole.admin)
+
+    monkeypatch.setattr(link, "redeem_link_code", fake_redeem)
+
+    _link(GOOD_CODE, telegram_user_id="555")
+
+    assert bot.admin_menu == ["555"]
+
+
+def test_user_link_keeps_the_default_command_menu(bot):
+    _link(GOOD_CODE, telegram_user_id="100")
+
+    assert bot.admin_menu == []
