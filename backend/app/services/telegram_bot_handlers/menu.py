@@ -80,11 +80,13 @@ def _more_menu_row_actions(ctx: BotContext) -> list[list[str]]:
     return rows
 
 
-def build_linked_reply_keyboard() -> dict:
+def build_linked_reply_keyboard(*, is_admin: bool = False) -> dict:
     """Reply-клавиатура привязанного пользователя — без «Запросить доступ».
 
     Используется и после одобрения заявки: сообщение «Доступ одобрен» приходит
     с этой клавиатурой, чтобы устаревшая кнопка «Запросить доступ» пропала.
+    Пользовательские действия («Запросить ещё конфиг», «Продлить по ключу») админу
+    не нужны: он создаёт конфиги и коды сам.
     """
     rows = [
         [
@@ -92,10 +94,11 @@ def build_linked_reply_keyboard() -> dict:
             reply_button(i18n.BTN_MENU_STATUS),
         ],
         [reply_button(i18n.BTN_MENU_MORE)],
-        [reply_button(i18n.BTN_REQUEST_MORE_CONFIG)],
     ]
-    if get_feature_service().is_enabled("unlock_codes"):
-        rows.append([reply_button(i18n.BTN_REDEEM_UNLOCK)])
+    if not is_admin:
+        rows.append([reply_button(i18n.BTN_REQUEST_MORE_CONFIG)])
+        if get_feature_service().is_enabled("unlock_codes"):
+            rows.append([reply_button(i18n.BTN_REDEEM_UNLOCK)])
     return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
 
 
@@ -107,7 +110,7 @@ def build_reply_keyboard(ctx: BotContext) -> dict:
         rows.append([reply_button(i18n.BTN_LINK_CODE)])
         return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
 
-    return build_linked_reply_keyboard()
+    return build_linked_reply_keyboard(is_admin=is_admin(ctx.user))
 
 
 def build_more_inline_menu(ctx: BotContext) -> dict:

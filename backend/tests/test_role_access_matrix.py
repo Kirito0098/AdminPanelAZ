@@ -250,6 +250,37 @@ def test_renew_request_callback_stays_available_to_users():
     assert bot_module._is_admin_callback("ar:a:3") is True
 
 
+def test_admin_reply_keyboard_has_no_user_only_actions(monkeypatch):
+    monkeypatch.setattr(menu, "get_feature_service", lambda: SimpleNamespace(is_enabled=lambda _n: True))
+
+    keyboard = menu.build_linked_reply_keyboard(is_admin=True)
+    texts = [button["text"] for row in keyboard["keyboard"] for button in row]
+
+    assert i18n.BTN_REQUEST_MORE_CONFIG not in texts
+    assert i18n.BTN_REDEEM_UNLOCK not in texts
+    assert i18n.BTN_MENU_CONFIGS in texts
+    assert i18n.BTN_MENU_MORE in texts
+
+
+def test_user_reply_keyboard_keeps_user_only_actions(monkeypatch):
+    monkeypatch.setattr(menu, "get_feature_service", lambda: SimpleNamespace(is_enabled=lambda _n: True))
+
+    keyboard = menu.build_linked_reply_keyboard(is_admin=False)
+    texts = [button["text"] for row in keyboard["keyboard"] for button in row]
+
+    assert i18n.BTN_REQUEST_MORE_CONFIG in texts
+    assert i18n.BTN_REDEEM_UNLOCK in texts
+
+
+def test_linked_keyboard_is_role_aware(db, monkeypatch):
+    monkeypatch.setattr(menu, "get_feature_service", lambda: SimpleNamespace(is_enabled=lambda _n: True))
+
+    admin_keyboard = menu.build_reply_keyboard(_context(db, UserRole.admin))
+    texts = [button["text"] for row in admin_keyboard["keyboard"] for button in row]
+
+    assert i18n.BTN_REQUEST_MORE_CONFIG not in texts
+
+
 def test_mini_settings_hides_bot_state_from_a_regular_user(db, monkeypatch):
     from app.routers import tg_mini as mini_root
     from app.routers.tg_mini import settings as mini_settings_module

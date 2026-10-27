@@ -74,7 +74,7 @@ def _linked_keyboard(ctx: BotContext) -> dict | None:
         return None
     from app.services.telegram_bot_handlers.menu import build_linked_reply_keyboard
 
-    return build_linked_reply_keyboard()
+    return build_linked_reply_keyboard(is_admin=is_admin(ctx.user))
 
 
 async def handle_request_access(ctx: BotContext) -> None:

@@ -902,7 +902,7 @@ def _linked_reply_keyboard(user: User) -> dict[str, Any] | None:
     try:
         from app.services.telegram_bot_handlers.menu import build_linked_reply_keyboard
 
-        return build_linked_reply_keyboard()
+        return build_linked_reply_keyboard(is_admin=user.role == UserRole.admin)
     except Exception as exc:  # клавиатура не должна ломать доставку
         logger.warning("delivery keyboard build failed for user_id=%s: %s", user.id, exc)
         return None
