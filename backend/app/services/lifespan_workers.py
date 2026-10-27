@@ -30,6 +30,7 @@ from app.services.user_reminder_worker import run_user_reminder_loop
 from app.services.noc_report_scheduler import run_noc_report_scheduler_loop
 from app.services.alert_rule_worker import run_alert_rules_loop
 from app.services.openvpn_buffer_guard_worker import run_openvpn_buffer_guard_loop
+from app.services.panel_update_notifier import run_panel_update_check_loop
 from app.services.telegram_polling_worker import run_telegram_polling_loop
 from app.services.webhook_delivery_worker import run_webhook_delivery_loop
 from app.services.worker_lifecycle import (
@@ -157,6 +158,7 @@ def spawn_background_tasks(
         tasks["openvpn_buffer_guard"] = create_task(run_openvpn_buffer_guard_loop())
 
     tasks["webhook_delivery"] = create_task(run_webhook_delivery_loop())
+    tasks["panel_update_check"] = create_task(run_panel_update_check_loop())
     tasks["telegram_polling"] = create_task(run_telegram_polling_loop())
 
     return tasks
