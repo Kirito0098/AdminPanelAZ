@@ -179,6 +179,60 @@ def test_config_file_is_sent_from_the_config_node(ctx, nodes, configs, monkeypat
     assert adapters[germany.id].calls == []
 
 
+def test_empty_profile_file_is_not_sent_to_telegram(db, nodes, configs, monkeypatch):
+    from app.models import User, UserRole
+    from app.services import telegram_config_send as sender
+
+    _germany, usa = nodes
+    _local, remote = configs
+    user = db.query(User).filter(User.username == "ivan").first()
+    assert user.role == UserRole.user
+
+    adapter = FakeAdapter("USA")
+    adapter._files = lambda client_name: [  # type: ignore[method-assign]
+        {"path": f"/profiles/USA/{client_name}.ovpn", "protocol": "openvpn", "variant": "antizapret-udp"}
+    ]
+    monkeypatch.setattr(sender, "get_adapter_for_node", lambda _node: adapter)
+    monkeypatch.setattr(sender, "read_profile_file_for_delivery", lambda *_a, **_k: "")
+    monkeypatch.setattr(sender, "send_tg_document_result", lambda *_a, **_k: pytest.fail("пустой файл не отправляем"))
+
+    sent, error = sender.send_config_for_user(
+        db,
+        remote,
+        user,
+        bot_token="bot",
+        chat_id_override=user.telegram_id,
+        run_async=False,
+    )
+
+    assert sent == 0
+    assert error == sender.EMPTY_PROFILE_FILE_ERROR
+    assert usa.id == remote.node_id
+
+
+def test_group_keyboard_hides_the_protocol_button_for_a_single_protocol():
+    from app.services.telegram_profile_ui import ProfileFileEntry, ProfileFileGroup
+
+    group = ProfileFileGroup(
+        key="ovpn",
+        emoji="🔐",
+        title="OpenVPN",
+        files=[
+            ProfileFileEntry(index=0, file={"path": "/a.ovpn", "protocol": "openvpn"}),
+            ProfileFileEntry(index=1, file={"path": "/b.ovpn", "protocol": "openvpn"}),
+        ],
+    )
+
+    single = handler._config_group_keyboard(1, group, show_protocols=False)
+    texts = [button["text"] for row in single["inline_keyboard"] for button in row]
+    assert handler.i18n.BTN_CONFIG_BACK not in texts
+    assert handler.i18n.BTN_ALL_CONFIGS in texts
+
+    multi = handler._config_group_keyboard(1, group, show_protocols=True)
+    texts = [button["text"] for row in multi["inline_keyboard"] for button in row]
+    assert handler.i18n.BTN_CONFIG_BACK in texts
+
+
 def test_parse_configs_callback_reads_the_node(nodes):
     _germany, usa = nodes
 

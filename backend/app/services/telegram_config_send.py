@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from typing import Literal
@@ -16,6 +17,13 @@ from app.services.telegram_profile_ui import file_caption
 from app.services.telegram import send_tg_document_result, send_tg_message
 from app.services.vpn_install_instructions import InstallPlatform, build_install_instruction_message
 from app.services.vpn_profile_visibility import filter_profile_files, resolve_effective_visible_vpn_profiles
+
+logger = logging.getLogger(__name__)
+
+EMPTY_PROFILE_FILE_ERROR = (
+    "файл профиля на сервере пустой — пересоздайте профили "
+    "(Настройки → Обслуживание → Пересоздать профили)"
+)
 
 
 def _download_name(config: VpnConfig, file_item: dict, selected_path: str) -> str:
@@ -76,6 +84,10 @@ def send_config_files_to_chat(
             content = read_profile_file_for_delivery(adapter, selected_path, hosts)
         except Exception as exc:
             return sent, str(exc) if sent == 0 else None
+        if not (content or "").strip():
+            # Telegram отвечает «file must be non-empty» — понятнее сказать причину самим.
+            logger.warning("empty profile file node=%s path=%s", config.node_id, selected_path)
+            return sent, EMPTY_PROFILE_FILE_ERROR if sent == 0 else None
 
         download_name = _download_name(config, file_item, selected_path)
         caption = file_caption(client_name=config.client_name, file_item=file_item)

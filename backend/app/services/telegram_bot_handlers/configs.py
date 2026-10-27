@@ -360,17 +360,17 @@ def _config_group_keyboard(
     group: ProfileFileGroup,
     *,
     filter_key: str = "all",
+    show_protocols: bool = True,
 ) -> dict:
     rows: list[list] = [
         [inline_button(file_button_label(entry.file, index=offset), callback_data=f"cfgf:{config_id}:{entry.index}")]
         for offset, entry in enumerate(group.files, start=1)
     ]
-    rows.append(
-        [
-            inline_button(i18n.BTN_CONFIG_BACK, callback_data=_cfg_callback(config_id, filter_key)),
-            inline_button(i18n.BTN_ALL_CONFIGS, callback_data=_configs_list_callback(0, filter_key)),
-        ]
-    )
+    back_row: list[dict] = []
+    if show_protocols:
+        back_row.append(inline_button(i18n.BTN_CONFIG_BACK, callback_data=_cfg_callback(config_id, filter_key)))
+    back_row.append(inline_button(i18n.BTN_ALL_CONFIGS, callback_data=_configs_list_callback(0, filter_key)))
+    rows.append(back_row)
     rows.append([inline_button(i18n.BTN_MENU_HOME, callback_data="nav:home")])
     return inline_keyboard(rows)
 
@@ -416,6 +416,7 @@ async def _show_config_group_picker(
     *,
     filter_key: str = "all",
     message_id: int | None = None,
+    show_protocols: bool = True,
 ) -> None:
     if len(group.files) == 1:
         await handle_config_file_send(
@@ -437,7 +438,7 @@ async def _show_config_group_picker(
     await send_or_edit(
         ctx,
         text,
-        markup=_config_group_keyboard(config.id, group, filter_key=filter_key),
+        markup=_config_group_keyboard(config.id, group, filter_key=filter_key, show_protocols=show_protocols),
         message_id=message_id,
     )
 
@@ -464,6 +465,7 @@ async def _show_config_picker(
             active_groups[0],
             filter_key=filter_key,
             message_id=message_id,
+            show_protocols=len(groups) > 1,
         )
         return
 
@@ -635,6 +637,7 @@ async def handle_config_group_callback(
         group,
         filter_key=filter_key,
         message_id=message_id,
+        show_protocols=len(groups) > 1,
     )
 
 
