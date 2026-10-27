@@ -237,7 +237,7 @@ STATUS_TITLE = "📊 <b>Статус панели</b>"
 STATUS_BODY = (
     "{title}\n\n"
     "🖥 Узел: <b>{node_name}</b>\n"
-    "📁 Конфигов: <b>{total_configs}</b>\n"
+    "📁 Конфигов на узле: <b>{total_configs}</b>\n"
     "🔐 OpenVPN online: <b>{connected_openvpn}</b>\n"
     "🛡️ WireGuard online: <b>{connected_wireguard}</b>\n"
     "🌐 IP сервера: <code>{server_ip}</code>"
@@ -276,7 +276,7 @@ CONFIGS_NONE_ON_NODE = (
     "📭 На активном узле нет файлов конфигурации.\n\n"
     "Клиенты есть в панели, но профили на сервере не найдены."
 )
-CONFIGS_FILTER_EMPTY = "<i>Нет клиентов с файлами этого типа на узле.</i>"
+CONFIGS_FILTER_EMPTY = "<i>Нет клиентов с файлами этого типа.</i>"
 
 # --- /traffic ---
 
@@ -311,11 +311,19 @@ CONFIG_SEND_UNKNOWN = "неизвестная ошибка"
 CONFIG_FILES_NONE = "Файлы конфигурации не найдены на узле."
 CONFIG_PICK_PROTOCOL = (
     "📄 <b>{name}</b>\n"
-    "Тип: <code>{vpn_type}</code>\n\n"
+    "Тип: <code>{vpn_type}</code>\n"
+    "🌍 Узел: <b>{node}</b>\n\n"
     "Выберите протокол:"
 )
+CONFIG_CHOOSE_NODE = (
+    "📄 <b>{name}</b>\n"
+    "Это имя есть на нескольких узлах.\n\n"
+    "Выберите конфигурацию:"
+)
+CONFIG_NODE_UNAVAILABLE = "⚠️ Узел конфигурации недоступен. Проверьте связь с сервером."
 CONFIG_PICK_FILE = (
     "📄 <b>{name}</b>\n"
+    "🌍 Узел: <b>{node}</b>\n"
     "{protocol}\n\n"
     "{preview}\n\n"
     "<i>Выберите файл ↓</i>"
@@ -338,7 +346,7 @@ INLINE_UNLINKED_TITLE = "🔗 Привязка аккаунта"
 INLINE_UNLINKED_DESC = "Telegram не привязан к панели"
 INLINE_CONFIG_TITLE = "📄 {name} ({vpn_type})"
 INLINE_CONFIG_DESC = "{name} · {vpn_type} · {filename}"
-INLINE_CONFIG_ARTICLE_DESC = "Конфиг {vpn_type}"
+INLINE_CONFIG_ARTICLE_DESC = "Конфиг {vpn_type} · узел {node}"
 INLINE_CONFIG_MESSAGE = (
     "📄 <b>{name}</b>\n"
     "Тип: <code>{vpn_type}</code>\n\n"

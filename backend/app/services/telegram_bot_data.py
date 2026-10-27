@@ -92,22 +92,50 @@ def build_server_status_block(db: Session) -> str | None:
     return "\n".join(lines)
 
 
-def list_user_configs(db: Session, user: User) -> list[VpnConfig]:
+def node_labels(db: Session, node_ids: set[int]) -> dict[int, str]:
+    """``node_id → имя`` для подписей в боте (без похода на узлы)."""
+    from app.models import Node
+
+    if not node_ids:
+        return {}
+    rows = db.query(Node).filter(Node.id.in_(node_ids)).all()
+    return {node.id: (node.name or str(node.id)) for node in rows}
+
+
+def config_node_label(db: Session, config: VpnConfig) -> str:
+    """Подпись узла конфига для карточек бота."""
+    return node_labels(db, {config.node_id}).get(config.node_id, str(config.node_id))
+
+
+def list_user_configs(db: Session, user: User, *, node_id: int | None = None) -> list[VpnConfig]:
+    """Доступные конфиги пользователя по всем узлам; HA-тени скрыты.
+
+    Раньше список ограничивался активным узлом панели — конфиги с других серверов
+    не были видны в боте, хотя файлы с них отдавались (см. ``telegram_config_send``).
+    """
     from app.services.config_access import list_accessible_configs
 
-    node = get_active_node(db)
-    query = db.query(VpnConfig).filter(VpnConfig.node_id == node.id)
-    return sorted(list_accessible_configs(db, user, query), key=lambda c: c.client_name)
+    query = db.query(VpnConfig).filter(VpnConfig.ha_primary_config_id.is_(None))
+    if node_id is not None:
+        query = query.filter(VpnConfig.node_id == node_id)
+    configs = list_accessible_configs(db, user, query)
+    if not configs:
+        return []
+    labels = node_labels(db, {config.node_id for config in configs})
+    return sorted(configs, key=lambda config: (labels.get(config.node_id, ""), config.client_name))
+
+
+def find_configs_by_name(db: Session, user: User, name: str) -> list[VpnConfig]:
+    """Все конфиги с таким именем: одно имя может жить на нескольких узлах."""
+    normalized = (name or "").strip().lower()
+    if not normalized:
+        return []
+    return [config for config in list_user_configs(db, user) if config.client_name.lower() == normalized]
 
 
 def find_config_by_name(db: Session, user: User, name: str) -> VpnConfig | None:
-    normalized = (name or "").strip().lower()
-    if not normalized:
-        return None
-    for config in list_user_configs(db, user):
-        if config.client_name.lower() == normalized:
-            return config
-    return None
+    matches = find_configs_by_name(db, user, name)
+    return matches[0] if matches else None
 
 
 def search_user_configs(db: Session, user: User, query: str, *, limit: int = 20) -> list[VpnConfig]:

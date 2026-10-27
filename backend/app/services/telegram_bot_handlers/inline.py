@@ -7,7 +7,7 @@ from typing import Any
 
 from app.models import VpnConfig
 from app.services.telegram_api import answer_inline_query
-from app.services.telegram_bot_data import search_user_configs
+from app.services.telegram_bot_data import config_node_label, search_user_configs
 from app.services.telegram_bot_handlers.base import BotContext, unlinked_message
 from app.services.telegram_bot_inline_cache import (
     INLINE_RESULTS_TTL_SECONDS,
@@ -77,7 +77,10 @@ def _config_article(ctx: BotContext, config: VpnConfig) -> dict[str, Any]:
         "type": "article",
         "id": f"cfg:{config.id}",
         "title": i18n.INLINE_CONFIG_TITLE.format(name=config.client_name, vpn_type=config.vpn_type.value),
-        "description": i18n.INLINE_CONFIG_ARTICLE_DESC.format(vpn_type=config.vpn_type.value),
+        "description": i18n.INLINE_CONFIG_ARTICLE_DESC.format(
+            vpn_type=config.vpn_type.value,
+            node=config_node_label(ctx.db, config),
+        ),
         "input_message_content": {
             "message_text": message,
             "parse_mode": "HTML",

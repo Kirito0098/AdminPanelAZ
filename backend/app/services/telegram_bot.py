@@ -198,8 +198,8 @@ async def _dispatch_callback(
     if data.startswith("configs:"):
         from app.services.telegram_bot_handlers.configs import handle_configs, parse_configs_callback
 
-        page, filter_key = parse_configs_callback(data)
-        await handle_configs(ctx, page=page, filter_key=filter_key, message_id=message_id)
+        page, filter_key, node_id = parse_configs_callback(data)
+        await handle_configs(ctx, page=page, filter_key=filter_key, node_id=node_id, message_id=message_id)
         return
     if data.startswith("traffic:"):
         page = int(data.split(":", 1)[1]) if data.split(":", 1)[1].isdigit() else 0
