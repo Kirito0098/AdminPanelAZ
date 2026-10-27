@@ -438,8 +438,16 @@ def set_webhook_sync(bot_token: str, url: str, *, secret_token: str | None = Non
     )
 
 
-def set_my_commands_sync(bot_token: str, commands: list[dict[str, str]]) -> tuple[bool, str]:
-    return _post_checked_sync(bot_token, "setMyCommands", {"commands": commands}, "настроить команды бота")
+def set_my_commands_sync(
+    bot_token: str,
+    commands: list[dict[str, str]],
+    *,
+    scope: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    payload: dict[str, Any] = {"commands": commands}
+    if scope is not None:
+        payload["scope"] = scope
+    return _post_checked_sync(bot_token, "setMyCommands", payload, "настроить команды бота")
 
 
 def reset_chat_menu_button_sync(bot_token: str) -> tuple[bool, str]:

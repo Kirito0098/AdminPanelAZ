@@ -1,9 +1,10 @@
 import html
 import json
+import logging
 import secrets
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
@@ -40,7 +41,6 @@ from app.services.telegram import send_tg_message
 from app.services.telegram_api import (
     delete_webhook_sync,
     reset_chat_menu_button_sync,
-    set_my_commands_sync,
     set_webhook_sync,
 )
 from app.services.telegram_bot_command_rate_limit import get_bot_command_rate_limits, set_bot_command_rate_limits
@@ -83,12 +83,32 @@ def _webhook_url(request: Request, secret: str) -> str:
     return f"{root}/api/telegram/webhook/{secret}"
 
 
-def _configure_bot_menu(token: str) -> None:
-    from app.services.telegram_bot_handlers.menu import build_bot_commands
+def _configure_bot_menu(db: Session, token: str) -> None:
+    from app.services.telegram_bot_commands import sync_bot_commands
 
-    for ok, error in (set_my_commands_sync(token, build_bot_commands()), reset_chat_menu_button_sync(token)):
-        if not ok:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
+    synced = sync_bot_commands(db, token)
+    if not synced["default"]:
+        detail = synced["errors"][0] if synced["errors"] else "Не удалось настроить команды бота"
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
+    ok, error = reset_chat_menu_button_sync(token)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
+
+
+def _sync_bot_commands_best_effort(token: str) -> None:
+    """Пере-синхронизировать меню команд после сохранения настроек (фоном, не ломает сохранение)."""
+    from app.database import SessionLocal
+    from app.services.telegram_bot_commands import sync_bot_commands
+
+    if not token:
+        return
+    session = SessionLocal()
+    try:
+        sync_bot_commands(session, token)
+    except Exception:  # noqa: BLE001 — сеть/Telegram не должны ломать сохранение настроек
+        logging.getLogger(__name__).warning("bot commands sync failed", exc_info=True)
+    finally:
+        session.close()
 
 
 def _telegram_settings_response(db: Session, request: Request) -> TelegramSettingsResponse:
@@ -161,6 +181,7 @@ def get_telegram_settings(
 def update_telegram_settings(
     payload: TelegramSettingsUpdate,
     request: Request,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
@@ -219,6 +240,8 @@ def update_telegram_settings(
     if payload.pending_request_cap is not None:
         _set_setting(db, "telegram_new_user_request_pending_cap", str(payload.pending_request_cap))
     db.commit()
+    if token := _get_setting(db, "telegram_bot_token"):
+        background.add_task(_sync_bot_commands_best_effort, token)
     admin_notify_service.send_settings_change(
         db,
         actor_username=admin.username,
@@ -510,7 +533,7 @@ def register_telegram_webhook(
     if not ok:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
 
-    _configure_bot_menu(bot_token)
+    _configure_bot_menu(db, bot_token)
     _set_setting(db, "telegram_webhook_set_at", datetime.now(timezone.utc).isoformat())
     _set_setting(db, "telegram_webhook_secret_required", "true")
     db.commit()
@@ -606,7 +629,7 @@ def update_telegram_relay(
                 ok, error = delete_webhook_sync(token)
                 if not ok:
                     raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
-                _configure_bot_menu(token)
+                _configure_bot_menu(db, token)
         except HTTPException:
             _set_setting(db, RELAY_NODES_SETTING, previous)
             db.commit()

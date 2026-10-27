@@ -152,21 +152,23 @@ REQUEST_NEED_PRESET = (
 )
 REQUEST_EXTEND_CUSTOM_TEXT = "Задайте срок доступа в веб-панели по заявке."
 
-BOT_COMMANDS: tuple[tuple[str, str], ...] = (
+BOT_COMMANDS_USER: tuple[tuple[str, str], ...] = (
     ("start", "Главное меню"),
-    ("help", "Справка по командам"),
-    ("link", "Привязка аккаунта"),
-    ("status", "Статус панели"),
     ("myconfigs", "Мои VPN-конфиги"),
-    ("traffic", "Трафик: сводка и топ-5"),
     ("configs", "Список VPN-конфигов"),
-    ("config", "Карточка конфига"),
+    ("traffic", "Трафик: сводка и топ-5"),
+    ("status", "Статус панели"),
+    ("link", "Привязка аккаунта"),
+    ("help", "Справка по командам"),
+)
+
+BOT_COMMANDS_ADMIN: tuple[tuple[str, str], ...] = BOT_COMMANDS_USER + (
     ("settings", "Настройки панели (admin)"),
-    ("unlock", "Генерация unlock-кода (admin)"),
     ("nodes", "VPN-узлы (admin)"),
     ("cidr", "Статус CIDR pipeline (admin)"),
     ("warper", "Статус AZ-WARP (admin)"),
     ("awg2", "Статус AZ-AWG2 (admin)"),
+    ("unlock", "Генерация unlock-кода (admin)"),
 )
 
 # --- /start ---

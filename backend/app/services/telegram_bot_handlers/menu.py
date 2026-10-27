@@ -118,12 +118,6 @@ def build_more_inline_menu(ctx: BotContext) -> dict:
     return inline_keyboard(rows)
 
 
-def build_bot_commands() -> list[dict[str, str]]:
-    if not get_feature_service().is_enabled("unlock_codes"):
-        return [{"command": cmd, "description": desc} for cmd, desc in i18n.BOT_COMMANDS if cmd != "unlock"]
-    return [{"command": cmd, "description": desc} for cmd, desc in i18n.BOT_COMMANDS]
-
-
 async def handle_more_menu(ctx: BotContext, *, message_id: int | None = None) -> None:
     await send_or_edit(
         ctx,

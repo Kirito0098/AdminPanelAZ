@@ -8,8 +8,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.models import UserRole
+from app.services import telegram_bot_i18n as i18n
 from app.services.telegram_bot_handlers import unlock_codes_fsm
-from app.services.telegram_bot_handlers.menu import build_bot_commands
 from app.services.telegram_bot_handlers.unlock_codes import (
     handle_unlock_codes_callback,
     handle_unlock_codes_root,
@@ -79,8 +79,10 @@ def test_unlock_text_denies_non_admin():
 
 
 def test_unlock_command_is_registered():
-    commands = build_bot_commands()
-    assert any(item["command"] == "unlock" for item in commands)
+    admin_commands = {command for command, _ in i18n.BOT_COMMANDS_ADMIN}
+    user_commands = {command for command, _ in i18n.BOT_COMMANDS_USER}
+    assert "unlock" in admin_commands
+    assert "unlock" not in user_commands
 
 
 def test_unlock_flow_creates_code_after_mode_choice():
