@@ -989,13 +989,19 @@ def run_user_delete_cleanup(task_id: str, user_id: int, actor_username: str | No
 
         actor = _resolve_delete_actor(db, actor_username, user)
 
-        # Доступ в панель/портал и сессии отключаем сразу.
+        # Доступ в панель/портал и сессии отключаем сразу; Telegram освобождаем,
+        # иначе удаляемый аккаунт держит чужой telegram_id до конца очистки.
+        from app.services.user_access_requests import delete_user_write_archive
+
         user.panel_login_enabled = False
         user.is_active = False
         user.token_version = (user.token_version or 0) + 1
+        delete_user_write_archive(db, user)
+        user.telegram_id = None
         revoke_creator_portal_links(db, user.id, keep_accessible=False)
         invalidate_user_sessions(db, user, reason="deleted", commit=False)
         active_web_session_service.revoke_user_sessions(db, user.username, commit=False)
+        db.commit()
 
         configs = db.query(VpnConfig).filter(VpnConfig.owner_id == user.id).all()
         in_plan: list[VpnConfig] = []
@@ -1011,13 +1017,13 @@ def run_user_delete_cleanup(task_id: str, user_id: int, actor_username: str | No
                 errors.append(f"{config.client_name} (node {config.node_id}): {exc}")
 
         if errors:
-            db.rollback()
+            db.commit()
             background_task_service.update_background_task(
                 task_id,
-                status="completed",
+                status="failed",
                 progress_percent=100,
                 progress_stage="Ошибка очистки",
-                message="Очистка завершена с ошибками",
+                message=f"Очистка не завершена: ошибок {len(errors)}",
                 output=json.dumps({"success": False, "errors": errors}, ensure_ascii=False),
             )
             return {"success": False, "errors": errors}

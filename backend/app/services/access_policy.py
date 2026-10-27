@@ -498,6 +498,24 @@ class AccessPolicyService:
         self.reconcile_openvpn(client_name)
         return self._ovpn_state(row)
 
+    def openvpn_temp_block_minutes(self, client_name: str, minutes: int, *, actor: str | None = None) -> dict:
+        """Short temporary block (minutes): «disconnect device + block for N minutes»."""
+        window = int(minutes)
+        if window <= 0:
+            raise ValueError("minutes must be positive")
+        row = self._get_ovpn(client_name)
+        now = _now()
+        row.is_temp_blocked = True
+        row.is_permanent_blocked = False
+        row.block_reason = "manual_temp"
+        row.block_started_at = now
+        row.block_days = None
+        row.block_until = now + timedelta(minutes=window)
+        row.updated_by = actor
+        self.db.commit()
+        self.reconcile_openvpn(client_name)
+        return self._ovpn_state(row)
+
     def openvpn_permanent_block(self, client_name: str, *, actor: str | None = None) -> dict:
         row = self._get_ovpn(client_name)
         now = _now()

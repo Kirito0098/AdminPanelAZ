@@ -44,7 +44,7 @@ from app.services.telegram_api import (
     set_webhook_sync,
 )
 from app.services.telegram_bot_command_rate_limit import get_bot_command_rate_limits, set_bot_command_rate_limits
-from app.services.telegram_link import notify_telegram_unlinked
+from app.services.telegram_link import notify_telegram_unlinked, release_telegram_of_pending_deletion
 from app.services.telegram_transport import (
     RELAY_CHECK_TIMEOUT,
     RELAY_NODES_SETTING,
@@ -303,7 +303,16 @@ def update_admin_notify_settings(
     if payload.telegram_id is not None:
         tg_id = payload.telegram_id.strip()
         if tg_id:
-            existing = db.query(User).filter(User.telegram_id == tg_id, User.id != admin.id).first()
+            release_telegram_of_pending_deletion(db, tg_id, keep_user_id=admin.id)
+            existing = (
+                db.query(User)
+                .filter(
+                    User.telegram_id == tg_id,
+                    User.id != admin.id,
+                    User.provision_state != "pending_deletion",
+                )
+                .first()
+            )
             if existing:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,

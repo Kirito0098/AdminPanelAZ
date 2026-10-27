@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models import Node, NodeStatus, NodeSyncGroup, VpnConfig, VpnType
+from app.models import Node, NodeStatus, NodeSyncGroup, TrafficSessionState, VpnConfig, VpnType
 from app.schemas import (
     HaNodePresence,
     MonitoringNodeSummary,
     MonitoringOverview,
     MonitoringService,
     OpenVpnClient,
+    OpenVpnGlobalStats,
     VpnConfigHaInfo,
     WireGuardPeer,
 )
@@ -41,6 +43,8 @@ from app.services.node_compare_metrics import extract_cidr_routes_count, get_tra
 from app.services.proxy_noc_enrich import get_mappings_for_proxy, match_client_ip, normalize_proxy_host
 from app.services.resource_metrics import get_latest_samples_by_node
 from app.services.wireguard_status import wireguard_peer_is_online as _wg_is_online
+
+logger = logging.getLogger(__name__)
 
 HaMode = Literal["dedupe", "raw"]
 
@@ -422,6 +426,49 @@ def _attach_client_owners(
     return attached
 
 
+_OPENVPN_PROTOCOL_TYPES = frozenset({"openvpn", "openvpn-udp", "openvpn-tcp"})
+# Bare protocol names some writers may use; a suffix-less "wireguard" must not fall
+# into the legacy-openvpn default of protocol_type_from_profile().
+_NON_OPENVPN_PROFILES = frozenset({"wireguard", "amneziawg", "amneziawg2"})
+
+
+def _is_openvpn_session_profile(profile: str | None) -> bool:
+    from app.services.traffic.collector import protocol_type_from_profile
+
+    name = (profile or "").strip().lower()
+    if not name or name in _NON_OPENVPN_PROFILES:
+        return False
+    return protocol_type_from_profile(name) in _OPENVPN_PROTOCOL_TYPES
+
+
+def _openvpn_clients_from_sessions(db: Session, node_id: int) -> list[OpenVpnClient]:
+    """Connected OpenVPN clients known to traffic accounting for this node.
+
+    The management socket may be unreachable (missing socket, restart, permissions);
+    an active traffic session still proves the client is connected right now.
+    """
+    rows = (
+        db.query(TrafficSessionState)
+        .filter(TrafficSessionState.node_id == node_id, TrafficSessionState.is_active.is_(True))
+        .all()
+    )
+    return [
+        OpenVpnClient(
+            common_name=row.common_name,
+            real_address=row.real_address or "",
+            virtual_address=row.virtual_address or "",
+            bytes_received=int(row.last_bytes_received or 0),
+            bytes_sent=int(row.last_bytes_sent or 0),
+            connected_since="",
+            connected_since_ts=int(row.connected_since_ts or 0),
+            profile=row.profile,
+            data_source="db_fallback",
+        )
+        for row in rows
+        if _is_openvpn_session_profile(row.profile)
+    ]
+
+
 def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOverview:
     if not is_vpn_node(node):
         try:
@@ -470,6 +517,20 @@ def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOve
 
     adapter = get_adapter_for_node(node)
     ovpn_clients, openvpn_data_source = adapter.get_openvpn_status_snapshot()
+    if not ovpn_clients:
+        # Мёртвый management socket не должен превращать все карточки в «офлайн»:
+        # активная сессия учёта трафика доказывает, что клиент на узле подключён.
+        fallback_ovpn = _openvpn_clients_from_sessions(db, node.id)
+        if fallback_ovpn:
+            ovpn_clients = fallback_ovpn
+            openvpn_data_source = "db_fallback"
+    try:
+        openvpn_global_stats: OpenVpnGlobalStats | None = OpenVpnGlobalStats(
+            **adapter.get_openvpn_global_stats()
+        )
+    except Exception as exc:  # старый агент без эндпоинта — не ломаем обзор
+        logger.debug("openvpn global stats unavailable node_id=%s: %s", node.id, exc)
+        openvpn_global_stats = None
     wireguard_peers = adapter.parse_wireguard_status()
     amneziawg2_peers = _load_awg2_peers_for_node(db, adapter)
     services = adapter.get_service_status()
@@ -519,6 +580,7 @@ def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOve
         node_id=node.id,
         node_name=node.name,
         openvpn_data_source=openvpn_data_source,
+        openvpn_global_stats=openvpn_global_stats,
         nodes_summary=[],
         nodes_online=1 if node.status == NodeStatus.online else 0,
         nodes_total=1,

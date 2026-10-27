@@ -394,6 +394,11 @@ export interface OpenVpnClient {
   connected_since_ts?: number
   profile?: string | null
   data_source?: string
+  /** OpenVPN 2.6+ per-session id (client-kill <CID>): one device, not the whole CN. */
+  client_id?: string | null
+  peer_id?: string | null
+  /** OpenVPN 2.7+ data channel cipher; non-AEAD values are a warning sign. */
+  cipher?: string | null
   display_address?: string | null
   client_ip?: string | null
   city?: string | null
@@ -497,6 +502,11 @@ export interface MonitoringOverview {
   node_id?: number | null
   node_name?: string | null
   openvpn_data_source?: string
+  /** Daemon-wide OpenVPN counters (GLOBAL_STATS): DCO state and bcast/mcast queue. */
+  openvpn_global_stats?: {
+    dco_enabled: boolean | null
+    max_bcast_mcast_queue: number | null
+  } | null
   scope?: 'node' | 'all'
   nodes_summary?: MonitoringNodeSummary[]
   nodes_online?: number

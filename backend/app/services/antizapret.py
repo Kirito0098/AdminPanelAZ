@@ -42,6 +42,15 @@ _ALREADY_REVOKED_MARKERS = (
     "already been revoked",
 )
 
+# EasyRSA cannot revoke a CN it has no issued certificate for: the client is already gone.
+_NO_CERTIFICATE_MARKERS = (
+    "unable to revoke as no certificate was found",
+    "no certificate was found",
+)
+
+# AntiZapret's WireGuard script answers this when the peer is not in the server config.
+_WIREGUARD_CLIENT_MISSING_MARKERS = ("please check if client exists",)
+
 
 
 def _install_staged(src: Path, dst: Path) -> None:
@@ -77,7 +86,7 @@ class AntiZapretService:
         self.client_dir = self.base_path / "client"
         self.config_dir = self.base_path / "config"
         self.knot_resolver_dir = Path("/etc/knot-resolver")
-        self.openvpn_logs = Path("/etc/openvpn/server/logs")
+        self.openvpn_logs = Path(settings.openvpn_socket_dir)
         self.openvpn_ccd_dir = OPENVPN_CCD_DIR
 
     def _run_client_script(self, *args: str, timeout: int = 120) -> str:
@@ -131,6 +140,14 @@ class AntiZapretService:
         try:
             return self._run_client_script("2", client_name)
         except HTTPException as exc:
+            if self._openvpn_client_gone(client_name, exc):
+                removed = self._purge_openvpn_client_artifacts(client_name)
+                logger.warning(
+                    "AntiZapret has no certificate for OpenVPN client %s; removed %d leftover file(s)",
+                    client_name,
+                    removed,
+                )
+                return f"Клиент {client_name} уже отсутствует: файлов удалено {removed}"
             if not self._openvpn_client_cert_only_revoked(client_name, exc):
                 raise
             removed = self._purge_openvpn_client_artifacts(client_name)
@@ -141,6 +158,26 @@ class AntiZapretService:
                 removed,
             )
             return f"Клиент {client_name} удалён: сертификат уже отозван, файлов удалено {removed}"
+
+    def _openvpn_client_gone(self, client_name: str, exc: HTTPException) -> bool:
+        """True only when EasyRSA has no certificate and no profile is left for the client.
+
+        Same guard as the «already revoked» path: a client with profiles or a still-valid
+        index entry keeps its files and the original error.
+        """
+        detail = str(exc.detail or "").lower()
+        if not any(marker in detail for marker in _NO_CERTIFICATE_MARKERS):
+            return False
+        try:
+            if self.get_profile_files(client_name, VpnType.openvpn):
+                return False
+            from app.services.openvpn_pki import load_easyrsa_index
+
+            entries = load_easyrsa_index(self)
+        except Exception as verify_exc:  # noqa: BLE001 — verification must never mask the delete error
+            logger.warning("Cannot verify PKI state of OpenVPN client %s: %s", client_name, verify_exc)
+            return False
+        return not any(entry.common_name == client_name and entry.status == "V" for entry in entries)
 
     def _openvpn_client_cert_only_revoked(self, client_name: str, exc: HTTPException) -> bool:
         """True only when the script failed because every profile cert is already revoked/expired.
@@ -164,19 +201,32 @@ class AntiZapretService:
 
     def _purge_openvpn_client_artifacts(self, client_name: str) -> int:
         """Remove profile files and the ccd entry of a client whose certificate is already dead."""
-        paths: set[Path] = {self.openvpn_ccd_dir / client_name}
+        removed = self._purge_profile_files(client_name, VpnType.openvpn)
+        ccd = self.openvpn_ccd_dir / client_name
         try:
-            for entry in self.get_profile_files(client_name, VpnType.openvpn):
-                path = entry.get("path")
-                if path:
-                    paths.add(Path(path))
+            if ccd.is_file():
+                ccd.unlink()
+                removed += 1
+        except OSError as exc:
+            logger.warning("Cannot remove %s: %s", ccd, exc)
+        return removed
+
+    def _purge_profile_files(self, client_name: str, vpn_type: VpnType) -> int:
+        """Remove profile files of a client that no longer exists on the node."""
+        try:
+            entries = self.get_profile_files(client_name, vpn_type)
         except Exception as exc:  # noqa: BLE001 — a broken listing must not block the cleanup
-            logger.warning("Cannot list OpenVPN profiles of %s: %s", client_name, exc)
+            logger.warning("Cannot list %s profiles of %s: %s", vpn_type.value, client_name, exc)
+            return 0
         removed = 0
-        for path in sorted(paths):
+        for entry in entries:
+            path = entry.get("path")
+            if not path:
+                continue
             try:
-                if path.is_file():
-                    path.unlink()
+                profile = Path(path)
+                if profile.is_file():
+                    profile.unlink()
                     removed += 1
             except OSError as exc:
                 logger.warning("Cannot remove %s: %s", path, exc)
@@ -197,7 +247,30 @@ class AntiZapretService:
 
     def delete_wireguard_client(self, client_name: str) -> str:
         self.validate_client_name(client_name)
-        return self._run_client_script("5", client_name)
+        try:
+            return self._run_client_script("5", client_name)
+        except HTTPException as exc:
+            if not self._wireguard_client_missing(client_name, exc):
+                raise
+            removed = self._purge_profile_files(client_name, VpnType.wireguard)
+            logger.warning(
+                "AntiZapret has no WireGuard peer %s; removed %d leftover file(s)",
+                client_name,
+                removed,
+            )
+            return f"Клиент {client_name} уже отсутствует: файлов удалено {removed}"
+
+    def _wireguard_client_missing(self, client_name: str, exc: HTTPException) -> bool:
+        """True only when the script reports a missing peer and the live list agrees."""
+        detail = str(exc.detail or "").lower()
+        if not any(marker in detail for marker in _WIREGUARD_CLIENT_MISSING_MARKERS):
+            return False
+        try:
+            clients = {name.strip().lower() for name in self.list_wireguard_clients()}
+        except Exception as verify_exc:  # noqa: BLE001 — verification must never mask the delete error
+            logger.warning("Cannot list WireGuard clients to verify %s: %s", client_name, verify_exc)
+            return False
+        return client_name.strip().lower() not in clients
 
     def list_wireguard_clients(self) -> list[str]:
         output = self._run_client_script("6")

@@ -79,12 +79,14 @@ type LogLevel = 'all' | 'error' | 'warn' | 'info'
 function dataSourceLabel(source?: string) {
   if (source === 'management_socket') return connectionSourceLabel('management_socket')
   if (source === 'status_log') return 'Status-логи'
+  if (source === 'db_fallback') return 'Сессии из БД (сокет недоступен)'
   return 'Нет данных'
 }
 
 function dataSourceVariant(source?: string): 'default' | 'secondary' | 'outline' {
   if (source === 'management_socket') return 'default'
   if (source === 'status_log') return 'secondary'
+  if (source === 'db_fallback') return 'secondary'
   return 'outline'
 }
 

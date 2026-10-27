@@ -196,6 +196,13 @@ class OpenVpnKillClientRequest(BaseModel):
     client_name: str = Field(min_length=1, max_length=32, pattern=KILL_CLIENT_NAME_PATTERN)
 
 
+class OpenVpnClientKillByIdRequest(BaseModel):
+    """Disconnect one session (device) by its OpenVPN Client ID."""
+
+    unit: str = Field(min_length=1, max_length=128)
+    client_id: int = Field(ge=0, le=2_147_483_647)
+
+
 class RotateApiKeyRequest(BaseModel):
     new_api_key: str = Field(min_length=24)
 
@@ -366,6 +373,19 @@ def openvpn_kill(payload: OpenVpnKillClientRequest, _: None = Depends(verify_api
     if not unit:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимый OpenVPN unit")
     return openvpn_management_service.kill_client(unit, payload.client_name)
+
+
+@app.post("/openvpn/management/client-kill")
+def openvpn_client_kill(payload: OpenVpnClientKillByIdRequest, _: None = Depends(verify_api_key)):
+    unit = normalize_watch_unit(payload.unit)
+    if not unit:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимый OpenVPN unit")
+    return openvpn_management_service.kill_client_by_id(unit, payload.client_id)
+
+
+@app.get("/openvpn/management/global-stats")
+def openvpn_global_stats(_: None = Depends(verify_api_key)):
+    return openvpn_management_service.collect_global_stats()
 
 
 @app.get("/openvpn/multihome")

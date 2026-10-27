@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronsDownUp, ChevronsUpDown, Clock, User } from 'lucide-react'
 import MonitoringConnectionsList, {
+  type DeviceDisconnectTarget,
   type MonitoringConnectionRow,
 } from '@/components/monitoring/MonitoringConnectionsList'
 import { Badge } from '@/components/ui/badge'
@@ -36,6 +37,7 @@ type MonitoringUsersListProps = {
   rows: MonitoringConnectionRow[]
   showNodeColumn: boolean
   onDisconnectOpenVpn?: (clientName: string) => void
+  onDisconnectDevice?: (target: DeviceDisconnectTarget, blockMinutes?: number) => void
 }
 
 /**
@@ -49,6 +51,7 @@ export default function MonitoringUsersList({
   rows,
   showNodeColumn,
   onDisconnectOpenVpn,
+  onDisconnectDevice,
 }: MonitoringUsersListProps) {
   const groups = useMemo(() => groupConnectionsByOwner(rows), [rows])
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
@@ -146,6 +149,7 @@ export default function MonitoringUsersList({
                   rows={group.rows}
                   showNodeColumn={showNodeColumn}
                   onDisconnectOpenVpn={onDisconnectOpenVpn}
+                  onDisconnectDevice={onDisconnectDevice}
                 />
               </div>
             )}

@@ -737,6 +737,11 @@ class OpenVpnClient(BaseModel):
     connected_since_ts: int = 0
     profile: str | None = None
     data_source: str = "status_log"
+    # OpenVPN 2.6+ per-session identity: two devices of one CN are separate sessions.
+    client_id: str | None = None
+    peer_id: str | None = None
+    # OpenVPN 2.7+ reports the data channel cipher per session (AES-GCM, CHACHA20, …).
+    cipher: str | None = None
     display_address: str | None = None
     client_ip: str | None = None
     city: str | None = None
@@ -826,6 +831,13 @@ class GeoRoutingHintResponse(BaseModel):
     nodes: list[GeoRoutingNodeHint] = Field(default_factory=list)
 
 
+class OpenVpnGlobalStats(BaseModel):
+    """Daemon-wide OpenVPN counters from ``GLOBAL_STATS``."""
+
+    dco_enabled: bool | None = None
+    max_bcast_mcast_queue: int | None = None
+
+
 class MonitoringOverview(BaseModel):
     services: list[MonitoringService]
     openvpn_clients: list[OpenVpnClient]
@@ -836,6 +848,7 @@ class MonitoringOverview(BaseModel):
     node_id: int | None = None
     node_name: str | None = None
     openvpn_data_source: str = "status_log"
+    openvpn_global_stats: OpenVpnGlobalStats | None = None
     scope: str = "node"
     nodes_summary: list[MonitoringNodeSummary] = Field(default_factory=list)
     nodes_online: int = 0

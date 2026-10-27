@@ -273,6 +273,12 @@ class NodeAdapter(ABC):
     def kill_openvpn_client(self, unit: str, client_name: str) -> dict: ...
 
     @abstractmethod
+    def kill_openvpn_session(self, unit: str, client_id: int) -> dict: ...
+
+    @abstractmethod
+    def get_openvpn_global_stats(self) -> dict[str, Any]: ...
+
+    @abstractmethod
     def disconnect_openvpn_client(self, client_name: str) -> dict: ...
 
     @abstractmethod
@@ -896,6 +902,13 @@ class LocalNodeAdapter(NodeAdapter):
     def kill_openvpn_client(self, unit: str, client_name: str) -> dict:
         profile_key = normalize_watch_unit(unit) or unit
         return openvpn_management_service.kill_client(profile_key, client_name)
+
+    def kill_openvpn_session(self, unit: str, client_id: int) -> dict:
+        profile_key = normalize_watch_unit(unit) or unit
+        return openvpn_management_service.kill_client_by_id(profile_key, client_id)
+
+    def get_openvpn_global_stats(self) -> dict[str, Any]:
+        return openvpn_management_service.collect_global_stats()
 
     def disconnect_openvpn_client(self, client_name: str) -> dict:
         return openvpn_management_service.disconnect_client(client_name)
@@ -1606,6 +1619,18 @@ class RemoteNodeAdapter(NodeAdapter):
             json=payload,
             timeout=30.0,
         )
+
+    def kill_openvpn_session(self, unit: str, client_id: int) -> dict:
+        payload = {"unit": unit, "client_id": int(client_id)}
+        return self._request(
+            "POST",
+            "/openvpn/management/client-kill",
+            json=payload,
+            timeout=30.0,
+        )
+
+    def get_openvpn_global_stats(self) -> dict[str, Any]:
+        return self._request("GET", "/openvpn/management/global-stats", timeout=30.0)
 
     def parse_wireguard_status(self) -> list[WireGuardPeer]:
         overview = self._get_monitoring_overview()

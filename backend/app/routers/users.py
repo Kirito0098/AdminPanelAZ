@@ -133,7 +133,7 @@ from app.services.admin_bootstrap import (
 from app.services.password_policy import validate_password
 from app.services.refresh_token import invalidate_user_sessions
 from app.services.self_service import password_change_required_on_admin_set
-from app.services.telegram_link import notify_telegram_unlinked
+from app.services.telegram_link import notify_telegram_unlinked, release_telegram_of_pending_deletion
 from app.services.user_access_extend import compute_extended_access_until
 from app.services.user_subscription import (
     get_user_access_until,
@@ -368,6 +368,21 @@ def list_users(
     return users
 
 
+def _pending_deletion_conflict(db: Session, user: User, actor: User, *, what: str) -> HTTPException:
+    """Пользователь ещё удаляется: перезапускаем очистку вместо «уже существует»."""
+    enqueue_user_delete_cleanup(db, user_id=user.id, actor_username=actor.username)
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "user_deletion_pending",
+            "message": (
+                f"{what} занято пользователем {user.username}, который ещё удаляется — "
+                "очистка перезапущена, повторите через несколько секунд"
+            ),
+        },
+    )
+
+
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def create_user(
     payload: UserCreate,
@@ -375,7 +390,10 @@ def create_user(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    if db.query(User).filter(User.username == payload.username).first():
+    existing = db.query(User).filter(User.username == payload.username).first()
+    if existing is not None:
+        if existing.provision_state == "pending_deletion":
+            raise _pending_deletion_conflict(db, existing, admin, what="Имя пользователя")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Пользователь уже существует")
     validate_password(payload.password, username=payload.username)
     user = User(
@@ -420,7 +438,10 @@ def create_provisioned_user(
     admin: User = Depends(require_admin),
 ):
     """Создать абонента (role=user) с планом конфигов и сразу поставить задачу применения."""
-    if db.query(User).filter(User.username == payload.username).first():
+    existing = db.query(User).filter(User.username == payload.username).first()
+    if existing is not None:
+        if existing.provision_state == "pending_deletion":
+            raise _pending_deletion_conflict(db, existing, admin, what="Имя пользователя")
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Пользователь уже существует")
     if not payload.client_base_name:
         raise HTTPException(
@@ -432,6 +453,8 @@ def create_provisioned_user(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))
     taken = db.query(User).filter(func.lower(User.client_base_name) == base.lower()).first()
     if taken is not None:
+        if taken.provision_state == "pending_deletion":
+            raise _pending_deletion_conflict(db, taken, admin, what="Базовое имя")
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail=f"Базовое имя уже используется пользователем {taken.username}",
@@ -950,7 +973,16 @@ def update_user(
             )
         had_tg = bool((user.telegram_id or "").strip())
         if tg_id:
-            existing = db.query(User).filter(User.telegram_id == tg_id, User.id != user.id).first()
+            release_telegram_of_pending_deletion(db, tg_id, keep_user_id=user.id)
+            existing = (
+                db.query(User)
+                .filter(
+                    User.telegram_id == tg_id,
+                    User.id != user.id,
+                    User.provision_state != "pending_deletion",
+                )
+                .first()
+            )
             if existing:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -1216,19 +1248,22 @@ def _last_provision_task(db: Session, user_id: int) -> dict | None:
     return background_task_service.serialize_background_task(task) if task is not None else None
 
 
-def _group_provision_configs(
-    db: Session, user: User, base: str | None, node_ids: list[int]
-) -> list[ProvisioningConfig]:
-    query = db.query(VpnConfig).filter(VpnConfig.owner_id == user.id)
-    if node_ids:
-        query = query.filter(VpnConfig.node_id.in_(node_ids))
-    configs = query.all()
-    namespace = names_under_base(base) if base else None
-    labels = {node.id: node.name for node in db.query(Node).filter(Node.id.in_(node_ids)).all()} if node_ids else {}
+def _group_provision_configs(db: Session, user: User) -> list[ProvisioningConfig]:
+    """Все конфиги владельца — и плановые, и оставшиеся вне плана.
+
+    Раньше фильтр по namespace ``client_base_name`` и по узлам плана прятал конфиг,
+    переназначенный пользователю с другим базовым именем: он исчезал и у прежнего
+    владельца (сменился ``owner_id``), и у нового (имя вне namespace).
+    """
+    configs = db.query(VpnConfig).filter(VpnConfig.owner_id == user.id).all()
+    node_ids = {config.node_id for config in configs}
+    labels = (
+        {node.id: node.name for node in db.query(Node).filter(Node.id.in_(node_ids)).all()}
+        if node_ids
+        else {}
+    )
     by_name: dict[str, list[dict]] = defaultdict(list)
     for config in configs:
-        if namespace is not None and (config.client_name or "").lower() not in namespace:
-            continue
         by_name[config.client_name].append(
             {
                 "node_id": config.node_id,
@@ -1288,7 +1323,7 @@ def get_provisioning(
         desired=desired,
         suggested=suggested,
         plan=serialized_plan,
-        configs=_group_provision_configs(db, user, base, node_ids),
+        configs=_group_provision_configs(db, user),
         last_task=_last_provision_task(db, user.id),
         grace_hold=GraceHoldView(**grace_hold) if grace_hold else None,
     )
@@ -1869,6 +1904,8 @@ def delete_user(
     user.provision_state = "pending_deletion"
     user.panel_login_enabled = False
     user.is_active = False
+    # Telegram уже записан в архив выше — освобождаем id сразу, не дожидаясь очистки.
+    user.telegram_id = None
     user.token_version = (user.token_version or 0) + 1
     invalidate_user_sessions(db, user, reason="deleted", commit=False)
     active_web_session_service.revoke_user_sessions(db, user.username, commit=False)

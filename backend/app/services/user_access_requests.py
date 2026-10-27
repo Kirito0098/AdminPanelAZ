@@ -129,11 +129,20 @@ def _pending_cap(db: Session) -> int:
 
 
 def _is_bound(db: Session, telegram_id: str) -> User | None:
-    return db.query(User).filter(User.telegram_id == telegram_id).first()
+    return (
+        db.query(User)
+        .filter(User.telegram_id == telegram_id, User.provision_state != "pending_deletion")
+        .first()
+    )
 
 
 def _login_is_free(db: Session, username: str) -> bool:
-    return db.query(User).filter(User.username == username).first() is None
+    return (
+        db.query(User)
+        .filter(User.username == username, User.provision_state != "pending_deletion")
+        .first()
+        is None
+    )
 
 
 def _propose_login(db: Session, telegram_username: str | None, telegram_id: str) -> str:

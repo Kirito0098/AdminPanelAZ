@@ -23,6 +23,7 @@ import {
   getResourceHistory,
   openMonitoringStream,
   openvpnDisconnect,
+  openvpnDisconnectSession,
   restartService,
   type StreamHandle,
 } from '@/api/client'
@@ -31,6 +32,7 @@ import MonitoringCharts from '@/components/monitoring/MonitoringCharts'
 import { formatBytes, totalTraffic } from '@/lib/trafficFormat'
 import MonitoringConnectionsList, {
   buildMonitoringConnectionRows,
+  type DeviceDisconnectTarget,
 } from '@/components/monitoring/MonitoringConnectionsList'
 import MonitoringGeoSummary from '@/components/monitoring/MonitoringGeoSummary'
 import MonitoringUsersList from '@/components/monitoring/MonitoringUsersList'
@@ -692,6 +694,34 @@ export default function MonitoringPage() {
     })
   }
 
+  const handleDisconnectDevice = (target: DeviceDisconnectTarget, blockMinutes?: number) => {
+    const blocking = blockMinutes != null
+    confirm({
+      title: blocking ? `Отключить и заблокировать на ${blockMinutes} мин?` : 'Отключить одно устройство?',
+      description: blocking
+        ? `Сессия Client ID ${target.clientId} (${target.profile}) будет отключена, а клиент «${target.clientName}» заблокирован на ${blockMinutes} мин — все его устройства не смогут подключиться до истечения срока.`
+        : `Сессия Client ID ${target.clientId} (${target.profile}) будет отключена. Остальные устройства клиента останутся на связи.`,
+      confirmLabel: blocking ? 'Отключить и заблокировать' : 'Отключить устройство',
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          await openvpnDisconnectSession(target.profile, target.clientId, target.nodeId, {
+            clientName: target.clientName,
+            blockMinutes,
+          })
+          success(
+            blocking
+              ? `Устройство ${target.clientId} отключено, «${target.clientName}» заблокирован на ${blockMinutes} мин`
+              : `Устройство ${target.clientId} отключено`,
+          )
+          await load({ manual: false })
+        } catch (err) {
+          notifyError(err instanceof ApiError ? err.message : 'Ошибка отключения устройства')
+        }
+      },
+    })
+  }
+
   const handleRestartService = (serviceName: string) => {
     confirm({
       title: 'Перезапустить службу?',
@@ -797,6 +827,7 @@ export default function MonitoringPage() {
               refreshIntervalSec={REFRESH_INTERVAL}
               geoipMode={data?.geoip_mode}
               dataSource={data?.openvpn_data_source}
+              globalStats={data?.openvpn_global_stats}
               servedFromCache={data?.served_from_cache}
             />
           </div>
@@ -1380,6 +1411,7 @@ export default function MonitoringPage() {
                         rows={connectionRows}
                         showNodeColumn={showNodeColumn}
                         onDisconnectOpenVpn={handleDisconnectOpenVpn}
+                        onDisconnectDevice={handleDisconnectDevice}
                       />
                     ) : (
                       <MonitoringConnectionsList
@@ -1392,6 +1424,7 @@ export default function MonitoringPage() {
                           setSortDir(dir)
                         }}
                         onDisconnectOpenVpn={handleDisconnectOpenVpn}
+                        onDisconnectDevice={handleDisconnectDevice}
                       />
                     )}
                   </CardContent>

@@ -166,3 +166,22 @@ export async function openvpnDisconnect(clientName: string) {
     body: JSON.stringify({ client_name: clientName }),
   })
 }
+
+/** Disconnect ONE device (session) of an OpenVPN client; no cooldown, no policy change. */
+export async function openvpnDisconnectSession(
+  profile: string,
+  clientId: string | number,
+  nodeId?: number | null,
+  options?: { clientName?: string; blockMinutes?: number },
+) {
+  return apiFetch('/client-access/openvpn/disconnect-session', {
+    method: 'POST',
+    body: JSON.stringify({
+      profile,
+      client_id: Number(clientId),
+      node_id: nodeId ?? null,
+      client_name: options?.clientName ?? null,
+      block_minutes: options?.blockMinutes ?? null,
+    }),
+  })
+}

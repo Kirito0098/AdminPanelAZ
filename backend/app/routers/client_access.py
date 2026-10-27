@@ -1,6 +1,7 @@
 import logging
 import os
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
@@ -11,14 +12,20 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_admin, tg_mini_token_allowed
 from app.config import get_settings
 from app.database import get_db
-from app.models import AmneziaWg2AccessPolicy, User, UserRole, VpnConfig, VpnType
+from app.models import AmneziaWg2AccessPolicy, Node, User, UserRole, VpnConfig, VpnType
 from app.services.access_policy import (
     AccessPolicyService,
 )
 from app.services.access_until import set_access_until as set_policy_access_until
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
-from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
+from app.services.node_manager import (
+    get_active_adapter,
+    get_active_node,
+    get_adapter_for_node,
+    get_node_antizapret_path,
+    node_metadata_dict,
+)
 from app.services.node_sync.groups import require_ha_primary_for_client_ops
 from app.services.node_sync.client_ops_sync import (
     apply_openvpn_disconnect_on_node,
@@ -53,6 +60,17 @@ DISCONNECT_COOLDOWN_SECONDS = max(
 class BlockRequest(BaseModel):
     client_name: str
     days: int | None = Field(default=None, ge=1, le=3650)
+
+
+class OpenVpnSessionDisconnectRequest(BaseModel):
+    """Одна сессия (устройство) клиента: профиль OpenVPN + его Client ID."""
+
+    profile: str = Field(min_length=1, max_length=64)
+    client_id: int = Field(ge=0, le=2_147_483_647)
+    node_id: int | None = None
+    # Блокировка действует на клиента целиком (banned_clients по CN), не на устройство.
+    client_name: str | None = Field(default=None, min_length=1, max_length=32)
+    block_minutes: int | None = Field(default=None, ge=1, le=1440)
 
 
 class ExpiryRequest(BaseModel):
@@ -348,6 +366,76 @@ def openvpn_disconnect(payload: BlockRequest, request: Request, db: Session = De
         node_id=node.id,
         client_name=client_name,
         cooldown_seconds=cooldown,
+    )
+    return result
+
+
+def _apply_openvpn_temp_block(
+    db: Session, node: Node, client_name: str, minutes: int, actor: str | None
+) -> None:
+    """Короткая блокировка клиента на N минут: banned_clients + авто-снятие по сроку."""
+    raw_path = node_metadata_dict(node).get("antizapret_path") or get_settings().antizapret_path
+    service = AccessPolicyService(
+        db,
+        antizapret_path=Path(str(raw_path)),
+        node_id=node.id,
+        node_name=node.name,
+        adapter=get_adapter_for_node(node),
+    )
+    service.openvpn_temp_block_minutes(client_name, minutes, actor=actor)
+
+
+@router.post("/openvpn/disconnect-session")
+def openvpn_disconnect_session(
+    payload: "OpenVpnSessionDisconnectRequest",
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """Отключить одно устройство (сессию) клиента, по желанию — с блокировкой на N минут.
+
+    В отличие от ``/openvpn/disconnect`` не ставит cooldown на 15 с: рвётся ровно одна
+    сессия по OpenVPN Client ID. Блокировка (``block_minutes``) действует на клиента
+    целиком — OpenVPN банит common name, а не отдельное устройство.
+    """
+    if payload.block_minutes is not None and not payload.client_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Для блокировки укажите имя клиента",
+        )
+    node = db.get(Node, payload.node_id) if payload.node_id is not None else get_active_node(db)
+    if node is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Узел не найден")
+
+    adapter = get_adapter_for_node(node)
+    result = adapter.kill_openvpn_session(payload.profile, payload.client_id)
+    if not result.get("success"):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=result.get("message", "Не удалось отключить устройство"),
+        )
+
+    if payload.block_minutes is not None and payload.client_name:
+        _apply_openvpn_temp_block(
+            db, node, payload.client_name, payload.block_minutes, user.username
+        )
+        result["block_minutes"] = payload.block_minutes
+        result["blocked_client"] = payload.client_name
+
+    log_action(
+        db,
+        action="openvpn_disconnect_session",
+        user_id=user.id,
+        username=user.username,
+        details=(
+            f"profile={payload.profile} cid={payload.client_id} node={node.name}"
+            + (
+                f" block={payload.block_minutes}m client={payload.client_name}"
+                if payload.block_minutes is not None
+                else ""
+            )
+        ),
+        remote_addr=request.client.host if request.client else None,
     )
     return result
 

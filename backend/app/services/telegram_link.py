@@ -68,6 +68,27 @@ def create_link_code(db: Session, user: User) -> tuple[str, int]:
     return code, _CODE_TTL_SECONDS
 
 
+def release_telegram_of_pending_deletion(
+    db: Session, telegram_id: str, *, keep_user_id: int | None = None
+) -> None:
+    """Освободить telegram_id у аккаунтов в ``pending_deletion``.
+
+    Индекс ``users.telegram_id`` уникальный: пока строка «ещё удаляется» держит id,
+    привязать его к другому аккаунту нельзя. История переписки уже в архиве.
+    """
+    from app.services.user_access_requests import delete_user_write_archive
+
+    query = db.query(User).filter(
+        User.telegram_id == telegram_id,
+        User.provision_state == "pending_deletion",
+    )
+    if keep_user_id is not None:
+        query = query.filter(User.id != keep_user_id)
+    for stale in query.all():
+        delete_user_write_archive(db, stale)
+        stale.telegram_id = None
+
+
 def redeem_link_code(db: Session, code: str, telegram_id: str) -> tuple[bool, str, User | None]:
     normalized = (code or "").strip().lower()
     if not normalized:
@@ -88,9 +109,11 @@ def redeem_link_code(db: Session, code: str, telegram_id: str) -> tuple[bool, st
         return False, "Пользователь панели не найден.", None
 
     existing = db.query(User).filter(User.telegram_id == telegram_id, User.id != user.id).first()
-    if existing:
+    if existing and existing.provision_state != "pending_deletion":
         db.commit()
         return False, "Этот Telegram ID уже привязан к другому пользователю.", None
+
+    release_telegram_of_pending_deletion(db, telegram_id, keep_user_id=user.id)
 
     current = (user.telegram_id or "").strip()
     if current and current != telegram_id:
