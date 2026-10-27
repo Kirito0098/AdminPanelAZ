@@ -82,11 +82,31 @@ pnpm-debug.log*
 # --- IDE / OS ---
 .idea/
 .vscode/
-.cursor/
 *.swp
 *~
 .DS_Store
 Thumbs.db
+
+# --- Cursor: curated pack in git; local secrets/settings out ---
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+!.cursor/skills/
+!.cursor/skills/**
+!.cursor/hooks.json
+!.cursor/mcp.json.example
+# Optional heavy / unused UI skill (binary) — keep local only if reinstalled
+.cursor/skills/impeccable/
+
+# --- Agents: AGENTS.md + relative skill links; local MCP/bin out ---
+.agents/*
+!.agents/AGENTS.md
+!.agents/skills/
+!.agents/skills/**
+!.agents/skills-lock.json
+!.agents/hooks.json
+.agents/bin/
+.agents/**/__pycache__/
 
 # --- Local screenshot tooling (credentials / panel URL — not for repo) ---
 scripts/capture-readme-screenshots.mjs
@@ -101,8 +121,7 @@ docs/superpowers/
 # --- OpenCode agent workspace (local config, memory, plans; not for repo) ---
 .opencode/
 
-# --- Agent skills installed via `npx skills` (local; not for repo) ---
-.agents/
+# Root-level skills lock from global `npx skills` (project lock is .agents/skills-lock.json)
 /skills-lock.json
 
 # --- Local implementation plans (owner-only; not for public repo) ---

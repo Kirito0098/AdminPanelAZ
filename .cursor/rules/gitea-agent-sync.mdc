@@ -1,0 +1,41 @@
+---
+description: GitHub — проект + curated agent pack; личный Gitea — полный снимок агента; sync через pre-push
+alwaysApply: true
+---
+
+# Синхронизация с личным Gitea
+
+| Куда | Что |
+|---|---|
+| `origin` — GitHub `Kirito0098/AdminPanelAZ` | код проекта **и** curated agent pack (см. ниже) |
+| `gitea` — `git.claymore-dev.com/Claymore/AdminPanelAZ` | те же ветки и теги |
+| `Claymore/AdminPanelAZ-agent` (приватный) | полный снимок: `project/.cursor`, `project/.agents`, `project/docs/superpowers`, `project/.superpowers`, `home/.agents/skills` |
+
+Работает само: `.git/hooks/pre-push` — симлинк на `/root/agent-sync/AdminPanelAZ-agent/hooks/pre-push`. При `git push origin` хук отправляет те же refs в `gitea` и запускает `bin/sync.sh` (снимок → проверка секретов → коммит → push, только при изменениях). Вручную в `gitea` пушить не нужно.
+
+## Curated pack в GitHub (коммитить)
+
+- `.cursor/rules/`
+- `.cursor/skills/` (project skills; без тяжёлых бинарников вроде impeccable)
+- `.cursor/hooks.json`
+- `.cursor/mcp.json.example`
+- `.agents/AGENTS.md`
+- `.agents/skills/` — **только** относительные symlink’и на `../.cursor/skills/…`
+- `.agents/skills-lock.json` (если есть)
+
+## ❌ Не коммитить в GitHub
+
+- `.cursor/mcp.json`, `.cursor/settings.json` — локальные пути/токены
+- `.cursor/skills/impeccable/` и прочий локальный UI-skill с бинарниками (ставить отдельно при необходимости)
+- Absolute symlink’и на `/root/…` или `~/.agents/…`
+- `docs/superpowers/`, `.superpowers/`, `.opencode/`, `.codebase-memory/`
+- `.agents/bin/`, `__pycache__`, локальные MCP-обёртки с секретами
+- Скрипт sync / pre-push hook — живут в `/root/agent-sync/AdminPanelAZ-agent`
+- `git push --no-verify origin` — Gitea не получит ни refs, ни снимок
+
+## Если…
+
+- **Хука нет** (новый клон): `ln -sfn /root/agent-sync/AdminPanelAZ-agent/hooks/pre-push /opt/AdminPanelAZ/.git/hooks/pre-push`.
+- **«pre-push: в gitea не отправлено»** — GitHub уже обновлён; повторить `git push gitea <ветка>` (и `--tags`), когда Gitea доступен.
+- **«agent-sync: похоже на секрет»** — показать пользователю названные файлы и не отправлять. Настоящий секрет — убрать из файла; пример из документации — в нём должно быть `EXAMPLE`, иначе спросить пользователя. Повтор: `/root/agent-sync/AdminPanelAZ-agent/bin/sync.sh` (`--dry-run` — без коммита).
+- **Новый каталог для синхронизации** — строка `snapshot <источник> <путь в снимке>` в `bin/sync.sh` и случай в `tests/test-sync.sh`; проверка: `bash tests/test-sync.sh && bash tests/test-pre-push.sh`, `shellcheck -S warning`. Коммит и push — в agent-репозитории, не в проекте.

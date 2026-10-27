@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "skills": {
+    "tui-design": {
+      "source": "gfargo/skills",
+      "sourceType": "github",
+      "skillPath": ".cursor/skills/tui-design/SKILL.md",
+      "computedHash": "8f26d4897417a5e582786cf9f190fce95d26d7dd6423b3a5c7e319be897183d8",
+      "note": "vendored into project .cursor/skills"
+    }
+  }
+}

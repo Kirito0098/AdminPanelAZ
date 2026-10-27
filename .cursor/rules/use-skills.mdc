@@ -1,0 +1,101 @@
+---
+description: Обязательный выбор skill перед работой — какой skill читать в какой ситуации
+alwaysApply: true
+---
+
+# Skills — читать до действий, а не по памяти
+
+Перед любой задачей (кроме вопроса-справки и чтения кода) сопоставь её с таблицей ниже. Если ситуация подходит — **прочитай файл skill инструментом Read**; путь бери из списка доступных skills в контексте сессии. Описания в таблице недостаточно, нужен полный текст.
+Можно сочетать несколько skills, если задача затрагивает несколько областей (например, баг в UI: `systematic-debugging` + `web-design-guidelines`).
+В первом сообщении одной строкой назови, какие skills применяешь (или почему ни один не подходит).
+
+## Вилка процессов (чтобы не путать Superpowers и pstack)
+
+```text
+Новая фича / редизайн / новое UX
+  → brainstorming → writing-plans → «да» пользователя
+  → реализация: executing-plans или subagent-driven-development
+  → /poteto-mode только если пользователь явно попросил rigor / poteto
+    ИЛИ уже есть апрув плана и задача жёсткая (архитектура, гонки, «доведи»)
+
+Баг / «не работает» / красный CI  (без /poteto-mode)
+  → systematic-debugging
+  → дешёвый локальный тест → project tdd (.cursor/skills/tdd)
+
+Явно /poteto-mode или «доведи PR» / babysit в стиле poteto
+  → только playbook poteto-mode; не параллелить systematic-debugging,
+    writing-plans, finishing-a-development-branch, swarm/arena вручную
+
+Меню / сайдбар / маршруты / «куда раздел»
+  → site-architecture (если установлен); экран → web-design-guidelines
+    (+ impeccable, только если поставили сами)
+
+Готово / «исправлено» / перед коммитом
+  → verification-before-completion (+ review-security на critical-диффе)
+```
+
+**Дубликаты имён:** skill `tdd` есть и в проекте, и в плагине pstack — всегда читай **проектный** `.cursor/skills/tdd` (критические узлы + «prefer no bad test»). Superpowers `test-driven-development` — **не** вызывать по умолчанию. Principles pstack (`principle-*`) не звать отдельно: они внутри poteto-mode; «готово» = `verification-before-completion`, не `principle-prove-it-works`.
+
+| Ситуация | Skill / файлы для чтения |
+|----------|-------|
+| Новая фича, редизайн, изменение поведения в нескольких модулях или с новым UX | `brainstorming`, затем `writing-plans` (**дождись апрува плана!**) |
+| Небольшое изменение поведения в одном месте | без skill: план в 2–5 пунктов в чате и «да» пользователя |
+| Есть одобренный план, многошаговая реализация | `executing-plans` или `subagent-driven-development` |
+| Багфикс с дешёвым локальным тестом, или пользователь явно просит TDD / регрессию / `/tdd` | **project** `tdd` (`.cursor/skills/tdd`); не Superpowers `test-driven-development`; не копировать текст из pstack-plugin `tdd` |
+| Баг, красный тест, CI упал, «не работает» (нет `/poteto-mode`) | `systematic-debugging` |
+| Перед словами «готово», «исправлено», «тесты проходят», перед коммитом | `verification-before-completion` |
+| Перед «готово» по любому коду, «не переусложнено ли», «что можно удалить» | `ponytail-review` (свой новый код чистишь сам, по старому — только список) |
+| UI: страницы, компоненты, Mini App, вёрстка, копирайт интерфейса | `web-design-guidelines`; если установлен **impeccable** (опционально, не в git) — он + guidelines на audit |
+| Перестройка меню / сайдбара / маршрутов / IA («куда положить раздел») | `site-architecture` (опциональный skill; см. CONTRIBUTING); экран — guidelines / impeccable если есть |
+| React-код: ререндеры, бандл, тяжёлые вычисления | `react-best-practices`, кроме `server-*`, `async-api-routes`, `rendering-hydration-*` (у нас Vite SPA без Next.js и SSR) |
+| Компонент оброс boolean-пропсами (4+ флагов режима) | `vercel-composition-patterns` |
+| TypeScript (`.ts` / `.tsx`), дисциплина типов | `typescript-best-practices` (pstack) |
+| Проверить UI в браузере после правок фронта | `webapp-testing` |
+| Пользователь явно `/poteto-mode` / rigor / «доведи PR» в стиле poteto | `poteto-mode` (не вместо brainstorming→плана на **новые** фичи без апрува) |
+| Код пересекает границу модуля / API — сначала форма (и без полного poteto) | `architect` (pstack) |
+| Маленький дифф — что ещё может сломаться (и без полного poteto) | `blast-radius` (pstack) |
+| Как / почему устроена подсистема; объяснить изменение | `how` / `why` / `teach` (pstack) |
+| Сами атакуем дифф перед merge (не чужие комментарии) | `interrogate` (pstack) |
+| Docs, RFC, README, описание PR, коммит-сообщение | `technical-writing` (pstack); прозу чистить `unslop`; перед ревью комментарии — `no-comments` |
+| Дифф трогает auth, 2FA/passkey, JWT, middleware, rate limit, публичную раздачу конфигов, webhook Telegram, node agent | `review-security` (обязательно перед «готово») |
+| Точечный security-аудит конкретной поверхности (JWT, CORS, CSRF, WebSocket, traversal, Host header, GitHub Actions) | соответствующий skill из `~/.agents/skills/` |
+| Пришло ревью / комментарии к PR | `receiving-code-review` (не `interrogate`) |
+| Независимые куски работы параллельно | `dispatching-parallel-agents`; `swarm` / `arena` — **только** явный `/swarm` `/arena` или шаг внутри poteto-mode |
+| Работа закончена, тесты зелёные — что дальше с веткой | `finishing-a-development-branch` (+ `release-train-branching`); poteto babysit/shipping — только из `/poteto-mode` |
+| Пользователь просит отчёт/дашборд или итог не помещается в короткую таблицу в чате | `canvas` |
+| Разбить большой дизайн-спек `docs/superpowers/specs/*-design.md` по папкам, пометить что уже в коде | `split-design-spec` |
+
+## Тесты — только на критических узлах
+
+Новые тесты пишем **только** там, где ошибка кладёт сервер, открывает уязвимость или теряет данные:
+
+- auth, 2FA/passkey, JWT, сессии, права ролей, rate limit;
+- публичная раздача конфигов и ссылок портала, webhook Telegram;
+- nginx, firewall, systemd, `install.sh` / обновление / удаление;
+- бэкап и восстановление, миграции БД;
+- node / proxy agent и синхронизация с узлами;
+- создание, блокировка и удаление VPN-клиентов, лимиты трафика.
+
+**Правила тестирования (project `/tdd`, не Superpowers TDD):**
+
+- Вне списка (UI, тексты, вёрстка, формы, мелкие фичи) — без новых тестов. Проверяем через ruff / eslint / typecheck, прогон существующих тестов и `webapp-testing` (или просим пользователя проверить UI визуально).
+- Существующие тесты не ломаем: падают — чиним код или обновляем тест.
+- Багфикс в критическом узле — строго 1 регрессионный тест на сам баг, без россыпи соседних крайних случаев.
+- Prefer no new test over a bad/broad/mock-heavy test. Если путь теста неясен, дорог или integration-heavy — ближайшая executable-проверка и коротко почему без нового теста.
+- Superpowers `test-driven-development` («тест перед каждой фичей/багом») — **игнорировать**, пока пользователь явно не попросил полный TDD.
+
+## Когда можно без процесса
+
+Опечатка, правка одной строки документации, ответ на вопрос, чтение кода — без `brainstorming` / `writing-plans`. Но `verification-before-completion` действует всегда, если заявляешь, что что-то работает.
+
+## ❌ Строгие запреты (не делать)
+
+- Не применять skill «по памяти». Всегда читай исходный файл в текущей сессии.
+- Не начинать писать код фичи без `brainstorming` и утверждённого пользователем плана (мелкое изменение в одном месте — без skill, но с планом в чате и «да»).
+- Не подменять апрув плана вызовом `/poteto-mode` на новой фиче.
+- Не добавлять проверки внутри доверенного кода «на всякий случай» — см. `lean-code.mdc`.
+- Не чинить баг слепым подбором правок без `systematic-debugging` (кроме активного poteto bug-fix playbook).
+- Не писать «готово» без фактического запуска ruff / pytest / eslint / typecheck. Вывод команд обязательно показывай в чате.
+- Не писать тесты на код вне списка критических узлов, если пользователь прямо об этом не попросил.
+- Не запускать Superpowers `test-driven-development` по умолчанию; для точечной регрессии — **project** `tdd`.
+- Не звать `swarm` / `arena` / poteto babysit параллельно с Superpowers finishing/dispatching «на всякий случай».

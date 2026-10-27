@@ -8,12 +8,56 @@
 
 ---
 
-## Важно: локальные настройки Cursor не в git
+## Agent starter pack (уже в git)
 
-Каталог **`.cursor/`** (MCP, rules, hooks) и **`.codebase-memory/`** в репозиторий **не коммитятся**.  
-Skills мейнтейнера лежат вне репо (`~/.agents/skills/`, `~/.cursor/skills-cursor`, плагины в `~/.cursor/plugins/cache/` и т.п.).
+После клона в репо уже есть curated pack для Cursor:
 
-Подключайте инструменты **у себя локально** по этому файлу — не копируйте чужие токены и `mcp.json` с секретами в PR.
+| Путь | Что |
+|------|-----|
+| `.cursor/rules/` | `use-skills`, `lean-code`, `release-train-branching`, … |
+| `.cursor/skills/` | project skills: `tdd`, `ponytail-review`, React/Vercel UI, `webapp-testing`, `tui-design`, … |
+| `.cursor/mcp.json.example` | шаблон MCP **без** секретов |
+| `.agents/AGENTS.md` | краткая карта; skills — symlink на `.cursor/skills/` |
+
+**Не в git (локально):** `.cursor/mcp.json`, `.cursor/settings.json`, `.codebase-memory/`, `docs/superpowers/`, тяжёлый **impeccable** (если поставите сами).
+
+```bash
+cp .cursor/mcp.json.example .cursor/mcp.json   # поправить пути команд под свою машину
+# Marketplace: Plugins → superpowers, pstack; затем /setup-pstack
+```
+
+Чужие токены и личный `mcp.json` в PR не класть.
+
+### Промпт для ИИ после клона (вставить в Agent)
+
+Обычно достаточно открыть проект в Cursor и **вставить блок ниже одним сообщением** — агент сам поставит плагины, MCP и опциональные skills по этому гайду.
+
+```text
+Настрой эту машину для разработки AdminPanelAZ с Cursor Agent.
+
+Сначала прочитай CONTRIBUTING.md и .cursor/rules/use-skills.mdc — не выдумывай шаги мимо них.
+
+Сделай по порядку и в конце дай чеклист «готово / нужно подтверждение / не вышло»:
+
+1) Убедись, что в репо уже есть starter pack: .cursor/rules/, .cursor/skills/, .agents/AGENTS.md, .cursor/mcp.json.example. Если чего-то нет — скажи.
+
+2) Плагины Cursor Marketplace (если ещё нет): установи superpowers и pstack (tool install_plugin или скажи мне нажать Install в UI). Не ставь obra/superpowers второй раз через npx skills — будет дубль.
+
+3) MCP локально: если нет .cursor/mcp.json — скопируй из .cursor/mcp.json.example. Подставь рабочие команды под ЭТУ ОС (which / path): codebase-memory-mcp, uvx+siteaudit, github-mcp-stdio или hosted GitHub MCP. Секреты и токены в файл не пиши; для GitHub рассчитай на `gh auth login` / `gh auth token`. .cursor/mcp.json в git не коммить.
+
+4) Опциональные skills (поставь, если меня не против; можно спросить одним вопросом):
+   - npx skills add coreyhaines31/marketingskills@site-architecture -g -a cursor -y
+   - cyber-skills точечно НЕ ставь все ~800; достаточно review-security из Cursor + при security-работе команды из CONTRIBUTING.
+   - impeccable не ставь по умолчанию (тяжёлый, в pack его нет).
+
+5) Напомни мне один раз вручную: в чате выполнить /setup-pstack (выбор моделей pstack).
+
+6) Кратко объясни вилку: фичи → Superpowers brainstorm/plan; баги → systematic-debugging + project tdd; rigor/PR → /poteto-mode. Project tdd = .cursor/skills/tdd, не плагинный дубль.
+
+Не трогай .env, не коммить секреты, не пушь. Код панели не рефакторь — только tooling.
+```
+
+После этого один раз вручную: **`/setup-pstack`**. Если агент попросит подтвердить Install плагина — нажми Approve.
 
 ---
 
@@ -126,7 +170,7 @@ gh auth login
 | **canvas** | Отдать результат анализа **визуально** (архитектура, метрики, таблицы) рядом с чатом, а не простынёй markdown. |
 | **split-to-prs** | Большая ветка/чат → несколько маленьких reviewable PR без потери работы. |
 | **shell** (`/shell`) | Выполнить команду **буквально** (install/systemd/firewall), без «улучшений» агентом. |
-| **create-rule** | Локальные правила проекта (`.cursor/rules/`) — постоянный контекст агента; в git AdminPanelAZ не коммитим. |
+| **create-rule** | Новые always-on правила в `.cursor/rules/` (pack уже в git). |
 | **create-hook** | Хуки на события агента (например напоминание обновить docs после правок UI). |
 | **automate** | Создать **Cursor Automation** (расписание/триггеры в Cursor), не GitHub Actions репо. |
 | **loop** | Повторять проверку по интервалу (`/loop 5m …`) — удобно для CI/smoke. |
@@ -170,7 +214,47 @@ npx skills remove -g -y brainstorming dispatching-parallel-agents executing-plan
 | **finishing-a-development-branch** | Когда задачи и тесты зелёные: выбор merge / PR / оставить / выбросить и аккуратный cleanup. |
 | **writing-skills** | Писать или править собственные skills по дисциплине TDD для процессов (редко нужно контрибьютору панели). |
 
-Типичный поток: `brainstorming` → `writing-plans` → (`using-git-worktrees`) → `subagent-driven-development` / `executing-plans` + `test-driven-development` → `verification-before-completion` → `finishing-a-development-branch`.
+Типичный поток фичи: `brainstorming` → `writing-plans` → (`using-git-worktrees`) → `subagent-driven-development` / `executing-plans` → `verification-before-completion` → `finishing-a-development-branch`.
+
+**TDD:** для точечной регрессии — проектный **`tdd`** (`.cursor/skills/tdd`). Superpowers `test-driven-development` в этот поток **не** входит (полная TDD-дисциплина на каждую фичу — только по явной просьбе). Подробная вилка Superpowers ↔ pstack — в правиле `use-skills`.
+
+---
+
+## pstack ([cursor/plugins · pstack](https://cursor.com/marketplace/cursor/pstack)) — зачем
+
+**Что это:** playbook’и и principles от poteto (React core / Cursor): меньше кода, больше доказательств, параллельные агенты. Ставится **плагином** Marketplace (`pstack`), skills в `~/.cursor/plugins/cache/…/pstack/…/skills/`. После установки один раз: **`/setup-pstack`** (модели по ролям).
+
+**Как стыкуется с Superpowers (чтобы агент не путался):**
+
+| Когда | Что звать |
+|-------|-----------|
+| Новая фича без апрува | Только Superpowers: brainstorm → plan → «да» |
+| Реализация после «да» | `executing-plans` / `subagent-driven` **или** `/poteto-mode`, если нужен rigor |
+| Баг без `/poteto-mode` | `systematic-debugging` (+ project `tdd` при дешёвом тесте) |
+| Явно `/poteto-mode` / «доведи PR» | Только poteto playbook — не мешать finishing/dispatching/swarm вручную |
+| Параллель по умолчанию | `dispatching-parallel-agents`; `swarm`/`arena` — только явный вызов |
+
+Не дублируйте весь pstack через `npx skills add` — плагин уже кладёт skills. Имя **`tdd`** есть и в плагине, и в проекте — **всегда** project `.cursor/skills/tdd`. Principles (`principle-*`) не звать отдельно.
+
+| Skill | Зачем для AdminPanelAZ |
+|-------|-------------------------|
+| **`poteto-mode`** / **`poteto-help`** | Точка входа / выбор playbook (после апрува или на баг/PR). |
+| **`architect`** | Типы и границы модулей до кода (API, node sync, adapters). |
+| **`blast-radius`** | Маленький дифф → что ещё сломает (nginx, clients, install, agent). |
+| **`how` / `why` / `teach`** | Разбор подсистем (HA, sync, install, Telegram). |
+| **`interrogate`** | Сами атакуем дифф перед merge (чужие комментарии → `receiving-code-review`). |
+| **`typescript-best-practices`** | Frontend `.ts` / `.tsx`. |
+| **`no-comments` / `unslop` / `technical-writing`** | Чистый код и проза; docs / PR / коммиты. |
+
+---
+
+## site-architecture ([coreyhaines31/marketingskills](https://skills.sh/coreyhaines31/marketingskills/site-architecture)) — меню / IA
+
+```bash
+npx skills add coreyhaines31/marketingskills@site-architecture -g -a cursor -y
+```
+
+Файлы: `~/.agents/skills/site-architecture`. **Когда:** перестройка сайдбара, маршрутов, «куда положить раздел». Ориентир — IA/навигация. Визуал экрана — `web-design-guidelines` в репо; опционально **impeccable** с Marketplace (в starter pack нет — тяжёлый бинарь, не использовался).
 
 ---
 
@@ -212,7 +296,11 @@ npx skills update -g -y   # обновление
 PR / CI / GitHub           → github + babysit / review-*
 UI глазами                 → browser
 HTTPS заголовки домена     → siteaudit
-Процесс фичи/бага          → Superpowers (brainstorm → plan → TDD → verify)
+Меню / IA                  → site-architecture (опц.); экран → web-design-guidelines (+ impeccable опц.)
+Фича (план)                → Superpowers brainstorm → plan → «да»
+Фича (после «да»)          → executing-plans / subagent-driven  или  /poteto-mode (rigor)
+Баг без poteto             → systematic-debugging (+ project tdd)
+Явно /poteto-mode          → только poteto playbook
 Security диффа PR          → review-security
 Глубокий security playbook → Anthropic Cybersecurity Skills (точечно)
 ```
@@ -237,9 +325,10 @@ Security-критичные зоны (auth, middleware, public download, telegra
 ## Быстрый старт для разработчика
 
 1. Клон репозитория, Python/Node как в README / `install.sh` (или локальный venv + `frontend` npm).
-2. Прочитать [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) и [`SECURITY.md`](SECURITY.md).
-3. Подключить MCP и skills из разделов выше (локально).
-4. Не коммитить `.cursor/`, `.env`, БД, граф памяти, `~/.agents/skills/`.
-5. PR: понятное описание, зелёный CI; крупные изменения — через **split-to-prs** / Superpowers finish-branch.
+2. Открыть папку в **Cursor** → новый Agent-чат → вставить промпт из раздела **«Промпт для ИИ после клона»** выше → Approve на установку плагинов.
+3. Один раз вручную: **`/setup-pstack`**. При необходимости `gh auth login`.
+4. Пробежать [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) и [`SECURITY.md`](SECURITY.md).
+5. Не коммитить `.cursor/mcp.json`, `.env`, БД, граф памяти; правки rules/skills из pack — в PR нормально.
+6. PR: понятное описание, зелёный CI; крупные изменения — через **split-to-prs** / Superpowers finish-branch.
 
 Вопросы и идеи по продукту: [Fider](https://claymore0098.fider.io/). Баги безопасности — см. [`SECURITY.md`](SECURITY.md).
