@@ -254,7 +254,9 @@ def _configs_preview(
         groups = protocol_map.get(config.id, frozenset())
         emoji, tag = format_config_protocol_badge_for_filter(groups, filter_key)
         node_suffix = f" · {escape(labels[config.node_id])}" if len(labels) > 1 else ""
-        lines.append(f"{start_index + offset}. {emoji}{tag} <code>{escape(config.client_name)}</code>{node_suffix}")
+        lines.append(
+            f"{start_index + offset + 1}. {emoji}{tag} <code>{escape(config.client_name)}</code>{node_suffix}"
+        )
     return "\n".join(lines)
 
 

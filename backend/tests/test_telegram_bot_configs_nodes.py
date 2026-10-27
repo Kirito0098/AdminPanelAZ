@@ -186,6 +186,21 @@ def test_parse_configs_callback_reads_the_node(nodes):
     assert handler.parse_configs_callback("configs:0:all") == (0, "all", 0)
 
 
+def test_configs_preview_numbers_rows_from_one(nodes, configs):
+    germany, _usa = nodes
+    local, _remote = configs
+
+    text = handler._configs_preview(
+        [local],
+        0,
+        {local.id: frozenset({"ovpn"})},
+        labels={germany.id: "Germany"},
+    )
+
+    assert text.startswith("1. ")
+    assert "· Germany" not in text
+
+
 def test_configs_keyboard_offers_a_node_filter(nodes, configs):
     germany, usa = nodes
     local, remote = configs
