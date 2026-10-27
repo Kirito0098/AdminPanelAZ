@@ -240,8 +240,10 @@ def update_telegram_settings(
     if payload.pending_request_cap is not None:
         _set_setting(db, "telegram_new_user_request_pending_cap", str(payload.pending_request_cap))
     db.commit()
-    if token := _get_setting(db, "telegram_bot_token"):
-        background.add_task(_sync_bot_commands_best_effort, token)
+    bot_token = _get_setting(db, "telegram_bot_token")
+    bot_enabled = _get_setting(db, "telegram_bot_interactive_enabled", "false") == "true"
+    if bot_token and bot_enabled:
+        background.add_task(_sync_bot_commands_best_effort, bot_token)
     admin_notify_service.send_settings_change(
         db,
         actor_username=admin.username,
