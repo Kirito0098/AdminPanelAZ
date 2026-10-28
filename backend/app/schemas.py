@@ -402,6 +402,7 @@ class UserProvisionSummary(BaseModel):
     traffic_limit_blocked: bool = False
     traffic_consumed_bytes: int = 0
     telegram_id: str | None = None
+    visible_vpn_profiles: dict | None = None
 
 
 class GraceHoldView(BaseModel):

@@ -140,7 +140,11 @@ from app.services.user_subscription import (
     normalize_access_until,
     set_user_access_until,
 )
-from app.services.vpn_profile_visibility import normalize_policy, policy_to_json
+from app.services.vpn_profile_visibility import (
+    normalize_policy,
+    parse_user_visible_vpn_profiles,
+    policy_to_json,
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
 settings = get_settings()
@@ -233,6 +237,7 @@ def _user_summary(
         traffic_limit_blocked=bool(user.traffic_limit_blocked),
         traffic_consumed_bytes=int(traffic_consumed_bytes),
         telegram_id=(user.telegram_id or None),
+        visible_vpn_profiles=parse_user_visible_vpn_profiles(user.visible_vpn_profiles),
     )
 
 

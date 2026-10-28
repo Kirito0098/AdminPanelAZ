@@ -230,10 +230,6 @@ export default function UsersTab({
   const [defaultPolicy, setDefaultPolicy] = useState<VisibleVpnProfilesPolicy>(FULL_VISIBLE_VPN_POLICY)
   const [defaultPolicyLoading, setDefaultPolicyLoading] = useState(true)
   const [savingDefaultPolicy, setSavingDefaultPolicy] = useState(false)
-  const [draftUseCustomVisibility, setDraftUseCustomVisibility] = useState(false)
-  const [draftVisibilityPolicy, setDraftVisibilityPolicy] =
-    useState<VisibleVpnProfilesPolicy>(FULL_VISIBLE_VPN_POLICY)
-
   useEffect(() => {
     setUsersList(users)
   }, [users])
@@ -391,11 +387,6 @@ export default function UsersTab({
     setDraftCanCreate(user.can_create_configs !== false)
     setDraftCanManage(user.can_manage_configs === true)
     setDraftAccessUntil(isoToDateInput(user.access_until))
-    const hasOverride = user.visible_vpn_profiles != null
-    setDraftUseCustomVisibility(hasOverride)
-    setDraftVisibilityPolicy(
-      copyVisibleVpnPolicy(hasOverride ? user.visible_vpn_profiles : defaultPolicy),
-    )
     setDraftGroups([])
     setSearch('')
     setOwnerFilter('all')
@@ -453,9 +444,6 @@ export default function UsersTab({
           notifyError('Квота: целое число ≥ 0 (0 = без лимита по умолчанию)')
           return
         }
-        payload.visible_vpn_profiles = draftUseCustomVisibility
-          ? draftVisibilityPolicy
-          : null
       }
       const updated = await updateUser(activeEditor.id, payload)
       if (draftRole === 'user') {
@@ -723,7 +711,7 @@ export default function UsersTab({
         open={policyOpen}
         onOpenChange={setPolicyOpen}
         title="Видимость VPN-профилей по умолчанию"
-        description="Что видят обычные пользователи без персонального исключения"
+        description="Что видят обычные пользователи без персонального исключения (исключение — в карточке абонента, вкладка «Аккаунт»)"
         icon={<EyeOff size={16} />}
       >
         {defaultPolicyLoading ? (
@@ -777,7 +765,7 @@ export default function UsersTab({
           if (!open && !savingUser) setActiveEditor(null)
         }}
         title={activeEditor ? `Пользователь: ${activeEditor.username}` : 'Пользователь'}
-        description="Роль, права доступа, квота и видимость VPN-профилей"
+        description="Роль, права доступа и квота"
         icon={Users}
         size="xl"
         bodyClassName="px-5 py-4"
@@ -893,54 +881,6 @@ export default function UsersTab({
                   <p className="text-xs text-muted-foreground">
                     Пусто — бессрочно. При сохранении срок синхронизируется на все клиентские профили этого пользователя. При создании конфигов пользователем сюда копируется срок блокировки; сертификат OpenVPN у пользователя всегда максимальный.
                   </p>
-                </div>
-                <div className="space-y-2 rounded-xl border bg-muted/20 p-3">
-                  <div>
-                    <Label>Видимость VPN-профилей</Label>
-                    <p className="mt-0.5 text-xs text-muted-foreground">
-                      Исключение полностью заменяет глобальное умолчание.
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDraftUseCustomVisibility(false)
-                        setDraftVisibilityPolicy(copyVisibleVpnPolicy(defaultPolicy))
-                      }}
-                      className={cn(
-                        'rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
-                        !draftUseCustomVisibility
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'hover:bg-muted/50',
-                      )}
-                    >
-                      Как умолчание
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDraftUseCustomVisibility(true)
-                        if (!draftUseCustomVisibility) {
-                          setDraftVisibilityPolicy(copyVisibleVpnPolicy(defaultPolicy))
-                        }
-                      }}
-                      className={cn(
-                        'rounded-lg border px-3 py-1.5 text-sm font-medium transition-colors',
-                        draftUseCustomVisibility
-                          ? 'border-primary bg-primary/10 text-primary'
-                          : 'hover:bg-muted/50',
-                      )}
-                    >
-                      Своя политика
-                    </button>
-                  </div>
-                  {draftUseCustomVisibility && (
-                    <VpnVisibilityPolicyEditor
-                      value={draftVisibilityPolicy}
-                      onChange={setDraftVisibilityPolicy}
-                    />
-                  )}
                 </div>
               </div>
 

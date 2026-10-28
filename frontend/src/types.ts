@@ -275,6 +275,8 @@ export interface VisibleVpnProfilesPolicy {
   routes: string[]
   protocols: string[]
   openvpn_groups: string[]
+  /** AmneziaWG 2.0: у абонента только файл .conf, без .vpn-вариантов. Нет в старом JSON → true. */
+  awg2_tunnel_only?: boolean
 }
 
 export interface VisibleVpnProfilesDefaultResponse {
@@ -2593,6 +2595,8 @@ export interface UserProvisionSummary {
   traffic_limit_blocked?: boolean
   traffic_consumed_bytes?: number
   telegram_id?: string | null
+  /** Персональное исключение видимости; null — действует умолчание. */
+  visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
 }
 
 export interface UserStatsResponse {

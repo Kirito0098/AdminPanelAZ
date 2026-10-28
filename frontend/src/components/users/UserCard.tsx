@@ -221,7 +221,7 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
             </Suspense>
           </TabsContent>
           <TabsContent value="account" className="mt-0">
-            <UserAccountSection user={user} onSave={onSave} onDelete={onDelete} />
+            <UserAccountSection user={user} onSave={onSave} onDelete={onDelete} onRefresh={onRefresh} />
           </TabsContent>
         </div>
       </Tabs>

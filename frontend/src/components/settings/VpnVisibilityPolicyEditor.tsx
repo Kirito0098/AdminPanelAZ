@@ -1,5 +1,6 @@
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import type { VisibleVpnProfilesPolicy } from '@/types'
 import { cn } from '@/lib/utils'
 
@@ -7,6 +8,7 @@ export const FULL_VISIBLE_VPN_POLICY: VisibleVpnProfilesPolicy = {
   routes: ['az', 'vpn'],
   protocols: ['openvpn', 'wireguard', 'amneziawg', 'amneziawg2'],
   openvpn_groups: ['udp_tcp', 'udp', 'tcp'],
+  awg2_tunnel_only: true,
 }
 
 const ROUTE_OPTIONS = [
@@ -46,6 +48,7 @@ export function copyVisibleVpnPolicy(policy?: VisibleVpnProfilesPolicy | null): 
     routes: [...source.routes],
     protocols: [...source.protocols],
     openvpn_groups: [...source.openvpn_groups],
+    awg2_tunnel_only: source.awg2_tunnel_only ?? true,
   }
 }
 
@@ -67,7 +70,7 @@ export default function VpnVisibilityPolicyEditor({
   const renderGroup = (
     title: string,
     options: readonly { key: string; label: string }[],
-    axis: keyof VisibleVpnProfilesPolicy,
+    axis: 'routes' | 'protocols' | 'openvpn_groups',
   ) => (
     <div className="space-y-2">
       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
@@ -99,6 +102,20 @@ export default function VpnVisibilityPolicyEditor({
       {renderGroup('Маршруты', ROUTE_OPTIONS, 'routes')}
       {renderGroup('OpenVPN группы', OPENVPN_GROUP_OPTIONS, 'openvpn_groups')}
       {renderGroup('Протоколы', PROTOCOL_OPTIONS, 'protocols')}
+      <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2.5">
+        <div className="space-y-0.5">
+          <Label htmlFor="vpnPolicyAwg2TunnelOnly">AmneziaWG 2.0: только файл .conf</Label>
+          <p className="text-xs text-muted-foreground">
+            Вкл. — абонент видит только .conf; файлы .vpn (для приложения Amnezia) скрыты.
+          </p>
+        </div>
+        <Switch
+          id="vpnPolicyAwg2TunnelOnly"
+          checked={value.awg2_tunnel_only ?? true}
+          disabled={disabled}
+          onCheckedChange={(next) => onChange({ ...value, awg2_tunnel_only: next })}
+        />
+      </div>
       {empty && (
         <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
           Пользователь не увидит ни одного профиля. Отметьте хотя бы маршрут и протокол.

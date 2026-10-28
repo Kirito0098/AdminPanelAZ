@@ -11,14 +11,16 @@ import { Switch } from '@/components/ui/switch'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import type { UserProvisionSummary, UserUpdatePayload } from '@/types'
 import UserSection from './UserSection'
+import UserVisibilitySection from './UserVisibilitySection'
 
 interface UserAccountSectionProps {
   user: UserProvisionSummary
   onSave: (id: number, data: Partial<UserUpdatePayload>) => void
   onDelete: (user: UserProvisionSummary) => void
+  onRefresh: () => void
 }
 
-export default function UserAccountSection({ user, onSave, onDelete }: UserAccountSectionProps) {
+export default function UserAccountSection({ user, onSave, onDelete, onRefresh }: UserAccountSectionProps) {
   const { error: notifyError, success } = useNotifications()
   const [panelLogin, setPanelLogin] = useState(Boolean(user.panel_login_enabled))
   const [password, setPassword] = useState('')
@@ -104,6 +106,8 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
           </Button>
         </div>
       </UserSection>
+
+      {user.role === 'user' && <UserVisibilitySection user={user} onRefresh={onRefresh} />}
 
       <UserSection
         icon={Layers}
