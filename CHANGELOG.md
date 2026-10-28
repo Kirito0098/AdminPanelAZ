@@ -133,6 +133,7 @@
 
 ### 🐛 Fixed
 
+- **Клиенты / OpenVPN офлайн при живом AWG** — `scope=all` не подставлял сессии трафика при пустом/неполном management-сокете OpenVPN (AWG2 шёл другим зондом). Теперь federated и node overview делают **union** socket ∪ active OpenVPN sessions (`monitoring_overview.py`).
 - **Клиенты / все «Подключение офлайн»** — карта на «Клиентах» брала `/monitoring/overview?scope=node` (только активный узел), поэтому в HA сессия на реплике не подсвечивала карточку; плюс при группе OpenVPN `GROUP_UDP` сессия без суффикса `-udp` в profile считалась офлайн. Теперь overview `scope=all` + мягкое сопоставление UDP/TCP; AWG 2.0 по-прежнему из `amneziawg2_peers` (`DashboardPage.tsx`, `configCardUtils.ts`).
 - **HA «Домен» / чужие remote остаются в .ovpn** — после порчи списка адресов (прокси другой HA) «Домен» ставил `shared_domain` первым, но старые remote из БД не удалял. Теперь список **Адреса подключения** на узлах группы заменяется на `[shared_domain]` целиком, затем doall + `client.sh 7` + патч; прокси для этой группы задают снова вручную (`shared_domain.py`, `openvpn_remote_hosts.py`).
 - **Прокси / адреса remote на чужой VPN** — блок «Адреса подключения» на странице Прокси больше не пишет список в глобальный активный узел без явного выбора: селектор VPN (+ кнопка «Адреса VPN» у привязанного прокси). Загрузка списка игнорирует устаревший ответ при быстрой смене узла, чтобы remote одной HA не попадали в другую (`ProxyHubView.tsx`, `RemoteHostsCard.tsx`).

@@ -154,6 +154,7 @@ def _collect_nodes_monitoring_data(db: Session) -> list[dict]:
             else:
                 adapter = get_adapter_for_node(node)
                 ovpn_clients, _ = adapter.get_openvpn_status_snapshot()
+                ovpn_clients = _merge_openvpn_status_with_sessions(db, node.id, ovpn_clients)
                 wireguard_peers = adapter.parse_wireguard_status()
                 amneziawg2_peers = _load_awg2_peers_for_node(db, adapter)
                 payload.update(
@@ -168,6 +169,15 @@ def _collect_nodes_monitoring_data(db: Session) -> list[dict]:
                 )
         except Exception as exc:
             payload["error"] = _exc_message(exc)
+            if is_vpn_node(node) and not payload["ovpn_clients"]:
+                try:
+                    payload["ovpn_clients"] = _merge_openvpn_status_with_sessions(
+                        db, node.id, []
+                    )
+                except Exception:
+                    logger.debug(
+                        "openvpn session fallback failed node_id=%s", node.id, exc_info=True
+                    )
         node_payloads.append(payload)
 
     return node_payloads
@@ -469,6 +479,31 @@ def _openvpn_clients_from_sessions(db: Session, node_id: int) -> list[OpenVpnCli
     ]
 
 
+def _merge_openvpn_status_with_sessions(
+    db: Session,
+    node_id: int,
+    clients: list[OpenVpnClient],
+) -> list[OpenVpnClient]:
+    """Union management-socket clients with active traffic sessions.
+
+    Socket may list only some profiles (one unit down) while sessions still
+    track the rest — empty-only fallback would miss those and leave cards offline.
+    """
+    session_clients = _openvpn_clients_from_sessions(db, node_id)
+    if not clients:
+        return session_clients
+    if not session_clients:
+        return clients
+    known = {(c.common_name or "").strip().lower() for c in clients if c.common_name}
+    merged = list(clients)
+    for extra in session_clients:
+        key = (extra.common_name or "").strip().lower()
+        if key and key not in known:
+            merged.append(extra)
+            known.add(key)
+    return merged
+
+
 def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOverview:
     if not is_vpn_node(node):
         try:
@@ -517,13 +552,12 @@ def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOve
 
     adapter = get_adapter_for_node(node)
     ovpn_clients, openvpn_data_source = adapter.get_openvpn_status_snapshot()
-    if not ovpn_clients:
-        # Мёртвый management socket не должен превращать все карточки в «офлайн»:
-        # активная сессия учёта трафика доказывает, что клиент на узле подключён.
-        fallback_ovpn = _openvpn_clients_from_sessions(db, node.id)
-        if fallback_ovpn:
-            ovpn_clients = fallback_ovpn
-            openvpn_data_source = "db_fallback"
+    before = len(ovpn_clients)
+    ovpn_clients = _merge_openvpn_status_with_sessions(db, node.id, ovpn_clients)
+    if ovpn_clients and before == 0:
+        openvpn_data_source = "db_fallback"
+    elif ovpn_clients and len(ovpn_clients) > before:
+        openvpn_data_source = f"{openvpn_data_source}+db_sessions"
     try:
         openvpn_global_stats: OpenVpnGlobalStats | None = OpenVpnGlobalStats(
             **adapter.get_openvpn_global_stats()
