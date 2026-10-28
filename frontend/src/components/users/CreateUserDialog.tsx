@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, ChevronLeft, Users as UsersIcon } from 'lucide-react'
-import { getConfigs } from '@/api/configs'
+import { getAssignableConfigs } from '@/api/configs'
 import { getNodeSyncGroups, getNodes } from '@/api/nodes'
 import { listPresets } from '@/api/users'
 import { Node, PresetResponse } from '@/types'
@@ -21,9 +21,32 @@ type CreateMode = 'provision' | 'from_existing'
 type ConfigOption = {
   id: number
   name: string
+  vpn_type: string
+  node_name: string
+  description?: string | null
   owner_id: number | null
   owner_username?: string | null
-  ha_primary_config_id: number | null
+  owner_is_admin: boolean
+}
+
+const VPN_TYPE_LABEL: Record<string, string> = {
+  wireguard: 'WireGuard',
+  openvpn: 'OpenVPN',
+  amneziawg2: 'AmneziaWG 2.0',
+}
+
+function vpnTypeLabel(vpnType: string): string {
+  return VPN_TYPE_LABEL[vpnType] ?? vpnType
+}
+
+function configOptionSubtitle(cfg: ConfigOption): string {
+  const parts: string[] = [cfg.node_name, vpnTypeLabel(cfg.vpn_type)]
+  if (cfg.description?.trim()) parts.push(cfg.description.trim())
+  if (cfg.owner_username) parts.push(`владелец: ${cfg.owner_username}`)
+  else if (cfg.owner_id == null) parts.push('без владельца')
+  else parts.push(`owner_id: ${cfg.owner_id}`)
+  parts.push(`#${cfg.id}`)
+  return parts.join(' · ')
 }
 
 export type CreateUserPayload = {
@@ -192,16 +215,18 @@ export default function CreateUserDialog({
     const load = async () => {
       setConfigsLoading(true)
       try {
-        const list = await getConfigs(false)
+        const list = await getAssignableConfigs()
         if (cancelled) return
-        // List API already scopes to primaries; keep ha_primary_config_id for filter parity.
         setConfigOptions(
           list.map((c) => ({
             id: c.id,
             name: c.client_name,
+            vpn_type: c.vpn_type,
+            node_name: c.node_name,
+            description: c.description ?? null,
             owner_id: c.owner_id,
             owner_username: c.owner_username ?? null,
-            ha_primary_config_id: null,
+            owner_is_admin: c.owner_is_admin,
           })),
         )
         setConfigsLoaded(true)
@@ -231,26 +256,43 @@ export default function CreateUserDialog({
   const awg2Enabled = availableProtocols.some((p) => p.id === 'amneziawg2')
 
   const visibleConfigs = useMemo(() => {
-    let list = configOptions.filter((c) => c.ha_primary_config_id == null)
+    let list = configOptions
     if (!showAllOwners) {
+      // «Висящие на админах» + свои + без владельца — типичный кейс разнесения
       list = list.filter(
-        (c) => c.owner_id == null || (adminUserId != null && c.owner_id === adminUserId),
+        (c) =>
+          c.owner_id == null ||
+          c.owner_is_admin ||
+          (adminUserId != null && c.owner_id === adminUserId),
       )
     }
     const q = configSearch.trim().toLowerCase()
     if (q) {
-      list = list.filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) ||
-          (c.owner_username ?? '').toLowerCase().includes(q),
-      )
+      list = list.filter((c) => {
+        const hay = [
+          c.name,
+          c.node_name,
+          c.owner_username ?? '',
+          vpnTypeLabel(c.vpn_type),
+          c.vpn_type,
+          c.description ?? '',
+          String(c.id),
+        ]
+          .join(' ')
+          .toLowerCase()
+        return hay.includes(q)
+      })
     }
     return list
   }, [configOptions, showAllOwners, adminUserId, configSearch])
 
   const selectedConfigNames = useMemo(() => {
-    const byId = new Map(configOptions.map((c) => [c.id, c.name]))
-    return configIds.map((id) => byId.get(id) ?? `#${id}`)
+    const byId = new Map(configOptions.map((c) => [c.id, c]))
+    return configIds.map((id) => {
+      const c = byId.get(id)
+      if (!c) return `#${id}`
+      return `${c.name} · ${c.node_name} · ${vpnTypeLabel(c.vpn_type)}`
+    })
   }, [configIds, configOptions])
 
   const changeSelectedNodes = (nextIds: number[]) => {
@@ -577,7 +619,7 @@ export default function CreateUserDialog({
                 id="createConfigSearch"
                 value={configSearch}
                 onChange={(e) => setConfigSearch(e.target.value)}
-                placeholder="Поиск по имени…"
+                placeholder="Поиск: имя, узел, тип, владелец, #id…"
                 className="h-9"
               />
               {configsLoading ? (
@@ -590,6 +632,7 @@ export default function CreateUserDialog({
                 <div className="max-h-56 space-y-0.5 overflow-y-auto rounded-lg border p-1">
                   {visibleConfigs.map((cfg) => {
                     const checked = configIds.includes(cfg.id)
+                    const subtitle = configOptionSubtitle(cfg)
                     return (
                       <label
                         key={cfg.id}
@@ -603,16 +646,12 @@ export default function CreateUserDialog({
                         <Checkbox
                           checked={checked}
                           onCheckedChange={(next) => toggleConfigId(cfg.id, next)}
-                          aria-label={cfg.name}
+                          aria-label={`${cfg.name} ${subtitle}`}
                         />
                         <div className="min-w-0 flex-1">
                           <span className="block truncate text-sm font-medium font-mono">{cfg.name}</span>
-                          <span className="text-[10px] text-muted-foreground">
-                            {cfg.owner_username
-                              ? `владелец: ${cfg.owner_username}`
-                              : cfg.owner_id == null
-                                ? 'без владельца'
-                                : `owner_id: ${cfg.owner_id}`}
+                          <span className="block truncate text-[10px] text-muted-foreground">
+                            {subtitle}
                           </span>
                         </div>
                       </label>

@@ -648,6 +648,20 @@ class VpnConfigResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class VpnConfigAssignableItem(BaseModel):
+    """Primary configs across all nodes — for admin «привязать существующие»."""
+
+    id: int
+    client_name: str
+    vpn_type: VpnType
+    node_id: int
+    node_name: str
+    owner_id: int | None = None
+    owner_username: str | None = None
+    owner_is_admin: bool = False
+    description: str | None = None
+
+
 class ConfigTagCreate(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     color: str | None = Field(default="#6366f1", max_length=16)

@@ -24,6 +24,23 @@ export async function getConfigs(includeFiles = false, tagIds?: number[]) {
   return apiFetch<VpnConfig[]>(`/configs${query}`)
 }
 
+/** Admin: primary configs on all nodes (create-user «привязать существующие»). */
+export type AssignableConfig = {
+  id: number
+  client_name: string
+  vpn_type: string
+  node_id: number
+  node_name: string
+  owner_id: number | null
+  owner_username?: string | null
+  owner_is_admin: boolean
+  description?: string | null
+}
+
+export async function getAssignableConfigs() {
+  return apiFetch<AssignableConfig[]>('/configs/assignable')
+}
+
 export async function getConfigQuota() {
   return apiFetch<SelfServiceQuota>('/configs/quota')
 }

@@ -10,13 +10,14 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin, tg_mini_token_allowed
 from app.database import get_db
-from app.models import AppSetting, User, UserRole, VpnConfig, VpnType
+from app.models import AppSetting, Node, User, UserRole, VpnConfig, VpnType
 from app.schemas import (
     ConfigTagResponse,
     EffectiveVisibleVpnProfilesResponse,
     MessageResponse,
     SelfServiceQuotaResponse,
     VisibleVpnProfilesPolicy,
+    VpnConfigAssignableItem,
     VpnConfigCreate,
     VpnConfigHaInfo,
     VpnConfigResponse,
@@ -355,6 +356,38 @@ def get_visible_vpn_profiles(
         policy=VisibleVpnProfilesPolicy(**policy),
         inherited=inherited,
     )
+
+
+@router.get("/assignable", response_model=list[VpnConfigAssignableItem])
+def list_assignable_configs(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Все primary-конфиги по всем узлам — для привязки при создании абонента."""
+    rows = (
+        db.query(VpnConfig, Node, User)
+        .outerjoin(Node, Node.id == VpnConfig.node_id)
+        .outerjoin(User, User.id == VpnConfig.owner_id)
+        .filter(VpnConfig.ha_primary_config_id.is_(None))
+        .order_by(VpnConfig.client_name.asc(), VpnConfig.node_id.asc(), VpnConfig.vpn_type.asc())
+        .all()
+    )
+    out: list[VpnConfigAssignableItem] = []
+    for config, node, owner in rows:
+        out.append(
+            VpnConfigAssignableItem(
+                id=config.id,
+                client_name=config.client_name,
+                vpn_type=config.vpn_type,
+                node_id=config.node_id,
+                node_name=(node.name if node is not None else f"node-{config.node_id}"),
+                owner_id=config.owner_id,
+                owner_username=owner.username if owner is not None else None,
+                owner_is_admin=bool(owner is not None and owner.role == UserRole.admin),
+                description=config.description,
+            )
+        )
+    return out
 
 
 @router.get("", response_model=list[VpnConfigResponse])
