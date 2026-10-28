@@ -152,7 +152,7 @@ def me_send_config(
     )
 
 
-@router.get("/qr-link")
+@router.get("/me/qr-link")
 def me_qr_link(
     request: Request,
     config_id: int = Query(...),

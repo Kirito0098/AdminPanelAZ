@@ -222,6 +222,48 @@ def test_me_files_uses_config_node(tg_client, db, nodes, monkeypatch):
     assert any(file_item["path"] == "client.conf" for file_item in response.json()["files"]), response.json()
 
 
+def test_me_qr_link_route_is_under_me_prefix(tg_client, db, nodes, monkeypatch):
+    """Mini App calls /me/qr-link; a bare /qr-link must not be the owner path (was 404 Not Found)."""
+    ivan = _me_user(db, telegram_id="111")
+    tg_client.app.dependency_overrides[get_tg_mini_user] = lambda: ivan
+    config = _config(db, ivan, nodes[1], "ivan")
+    stub = SimpleNamespace(
+        get_profile_files=lambda client_name, vpn_type: [
+            {"path": "client.conf", "protocol": "wireguard", "variant": "vpn"}
+        ]
+    )
+    monkeypatch.setattr(
+        "app.routers.tg_mini.me_configs.get_adapter_for_node",
+        lambda node: stub,
+    )
+    monkeypatch.setattr(
+        "app.routers.tg_mini.me_configs.resolve_effective_visible_vpn_profiles",
+        lambda *_a, **_k: {
+            "routes": ["vpn"],
+            "protocols": ["wireguard"],
+            "openvpn_groups": [],
+            "awg2_tunnel_only": True,
+        },
+    )
+    monkeypatch.setattr(
+        "app.routers.tg_mini.me_configs._qr_download_service",
+        lambda db, request: SimpleNamespace(
+            create_token=lambda **kwargs: {
+                "url": "https://example.test/d/token",
+                "token": "t",
+                "expires_at": "2099-01-01T00:00:00Z",
+            }
+        ),
+    )
+
+    # Owner Mini App uses /me/qr-link (frontend getTgQrLink); bare /qr-link is admin-active only.
+    ok = tg_client.get(
+        f"/api/tg-mini/me/qr-link?config_id={config.id}&path=client.conf"
+    )
+    assert ok.status_code == status.HTTP_200_OK, ok.text
+    assert ok.json()["url"] == "https://example.test/d/token", ok.json()
+
+
 # --- Task 11.2: самосервис /me/plan-configs (квота D3) ---
 
 def test_plan_configs_self_service_quota(me_client, db, nodes):
