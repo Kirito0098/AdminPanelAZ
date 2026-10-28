@@ -106,6 +106,20 @@ export async function qrUserConfigFile(userId: number, configId: number, path: s
   return apiFetchResponse(`/users/${userId}/configs/${configId}/qr?path=${encodeURIComponent(path)}`)
 }
 
+export type UserQrContentMode = 'profile' | 'download-link'
+
+export async function fetchUserConfigQrBlob(
+  userId: number,
+  configId: number,
+  path: string,
+): Promise<{ blob: Blob; contentMode: UserQrContentMode; downloadUrl?: string }> {
+  const response = await qrUserConfigFile(userId, configId, path)
+  const contentMode: UserQrContentMode =
+    response.headers.get('X-Qr-Content') === 'download-link' ? 'download-link' : 'profile'
+  const downloadUrl = response.headers.get('X-Qr-Download-Url') ?? undefined
+  return { blob: await response.blob(), contentMode, downloadUrl }
+}
+
 export interface ConfigAccessOp {
   op: 'block_temp' | 'block_perm' | 'unblock'
   days?: number

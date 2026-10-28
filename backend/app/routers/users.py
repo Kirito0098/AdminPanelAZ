@@ -1565,7 +1565,7 @@ def config_files(
     require_ha_primary_for_client_ops(db, node=node)
     adapter = get_adapter_for_node(node)
     files = adapter.get_profile_files(op_config.client_name, op_config.vpn_type)
-    return enrich_profile_files(op_config.client_name, files)
+    return {"files": enrich_profile_files(op_config.client_name, files)}
 
 
 @router.get("/{user_id}/configs/{config_id}/download")

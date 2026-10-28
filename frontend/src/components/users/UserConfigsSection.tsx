@@ -1,17 +1,29 @@
 import { useState } from 'react'
-import { Download, KeyRound, QrCode, Trash2 } from 'lucide-react'
+import { Copy, Download, FileKey, KeyRound, Loader2, QrCode, Trash2 } from 'lucide-react'
 import {
   deleteUserConfig,
   downloadUserConfigFile,
+  fetchUserConfigQrBlob,
   getUserConfigFiles,
-  qrUserConfigFile,
   setUserConfigAccessOp,
+  type UserConfigFile,
+  type UserQrContentMode,
 } from '@/api/users'
 import { ProvisioningConfigNode, UserProvisioningCard } from '@/types'
 import { useNotifications } from '@/context/NotificationContext'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import EmptyState from '@/components/ui/EmptyState'
+import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
+import { triggerFileDownload } from '@/lib/triggerFileDownload'
 import UserSection from './UserSection'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 
@@ -23,6 +35,38 @@ interface ConfigEntry extends ProvisioningConfigNode {
 interface UserConfigsSectionProps {
   userId: number
   card: UserProvisioningCard
+}
+
+type FilePickMode = 'download' | 'qr'
+
+type FilePickState = {
+  entry: ConfigEntry
+  mode: FilePickMode
+  files: UserConfigFile[]
+}
+
+type QrPreviewState = {
+  url: string
+  filename: string
+  contentMode: UserQrContentMode
+  downloadUrl?: string
+}
+
+function fileLabel(file: UserConfigFile): string {
+  const variant = (file.variant || '').trim()
+  if (!variant) return file.protocol || 'Профиль'
+  if (variant === 'vpn' || variant === 'antizapret') {
+    return variant === 'vpn' ? 'VPN профиль' : 'AntiZapret'
+  }
+  if (variant.startsWith('vpn')) return `VPN (${variant.replace(/^vpn-?/, '') || 'профиль'})`
+  if (variant.startsWith('antizapret')) {
+    return `AntiZapret (${variant.replace(/^antizapret-?/, '') || 'профиль'})`
+  }
+  return variant
+}
+
+function fileDisplayName(file: UserConfigFile): string {
+  return file.download_filename || file.filename || file.path.split('/').pop() || 'config'
 }
 
 export default function UserConfigsSection({ userId, card }: UserConfigsSectionProps) {
@@ -37,15 +81,18 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
   )
   const inPlan = (name: string) => planNames.has(name.toLowerCase())
 
-  const [filesByEntry, setFilesByEntry] = useState<Record<string, string[]>>({})
+  const [filesByEntry, setFilesByEntry] = useState<Record<string, UserConfigFile[]>>({})
   const [filesLoading, setFilesLoading] = useState<Set<string>>(new Set())
   const [deleteTarget, setDeleteTarget] = useState<ConfigEntry | null>(null)
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState<Set<string>>(new Set())
+  const [filePick, setFilePick] = useState<FilePickState | null>(null)
+  const [qrPreview, setQrPreview] = useState<QrPreviewState | null>(null)
 
   const configKey = (entry: ConfigEntry) => String(entry.config_id ?? entry.node_id)
-  const isLoading = (key: string) => actionLoading.has(key)
-  const loadFiles = async (entry: ConfigEntry): Promise<string[]> => {
+  const isLoading = (key: string) => actionLoading.has(key) || filesLoading.has(key)
+
+  const loadFiles = async (entry: ConfigEntry): Promise<UserConfigFile[]> => {
     if (!entry.config_id) return []
     const key = configKey(entry)
     const cached = filesByEntry[key]
@@ -54,10 +101,11 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
     setFilesLoading((prev) => new Set([...prev, key]))
     try {
       const data = await getUserConfigFiles(userId, entry.config_id)
-      const paths = data.files.map((f) => f.path)
-      setFilesByEntry((prev) => ({ ...prev, [key]: paths }))
-      return paths
-    } catch {
+      const files = data.files
+      setFilesByEntry((prev) => ({ ...prev, [key]: files }))
+      return files
+    } catch (err) {
+      notifyError(err instanceof Error ? err.message : 'Не удалось получить файлы профиля')
       return []
     } finally {
       setFilesLoading((prev) => {
@@ -68,28 +116,18 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
     }
   }
 
-  const handleDownload = async (entry: ConfigEntry) => {
+  const runDownload = async (entry: ConfigEntry, file: UserConfigFile) => {
     if (!entry.config_id) return
-    const paths = await loadFiles(entry)
-    const path = paths[0]
-    if (!path) {
-      notifyError('Нет файлов профиля на узле')
-      return
-    }
     const key = `dl-${configKey(entry)}`
     setActionLoading((prev) => new Set([...prev, key]))
     try {
-      const res = await downloadUserConfigFile(userId, entry.config_id, path)
+      const res = await downloadUserConfigFile(userId, entry.config_id, file.path)
       const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = path.split('/').pop() ?? 'config'
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
-      success('Конфиг скачан')
+      const downloadName =
+        parseContentDispositionFilename(res.headers.get('Content-Disposition')) ??
+        fileDisplayName(file)
+      triggerFileDownload(blob, downloadName)
+      success(`Файл «${downloadName}» скачан`)
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Ошибка скачивания')
     } finally {
@@ -101,27 +139,23 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
     }
   }
 
-  const handleQr = async (entry: ConfigEntry) => {
+  const runQr = async (entry: ConfigEntry, file: UserConfigFile) => {
     if (!entry.config_id) return
-    const paths = await loadFiles(entry)
-    const path = paths[0]
-    if (!path) {
-      notifyError('Нет файлов профиля на узле')
-      return
-    }
     const key = `qr-${configKey(entry)}`
     setActionLoading((prev) => new Set([...prev, key]))
     try {
-      const res = await qrUserConfigFile(userId, entry.config_id, path)
-      const blob = await res.blob()
+      const { blob, contentMode, downloadUrl } = await fetchUserConfigQrBlob(
+        userId,
+        entry.config_id,
+        file.path,
+      )
       const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${entry.clientName}-qr.png`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      setQrPreview({
+        url,
+        filename: fileDisplayName(file),
+        contentMode,
+        downloadUrl,
+      })
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Ошибка QR')
     } finally {
@@ -130,6 +164,45 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
         next.delete(key)
         return next
       })
+    }
+  }
+
+  const openFileAction = async (entry: ConfigEntry, mode: FilePickMode) => {
+    if (!entry.config_id) return
+    const files = await loadFiles(entry)
+    if (!files.length) {
+      notifyError('Нет файлов профиля на узле')
+      return
+    }
+    if (files.length === 1) {
+      if (mode === 'download') {
+        await runDownload(entry, files[0])
+      } else {
+        await runQr(entry, files[0])
+      }
+      return
+    }
+    setFilePick({ entry, mode, files })
+  }
+
+  const pickFile = async (file: UserConfigFile) => {
+    if (!filePick) return
+    const { entry, mode } = filePick
+    setFilePick(null)
+    if (mode === 'download') {
+      await runDownload(entry, file)
+    } else {
+      await runQr(entry, file)
+    }
+  }
+
+  const copyQrDownloadUrl = async () => {
+    if (!qrPreview?.downloadUrl) return
+    try {
+      await navigator.clipboard.writeText(qrPreview.downloadUrl)
+      success('Ссылка скопирована в буфер')
+    } catch {
+      notifyError('Не удалось скопировать ссылку')
     }
   }
 
@@ -165,7 +238,11 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
       await deleteUserConfig(userId, deleteTarget.config_id)
       success('Конфиг удалён')
       setDeleteTarget(null)
-      void loadFiles(deleteTarget) // refresh statuses
+      setFilesByEntry((prev) => {
+        const next = { ...prev }
+        delete next[configKey(deleteTarget)]
+        return next
+      })
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Ошибка удаления')
     } finally {
@@ -233,7 +310,7 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
                           clientName: group.name,
                         }
                         const created = entry.config_id != null
-                        const loadingKey = `cfg-${entry.config_id ?? entry.node_id}`
+                        const loadingKey = configKey(configEntry)
                         return (
                           <div
                             key={entry.config_id ?? entry.node_id}
@@ -247,25 +324,37 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
                                 </Badge>
                               </div>
                               <p className="mt-0.5 text-[11px] text-muted-foreground">
-                                узел ID {entry.node_id}{entry.config_id ? ` · конфиг #${entry.config_id}` : ''}
+                                узел ID {entry.node_id}
+                                {entry.config_id ? ` · конфиг #${entry.config_id}` : ''}
                               </p>
                             </div>
                             <div className="flex items-center gap-1">
                               <Button
                                 type="button"
                                 size="sm"
+                                title="Скачать"
                                 disabled={!created || isLoading(loadingKey)}
-                                onClick={() => void handleDownload(configEntry)}
+                                onClick={() => void openFileAction(configEntry, 'download')}
                               >
-                                <Download size={13} />
+                                {filesLoading.has(loadingKey) ? (
+                                  <Loader2 size={13} className="animate-spin" />
+                                ) : (
+                                  <Download size={13} />
+                                )}
                               </Button>
                               <Button
                                 type="button"
                                 size="sm"
+                                title="QR-код"
                                 disabled={!created || isLoading(loadingKey)}
-                                onClick={() => void handleQr(configEntry)}
+                                onClick={() => void openFileAction(configEntry, 'qr')}
                               >
-                                <QrCode size={13} />
+                                {actionLoading.has(`qr-${loadingKey}`) ||
+                                filesLoading.has(loadingKey) ? (
+                                  <Loader2 size={13} className="animate-spin" />
+                                ) : (
+                                  <QrCode size={13} />
+                                )}
                               </Button>
                               <Button
                                 type="button"
@@ -298,6 +387,98 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
         </div>
       </UserSection>
 
+      <Dialog
+        open={filePick != null}
+        onOpenChange={(open) => {
+          if (!open) setFilePick(null)
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              {filePick?.mode === 'qr' ? 'QR-код профиля' : 'Скачать профиль'}
+            </DialogTitle>
+            <DialogDescription>
+              {filePick
+                ? `${filePick.entry.clientName} · ${filePick.entry.node_label}`
+                : null}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {filePick?.files.map((file) => (
+              <div
+                key={file.path}
+                className="flex items-center justify-between gap-3 rounded-lg border px-3 py-2.5"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium">{fileLabel(file)}</p>
+                  <p className="truncate text-[11px] text-muted-foreground">
+                    {fileDisplayName(file)}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void pickFile(file)}
+                >
+                  {filePick.mode === 'qr' ? <QrCode size={14} /> : <Download size={14} />}
+                  {filePick.mode === 'qr' ? 'QR' : 'Скачать'}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={qrPreview != null}
+        onOpenChange={(open) => {
+          if (!open && qrPreview) {
+            URL.revokeObjectURL(qrPreview.url)
+            setQrPreview(null)
+          }
+        }}
+      >
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileKey size={18} />
+              {qrPreview?.contentMode === 'download-link'
+                ? 'QR: ссылка для скачивания'
+                : 'QR-код профиля'}
+            </DialogTitle>
+            <DialogDescription>
+              {qrPreview?.filename}
+              {qrPreview?.contentMode === 'download-link' ? (
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  Профиль не помещается в один QR (типично для AntiZapret WG/AWG и OpenVPN).
+                  Отсканируйте камерой телефона — откроется ссылка для скачивания файла, не импорт
+                  в VPN-приложение.
+                </span>
+              ) : (
+                <span className="mt-1 block text-xs text-muted-foreground">
+                  Отсканируйте VPN-приложением для импорта профиля.
+                </span>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          {qrPreview && (
+            <div className="flex justify-center rounded-lg border bg-muted/30 p-6">
+              <img src={qrPreview.url} alt="QR-код конфигурации" className="max-h-72 rounded-md" />
+            </div>
+          )}
+          {qrPreview?.downloadUrl && (
+            <DialogFooter className="sm:justify-center">
+              <Button type="button" variant="outline" onClick={() => void copyQrDownloadUrl()}>
+                <Copy size={14} />
+                Скопировать ссылку
+              </Button>
+            </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <ConfirmDialog
         open={deleteTarget != null}
         onOpenChange={(open: boolean) => {
@@ -307,9 +488,11 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
         description={
           deleteTarget ? (
             <>
-              Конфиг «{deleteTarget.clientName}» на узле {deleteTarget.node_label} будет удалён без возможности восстановления.
+              Конфиг «{deleteTarget.clientName}» на узле {deleteTarget.node_label} будет удалён без
+              возможности восстановления.
             </>
-          ) : null}
+          ) : null
+        }
         confirmLabel="Удалить"
         destructive
         loading={deleteLoading}
