@@ -82,16 +82,17 @@ def hosts_to_json(hosts: list[str]) -> str:
     return json.dumps(list(hosts), ensure_ascii=False)
 
 
-def align_remote_hosts_to_domain(domain: str, existing: list[str] | None) -> list[str]:
-    """Put ``domain`` first so HA «Домен» / client.sh 7 is not undone by remotes patch.
+def align_remote_hosts_to_domain(domain: str, existing: list[str] | None = None) -> list[str]:
+    """Replace remotes with ``domain`` only — HA «Домен» must drop foreign hosts.
 
-    Keeps other remotes (proxy fallbacks, etc.) after the shared domain, deduped.
+    Polluted lists (proxy remotes from another HA) used to stay after the new
+    domain as 2nd/3rd entries; client.sh 7 then wrote all of them into .ovpn.
+    Proxy / multi-remote for this node is set again via «Адреса подключения».
+    ``existing`` is ignored (kept for call-site compatibility).
     """
+    del existing  # Domain replace; do not merge stale remotes
     host = (domain or "").strip()
-    if not host:
-        return list(existing or [])
-    rest = [h for h in (existing or []) if h.lower() != host.lower()]
-    return [host, *rest][:MAX_OPENVPN_REMOTE_HOSTS]
+    return [host] if host else []
 
 
 def sync_openvpn_host_from_remotes(

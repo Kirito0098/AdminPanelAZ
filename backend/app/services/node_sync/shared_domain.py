@@ -2,11 +2,10 @@
 
 Writes ``OPENVPN_HOST`` from ``shared_domain`` and ``WIREGUARD_HOST`` from
 ``shared_domain_wireguard`` (falling back to ``shared_domain`` when empty) to
-``/root/antizapret/setup`` on the primary and all replicas, aligns each node's
-OpenVPN remotes list so ``shared_domain`` is first (so the remotes disk/download
-patch cannot undo the new domain), then runs ``doall.sh`` (apply_config_changes)
-and ``client.sh 7`` (recreate_profiles) on each node so the new hosts land in
-regenerated client profiles.
+``/root/antizapret/setup`` on the primary and all replicas, replaces each node's OpenVPN remotes list with ``[shared_domain]`` (drops
+foreign hosts left by a bad proxy remotes save), then runs ``doall.sh``
+(apply_config_changes) and ``client.sh 7`` (recreate_profiles) on each node so
+the new host lands alone in regenerated client profiles.
 
 On replicas the locally regenerated ``.ovpn`` files are then replaced with a
 byte-copy from the primary: ``client.sh 7`` rebuilds profiles from the
@@ -135,8 +134,8 @@ def apply_shared_domain_to_members(
         progress(percent, f"{node.name}: запись хостов в setup…")
         try:
             get_adapter_for_node(node).update_antizapret_settings(updates)
-            # Remotes list wins over OPENVPN_HOST on disk patch and download.
-            # Align first remote to shared_domain so client.sh 7 is not undone.
+            # Remotes list wins on disk patch/download — replace with domain only
+            # so foreign hosts from another HA/proxy do not stay in .ovpn.
             aligned = align_remote_hosts_to_domain(
                 openvpn_host, parse_hosts_json(node.openvpn_remote_hosts)
             )
