@@ -185,11 +185,12 @@ export default function DashboardPage() {
       startGlobal()
     }
 
-    // Admin: one live probe via /monitoring/overview (feeds cards + connectionMap).
+    // Admin: federated overview so HA / multi-node clients online on any member
+    // still light the card (scope=node only saw the active node).
     // Config counts come from getConfigs — avoids a second /monitoring/summary probe.
     const monitoringPromise =
       user?.role === 'admin'
-        ? getMonitoring('node')
+        ? getMonitoring('all', 'dedupe')
             .then((data) => {
               setConnectionMap(
                 buildClientConnectionMap(

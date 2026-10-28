@@ -479,6 +479,16 @@ function emptyConnectionEntry(): ClientConnectionEntry {
   }
 }
 
+/**
+ * Build presence for Clients cards. Pass federated overview lists (scope=all)
+ * so HA sessions on any member light the card.
+ *
+ * | Tab          | Source                         | Flag        |
+ * | openvpn      | openvpn_clients                | openvpn*    |
+ * | wireguard    | wireguard_peers (wg dump)      | wireguard   |
+ * | amneziawg    | same dump (awg interfaces)     | wireguard   |
+ * | amneziawg2   | amneziawg2_peers (AZ-AWG2)     | amneziawg2  |
+ */
 export function buildClientConnectionMap(
   openvpnClients: OpenVpnClient[],
   wireguardPeers: WireGuardPeer[],
@@ -548,12 +558,25 @@ export function isConfigConnected(
   const entry = connectionMap[clientName.trim().toLowerCase()]
   if (!entry) return false
   if (tab === 'openvpn') {
-    if (openvpnGroup === 'GROUP_UDP') return entry.openvpnUdp
-    if (openvpnGroup === 'GROUP_TCP') return entry.openvpnTcp
-    return entry.openvpn
+    // Live in status ⇒ online. Prefer transport flags when known; if profile/
+    // real_address did not reveal udp/tcp, still count the session for GROUP_*.
+    if (!entry.openvpn) return false
+    if (openvpnGroup === 'GROUP_UDP') {
+      if (entry.openvpnUdp) return true
+      if (entry.openvpnTcp && !entry.openvpnUdp) return false
+      return true
+    }
+    if (openvpnGroup === 'GROUP_TCP') {
+      if (entry.openvpnTcp) return true
+      if (entry.openvpnUdp && !entry.openvpnTcp) return false
+      return true
+    }
+    return true
   }
+  // amneziawg2 = AZ-AWG2 peers; wireguard + stock amneziawg share wg/awg dump.
   if (tab === 'amneziawg2') return entry.amneziawg2
-  return entry.wireguard
+  if (tab === 'wireguard' || tab === 'amneziawg') return entry.wireguard
+  return false
 }
 
 export function formatBlockStatus(policy?: ClientAccessPolicy): {

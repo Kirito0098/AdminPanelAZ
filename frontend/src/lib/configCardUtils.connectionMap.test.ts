@@ -32,20 +32,23 @@ function peer(partial: Partial<WireGuardPeer> & Pick<WireGuardPeer, 'client_name
 }
 
 describe('buildClientConnectionMap', () => {
-  it('marks AWG2 online from amneziawg2_peers, not stock wireguard', () => {
+  it('marks each protocol from its own federated list', () => {
     // Naive UTC within 180s window (backend style without Z).
     const fresh = new Date(Date.now() - 30_000).toISOString().replace(/Z$/, '')
 
     const map = buildClientConnectionMap(
-      [],
-      [peer({ client_name: 'only-wg', latest_handshake: fresh })],
+      [ovpn({ common_name: 'ovpn-user', profile: 'antizapret-udp' })],
+      [peer({ client_name: 'wg-or-awg', latest_handshake: fresh })],
       [peer({ client_name: 'awg2-user', latest_handshake: fresh })],
     )
 
+    expect(isConfigConnected('ovpn-user', 'openvpn', map)).toBe(true)
+    expect(isConfigConnected('wg-or-awg', 'wireguard', map)).toBe(true)
+    expect(isConfigConnected('wg-or-awg', 'amneziawg', map)).toBe(true)
     expect(isConfigConnected('awg2-user', 'amneziawg2', map)).toBe(true)
     expect(isConfigConnected('awg2-user', 'wireguard', map)).toBe(false)
-    expect(isConfigConnected('only-wg', 'wireguard', map)).toBe(true)
-    expect(isConfigConnected('only-wg', 'amneziawg2', map)).toBe(false)
+    expect(isConfigConnected('wg-or-awg', 'amneziawg2', map)).toBe(false)
+    expect(isConfigConnected('ovpn-user', 'wireguard', map)).toBe(false)
   })
 
   it('keeps OpenVPN online when profile has -udp', () => {
@@ -55,6 +58,24 @@ describe('buildClientConnectionMap', () => {
     )
     expect(isConfigConnected('Alice', 'openvpn', map, 'GROUP_UDP')).toBe(true)
     expect(isConfigConnected('Alice', 'openvpn', map, 'GROUP_TCP')).toBe(false)
+  })
+
+  it('counts OpenVPN online for GROUP_UDP when transport is unknown', () => {
+    const map = buildClientConnectionMap(
+      [ovpn({ common_name: 'Keenetic_X', profile: 'antizapret', real_address: '1.2.3.4:1194' })],
+      [],
+    )
+    expect(isConfigConnected('Keenetic_X', 'openvpn', map, 'GROUP_UDP')).toBe(true)
+    expect(isConfigConnected('Keenetic_X', 'openvpn', map, 'GROUP_TCP')).toBe(true)
+  })
+
+  it('marks federated HA peer online on OpenVPN tab', () => {
+    const map = buildClientConnectionMap(
+      [ovpn({ common_name: 'Keenetic_Bogachevs', profile: 'antizapret-udp' })],
+      [],
+      [],
+    )
+    expect(isConfigConnected('Keenetic_Bogachevs', 'openvpn', map, 'GROUP_UDP\\TCP')).toBe(true)
   })
 })
 
