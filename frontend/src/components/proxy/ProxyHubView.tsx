@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Activity,
+  Cable,
   ExternalLink,
   Network,
   Puzzle,
@@ -22,11 +23,20 @@ import SettingsAlert from '@/components/settings/SettingsAlert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
-
+import { findNodeHaMembership } from '@/lib/nodeHa'
+import type { Node, NodeSyncGroup } from '@/types'
 
 const ANTIZAPRET_REMOTES_HASH = encodeURIComponent('section-Адреса подключения')
 
@@ -57,14 +67,44 @@ const QUICK_LINKS = [
   },
 ] as const
 
+function vpnSelectLabel(node: Node, syncGroups: NodeSyncGroup[]): string {
+  const membership = findNodeHaMembership(node.id, syncGroups)
+  if (membership) {
+    const group = syncGroups.find((g) => g.id === membership.groupId)
+    const role = group?.primary_node_id === node.id ? 'primary' : 'replica'
+    return `${node.name} · HA «${membership.groupName}» (${role})`
+  }
+  return node.name
+}
+
+function pickDefaultRemotesNodeId(
+  vpnNodes: Node[],
+  proxyNodes: Node[],
+  activeNode: Node | null,
+): number | null {
+  if (vpnNodes.length === 0) return null
+  if (activeNode && !isProxyNode(activeNode) && vpnNodes.some((n) => n.id === activeNode.id)) {
+    return activeNode.id
+  }
+  const linkedIds = new Set(
+    proxyNodes
+      .map((p) => p.linked_vpn_node_id)
+      .filter((id): id is number => typeof id === 'number' && id > 0),
+  )
+  const linked = vpnNodes.find((n) => linkedIds.has(n.id))
+  return linked?.id ?? vpnNodes[0].id
+}
+
 export default function ProxyHubView() {
   const { activeNode, nodes, syncGroups, refreshNodes, refreshSyncGroups } = useNode()
   const { error: notifyError } = useNotifications()
   const [bootstrapped, setBootstrapped] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [remotesNodeId, setRemotesNodeId] = useState<number | null>(null)
 
   const proxyNodes = useMemo(() => nodes.filter(isProxyNode), [nodes])
+  const vpnNodes = useMemo(() => nodes.filter((n) => !isProxyNode(n)), [nodes])
 
   const load = useCallback(async () => {
     setRefreshing(true)
@@ -87,6 +127,13 @@ export default function ProxyHubView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    setRemotesNodeId((prev) => {
+      if (prev != null && vpnNodes.some((n) => n.id === prev)) return prev
+      return pickDefaultRemotesNodeId(vpnNodes, proxyNodes, activeNode)
+    })
+  }, [vpnNodes, proxyNodes, activeNode])
+
   const handlePanelUpdated = useCallback(async () => {
     try {
       await refreshNodes()
@@ -95,10 +142,17 @@ export default function ProxyHubView() {
     }
   }, [refreshNodes])
 
-  const activeNodeLabel = useMemo(() => {
-    if (!activeNode) return null
-    return activeNode.name
-  }, [activeNode])
+  const remotesNode = useMemo(
+    () => (remotesNodeId == null ? null : vpnNodes.find((n) => n.id === remotesNodeId) ?? null),
+    [remotesNodeId, vpnNodes],
+  )
+
+  const remotesNodeLabel = remotesNode ? vpnSelectLabel(remotesNode, syncGroups) : null
+
+  const proxiesLinkedToRemotes = useMemo(() => {
+    if (remotesNodeId == null) return []
+    return proxyNodes.filter((p) => p.linked_vpn_node_id === remotesNodeId)
+  }, [proxyNodes, remotesNodeId])
 
   return (
     <div className="space-y-6">
@@ -111,8 +165,9 @@ export default function ProxyHubView() {
         docsLabel="Инструкция"
         description={
           <>
-            Сводка по прокси-узлам и адресам OpenVPN активного VPN. У каждого прокси можно указать,
-            к какой HA-группе или серверу он относится. Панель не ставит и не запускает{' '}
+            Сводка по прокси-узлам и адресам OpenVPN. Адреса remote хранятся на VPN-узле — выберите
+            узел ниже (у одной HA можно указать прокси, у другой — только зарубежные). Панель не ставит
+            и не запускает{' '}
             <code className="rounded bg-muted px-1 py-0.5 font-mono text-xs">proxy.sh</code>.
           </>
         }
@@ -187,9 +242,23 @@ export default function ProxyHubView() {
                         {node.host}:{node.port}
                       </CardDescription>
                     </div>
-                    <Button type="button" variant="ghost" size="sm" asChild>
-                      <Link to="/nodes">Открыть на Узлах</Link>
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                      {node.linked_vpn_node_id != null &&
+                        vpnNodes.some((v) => v.id === node.linked_vpn_node_id) && (
+                          <Button
+                            type="button"
+                            variant={remotesNodeId === node.linked_vpn_node_id ? 'secondary' : 'outline'}
+                            size="sm"
+                            onClick={() => setRemotesNodeId(node.linked_vpn_node_id!)}
+                          >
+                            <Cable className="mr-1.5 h-3.5 w-3.5" />
+                            Адреса VPN
+                          </Button>
+                        )}
+                      <Button type="button" variant="ghost" size="sm" asChild>
+                        <Link to="/nodes">Открыть на Узлах</Link>
+                      </Button>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent>
@@ -208,25 +277,65 @@ export default function ProxyHubView() {
 
       <section className="space-y-3">
         <div className="space-y-1">
-          <h3 className="text-sm font-semibold tracking-tight">Адреса подключения (активный VPN)</h3>
+          <h3 className="text-sm font-semibold tracking-tight">Адреса подключения (VPN)</h3>
           <p className="text-xs text-muted-foreground">
-            Список remote OpenVPN для{' '}
-            {activeNodeLabel ? (
-              <span className="font-medium text-foreground">{activeNodeLabel}</span>
-            ) : (
-              'активного узла'
-            )}
-            . Полный блок setup — в{' '}
+            Список remote OpenVPN хранится отдельно на каждом VPN-узле. Полный блок setup — в{' '}
             <Link
               to={`/antizapret#${ANTIZAPRET_REMOTES_HASH}`}
               className="font-medium text-primary underline-offset-4 hover:underline"
             >
               Конфиг AntiZapret
-            </Link>
-            .
+            </Link>{' '}
+            (там тоже для активного узла).
           </p>
         </div>
-        <RemoteHostsCard nodeId={activeNode?.id ?? null} variant="card" />
+
+        {vpnNodes.length === 0 ? (
+          <SettingsAlert variant="warning" title="Нет VPN-узлов">
+            Добавьте VPN-узел на странице Узлы — без него список remote задать нельзя.
+          </SettingsAlert>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid max-w-lg gap-1.5">
+              <Label htmlFor="proxy-remotes-vpn">VPN-узел для списка remote</Label>
+              <Select
+                value={remotesNodeId != null ? String(remotesNodeId) : undefined}
+                onValueChange={(value) => setRemotesNodeId(Number(value))}
+              >
+                <SelectTrigger id="proxy-remotes-vpn">
+                  <SelectValue placeholder="Выберите VPN-узел" />
+                </SelectTrigger>
+                <SelectContent>
+                  {vpnNodes.map((node) => (
+                    <SelectItem key={node.id} value={String(node.id)}>
+                      {vpnSelectLabel(node, syncGroups)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {remotesNodeLabel && (
+                <p className="text-xs text-muted-foreground">
+                  Редактируется:{' '}
+                  <span className="font-medium text-foreground">{remotesNodeLabel}</span>
+                  {proxiesLinkedToRemotes.length > 0
+                    ? ` · прокси: ${proxiesLinkedToRemotes.map((p) => p.name).join(', ')}`
+                    : ' · прокси не привязан (можно оставить только зарубежные адреса)'}
+                </p>
+              )}
+            </div>
+            <RemoteHostsCard
+              key={remotesNodeId ?? 'none'}
+              nodeId={remotesNodeId}
+              variant="card"
+              missingNodeMessage="Выберите VPN-узел в списке выше."
+              cardDescription={
+                remotesNodeLabel
+                  ? `Список remote OpenVPN для «${remotesNode?.name ?? ''}». Первый адрес — слот входа (RU-прокси, если нужен). Нельзя совпадать с доменом панели.`
+                  : undefined
+              }
+            />
+          </div>
+        )}
       </section>
 
       <section className="space-y-3">

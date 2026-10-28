@@ -133,6 +133,7 @@
 
 ### 🐛 Fixed
 
+- **Прокси / адреса remote на чужой VPN** — блок «Адреса подключения» на странице Прокси больше не пишет список в глобальный активный узел без явного выбора: селектор VPN (+ кнопка «Адреса VPN» у привязанного прокси). Загрузка списка игнорирует устаревший ответ при быстрой смене узла, чтобы remote одной HA не попадали в другую (`ProxyHubView.tsx`, `RemoteHostsCard.tsx`).
 - **Создание OpenVPN + HA / зависание панели** — после `client.sh 1` панель больше не гоняет полный `client.sh 7` (пересоздание всех профилей) на create/renew/bulk/CSV/шаблонах; при заданных remote hosts — только точечный patch. Репликация клиентов HA (create/delete/renew) уходит в фон (`ha_client_sync`) с локом на группу, HTTP отвечает после работы на primary; в ответе — `ha_sync_task_id`, в диалоге создания — info «HA-синхронизация в фоне». Кнопка recreate-profiles, shared domain, doall/routing apply и обычный restore по-прежнему могут звать `7`.
 - **CIDR deploy / мёртвый `recreate_profiles_after`** — флаг убран из API и пайплайна: кнопка «Развернуть + doall + 7» давно снята, `7` для маршрутизации идёт через «Провайдеры → doall + client.sh 7». Также удалён неиспользуемый `recreate_openvpn_profiles_after_admin_change`.
 - **Сохранение списков / edit-files / allow-ips / recreate / AWG2 HA** — `doall` и HA-репликация файлов больше не держат HTTP: после записи на primary ставится фон `config_apply` (doall без `client.sh 7` + replicate); recreate-profiles — фон `recreate_profiles`; restore/obfuscation AZ-AWG2 — фон `ha_awg2_sync` с локом группы.
