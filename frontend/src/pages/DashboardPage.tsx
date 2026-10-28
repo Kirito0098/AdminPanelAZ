@@ -192,7 +192,11 @@ export default function DashboardPage() {
         ? getMonitoring('node')
             .then((data) => {
               setConnectionMap(
-                buildClientConnectionMap(data.openvpn_clients, data.wireguard_peers),
+                buildClientConnectionMap(
+                  data.openvpn_clients,
+                  data.wireguard_peers,
+                  data.amneziawg2_peers ?? [],
+                ),
               )
               return data
             })

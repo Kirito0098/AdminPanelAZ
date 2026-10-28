@@ -147,7 +147,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 - `shared_domain` → `OPENVPN_HOST`
 - `shared_domain_wireguard` → `WIREGUARD_HOST` (если пусто — тот же host, что `shared_domain`)
 
-Так же, как в оригинальном AntiZapret `setup.sh`, можно задать **разные** домены для OpenVPN и WireGuard/AmneziaWG. Затем на каждом узле выполняется `doall.sh` (apply_config_changes) + `client.sh 7` (recreate_profiles), чтобы новые хосты попали в перегенерированные профили клиентов. Фоновая задача `node_sync_shared_domain`; ошибка на одном узле не прерывает остальные (partial failure → `sync_status=failed`, детали в `last_sync_error`). Вызывается при **HA Setup** (если при создании включён переключатель «Сразу настроить группу»), при изменении доменов в группе, а также вручную кнопкой «Домен». Создание группы **без** Setup **не** применяет домены автоматически.
+Так же, как в оригинальном AntiZapret `setup.sh`, можно задать **разные** домены для OpenVPN и WireGuard/AmneziaWG. Затем на каждом узле: список **Адреса подключения** выравнивается так, чтобы `shared_domain` был первым (иначе патч remotes после `client.sh 7` и скачивание снова подставляли бы старый remote); `doall.sh` + `client.sh 7`, чтобы новые хосты попали в перегенерированные профили. Фоновая задача `node_sync_shared_domain`; ошибка на одном узле не прерывает остальные (partial failure → `sync_status=failed`, детали в `last_sync_error`). Вызывается при **HA Setup** (если при создании включён переключатель «Сразу настроить группу»), при изменении доменов в группе, а также вручную кнопкой «Домен». Создание группы **без** Setup **не** применяет домены автоматически.
 
 ### Partial failure
 

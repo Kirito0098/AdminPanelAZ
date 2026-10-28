@@ -2,9 +2,11 @@
 
 Writes ``OPENVPN_HOST`` from ``shared_domain`` and ``WIREGUARD_HOST`` from
 ``shared_domain_wireguard`` (falling back to ``shared_domain`` when empty) to
-``/root/antizapret/setup`` on the primary and all replicas, then runs
-``doall.sh`` (apply_config_changes) and ``client.sh 7`` (recreate_profiles) on
-each node so the new hosts land in regenerated client profiles.
+``/root/antizapret/setup`` on the primary and all replicas, aligns each node's
+OpenVPN remotes list so ``shared_domain`` is first (so the remotes disk/download
+patch cannot undo the new domain), then runs ``doall.sh`` (apply_config_changes)
+and ``client.sh 7`` (recreate_profiles) on each node so the new hosts land in
+regenerated client profiles.
 
 On replicas the locally regenerated ``.ovpn`` files are then replaced with a
 byte-copy from the primary: ``client.sh 7`` rebuilds profiles from the
@@ -33,7 +35,11 @@ from app.services.node_sync.groups import (
 )
 from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
 from app.services.node_sync.vpn_state_sync import clear_openvpn_restart_pending, copy_openvpn_profiles_from_primary
-from app.services.openvpn_remote_hosts import parse_hosts_json
+from app.services.openvpn_remote_hosts import (
+    align_remote_hosts_to_domain,
+    hosts_to_json,
+    parse_hosts_json,
+)
 from app.services.profile_delivery import patch_openvpn_profiles_on_node
 
 logger = logging.getLogger(__name__)
@@ -129,12 +135,24 @@ def apply_shared_domain_to_members(
         progress(percent, f"{node.name}: запись хостов в setup…")
         try:
             get_adapter_for_node(node).update_antizapret_settings(updates)
+            # Remotes list wins over OPENVPN_HOST on disk patch and download.
+            # Align first remote to shared_domain so client.sh 7 is not undone.
+            aligned = align_remote_hosts_to_domain(
+                openvpn_host, parse_hosts_json(node.openvpn_remote_hosts)
+            )
+            node.openvpn_remote_hosts = hosts_to_json(aligned)
+            db.add(node)
             result["updated"].append({"node_id": node.id, "node_name": node.name})
         except Exception as exc:
             logger.warning("Shared domain setup write failed on %s: %s", node.name, exc)
             result["errors"].append(
                 {"node_id": node.id, "node_name": node.name, "stage": "setup", "error": str(exc)}
             )
+    try:
+        db.commit()
+    except Exception as exc:
+        logger.warning("Shared domain remotes commit failed: %s", exc)
+        result["errors"].append({"stage": "remotes", "error": str(exc)})
 
     if run_apply:
         primary_adapter = None

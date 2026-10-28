@@ -82,6 +82,18 @@ def hosts_to_json(hosts: list[str]) -> str:
     return json.dumps(list(hosts), ensure_ascii=False)
 
 
+def align_remote_hosts_to_domain(domain: str, existing: list[str] | None) -> list[str]:
+    """Put ``domain`` first so HA «Домен» / client.sh 7 is not undone by remotes patch.
+
+    Keeps other remotes (proxy fallbacks, etc.) after the shared domain, deduped.
+    """
+    host = (domain or "").strip()
+    if not host:
+        return list(existing or [])
+    rest = [h for h in (existing or []) if h.lower() != host.lower()]
+    return [host, *rest][:MAX_OPENVPN_REMOTE_HOSTS]
+
+
 def sync_openvpn_host_from_remotes(
     adapter_factory,
     hosts: list[str],
