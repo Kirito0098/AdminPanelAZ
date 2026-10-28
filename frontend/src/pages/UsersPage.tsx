@@ -22,6 +22,7 @@ import {
 import { getNodes } from '@/api/nodes'
 import {
   createProvisionedUser,
+  createUserFromExisting,
   deleteProvisionedUser,
   downloadBulkNodesReport,
   getProvisioning,
@@ -32,6 +33,7 @@ import {
   resumeUser,
   suspendUser,
 } from '@/api/users'
+import { useAuth } from '@/context/AuthContext'
 import AppDialog from '@/components/shared/AppDialog'
 import DocsLink from '@/components/shared/DocsLink'
 import ToolbarButton from '@/components/shared/ToolbarButton'
@@ -74,7 +76,9 @@ const REQUEST_PROTOCOLS: { id: string; label: string; featureKeys: string[] }[] 
 ]
 import { UsersFilters } from '@/components/users/UsersFilters'
 import UsersCardViewSettings from '@/components/users/UsersCardViewSettings'
-import CreateUserDialog from '@/components/users/CreateUserDialog'
+import CreateUserDialog, {
+  type CreateUserPayload,
+} from '@/components/users/CreateUserDialog'
 import BulkNodesDialog from '@/components/users/BulkNodesDialog'
 import UsersBulkBar from '@/components/users/UsersBulkBar'
 import SubscriberCard from '@/components/users/SubscriberCard'
@@ -97,6 +101,7 @@ export default function UsersPage() {
   const { userId } = useParams<{ userId: string }>()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
+  const { user: authUser } = useAuth()
   const { isEnabled } = useFeatureModules()
   const { success, error: notifyError } = useNotifications()
   const { pendingRequestsCount } = useNotificationCenter()
@@ -442,26 +447,34 @@ export default function UsersPage() {
       suspended,
     }
   }, [users])
-  const handleCreate = async (data: {
-    username: string
-    client_base_name: string
-    node_ids: number[]
-    protocols: string[]
-    config_count: number
-    config_quota?: number | null
-    access_until?: string | null
-    panel_login_enabled: boolean
-    password?: string | null
-    telegram_id?: string | null
-    preset_id?: number | null
-  }) => {
+  const handleCreate = async (data: CreateUserPayload) => {
     try {
+      if (data.mode === 'from_existing') {
+        const created = await createUserFromExisting({
+          username: data.username,
+          config_ids: data.config_ids ?? [],
+          config_quota: data.config_quota ?? null,
+          access_until: data.access_until ?? null,
+          panel_login_enabled: data.panel_login_enabled,
+          password: data.password ?? null,
+          telegram_id: data.telegram_id ?? null,
+        })
+        setCreateOpen(false)
+        success(
+          created.assigned_config_ids.length
+            ? `«${data.username}» создан, привязано конфигов: ${created.assigned_config_ids.length}`
+            : `«${data.username}» создан без конфигов`,
+        )
+        await reloadUsers()
+        void navigate(`/users/${created.user.id}`, { replace: false })
+        return
+      }
       const created = await createProvisionedUser({
         username: data.username,
-        client_base_name: data.client_base_name,
-        node_ids: data.node_ids,
-        protocols: data.protocols,
-        config_count: data.config_count,
+        client_base_name: data.client_base_name!,
+        node_ids: data.node_ids!,
+        protocols: data.protocols!,
+        config_count: data.config_count!,
         config_quota: data.config_quota ?? null,
         access_until: data.access_until ?? null,
         panel_login_enabled: data.panel_login_enabled,
@@ -848,6 +861,7 @@ export default function UsersPage() {
         <CreateUserDialog
           open={createOpen}
           onOpenChange={setCreateOpen}
+          adminUserId={authUser?.id}
           onCreate={handleCreate}
         />
       ) : null}

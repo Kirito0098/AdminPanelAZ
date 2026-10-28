@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, ChevronLeft, Users as UsersIcon } from 'lucide-react'
+import { getConfigs } from '@/api/configs'
 import { getNodeSyncGroups, getNodes } from '@/api/nodes'
 import { listPresets } from '@/api/users'
 import { Node, PresetResponse } from '@/types'
@@ -15,23 +16,38 @@ import { formatDate } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 
 type Step = 'who' | 'access' | 'summary'
+type CreateMode = 'provision' | 'from_existing'
+
+type ConfigOption = {
+  id: number
+  name: string
+  owner_id: number | null
+  owner_username?: string | null
+  ha_primary_config_id: number | null
+}
+
+export type CreateUserPayload = {
+  mode: CreateMode
+  username: string
+  client_base_name?: string
+  node_ids?: number[]
+  protocols?: string[]
+  config_count?: number
+  config_ids?: number[]
+  config_quota?: number | null
+  access_until?: string | null
+  panel_login_enabled: boolean
+  password?: string | null
+  telegram_id?: string | null
+  preset_id?: number | null
+}
 
 interface CreateUserDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onCreate: (data: {
-    username: string
-    client_base_name: string
-    node_ids: number[]
-    protocols: string[]
-    config_count: number
-    config_quota?: number | null
-    access_until?: string | null
-    panel_login_enabled: boolean
-    password?: string | null
-    telegram_id?: string | null
-    preset_id?: number | null
-  }) => void | Promise<void>
+  /** Current admin user id — filters configs to unowned ∪ this owner by default. */
+  adminUserId?: number
+  onCreate: (data: CreateUserPayload) => void | Promise<void>
 }
 
 const PROTOCOLS: { id: string; label: string; featureKeys: string[] }[] = [
@@ -54,6 +70,7 @@ function nodesMissingAwg2(nodes: Node[], selectedIds: number[]): Node[] {
 export default function CreateUserDialog({
   open,
   onOpenChange,
+  adminUserId,
   onCreate,
 }: CreateUserDialogProps) {
   const { isEnabled } = useFeatureModules()
@@ -62,6 +79,7 @@ export default function CreateUserDialog({
     [isEnabled],
   )
   const [step, setStep] = useState<Step>('who')
+  const [mode, setMode] = useState<CreateMode>('provision')
   const [nodes, setNodes] = useState<Node[]>([])
   const [replicaIds, setReplicaIds] = useState<Set<number>>(new Set())
   const [nodesLoading, setNodesLoading] = useState(false)
@@ -78,12 +96,19 @@ export default function CreateUserDialog({
   const [configCount, setConfigCount] = useState(1)
   const [configQuota, setConfigQuota] = useState('')
   const [accessUntil, setAccessUntil] = useState('')
+  const [configIds, setConfigIds] = useState<number[]>([])
+  const [configOptions, setConfigOptions] = useState<ConfigOption[]>([])
+  const [configsLoading, setConfigsLoading] = useState(false)
+  const [configsLoaded, setConfigsLoaded] = useState(false)
+  const [showAllOwners, setShowAllOwners] = useState(false)
+  const [configSearch, setConfigSearch] = useState('')
 
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
     if (!open) {
       setStep('who')
+      setMode('provision')
       setUsername('')
       setClientBaseName('')
       setTelegramId('')
@@ -95,6 +120,11 @@ export default function CreateUserDialog({
       setConfigQuota('')
       setAccessUntil('')
       setSelectedPresetId(null)
+      setConfigIds([])
+      setConfigOptions([])
+      setConfigsLoaded(false)
+      setShowAllOwners(false)
+      setConfigSearch('')
     }
   }, [open])
 
@@ -156,6 +186,37 @@ export default function CreateUserDialog({
     }
   }, [open])
 
+  useEffect(() => {
+    if (!open || step !== 'access' || mode !== 'from_existing' || configsLoaded) return
+    let cancelled = false
+    const load = async () => {
+      setConfigsLoading(true)
+      try {
+        const list = await getConfigs(false)
+        if (cancelled) return
+        // List API already scopes to primaries; keep ha_primary_config_id for filter parity.
+        setConfigOptions(
+          list.map((c) => ({
+            id: c.id,
+            name: c.client_name,
+            owner_id: c.owner_id,
+            owner_username: c.owner_username ?? null,
+            ha_primary_config_id: null,
+          })),
+        )
+        setConfigsLoaded(true)
+      } catch {
+        if (!cancelled) setConfigOptions([])
+      } finally {
+        if (!cancelled) setConfigsLoading(false)
+      }
+    }
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [open, step, mode, configsLoaded])
+
   /** Прокси и реплики HA выдавать нельзя (сервер проверит ещё раз). */
   const assignableNodes = useMemo(
     () => nodes.filter((node) => (node.node_kind ?? 'vpn') === 'vpn' && !replicaIds.has(node.id)),
@@ -168,6 +229,29 @@ export default function CreateUserDialog({
   )
 
   const awg2Enabled = availableProtocols.some((p) => p.id === 'amneziawg2')
+
+  const visibleConfigs = useMemo(() => {
+    let list = configOptions.filter((c) => c.ha_primary_config_id == null)
+    if (!showAllOwners) {
+      list = list.filter(
+        (c) => c.owner_id == null || (adminUserId != null && c.owner_id === adminUserId),
+      )
+    }
+    const q = configSearch.trim().toLowerCase()
+    if (q) {
+      list = list.filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          (c.owner_username ?? '').toLowerCase().includes(q),
+      )
+    }
+    return list
+  }, [configOptions, showAllOwners, adminUserId, configSearch])
+
+  const selectedConfigNames = useMemo(() => {
+    const byId = new Map(configOptions.map((c) => [c.id, c.name]))
+    return configIds.map((id) => byId.get(id) ?? `#${id}`)
+  }, [configIds, configOptions])
 
   const changeSelectedNodes = (nextIds: number[]) => {
     setSelectedNodeIds(nextIds)
@@ -196,28 +280,55 @@ export default function CreateUserDialog({
   }
 
   const canProceed = () => {
-    if (step === 'who') return Boolean(username.trim() && clientBaseName.trim())
-    if (step === 'access')
+    if (step === 'who') {
+      if (!username.trim()) return false
+      if (mode === 'from_existing') {
+        if (panelLogin && password.length < 4) return false
+        return true
+      }
+      return Boolean(clientBaseName.trim())
+    }
+    if (step === 'access') {
+      if (mode === 'from_existing') return true
       return selectedNodeIds.length > 0 && selectedProtocols.length > 0
+    }
     return true
   }
+
+  const parsedQuota =
+    configQuota.trim() === '' ? null : Number.parseInt(configQuota, 10) || undefined
+  const parsedAccessUntil = accessUntil.trim() === '' ? undefined : accessUntil
 
   const handleSubmit = async () => {
     setSubmitting(true)
     try {
-      await onCreate({
-        username: username.trim(),
-        client_base_name: clientBaseName.trim(),
-        node_ids: selectedNodeIds,
-        protocols: selectedProtocols,
-        config_count: configCount,
-        config_quota: configQuota.trim() === '' ? null : Number.parseInt(configQuota, 10) || undefined,
-        access_until: accessUntil.trim() === '' ? undefined : accessUntil,
-        panel_login_enabled: panelLogin,
-        password: panelLogin ? password : undefined,
-        telegram_id: telegramId.trim() === '' ? undefined : telegramId.trim(),
-        preset_id: selectedPresetId,
-      })
+      if (mode === 'from_existing') {
+        await onCreate({
+          mode: 'from_existing',
+          username: username.trim(),
+          config_ids: configIds,
+          config_quota: parsedQuota,
+          access_until: parsedAccessUntil,
+          panel_login_enabled: panelLogin,
+          password: panelLogin ? password : undefined,
+          telegram_id: telegramId.trim() === '' ? undefined : telegramId.trim(),
+        })
+      } else {
+        await onCreate({
+          mode: 'provision',
+          username: username.trim(),
+          client_base_name: clientBaseName.trim(),
+          node_ids: selectedNodeIds,
+          protocols: selectedProtocols,
+          config_count: configCount,
+          config_quota: parsedQuota,
+          access_until: parsedAccessUntil,
+          panel_login_enabled: panelLogin,
+          password: panelLogin ? password : undefined,
+          telegram_id: telegramId.trim() === '' ? undefined : telegramId.trim(),
+          preset_id: selectedPresetId,
+        })
+      }
     } finally {
       setSubmitting(false)
     }
@@ -230,12 +341,27 @@ export default function CreateUserDialog({
     </>
   )
 
+  const toggleConfigId = (id: number, next: boolean | 'indeterminate') => {
+    setConfigIds((prev) => {
+      const set = new Set(prev)
+      if (next) set.add(id)
+      else set.delete(id)
+      return Array.from(set).sort((a, b) => a - b)
+    })
+  }
+
   return (
     <AppDialog
       open={open}
       onOpenChange={onOpenChange}
       title={step === 'summary' ? 'Сводка создания' : step === 'access' ? 'Доступ' : 'Кто'}
-      description={step === 'summary' ? 'Проверьте план перед созданием абонента' : undefined}
+      description={
+        step === 'summary'
+          ? mode === 'from_existing'
+            ? 'Проверьте логин и привязку конфигов'
+            : 'Проверьте план перед созданием абонента'
+          : undefined
+      }
       icon={UsersIcon}
       size="lg"
       hideClose={step === 'summary'}
@@ -273,8 +399,31 @@ export default function CreateUserDialog({
           <>
             {header(
               'Кто войдёт',
-              'Логин абонента и базовое имя конфигов. Имена конфигов будут client, client-2, …',
+              mode === 'from_existing'
+                ? 'Логин абонента. Существующие конфиги привяжете на следующем шаге.'
+                : 'Логин абонента и базовое имя конфигов. Имена конфигов будут client, client-2, …',
             )}
+            <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/20 p-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="createFromExisting">Без новых конфигов (привязать существующие)</Label>
+                <p className="text-xs text-muted-foreground">
+                  VPN на серверах не создаются — только смена владельца.
+                </p>
+              </div>
+              <Switch
+                id="createFromExisting"
+                checked={mode === 'from_existing'}
+                onCheckedChange={(on) => {
+                  setMode(on ? 'from_existing' : 'provision')
+                  setSelectedPresetId(null)
+                  setConfigIds([])
+                  if (!on) {
+                    setConfigsLoaded(false)
+                    setConfigOptions([])
+                  }
+                }}
+              />
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="createUsername">Логин</Label>
               <Input
@@ -287,20 +436,22 @@ export default function CreateUserDialog({
                 required
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="createBaseName">Базовое имя конфигов</Label>
-              <Input
-                id="createBaseName"
-                value={clientBaseName}
-                onChange={(e) => setClientBaseName(e.target.value)}
-                placeholder="ivan"
-                className="h-9 font-mono"
-                required
-              />
-              <p className="text-xs text-muted-foreground">
-                Не заканчивайте на «-число» (например ivan-2) — такие имена зарезервированы под нумерацию
-              </p>
-            </div>
+            {mode === 'provision' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="createBaseName">Базовое имя конфигов</Label>
+                <Input
+                  id="createBaseName"
+                  value={clientBaseName}
+                  onChange={(e) => setClientBaseName(e.target.value)}
+                  placeholder="ivan"
+                  className="h-9 font-mono"
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  Не заканчивайте на «-число» (например ivan-2) — такие имена зарезервированы под нумерацию
+                </p>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="createTelegramId">Telegram ID (необязательно)</Label>
               <Input
@@ -325,7 +476,7 @@ export default function CreateUserDialog({
               </div>
               <Switch id="createPanelLogin" checked={panelLogin} onCheckedChange={setPanelLogin} />
             </div>
-            {presets.length > 0 && (
+            {mode === 'provision' && presets.length > 0 && (
               <div className="space-y-1.5">
                 <Label htmlFor="createPreset">Шаблон предоставления (необязательно)</Label>
                 <select
@@ -367,7 +518,116 @@ export default function CreateUserDialog({
           </>
         )}
 
-        {step === 'access' && (
+        {step === 'access' && mode === 'from_existing' && (
+          <>
+            {header(
+              'Доступ',
+              'Привяжите существующие конфиги и при необходимости срок и квоту.',
+            )}
+            <p className="text-xs text-muted-foreground">
+              VPN на серверах не создаются — только смена владельца.
+            </p>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="createAccessUntilExisting">Срок доступа (необязательно)</Label>
+              <Input
+                id="createAccessUntilExisting"
+                type="date"
+                value={accessUntil}
+                onChange={(e) => setAccessUntil(e.target.value)}
+                className="h-9"
+              />
+              <p className="text-xs text-muted-foreground">
+                Пусто — бессрочно.
+              </p>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="createConfigQuotaExisting">Квота имён на пользователя (необязательно)</Label>
+              <Input
+                id="createConfigQuotaExisting"
+                type="number"
+                min={0}
+                max={1000}
+                value={configQuota}
+                onChange={(e) => setConfigQuota(e.target.value)}
+                placeholder="без лимита"
+                className="h-9"
+              />
+              <p className="text-xs text-muted-foreground">
+                Лимит имён конфигов на всех серверах. 0 — общий лимит панели
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Label>Конфиги</Label>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="createShowAllOwners" className="text-xs font-normal text-muted-foreground">
+                    Показать все владельцы
+                  </Label>
+                  <Switch
+                    id="createShowAllOwners"
+                    checked={showAllOwners}
+                    onCheckedChange={setShowAllOwners}
+                  />
+                </div>
+              </div>
+              <Input
+                id="createConfigSearch"
+                value={configSearch}
+                onChange={(e) => setConfigSearch(e.target.value)}
+                placeholder="Поиск по имени…"
+                className="h-9"
+              />
+              {configsLoading ? (
+                <span className="text-xs text-muted-foreground">Загрузка конфигов…</span>
+              ) : visibleConfigs.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Нет подходящих конфигов. Можно создать абонента без привязки.
+                </p>
+              ) : (
+                <div className="max-h-56 space-y-0.5 overflow-y-auto rounded-lg border p-1">
+                  {visibleConfigs.map((cfg) => {
+                    const checked = configIds.includes(cfg.id)
+                    return (
+                      <label
+                        key={cfg.id}
+                        className={cn(
+                          'flex items-center gap-2 rounded-md px-2.5 py-2 transition-colors',
+                          checked
+                            ? 'bg-primary/5'
+                            : 'hover:bg-muted/50',
+                        )}
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(next) => toggleConfigId(cfg.id, next)}
+                          aria-label={cfg.name}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium font-mono">{cfg.name}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {cfg.owner_username
+                              ? `владелец: ${cfg.owner_username}`
+                              : cfg.owner_id == null
+                                ? 'без владельца'
+                                : `owner_id: ${cfg.owner_id}`}
+                          </span>
+                        </div>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+              {configIds.length > 0 && (
+                <p className="text-xs text-muted-foreground">Выбрано: {configIds.length}</p>
+              )}
+            </div>
+          </>
+        )}
+
+        {step === 'access' && mode === 'provision' && (
           <>
             {header(
               'Доступ',
@@ -536,7 +796,45 @@ export default function CreateUserDialog({
           </>
         )}
 
-        {step === 'summary' && (
+        {step === 'summary' && mode === 'from_existing' && (
+          <>
+            {header(
+              'Сводка',
+              'После создания откроется карточка абонента. VPN-файлы на серверах не создаются.',
+            )}
+            <div className="rounded-lg border bg-muted/20 p-3 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium">Абонент:</span>
+                <span className="font-mono">{username}</span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="font-medium shrink-0">Конфиги:</span>
+                <span className="font-mono text-[11px]">
+                  {selectedConfigNames.length ? selectedConfigNames.join(', ') : 'без привязки'}
+                </span>
+              </div>
+              {accessUntil ? (
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">Срок доступа:</span>
+                  <span className="text-[11px]">{formatDate(accessUntil)}</span>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">Срок доступа:</span>
+                  <span className="text-[11px]">бессрочно</span>
+                </div>
+              )}
+              {panelLogin && (
+                <div className="flex items-center gap-2">
+                  <span className="font-medium">Вход в панель:</span>
+                  <span className="text-[11px]">включён</span>
+                </div>
+              )}
+            </div>
+          </>
+        )}
+
+        {step === 'summary' && mode === 'provision' && (
           <>
             {header(
               'Сводка',
