@@ -49,6 +49,7 @@ from app.services.node_transport import (
     resolve_transport_id,
 )
 from app.services.node_manager import (
+    _node_kind,
     check_node_health,
     clear_active_node_id,
     sync_local_node,
@@ -167,6 +168,10 @@ def _node_transport_value(node: Node) -> str:
 
 def _to_response(node: Node) -> NodeResponse:
     transport = _node_transport_value(node)
+    meta = node_metadata_dict(node)
+    awg2_installed = meta.get("awg2_installed")
+    if awg2_installed is not None:
+        awg2_installed = bool(awg2_installed)
     return NodeResponse(
         id=node.id,
         name=node.name,
@@ -187,7 +192,8 @@ def _to_response(node: Node) -> NodeResponse:
         linked_vpn_node_id=getattr(node, "linked_vpn_node_id", None),
         portal_label=getattr(node, "portal_label", None),
         last_seen_at=node.last_seen_at,
-        metadata=node_metadata_dict(node),
+        metadata=meta,
+        awg2_installed=awg2_installed if _node_kind(node) != NODE_KIND_PROXY else None,
         created_at=node.created_at,
         updated_at=node.updated_at,
     )

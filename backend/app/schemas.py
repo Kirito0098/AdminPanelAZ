@@ -1887,6 +1887,7 @@ class NodeResponse(NodeBase):
     portal_label: str | None = None
     last_seen_at: datetime | None = None
     metadata: dict[str, Any] = {}
+    awg2_installed: bool | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -570,6 +570,13 @@ def update_node_from_health(node: Node, health: dict, db: Session) -> None:
             meta["tls_mismatch"] = bool(expected_tls) != bool(health["listen_tls"])
         else:
             meta.pop("tls_mismatch", None)
+        if _node_kind(node) == NODE_KIND_VPN:
+            try:
+                awg2_health = get_adapter_for_node(node).get_awg2_health()
+                meta["awg2_installed"] = bool(awg2_health.get("installed"))
+            except Exception:
+                meta["awg2_installed"] = False
+            meta["awg2_checked_at"] = now_iso
         node.node_metadata = json.dumps(meta)
     elif health.get("error") or health.get("link_error"):
         meta = node_metadata_dict(node)
