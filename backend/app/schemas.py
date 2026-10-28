@@ -382,6 +382,27 @@ class UserProvisionedCreate(BaseModel):
     telegram_id: str | None = None
 
 
+class UserFromExistingCreate(BaseModel):
+    username: str
+    config_ids: list[int] = []
+    config_quota: int | None = Field(default=None, ge=0, le=1000)
+    access_until: datetime | None = None
+    panel_login_enabled: bool = False
+    password: str | None = None
+    telegram_id: str | None = None
+
+    @field_validator("access_until", mode="before")
+    @classmethod
+    def _access_until_end_of_day(cls, value: Any) -> Any:
+        """A bare `YYYY-MM-DD` means the end of that day, as on the client level.
+
+        Without this, "доступ до 1 окт" would cut access at 00:00 on Oct 1.
+        """
+        if isinstance(value, str) and DATE_ONLY_RE.fullmatch(value.strip()):
+            return f"{value.strip()}T23:59:59.999999+00:00"
+        return value
+
+
 class UserProvisionSummary(BaseModel):
     id: int
     username: str
@@ -416,6 +437,11 @@ class GraceHoldView(BaseModel):
 class UserProvisionedResponse(BaseModel):
     user: UserProvisionSummary
     task_id: str
+
+
+class UserFromExistingResponse(BaseModel):
+    user: UserProvisionSummary
+    assigned_config_ids: list[int] = []
 
 
 class UserProvisioningUpdate(BaseModel):

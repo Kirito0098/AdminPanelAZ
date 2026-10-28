@@ -49,6 +49,8 @@ from app.schemas import (
     UserConfigAccessUpdate,
     UserCreate,
     UserProvisionSummary,
+    UserFromExistingCreate,
+    UserFromExistingResponse,
     UserProvisionedCreate,
     UserProvisionedResponse,
     UserProvisioningApply,
@@ -529,6 +531,47 @@ def create_provisioned_user(
             ),
         )
     return UserProvisionedResponse(user=_user_summary(user, [n.id for n in nodes]), task_id=task.id)
+
+
+@router.post(
+    "/from-existing",
+    response_model=UserFromExistingResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_user_from_existing_endpoint(
+    payload: UserFromExistingCreate,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Создать абонента без VPN-провижининга, опционально привязав существующие primary-конфиги."""
+    from app.services.config_ownership import create_user_from_existing as _create
+
+    assigned_ids = list(dict.fromkeys(payload.config_ids))
+    user = _create(db, payload=payload, actor=admin)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="user_create",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=(
+                f"created={user.username}, from_existing=true, "
+                f"assigned_config_ids={assigned_ids}"
+            ),
+        )
+    admin_notify_service.send_user_create(
+        db,
+        actor_username=admin.username,
+        target_name=user.username,
+        details=f"from_existing, configs={assigned_ids}",
+        client_timezone=get_client_timezone_from_request(request),
+    )
+    return UserFromExistingResponse(
+        user=_user_summary(user, []),
+        assigned_config_ids=assigned_ids,
+    )
 
 
 @router.get("/presets", response_model=list[PresetResponse])
