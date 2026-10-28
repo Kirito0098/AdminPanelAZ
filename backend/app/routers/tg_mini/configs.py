@@ -91,6 +91,7 @@ def mini_send_config(
         protocol=match.get("protocol", ""),
         variant=match.get("variant", ""),
         path=match.get("path", ""),
+        kind=match.get("kind", ""),
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=EMPTY_CATALOG_MESSAGE)
     return _send_config_file(
@@ -121,6 +122,7 @@ def mini_qr_link(
         protocol=match.get("protocol", ""),
         variant=match.get("variant", ""),
         path=match.get("path", ""),
+        kind=match.get("kind", ""),
     ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
     return _qr_download_service(db, request).create_token(

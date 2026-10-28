@@ -325,6 +325,7 @@ def _require_profile_path_allowed(
         protocol=match.get("protocol", ""),
         variant=match.get("variant", ""),
         path=match.get("path", path),
+        kind=match.get("kind", ""),
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Файл профиля недоступен")
 

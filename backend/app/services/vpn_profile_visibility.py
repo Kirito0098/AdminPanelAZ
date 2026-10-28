@@ -39,36 +39,44 @@ VARIANT_TO_OPENVPN_GROUP: dict[str, str] = {
     "vpn-tcp": "tcp",
 }
 
-FULL_POLICY: dict[str, list[str]] = {
+# Admin catalog: every file visible, including AWG2 .vpn / -vpnuri.txt sidecars.
+FULL_POLICY: dict[str, Any] = {
     "routes": sorted(ROUTES),
     "protocols": sorted(PROTOCOLS),
     "openvpn_groups": sorted(OPENVPN_GROUPS),
+    "awg2_tunnel_only": False,
 }
 
 EMPTY_CATALOG_MESSAGE = "Администратор ограничил доступные типы конфигураций"
 
 
-def copy_policy(policy: Mapping[str, Any] | None = None) -> dict[str, list[str]]:
+def copy_policy(policy: Mapping[str, Any] | None = None) -> dict[str, Any]:
     source = policy or FULL_POLICY
     return {
         "routes": list(source.get("routes") or []),
         "protocols": list(source.get("protocols") or []),
         "openvpn_groups": list(source.get("openvpn_groups") or []),
+        "awg2_tunnel_only": bool(source.get("awg2_tunnel_only", True)),
     }
 
 
-def normalize_policy(raw: Any, *, strict: bool = False) -> dict[str, list[str]]:
+def full_subscriber_policy() -> dict[str, Any]:
+    """All routes/protocols/groups, but AWG2 sidecars stay hidden (subscriber default)."""
+    return {**copy_policy(FULL_POLICY), "awg2_tunnel_only": True}
+
+
+def normalize_policy(raw: Any, *, strict: bool = False) -> dict[str, Any]:
     """Parse and sanitize a policy object.
 
     Unknown keys/values are dropped when strict=False.
     When strict=True (write API), unknown values raise 400.
     """
     if raw is None:
-        return copy_policy(FULL_POLICY)
+        return full_subscriber_policy()
     if isinstance(raw, str):
         text = raw.strip()
         if not text:
-            return copy_policy(FULL_POLICY)
+            return full_subscriber_policy()
         try:
             raw = json.loads(text)
         except (ValueError, TypeError) as exc:
@@ -77,16 +85,16 @@ def normalize_policy(raw: Any, *, strict: bool = False) -> dict[str, list[str]]:
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Некорректный JSON политики видимости VPN-профилей",
                 ) from exc
-            return copy_policy(FULL_POLICY)
+            return full_subscriber_policy()
     if not isinstance(raw, dict):
         if strict:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Политика видимости VPN-профилей должна быть объектом",
             )
-        return copy_policy(FULL_POLICY)
+        return full_subscriber_policy()
 
-    known_keys = {"routes", "protocols", "openvpn_groups"}
+    known_keys = {"routes", "protocols", "openvpn_groups", "awg2_tunnel_only"}
     if strict:
         unknown = set(raw.keys()) - known_keys
         if unknown:
@@ -119,10 +127,20 @@ def normalize_policy(raw: Any, *, strict: bool = False) -> dict[str, list[str]]:
                 )
         return result
 
+    tunnel_only = raw.get("awg2_tunnel_only", True)
+    if not isinstance(tunnel_only, bool):
+        if strict:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Поле «awg2_tunnel_only» должно быть true или false",
+            )
+        tunnel_only = True
+
     return {
         "routes": _axis("routes", ROUTES),
         "protocols": _axis("protocols", PROTOCOLS),
         "openvpn_groups": _axis("openvpn_groups", OPENVPN_GROUPS),
+        "awg2_tunnel_only": tunnel_only,
     }
 
 
@@ -130,14 +148,14 @@ def policy_to_json(policy: Mapping[str, Any]) -> str:
     return json.dumps(normalize_policy(policy), ensure_ascii=False, separators=(",", ":"))
 
 
-def get_default_visible_vpn_profiles(db: Session) -> dict[str, list[str]]:
+def get_default_visible_vpn_profiles(db: Session) -> dict[str, Any]:
     raw = _get_setting(db, SETTING_VISIBLE_VPN_PROFILES_DEFAULT, "")
     if not raw.strip():
-        return copy_policy(FULL_POLICY)
+        return full_subscriber_policy()
     return normalize_policy(raw, strict=False)
 
 
-def set_default_visible_vpn_profiles(db: Session, policy: Mapping[str, Any]) -> dict[str, list[str]]:
+def set_default_visible_vpn_profiles(db: Session, policy: Mapping[str, Any]) -> dict[str, Any]:
     normalized = normalize_policy(policy, strict=True)
     value = policy_to_json(normalized)
     row = db.query(AppSetting).filter(AppSetting.key == SETTING_VISIBLE_VPN_PROFILES_DEFAULT).first()
@@ -149,7 +167,7 @@ def set_default_visible_vpn_profiles(db: Session, policy: Mapping[str, Any]) -> 
     return normalized
 
 
-def parse_user_visible_vpn_profiles(raw: str | None) -> dict[str, list[str]] | None:
+def parse_user_visible_vpn_profiles(raw: str | None) -> dict[str, Any] | None:
     if raw is None:
         return None
     text = str(raw).strip()
@@ -158,7 +176,7 @@ def parse_user_visible_vpn_profiles(raw: str | None) -> dict[str, list[str]] | N
     return normalize_policy(text, strict=False)
 
 
-def resolve_visible_vpn_profiles(db: Session, user: User) -> dict[str, list[str]]:
+def resolve_visible_vpn_profiles(db: Session, user: User) -> dict[str, Any]:
     """Effective policy for user (before feature-toggle ceiling). Admin → full catalog."""
     if user.role == UserRole.admin:
         return copy_policy(FULL_POLICY)
@@ -175,7 +193,7 @@ def intersect_policy_with_features(
     wireguard_enabled: bool = True,
     amneziawg_enabled: bool = True,
     amneziawg2_enabled: bool = True,
-) -> dict[str, list[str]]:
+) -> dict[str, Any]:
     protocols = list(policy.get("protocols") or [])
     allowed: list[str] = []
     for key in protocols:
@@ -212,7 +230,7 @@ def resolve_effective_visible_vpn_profiles(
     user: User,
     *,
     feature_flags: Mapping[str, bool] | None = None,
-) -> dict[str, list[str]]:
+) -> dict[str, Any]:
     policy = resolve_visible_vpn_profiles(db, user)
     flags = feature_flags or feature_flags_from_service()
     return intersect_policy_with_features(
@@ -254,6 +272,7 @@ def profile_file_allowed(
     protocol: str = "",
     variant: str = "",
     path: str = "",
+    kind: str = "",
 ) -> bool:
     protocol_key = protocol_key_from_file(protocol=protocol, path=path)
     if protocol_key is None:
@@ -264,6 +283,10 @@ def profile_file_allowed(
     route = route_key_from_file(variant=variant, path=path)
     if route not in set(policy.get("routes") or []):
         return False
+    if protocol_key == "amneziawg2" and bool(policy.get("awg2_tunnel_only", True)):
+        lowered = f"{path}".replace("\\", "/").lower()
+        if (kind or "").strip().lower() == "vpnuri" or lowered.endswith((".vpn", "-vpnuri.txt")):
+            return False
     if protocol_key == "openvpn":
         groups = set(policy.get("openvpn_groups") or [])
         if not groups:
@@ -292,6 +315,7 @@ def filter_profile_files(files: list[dict[str, str]], policy: Mapping[str, Any])
             protocol=item.get("protocol", ""),
             variant=item.get("variant", ""),
             path=item.get("path", ""),
+            kind=item.get("kind", ""),
         )
     ]
 

@@ -746,6 +746,7 @@ def _list_files_for_configs(db: Session, configs: list[VpnConfig]) -> list[dict]
                 protocol=protocol,
                 variant=f.get("variant", ""),
                 path=path,
+                kind=f.get("kind", ""),
             ):
                 continue
             filename = (

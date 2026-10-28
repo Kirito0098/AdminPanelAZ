@@ -536,6 +536,7 @@ class VisibleVpnProfilesPolicy(BaseModel):
     routes: list[str] = Field(default_factory=list)
     protocols: list[str] = Field(default_factory=list)
     openvpn_groups: list[str] = Field(default_factory=list)
+    awg2_tunnel_only: bool = True
 
 
 class VisibleVpnProfilesDefaultResponse(BaseModel):
