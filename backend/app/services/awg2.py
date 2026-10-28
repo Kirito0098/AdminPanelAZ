@@ -1346,14 +1346,9 @@ class Awg2Service:
                 Path(temp_path).unlink(missing_ok=True)
 
 
-get_adapter_for_node = None  # monkeypatched in tests
-
-
 def assert_awg2_available_on_nodes(nodes: Sequence[Node]) -> None:
     """Live-check AZ-AWG2 on each VPN node; 409 listing nodes that lack install."""
-    from app.services.node_manager import NODE_KIND_VPN, _node_kind, get_adapter_for_node as _default_get_adapter
-
-    resolve_adapter = get_adapter_for_node if get_adapter_for_node is not None else _default_get_adapter
+    from app.services.node_manager import NODE_KIND_VPN, _node_kind, get_adapter_for_node
 
     missing: list[str] = []
     install_cmd = AWG2_INSTALL_CMD
@@ -1362,7 +1357,7 @@ def assert_awg2_available_on_nodes(nodes: Sequence[Node]) -> None:
             continue
         health: dict[str, Any] | None = None
         try:
-            health = resolve_adapter(node).get_awg2_health()
+            health = get_adapter_for_node(node).get_awg2_health()
             installed = bool(health.get("installed"))
         except Exception as exc:
             logger.warning("awg2 probe failed on node %s: %s", node.id, exc)

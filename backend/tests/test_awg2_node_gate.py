@@ -33,7 +33,7 @@ def test_assert_awg2_available_raises_listing_missing_nodes(monkeypatch):
         ad.get_awg2_health.return_value = {"installed": node.id == 1}
         return ad
 
-    monkeypatch.setattr(awg2_mod, "get_adapter_for_node", fake_adapter)
+    monkeypatch.setattr("app.services.node_manager.get_adapter_for_node", fake_adapter)
 
     with pytest.raises(HTTPException) as ei:
         awg2_mod.assert_awg2_available_on_nodes([good, bad])
@@ -53,7 +53,7 @@ def test_assert_awg2_available_ok_when_all_installed(monkeypatch):
         ad.get_awg2_health.return_value = {"installed": True}
         return ad
 
-    monkeypatch.setattr(awg2_mod, "get_adapter_for_node", fake_adapter)
+    monkeypatch.setattr("app.services.node_manager.get_adapter_for_node", fake_adapter)
     awg2_mod.assert_awg2_available_on_nodes(nodes)  # no raise
 
 

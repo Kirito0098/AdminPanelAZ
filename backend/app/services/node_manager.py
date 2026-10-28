@@ -574,7 +574,8 @@ def update_node_from_health(node: Node, health: dict, db: Session) -> None:
             try:
                 awg2_health = get_adapter_for_node(node).get_awg2_health()
                 meta["awg2_installed"] = bool(awg2_health.get("installed"))
-            except Exception:
+            except Exception as exc:
+                logger.warning("awg2 probe failed on node %s: %s", node.id, exc)
                 meta["awg2_installed"] = False
             meta["awg2_checked_at"] = now_iso
         node.node_metadata = json.dumps(meta)

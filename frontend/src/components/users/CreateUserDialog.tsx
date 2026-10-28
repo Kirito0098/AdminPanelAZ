@@ -167,12 +167,14 @@ export default function CreateUserDialog({
     [assignableNodes, selectedNodeIds],
   )
 
-  useEffect(() => {
-    if (awg2Blocked.length === 0) return
-    setSelectedProtocols((prev) =>
-      prev.includes('amneziawg2') ? prev.filter((id) => id !== 'amneziawg2') : prev,
-    )
-  }, [awg2Blocked])
+  const awg2Enabled = availableProtocols.some((p) => p.id === 'amneziawg2')
+
+  const changeSelectedNodes = (nextIds: number[]) => {
+    setSelectedNodeIds(nextIds)
+    if (nodesMissingAwg2(assignableNodes, nextIds).length > 0) {
+      setSelectedProtocols((prev) => prev.filter((id) => id !== 'amneziawg2'))
+    }
+  }
 
   const planNames = useMemo(() => {
     const names: string[] = []
@@ -396,7 +398,7 @@ export default function CreateUserDialog({
                             const ids = new Set(selectedNodeIds)
                             if (next) ids.add(node.id)
                             else ids.delete(node.id)
-                            setSelectedNodeIds(Array.from(ids).sort((a, b) => a - b))
+                            changeSelectedNodes(Array.from(ids).sort((a, b) => a - b))
                           }}
                           aria-label={`Узел ${node.name}`}
                         />
@@ -425,7 +427,7 @@ export default function CreateUserDialog({
                 ) : null}
                 {availableProtocols.map((proto) => {
                   const checked = selectedProtocols.includes(proto.id)
-                  const awg2Disabled = proto.id === 'amneziawg2' && awg2Blocked.length > 0
+                  const awg2Disabled = proto.id === 'amneziawg2' && awg2Blocked.length > 0 && !checked
                   return (
                     <label
                       key={proto.id}
@@ -450,9 +452,9 @@ export default function CreateUserDialog({
                   )
                 })}
               </fieldset>
-              {awg2Blocked.length > 0 ? (
+              {awg2Enabled && awg2Blocked.length > 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  Не установлен на: {awg2Blocked.map((n) => n.name).join(', ')}
+                  AmneziaWG 2.0: AZ-AWG2 не установлен на: {awg2Blocked.map((n) => n.name).join(', ')}
                 </p>
               ) : null}
             </div>

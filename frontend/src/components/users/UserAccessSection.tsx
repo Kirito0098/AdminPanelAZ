@@ -147,12 +147,7 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
     [assignableNodes, draftNodeIds],
   )
 
-  useEffect(() => {
-    if (awg2Blocked.length === 0) return
-    setDraftProtocols((prev) =>
-      prev.includes('amneziawg2') ? prev.filter((id) => id !== 'amneziawg2') : prev,
-    )
-  }, [awg2Blocked])
+  const awg2Enabled = isEnabled('awg2')
 
   const hasPlan = user.client_base_name != null && user.client_base_name.length > 0
   // План заблокирован, пока срок доступа истёк (Stage 1) — изменения и применение недоступны.
@@ -325,7 +320,11 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
     const ids = new Set(draftNodeIds)
     if (checked) ids.add(nodeId)
     else ids.delete(nodeId)
-    setDraftNodeIds(Array.from(ids).sort((a, b) => a - b))
+    const nextIds = Array.from(ids).sort((a, b) => a - b)
+    setDraftNodeIds(nextIds)
+    if (nodesMissingAwg2(assignableNodes, nextIds).length > 0) {
+      setDraftProtocols((prev) => prev.filter((id) => id !== 'amneziawg2'))
+    }
   }
 
   const toggleProtocol = (proto: string, checked: boolean) => {
@@ -463,7 +462,7 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
                       ? 'OpenVPN'
                       : 'AmneziaWG 2.0'
                 const checked = draftProtocols.includes(proto)
-                const awg2Disabled = proto === 'amneziawg2' && awg2Blocked.length > 0
+                const awg2Disabled = proto === 'amneziawg2' && awg2Blocked.length > 0 && !checked
                 const disabled = !provisioningOn || expired || awg2Disabled
                 return (
                   <label
@@ -487,9 +486,9 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
                 )
               })}
             </fieldset>
-            {awg2Blocked.length > 0 ? (
+            {awg2Enabled && awg2Blocked.length > 0 ? (
               <p className="text-xs text-muted-foreground">
-                Не установлен на: {awg2Blocked.map((n) => n.name).join(', ')}
+                AmneziaWG 2.0: AZ-AWG2 не установлен на: {awg2Blocked.map((n) => n.name).join(', ')}
               </p>
             ) : null}
           </div>
