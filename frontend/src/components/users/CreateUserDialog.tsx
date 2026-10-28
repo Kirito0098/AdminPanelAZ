@@ -109,15 +109,20 @@ export default function CreateUserDialog({
     const load = async () => {
       setNodesLoading(true)
       try {
-        const [list, groups] = await Promise.all([getNodes(), getNodeSyncGroups()])
+        const [list, groups] = await Promise.all([getNodes(), getNodeSyncGroups().catch(() => [])])
         if (cancelled) return
         const replicas = new Set<number>()
         for (const group of groups) {
           for (const id of group.replica_node_ids ?? []) replicas.add(id)
         }
+        const assignableIds = new Set(
+          list
+            .filter((node) => (node.node_kind ?? 'vpn') === 'vpn' && !replicas.has(node.id))
+            .map((node) => node.id),
+        )
         setNodes(list)
         setReplicaIds(replicas)
-        setSelectedNodeIds((prev) => prev.filter((id) => !replicas.has(id)))
+        setSelectedNodeIds((prev) => prev.filter((id) => assignableIds.has(id)))
       } catch {
         /* узлы необязательны для шага «Доступ» — без них покажем подсказку */
       } finally {

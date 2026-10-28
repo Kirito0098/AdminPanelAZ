@@ -29,6 +29,8 @@ export default function UserVisibilitySection({ user, onRefresh }: UserVisibilit
     copyVisibleVpnPolicy(user.visible_vpn_profiles),
   )
 
+  const hadOverride = user.visible_vpn_profiles != null
+
   useEffect(() => {
     let cancelled = false
     void (async () => {
@@ -37,7 +39,7 @@ export default function UserVisibilitySection({ user, onRefresh }: UserVisibilit
         if (cancelled) return
         const loaded = copyVisibleVpnPolicy(data.policy)
         setDefaultPolicy(loaded)
-        if (user.visible_vpn_profiles == null) setDraft(loaded)
+        if (!hadOverride) setDraft(loaded)
       } catch (err) {
         if (!cancelled) {
           notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить умолчание видимости профилей')
@@ -49,9 +51,7 @@ export default function UserVisibilitySection({ user, onRefresh }: UserVisibilit
     return () => {
       cancelled = true
     }
-  }, [user.visible_vpn_profiles, notifyError])
-
-  const hadOverride = user.visible_vpn_profiles != null
+  }, [hadOverride, notifyError])
 
   const handleSave = async () => {
     setSaving(true)

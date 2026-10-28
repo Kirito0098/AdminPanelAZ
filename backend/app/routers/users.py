@@ -236,7 +236,7 @@ def _user_summary(
         traffic_counter_reset_at=user.traffic_counter_reset_at,
         traffic_limit_blocked=bool(user.traffic_limit_blocked),
         traffic_consumed_bytes=int(traffic_consumed_bytes),
-        telegram_id=(user.telegram_id or None),
+        telegram_id=(user.telegram_id or "").strip() or None,
         visible_vpn_profiles=parse_user_visible_vpn_profiles(user.visible_vpn_profiles),
     )
 
@@ -495,7 +495,7 @@ def create_provisioned_user(
         desired_protocols=json.dumps(protocols),
         access_until=payload.access_until,
         config_quota=payload.config_quota,
-        telegram_id=payload.telegram_id or None,
+        telegram_id=(payload.telegram_id or "").strip() or None,
         provision_state="unmanaged",
     )
     db.add(user)
