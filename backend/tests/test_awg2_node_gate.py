@@ -5,6 +5,8 @@ from fastapi import HTTPException
 
 from app.models import Node, NodeStatus
 from app.services import awg2 as awg2_mod
+from app.services import user_provisioning as up
+from app.services.user_provisioning import ACTION_CREATE, PlanItem
 
 
 def _vpn_node(id_: int, name: str) -> Node:
@@ -53,3 +55,48 @@ def test_assert_awg2_available_ok_when_all_installed(monkeypatch):
 
     monkeypatch.setattr(awg2_mod, "get_adapter_for_node", fake_adapter)
     awg2_mod.assert_awg2_available_on_nodes(nodes)  # no raise
+
+
+def test_apply_node_continues_after_awg2_not_installed(monkeypatch):
+    session = MagicMock()
+    owner = MagicMock()
+    actor = MagicMock()
+    node = MagicMock()
+    node.name = "Test_serv"
+    session.get.return_value = node
+
+    items = [
+        PlanItem(node_id=2, node_label="Test_serv", client_name="node", vpn_type="amneziawg2", action=ACTION_CREATE),
+        PlanItem(node_id=2, node_label="Test_serv", client_name="node", vpn_type="openvpn", action=ACTION_CREATE),
+    ]
+
+    calls = {"n": 0}
+
+    def fake_apply_create(session, node, item, owner, actor):
+        calls["n"] += 1
+        if item.vpn_type == "amneziawg2":
+            return {
+                "node_id": 2,
+                "node_label": "Test_serv",
+                "client_name": item.client_name,
+                "vpn_type": item.vpn_type,
+                "action": ACTION_CREATE,
+                "status": "error",
+                "error": "409: AZ-AWG2 не установлен",
+            }
+        return {
+            "node_id": 2,
+            "node_label": "Test_serv",
+            "client_name": item.client_name,
+            "vpn_type": item.vpn_type,
+            "action": ACTION_CREATE,
+            "status": "done",
+            "error": None,
+        }
+
+    monkeypatch.setattr(up, "_apply_create", fake_apply_create)
+    results = up._apply_node(2, items, session, owner, actor)
+    assert calls["n"] == 2
+    assert results[0]["status"] == "error"
+    assert results[1]["status"] == "done"
+    assert results[1].get("error") != "Пропущено после сетевой ошибки на узле"

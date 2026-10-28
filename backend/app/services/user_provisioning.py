@@ -69,9 +69,15 @@ from app.services.ssh_tunnel_pool import SshTunnelError
 TASK_TYPE = "user_provision"
 USER_DELETE_CLEANUP_TASK_TYPE = "user_delete_cleanup"
 
-# Сетевые ошибки узла: после первой такой ошибки на узле остальные его элементы
-# пропускаются (та же политика, что у портала).
-_NODE_NETWORK_ERRORS = (HTTPException, httpx.HTTPError, OSError, SshTunnelError)
+# После первой ошибки «узел недоступен» на узле остальные его элементы пропускаются.
+
+
+def _is_node_unreachable(exc: BaseException) -> bool:
+    if isinstance(exc, (httpx.HTTPError, OSError, SshTunnelError)):
+        return True
+    if isinstance(exc, HTTPException):
+        return exc.status_code >= 500 or exc.status_code in {408, 502, 503, 504}
+    return False
 
 # Протоколы → ключ модуля (как require_vpn_type): WG доступен при wireguard ИЛИ amneziawg.
 _PROTOCOL_FEATURE_KEYS: dict[str, tuple[str, ...]] = {
@@ -700,12 +706,11 @@ def _apply_create(
         )
         if isinstance(outcome, tuple) and outcome:
             result["config_id"] = outcome[0].id
-    except _NODE_NETWORK_ERRORS as exc:
+    except Exception as exc:
         result["status"] = "error"
         result["error"] = str(exc)
-    except Exception as exc:  # несетевая ошибка элемента — не гасим весь узел
-        result["status"] = "error"
-        result["error"] = str(exc)
+        if _is_node_unreachable(exc):
+            result["unreachable"] = True
     return result
 
 
@@ -728,12 +733,11 @@ def _apply_delete(
         config = session.get(VpnConfig, item.config_id)
         if config is not None:
             deprovision_config(session, config=config, actor=actor, notify=False)
-    except _NODE_NETWORK_ERRORS as exc:
-        result["status"] = "error"
-        result["error"] = str(exc)
     except Exception as exc:
         result["status"] = "error"
         result["error"] = str(exc)
+        if _is_node_unreachable(exc):
+            result["unreachable"] = True
     return result
 
 
@@ -767,7 +771,7 @@ def _apply_node(
             results.append(_apply_create(session, node, item, owner, actor))
         else:
             results.append(_apply_delete(session, node_label, item, actor))
-        if results[-1]["status"] == "error":
+        if results[-1].get("unreachable"):
             skip_rest = True
     return results
 
