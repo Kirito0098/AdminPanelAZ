@@ -29,7 +29,8 @@ from app.services.admin_notify import admin_notify_service
 from app.services.env_file import EnvFileService
 from app.services.file_editor import EDITABLE_FILES
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
-from app.services.node_sync.config_sync import maybe_replicate_config_files
+from app.services.background_tasks import background_task_service
+from app.services.config_apply_queue import enqueue_doall_and_replicate, enqueue_recreate_profiles
 from app.services.node_sync.groups import require_ha_primary_for_config_ops
 from app.services.noc_schedule import parse_cron_dow, parse_hhmm
 from app.services.notify_time import (
@@ -37,8 +38,6 @@ from app.services.notify_time import (
     get_client_timezone_from_request,
     remember_client_timezone,
 )
-from app.services.openvpn_profile_repair import recreate_openvpn_profiles
-from app.services.profile_delivery import load_node_remote_hosts
 from app.services.self_service import get_self_service_limits, set_self_service_limits
 from app.services.user_grace import ALLOWED_MONTHS, get_grace_months, set_grace_months
 from app.services.vpn_profile_visibility import (
@@ -73,7 +72,11 @@ def _read_config_files_parallel(adapter, filenames: tuple[str, ...]) -> dict[str
 
 
 @router.get("", response_model=AppSettingsResponse)
-def get_settings(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def get_settings(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    apply_task_id: str | None = None,
+):
     adapter = get_active_adapter(db)
     node = get_active_node(db)
     file_contents = _read_config_files_parallel(adapter, _CONFIG_FILE_NAMES)
@@ -105,6 +108,7 @@ def get_settings(current_user: User = Depends(get_current_user), db: Session = D
         allow_ips=allow_ips,
         node_id=node.id,
         node_name=node.name,
+        apply_task_id=apply_task_id,
     )
 
 
@@ -116,6 +120,7 @@ def update_settings(
     current_user: User = Depends(get_current_user),
 ):
     config_changed = False
+    apply_task_id: str | None = None
 
     if payload.theme is not None:
         current_user.theme = payload.theme
@@ -194,30 +199,22 @@ def update_settings(
             config_changed = True
 
         if config_changed:
-            try:
-                adapter.apply_config_changes()
-                from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
-
-                maybe_ensure_node_openvpn_multihome(adapter, get_active_node(db), restart_if_unchanged=False)
-            except HTTPException:
-                raise
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=f"Ошибка применения настроек: {exc}",
-                ) from exc
             node = get_active_node(db)
-            maybe_replicate_config_files(
-                db,
+            task = enqueue_doall_and_replicate(
                 node_id=node.id,
                 file_keys=changed_file_keys,
-                run_doall=True,
                 content_overrides=content_overrides,
+                created_by_username=current_user.username,
+                run_doall=True,
+                run_replicate=True,
+                queued_message="Списки AntiZapret сохранены — doall в фоне…",
             )
+            apply_task_id = task.id
             admin_notify_service.send_settings_change(
                 db,
                 actor_username=current_user.username,
                 settings_key="settings_run_doall",
+                details=f"queued:{task.id}",
                 node_id=node.id,
                 node_name=node.name,
                 client_timezone=get_client_timezone_from_request(request),
@@ -230,10 +227,10 @@ def update_settings(
 
     db.commit()
     db.refresh(current_user)
-    return get_settings(current_user=current_user, db=db)
+    return get_settings(current_user=current_user, db=db, apply_task_id=apply_task_id)
 
 
-@router.post("/recreate-profiles", response_model=MessageResponse)
+@router.post("/recreate-profiles", status_code=status.HTTP_202_ACCEPTED)
 def recreate_profiles(
     request: Request,
     db: Session = Depends(get_db),
@@ -241,25 +238,19 @@ def recreate_profiles(
 ):
     require_ha_primary_for_config_ops(db)
     node = get_active_node(db)
-    result = recreate_openvpn_profiles(
-        get_active_adapter(db),
-        hosts=load_node_remote_hosts(db, node.id),
-    )
-    if not result.success:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=result.errors[0] if result.errors else "Ошибка пересоздания профилей",
-        )
+    task = enqueue_recreate_profiles(node_id=node.id, created_by_username=admin.username)
     admin_notify_service.send_settings_change(
         db,
         actor_username=admin.username,
         settings_key="settings_run_doall",
-        details="recreate_profiles",
+        details=f"recreate_profiles queued:{task.id}",
         node_id=node.id,
         node_name=node.name,
         client_timezone=get_client_timezone_from_request(request),
     )
-    return MessageResponse(message="Профили пересозданы", detail=result.output)
+    return background_task_service.build_accepted_payload(
+        task, "Пересоздание профилей запущено в фоне."
+    )
 
 
 @router.get("/monitor", response_model=MonitorSettingsResponse)

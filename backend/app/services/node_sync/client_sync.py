@@ -38,13 +38,18 @@ _ha_group_locks: dict[int, threading.Lock] = {}
 _ha_group_locks_guard = threading.Lock()
 
 
-def _ha_group_lock(group_id: int) -> threading.Lock:
+def ha_group_lock(group_id: int) -> threading.Lock:
+    """Serialize HA crypto ops (client sync, AWG2 overlay) per sync group."""
     with _ha_group_locks_guard:
         lock = _ha_group_locks.get(group_id)
         if lock is None:
             lock = threading.Lock()
             _ha_group_locks[group_id] = lock
         return lock
+
+
+def _ha_group_lock(group_id: int) -> threading.Lock:
+    return ha_group_lock(group_id)
 
 
 def format_ha_replicate_errors(result: dict[str, Any] | None) -> str | None:

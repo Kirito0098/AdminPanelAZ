@@ -234,6 +234,7 @@ class NodeAllowFirstRemoteHostResponse(BaseModel):
     host: str
     detail: str | None = None
     warnings: list[str] = Field(default_factory=list)
+    apply_task_id: str | None = None
 
 
 class NodeOpenVpnMultihomeBody(BaseModel):
@@ -987,6 +988,8 @@ class AppSettingsResponse(BaseModel):
     allow_ips: str = ""
     node_id: int | None = None
     node_name: str | None = None
+    # Background doall + HA replicate after saving AntiZapret lists.
+    apply_task_id: str | None = None
 
 
 class AppSettingsUpdate(BaseModel):
@@ -1732,6 +1735,7 @@ class ServerRebootPendingResponse(BaseModel):
 class MessageResponse(BaseModel):
     message: str
     detail: Any | None = None
+    task_id: str | None = None
 
 
 class BackgroundTaskResponse(BaseModel):

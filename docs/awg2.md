@@ -174,6 +174,7 @@ API `GET /api/awg2/monitoring` остаётся для NOC / Telegram Mini App (
 - Не рассчитывайте на UI для `install-base` или reboot: это только SSH
 - Не путайте вкладки **AmneziaWG** и **AmneziaWG 2.0** на Dashboard
 - Для HA-копии AWG2 учитывайте byte-copy crypto-sync и исключения архива из среза 2a
+- Restore / regenerate / apply обфускации на primary отвечают сразу; push overlay на replica — фон `ha_awg2_sync` (прогресс в панели)
 - После смены обфускации переимпортируйте клиентские профили
 
 ---

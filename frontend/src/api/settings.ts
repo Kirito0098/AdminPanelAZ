@@ -118,7 +118,7 @@ export async function testAuditStream() {
 }
 
 export async function recreateProfiles() {
-  return apiFetch<{ message: string; detail?: string }>('/settings/recreate-profiles', { method: 'POST' })
+  return apiFetch<BackgroundTaskAcceptedResponse>('/settings/recreate-profiles', { method: 'POST' })
 }
 
 export async function runDoall() {

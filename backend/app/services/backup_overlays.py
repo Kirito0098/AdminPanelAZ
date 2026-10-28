@@ -82,10 +82,13 @@ def _apply_adapter(payload: dict, *, db) -> None:
                 runtime.get("errors") or [],
             )
             return
-        from app.routers.awg2 import _ha_sync_awg2_from_active
+        from app.routers.awg2 import _enqueue_ha_awg2_from_active
 
-        ha = _ha_sync_awg2_from_active(db)
+        # Queue HA push so panel restore HTTP does not wait on replica AWG2 copy.
+        ha = _enqueue_ha_awg2_from_active(db)
         if ha.get("errors"):
             logger.warning("AZ-AWG2 HA sync after panel restore: %s", ha["errors"])
+        elif ha.get("queued"):
+            logger.info("AZ-AWG2 HA sync queued after panel restore: %s", ha.get("task_id"))
     except Exception as exc:
         logger.warning("Could not restore AZ-AWG2 overlay from panel backup: %s", exc)

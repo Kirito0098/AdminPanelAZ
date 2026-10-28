@@ -74,7 +74,7 @@ from app.services.background_tasks import background_task_service
 from app.services.geo_routing_hint import build_geo_routing_hint
 from app.services.ssh_tunnel_pool import forget_ssh_host_key, get_ssh_tunnel_pool
 from app.services.node_transport_preflight import preflight_transport_switch
-from app.services.node_sync.config_sync import maybe_replicate_config_files
+from app.services.config_apply_queue import enqueue_doall_and_replicate
 from app.services.node_sync.groups import build_ha_node_context, find_group_for_node
 from app.services.openvpn_remote_hosts import (
     RemoteHostsError,
@@ -1012,22 +1012,14 @@ def allow_first_remote_host(
 
     adapter.write_config_file("allow-ips.txt", new_content)
     warnings: list[str] = []
-    try:
-        adapter.apply_config_changes()
-        from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
-
-        maybe_ensure_node_openvpn_multihome(adapter, node, restart_if_unchanged=False)
-    except Exception as exc:  # noqa: BLE001 — best-effort; file already written
-        detail = getattr(exc, "detail", None) or str(exc)
-        warnings.append(f"Файл сохранён, но doall.sh ошибка: {detail}")
-
-    # Same HA post-save path as edit_files PUT allow_ips.
-    maybe_replicate_config_files(
-        db,
+    task = enqueue_doall_and_replicate(
         node_id=node_id,
         file_keys=["allow_ips"],
-        run_doall=True,
         content_overrides={"allow_ips": new_content},
+        created_by_username=admin.username,
+        run_doall=True,
+        run_replicate=True,
+        queued_message="allow-ips обновлён — doall в фоне…",
     )
 
     if settings.audit_log_enabled:
@@ -1039,7 +1031,12 @@ def allow_first_remote_host(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"node_id={node_id} host={first}",
         )
-    return NodeAllowFirstRemoteHostResponse(added=True, host=first, warnings=warnings)
+    return NodeAllowFirstRemoteHostResponse(
+        added=True,
+        host=first,
+        warnings=warnings,
+        apply_task_id=task.id,
+    )
 
 
 @router.get("/{node_id}/openvpn-multihome", response_model=NodeOpenVpnMultihomeResponse)

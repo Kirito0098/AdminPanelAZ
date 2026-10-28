@@ -76,8 +76,9 @@ def test_adapter_mode_writes_lists_then_awg2_then_ha(monkeypatch):
     adapter.restore_awg2_backup.side_effect = lambda data: order.append("awg2") or {"success": True}
     monkeypatch.setattr("app.services.backup_overlays.get_active_adapter", lambda _db: adapter)
     monkeypatch.setattr(
-        "app.routers.awg2._ha_sync_awg2_from_active",
-        lambda _db: order.append("ha") or {"attempted": True, "errors": []},
+        "app.routers.awg2._enqueue_ha_awg2_from_active",
+        lambda _db, username=None: order.append("ha")
+        or {"attempted": True, "errors": [], "queued": True, "task_id": "t1"},
     )
     apply_backup_overlays(
         {"configs": {"include-hosts.txt": "x"}, "_files": {"awg2": b"ov"}},

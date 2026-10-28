@@ -431,7 +431,20 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
             actionLabel="Пересоздать профили"
             busyLabel="Выполняется..."
             busy={busy === 'recreate'}
-            onRun={() => void run('recreate', 'Пересоздание профилей...', recreateProfiles)}
+            onRun={async () => {
+              setBusy('recreate')
+              try {
+                const resp = await recreateProfiles()
+                trackBackgroundTask(resp.task_id, {
+                  onComplete: () => success(resp.message || 'Профили пересозданы'),
+                  onError: (task, message) => notifyError(task?.error || task?.message || message),
+                })
+              } catch (err) {
+                notifyError(err instanceof ApiError ? err.message : 'Не удалось запустить пересоздание')
+              } finally {
+                setBusy(null)
+              }
+            }}
           />
         </CardContent>
       </Card>

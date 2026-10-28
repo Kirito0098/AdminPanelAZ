@@ -7,10 +7,10 @@ from app.database import get_db
 from app.models import User
 from app.schemas import MessageResponse
 from app.services.action_log import log_action
+from app.services.config_apply_queue import enqueue_doall_and_replicate
 from app.services.edit_files_transfer import run_edit_files_transfer
 from app.services.file_editor import EDITABLE_FILES, FileEditorService, is_kresd_custom_key
 from app.services.node_manager import get_active_adapter, get_active_node
-from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import require_ha_primary_for_config_ops
 
 router = APIRouter(prefix="/edit-files", tags=["edit-files"])
@@ -64,43 +64,51 @@ def save_edit_file(
     current_user: User = Depends(require_admin),
 ):
     require_ha_primary_for_config_ops(db)
+    node = get_active_node(db)
     if is_kresd_custom_key(file_key):
         adapter = get_active_adapter(db)
         adapter.write_config_file(EDITABLE_FILES[file_key], payload.content)
-        maybe_replicate_config_files(
-            db,
-            node_id=get_active_node(db).id,
+        task = enqueue_doall_and_replicate(
+            node_id=node.id,
             file_keys=[file_key],
-            run_doall=False,
             content_overrides={file_key: payload.content},
+            created_by_username=current_user.username,
+            run_doall=False,
+            run_replicate=True,
+            queued_message="DNS-файл сохранён — HA-репликация в фоне…",
         )
-        return MessageResponse(message="Файл сохранён, DNS-резолвер перезапущен")
+        return MessageResponse(
+            message="Файл сохранён, DNS-резолвер перезапущен; HA в фоне",
+            task_id=task.id,
+        )
     try:
         adapter = get_active_adapter(db)
         adapter.write_config_file(_filename_for_key(file_key), payload.content)
-        output = adapter.apply_config_changes()
-        from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
-
-        maybe_ensure_node_openvpn_multihome(adapter, get_active_node(db), restart_if_unchanged=False)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Файл сохранён, но doall.sh ошибка: {exc}") from exc
-    maybe_replicate_config_files(
-        db,
-        node_id=get_active_node(db).id,
+        raise HTTPException(status_code=500, detail=f"Не удалось сохранить файл: {exc}") from exc
+
+    task = enqueue_doall_and_replicate(
+        node_id=node.id,
         file_keys=[file_key],
-        run_doall=True,
         content_overrides={file_key: payload.content},
+        created_by_username=current_user.username,
+        run_doall=True,
+        run_replicate=True,
+        queued_message="Файл сохранён — doall в фоне…",
     )
-    return MessageResponse(message="Файл сохранён и применён", detail=output)
+    return MessageResponse(
+        message="Файл сохранён, применение (doall) запущено в фоне",
+        task_id=task.id,
+    )
 
 
 @router.post("/batch", response_model=MessageResponse)
 def save_batch(
     payload: BatchUpdate,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    current_user: User = Depends(require_admin),
 ):
     require_ha_primary_for_config_ops(db)
     try:
@@ -111,20 +119,24 @@ def save_batch(
     for key, content in payload.files.items():
         adapter.write_config_file(filenames[key], content)
     run_doall = payload.run_doall and any(not is_kresd_custom_key(key) for key in payload.files)
-    output = None
-    if run_doall:
-        output = adapter.apply_config_changes()
-        from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
-
-        maybe_ensure_node_openvpn_multihome(adapter, get_active_node(db), restart_if_unchanged=False)
-    maybe_replicate_config_files(
-        db,
-        node_id=get_active_node(db).id,
+    node = get_active_node(db)
+    task = enqueue_doall_and_replicate(
+        node_id=node.id,
         file_keys=list(payload.files.keys()),
-        run_doall=run_doall,
         content_overrides=dict(payload.files),
+        created_by_username=current_user.username,
+        run_doall=run_doall,
+        run_replicate=True,
+        queued_message=(
+            "Файлы сохранены — doall в фоне…"
+            if run_doall
+            else "Файлы сохранены — HA-репликация в фоне…"
+        ),
     )
-    return MessageResponse(message="Файлы сохранены", detail=output)
+    return MessageResponse(
+        message="Файлы сохранены" + (", применение в фоне" if run_doall else ""),
+        task_id=task.id,
+    )
 
 
 @router.post("/transfer")

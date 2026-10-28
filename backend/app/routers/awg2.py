@@ -17,9 +17,8 @@ from app.models import User
 from app.schemas import Awg2ObfuscationApply
 from app.services.async_iter import iterate_in_thread
 from app.services.awg2 import Awg2ClientNotFoundError, Awg2NotInstalledError
-from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node
-from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes
-from app.services.node_sync.vpn_state_sync import sync_amneziawg2_state_from_primary
+from app.services.config_apply_queue import enqueue_ha_awg2_sync, run_ha_awg2_sync
+from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.stream_ticket import admin_from_stream_ticket
 
 router = APIRouter(prefix="/awg2", tags=["awg2"])
@@ -47,31 +46,24 @@ def _iter_awg2_install_sse(
 
 
 def _ha_sync_awg2_from_active(db: Session) -> dict[str, Any]:
-    """Best-effort HA push of AWG2 state to replicas. Never raises."""
-    errors: list[dict[str, str | None]] = []
+    """Sync AWG2 HA push (used by backup overlays / tests). Prefer enqueue in HTTP handlers."""
     try:
         node = get_active_node(db)
-        group = find_sync_group_for_primary(db, node.id)
-        if not group:
-            return {"attempted": False, "errors": []}
-        primary_adapter = get_active_adapter(db)
-        replicas = get_replica_nodes(db, group)
-        if not replicas:
-            return {"attempted": True, "errors": []}
-        for replica in replicas:
-            try:
-                replica_adapter = get_adapter_for_node(replica)
-                sync_amneziawg2_state_from_primary(
-                    primary_adapter,
-                    replica_adapter,
-                    db=db,
-                    replica_node=replica,
-                )
-            except Exception as exc:  # noqa: BLE001 — collect warnings, do not fail apply
-                errors.append({"node_name": replica.name, "error": str(exc)})
-        return {"attempted": True, "errors": errors}
+        return run_ha_awg2_sync(db, primary_node_id=node.id)
     except Exception as exc:  # noqa: BLE001
         return {"attempted": True, "errors": [{"node_name": None, "error": str(exc)}]}
+
+
+def _enqueue_ha_awg2_from_active(db: Session, *, username: str | None = None) -> dict[str, Any]:
+    """Queue HA AWG2 sync; returns ha payload with optional task_id (never raises)."""
+    try:
+        node = get_active_node(db)
+        task = enqueue_ha_awg2_sync(primary_node_id=node.id, created_by_username=username)
+        if task is None:
+            return {"attempted": False, "errors": [], "queued": False}
+        return {"attempted": True, "errors": [], "queued": True, "task_id": task.id}
+    except Exception as exc:  # noqa: BLE001
+        return {"attempted": True, "errors": [{"node_name": None, "error": str(exc)}], "queued": False}
 
 
 def _map_awg2_exc(exc: Exception) -> HTTPException:
@@ -118,7 +110,7 @@ def awg2_backup(db: Session = Depends(get_db), _: User = Depends(require_admin))
 def awg2_restore(
     archive: UploadFile = File(...),
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
 ):
     node = get_active_node(db)
     try:
@@ -135,7 +127,7 @@ def awg2_restore(
             for entry in errors
         ) or "AZ-AWG2 runtime apply failed"
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=detail)
-    ha = _ha_sync_awg2_from_active(db)
+    ha = _enqueue_ha_awg2_from_active(db, username=admin.username)
     return {
         "message": "AZ-AWG2 восстановлен из бэкапа",
         "runtime": runtime,
@@ -155,13 +147,16 @@ def get_obfuscation(db: Session = Depends(get_db), _: User = Depends(require_adm
 
 
 @router.post("/obfuscation/regenerate")
-def regenerate_obfuscation(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def regenerate_obfuscation(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
     node = get_active_node(db)
     try:
         result = get_active_adapter(db).awg2_obfuscation_regenerate()
     except Exception as exc:  # noqa: BLE001
         raise _map_awg2_exc(exc) from exc
-    ha = _ha_sync_awg2_from_active(db)
+    ha = _enqueue_ha_awg2_from_active(db, username=admin.username)
     return {**result, **_node_meta(node), "ha": ha, "reimport_required": True}
 
 
@@ -169,14 +164,14 @@ def regenerate_obfuscation(db: Session = Depends(get_db), _: User = Depends(requ
 def apply_obfuscation(
     payload: Awg2ObfuscationApply,
     db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
+    admin: User = Depends(require_admin),
 ):
     node = get_active_node(db)
     try:
         result = get_active_adapter(db).awg2_obfuscation_apply(**payload.model_dump())
     except Exception as exc:  # noqa: BLE001
         raise _map_awg2_exc(exc) from exc
-    ha = _ha_sync_awg2_from_active(db)
+    ha = _enqueue_ha_awg2_from_active(db, username=admin.username)
     return {**result, **_node_meta(node), "ha": ha, "reimport_required": True}
 
 

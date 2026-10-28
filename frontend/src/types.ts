@@ -584,6 +584,7 @@ export interface AppSettings {
   allow_ips: string
   node_id?: number | null
   node_name?: string | null
+  apply_task_id?: string | null
 }
 
 export interface DashboardSummary {
@@ -2224,6 +2225,8 @@ export interface Awg2ObfuscationResponse {
   reimport_required?: boolean
   ha?: {
     attempted?: boolean
+    queued?: boolean
+    task_id?: string | null
     errors?: Array<{ node_name?: string | null; error?: string | null }>
   }
   output?: string

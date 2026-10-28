@@ -58,6 +58,9 @@ _PIPELINE_TASK_TYPES = {
     "user_delete_cleanup",
     "bulk_user_nodes",
     "ha_client_sync",
+    "config_apply",
+    "recreate_profiles",
+    "ha_awg2_sync",
 }
 
 _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
@@ -85,6 +88,9 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "user_delete_cleanup": ("Удаление пользователя…", "Подготовка очистки…", 5),
     "bulk_user_nodes": ("Массовая выдача серверов…", "Запуск…", 5),
     "ha_client_sync": ("Синхронизация HA клиентов…", "Подготовка…", 5),
+    "config_apply": ("Применение конфигурации…", "Подготовка…", 5),
+    "recreate_profiles": ("Пересоздание профилей…", "client.sh 7…", 5),
+    "ha_awg2_sync": ("HA-синхронизация AZ-AWG2…", "Подготовка…", 5),
 }
 
 _TASK_DONE_PROGRESS: dict[str, str] = {
@@ -112,6 +118,9 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "user_delete_cleanup": "Пользователь удалён",
     "bulk_user_nodes": "Массовая операция с серверами завершена",
     "ha_client_sync": "Синхронизация HA клиентов завершена",
+    "config_apply": "Конфигурация применена",
+    "recreate_profiles": "Профили пересозданы",
+    "ha_awg2_sync": "HA-синхронизация AZ-AWG2 завершена",
 }
 
 

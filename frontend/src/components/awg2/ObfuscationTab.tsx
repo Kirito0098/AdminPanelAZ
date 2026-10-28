@@ -22,6 +22,7 @@ import {
 import Spinner from '@/components/ui/Spinner'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
+import { useProgress } from '@/context/ProgressContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { formatDateTime } from '@/lib/datetime'
 import type { Awg2HealthResponse, Awg2ObfuscationResponse } from '@/types'
@@ -51,6 +52,7 @@ export default function ObfuscationTab({ health }: ObfuscationTabProps) {
 
 function ObfuscationPanel({ health }: ObfuscationTabProps) {
   const { success, error: notifyError } = useNotifications()
+  const { trackBackgroundTask } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
   const disabled = !health?.installed
 
@@ -102,6 +104,13 @@ function ObfuscationPanel({ health }: ObfuscationTabProps) {
     setReimportAlert(Boolean(data.reimport_required))
     setHaErrors(data.ha?.errors ?? [])
     success(message)
+    const taskId = data.ha?.task_id
+    if (taskId) {
+      trackBackgroundTask(taskId, {
+        onComplete: () => success('HA-синхронизация AZ-AWG2 завершена'),
+        onError: (task, errMessage) => notifyError(task?.error || task?.message || errMessage),
+      })
+    }
   }
 
   async function onRegenerate() {

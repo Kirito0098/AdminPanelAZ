@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { useNotifications } from '@/context/NotificationContext'
+import { useProgress } from '@/context/ProgressContext'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
 import { AZ_PROXY_SH_DOCS_URL } from '@/components/nodes/ProxyNodePanel'
 import { ArrowDown, ArrowUp, Cable, Plus, RefreshCw, Save, Shield, X } from 'lucide-react'
@@ -297,6 +298,7 @@ export default function RemoteHostsCard({
   onHostsPersisted,
 }: RemoteHostsCardProps) {
   const { success, error: notifyError, warning: notifyWarning } = useNotifications()
+  const { trackBackgroundTask } = useProgress()
   const haReplicaReadonly = useHaReplicaReadonly()
   const controlsDisabled = disabled || haReplicaReadonly
 
@@ -443,6 +445,12 @@ export default function RemoteHostsCard({
       const result = await allowFirstRemoteHost(nodeId)
       if (result.added) {
         success(`Адрес ${result.host} добавлен в allow-ips.txt`)
+        if (result.apply_task_id) {
+          trackBackgroundTask(result.apply_task_id, {
+            onComplete: () => success('doall для allow-ips завершён'),
+            onError: (task, message) => notifyError(task?.error || task?.message || message),
+          })
+        }
       } else {
         notifyWarning(
           result.detail ? `${result.host}: ${result.detail}` : `${result.host} уже есть в allow-ips`,
@@ -463,6 +471,7 @@ export default function RemoteHostsCard({
     notifyError,
     notifyWarning,
     success,
+    trackBackgroundTask,
   ])
 
   const listProps = {
