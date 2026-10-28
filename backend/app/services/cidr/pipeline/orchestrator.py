@@ -17,8 +17,6 @@ from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.cidr.pipeline.file_pipeline import rollback_from_runtime_backup
 from app.services.node_adapter import NodeAdapter, RemoteNodeAdapter
 from app.services.node_manager import is_vpn_node, get_active_node, get_adapter_for_node
-from app.services.openvpn_remote_hosts import parse_hosts_json
-from app.services.profile_delivery import patch_openvpn_profiles_on_node
 
 logger = logging.getLogger(__name__)
 
@@ -80,21 +78,15 @@ def run_apply(
     *,
     sync_after: bool = True,
     apply_after: bool = False,
-    recreate_profiles_after: bool = False,
-    hosts: list[str] | None = None,
     ensure_openvpn_multihome: bool = False,
 ) -> dict[str, Any]:
-    """Sync CIDR providers, optionally run doall and recreate client profiles (client.sh 7)."""
+    """Sync CIDR providers and optionally run doall.sh (profiles via Providers → doall + 7)."""
     result: dict[str, Any] = {}
     if sync_after:
         result["sync"] = adapter.sync_cidr_providers()
     if apply_after:
         result["doall_output"] = adapter.apply_config_changes()
-    if recreate_profiles_after:
-        result["recreate_profiles_output"] = adapter.recreate_profiles()
-        if hosts:
-            result["remote_hosts_patch"] = patch_openvpn_profiles_on_node(adapter, hosts)
-    if ensure_openvpn_multihome and (apply_after or recreate_profiles_after):
+    if ensure_openvpn_multihome and apply_after:
         from app.services.openvpn_multihome import maybe_ensure_openvpn_multihome
 
         mh = maybe_ensure_openvpn_multihome(adapter, enabled=True, restart_if_unchanged=False)
@@ -187,7 +179,6 @@ def _deploy_single_node(
     files: list[str] | list[dict] | None,
     sync_after: bool,
     apply_after: bool,
-    recreate_profiles_after: bool = False,
 ) -> dict[str, Any]:
     """Push artifacts to one node, then optional sync/apply."""
     entry: dict[str, Any] = {
@@ -216,16 +207,11 @@ def _deploy_single_node(
         entry["error"] = f"Ошибка развёртывания: {len(failed)} файл(ов)"
         return entry
 
-    if apply_after or recreate_profiles_after:
-        hosts = (
-            parse_hosts_json(node.openvpn_remote_hosts) if recreate_profiles_after else None
-        )
+    if apply_after:
         apply_result = run_apply(
             adapter,
             sync_after=False,
-            apply_after=apply_after,
-            recreate_profiles_after=recreate_profiles_after,
-            hosts=hosts,
+            apply_after=True,
             ensure_openvpn_multihome=bool(node.openvpn_multihome),
         )
         entry.update(apply_result)
@@ -246,7 +232,6 @@ def run_multi_deploy(
     files: list[str] | list[dict] | None = None,
     sync_after: bool = True,
     apply_after: bool = False,
-    recreate_profiles_after: bool = False,
     triggered_by: str | None = None,
 ) -> dict[str, Any]:
     """Deploy CIDR artifacts to one or more nodes; offline nodes are skipped and logged."""
@@ -283,7 +268,6 @@ def run_multi_deploy(
             files=files,
             sync_after=sync_after,
             apply_after=apply_after,
-            recreate_profiles_after=recreate_profiles_after,
         )
         per_node.append(entry)
         all_pushed.extend(entry.get("pushed_files") or [])

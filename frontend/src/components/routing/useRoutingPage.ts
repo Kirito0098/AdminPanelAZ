@@ -461,7 +461,6 @@ export function useRoutingPage() {
               target_node_ids: deployAllOnline ? null : deployTargetNodeIds.length ? deployTargetNodeIds : null,
               sync_after: true,
               apply_after: false,
-              recreate_profiles_after: false,
               selected_files,
             }),
           deployAllOnline

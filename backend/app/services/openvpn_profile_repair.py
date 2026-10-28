@@ -65,25 +65,6 @@ def validate_openvpn_profiles(
     return ProfileValidationResult(ready=not issues, issues=tuple(issues))
 
 
-def recreate_openvpn_profiles_after_admin_change(
-    adapter,
-    *,
-    client_names: list[str] | None = None,
-    hosts: list[str] | None = None,
-) -> RecreateResult:
-    """Full client.sh 7 + optional host patch + validate (settings / shared domain)."""
-    result = recreate_openvpn_profiles(adapter, hosts=hosts)
-    if not result.success:
-        return result
-    result.validation = validate_openvpn_profiles(adapter, client_names=client_names)
-    if not result.validation.ready:
-        logger.warning(
-            "OpenVPN profiles still invalid after recreate for clients: %s",
-            sorted({issue.client_name for issue in result.validation.issues}),
-        )
-    return result
-
-
 def finalize_openvpn_profiles_after_add(
     adapter,
     *,
