@@ -79,6 +79,7 @@ interface CreateClientDialogProps {
   openvpnEnabled: boolean
   wireguardEnabled: boolean
   awg2CreateEnabled: boolean
+  awg2Installed?: boolean
   isAdmin: boolean
   currentUserId?: number
   panelUsers: User[]
@@ -96,6 +97,7 @@ export default function CreateClientDialog({
   openvpnEnabled,
   wireguardEnabled,
   awg2CreateEnabled,
+  awg2Installed = false,
   isAdmin,
   currentUserId,
   panelUsers,
@@ -111,10 +113,12 @@ export default function CreateClientDialog({
       PROTOCOL_ORDER.filter((type) => {
         if (type === 'openvpn') return openvpnEnabled
         if (type === 'wireguard') return wireguardEnabled
-        return awg2CreateEnabled
+        return awg2CreateEnabled && awg2Installed
       }),
-    [openvpnEnabled, wireguardEnabled, awg2CreateEnabled],
+    [openvpnEnabled, wireguardEnabled, awg2CreateEnabled, awg2Installed],
   )
+
+  const showAwg2MissingHint = awg2CreateEnabled && !awg2Installed
 
   const [clientName, setClientName] = useState('')
   const [description, setDescription] = useState('')
@@ -405,6 +409,9 @@ export default function CreateClientDialog({
                   )
                 })}
               </div>
+              {showAwg2MissingHint && (
+                <p className={hintClass}>AZ-AWG2 не установлен на активном узле.</p>
+              )}
               {availableProtocols.length === 0 && (
                 <p className="text-xs text-destructive lg:text-sm">Нет доступных протоколов на этом узле.</p>
               )}

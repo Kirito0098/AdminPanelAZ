@@ -20,7 +20,6 @@ import {
   getConfigProfileFiles,
   getConfigQuota,
   getConfigs,
-  getAwg2Health,
   getEffectiveVisibleVpnProfiles,
   getMonitoring,
   getUsers,
@@ -104,7 +103,6 @@ export default function DashboardPage() {
   const [summaryLoading, setSummaryLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [syncing, setSyncing] = useState(false)
-  const [awg2Installed, setAwg2Installed] = useState(false)
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [qrPreview, setQrPreview] = useState<{
     url: string
@@ -117,7 +115,8 @@ export default function DashboardPage() {
   const [panelUsers, setPanelUsers] = useState<User[]>([])
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
   const isAdmin = user?.role === 'admin'
-  const awg2CreateEnabled = awg2Visible && awg2Installed
+  const nodeAwg2Installed = activeNode?.awg2_installed === true
+  const awg2CreateEnabled = awg2Visible && nodeAwg2Installed
   // Hide create when can_create is false (flag off or quota exhausted) — including unlimited quota.
   const createBlocked = !isAdmin && quota != null && !quota.can_create
   const canCreateClient = (openvpnEnabled || wireguardEnabled || awg2CreateEnabled) && !createBlocked
@@ -129,30 +128,6 @@ export default function DashboardPage() {
       .then((data) => setVisibilityPolicy(data.policy))
       .catch(() => setVisibilityPolicy(null))
   }, [user?.id])
-
-  useEffect(() => {
-    if (!awg2ToggleOn) {
-      setAwg2Installed(false)
-      return
-    }
-    // Health is admin-only; users with visibility rely on backend 409 if layer missing.
-    if (!isAdmin) {
-      setAwg2Installed(true)
-      return
-    }
-    if (nodeLoading) return
-    let cancelled = false
-    void getAwg2Health()
-      .then((health) => {
-        if (!cancelled) setAwg2Installed(Boolean(health.installed))
-      })
-      .catch(() => {
-        if (!cancelled) setAwg2Installed(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [awg2ToggleOn, isAdmin, nodeLoading, activeNode?.id])
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
@@ -535,7 +510,8 @@ export default function DashboardPage() {
         onOpenChange={setShowForm}
         openvpnEnabled={openvpnEnabled}
         wireguardEnabled={wireguardEnabled}
-        awg2CreateEnabled={awg2CreateEnabled}
+        awg2CreateEnabled={awg2Visible}
+        awg2Installed={nodeAwg2Installed}
         isAdmin={isAdmin}
         currentUserId={user?.id}
         panelUsers={panelUsers}
