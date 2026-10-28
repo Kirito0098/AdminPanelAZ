@@ -1,3 +1,4 @@
+import secrets
 from html import escape
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -49,13 +50,25 @@ def _qr_delivery_source(db: Session, row: QrDownloadToken):
 
 
 def _qr_download_page(*, token: str, config_name: str, pin_required: bool) -> HTMLResponse:
-    """Self-contained page: GET must not redeem the one-time token (link previews)."""
+    """HTML only: GET must not redeem the token (link-preview crawlers).
+
+    Without a PIN the page posts the form itself, so a real browser starts
+    the file. Crawlers do not run that script. With a PIN the person has to
+    type it — there is nothing to submit automatically.
+    """
     name = escape(config_name or "config")
+    nonce = "" if pin_required else secrets.token_urlsafe(16)
+    script_src = "" if pin_required else f"; script-src 'nonce-{nonce}'"
     pin_block = (
         '<label for="pin">PIN</label><input id="pin" name="pin" type="password" '
         'inputmode="numeric" autocomplete="one-time-code" required />'
         if pin_required
         else ""
+    )
+    auto_script = (
+        ""
+        if pin_required
+        else f'<script nonce="{escape(nonce)}">document.forms[0].submit()</script>'
     )
     html = f"""<!DOCTYPE html>
 <html lang="ru">
@@ -63,7 +76,7 @@ def _qr_download_page(*, token: str, config_name: str, pin_required: bool) -> HT
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <meta name="robots" content="noindex,nofollow"/>
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'"/>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'{script_src}; form-action 'self'; base-uri 'none'"/>
 <title>Скачать конфиг</title>
 <style>
 body{{font-family:system-ui,sans-serif;margin:2rem;max-width:28rem;line-height:1.4}}
@@ -78,6 +91,7 @@ input{{display:block;width:100%;margin-top:.35rem;padding:.5rem;box-sizing:borde
 {pin_block}
 <button type="submit">Скачать</button>
 </form>
+{auto_script}
 </body>
 </html>"""
     return HTMLResponse(

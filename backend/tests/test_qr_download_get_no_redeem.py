@@ -71,6 +71,8 @@ def test_qr_download_get_does_not_increment_download_count(client, factory):
     assert "text/html" in resp.headers.get("content-type", "")
     assert "Скачать" in resp.text
     assert "alice.conf" in resp.text
+    assert "document.forms[0].submit()" in resp.text
+    assert "script-src 'nonce-" in resp.text
     with factory() as db:
         row = db.query(QrDownloadToken).one()
         assert row.download_count == 0

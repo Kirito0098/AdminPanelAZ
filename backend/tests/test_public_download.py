@@ -105,6 +105,8 @@ def test_qr_download_get_html_shows_pin_when_token_has_pin(client):
     assert "text/html" in resp.headers.get("content-type", "")
     assert 'name="pin"' in resp.text
     assert "Скачать" in resp.text
+    assert "<script" not in resp.text
+    assert "script-src" not in resp.text
     Svc.return_value.redeem_token.assert_not_called()
     rl.consume.assert_called_once_with("203.0.113.1")
 
@@ -126,6 +128,7 @@ def test_qr_download_get_html_shows_pin_when_global_pin_set(client):
 
     assert resp.status_code == 200
     assert 'name="pin"' in resp.text
+    assert "<script" not in resp.text
     Svc.return_value.redeem_token.assert_not_called()
 
 
