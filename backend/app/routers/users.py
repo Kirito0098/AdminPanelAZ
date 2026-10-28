@@ -474,6 +474,11 @@ def create_provisioned_user(
     protocols = _validate_protocols(payload.protocols)
     indexes = list(range(1, payload.config_count + 1))
 
+    if "amneziawg2" in protocols:
+        from app.services.awg2 import assert_awg2_available_on_nodes
+
+        assert_awg2_available_on_nodes(nodes)
+
     if not payload.panel_login_enabled:
         password = payload.password or secrets.token_urlsafe(24)
     else:
@@ -1389,6 +1394,11 @@ def update_provisioning(
     indexes = _validate_indexes(payload.plan_config_indexes)
     protocols = _validate_protocols(payload.protocols)
     nodes = validate_plan_nodes(db, payload.node_ids)
+
+    if "amneziawg2" in protocols:
+        from app.services.awg2 import assert_awg2_available_on_nodes
+
+        assert_awg2_available_on_nodes(nodes)
 
     user.client_base_name = new_base
     user.plan_config_indexes = json.dumps(indexes)

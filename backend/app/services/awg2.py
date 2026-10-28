@@ -17,7 +17,11 @@ import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Iterator, Literal
+
+if TYPE_CHECKING:
+    from app.models import Node
 
 from fastapi import HTTPException, status
 
@@ -1340,3 +1344,38 @@ class Awg2Service:
         finally:
             if temp_path:
                 Path(temp_path).unlink(missing_ok=True)
+
+
+get_adapter_for_node = None  # monkeypatched in tests
+
+
+def assert_awg2_available_on_nodes(nodes: Sequence[Node]) -> None:
+    """Live-check AZ-AWG2 on each VPN node; 409 listing nodes that lack install."""
+    from app.services.node_manager import NODE_KIND_VPN, _node_kind, get_adapter_for_node as _default_get_adapter
+
+    resolve_adapter = get_adapter_for_node if get_adapter_for_node is not None else _default_get_adapter
+
+    missing: list[str] = []
+    install_cmd = AWG2_INSTALL_CMD
+    for node in nodes:
+        if _node_kind(node) != NODE_KIND_VPN:
+            continue
+        try:
+            health = resolve_adapter(node).get_awg2_health()
+            installed = bool(health.get("installed"))
+            install_cmd = health.get("install_command") or AWG2_INSTALL_CMD
+        except Exception:
+            installed = False
+            install_cmd = AWG2_INSTALL_CMD
+        if not installed:
+            missing.append(node.name)
+    if not missing:
+        return
+    names = ", ".join(missing)
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "message": f"AZ-AWG2 не установлен на: {names}",
+            "install_command": install_cmd,
+        },
+    )
