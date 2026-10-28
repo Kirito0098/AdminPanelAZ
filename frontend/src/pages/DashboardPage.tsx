@@ -92,7 +92,7 @@ export default function DashboardPage() {
       visibilityPolicy.protocols.includes('amneziawg2'))
   const { activeNode, loading: nodeLoading } = useNode()
   const haReplicaReadonly = useHaReplicaReadonly()
-  const { success, error: notifyError, warning: notifyWarning } = useNotifications()
+  const { success, error: notifyError, warning: notifyWarning, info: notifyInfo } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
   const { task: importTask, polling: importPolling, startPoll: startImportPoll } = useBackgroundTaskPoll()
   const csvInputRef = useRef<HTMLInputElement>(null)
@@ -548,6 +548,7 @@ export default function DashboardPage() {
         onSuccess={success}
         onError={notifyError}
         onWarning={notifyWarning}
+        onInfo={notifyInfo}
         withProgress={withInline}
       />
 

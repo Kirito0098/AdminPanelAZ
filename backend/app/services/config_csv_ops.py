@@ -19,13 +19,12 @@ from app.services.awg2 import require_awg2_installed
 from app.services.background_tasks import background_task_service
 from app.services.client_names import validate_new_client_name
 from app.services.feature_guards import get_feature_service, require_vpn_type
-from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node, get_node_antizapret_path
-from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes, require_ha_primary_for_client_ops
-from app.services.node_sync.client_sync import maybe_replicate_create
+from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
+from app.services.node_sync.groups import require_ha_primary_for_client_ops
+from app.services.node_sync.client_sync import enqueue_maybe_replicate_create
 from app.services.node_sync.policy_sync import maybe_replicate_policy_op
-from app.services.node_sync.vpn_state_sync import copy_openvpn_profiles_from_primary
 from app.services.openvpn_cert import refresh_config_cert_expiry
-from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
+from app.services.openvpn_profile_repair import finalize_openvpn_profiles_after_add
 from app.services.profile_delivery import load_node_remote_hosts
 from app.services.traffic.maintenance import purge_traffic_history_for_reused_name
 from app.services.traffic_limit import parse_traffic_limit_period_days
@@ -429,7 +428,12 @@ def _import_single_row(
             "error": f"политика: {exc}",
         }
 
-    maybe_replicate_create(db, node_id=node_id, primary_config=config)
+    enqueue_maybe_replicate_create(
+        db,
+        node_id=node_id,
+        primary_config=config,
+        created_by_username=actor_username,
+    )
 
     try:
         from app.services.user_subscription import replicate_inherited_access_until
@@ -545,10 +549,9 @@ def _recreate_ovpn_profiles_after_import(
     node_id: int,
     progress_updater: Callable[[int, str, str | None], None] | None = None,
 ) -> list[str]:
-    """One batch client.sh 7 after import so new .ovpn embed current setup hosts.
+    """Patch remotes on new OpenVPN profiles after import — never client.sh 7.
 
-    On an HA primary the recreated profiles are then byte-copied to replicas to
-    keep parity (per-row crypto replication ran before the batch recreate).
+    Each row already ran ``client.sh 1``. HA crypto sync copies to replicas separately.
     """
     ovpn_names = [
         str(item.get("client_name"))
@@ -558,39 +561,26 @@ def _recreate_ovpn_profiles_after_import(
     if not ovpn_names:
         return []
 
-    warnings: list[str] = []
     if progress_updater:
-        progress_updater(100, "Пересоздание OpenVPN-профилей…")
+        progress_updater(100, "Патч OpenVPN remote hosts…")
     db = SessionLocal()
     try:
+        hosts = load_node_remote_hosts(db, node_id)
+        if not hosts:
+            return []
         adapter = get_active_adapter(db)
         try:
-            recreate_openvpn_profiles_after_admin_change(
+            result = finalize_openvpn_profiles_after_add(
                 adapter,
                 client_names=ovpn_names,
-                hosts=load_node_remote_hosts(db, node_id),
+                hosts=hosts,
             )
         except Exception as exc:
-            logger.warning("CSV import: profile recreate failed: %s", exc)
-            return [f"Пересоздание профилей: {exc}"]
-
-        group = find_sync_group_for_primary(db, node_id)
-        if group:
-            for replica_node in get_replica_nodes(db, group):
-                try:
-                    copy_openvpn_profiles_from_primary(
-                        adapter, get_adapter_for_node(replica_node)
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "CSV import: .ovpn copy to replica %s failed: %s",
-                        replica_node.name,
-                        exc,
-                    )
-                    warnings.append(f"Копия .ovpn на реплику {replica_node.name}: {exc}")
+            logger.warning("CSV import: profile finalize failed: %s", exc)
+            return [f"Патч профилей: {exc}"]
+        return [str(e) for e in (result.errors or [])]
     finally:
         db.close()
-    return warnings
 
 
 def enqueue_config_csv_import(

@@ -198,7 +198,7 @@ def test_provision_config_while_suspended_creates_blocked(db, node, regular_user
     db.commit()
     from app.services.config_provisioning import provision_config
 
-    config, _warning = provision_config(
+    config, _warning, _ha_task = provision_config(
         db,
         node=node,
         client_name="ivan",

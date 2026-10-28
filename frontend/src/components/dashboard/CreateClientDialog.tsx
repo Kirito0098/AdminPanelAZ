@@ -88,6 +88,7 @@ interface CreateClientDialogProps {
   onSuccess: (message: string) => void
   onError: (message: string) => void
   onWarning: (message: string) => void
+  onInfo?: (message: string) => void
   withProgress: <T>(fn: () => Promise<T>, label: string) => Promise<T>
 }
 
@@ -106,6 +107,7 @@ export default function CreateClientDialog({
   onSuccess,
   onError,
   onWarning,
+  onInfo,
   withProgress,
 }: CreateClientDialogProps) {
   const availableProtocols = useMemo(
@@ -253,6 +255,7 @@ export default function CreateClientDialog({
     const accessDateSnapshot = accessUntilDate
     const created: VpnType[] = []
     let lastHaWarning: string | undefined
+    let haSyncQueued = false
     let trafficWarning: string | null = null
 
     try {
@@ -269,6 +272,7 @@ export default function CreateClientDialog({
             })
             created.push(vpnType)
             if (result.ha_replicate_warning) lastHaWarning = result.ha_replicate_warning
+            if (result.ha_sync_task_id) haSyncQueued = true
             await applyAccessUntil(trimmedName, vpnType, accessDateSnapshot)
           } catch (err) {
             if (created.length === 0) {
@@ -311,6 +315,9 @@ export default function CreateClientDialog({
         onWarning(`Профиль создан, но ${trafficWarning}`)
       }
       if (lastHaWarning) onWarning(lastHaWarning)
+      else if (haSyncQueued) {
+        ;(onInfo ?? onSuccess)('HA-синхронизация запущена в фоне')
+      }
     } catch (err) {
       onError(err instanceof ApiError ? err.message : 'Ошибка создания клиента')
     } finally {

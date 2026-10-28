@@ -92,7 +92,7 @@ def test_create_amneziawg2_sets_expires_at_and_passes_ttl():
             expires_at=expires_at,
         )
         db.add(config)
-        return config, None
+        return config, None, None
 
     before = datetime.utcnow()
     with (
@@ -249,7 +249,7 @@ def test_run_awg2_expire_once_uses_ha_aware_delete_path():
         with (
             patch.object(awg2_expire_worker, "get_adapter_for_node", return_value=adapter),
             patch.object(awg2_expire_worker, "find_sync_group_for_primary", return_value=sync_group) as find_group,
-            patch.object(awg2_expire_worker, "maybe_replicate_delete") as replicate_delete,
+            patch.object(awg2_expire_worker, "enqueue_maybe_replicate_delete") as replicate_delete,
             patch.object(awg2_expire_worker, "purge_ha_shadow_configs") as purge_shadows,
         ):
             result = awg2_expire_worker.run_awg2_expire_once(Session)

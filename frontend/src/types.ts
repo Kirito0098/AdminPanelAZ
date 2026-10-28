@@ -363,6 +363,8 @@ export interface VpnConfig {
   tags?: ConfigTag[]
   ha?: VpnConfigHaInfo | null
   ha_replicate_warning?: string | null
+  /** Background HA client sync task id when create/renew was queued. */
+  ha_sync_task_id?: string | null
   /** Issued VPN tunnel IP (WireGuard AllowedIPs / OpenVPN virtual address). */
   local_ip?: string | null
   profile_files: Array<{

@@ -71,7 +71,7 @@ def recreate_openvpn_profiles_after_admin_change(
     client_names: list[str] | None = None,
     hosts: list[str] | None = None,
 ) -> RecreateResult:
-    """After explicit create/renew (client.sh 1 on primary), regenerate .ovpn files."""
+    """Full client.sh 7 + optional host patch + validate (settings / shared domain)."""
     result = recreate_openvpn_profiles(adapter, hosts=hosts)
     if not result.success:
         return result
@@ -79,6 +79,33 @@ def recreate_openvpn_profiles_after_admin_change(
     if not result.validation.ready:
         logger.warning(
             "OpenVPN profiles still invalid after recreate for clients: %s",
+            sorted({issue.client_name for issue in result.validation.issues}),
+        )
+    return result
+
+
+def finalize_openvpn_profiles_after_add(
+    adapter,
+    *,
+    client_names: list[str],
+    hosts: list[str] | None = None,
+) -> RecreateResult:
+    """After client.sh 1: patch remotes if needed and validate — never client.sh 7.
+
+    ``client.sh 1`` already writes the new client's ``.ovpn`` files. A full
+    recreate would rebuild every client (and WG/AWG) for no gain on create/renew.
+    """
+    result = RecreateResult(success=True, recreated=False)
+    if hosts:
+        result.patch = patch_openvpn_profiles_on_node(
+            adapter, hosts, client_names=client_names
+        )
+        for warning in result.patch.get("warnings") or []:
+            result.errors.append(str(warning))
+    result.validation = validate_openvpn_profiles(adapter, client_names=client_names)
+    if not result.validation.ready:
+        logger.warning(
+            "OpenVPN profiles invalid after add for clients: %s",
             sorted({issue.client_name for issue in result.validation.issues}),
         )
     return result

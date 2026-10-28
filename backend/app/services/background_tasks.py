@@ -57,6 +57,7 @@ _PIPELINE_TASK_TYPES = {
     "user_provision",
     "user_delete_cleanup",
     "bulk_user_nodes",
+    "ha_client_sync",
 }
 
 _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
@@ -83,6 +84,7 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "user_provision": ("Применение плана конфигов…", "Подготовка плана…", 5),
     "user_delete_cleanup": ("Удаление пользователя…", "Подготовка очистки…", 5),
     "bulk_user_nodes": ("Массовая выдача серверов…", "Запуск…", 5),
+    "ha_client_sync": ("Синхронизация HA клиентов…", "Подготовка…", 5),
 }
 
 _TASK_DONE_PROGRESS: dict[str, str] = {
@@ -109,6 +111,7 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "user_provision": "План конфигов применён",
     "user_delete_cleanup": "Пользователь удалён",
     "bulk_user_nodes": "Массовая операция с серверами завершена",
+    "ha_client_sync": "Синхронизация HA клиентов завершена",
 }
 
 

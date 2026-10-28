@@ -6,10 +6,13 @@ The routers stay thin wrappers and behave exactly as before.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
-from fastapi import HTTPException, Request, status
+from fastapi import Request
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.config import get_settings
 from app.models import Node, User, UserRole, VpnConfig, VpnType
@@ -24,15 +27,14 @@ from app.services.client_portal import cleanup_deleted_client_records
 from app.services.feature_guards import get_feature_service, require_vpn_type
 from app.services.node_manager import get_adapter_for_node, node_metadata_dict
 from app.services.node_sync.client_sync import (
-    format_ha_replicate_errors,
-    maybe_replicate_create,
-    maybe_replicate_delete,
+    enqueue_maybe_replicate_create,
+    enqueue_maybe_replicate_delete,
     purge_ha_shadow_configs,
 )
 from app.services.node_sync.groups import find_sync_group_for_primary
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.openvpn_cert import refresh_config_cert_expiry
-from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
+from app.services.openvpn_profile_repair import finalize_openvpn_profiles_after_add
 from app.services.profile_delivery import load_node_remote_hosts
 from app.services.traffic.maintenance import purge_traffic_history_for_reused_name
 from app.services.user_subscription import (
@@ -60,10 +62,11 @@ def provision_config(
     cert_expire_days: int | None = None,
     ttl: int | None = None,
     description: str | None = None,
-) -> tuple[VpnConfig, str | None]:
+) -> tuple[VpnConfig, str | None, str | None]:
     """Create a client profile on an explicit node.
 
-    Returns ``(config, ha_replicate_warning)``. Never consults the active node.
+    Returns ``(config, ha_replicate_warning, ha_sync_task_id)``.
+    Never consults the active node. HA crypto sync runs in a background task.
     """
     existing = (
         db.query(VpnConfig)
@@ -92,7 +95,7 @@ def provision_config(
         else:
             resolved_cert_days = 3650
         adapter.add_openvpn_client(client_name, resolved_cert_days)
-        recreate_openvpn_profiles_after_admin_change(
+        finalize_openvpn_profiles_after_add(
             adapter,
             client_names=[client_name],
             hosts=load_node_remote_hosts(db, node.id),
@@ -156,10 +159,20 @@ def provision_config(
                 svc.set_reason_block(protocol, config.client_name, reason, actor=actor.username)
 
     ha_replicate_warning: str | None = None
+    ha_sync_task_id: str | None = None
     group = find_sync_group_for_primary(db, node_id=node.id)
     if group:
-        replicate_result = maybe_replicate_create(db, node_id=node.id, primary_config=config)
-        ha_replicate_warning = format_ha_replicate_errors(replicate_result)
+        try:
+            queued = enqueue_maybe_replicate_create(
+                db,
+                node_id=node.id,
+                primary_config=config,
+                created_by_username=actor.username,
+            )
+            if queued:
+                ha_sync_task_id = str(queued.get("task_id") or "") or None
+        except Exception as exc:  # noqa: BLE001 — create already succeeded on primary
+            ha_replicate_warning = f"Не удалось поставить HA sync в очередь: {exc}"
         inherit = replicate_inherited_access_until(db, config, inherit, actor=actor.username)
 
     if inherit.get("warning"):
@@ -178,7 +191,7 @@ def provision_config(
             node_name=node.name,
             client_timezone=get_client_timezone_from_request(None),
         )
-    return config, ha_replicate_warning
+    return config, ha_replicate_warning, ha_sync_task_id
 
 
 def deprovision_config(
@@ -188,8 +201,11 @@ def deprovision_config(
     actor: User,
     notify: bool,
     request: Request | None = None,
-) -> None:
-    """Delete a client profile on its own node. Never consults the active node."""
+) -> str | None:
+    """Delete a client profile on its own node. Never consults the active node.
+
+    Returns optional ``ha_sync_task_id`` when HA disk sync was queued.
+    """
     node = db.get(Node, config.node_id)
     adapter = get_adapter_for_node(node)
     if config.vpn_type == VpnType.openvpn:
@@ -202,10 +218,21 @@ def deprovision_config(
 
     client_name = config.client_name
     vpn_type = config.vpn_type.value
+    ha_sync_task_id: str | None = None
 
     sync_group = find_sync_group_for_primary(db, node.id)
     if sync_group:
-        maybe_replicate_delete(db, node_id=node.id, primary_config=config)
+        try:
+            queued = enqueue_maybe_replicate_delete(
+                db,
+                node_id=node.id,
+                primary_config=config,
+                created_by_username=actor.username,
+            )
+            if queued:
+                ha_sync_task_id = str(queued.get("task_id") or "") or None
+        except Exception as exc:  # noqa: BLE001 — primary delete must finish
+            logger.warning("HA delete enqueue failed: %s", exc)
 
     purge_ha_shadow_configs(db, config.id)
     db.delete(config)
@@ -222,3 +249,4 @@ def deprovision_config(
             node_name=node.name,
             client_timezone=get_client_timezone_from_request(request),
         )
+    return ha_sync_task_id

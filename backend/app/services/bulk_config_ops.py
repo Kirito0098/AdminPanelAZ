@@ -19,15 +19,15 @@ from app.services.client_portal import cleanup_deleted_client_records, revoke_cl
 from app.services.config_tags import resolve_config_ids_by_tags
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
 from app.services.node_sync.client_sync import (
-    maybe_replicate_cert_renew,
+    enqueue_maybe_replicate_cert_renew,
+    enqueue_maybe_replicate_delete,
     maybe_replicate_config_metadata,
-    maybe_replicate_delete,
     purge_ha_shadow_configs,
 )
 from app.services.node_sync.policy_sync import maybe_replicate_policy_op
 from app.services.node_sync.groups import find_sync_group_for_primary, require_ha_primary_for_client_ops
 from app.services.openvpn_cert import refresh_config_cert_expiry
-from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
+from app.services.openvpn_profile_repair import finalize_openvpn_profiles_after_add
 from app.services.profile_delivery import load_node_remote_hosts
 
 logger = logging.getLogger(__name__)
@@ -118,7 +118,7 @@ def _run_single_op(
             if config.vpn_type != VpnType.openvpn:
                 return {"config_id": config_id, "ok": False, "error": "not openvpn"}
             adapter.add_openvpn_client(name, renew_cert_days)
-            recreate_openvpn_profiles_after_admin_change(
+            finalize_openvpn_profiles_after_add(
                 adapter,
                 client_names=[name],
                 hosts=load_node_remote_hosts(db, node_id),
@@ -126,11 +126,12 @@ def _run_single_op(
             config.cert_expire_days = renew_cert_days
             refresh_config_cert_expiry(config, adapter)
             db.commit()
-            maybe_replicate_cert_renew(
+            enqueue_maybe_replicate_cert_renew(
                 db,
                 node_id=node_id,
                 primary_config=config,
                 cert_expire_days=renew_cert_days,
+                created_by_username=actor_username,
             )
         elif operation == "change_owner":
             if owner_id is None:
@@ -155,7 +156,12 @@ def _run_single_op(
             node = get_active_node(db)
             sync_group = find_sync_group_for_primary(db, node.id)
             if sync_group:
-                maybe_replicate_delete(db, node_id=node.id, primary_config=config)
+                enqueue_maybe_replicate_delete(
+                    db,
+                    node_id=node.id,
+                    primary_config=config,
+                    created_by_username=actor_username,
+                )
             purge_ha_shadow_configs(db, config.id)
             admin_notify_service.send_config_delete(
                 db,

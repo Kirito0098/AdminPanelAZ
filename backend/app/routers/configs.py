@@ -48,7 +48,7 @@ from app.services.client_local_ip import build_client_local_ip_map
 from app.services.config_import import format_config_disk_sync_message, import_clients_from_disk
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.client_sync import (
-    maybe_replicate_cert_renew,
+    enqueue_maybe_replicate_cert_renew,
     maybe_replicate_config_metadata,
 )
 from app.services.node_sync.groups import (
@@ -58,7 +58,7 @@ from app.services.node_sync.groups import (
     require_ha_primary_for_client_ops,
 )
 from app.services.openvpn_cert import days_remaining_until, refresh_config_cert_expiry
-from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
+from app.services.openvpn_profile_repair import finalize_openvpn_profiles_after_add
 from app.services.openvpn_group import (
     filter_openvpn_profile_files,
     list_openvpn_groups,
@@ -203,6 +203,7 @@ def _to_response(
     profile_files: list[dict[str, str]] | None = None,
     tags: list[ConfigTagResponse] | None = None,
     ha_replicate_warning: str | None = None,
+    ha_sync_task_id: str | None = None,
     visibility_policy: dict | None = None,
     local_ip: str | None = None,
     viewer: User | None = None,
@@ -243,6 +244,7 @@ def _to_response(
         tags=tags or [],
         ha=_ha_info_for_config(db, config),
         ha_replicate_warning=ha_replicate_warning,
+        ha_sync_task_id=ha_sync_task_id,
         local_ip=local_ip,
     )
 
@@ -581,7 +583,7 @@ def create_config(
     node = get_active_node(db)
     adapter = get_active_adapter(db)
     try:
-        config, ha_replicate_warning = provision_config(
+        config, ha_replicate_warning, ha_sync_task_id = provision_config(
             db,
             node=node,
             client_name=payload.client_name,
@@ -602,6 +604,7 @@ def create_config(
         include_files=True,
         adapter=adapter,
         ha_replicate_warning=ha_replicate_warning,
+        ha_sync_task_id=ha_sync_task_id,
         visibility_policy=_viewer_visibility_policy(db, current_user),
         openvpn_group=resolve_openvpn_group_for_user(db, current_user),
         local_ip=_local_ip_for_config(db, config, adapter),
@@ -673,7 +676,7 @@ def update_config(
         adapter = get_active_adapter(db)
         days = openvpn_cert_days_for_actor(current_user, payload.cert_expire_days)
         adapter.add_openvpn_client(config.client_name, days)
-        recreate_openvpn_profiles_after_admin_change(
+        finalize_openvpn_profiles_after_add(
             adapter,
             client_names=[config.client_name],
             hosts=load_node_remote_hosts(db, config.node_id),
@@ -687,13 +690,17 @@ def update_config(
     db.refresh(config)
 
     node = get_active_node(db)
+    ha_sync_task_id: str | None = None
     if cert_renewed and renewed_days is not None:
-        maybe_replicate_cert_renew(
+        queued = enqueue_maybe_replicate_cert_renew(
             db,
             node_id=node.id,
             primary_config=config,
             cert_expire_days=renewed_days,
+            created_by_username=current_user.username,
         )
+        if queued:
+            ha_sync_task_id = str(queued.get("task_id") or "") or None
     if metadata_changed:
         maybe_replicate_config_metadata(db, node_id=node.id, primary_config=config)
 
@@ -705,6 +712,7 @@ def update_config(
         openvpn_group=resolve_openvpn_group_for_user(db, current_user),
         local_ip=_local_ip_for_config(db, config),
         viewer=current_user,
+        ha_sync_task_id=ha_sync_task_id,
     )
 
 
