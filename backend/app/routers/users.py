@@ -113,6 +113,7 @@ from app.services.file_download import attachment_response
 from app.services.provisioning_presets import create_preset, delete_preset, list_presets, update_preset
 from app.services.qr_generator import generate_qr_png, prefers_download_link_qr
 from app.services.telegram_link import create_link_code
+from app.services.user_identity_conflict import pending_deletion_conflict as _pending_deletion_conflict
 from app.services.user_provisioning import (
     TASK_TYPE,
     USER_DELETE_CLEANUP_TASK_TYPE,
@@ -374,21 +375,6 @@ def list_users(
         user.plan_config_count = len(parse_plan_indexes(user.plan_config_indexes))
         user.active_task_id = active_task_by_user.get(user.id)
     return users
-
-
-def _pending_deletion_conflict(db: Session, user: User, actor: User, *, what: str) -> HTTPException:
-    """Пользователь ещё удаляется: перезапускаем очистку вместо «уже существует»."""
-    enqueue_user_delete_cleanup(db, user_id=user.id, actor_username=actor.username)
-    return HTTPException(
-        status_code=status.HTTP_409_CONFLICT,
-        detail={
-            "code": "user_deletion_pending",
-            "message": (
-                f"{what} занято пользователем {user.username}, который ещё удаляется — "
-                "очистка перезапущена, повторите через несколько секунд"
-            ),
-        },
-    )
 
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

@@ -14,6 +14,7 @@ from app.models import User, UserRole, VpnConfig
 from app.schemas import UserFromExistingCreate
 from app.services.client_portal import revoke_client_portal_links
 from app.services.node_sync.client_sync import maybe_replicate_config_metadata
+from app.services.user_identity_conflict import pending_deletion_conflict
 
 
 def assign_config_owner(db: Session, *, config: VpnConfig, new_owner: User) -> None:
@@ -33,6 +34,8 @@ def create_user_from_existing(
 ) -> User:
     existing = db.query(User).filter(User.username == payload.username).first()
     if existing is not None:
+        if existing.provision_state == "pending_deletion":
+            raise pending_deletion_conflict(db, existing, actor, what="Имя пользователя")
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Пользователь уже существует")
 
     if not payload.panel_login_enabled:

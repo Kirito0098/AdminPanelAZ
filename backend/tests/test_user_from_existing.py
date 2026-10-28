@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -96,3 +97,40 @@ def test_create_from_existing_assigns_primaries(db, monkeypatch):
     assert user.access_until is not None
     assert c1.owner_id == user.id
     assert c2.owner_id == user.id
+
+
+def test_create_from_existing_pending_deletion_returns_409(db, monkeypatch):
+    from app.services import user_identity_conflict
+
+    admin = _admin(db)
+    ghost = User(
+        username="subscriber",
+        password_hash="x",
+        role=UserRole.user,
+        provision_state="pending_deletion",
+    )
+    db.add(ghost)
+    db.commit()
+    ghost_id = ghost.id
+
+    enqueued: list[tuple[int, str]] = []
+    monkeypatch.setattr(
+        user_identity_conflict,
+        "enqueue_user_delete_cleanup",
+        lambda _db, *, user_id, actor_username: enqueued.append((user_id, actor_username)),
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        config_ownership.create_user_from_existing(
+            db,
+            payload=UserFromExistingCreate(
+                username="subscriber",
+                panel_login_enabled=False,
+                config_ids=[],
+            ),
+            actor=admin,
+        )
+
+    assert excinfo.value.status_code == 409
+    assert excinfo.value.detail["code"] == "user_deletion_pending"
+    assert enqueued == [(ghost_id, "admin")]

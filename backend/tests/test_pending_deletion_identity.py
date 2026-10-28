@@ -13,6 +13,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.models import User, UserRole
 from app.routers import users as users_router
+from app.services import user_identity_conflict
 from app.schemas import UserCreate
 from app.services.telegram_link import create_link_code, redeem_link_code
 
@@ -32,11 +33,9 @@ def factory():
 
 def _stubs(monkeypatch) -> list[tuple[int, str]]:
     enqueued: list[tuple[int, str]] = []
-    monkeypatch.setattr(
-        users_router,
-        "enqueue_user_delete_cleanup",
-        lambda _db, *, user_id, actor_username: enqueued.append((user_id, actor_username)),
-    )
+    stub = lambda _db, *, user_id, actor_username: enqueued.append((user_id, actor_username))
+    monkeypatch.setattr(user_identity_conflict, "enqueue_user_delete_cleanup", stub)
+    monkeypatch.setattr(users_router, "enqueue_user_delete_cleanup", stub)
     monkeypatch.setattr(users_router.settings, "audit_log_enabled", False)
     monkeypatch.setattr(users_router.admin_notify_service, "send_user_create", lambda *_a, **_k: None)
     return enqueued
