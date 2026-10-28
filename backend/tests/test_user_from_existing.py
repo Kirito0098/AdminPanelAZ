@@ -99,6 +99,30 @@ def test_create_from_existing_assigns_primaries(db, monkeypatch):
     assert c2.owner_id == user.id
 
 
+def test_create_from_existing_config_quota_zero_unlimited(db, monkeypatch):
+    admin = _admin(db)
+    cfg = VpnConfig(node_id=1, client_name="a", vpn_type=VpnType.openvpn, owner_id=admin.id)
+    db.add(cfg)
+    db.commit()
+    db.refresh(cfg)
+
+    monkeypatch.setattr(config_ownership, "revoke_client_portal_links", lambda *a, **k: 0)
+    monkeypatch.setattr(config_ownership, "maybe_replicate_config_metadata", lambda *a, **k: None)
+
+    user = config_ownership.create_user_from_existing(
+        db,
+        payload=UserFromExistingCreate(
+            username="unlimited",
+            panel_login_enabled=False,
+            config_ids=[cfg.id],
+            config_quota=0,
+        ),
+        actor=admin,
+    )
+    db.refresh(cfg)
+    assert cfg.owner_id == user.id
+
+
 def test_create_from_existing_pending_deletion_returns_409(db, monkeypatch):
     from app.services import user_identity_conflict
 

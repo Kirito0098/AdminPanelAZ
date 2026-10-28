@@ -50,7 +50,11 @@ def create_user_from_existing(
     validate_password(password, username=payload.username)
 
     ids = list(dict.fromkeys(payload.config_ids))  # stable unique
-    if payload.config_quota is not None and len(ids) > payload.config_quota:
+    if (
+        payload.config_quota is not None
+        and payload.config_quota > 0
+        and len(ids) > payload.config_quota
+    ):
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
             detail="Число привязываемых конфигов больше квоты",
