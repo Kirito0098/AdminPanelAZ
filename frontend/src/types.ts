@@ -275,7 +275,7 @@ export interface VisibleVpnProfilesPolicy {
   routes: string[]
   protocols: string[]
   openvpn_groups: string[]
-  /** AmneziaWG 2.0: у абонента только файл .conf, без .vpn-вариантов. Нет в старом JSON → true. */
+  /** AmneziaWG 2.0: true = только .conf (скрыть .vpn / -vpnuri.txt). Нет в старом JSON → true. */
   awg2_tunnel_only?: boolean
 }
 

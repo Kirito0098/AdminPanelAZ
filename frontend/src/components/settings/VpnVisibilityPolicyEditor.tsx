@@ -1,6 +1,5 @@
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import type { VisibleVpnProfilesPolicy } from '@/types'
 import { cn } from '@/lib/utils'
 
@@ -66,6 +65,8 @@ export default function VpnVisibilityPolicyEditor({
   className,
 }: VpnVisibilityPolicyEditorProps) {
   const empty = isVisibleVpnPolicyEmpty(value)
+  const awg2Enabled = value.protocols.includes('amneziawg2')
+  const showAmneziaFiles = !(value.awg2_tunnel_only ?? true)
 
   const renderGroup = (
     title: string,
@@ -102,19 +103,29 @@ export default function VpnVisibilityPolicyEditor({
       {renderGroup('Маршруты', ROUTE_OPTIONS, 'routes')}
       {renderGroup('OpenVPN группы', OPENVPN_GROUP_OPTIONS, 'openvpn_groups')}
       {renderGroup('Протоколы', PROTOCOL_OPTIONS, 'protocols')}
-      <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2.5">
-        <div className="space-y-0.5">
-          <Label htmlFor="vpnPolicyAwg2TunnelOnly">AmneziaWG 2.0: только файл .conf</Label>
-          <p className="text-xs text-muted-foreground">
-            Вкл. — абонент видит только .conf; файлы .vpn (для приложения Amnezia) скрыты.
-          </p>
+      <div className="space-y-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          AmneziaWG 2.0 файлы
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+            <Checkbox checked={awg2Enabled} disabled />
+            .conf
+          </label>
+          <label className="inline-flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={awg2Enabled && showAmneziaFiles}
+              disabled={disabled || !awg2Enabled}
+              onCheckedChange={(next) => onChange({ ...value, awg2_tunnel_only: !next })}
+            />
+            файлы Amnezia (.vpn)
+          </label>
         </div>
-        <Switch
-          id="vpnPolicyAwg2TunnelOnly"
-          checked={value.awg2_tunnel_only ?? true}
-          disabled={disabled}
-          onCheckedChange={(next) => onChange({ ...value, awg2_tunnel_only: next })}
-        />
+        {!awg2Enabled && (
+          <p className="text-xs text-muted-foreground">
+            Включите протокол AmneziaWG 2.0, чтобы настроить файлы.
+          </p>
+        )}
       </div>
       {empty && (
         <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
