@@ -45,34 +45,37 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
 
   const configKey = (entry: ConfigEntry) => String(entry.config_id ?? entry.node_id)
   const isLoading = (key: string) => actionLoading.has(key)
-  const entryFiles = (entry: ConfigEntry) => filesByEntry[configKey(entry)] ?? []
-  const hasFiles = (entry: ConfigEntry) => Boolean(entryFiles(entry).length)
-
-  const loadFiles = async (entry: ConfigEntry) => {
-    if (!entry.config_id) return
-    if (hasFiles(entry) || filesLoading.has(configKey(entry))) return
-    setFilesLoading((prev) => new Set([...prev, configKey(entry)]))
+  const loadFiles = async (entry: ConfigEntry): Promise<string[]> => {
+    if (!entry.config_id) return []
+    const key = configKey(entry)
+    const cached = filesByEntry[key]
+    if (cached?.length) return cached
+    if (filesLoading.has(key)) return []
+    setFilesLoading((prev) => new Set([...prev, key]))
     try {
       const data = await getUserConfigFiles(userId, entry.config_id)
-      setFilesByEntry((prev) => ({ ...prev, [configKey(entry)]: data.files.map((f) => f.path) }))
+      const paths = data.files.map((f) => f.path)
+      setFilesByEntry((prev) => ({ ...prev, [key]: paths }))
+      return paths
     } catch {
-      /* files unavailable on this node yet */
+      return []
     } finally {
       setFilesLoading((prev) => {
         const next = new Set(prev)
-        next.delete(configKey(entry))
+        next.delete(key)
         return next
       })
     }
   }
 
-  const primaryPath = (entry: ConfigEntry) => entryFiles(entry)[0]
-
   const handleDownload = async (entry: ConfigEntry) => {
     if (!entry.config_id) return
-    await loadFiles(entry)
-    const path = primaryPath(entry)
-    if (!path) return
+    const paths = await loadFiles(entry)
+    const path = paths[0]
+    if (!path) {
+      notifyError('Нет файлов профиля на узле')
+      return
+    }
     const key = `dl-${configKey(entry)}`
     setActionLoading((prev) => new Set([...prev, key]))
     try {
@@ -100,9 +103,12 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
 
   const handleQr = async (entry: ConfigEntry) => {
     if (!entry.config_id) return
-    await loadFiles(entry)
-    const path = primaryPath(entry)
-    if (!path) return
+    const paths = await loadFiles(entry)
+    const path = paths[0]
+    if (!path) {
+      notifyError('Нет файлов профиля на узле')
+      return
+    }
     const key = `qr-${configKey(entry)}`
     setActionLoading((prev) => new Set([...prev, key]))
     try {
