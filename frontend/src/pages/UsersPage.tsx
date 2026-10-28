@@ -1098,6 +1098,19 @@ function UserCardView({
     }
   }, [userId, notifyError, onBack])
 
+  const provisionState = card?.user.provision_state
+  const activeTaskId = card?.user.active_task_id
+
+  useEffect(() => {
+    const needsPoll = provisionState === 'pending' || Boolean(activeTaskId)
+    if (!needsPoll) return
+
+    const timer = window.setInterval(() => {
+      void load()
+    }, 1500)
+    return () => window.clearInterval(timer)
+  }, [provisionState, activeTaskId, load])
+
   if (loading) return <Spinner label="Загрузка карточки…" className="py-16" />
   if (!card) return null
 
