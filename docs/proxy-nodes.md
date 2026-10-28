@@ -206,52 +206,43 @@ Mappings живут в conntrack на RU и забираются агентом;
 
 ## AmneziaWG 2.0 через прокси {#amneziawg-20-через-прокси}
 
-Слой [az-awg2](https://github.com/blindtechnique/az-awg2) слушает **свои** UDP-порты (рандом `20000–59999` или `--awg-ports`), не `52080/52443` стокового AntiZapret. Штатный `proxy.sh` эти порты **не** форвардит. Панель **не** правит `proxy.sh` — только подставляет IP/домен прокси в `Endpoint` при скачивании (галочка «Также для AmneziaWG / WireGuard / AWG 2.0»).
+У AWG 2.0 свои UDP-порты — штатный `proxy.sh` их не открывает. Панель только пишет IP прокси в `Endpoint` при скачивании конфига (галочка «Также для AmneziaWG / WireGuard / AWG 2.0»). Порты на RU нужно добавить вручную один раз.
 
-### На панели
+### 1. На панели
 
-1. На VPN с AZ-AWG2: **Прокси** (или OpenVPN-панель) → первый адрес = RU-прокси → включите галочку → **Сохранить**.
-2. IP прокси в `allow-ips.txt` на этом VPN («Добавить первый адрес в allow-ips»).
-3. Снова скачайте конфиг AWG 2.0 клиенту (старый файл с прямым IP не обновится сам).
+1. VPN с AZ-AWG2 → **Прокси** → первый адрес = ваш RU-прокси → галочка для WireGuard/AWG → **Сохранить**.
+2. Добавьте IP прокси в allow-ips на этом VPN.
+3. Скачайте клиенту **новый** конфиг AWG 2.0.
 
-### На зарубежном VPN — узнать порты слоя
+### 2. На зарубежном VPN — скопируйте порты
 
 ```bash
 grep -E '^(AZ_PORT|VPN_PORT)=' /etc/amnezia/amneziawg/services.env
-# обычно два порта (туннели antizapret и vpn); или из профиля: Endpoint = …:ПОРТ
 ```
 
-`WIREGUARD_IP` ниже — публичный IPv4 этого VPN (тот же DESTINATION, что в карточке прокси / при установке `proxy.sh`).
+Запомните два числа (например `41234` и `45123`) и публичный IP этого VPN.
 
-### На RU-прокси — как в `proxy.sh`, но для портов AWG2
+### 3. На RU-прокси — вставьте и подставьте свои значения
 
-Стиль тот же, что [GubernievS `proxy.sh`](https://github.com/GubernievS/AntiZapret-VPN/blob/main/proxy.sh) для WireGuard:  
-`iptables -w -t nat -A PREROUTING -p udp --dport PORT -j DNAT --to-destination $WIREGUARD_IP:PORT`  
-и SNAT `--to-source $DEFAULT_IP`, затем `netfilter-persistent save`.  
-**Не** запускайте `proxy.sh` заново только ради AWG2 — скрипт чистит nat и перезагружает сервер.
+Зайдите по SSH **под root** на российский прокси (где уже стоит `proxy.sh`).  
+В блоке ниже замените только три строки: IP VPN и два порта. Остальное не трогайте. Скопируйте целиком и выполните.
 
 ```bash
-# root на RU (после уже установленного proxy.sh)
-WIREGUARD_IP=203.0.113.10   # IPv4 VPN с az-awg2
-DEFAULT_IP="$(ip route get 1.2.3.4 2>/dev/null | grep -oP 'src \K\S+')"
-# порты из services.env на VPN, например:
+VPN_IP=203.0.113.10
 AZ_PORT=41234
 VPN_PORT=45123
 
-# DNAT: локальный UDP-порт → тот же порт на VPN (как 51080→51080 в proxy.sh)
-iptables -w -t nat -C PREROUTING -p udp --dport "$AZ_PORT" -j DNAT --to-destination "$WIREGUARD_IP:$AZ_PORT" 2>/dev/null \
-  || iptables -w -t nat -A PREROUTING -p udp --dport "$AZ_PORT" -j DNAT --to-destination "$WIREGUARD_IP:$AZ_PORT"
-iptables -w -t nat -C PREROUTING -p udp --dport "$VPN_PORT" -j DNAT --to-destination "$WIREGUARD_IP:$VPN_PORT" 2>/dev/null \
-  || iptables -w -t nat -A PREROUTING -p udp --dport "$VPN_PORT" -j DNAT --to-destination "$WIREGUARD_IP:$VPN_PORT"
+DEFAULT_IP="$(ip route get 1.2.3.4 | grep -oP 'src \K\S+')"
 
-# SNAT на VPN обычно уже есть от proxy.sh; если WIREGUARD_IP другой — добавьте:
-iptables -w -t nat -C POSTROUTING -d "$WIREGUARD_IP" -j SNAT --to-source "$DEFAULT_IP" 2>/dev/null \
-  || iptables -w -t nat -A POSTROUTING -d "$WIREGUARD_IP" -j SNAT --to-source "$DEFAULT_IP"
+iptables -w -t nat -A PREROUTING -p udp --dport $AZ_PORT -j DNAT --to-destination $VPN_IP:$AZ_PORT
+iptables -w -t nat -A PREROUTING -p udp --dport $VPN_PORT -j DNAT --to-destination $VPN_IP:$VPN_PORT
+iptables -w -t nat -A POSTROUTING -d $VPN_IP -j SNAT --to-source $DEFAULT_IP
 
 netfilter-persistent save
 ```
 
-Проверка: свежий конфиг AWG 2.0 с `Endpoint = <IP_прокси>:$AZ_PORT` (или `$VPN_PORT`) — handshake на VPN.
+Готово. Подключайте клиент свежим конфигом с Endpoint на IP прокси.  
+Не запускайте `proxy.sh` повторно — он сотрёт эти правила.
 
 ---
 
