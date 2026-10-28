@@ -2592,6 +2592,7 @@ export interface UserProvisionSummary {
   traffic_counter_reset_at?: string | null
   traffic_limit_blocked?: boolean
   traffic_consumed_bytes?: number
+  telegram_id?: string | null
 }
 
 export interface UserStatsResponse {

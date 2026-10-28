@@ -232,6 +232,7 @@ def _user_summary(
         traffic_counter_reset_at=user.traffic_counter_reset_at,
         traffic_limit_blocked=bool(user.traffic_limit_blocked),
         traffic_consumed_bytes=int(traffic_consumed_bytes),
+        telegram_id=(user.telegram_id or None),
     )
 
 

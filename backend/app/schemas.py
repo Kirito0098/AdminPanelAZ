@@ -401,6 +401,7 @@ class UserProvisionSummary(BaseModel):
     traffic_counter_reset_at: datetime | None = None
     traffic_limit_blocked: bool = False
     traffic_consumed_bytes: int = 0
+    telegram_id: str | None = None
 
 
 class GraceHoldView(BaseModel):

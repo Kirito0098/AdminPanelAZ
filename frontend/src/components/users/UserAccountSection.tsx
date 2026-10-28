@@ -136,9 +136,19 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
       <UserSection
         icon={Phone}
         title="Привязка Telegram"
-        description="Код для команды /link в боте. Действует 10 минут."
+        description={
+          user.telegram_id
+            ? 'Telegram привязан. Код для перепривязки — команда /link в боте, 10 минут.'
+            : 'Код для команды /link в боте. Действует 10 минут.'
+        }
       >
         <div className="space-y-3">
+          {user.telegram_id ? (
+            <div className="rounded-lg border bg-muted/20 px-3 py-2.5">
+              <p className="text-xs text-muted-foreground">Привязанный Telegram ID</p>
+              <p className="font-mono text-sm font-medium">{user.telegram_id}</p>
+            </div>
+          ) : null}
           <Button
             type="button"
             onClick={handleCreateLinkCode}
@@ -149,7 +159,7 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
               'Создание…'
             ) : (
               <>
-                <Phone size={15} /> Получить код
+                <Phone size={15} /> {user.telegram_id ? 'Перепривязать' : 'Получить код'}
               </>
             )}
           </Button>
