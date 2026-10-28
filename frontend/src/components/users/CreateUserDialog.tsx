@@ -305,7 +305,8 @@ export default function CreateUserDialog({
               <Label htmlFor="createTelegramId">Telegram ID (необязательно)</Label>
               <Input
                 id="createTelegramId"
-                type="number"
+                type="text"
+                inputMode="numeric"
                 value={telegramId}
                 onChange={(e) => setTelegramId(e.target.value)}
                 placeholder="123456789"
