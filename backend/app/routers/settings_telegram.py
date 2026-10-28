@@ -95,6 +95,16 @@ def _configure_bot_menu(db: Session, token: str) -> None:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
 
 
+def _register_webhook(db: Session, request: Request, bot_token: str) -> None:
+    secret = _ensure_webhook_secret(db)
+    ok, error = set_webhook_sync(bot_token, _webhook_url(request, secret), secret_token=secret)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
+    _configure_bot_menu(db, bot_token)
+    _set_setting(db, "telegram_webhook_set_at", datetime.now(timezone.utc).isoformat())
+    _set_setting(db, "telegram_webhook_secret_required", "true")
+
+
 def _sync_bot_commands_best_effort(token: str) -> None:
     """Пере-синхронизировать меню команд после сохранения настроек (фоном, не ломает сохранение)."""
     from app.database import SessionLocal
@@ -529,15 +539,7 @@ def register_telegram_webhook(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Включена связь через узел: webhook не нужен"
         )
 
-    secret = _ensure_webhook_secret(db)
-    url = _webhook_url(request, secret)
-    ok, error = set_webhook_sync(bot_token, url, secret_token=secret)
-    if not ok:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
-
-    _configure_bot_menu(db, bot_token)
-    _set_setting(db, "telegram_webhook_set_at", datetime.now(timezone.utc).isoformat())
-    _set_setting(db, "telegram_webhook_secret_required", "true")
+    _register_webhook(db, request, bot_token)
     db.commit()
     admin_notify_service.send_settings_change(
         db,
@@ -601,7 +603,18 @@ def update_telegram_relay(
 ):
     checks: list[TelegramRelayCheck] = []
     if not payload.node_ids:
+        previous = _get_setting(db, RELAY_NODES_SETTING)
         _set_setting(db, RELAY_NODES_SETTING, "")
+        token = _get_setting(db, "telegram_bot_token")
+        if token and _get_setting(db, "telegram_bot_interactive_enabled", "false") == "true":
+            try:
+                _register_webhook(db, request, token)
+            except HTTPException:
+                _set_setting(db, RELAY_NODES_SETTING, previous)
+                db.commit()
+                raise
+        else:
+            _set_setting(db, "telegram_webhook_set_at", "")
     else:
         nodes = []
         for node_id in payload.node_ids:
@@ -636,7 +649,7 @@ def update_telegram_relay(
             _set_setting(db, RELAY_NODES_SETTING, previous)
             db.commit()
             raise
-    _set_setting(db, "telegram_webhook_set_at", "")
+        _set_setting(db, "telegram_webhook_set_at", "")
     db.commit()
     admin_notify_service.send_settings_change(
         db,
