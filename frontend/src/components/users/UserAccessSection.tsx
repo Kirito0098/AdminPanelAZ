@@ -56,6 +56,10 @@ const sameDraft = (a: PlanDraft, b: PlanDraft) =>
   sameList(a.protocols, b.protocols) &&
   sameList(a.indexes, b.indexes)
 
+function nodesMissingAwg2(nodes: Node[], selectedIds: number[]): Node[] {
+  return nodes.filter((n) => selectedIds.includes(n.id) && n.awg2_installed !== true)
+}
+
 export default function UserAccessSection({ card, onRefresh, onDirtyChange }: UserAccessSectionProps) {
   const { user, configs, suggested } = card
   const { isEnabled } = useFeatureModules()
@@ -137,6 +141,18 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
     () => nodes.filter((node) => (node.node_kind ?? 'vpn') === 'vpn' && !replicaIds.has(node.id)),
     [nodes, replicaIds],
   )
+
+  const awg2Blocked = useMemo(
+    () => nodesMissingAwg2(assignableNodes, draftNodeIds),
+    [assignableNodes, draftNodeIds],
+  )
+
+  useEffect(() => {
+    if (awg2Blocked.length === 0) return
+    setDraftProtocols((prev) =>
+      prev.includes('amneziawg2') ? prev.filter((id) => id !== 'amneziawg2') : prev,
+    )
+  }, [awg2Blocked])
 
   const hasPlan = user.client_base_name != null && user.client_base_name.length > 0
   // План заблокирован, пока срок доступа истёк (Stage 1) — изменения и применение недоступны.
@@ -447,6 +463,8 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
                       ? 'OpenVPN'
                       : 'AmneziaWG 2.0'
                 const checked = draftProtocols.includes(proto)
+                const awg2Disabled = proto === 'amneziawg2' && awg2Blocked.length > 0
+                const disabled = !provisioningOn || expired || awg2Disabled
                 return (
                   <label
                     key={proto}
@@ -455,13 +473,13 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
                       checked
                         ? 'border-primary bg-primary/5'
                         : 'border-border/70 hover:bg-muted/50',
-                      !provisioningOn || expired ? 'opacity-60' : 'cursor-pointer',
+                      disabled ? 'opacity-60' : 'cursor-pointer',
                     )}
                   >
                     <Checkbox
                       checked={checked}
                       onCheckedChange={(next) => toggleProtocol(proto, next)}
-                      disabled={!provisioningOn || expired}
+                      disabled={disabled}
                       aria-label={label}
                     />
                     {label}
@@ -469,6 +487,11 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
                 )
               })}
             </fieldset>
+            {awg2Blocked.length > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Не установлен на: {awg2Blocked.map((n) => n.name).join(', ')}
+              </p>
+            ) : null}
           </div>
 
           <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">

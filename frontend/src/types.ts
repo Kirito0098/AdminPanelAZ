@@ -52,6 +52,7 @@ export interface Node {
   destination_ip?: string | null
   linked_vpn_node_id?: number | null
   last_seen_at?: string | null
+  awg2_installed?: boolean | null
   metadata: Record<string, unknown>
   created_at: string
   updated_at: string

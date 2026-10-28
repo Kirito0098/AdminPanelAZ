@@ -47,6 +47,10 @@ function protocolEnabled(
   return featureKeys.some((key) => isEnabled(key))
 }
 
+function nodesMissingAwg2(nodes: Node[], selectedIds: number[]): Node[] {
+  return nodes.filter((n) => selectedIds.includes(n.id) && n.awg2_installed !== true)
+}
+
 export default function CreateUserDialog({
   open,
   onOpenChange,
@@ -157,6 +161,18 @@ export default function CreateUserDialog({
     () => nodes.filter((node) => (node.node_kind ?? 'vpn') === 'vpn' && !replicaIds.has(node.id)),
     [nodes, replicaIds],
   )
+
+  const awg2Blocked = useMemo(
+    () => nodesMissingAwg2(assignableNodes, selectedNodeIds),
+    [assignableNodes, selectedNodeIds],
+  )
+
+  useEffect(() => {
+    if (awg2Blocked.length === 0) return
+    setSelectedProtocols((prev) =>
+      prev.includes('amneziawg2') ? prev.filter((id) => id !== 'amneziawg2') : prev,
+    )
+  }, [awg2Blocked])
 
   const planNames = useMemo(() => {
     const names: string[] = []
@@ -409,10 +425,18 @@ export default function CreateUserDialog({
                 ) : null}
                 {availableProtocols.map((proto) => {
                   const checked = selectedProtocols.includes(proto.id)
+                  const awg2Disabled = proto.id === 'amneziawg2' && awg2Blocked.length > 0
                   return (
-                    <label key={proto.id} className="flex items-center gap-2 cursor-pointer">
+                    <label
+                      key={proto.id}
+                      className={cn(
+                        'flex items-center gap-2',
+                        awg2Disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+                      )}
+                    >
                       <Checkbox
                         checked={checked}
+                        disabled={awg2Disabled}
                         onCheckedChange={(next) => {
                           const ids = new Set(selectedProtocols)
                           if (next) ids.add(proto.id)
@@ -426,6 +450,11 @@ export default function CreateUserDialog({
                   )
                 })}
               </fieldset>
+              {awg2Blocked.length > 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  Не установлен на: {awg2Blocked.map((n) => n.name).join(', ')}
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-1.5">
