@@ -2562,9 +2562,24 @@ export interface UserProvisionedCreate {
   telegram_id?: string | null
 }
 
+export interface UserFromExistingCreate {
+  username: string
+  config_ids?: number[]
+  config_quota?: number | null
+  access_until?: string | null
+  panel_login_enabled: boolean
+  password?: string | null
+  telegram_id?: string | null
+}
+
 export interface UserProvisionedResponse {
   user: UserProvisionSummary
   task_id: string
+}
+
+export interface UserFromExistingResponse {
+  user: UserProvisionSummary
+  assigned_config_ids: number[]
 }
 
 export interface UserProvisioningUpdate {

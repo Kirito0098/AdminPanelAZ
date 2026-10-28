@@ -10,6 +10,8 @@ import type {
   RejectRequest,
   TelegramLinkCodeResponse,
   User,
+  UserFromExistingCreate,
+  UserFromExistingResponse,
   UserProvisionedCreate,
   UserProvisionedResponse,
   UserProvisioningApply,
@@ -35,6 +37,14 @@ export interface UserProvisionSummary {
 /** POST /users/provisioned — создать абонента с планом и поставить задачу применения. */
 export async function createProvisionedUser(data: UserProvisionedCreate) {
   return apiFetch<UserProvisionedResponse>('/users/provisioned', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+/** POST /users/from-existing — создать абонента из существующих конфигов. */
+export async function createUserFromExisting(data: UserFromExistingCreate) {
+  return apiFetch<UserFromExistingResponse>('/users/from-existing', {
     method: 'POST',
     body: JSON.stringify(data),
   })
