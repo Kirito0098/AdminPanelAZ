@@ -95,8 +95,9 @@ def read_profile_file_for_delivery(adapter, path: str, hosts: list[str]) -> str:
     if name.lower().endswith(".ovpn"):
         return apply_openvpn_remote_hosts(raw, hosts)
     proto = protocol_key_from_file(protocol="", path=path)
-    if proto in ("wireguard", "amneziawg"):
-        # GubernievS: Endpoint host is WIREGUARD_HOST, never the OpenVPN remote list.
-        # Proxy for AWG is opt-in (remotes save with apply_to_wireguard writes WIREGUARD_HOST).
+    if proto in ("wireguard", "amneziawg", "amneziawg2"):
+        # GubernievS / AZ-AWG2: Endpoint host is WIREGUARD_HOST, never the OpenVPN remote list.
+        # Proxy is opt-in (remotes save with apply_to_wireguard writes WIREGUARD_HOST).
+        # Port stays from the profile (stock AWG ports or az-awg2 random UDP from services.env).
         return apply_wireguard_endpoint_host(raw, wireguard_host_from_adapter(adapter))
     return raw

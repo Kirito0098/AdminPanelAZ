@@ -240,14 +240,14 @@ function RemoteHostsListBody({
           checked={applyToWireguard}
           disabled={listDisabled}
           onCheckedChange={onApplyToWireguardChange}
-          aria-label="Подставлять первый адрес в Endpoint AmneziaWG и WireGuard"
+          aria-label="Подставлять первый адрес в Endpoint AmneziaWG, WireGuard и AWG 2.0"
         />
         <span>
-          <span className="font-medium">Также для AmneziaWG / WireGuard</span>
+          <span className="font-medium">Также для AmneziaWG / WireGuard / AWG 2.0</span>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Как шаг 4 в README AntiZapret: первый адрес (слот входа / прокси) пишется в
-            WIREGUARD_HOST и в Endpoint новых -am.conf / -wg.conf. Нужен proxy.sh с форвардом
-            портов 52443 и 52080.
+            Первый адрес (прокси) пишется в WIREGUARD_HOST и при скачивании в Endpoint
+            стокового AWG/WG и AmneziaWG 2.0 (порт в конфиге не меняется). Для стока нужен
+            proxy.sh с 52443/52080; для AWG 2.0 — ещё DNAT своих UDP-портов на RU (см. docs).
           </span>
         </span>
       </label>
