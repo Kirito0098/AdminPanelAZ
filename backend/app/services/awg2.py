@@ -1360,15 +1360,20 @@ def assert_awg2_available_on_nodes(nodes: Sequence[Node]) -> None:
     for node in nodes:
         if _node_kind(node) != NODE_KIND_VPN:
             continue
+        health: dict[str, Any] | None = None
         try:
             health = resolve_adapter(node).get_awg2_health()
             installed = bool(health.get("installed"))
-            install_cmd = health.get("install_command") or AWG2_INSTALL_CMD
-        except Exception:
+        except Exception as exc:
+            logger.warning("awg2 probe failed on node %s: %s", node.id, exc)
             installed = False
-            install_cmd = AWG2_INSTALL_CMD
         if not installed:
             missing.append(node.name)
+            if len(missing) == 1:
+                if health is not None:
+                    install_cmd = health.get("install_command") or AWG2_INSTALL_CMD
+                else:
+                    install_cmd = AWG2_INSTALL_CMD
     if not missing:
         return
     names = ", ".join(missing)

@@ -39,7 +39,7 @@ def test_assert_awg2_available_raises_listing_missing_nodes(monkeypatch):
     detail = ei.value.detail
     assert isinstance(detail, dict)
     assert "Test_serv" in detail["message"]
-    assert "Germani" not in detail["message"] or "Test_serv" in detail["message"]
+    assert "Germani" not in detail["message"]
     assert "install_command" in detail
 
 
