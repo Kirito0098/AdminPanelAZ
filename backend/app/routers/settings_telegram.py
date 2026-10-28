@@ -607,6 +607,7 @@ def update_telegram_relay(
         _set_setting(db, RELAY_NODES_SETTING, "")
         token = _get_setting(db, "telegram_bot_token")
         if token and _get_setting(db, "telegram_bot_interactive_enabled", "false") == "true":
+            db.commit()
             try:
                 _register_webhook(db, request, token)
             except HTTPException:
