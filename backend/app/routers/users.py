@@ -1256,7 +1256,11 @@ def _group_provision_configs(db: Session, user: User) -> list[ProvisioningConfig
     переназначенный пользователю с другим базовым именем: он исчезал и у прежнего
     владельца (сменился ``owner_id``), и у нового (имя вне namespace).
     """
-    configs = db.query(VpnConfig).filter(VpnConfig.owner_id == user.id).all()
+    configs = (
+        db.query(VpnConfig)
+        .filter(VpnConfig.owner_id == user.id, VpnConfig.ha_primary_config_id.is_(None))
+        .all()
+    )
     node_ids = {config.node_id for config in configs}
     labels = (
         {node.id: node.name for node in db.query(Node).filter(Node.id.in_(node_ids)).all()}

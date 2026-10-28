@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ListChecks, Plus, Trash2 } from 'lucide-react'
 import { ApiError } from '@/api/client'
-import { getNodes } from '@/api/nodes'
+import { getNodeSyncGroups, getNodes } from '@/api/nodes'
 import {
   addProvisioningConfig,
   removeProvisioningConfig,
@@ -63,6 +63,7 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
   const { trackBackgroundTask } = useProgress()
   const provisioningOn = isEnabled('user_provisioning')
   const [nodes, setNodes] = useState<Node[]>([])
+  const [replicaIds, setReplicaIds] = useState<Set<number>>(new Set())
   const [nodesLoading, setNodesLoading] = useState(false)
 
   // Без плана подставляем suggested (из уже существующих конфигов) или логин.
@@ -89,7 +90,7 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
 
   const resetDraft = () => {
     setDraftBaseName(savedPlan.baseName)
-    setDraftNodeIds([...savedPlan.nodeIds])
+    setDraftNodeIds(savedPlan.nodeIds.filter((id) => !replicaIds.has(id)))
     setDraftProtocols([...savedPlan.protocols])
     setDraftIndexes([...savedPlan.indexes])
   }
@@ -105,8 +106,15 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
     const load = async () => {
       setNodesLoading(true)
       try {
-        const list = await getNodes()
-        if (!cancelled) setNodes(list)
+        const [list, groups] = await Promise.all([getNodes(), getNodeSyncGroups()])
+        if (cancelled) return
+        const replicas = new Set<number>()
+        for (const group of groups) {
+          for (const id of group.replica_node_ids ?? []) replicas.add(id)
+        }
+        setNodes(list)
+        setReplicaIds(replicas)
+        setDraftNodeIds((prev) => prev.filter((id) => !replicas.has(id)))
       } catch {
         /* без списка узлов нельзя редактировать назначения — покажем те, что есть в плане */
       } finally {
@@ -118,6 +126,12 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
       cancelled = true
     }
   }, [])
+
+  /** Прокси и реплики HA выдавать нельзя (сервер проверит ещё раз). */
+  const assignableNodes = useMemo(
+    () => nodes.filter((node) => (node.node_kind ?? 'vpn') === 'vpn' && !replicaIds.has(node.id)),
+    [nodes, replicaIds],
+  )
 
   const hasPlan = user.client_base_name != null && user.client_base_name.length > 0
   // План заблокирован, пока срок доступа истёк (Stage 1) — изменения и применение недоступны.
@@ -373,11 +387,11 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
             <Label>Узлы</Label>
             {nodesLoading ? (
               <span className="text-xs text-muted-foreground">Загрузка узлов…</span>
-            ) : nodes.length === 0 ? (
+            ) : assignableNodes.length === 0 ? (
               <p className="text-xs text-muted-foreground">В панели нет узлов</p>
             ) : (
               <div className="grid gap-1 sm:grid-cols-2">
-                {nodes.map((node) => {
+                {assignableNodes.map((node) => {
                   const checked = draftNodeIds.includes(node.id)
                   return (
                     <label

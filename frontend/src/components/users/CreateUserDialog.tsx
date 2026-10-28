@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ArrowRight, ChevronLeft, Users as UsersIcon } from 'lucide-react'
-import { getNodes } from '@/api/nodes'
+import { getNodeSyncGroups, getNodes } from '@/api/nodes'
 import { listPresets } from '@/api/users'
 import { Node, PresetResponse } from '@/types'
 import AppDialog from '@/components/shared/AppDialog'
@@ -59,6 +59,7 @@ export default function CreateUserDialog({
   )
   const [step, setStep] = useState<Step>('who')
   const [nodes, setNodes] = useState<Node[]>([])
+  const [replicaIds, setReplicaIds] = useState<Set<number>>(new Set())
   const [nodesLoading, setNodesLoading] = useState(false)
   const [presets, setPresets] = useState<PresetResponse[]>([])
   const [selectedPresetId, setSelectedPresetId] = useState<number | null>(null)
@@ -108,8 +109,15 @@ export default function CreateUserDialog({
     const load = async () => {
       setNodesLoading(true)
       try {
-        const list = await getNodes()
-        if (!cancelled) setNodes(list)
+        const [list, groups] = await Promise.all([getNodes(), getNodeSyncGroups()])
+        if (cancelled) return
+        const replicas = new Set<number>()
+        for (const group of groups) {
+          for (const id of group.replica_node_ids ?? []) replicas.add(id)
+        }
+        setNodes(list)
+        setReplicaIds(replicas)
+        setSelectedNodeIds((prev) => prev.filter((id) => !replicas.has(id)))
       } catch {
         /* узлы необязательны для шага «Доступ» — без них покажем подсказку */
       } finally {
@@ -138,6 +146,12 @@ export default function CreateUserDialog({
       cancelled = true
     }
   }, [open])
+
+  /** Прокси и реплики HA выдавать нельзя (сервер проверит ещё раз). */
+  const assignableNodes = useMemo(
+    () => nodes.filter((node) => (node.node_kind ?? 'vpn') === 'vpn' && !replicaIds.has(node.id)),
+    [nodes, replicaIds],
+  )
 
   const planNames = useMemo(() => {
     const names: string[] = []
@@ -339,11 +353,11 @@ export default function CreateUserDialog({
               <Label>Узлы</Label>
               {nodesLoading ? (
                 <span className="text-xs text-muted-foreground">Загрузка узлов…</span>
-              ) : nodes.length === 0 ? (
+              ) : assignableNodes.length === 0 ? (
                 <p className="text-xs text-muted-foreground">Узлов нет — добавьте позже в карточке абонента</p>
               ) : (
                 <div className="grid gap-1 sm:grid-cols-2">
-                  {nodes.map((node) => {
+                  {assignableNodes.map((node) => {
                     const checked = selectedNodeIds.includes(node.id)
                     return (
                       <label
