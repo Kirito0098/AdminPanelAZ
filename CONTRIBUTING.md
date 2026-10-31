@@ -197,6 +197,8 @@ npx skills remove -g -y brainstorming dispatching-parallel-agents executing-plan
 
 **Зачем пакет в целом:** чтобы агент не прыгал сразу в код, а проходил цикл: понять задачу → дизайн → план → TDD → ревью → доказательства → закрытие ветки. Для крупных фич AdminPanelAZ (HA, HTTPS, Telegram, multi-node) это снижает «сломали соседний модуль».
 
+Какой skill брать в какой ситуации — одна таблица в `/root/.cline/skills/skills-catalog/SKILL.md`; ниже — расшифровка «зачем» для тех, кто правит сами skills.
+
 | Skill | Зачем |
 |-------|--------|
 | **using-superpowers** | Точка входа: сначала проверить, какой skill подходит, и вызвать его до действий. Без этого остальные Superpowers skills часто игнорируются. |

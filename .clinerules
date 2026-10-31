@@ -2,7 +2,9 @@
 
 Cline не читает `.cursor/rules/*.mdc` сам. Здесь — только то, что нужно в каждой сессии;
 детали лежат в `.cursor/rules/use-skills.mdc`, `lean-code.mdc`, `release-train-branching.mdc`
-и в каталоге скиллов `/root/.cline/skills/skills-catalog/SKILL.md` (открывать через Read).
+и в каталоге скиллов `/root/.cline/skills/skills-catalog/SKILL.md` — **каталог и есть
+источник правды по маршрутизации** (короткая таблица «ситуация → skill»), открывать через Read,
+когда задача с процессом.
 
 ## Мелочь ≠ фича
 
