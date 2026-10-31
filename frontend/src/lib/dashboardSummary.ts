@@ -31,12 +31,18 @@ export function mergeDashboardSummaryMonitoring(
     overview.total_connected_wireguard ??
     overview.wireguard_peers.filter(isWireGuardOnline).length
   const services = overview.services ?? []
+  // scope=all отдаёт services=[] (агрегат без служб), но nodes_summary знает каждый узел.
+  // Карточка говорит «активных на узле», поэтому берём активный узел, а не сумму по кластеру.
+  const activeNodeSummary = overview.nodes_summary?.find((node) => node.node_id === overview.node_id)
+  const activeServices =
+    activeNodeSummary?.active_services ?? services.filter((service) => service.active).length
+  const totalServices = activeNodeSummary?.total_services ?? services.length
   return {
     ...base,
     connected_openvpn: connectedOpenvpn,
     connected_wireguard: connectedWireguard,
-    active_services: services.filter((s) => s.active).length,
-    total_services: services.length,
+    active_services: activeServices,
+    total_services: totalServices,
     server_ip: overview.server_ip || base.server_ip || '',
     node_name: overview.node_name || base.node_name || '',
   }
