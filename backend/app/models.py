@@ -1003,6 +1003,26 @@ class AdminPanelNotification(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
+class AdminPanelNotificationState(Base):
+    """Личное состояние уведомления у админа: прочитано / скрыто / отложено.
+
+    Строка создаётся только при действии. «Непрочитано» по умолчанию выражает
+    ``users.last_read_notification_id``, поэтому бэкфилл не нужен.
+    """
+
+    __tablename__ = "admin_panel_notification_states"
+    __table_args__ = (UniqueConstraint("user_id", "notification_id", name="uq_apns_user_notification"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    notification_id: Mapped[int] = mapped_column(
+        ForeignKey("admin_panel_notifications.id", ondelete="CASCADE"), index=True
+    )
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    hidden_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    snoozed_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class ProvisioningPreset(Base):
     __tablename__ = "provisioning_presets"
 

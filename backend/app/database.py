@@ -1635,6 +1635,7 @@ def _migrate_nodes_columns() -> None:
 
 def _run_db_migrations() -> None:
     _migrate_nodes_columns()
+    _migrate_admin_panel_notification_states()
     _migrate_alert_rules_table()
     _migrate_openvpn_buffer_guard_tables()
     _migrate_openvpn_buffer_guard_factory_thresholds()
@@ -2022,6 +2023,40 @@ def _migrate_user_provisioning_stage2() -> None:
                     "DB migration: reclassified %s access_request notifications → requests",
                     fixed,
                 )
+
+
+def _migrate_admin_panel_notification_states() -> None:
+    """Личное состояние уведомлений админа (прочитано / скрыто / отложено)."""
+    with _migration_transaction() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS admin_panel_notification_states (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    notification_id INTEGER NOT NULL
+                        REFERENCES admin_panel_notifications(id) ON DELETE CASCADE,
+                    read_at DATETIME,
+                    hidden_at DATETIME,
+                    snoozed_until DATETIME,
+                    CONSTRAINT uq_apns_user_notification UNIQUE (user_id, notification_id)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_apns_user_hidden "
+                "ON admin_panel_notification_states (user_id, hidden_at)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_apns_user_snooze "
+                "ON admin_panel_notification_states (user_id, snoozed_until)"
+            )
+        )
+    logger.info("DB migration: ensured admin_panel_notification_states table")
 
 
 def _migrate_user_portal_banner() -> None:
