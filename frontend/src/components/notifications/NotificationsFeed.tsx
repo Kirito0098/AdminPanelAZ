@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Navigate } from 'react-router-dom'
 import { AlertTriangle, BellOff, EyeOff, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -8,15 +7,12 @@ import EmptyState from '@/components/ui/EmptyState'
 import NotificationCard from '@/components/notifications/NotificationCard'
 import { CATEGORY_ICON, CATEGORY_LABEL } from '@/components/notifications/labels'
 import { dayKey, dayLabel, snoozeUntil, type SnoozePreset } from '@/components/notifications/time'
-import { useAuth } from '@/context/AuthContext'
 import { useNotificationCenter, type NotificationTabKey } from '@/context/NotificationCenterContext'
 import type { NotificationItem } from '@/api/notifications'
 
 const CATEGORY_TABS: NotificationTabKey[] = ['all', 'requests', 'security', 'nodes', 'services', 'tasks']
 
-export default function NotificationsPage() {
-  const { user } = useAuth()
-  const isAdmin = user?.role === 'admin'
+export default function NotificationsFeed() {
   const { items, counts, query, setQuery, loading, hasMore, loadMore, markAllRead, setState } =
     useNotificationCenter()
   const [search, setSearch] = useState(query.q)
@@ -39,8 +35,6 @@ export default function NotificationsPage() {
     return [...map.values()]
   }, [items])
 
-  if (!isAdmin) return <Navigate to="/" replace />
-
   const handleSnooze = (id: number, preset: SnoozePreset) =>
     void setState(id, { snoozed_until: snoozeUntil(preset) })
 
@@ -50,7 +44,6 @@ export default function NotificationsPage() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
-        <h1 className="text-lg font-semibold">Уведомления</h1>
         {counts.unread > 0 && (
           <span className="rounded-full bg-primary/15 px-2 py-0.5 text-xs font-medium text-primary">
             {counts.unread} новых

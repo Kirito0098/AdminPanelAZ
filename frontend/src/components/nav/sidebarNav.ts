@@ -2,7 +2,6 @@
 import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
-  Bell,
   ClipboardList,
   Cpu,
   FileText,
@@ -79,7 +78,6 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   {
     label: 'Наблюдение',
     items: [
-      { to: '/notifications', label: 'Уведомления', icon: Bell, end: false, adminOnly: true, featureKey: null },
       { to: '/monitoring', label: 'NOC Мониторинг', icon: Activity, end: false, adminOnly: true, featureKey: 'logs_dashboard' },
       { to: '/traffic', label: 'Мониторинг трафика', icon: HardDrive, end: false, adminOnly: false, featureKey: 'traffic_sync' },
       {

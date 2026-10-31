@@ -17,6 +17,7 @@ import {
   Wifi,
   WifiOff,
   Plug,
+  Bell,
 } from 'lucide-react'
 import {
   ApiError,
@@ -52,6 +53,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
+import { useNotificationCenter } from '@/context/NotificationCenterContext'
+import NotificationsFeed from '@/components/notifications/NotificationsFeed'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
@@ -610,10 +613,13 @@ export default function LogsPage() {
   const showActionTab = user?.role === 'admin' && actionLogsEnabled
   const showQrDownloadsTab = user?.role === 'admin' && qrDownloadsEnabled
   const showSocketsTab = user?.role === 'admin' && logsDashboardEnabled
+  const showNotificationsTab = user?.role === 'admin'
+  const { counts: notificationCounts } = useNotificationCenter()
 
   const [searchParams] = useSearchParams()
   const initialLogTab = useMemo(() => {
     const tab = searchParams.get('tab')
+    if (tab === 'notifications' && showNotificationsTab) return tab
     if (tab === 'qr-downloads' && showQrDownloadsTab) return tab
     if (tab === 'openvpn-sockets' && showSocketsTab) return tab
     if (tab === 'actions' && showActionTab) return tab
@@ -621,6 +627,7 @@ export default function LogsPage() {
     return defaultLogTab
   }, [
     searchParams,
+    showNotificationsTab,
     showQrDownloadsTab,
     showSocketsTab,
     showActionTab,
@@ -873,7 +880,7 @@ export default function LogsPage() {
 
       <InlineProgressBar active={refreshing} label="Обновление логов..." />
 
-      {loadError && !connections && events.length === 0 ? (
+      {loadError && !connections && events.length === 0 && activeTab !== 'notifications' ? (
         <Card>
           <CardContent>
             <EmptyState
@@ -939,6 +946,17 @@ export default function LogsPage() {
               <TabsTrigger value="openvpn-sockets" className="gap-1.5">
                 <Plug size={14} />
                 OVPN сокеты
+              </TabsTrigger>
+            )}
+            {showNotificationsTab && (
+              <TabsTrigger value="notifications" className="gap-1.5">
+                <Bell size={14} />
+                Уведомления
+                {notificationCounts.unread > 0 && (
+                  <Badge variant="destructive" className="h-4 px-1 text-[10px]">
+                    {notificationCounts.unread > 99 ? '99+' : notificationCounts.unread}
+                  </Badge>
+                )}
               </TabsTrigger>
             )}
           </TabsList>
@@ -1378,6 +1396,12 @@ export default function LogsPage() {
                   )}
                 </CardContent>
               </Card>
+            </TabsContent>
+          )}
+
+          {showNotificationsTab && (
+            <TabsContent value="notifications" className="space-y-4">
+              <NotificationsFeed />
             </TabsContent>
           )}
         </Tabs>
