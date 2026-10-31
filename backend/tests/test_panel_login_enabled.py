@@ -1,3 +1,4 @@
+
 """Stage 1 Task 7: `panel_login_enabled` auth gate.
 
 Password / refresh / passkey / Telegram OIDC panel login is rejected when
@@ -29,6 +30,9 @@ from app.routers import auth as auth_router
 from app.routers import users as users_router
 from app.config import get_settings
 from app.services.refresh_token import create_refresh_token
+
+pytestmark = pytest.mark.slow
+
 
 settings = get_settings()
 

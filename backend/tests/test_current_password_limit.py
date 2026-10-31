@@ -1,3 +1,4 @@
+
 """Current-password checks reuse the login limiter, keyed per user and shared by both endpoints."""
 
 from __future__ import annotations
@@ -18,6 +19,9 @@ from app.routers import auth as auth_router
 from app.routers import telegram_webhook
 from app.services.app_setting_store import _set_setting
 from app.services.auth_rate_limit import AuthRateLimitService
+
+pytestmark = pytest.mark.slow
+
 
 PASSWORD = "Carol-pass-1"
 NEW_PASSWORD = "Carol-new-pass-2"

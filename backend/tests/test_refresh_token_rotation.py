@@ -1,3 +1,4 @@
+
 """Refresh rotation: reuse of a rotated token revokes its family; concurrent tab refresh is tolerated."""
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ from app.database import Base
 from app.models import RefreshToken, User, UserRole
 from app.routers import auth as auth_router
 from app.services import refresh_token as rt
+
+pytestmark = pytest.mark.slow
 
 
 @pytest.fixture()

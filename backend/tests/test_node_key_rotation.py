@@ -1,3 +1,4 @@
+
 """Automatic node API key rotation: due condition, key age tracking, and loop resilience."""
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ from app.services.node_manager import (
     store_api_key,
     store_pending_api_key,
 )
+
+pytestmark = pytest.mark.slow
 
 PENDING = "pending-key-0123456789abcdef0123456789"
 

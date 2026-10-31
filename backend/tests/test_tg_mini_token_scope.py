@@ -1,3 +1,4 @@
+
 """Mini App tokens must work only in /tg-mini and the panel routes the Mini App actually calls."""
 
 from unittest.mock import MagicMock
@@ -21,6 +22,8 @@ from app.config import get_settings
 from app.database import Base, get_db
 from app.models import User, UserRole
 from app.routers.tg_mini import TelegramAuthRequest, tg_auth
+
+pytestmark = pytest.mark.slow
 
 
 @pytest.fixture

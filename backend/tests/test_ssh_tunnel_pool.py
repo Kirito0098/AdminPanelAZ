@@ -12,6 +12,8 @@ import pytest
 from app.services.crypto import encrypt_secret
 from app.services.ssh_tunnel_pool import EnsureResult, SshTunnelError, SshTunnelPool
 
+pytestmark = pytest.mark.slow
+
 
 class _FakeListener:
     def __init__(self, port: int):
