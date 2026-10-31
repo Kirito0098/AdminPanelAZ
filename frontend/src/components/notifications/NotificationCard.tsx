@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Bell, MoreHorizontal } from 'lucide-react'
+import { Bell, Check, MoreHorizontal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -99,47 +99,66 @@ export default function NotificationCard({
         </p>
       </div>
 
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
+      {compact ? (
+        !item.state.read && (
+          // В колоколе живёт внешнее Radix-меню: вложенное меню оно закрывает вместе с собой,
+          // поэтому здесь одна явная кнопка. Отложить и скрыть — на странице уведомлений.
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7 shrink-0"
-            aria-label="Действия с уведомлением"
-            onClick={(event) => event.stopPropagation()}
+            aria-label="Отметить прочитанным"
+            onClick={(event) => {
+              event.stopPropagation()
+              onMarkRead(item.id)
+            }}
           >
-            <MoreHorizontal size={16} />
+            <Check size={16} />
           </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
-          {!item.state.read && (
-            <DropdownMenuItem onSelect={() => onMarkRead(item.id)}>Отметить прочитанным</DropdownMenuItem>
-          )}
-          {target && <DropdownMenuItem onSelect={open}>Перейти</DropdownMenuItem>}
-          {!compact && onSnooze && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel className="text-[11px] uppercase tracking-wide text-muted-foreground">
-                Отложить
-              </DropdownMenuLabel>
-              {SNOOZE_PRESETS.map((preset) => (
-                <DropdownMenuItem key={preset.id} onSelect={() => onSnooze(item.id, preset.id)}>
-                  {preset.label}
-                </DropdownMenuItem>
-              ))}
-            </>
-          )}
-          {!compact && onHide && !item.state.hidden && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onSelect={() => onHide(item.id)}>Скрыть</DropdownMenuItem>
-            </>
-          )}
-          {!compact && onRestore && item.state.hidden && (
-            <DropdownMenuItem onSelect={() => onRestore(item.id)}>Вернуть в ленту</DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>
+        )
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0"
+              aria-label="Действия с уведомлением"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <MoreHorizontal size={16} />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
+            {!item.state.read && (
+              <DropdownMenuItem onSelect={() => onMarkRead(item.id)}>Отметить прочитанным</DropdownMenuItem>
+            )}
+            {target && <DropdownMenuItem onSelect={open}>Перейти</DropdownMenuItem>}
+            {onSnooze && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Отложить
+                </DropdownMenuLabel>
+                {SNOOZE_PRESETS.map((preset) => (
+                  <DropdownMenuItem key={preset.id} onSelect={() => onSnooze(item.id, preset.id)}>
+                    {preset.label}
+                  </DropdownMenuItem>
+                ))}
+              </>
+            )}
+            {onHide && !item.state.hidden && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={() => onHide(item.id)}>Скрыть</DropdownMenuItem>
+              </>
+            )}
+            {onRestore && item.state.hidden && (
+              <DropdownMenuItem onSelect={() => onRestore(item.id)}>Вернуть в ленту</DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
     </article>
   )
 }
