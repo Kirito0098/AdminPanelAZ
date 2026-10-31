@@ -112,14 +112,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   }))
 
   if (!isAdmin) {
-    const panelIndex = visibleGroups.findIndex((group) => group.label === 'Панель')
-    if (panelIndex >= 0) {
-      visibleGroups = visibleGroups.map((group, index) =>
-        index === panelIndex ? { ...group, items: [...group.items, profileItem] } : group,
-      )
-    } else {
-      visibleGroups = [...visibleGroups, { label: 'Панель', items: [profileItem] }]
-    }
+    // Группы с adminOnly-пунктами не-админу не достаются, поэтому «Мой профиль» — отдельная группа.
+    visibleGroups = [...visibleGroups, { label: 'Профиль', items: [profileItem] }]
   }
 
   const themeToggle = (

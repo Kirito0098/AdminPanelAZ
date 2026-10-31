@@ -37,7 +37,7 @@ type SidebarNavGroup = {
 
 export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   {
-    label: 'Клиенты',
+    label: 'Клиенты и доступ',
     items: [
       { to: '/', label: 'Клиенты', icon: LayoutDashboard, end: true, adminOnly: false, featureKey: 'clients_page' },
       {
@@ -60,11 +60,17 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
     ],
   },
   {
-    label: 'Сеть',
+    label: 'VPN-сеть',
     items: [
-      { to: '/routing', label: 'Маршрутизация / CIDR', icon: GitBranch, end: false, adminOnly: true, featureKey: 'routing' },
-      { to: '/antizapret', label: 'Конфиг AntiZapret', icon: Settings2, end: false, adminOnly: true, featureKey: 'antizapret_config' },
+      { to: '/nodes', label: 'Узлы', icon: Server, end: false, adminOnly: true, featureKey: 'nodes' },
       { to: '/proxy', label: 'Прокси', icon: Network, end: false, adminOnly: true, featureKey: 'proxy_nodes' },
+      { to: '/routing', label: 'Маршрутизация / CIDR', icon: GitBranch, end: false, adminOnly: true, featureKey: 'routing' },
+    ],
+  },
+  {
+    label: 'Протоколы и обвязки',
+    items: [
+      { to: '/antizapret', label: 'Конфиг AntiZapret', icon: Settings2, end: false, adminOnly: true, featureKey: 'antizapret_config' },
       { to: '/warper', label: 'AZ-WARP', icon: Globe, end: false, adminOnly: true, featureKey: 'warper' },
       { to: '/awg2', label: 'AZ-AWG2', icon: Shield, end: false, adminOnly: true, featureKey: 'awg2' },
     ],
@@ -87,9 +93,8 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
     ],
   },
   {
-    label: 'Панель',
+    label: 'Система',
     items: [
-      { to: '/nodes', label: 'Узлы', icon: Server, end: false, adminOnly: true, featureKey: 'nodes' },
       { to: '/settings', label: 'Настройки', icon: Settings, end: false, adminOnly: true, featureKey: null },
       { to: '/telegram', label: 'Telegram', icon: Send, end: false, adminOnly: true, featureKey: 'telegram' },
       { to: '/edit-files', label: 'Редактор файлов', icon: FileText, end: false, adminOnly: true, featureKey: 'edit_files' },
