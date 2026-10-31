@@ -41,3 +41,9 @@ jsdom не воспроизводит порталы, вложенные Radix-�
 
 Работа в `release/X.Y.Z` (сейчас `release/2.26.6`). Не коммитить фичи в `main`,
 не открывать PR «фича → main»: PR релиза — когда пользователь скажет, что релиз готов.
+
+## Субагентов нет
+
+В Cline нет параллельных агентов: `subagent-driven-development`, `dispatching-parallel-agents`,
+`swarm`, `arena` и `using-git-worktrees` не установлены. Если план или skill ссылается на них
+как на «REQUIRED SUB-SKILL» — игнорировать, работать `executing-plans` в этом чате.
