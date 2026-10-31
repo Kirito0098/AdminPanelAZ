@@ -216,6 +216,8 @@ npx skills remove -g -y brainstorming dispatching-parallel-agents executing-plan
 
 Типичный поток фичи: `brainstorming` → `writing-plans` → (`using-git-worktrees`) → `subagent-driven-development` / `executing-plans` → `verification-before-completion` → `finishing-a-development-branch`.
 
+Это поток для **новой** фичи, экрана, потока или схемы данных. Мелкая правка (1–2 файла, без нового поведения: пункт меню, вкладки, подписи, вёрстка, мелкий баг) идёт без `brainstorming`/`writing-plans` — план на 2–5 пунктов в чате и прогоны проверок.
+
 **TDD:** для точечной регрессии — проектный **`tdd`** (`.cursor/skills/tdd`). Superpowers `test-driven-development` в этот поток **не** входит (полная TDD-дисциплина на каждую фичу — только по явной просьбе). Подробная вилка Superpowers ↔ pstack — в правиле `use-skills`.
 
 ---
