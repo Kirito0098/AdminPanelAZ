@@ -11,10 +11,11 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import datetime, timezone
 from time import monotonic
-from typing import Callable
+from typing import Callable, Literal
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -24,13 +25,16 @@ from app.models import User, UserAccessRequest
 from app.schemas import (
     MarkReadRequest,
     MarkReadResponse,
-    NotificationItem,
+    NotificationStateResponse,
+    NotificationStateUpdate,
     NotificationsListResponse,
 )
 from app.services.admin_panel_notifications import (
+    _UNSET,
     list_notifications_for_admin,
     mark_notifications_read,
     notifications_stream_snapshot,
+    set_notification_state,
 )
 from app.services.feature_guards import get_feature_service
 from app.services.stream_ticket import admin_from_stream_ticket
@@ -54,14 +58,26 @@ _db_session_factory: Callable[[], Session] = SessionLocal
     summary="Лента уведомлений для админа",
 )
 def get_notifications(
-    category: str | None = Query(default=None, description="Фильтр по категории bell-вкладки"),
+    category: str | None = Query(default=None, description="Фильтр по категории"),
+    level: Literal["info", "warning", "error"] | None = Query(default=None, description="Фильтр по уровню"),
+    unread_only: bool = Query(default=False, description="Только непрочитанные"),
+    q: str | None = Query(default=None, max_length=100, description="Поиск по заголовку и тексту"),
+    hidden_only: bool = Query(default=False, description="Только скрытые"),
     limit: int = Query(default=50, ge=1, le=100, description="Размер страницы"),
     before_id: int | None = Query(default=None, description="id строго меньше — страница назад"),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    items, unread = list_notifications_for_admin(
-        db, admin, category=category, limit=limit, before_id=before_id
+    items, unread, counts = list_notifications_for_admin(
+        db,
+        admin,
+        category=category,
+        level=level,
+        unread_only=unread_only,
+        q=q,
+        hidden_only=hidden_only,
+        before_id=before_id,
+        limit=limit,
     )
     pending = 0
     if get_feature_service().is_enabled("user_provisioning"):
@@ -74,6 +90,7 @@ def get_notifications(
         "items": items,
         "unread_count": unread,
         "pending_requests_count": pending,
+        "counts": counts,
     }
 
 
@@ -89,6 +106,42 @@ def post_read(
 ):
     mark_notifications_read(db, admin, body.up_to_id)
     return {"ok": True}
+
+
+@router.post(
+    "/{notification_id}/state",
+    response_model=NotificationStateResponse,
+    summary="Личное состояние уведомления: прочитано / скрыто / отложено",
+)
+def post_notification_state(
+    notification_id: int,
+    body: NotificationStateUpdate,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    snoozed_until: object = _UNSET
+    if "snoozed_until" in body.model_fields_set:
+        snoozed_until = None
+        if body.snoozed_until is not None:
+            value = body.snoozed_until
+            if value.tzinfo is not None:
+                value = value.astimezone(timezone.utc).replace(tzinfo=None)
+            if value <= datetime.utcnow():
+                raise HTTPException(
+                    status_code=422, detail="Срок откладывания должен быть в будущем"
+                )
+            snoozed_until = value
+    state = set_notification_state(
+        db,
+        admin,
+        notification_id,
+        read=body.read,
+        hidden=body.hidden,
+        snoozed_until=snoozed_until,
+    )
+    if state is None:
+        raise HTTPException(status_code=404, detail="Уведомление не найдено")
+    return {"state": state}
 
 
 @router.get(

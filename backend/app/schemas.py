@@ -2591,6 +2591,25 @@ class StreamTicketResponse(BaseModel):
     expires_in_seconds: int
 
 
+class NotificationStateOut(BaseModel):
+    read: bool
+    hidden: bool
+    snoozed_until: str | None = None
+
+
+class NotificationCategoryCount(BaseModel):
+    total: int
+    unread: int
+
+
+class NotificationCounts(BaseModel):
+    unread: int
+    attention: int
+    snoozed: int
+    hidden: int
+    by_category: dict[str, NotificationCategoryCount]
+
+
 class NotificationItem(BaseModel):
     id: int
     category: str
@@ -2599,12 +2618,27 @@ class NotificationItem(BaseModel):
     title: str
     message: str
     created_at: str
+    # Поле не было объявлено, и response_model молча вырезал его из ответа —
+    # из-за этого переход по конкретной заявке на фронтенде не срабатывал никогда.
+    action_payload: dict[str, Any] | None = None
+    state: NotificationStateOut
 
 
 class NotificationsListResponse(BaseModel):
     items: list[NotificationItem]
     unread_count: int
     pending_requests_count: int
+    counts: NotificationCounts
+
+
+class NotificationStateUpdate(BaseModel):
+    read: bool | None = None
+    hidden: bool | None = None
+    snoozed_until: datetime | None = None
+
+
+class NotificationStateResponse(BaseModel):
+    state: NotificationStateOut
 
 
 class MarkReadRequest(BaseModel):
