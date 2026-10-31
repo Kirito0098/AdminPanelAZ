@@ -383,6 +383,11 @@ def list_notifications_for_admin(
             continue
         if needle and needle not in f"{row.title or ''} {row.message or ''}".casefold():
             continue
+        state_payload = _state_payload(state)
+        if row.id <= last_read:
+            # Водяной знак — тоже прочтение; без этого карточка выглядит непрочитанной,
+            # хотя бейдж и счётчики считают её прочитанной.
+            state_payload["read"] = True
         items.append(
             {
                 "id": row.id,
@@ -393,7 +398,7 @@ def list_notifications_for_admin(
                 "message": row.message,
                 "created_at": _iso_utc(row.created_at) or "",
                 "action_payload": _payload(row.action_payload),
-                "state": _state_payload(state),
+                "state": state_payload,
             }
         )
         if len(items) >= limit:

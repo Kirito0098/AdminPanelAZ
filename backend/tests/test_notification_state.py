@@ -83,5 +83,30 @@ def test_state_is_per_admin(env):
     restored_items, restored_unread, _ = list_notifications_for_admin(db, first, limit=10)
     assert [item["id"] for item in restored_items] == [3, 2, 1]
     assert restored_unread == 1  # вернулось только скрытое; 2 всё ещё отложено, 3 прочитано
+def test_watermark_marks_items_read(env):
+    """Водяной знак — тоже прочтение: API обязан отдавать state.read=true для id <= last_read.
+
+    Иначе карточка выглядит непрочитанной (бейдж считает по водяному знаку, а карточка —
+    по state.read), и «Отметить всё» визуально ничего не делает.
+    """
+    db, first, _ = env
+    first.last_read_notification_id = 3
+    db.add(first)
+    db.commit()
+
+    items, unread, counts = list_notifications_for_admin(db, first, limit=10)
+
+    assert unread == 0 and counts["unread"] == 0
+    assert [item["state"]["read"] for item in items] == [True, True, True]
+
+    # Частичный водяной знак: прочитано только до 2.
+    first.last_read_notification_id = 2
+    db.add(first)
+    db.commit()
+
+    items, unread, _ = list_notifications_for_admin(db, first, limit=10)
+    assert unread == 1
+    assert [item["state"]["read"] for item in items] == [False, True, True]
+
 
     assert set_notification_state(db, first, 999, read=True) is None
