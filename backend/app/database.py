@@ -2024,6 +2024,33 @@ def _migrate_user_provisioning_stage2() -> None:
                     fixed,
                 )
 
+    # Заголовки и категории событий, которых не было в BELL_TITLES / EVENT_CATEGORY.
+    if "admin_panel_notifications" in tables:
+        with _migration_transaction() as conn:
+            titles = {
+                "user_provision_applied": "Выдача конфигов",
+                "openvpn_buffer_guard": "OpenVPN: перегрузка буфера",
+            }
+            fixed = 0
+            for event_type, title in titles.items():
+                result = conn.execute(
+                    text(
+                        "UPDATE admin_panel_notifications SET title = :title "
+                        "WHERE event_type = :event_type AND title <> :title"
+                    ),
+                    {"title": title, "event_type": event_type},
+                )
+                fixed += result.rowcount or 0
+            result = conn.execute(
+                text(
+                    "UPDATE admin_panel_notifications SET category = 'services' "
+                    "WHERE event_type = 'openvpn_buffer_guard' AND category <> 'services'"
+                )
+            )
+            fixed += result.rowcount or 0
+            if fixed:
+                logger.info("DB migration: refreshed %s notification titles", fixed)
+
 
 def _migrate_admin_panel_notification_states() -> None:
     """Личное состояние уведомлений админа (прочитано / скрыто / отложено)."""
