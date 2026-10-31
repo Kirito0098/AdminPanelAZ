@@ -3,95 +3,173 @@ import {
   fetchNotifications,
   markNotificationsRead,
   openNotificationsStream,
+  setNotificationState,
+  type NotificationCategory,
+  type NotificationCounts,
   type NotificationItem,
+  type NotificationLevel,
+  type NotificationStatePatch,
 } from '@/api/notifications'
 import { useAuth } from '@/context/AuthContext'
 import { useNotifications } from '@/context/NotificationContext'
 
-export type NotificationTabKey =
-  | 'all'
-  | 'requests'
-  | 'security'
-  | 'nodes'
-  | 'services'
-  | 'tasks'
+export type NotificationTabKey = 'all' | NotificationCategory
+
+export interface NotificationQuery {
+  category: NotificationTabKey
+  level: NotificationLevel | 'all'
+  unreadOnly: boolean
+  q: string
+  hiddenOnly: boolean
+}
+
+export const DEFAULT_NOTIFICATION_QUERY: NotificationQuery = {
+  category: 'all',
+  level: 'all',
+  unreadOnly: false,
+  q: '',
+  hiddenOnly: false,
+}
+
+export const EMPTY_NOTIFICATION_COUNTS: NotificationCounts = {
+  unread: 0,
+  attention: 0,
+  snoozed: 0,
+  hidden: 0,
+  by_category: {},
+}
+
+const PAGE_SIZE = 50
 
 interface NotificationCenterValue {
   items: NotificationItem[]
+  counts: NotificationCounts
   unreadCount: number
   pendingRequestsCount: number
-  category: NotificationTabKey
-  setCategory: (category: NotificationTabKey) => void
+  query: NotificationQuery
+  setQuery: (patch: Partial<NotificationQuery>) => void
+  loading: boolean
+  hasMore: boolean
   refetch: () => Promise<void>
-  /** Отметить прочитанным всё, что есть в ленте (включая скрытое фильтром вкладки). */
+  loadMore: () => Promise<void>
   markAllRead: () => Promise<void>
-  /** Отметить прочитанным конкретное уведомление и всё, что старше него. */
   markReadUpTo: (id: number) => Promise<void>
+  setState: (id: number, patch: NotificationStatePatch) => Promise<void>
 }
 
 const NotificationCenterContext = createContext<NotificationCenterValue | null>(null)
 
-/**
- * Единый владелец ленты уведомлений и SSE-потока.
- *
- * Раньше колокол и бейдж сайдбара тянули данные независимо, поэтому счётчик
- * заявок в сайдбаре «застывал» до перезагрузки страницы. Теперь один поток
- * обновляет и колокол, и навигацию.
- */
+function snoozeToastKey(userId: number) {
+  return `nc:snooze-notified:${userId}`
+}
+
+function readSnoozeSeen(userId: number): Set<number> {
+  try {
+    const raw = window.localStorage.getItem(snoozeToastKey(userId))
+    const parsed = raw ? (JSON.parse(raw) as unknown) : []
+    return new Set(
+      Array.isArray(parsed) ? parsed.filter((value): value is number => typeof value === 'number') : [],
+    )
+  } catch {
+    return new Set()
+  }
+}
+
+function writeSnoozeSeen(userId: number, seen: Set<number>) {
+  try {
+    window.localStorage.setItem(snoozeToastKey(userId), JSON.stringify([...seen].slice(-200)))
+  } catch {
+    // приватный режим браузера: тост может повториться, данные не теряются
+  }
+}
+
 export function NotificationCenterProvider({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
-  const { info } = useNotifications()
+  const { info, error: notifyError } = useNotifications()
   const isAdmin = user?.role === 'admin'
+  const userId = user?.id ?? 0
 
-  const [category, setCategoryState] = useState<NotificationTabKey>('all')
+  const [query, setQueryState] = useState<NotificationQuery>(DEFAULT_NOTIFICATION_QUERY)
   const [items, setItems] = useState<NotificationItem[]>([])
-  const [unreadCount, setUnreadCount] = useState(0)
+  const [counts, setCounts] = useState<NotificationCounts>(EMPTY_NOTIFICATION_COUNTS)
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0)
-  // Категория нужна внутри refetch без пересоздания SSE-подключения.
-  const categoryRef = useRef<NotificationTabKey>('all')
-  /** null = ещё не было успешного fetch; тост только при реальном росте после baseline. */
+  const [loading, setLoading] = useState(false)
+  const [hasMore, setHasMore] = useState(false)
+
+  const queryRef = useRef<NotificationQuery>(DEFAULT_NOTIFICATION_QUERY)
   const prevPendingRef = useRef<number | null>(null)
+
+  const buildParams = useCallback((beforeId?: number) => {
+    const current = queryRef.current
+    return {
+      ...(current.category === 'all' ? {} : { category: current.category }),
+      ...(current.level === 'all' ? {} : { level: current.level }),
+      ...(current.unreadOnly ? { unread_only: true } : {}),
+      ...(current.hiddenOnly ? { hidden_only: true } : {}),
+      ...(current.q.trim() ? { q: current.q.trim() } : {}),
+      ...(beforeId ? { before_id: beforeId } : {}),
+      limit: PAGE_SIZE,
+    }
+  }, [])
+
+  const notifySnoozedDue = useCallback(
+    (next: NotificationItem[]) => {
+      const now = Date.now()
+      const seen = readSnoozeSeen(userId)
+      const due = next.filter(
+        (item) =>
+          item.state.snoozed_until !== null &&
+          Date.parse(item.state.snoozed_until) <= now &&
+          !seen.has(item.id),
+      )
+      if (!due.length) return
+      due.forEach((item) => {
+        info(`Отложенное: ${item.title}`)
+        seen.add(item.id)
+      })
+      writeSnoozeSeen(userId, seen)
+    },
+    [info, userId],
+  )
 
   const refetch = useCallback(async () => {
     if (!isAdmin) return
+    setLoading(true)
     try {
-      const data = await fetchNotifications({
-        ...(categoryRef.current === 'all' ? {} : { category: categoryRef.current }),
-        limit: 100,
-      })
+      const data = await fetchNotifications(buildParams())
       setItems(data.items)
-      setUnreadCount(data.unread_count)
-      const pending = data.pending_requests_count
-      setPendingRequestsCount(pending)
+      setCounts(data.counts)
+      setHasMore(data.items.length >= PAGE_SIZE)
+      setPendingRequestsCount(data.pending_requests_count)
       const prev = prevPendingRef.current
-      if (
-        prev != null &&
-        pending > prev &&
-        (categoryRef.current === 'all' || categoryRef.current === 'requests')
-      ) {
-        info(`Новых заявок на доступ: ${pending - prev}`)
+      if (prev != null && data.pending_requests_count > prev) {
+        info(`Новых заявок на доступ: ${data.pending_requests_count - prev}`)
       }
-      prevPendingRef.current = pending
+      prevPendingRef.current = data.pending_requests_count
+      notifySnoozedDue(data.items)
     } catch {
-      // Оставляем прежние данные: SSE переподключится и вызовет refetch.
+      notifyError('Не удалось загрузить уведомления')
+    } finally {
+      setLoading(false)
     }
-  }, [info, isAdmin])
+  }, [buildParams, info, isAdmin, notifyError, notifySnoozedDue])
 
-  const setCategory = useCallback(
-    (next: NotificationTabKey) => {
-      categoryRef.current = next
-      setCategoryState(next)
-      void refetch()
-    },
-    [refetch],
-  )
+  const setQuery = useCallback((patch: Partial<NotificationQuery>) => {
+    setQueryState((prev) => {
+      const next = { ...prev, ...patch }
+      queryRef.current = next
+      return next
+    })
+  }, [])
 
   useEffect(() => {
     if (!isAdmin) return
     void refetch()
-    const stream = openNotificationsStream(() => {
-      void refetch()
-    })
+  }, [isAdmin, query, refetch])
+
+  useEffect(() => {
+    if (!isAdmin) return
+    const stream = openNotificationsStream(() => void refetch())
     const onFocus = () => void refetch()
     window.addEventListener('focus', onFocus)
     return () => {
@@ -100,22 +178,33 @@ export function NotificationCenterProvider({ children }: { children: React.React
     }
   }, [isAdmin, refetch])
 
+  const loadMore = useCallback(async () => {
+    if (!isAdmin || !items.length) return
+    const lastId = items[items.length - 1].id
+    try {
+      const data = await fetchNotifications(buildParams(lastId))
+      setItems((prev) => [...prev, ...data.items])
+      setHasMore(data.items.length >= PAGE_SIZE)
+      setCounts(data.counts)
+    } catch {
+      notifyError('Не удалось загрузить следующую страницу')
+    }
+  }, [buildParams, isAdmin, items, notifyError])
+
+
   const markAllRead = useCallback(async () => {
     if (!isAdmin) return
     try {
-      // Верхний id берём без фильтра вкладки — иначе непрочитанное в других
-      // категориях остаётся в бейдже после «Отметить всё как прочитанное».
       const latest = await fetchNotifications({ limit: 1 })
       const topId = latest.items[0]?.id
       if (!topId) return
       await markNotificationsRead(topId)
-      setUnreadCount(0)
     } catch {
-      // Счётчик не обнуляем: следующий refetch покажет реальное состояние.
+      notifyError('Не удалось отметить уведомления прочитанными')
     } finally {
       await refetch()
     }
-  }, [isAdmin, refetch])
+  }, [isAdmin, notifyError, refetch])
 
   const markReadUpTo = useCallback(
     async (id: number) => {
@@ -123,41 +212,62 @@ export function NotificationCenterProvider({ children }: { children: React.React
       try {
         await markNotificationsRead(id)
       } catch {
-        // Счётчик не критичен: следующий refetch покажет реальное состояние.
+        notifyError('Не удалось отметить уведомление прочитанным')
       } finally {
         await refetch()
       }
     },
-    [isAdmin, refetch],
+    [isAdmin, notifyError, refetch],
+  )
+
+  const setState = useCallback(
+    async (id: number, patch: NotificationStatePatch) => {
+      if (!isAdmin) return
+      try {
+        await setNotificationState(id, patch)
+      } catch {
+        notifyError('Не удалось изменить состояние уведомления')
+      } finally {
+        await refetch()
+      }
+    },
+    [isAdmin, notifyError, refetch],
   )
 
   const value = useMemo<NotificationCenterValue>(
     () => ({
       items,
-      unreadCount,
+      counts,
+      unreadCount: counts.unread,
       pendingRequestsCount,
-      category,
-      setCategory,
+      query,
+      setQuery,
+      loading,
+      hasMore,
       refetch,
+      loadMore,
       markAllRead,
       markReadUpTo,
+      setState,
     }),
     [
       items,
-      unreadCount,
+      counts,
       pendingRequestsCount,
-      category,
-      setCategory,
+      query,
+      setQuery,
+      loading,
+      hasMore,
       refetch,
+      loadMore,
       markAllRead,
       markReadUpTo,
+      setState,
     ],
   )
 
   return (
-    <NotificationCenterContext.Provider value={value}>
-      {children}
-    </NotificationCenterContext.Provider>
+    <NotificationCenterContext.Provider value={value}>{children}</NotificationCenterContext.Provider>
   )
 }
 
@@ -168,3 +278,4 @@ export function useNotificationCenter(): NotificationCenterValue {
   }
   return ctx
 }
+

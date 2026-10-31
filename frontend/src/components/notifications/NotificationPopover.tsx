@@ -1,204 +1,69 @@
-import { useCallback, useMemo } from 'react'
+import { useMemo } from 'react'
 import { NavLink } from 'react-router-dom'
-import { Bell, Clock, Shield, Server, Network, Mail } from 'lucide-react'
+import { BellOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useFeatureModules } from '@/context/FeatureModulesContext'
-
-export type NotificationCategory = 'requests' | 'security' | 'nodes' | 'services' | 'tasks'
-
-type TabKey = 'all' | 'requests' | 'security' | 'nodes' | 'services' | 'tasks'
-
-export interface NotificationItem {
-  id: number
-  category: NotificationCategory
-  level: string
-  event_type: string
-  title: string
-  message: string
-  created_at: string
-  action_payload?: Record<string, unknown> | null
-}
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import type { NotificationCounts, NotificationItem } from '@/api/notifications'
+import NotificationCard from './NotificationCard'
 
 export interface NotificationPopoverProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   sheet?: boolean
   items: NotificationItem[]
-  unreadCount: number
-  pendingRequestsCount: number
-  category: TabKey
-  onCategoryChange: (key: TabKey) => void
+  counts: NotificationCounts
   onMarkAllRead: () => void
-  onItemClick?: (item: NotificationItem) => void
+  onMarkRead: (id: number) => void
 }
 
-const CATEGORY_ICON: Record<TabKey, React.ElementType> = {
-  all: Bell,
-  requests: Clock,
-  security: Shield,
-  nodes: Server,
-  services: Network,
-  tasks: Mail,
-}
-
-const CATEGORY_LABEL: Record<TabKey, string> = {
-  all: 'Все',
-  requests: 'Заявки',
-  security: 'Безопасность',
-  nodes: 'Серверы',
-  services: 'Сервисы и сеть',
-  tasks: 'Задачи',
-}
-
-const LEVEL_VARIANT: Record<string, BadgeVariant> = {
-  info: 'secondary',
-  warning: 'warning',
-  error: 'destructive',
-}
-
-const LEVEL_LABEL: Record<string, string> = {
-  info: 'Инфо',
-  warning: 'Внимание',
-  error: 'Ошибка',
-}
-
-type BadgeVariant =
-  | 'default'
-  | 'secondary'
-  | 'destructive'
-  | 'outline'
-  | 'success'
-  | 'warning'
-
-function formatCreatedAt(value: string): string {
-  try {
-    return new Date(value).toLocaleString('ru-RU', {
-      day: '2-digit',
-      month: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
-  } catch {
-    return value
-  }
-}
-
-function renderItem(item: NotificationItem, onItemClick?: (item: NotificationItem) => void) {
-  const Icon = CATEGORY_ICON[item.category as TabKey] ?? Bell
-  const clickable = Boolean(onItemClick)
-  return (
-    <div
-      key={item.id}
-      className={`border-b border-border/60 last:border-0 py-2${clickable ? ' cursor-pointer hover:bg-muted/40' : ''}`}
-      onClick={() => onItemClick?.(item)}
-      role={clickable ? 'button' : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      onKeyDown={
-        clickable
-          ? (ev) => {
-              if (ev.key === 'Enter' || ev.key === ' ') {
-                ev.preventDefault()
-                onItemClick?.(item)
-              }
-            }
-          : undefined
-      }
-    >
-      <div className="flex items-start gap-2">
-        <Icon size={14} className="shrink-0 mt-0.5 text-muted-foreground" aria-hidden />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <span className="text-sm font-semibold">{item.title}</span>
-            <Badge variant={LEVEL_VARIANT[item.level] ?? 'secondary'} className="text-[10px]">
-              {LEVEL_LABEL[item.level] ?? item.level}
-            </Badge>
-          </div>
-          {item.message && (
-            <p className="mt-0.5 whitespace-pre-line text-xs text-muted-foreground line-clamp-3">
-              {item.message}
-            </p>
-          )}
-          <p className="mt-1 text-xs text-muted-foreground">{formatCreatedAt(item.created_at)}</p>
-        </div>
-      </div>
-    </div>
-  )
-}
+const PREVIEW_LIMIT = 5
 
 export default function NotificationPopover({
   open,
   onOpenChange,
   sheet = false,
   items,
-  unreadCount,
-  pendingRequestsCount,
-  category,
-  onCategoryChange,
+  counts,
   onMarkAllRead,
-  onItemClick,
+  onMarkRead,
 }: NotificationPopoverProps) {
-  const { isEnabled } = useFeatureModules()
-  const requestsTabEnabled = isEnabled('user_provisioning')
-
-  const tabs = useMemo<TabKey[]>(() => {
-    const list: TabKey[] = ['all']
-    if (requestsTabEnabled) list.push('requests')
-    list.push('security', 'nodes', 'services', 'tasks')
-    return list
-  }, [requestsTabEnabled])
-
-  const activeTab = category === 'requests' && !requestsTabEnabled ? 'all' : category
-  const visibleItems = items.filter((item) => activeTab === 'all' || item.category === activeTab)
-
-  const markAll = useCallback(() => {
-    onMarkAllRead()
-  }, [onMarkAllRead])
+  const preview = useMemo(() => items.slice(0, PREVIEW_LIMIT), [items])
 
   const body = (
-    <div className="flex flex-col gap-0">
-      <div className="flex items-center justify-between gap-2 px-3 py-2 text-xs border-b border-border/60 bg-muted/50">
-        <span className="font-semibold">Центр уведомлений</span>
-        <Button variant="outline" size="sm" onClick={markAll} disabled={!items.length}>
-          Отметить всё как прочитанное
+    <div className="flex flex-col">
+      <div className="flex items-center justify-between gap-2 border-b border-border/60 bg-muted/50 px-3 py-2">
+        <span className="text-xs font-semibold">
+          {counts.unread > 0 ? `${counts.unread} новых` : 'Центр уведомлений'}
+        </span>
+        <Button variant="outline" size="sm" onClick={onMarkAllRead} disabled={!items.length}>
+          Отметить всё
         </Button>
       </div>
-      <Tabs value={activeTab} onValueChange={(value) => onCategoryChange(value as TabKey)} className="w-full">
-        <TabsList className="w-auto gap-1 bg-muted/40 p-1">
-          {tabs.map((key) => {
-            const TabIcon = CATEGORY_ICON[key]
-            return (
-              <TabsTrigger key={key} value={key} className="text-xs font-medium">
-                <TabIcon size={13} className="mr-1.5 shrink-0" />
-                {CATEGORY_LABEL[key]}
-              </TabsTrigger>
-            )
-          })}
-        </TabsList>
-        {tabs.map((key) => (
-          <TabsContent key={key} value={key} className="p-3 overflow-y-auto max-h-[44vh]">
-            {visibleItems.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-sm text-muted-foreground">
-                Нет уведомлений
-              </div>
-            ) : (
-              <div className="space-y-0">
-                {visibleItems.map((item) => renderItem(item, onItemClick))}
-              </div>
-            )}
-          </TabsContent>
-        ))}
-      </Tabs>
-      <div className="border-t border-border/60 pt-2 pb-3 px-3">
+
+      <div className="flex max-h-[52vh] flex-col gap-2 overflow-y-auto p-2">
+        {preview.length === 0 ? (
+          <div className="flex flex-col items-center gap-2 py-8 text-sm text-muted-foreground">
+            <BellOff size={20} />
+            Уведомлений нет
+          </div>
+        ) : (
+          preview.map((item) => (
+            <NotificationCard key={item.id} item={item} compact onMarkRead={onMarkRead} />
+          ))
+        )}
+      </div>
+
+      <div className="flex items-center justify-between border-t border-border/60 px-3 py-2">
         <NavLink
-          to="/logs"
+          to="/notifications"
           className="text-xs text-primary underline-offset-4 hover:underline"
           onClick={() => onOpenChange(false)}
         >
-          Журнал аудита
+          Вся история →
         </NavLink>
+        {counts.attention > 0 && (
+          <span className="text-[11px] text-destructive">{counts.attention} требует внимания</span>
+        )}
       </div>
     </div>
   )
@@ -210,8 +75,8 @@ export default function NotificationPopover({
           <SheetHeader className="px-4 pb-2">
             <SheetTitle>Центр уведомлений</SheetTitle>
             <SheetDescription className="text-xs">
-              Непрочитано: <span className="font-semibold">{unreadCount}</span>{' '}
-              {pendingRequestsCount > 0 ? `· заявок: ${pendingRequestsCount}` : ''}
+              Непрочитано: <span className="font-semibold">{counts.unread}</span>
+              {counts.snoozed > 0 ? ` · отложено: ${counts.snoozed}` : ''}
             </SheetDescription>
           </SheetHeader>
           {body}
@@ -220,6 +85,5 @@ export default function NotificationPopover({
     )
   }
 
-  // Desktop: mounted inside DropdownMenuContent — parent owns open/close.
   return <div className="w-full">{body}</div>
 }

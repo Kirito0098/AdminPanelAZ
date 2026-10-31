@@ -2,36 +2,83 @@ import { apiFetch } from './http'
 import { openTicketEventSource, type StreamHandle } from './streamTicket'
 
 export type NotificationCategory = 'requests' | 'security' | 'nodes' | 'services' | 'tasks'
+export type NotificationLevel = 'info' | 'warning' | 'error'
+
+export interface NotificationState {
+  read: boolean
+  hidden: boolean
+  snoozed_until: string | null
+}
 
 export interface NotificationItem {
   id: number
   category: NotificationCategory
-  level: string
+  level: NotificationLevel | string
   event_type: string
   title: string
   message: string
   created_at: string
   action_payload?: Record<string, unknown> | null
+  state: NotificationState
+}
+
+export interface NotificationCategoryCount {
+  total: number
+  unread: number
+}
+
+export interface NotificationCounts {
+  unread: number
+  attention: number
+  snoozed: number
+  hidden: number
+  by_category: Record<string, NotificationCategoryCount>
 }
 
 export interface NotificationsResponse {
   items: NotificationItem[]
   unread_count: number
   pending_requests_count: number
+  counts: NotificationCounts
 }
 
-export async function fetchNotifications(params?: {
+export interface NotificationFilters {
   category?: NotificationCategory
+  level?: NotificationLevel
+  unread_only?: boolean
+  q?: string
+  hidden_only?: boolean
   limit?: number
   before_id?: number
-}): Promise<NotificationsResponse> {
-  const q = new URLSearchParams()
-  if (params?.category) q.set('category', params.category)
-  if (params?.limit) q.set('limit', String(params.limit))
-  if (params?.before_id) q.set('before_id', String(params.before_id))
-  const qs = q.toString()
-  const path = qs ? `/notifications?${qs}` : '/notifications'
-  return apiFetch<NotificationsResponse>(path)
+}
+
+export async function fetchNotifications(params?: NotificationFilters): Promise<NotificationsResponse> {
+  const search = new URLSearchParams()
+  if (params?.category) search.set('category', params.category)
+  if (params?.level) search.set('level', params.level)
+  if (params?.unread_only) search.set('unread_only', 'true')
+  if (params?.q) search.set('q', params.q)
+  if (params?.hidden_only) search.set('hidden_only', 'true')
+  if (params?.limit) search.set('limit', String(params.limit))
+  if (params?.before_id) search.set('before_id', String(params.before_id))
+  const qs = search.toString()
+  return apiFetch<NotificationsResponse>(qs ? `/notifications?${qs}` : '/notifications')
+}
+
+export interface NotificationStatePatch {
+  read?: boolean
+  hidden?: boolean
+  snoozed_until?: string | null
+}
+
+export async function setNotificationState(
+  id: number,
+  patch: NotificationStatePatch,
+): Promise<{ state: NotificationState }> {
+  return apiFetch<{ state: NotificationState }>(`/notifications/${id}/state`, {
+    method: 'POST',
+    body: JSON.stringify(patch),
+  })
 }
 
 export async function markNotificationsRead(up_to_id: number) {
@@ -53,3 +100,4 @@ export function openNotificationsStream(onUpdate: (data: unknown) => void): Stre
     },
   })
 }
+

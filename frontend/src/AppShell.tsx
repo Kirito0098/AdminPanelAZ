@@ -29,6 +29,7 @@ const EditFilesPage = lazyWithRetry(() => import('./pages/EditFilesPage'))
 const LogsPage = lazyWithRetry(() => import('./pages/LogsPage'))
 const ServerMonitorPage = lazyWithRetry(() => import('./pages/ServerMonitorPage'))
 const UsersPage = lazyWithRetry(() => import('./pages/UsersPage'))
+const NotificationsPage = lazyWithRetry(() => import('./pages/NotificationsPage'))
 
 /** Everything behind login; loaded only once a session exists. */
 export default function AppShell() {
@@ -67,6 +68,7 @@ export default function AppShell() {
                     <Route path="edit-files" element={<LazyPage><FeatureGuardRoute feature="edit_files"><EditFilesPage /></FeatureGuardRoute></LazyPage>} />
                     <Route path="logs" element={<LazyPage><FeatureGuardRoute anyOf={['logs_dashboard', 'action_logs']}><LogsPage /></FeatureGuardRoute></LazyPage>} />
                     <Route path="server-monitor" element={<LazyPage><FeatureGuardRoute feature="server_monitor"><ServerMonitorPage /></FeatureGuardRoute></LazyPage>} />
+                    <Route path="notifications" element={<LazyPage><NotificationsPage /></LazyPage>} />
                     <Route path="nodes" element={<LazyPage><FeatureGuardRoute feature="nodes"><NodesPage /></FeatureGuardRoute></LazyPage>} />
                     <Route
                       path="users"

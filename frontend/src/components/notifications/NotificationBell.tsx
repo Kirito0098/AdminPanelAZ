@@ -1,40 +1,16 @@
-import { useCallback, useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState } from 'react'
 import { Bell } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotificationCenter } from '@/context/NotificationCenterContext'
-import type { NotificationItem } from '@/api/notifications'
 import NotificationPopover from './NotificationPopover'
-
-function pathForNotification(item: NotificationItem): string | null {
-  if (item.action_payload) {
-    const requestId = item.action_payload.request_id
-    if (
-      item.event_type.startsWith('access_request_') &&
-      typeof requestId === 'number' &&
-      Number.isFinite(requestId)
-    ) {
-      return `/users?request=${requestId}`
-    }
-  }
-  if (item.event_type.startsWith('access_request_') || item.category === 'requests') {
-    return '/users?requests=1'
-  }
-  if (item.category === 'security') return '/logs'
-  if (item.category === 'nodes') return '/nodes'
-  return null
-}
-
-type TabKey = 'all' | 'requests' | 'security' | 'nodes' | 'services' | 'tasks'
 
 function bellBadge(unreadCount: number) {
   if (unreadCount <= 0) return null
   return (
-    <span className="absolute top-1 right-1 flex h-4 w-4 items-center justify-center">
-      <Badge variant="destructive" className="text-[10px] px-1.5">
+    <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center">
+      <Badge variant="destructive" className="px-1.5 text-[10px]">
         {unreadCount > 9 ? '9+' : unreadCount}
       </Badge>
     </span>
@@ -42,48 +18,16 @@ function bellBadge(unreadCount: number) {
 }
 
 export default function NotificationBell() {
-  const navigate = useNavigate()
-  const { isEnabled } = useFeatureModules()
-  const {
-    items,
-    unreadCount,
-    pendingRequestsCount,
-    category,
-    setCategory,
-    markAllRead,
-    markReadUpTo,
-  } = useNotificationCenter()
-  const requestsTabEnabled = isEnabled('user_provisioning')
-
+  const { items, counts, unreadCount, markAllRead, setState } = useNotificationCenter()
   const [desktopOpen, setDesktopOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
 
-  // Открыли центр уведомлений — считаем ленту просмотренной и гасим бейдж.
-  // Иначе непрочитанные копятся и «1 новая заявка» выглядит как «8 новых».
-  useEffect(() => {
-    if ((desktopOpen || mobileOpen) && unreadCount > 0) {
-      void markAllRead()
-    }
-  }, [desktopOpen, mobileOpen, unreadCount, markAllRead])
-
-  const handleItemClick = useCallback(
-    (item: NotificationItem) => {
-      const path = pathForNotification(item)
-      if (!path) return
-      setDesktopOpen(false)
-      setMobileOpen(false)
-      void markReadUpTo(item.id)
-      navigate(path)
-    },
-    [navigate, markReadUpTo],
-  )
-
-  const activeCategory: TabKey = category === 'requests' && !requestsTabEnabled ? 'all' : category
+  const markRead = (id: number) => void setState(id, { read: true })
 
   return (
     <>
       {/* Desktop: dropdown next to NodeSelector / LiveClock. */}
-      <div className="hidden sm:flex items-center gap-2">
+      <div className="hidden items-center gap-2 sm:flex">
         <DropdownMenu open={desktopOpen} onOpenChange={setDesktopOpen}>
           <DropdownMenuTrigger asChild>
             <Button variant="ghost" size="icon" className="relative h-8 w-8 shrink-0" aria-label="Уведомления">
@@ -95,19 +39,15 @@ export default function NotificationBell() {
             align="end"
             sideOffset={6}
             className="w-96 max-w-[min(24rem,calc(100vw-1.5rem))] p-0"
-            onCloseAutoFocus={(e) => e.preventDefault()}
+            onCloseAutoFocus={(event) => event.preventDefault()}
           >
             <NotificationPopover
               open={desktopOpen}
               onOpenChange={setDesktopOpen}
-              sheet={false}
               items={items}
-              unreadCount={unreadCount}
-              pendingRequestsCount={pendingRequestsCount}
-              category={activeCategory}
-              onCategoryChange={setCategory}
-              onMarkAllRead={markAllRead}
-              onItemClick={handleItemClick}
+              counts={counts}
+              onMarkAllRead={() => void markAllRead()}
+              onMarkRead={markRead}
             />
           </DropdownMenuContent>
         </DropdownMenu>
@@ -130,15 +70,11 @@ export default function NotificationBell() {
           onOpenChange={setMobileOpen}
           sheet
           items={items}
-          unreadCount={unreadCount}
-          pendingRequestsCount={pendingRequestsCount}
-          category={activeCategory}
-          onCategoryChange={setCategory}
-          onMarkAllRead={markAllRead}
-          onItemClick={handleItemClick}
+          counts={counts}
+          onMarkAllRead={() => void markAllRead()}
+          onMarkRead={markRead}
         />
       </div>
     </>
   )
 }
-
