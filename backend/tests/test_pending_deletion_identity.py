@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base
@@ -33,7 +33,10 @@ def factory():
 
 def _stubs(monkeypatch) -> list[tuple[int, str]]:
     enqueued: list[tuple[int, str]] = []
-    stub = lambda _db, *, user_id, actor_username: enqueued.append((user_id, actor_username))
+
+    def stub(_db: Session, *, user_id: int, actor_username: str) -> None:
+        enqueued.append((user_id, actor_username))
+
     monkeypatch.setattr(user_identity_conflict, "enqueue_user_delete_cleanup", stub)
     monkeypatch.setattr(users_router, "enqueue_user_delete_cleanup", stub)
     monkeypatch.setattr(users_router.settings, "audit_log_enabled", False)
