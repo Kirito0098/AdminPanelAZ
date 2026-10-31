@@ -2591,6 +2591,11 @@ class StreamTicketResponse(BaseModel):
     expires_in_seconds: int
 
 
+class NotificationDetailsEntry(BaseModel):
+    label: str
+    value: str
+
+
 class NotificationStateOut(BaseModel):
     read: bool
     hidden: bool
@@ -2621,6 +2626,7 @@ class NotificationItem(BaseModel):
     # Поле не было объявлено, и response_model молча вырезал его из ответа —
     # из-за этого переход по конкретной заявке на фронтенде не срабатывал никогда.
     action_payload: dict[str, Any] | None = None
+    details: list[NotificationDetailsEntry] = []
     state: NotificationStateOut
 
 

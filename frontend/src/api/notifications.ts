@@ -10,6 +10,11 @@ export interface NotificationState {
   snoozed_until: string | null
 }
 
+export interface NotificationDetailsEntry {
+  label: string
+  value: string
+}
+
 export interface NotificationItem {
   id: number
   category: NotificationCategory
@@ -19,6 +24,7 @@ export interface NotificationItem {
   message: string
   created_at: string
   action_payload?: Record<string, unknown> | null
+  details: NotificationDetailsEntry[]
   state: NotificationState
 }
 

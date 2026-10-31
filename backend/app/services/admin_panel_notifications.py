@@ -91,6 +91,24 @@ DETAIL_LABELS: dict[str, str] = {
 _KEY_VALUE_RE = re.compile(r"(\w+)=([^,\s]+)")
 
 
+def parse_bell_details(message: str | None) -> list[dict[str, str]]:
+    """«Кто: Claymore · Объект: ivan · Узел: Test_serv» → пары подпись/значение.
+
+    Формат пишут два места: ``humanize_bell_message`` и ``AdminNotifyService``
+    («Кто: …»). Части без «подпись: значение» (например, свободный хвост
+    «· Последний ответ 4 мин назад») отбрасываются, чтобы клиент не гадал.
+    """
+    details: list[dict[str, str]] = []
+    for part in (message or "").split(" · "):
+        label, separator, value = part.partition(": ")
+        if not separator:
+            continue
+        label, value = label.strip(), value.strip()
+        if label and value:
+            details.append({"label": label, "value": value})
+    return details
+
+
 def bell_title(event_type: str) -> str:
     """Human title for the bell; unknown events become a readable phrase."""
     known = BELL_TITLES.get(event_type)
@@ -398,6 +416,7 @@ def list_notifications_for_admin(
                 "message": row.message,
                 "created_at": _iso_utc(row.created_at) or "",
                 "action_payload": _payload(row.action_payload),
+                "details": parse_bell_details(row.message),
                 "state": state_payload,
             }
         )

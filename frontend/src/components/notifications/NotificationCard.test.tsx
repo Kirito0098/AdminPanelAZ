@@ -16,6 +16,11 @@ const item: NotificationItem = {
   message: 'Узел: nl-2',
   created_at: new Date().toISOString(),
   action_payload: null,
+  details: [
+    { label: 'Кто', value: 'Claymore' },
+    { label: 'Объект', value: 'ivan' },
+    { label: 'Узел', value: 'Test_serv' },
+  ],
   state: { read: false, hidden: false, snoozed_until: null },
 }
 

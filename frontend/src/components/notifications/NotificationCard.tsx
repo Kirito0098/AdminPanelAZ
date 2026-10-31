@@ -89,7 +89,21 @@ export default function NotificationCard({
           <h3 className="min-w-0 flex-1 text-sm font-semibold leading-snug">{item.title}</h3>
           <span className="shrink-0 text-[11px] text-muted-foreground">{formatRelative(item.created_at)}</span>
         </div>
-        {item.message && <p className="line-clamp-2 text-xs text-muted-foreground">{item.message}</p>}
+        {item.details.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {item.details.map((detail) => (
+              <span
+                key={`${detail.label}-${detail.value}`}
+                className="inline-flex max-w-full items-baseline gap-1 rounded-md border border-border/60 bg-muted/50 px-1.5 py-0.5 text-[11px] leading-tight"
+              >
+                <span className="shrink-0 text-muted-foreground/80">{detail.label}</span>
+                <span className="truncate font-semibold text-foreground">{detail.value}</span>
+              </span>
+            ))}
+          </div>
+        ) : item.message ? (
+          <p className="line-clamp-2 text-xs text-muted-foreground">{item.message}</p>
+        ) : null}
         <p className="text-[11px] text-muted-foreground/70">
           {categoryLabel(item.category)}
           {snoozed && item.state.snoozed_until
