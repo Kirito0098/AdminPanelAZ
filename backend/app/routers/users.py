@@ -34,6 +34,9 @@ from app.schemas import (
     BulkNodesPreviewItem,
     BulkNodesPreviewResponse,
     BulkNodesRequest,
+    BulkUsersFailure,
+    BulkUsersRequest,
+    BulkUsersResult,
     ConfigAccessOpRequest,
     GraceHoldView,
     MessageResponse,
@@ -151,6 +154,8 @@ from app.services.vpn_profile_visibility import (
     parse_user_visible_vpn_profiles,
     policy_to_json,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/users", tags=["users"])
 settings = get_settings()
@@ -974,6 +979,14 @@ def bulk_nodes_report(
     )
 
 
+def _client_ip(request):
+    """IP клиента строкой или None (устойчиво к мок-request в тестах)."""
+    if request is None:
+        return None
+    ip = ip_restriction_service.get_client_ip(request)
+    return ip if isinstance(ip, str) else None
+
+
 def _record_user_history(db, *, action, current_user, user, request, details=None):
     """Безусловная запись действия по абоненту (не зависит от audit_log_enabled)."""
     log_action(
@@ -981,9 +994,7 @@ def _record_user_history(db, *, action, current_user, user, request, details=Non
         action=action,
         user_id=current_user.id,
         username=current_user.username,
-        remote_addr=(
-            ip_restriction_service.get_client_ip(request) if request is not None else None
-        ),
+        remote_addr=_client_ip(request),
         details=details or f"target={user.username}",
         target_user_id=user.id,
     )
@@ -2008,18 +2019,13 @@ def put_user_config_access_endpoint(
     return MessageResponse(message="Доступ к клиентам обновлён")
 
 
-@router.delete("/{user_id}", response_model=MessageResponse)
-def delete_user(
-    user_id: int,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    if current_user.id == user_id:
+def _delete_user_core(db, user, current_user, request) -> tuple[str, bool]:
+    """Удалить абонента (без плана) или запустить фоновую очистку (с планом).
+
+    Возвращает (username, pending). История пишется с target_user_id.
+    """
+    if current_user.id == user.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Нельзя удалить себя")
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
     if user.role == UserRole.admin:
         other_admins = (
             db.query(User)
@@ -2032,13 +2038,13 @@ def delete_user(
                 detail="Нельзя удалить последнего администратора",
             )
     deleted_username = user.username
-    # Task 8: перед удалением пишем строку в telegram_user_archive (история requester'ов).
+    target_id = user.id
     delete_user_write_archive(db, user)
     active_provision = (
         db.query(BackgroundTask)
         .filter(
             BackgroundTask.task_type == TASK_TYPE,
-            BackgroundTask.subject_key == f"user:{user_id}",
+            BackgroundTask.subject_key == f"user:{target_id}",
             BackgroundTask.status.in_(["queued", "running"]),
         )
         .first()
@@ -2055,54 +2061,155 @@ def delete_user(
     if user.role != UserRole.admin:
         revoke_creator_portal_links(db, user.id, keep_accessible=False)
         db.flush()
+    remote_addr = _client_ip(request)
     if not has_plan:
-        # Без плана — исходное поведение: очистка и удаление строки.
         purge_user_before_delete(db, user, current_user)
         db.delete(user)
         db.commit()
-        if settings.audit_log_enabled:
-            log_action(
-                db,
-                action="user_delete",
-                user_id=current_user.id,
-                username=current_user.username,
-                remote_addr=ip_restriction_service.get_client_ip(request),
-                details=f"deleted={deleted_username}",
-            )
+        log_action(
+            db,
+            action="user_delete",
+            user_id=current_user.id,
+            username=current_user.username,
+            remote_addr=remote_addr,
+            details=f"deleted={deleted_username}",
+            target_user_id=target_id,
+        )
         admin_notify_service.send_user_delete(
             db,
             actor_username=current_user.username,
             target_name=deleted_username,
             client_timezone=get_client_timezone_from_request(request),
         )
-        return MessageResponse(message="Пользователь удалён")
-    # С планом: pending_deletion, вход+портал выключены, очистка в фоне.
+        return deleted_username, False
     user.provision_state = "pending_deletion"
     user.panel_login_enabled = False
     user.is_active = False
-    # Telegram уже записан в архив выше — освобождаем id сразу, не дожидаясь очистки.
     user.telegram_id = None
     user.token_version = (user.token_version or 0) + 1
     invalidate_user_sessions(db, user, reason="deleted", commit=False)
     active_web_session_service.revoke_user_sessions(db, user.username, commit=False)
     db.commit()
     enqueue_user_delete_cleanup(db, user_id=user.id, actor_username=current_user.username)
-    if settings.audit_log_enabled:
-        log_action(
-            db,
-            action="user_delete",
-            user_id=current_user.id,
-            username=current_user.username,
-            remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"deleted={deleted_username}, pending_deletion",
-        )
+    log_action(
+        db,
+        action="user_delete",
+        user_id=current_user.id,
+        username=current_user.username,
+        remote_addr=remote_addr,
+        details=f"deleted={deleted_username}, pending_deletion",
+        target_user_id=target_id,
+    )
     admin_notify_service.send_user_delete(
         db,
         actor_username=current_user.username,
         target_name=deleted_username,
         client_timezone=get_client_timezone_from_request(request),
     )
-    return JSONResponse(
-        status_code=status.HTTP_202_ACCEPTED,
-        content={"message": "Удаление запущено"},
+    return deleted_username, True
+
+
+def _apply_bulk_action(db, user, payload, current_user, request) -> None:
+    action = payload.action
+    if action == "extend":
+        new_until = compute_extended_access_until(get_user_access_until(user), payload.days or 0)
+        set_user_access_until(db, user, new_until, actor=current_user.username)
+    elif action == "suspend":
+        if user.role == UserRole.admin:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="Нельзя приостановить администратора"
+            )
+        user.suspended_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        user.suspend_reason = (payload.reason or "").strip() or None
+        user.suspend_reason_visible = bool(payload.show_reason)
+        db.commit()
+        apply_user_block(db, user, "user_suspended", actor=current_user.username)
+        if payload.notify_telegram and user.telegram_id:
+            bot_token = _get_setting(db, "telegram_bot_token")
+            if bot_token:
+                text = "Доступ приостановлен администратором"
+                if user.suspend_reason_visible and user.suspend_reason:
+                    text += f": {user.suspend_reason}"
+                send_tg_message(bot_token, user.telegram_id, text)
+    elif action == "resume":
+        user.suspended_at = None
+        user.suspend_reason = None
+        user.suspend_reason_visible = False
+        db.commit()
+        lift_user_block(db, user, "user_suspended", actor=current_user.username)
+        if payload.notify_telegram and user.telegram_id:
+            bot_token = _get_setting(db, "telegram_bot_token")
+            if bot_token:
+                send_tg_message(bot_token, user.telegram_id, "Доступ возобновлён.")
+    elif action == "set_traffic_limit":
+        if not get_feature_service().is_enabled("traffic_sync"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Для лимита трафика включите модуль «Синхронизация трафика» "
+                    "в Настройках → Модули"
+                ),
+            )
+        if "traffic_limit_bytes" not in payload.model_fields_set:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Укажите traffic_limit_bytes (или null)",
+            )
+        _set_user_traffic_limit(db, user, payload.traffic_limit_bytes, actor=current_user.username)
+    elif action == "delete":
+        _delete_user_core(db, user, current_user, request)
+        return  # удаление само пишет историю с target_user_id
+    _record_user_history(
+        db, action=f"user_bulk_{action}", current_user=current_user, user=user, request=request
     )
+
+
+@router.post("/bulk", response_model=BulkUsersResult)
+def bulk_users(
+    payload: BulkUsersRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    if payload.action in ("extend", "suspend", "resume") and not get_feature_service().is_enabled(
+        "user_provisioning"
+    ):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN, detail=module_disabled_message("user_provisioning")
+        )
+    failed: list[BulkUsersFailure] = []
+    succeeded = 0
+    for uid in payload.user_ids:
+        user = db.get(User, uid)
+        if user is None:
+            failed.append(BulkUsersFailure(user_id=uid, username="", error="Пользователь не найден"))
+            continue
+        try:
+            _apply_bulk_action(db, user, payload, current_user, request)
+            succeeded += 1
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail)
+            failed.append(BulkUsersFailure(user_id=uid, username=user.username, error=detail))
+        except Exception as exc:  # noqa: BLE001 — не прерывать остальных
+            logger.exception("bulk users action=%s user=%s failed", payload.action, user.id)
+            failed.append(BulkUsersFailure(user_id=uid, username=user.username, error=str(exc)))
+    return BulkUsersResult(total=len(payload.user_ids), succeeded=succeeded, failed=failed)
+
+
+@router.delete("/{user_id}", response_model=MessageResponse)
+def delete_user(
+    user_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    _name, pending = _delete_user_core(db, user, current_user, request)
+    if pending:
+        return JSONResponse(
+            status_code=status.HTTP_202_ACCEPTED,
+            content={"message": "Удаление запущено"},
+        )
+    return MessageResponse(message="Пользователь удалён")

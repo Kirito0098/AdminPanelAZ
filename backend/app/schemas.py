@@ -308,6 +308,28 @@ class UserHistoryEntry(BaseModel):
     created_at: datetime
 
 
+class BulkUsersRequest(BaseModel):
+    action: Literal["extend", "suspend", "resume", "set_traffic_limit", "delete"]
+    user_ids: list[int] = Field(default_factory=list, max_length=200)
+    days: int | None = Field(default=None, ge=1, le=3650)
+    reason: str | None = Field(default=None, max_length=200)
+    show_reason: bool = False
+    notify_telegram: bool = False
+    traffic_limit_bytes: int | None = Field(default=None, ge=0)
+
+
+class BulkUsersFailure(BaseModel):
+    user_id: int
+    username: str
+    error: str
+
+
+class BulkUsersResult(BaseModel):
+    total: int
+    succeeded: int
+    failed: list[BulkUsersFailure]
+
+
 class UserResponse(UserBase):
     id: int
     must_change_password: bool
