@@ -114,6 +114,20 @@ function matchesQuery(item: FeatureToggleItem, query: string): boolean {
   return haystack.includes(q)
 }
 
+const SCENARIO_BADGE: Record<string, { label: string; icon: string }> = {
+  home: { label: 'Домашнее', icon: '🏠' },
+  commercial: { label: 'Коммерческое', icon: '💼' },
+}
+
+type ScenarioFilter = 'all' | 'shared' | 'home' | 'commercial'
+
+const SCENARIO_FILTERS: { value: ScenarioFilter; label: string }[] = [
+  { value: 'all', label: 'Все' },
+  { value: 'shared', label: 'Общее' },
+  { value: 'home', label: '🏠 Домашнее' },
+  { value: 'commercial', label: '💼 Коммерческое' },
+]
+
 /** Linear/Clerk-style preference row: label + description left, switch right. */
 function ModuleToggleRow({
   item,
@@ -129,6 +143,7 @@ function ModuleToggleRow({
   blockHint?: string
 }) {
   const switchId = `module-${item.key}`
+  const scenarioBadge = item.scenario ? SCENARIO_BADGE[item.scenario] : undefined
   return (
     <div
       className={cn(
@@ -155,6 +170,11 @@ function ModuleToggleRow({
             >
               {item.label}
             </label>
+            {scenarioBadge && (
+              <Badge variant="secondary" className="h-5 px-1.5 text-[10px] font-normal">
+                {scenarioBadge.icon} {scenarioBadge.label}
+              </Badge>
+            )}
             {item.resource_impact_level !== 'minimal' && item.resource_impact_level !== 'low' && (
               <Badge
                 variant="outline"
@@ -272,9 +292,16 @@ function PresetCard({
       <p className="line-clamp-2 text-xs leading-snug text-muted-foreground">{description}</p>
 
       {preset.required_labels && preset.required_labels.length > 0 && (
-        <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
-          Обязательные: {preset.required_labels.join(', ')}
-        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-1">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+            Обязательные
+          </span>
+          {preset.required_labels.map((label) => (
+            <Badge key={label} variant="outline" className="h-5 px-1.5 text-[10px] font-normal">
+              {label}
+            </Badge>
+          ))}
+        </div>
       )}
 
       {(impactRam || impactCpuDisk || impactNote) && (
@@ -373,6 +400,7 @@ export default function FeatureTogglesTab() {
   const [resolved, setResolved] = useState<ScenarioResolved | null>(null)
   const [draft, setDraft] = useState<Record<string, boolean>>({})
   const [query, setQuery] = useState('')
+  const [scenarioFilter, setScenarioFilter] = useState<ScenarioFilter>('all')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [applyingPreset, setApplyingPreset] = useState<string | null>(null)
@@ -512,12 +540,17 @@ export default function FeatureTogglesTab() {
   }
 
   const filteredItems = useMemo(
-    () => items.filter((item) => matchesQuery(item, query)),
-    [items, query],
+    () =>
+      items.filter((item) => {
+        if (!matchesQuery(item, query)) return false
+        if (scenarioFilter === 'all') return true
+        return (item.scenario ?? 'shared') === scenarioFilter
+      }),
+    [items, query, scenarioFilter],
   )
 
   const grouped = useMemo(() => {
-    const order = ['background', 'app_module']
+    const order = ['app_module', 'background']
     const map = new Map<string, FeatureToggleItem[]>()
     for (const item of filteredItems) {
       const list = map.get(item.group) || []
@@ -720,6 +753,24 @@ export default function FeatureTogglesTab() {
           className="h-10 pl-9"
           aria-label="Поиск модулей"
         />
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        {SCENARIO_FILTERS.map((filter) => (
+          <button
+            key={filter.value}
+            type="button"
+            onClick={() => setScenarioFilter(filter.value)}
+            className={cn(
+              'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
+              scenarioFilter === filter.value
+                ? 'border-primary bg-primary/10 text-primary'
+                : 'border-border bg-card/50 text-muted-foreground hover:bg-muted',
+            )}
+          >
+            {filter.label}
+          </button>
+        ))}
       </div>
 
       {grouped.length === 0 ? (

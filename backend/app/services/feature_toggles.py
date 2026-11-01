@@ -700,11 +700,14 @@ def map_legacy_resource_profile(raw: str) -> str | None:
     return LEGACY_RESOURCE_PROFILE_TO_SCENARIO.get(key)
 
 
-# Scenario presets describe loading, not host layout. Host-dependent app modules
-# (`awg2`, `proxy_nodes`, `warper`, `routing`, `antizapret_config`,
-# `cloudflare_ips_update`, `node_ssh_transport`, VPN protocols) are deliberately
-# absent from every preset: enabling a section the operator does not use (or
-# hiding one they do) is not a preset's job.
+# Scenario presets describe loading, not host layout. «Коммерческое» deliberately
+# omits host-dependent app modules (`awg2`, `proxy_nodes`, `warper`, `routing`,
+# `antizapret_config`, `cloudflare_ips_update`, `node_ssh_transport`, VPN
+# protocols): a commercial host may or may not run them, so the preset must
+# neither advertise turning them on nor off. «Домашнее» / «Только панель» keep
+# their profile defaults for the local AntiZapret stack (routing / antizapret /
+# Cloudflare on or off, SSH transport on) but never lock them — the admin can
+# change any of them.
 #
 # Each preset has three levels:
 #   * `required` — hard core: applied and locked against switching off while the
@@ -888,20 +891,18 @@ SCENARIO_PRESETS: dict[str, dict] = {
             "note": "Замер «панель + VPN на сервере»; лучше 2 GB с запасом под ОС",
         },
         "workers_disabled": [],
-        # Жёсткое ядро: без этих модулей коммерческий сценарий работает
-        # неполноценно или падает. Заблокированы от выключения, пока сценарий активен.
+        # Жёсткое ядро раздачи доступа: без этих модулей коммерческий сценарий
+        # работает неполноценно или падает. Заблокированы от выключения, пока
+        # сценарий активен. Канал доставки (Telegram) и наблюдаемость (история
+        # подключений, NOC-отчёты, правила алертов) — мягкие дефолты, а не ядро.
         "required": [
             "user_management",
             "clients_page",
             "user_provisioning",
-            "telegram",
             "traffic_sync",
             "unlock_codes",
             "client_portal",
             "access_expiry",
-            "connection_history",
-            "noc_reports",
-            "alert_rules",
         ],
         "match": "required",
         "settings": {"inactive_user_grace_period_months": 3},
@@ -909,6 +910,10 @@ SCENARIO_PRESETS: dict[str, dict] = {
         "toggles": {
             "user_reminders": True,
             "qr_downloads": True,
+            "telegram": True,
+            "connection_history": True,
+            "noc_reports": True,
+            "alert_rules": True,
             "server_monitor": True,
             "logs_dashboard": True,
             "server_resources": True,
@@ -946,6 +951,41 @@ SCENARIO_PRESETS: dict[str, dict] = {
         },
     },
 }
+
+
+def _preset_on_keys(meta: dict) -> frozenset[str]:
+    """Toggle keys a preset turns ON (hard `required` core + soft `toggles` True)."""
+    on = set(meta.get("required", ()))
+    for key, enabled in meta.get("toggles", {}).items():
+        if enabled:
+            on.add(key)
+    return frozenset(on)
+
+
+def _preset_off_keys(meta: dict) -> frozenset[str]:
+    """Toggle keys a preset turns OFF (soft `toggles` False)."""
+    return frozenset(k for k, v in meta.get("toggles", {}).items() if not v)
+
+
+_HOME_ON = _preset_on_keys(SCENARIO_PRESETS["home"])
+_HOME_OFF = _preset_off_keys(SCENARIO_PRESETS["home"])
+_COMMERCIAL_ON = _preset_on_keys(SCENARIO_PRESETS["commercial"])
+
+
+def scenario_module_kind(key: str) -> str:
+    """'home' | 'commercial' | 'shared' — к какому сценарию относится модуль.
+
+    «commercial» — модуль, который коммерческий сценарий включает, а домашний
+    выключает; «home» — который домашний включает, а коммерческий не трогает и не
+    включает; «shared» — общее для обоих сценариев (включено в обоих или не задано
+    ни в одном — платформа, VPN-протоколы, host-зависимые).
+    """
+    if key in _COMMERCIAL_ON and key in _HOME_OFF:
+        return "commercial"
+    if key in _HOME_ON and key not in _COMMERCIAL_ON:
+        return "home"
+    return "shared"
+
 
 VALID_SCENARIO_PRESETS = frozenset(SCENARIO_PRESETS.keys())
 
@@ -1051,6 +1091,7 @@ class FeatureToggleService:
                 "enabled": enabled,
                 "resource_impact_label": impact["label"],
                 "group_meta": FEATURE_TOGGLE_GROUPS.get(definition.group, {}),
+                "scenario": scenario_module_kind(definition.key),
                 "locked": lock_reason is not None,
                 "lock_reason": lock_reason,
             })

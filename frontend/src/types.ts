@@ -1718,6 +1718,7 @@ export interface FeatureToggleItem {
   resource_impact_label: string
   resource_savings: string
   enabled: boolean
+  scenario?: 'home' | 'commercial' | 'shared'
   locked?: boolean
   lock_reason?: string | null
   group_meta: { label?: string; description?: string; badge?: string }
