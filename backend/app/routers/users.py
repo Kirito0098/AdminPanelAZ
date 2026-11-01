@@ -144,6 +144,7 @@ from app.services.refresh_token import invalidate_user_sessions
 from app.services.self_service import password_change_required_on_admin_set
 from app.services.telegram_link import notify_telegram_unlinked, release_telegram_of_pending_deletion
 from app.services.user_access_extend import compute_extended_access_until
+from app.services.unlock_codes import revoke_user_bound_unlock_codes
 from app.services.user_subscription import (
     get_user_access_until,
     normalize_access_until,
@@ -2045,6 +2046,7 @@ def _delete_user_core(db, user, current_user, request) -> tuple[str, bool]:
     deleted_username = user.username
     target_id = user.id
     delete_user_write_archive(db, user)
+    revoke_user_bound_unlock_codes(db, user.id)
     active_provision = (
         db.query(BackgroundTask)
         .filter(

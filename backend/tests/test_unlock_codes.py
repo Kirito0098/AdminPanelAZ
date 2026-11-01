@@ -33,6 +33,7 @@ from app.services.unlock_codes import (
     create_unlock_code,
     list_unlock_codes,
     redeem_unlock_code,
+    revoke_user_bound_unlock_codes,
 )
 
 
@@ -1525,3 +1526,33 @@ def test_user_bound_code_single_redemption_per_user(db):
         _redeem_bound_now(
             db, code="BOUND-TWICE-01", client_name="Mira", node_id=node.id, user_id=owner.id
         )
+
+
+def test_revoke_user_bound_codes_keeps_redeemed(db):
+    user = _make_user(db, username="leaving", role=UserRole.user)
+    pending = _user_bound_code(db, user, user.id, "BOUND-DEL-01")
+    redeemed = _user_bound_code(db, user, user.id, "BOUND-DEL-02")
+    redeemed.redemption_count = 1
+    db.commit()
+
+    revoked = revoke_user_bound_unlock_codes(db, user.id, commit=True)
+
+    db.refresh(pending)
+    db.refresh(redeemed)
+    assert revoked == 1
+    assert pending.revoked_at is not None
+    assert redeemed.revoked_at is None
+
+
+def test_purge_user_before_delete_clears_unlock_target(db):
+    from app.services.user_provisioning import purge_user_before_delete
+
+    user = _make_user(db, username="leaving", role=UserRole.user)
+    successor = _make_user(db, username="successor", role=UserRole.admin)
+    key = _user_bound_code(db, user, user.id, "BOUND-DEL-03")
+
+    purge_user_before_delete(db, user, successor)
+    db.commit()
+
+    db.refresh(key)
+    assert key.target_user_id is None

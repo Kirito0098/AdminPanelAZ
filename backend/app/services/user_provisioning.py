@@ -567,6 +567,12 @@ def purge_user_before_delete(db: Session, user: User, successor: User) -> None:
             {model.created_by_user_id: None},
             synchronize_session=False,
         )
+    # Абонентский unlock-ключ теряет привязку: строку не удаляем (история ключа),
+    # а FK на users.id без ON DELETE не дал бы удалить абонента.
+    db.query(UnlockCode).filter(UnlockCode.target_user_id == user.id).update(
+        {UnlockCode.target_user_id: None},
+        synchronize_session=False,
+    )
     db.query(VpnConfig).filter(VpnConfig.owner_id == user.id).update(
         {VpnConfig.owner_id: successor.id},
         synchronize_session=False,

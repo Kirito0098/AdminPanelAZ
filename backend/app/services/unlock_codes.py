@@ -263,6 +263,26 @@ def revoke_unlock_code(db: Session, code_id: int) -> None:
         db.commit()
 
 
+def revoke_user_bound_unlock_codes(db: Session, user_id: int, *, commit: bool = False) -> int:
+    """Отозвать невыкупленные ключи абонента (вызывается при удалении абонента)."""
+    rows = (
+        db.query(UnlockCode)
+        .filter(
+            UnlockCode.target_user_id == user_id,
+            UnlockCode.revoked_at.is_(None),
+            UnlockCode.redemption_count == 0,
+        )
+        .all()
+    )
+    now_db = _to_db_datetime(_now())
+    for row in rows:
+        row.revoked_at = now_db
+        db.add(row)
+    if commit:
+        db.commit()
+    return len(rows)
+
+
 def list_unlock_codes(
     db: Session, *, include_revoked: bool = False, comment_query: str | None = None
 ) -> list[dict]:
