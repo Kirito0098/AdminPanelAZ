@@ -452,10 +452,13 @@ export default function UnlockCodes() {
                         {formatDateTime(code.code_expires_at)}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Клиенты:{' '}
-                        {(code.allowed_client_names?.length ?? 0) > 0
-                          ? code.allowed_client_names!.join(', ')
-                          : 'любой'}
+                        {code.target_user_id
+                          ? `Абонент: ${code.target_user_name ?? code.target_user_id}`
+                          : `Клиенты: ${
+                              (code.allowed_client_names?.length ?? 0) > 0
+                                ? code.allowed_client_names!.join(', ')
+                                : 'любой'
+                            }`}
                       </p>
                       {redemptions.length > 0 && (
                         <div className="space-y-1 pt-1">
