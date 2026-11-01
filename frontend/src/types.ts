@@ -229,6 +229,8 @@ export interface ClosedAccessView {
   requests_enabled?: boolean
   /** Ссылка на бота для «Написать администратору». */
   contact_url?: string | null
+  /** Модуль «Сообщения абонентов» включён: кнопки чата в Mini App можно показывать. */
+  messaging_enabled?: boolean
 }
 
 /** ClosedAccessView плюс «открытое» состояние: срок, трафик, приостановка. */

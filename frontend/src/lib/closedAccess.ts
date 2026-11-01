@@ -45,8 +45,8 @@ export function closedAccessCopy(view: ClosedAccessView | null | undefined): Clo
         canRedeem: true,
         redeemLabel: 'Ввести ключ',
         canRequest: Boolean(view.requests_enabled),
-        canContact: false,
-        canPay: true,
+        canContact: Boolean(view.contact_url) && Boolean(view.messaging_enabled),
+        canPay: Boolean(view.requests_enabled),
       }
     case 'traffic_limit':
       return {
@@ -57,7 +57,7 @@ export function closedAccessCopy(view: ClosedAccessView | null | undefined): Clo
         redeemLabel: 'Ввести ключ',
         canRequest: Boolean(view.requests_enabled),
         canContact: false,
-        canPay: true,
+        canPay: Boolean(view.requests_enabled),
       }
     case 'suspended':
       return {
@@ -67,7 +67,7 @@ export function closedAccessCopy(view: ClosedAccessView | null | undefined): Clo
         canRedeem: false,
         redeemLabel: 'Продлить',
         canRequest: false,
-        canContact: Boolean(view.contact_url),
+        canContact: Boolean(view.contact_url) && Boolean(view.messaging_enabled),
         canPay: false,
       }
     case 'expiring':

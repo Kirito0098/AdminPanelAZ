@@ -98,6 +98,13 @@ def _admin_contact_url(db: Session) -> str | None:
     return f"https://t.me/{username}"
 
 
+def _messaging_enabled() -> bool:
+    """Модуль «Сообщения абонентов» включён? Иначе кнопки чата в Mini App не показываем."""
+    from app.services.feature_guards import get_feature_service
+
+    return get_feature_service().is_enabled("user_messaging")
+
+
 def closed_access_payload(db: Session, user: User, now: datetime | None = None) -> dict | None:
     """Закрытый доступ + доступные действия (для портала и Mini App)."""
     view = closed_access_view(user, now)
@@ -105,4 +112,5 @@ def closed_access_payload(db: Session, user: User, now: datetime | None = None) 
         return None
     view["requests_enabled"] = _requests_enabled(db)
     view["contact_url"] = _admin_contact_url(db)
+    view["messaging_enabled"] = _messaging_enabled()
     return view
