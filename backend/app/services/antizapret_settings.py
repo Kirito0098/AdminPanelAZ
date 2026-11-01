@@ -253,6 +253,12 @@ def read_antizapret_settings(setup_path: Path) -> dict[str, str]:
         else:
             m = re.search(rf"^{re.escape(env)}=([yn])$", content, re.M | re.I)
             settings[key] = m.group(1).lower() if m else default
+            # AntiZapret до 26.10.2026 держал часть флагов числом (DNS_WARP=1|2): показываем y/n.
+            legacy_numeric = p.get("legacy_numeric_flag")
+            if m is None and legacy_numeric:
+                raw = re.search(rf"^{re.escape(env)}=(\S+)\s*(#.*)?$", content, re.M | re.I)
+                if raw and raw.group(1) in legacy_numeric:
+                    settings[key] = legacy_numeric[raw.group(1)]
 
     # Legacy BLOCK_ADS → ANTIZAPRET_ADBLOCK (AntiZapret update.sh migrates the same way).
     if not re.search(r"^ANTIZAPRET_ADBLOCK=", content, re.M | re.I):
@@ -263,6 +269,13 @@ def read_antizapret_settings(setup_path: Path) -> dict[str, str]:
     # Protocol enable flags (monitoring / incidents; not in ANTIZAPRET_PARAMS UI schema).
     settings.update(read_protocol_enable_flags(setup_path))
     return settings
+
+
+def _has_numeric_marker(content: str, markers: Sequence[str]) -> bool:
+    """Новый setup хранит режимы WARP числами; в старом там y/n, и y/n никто не прочитает."""
+    return any(
+        re.search(rf"^{re.escape(env)}=[1-9]\s*(#.*)?$", content, re.M | re.I) for env in markers
+    )
 
 
 def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -> dict[str, Any]:
@@ -289,6 +302,20 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
         v = new_settings[key]
         env = p["env"]
         if p["type"] == "flag":
+            legacy_numeric = p.get("legacy_numeric_flag")
+            if legacy_numeric:
+                raw_legacy = re.search(rf"^{re.escape(env)}=(\S+)\s*(#.*)?$", content, re.M | re.I)
+                if raw_legacy and raw_legacy.group(1) in legacy_numeric:
+                    raise ValueError(
+                        f"{env}: в setup старый формат ({env}={raw_legacy.group(1)}). "
+                        "Обновите AntiZapret-VPN на узле — панель записывает y/n."
+                    )
+            markers = p.get("numeric_markers") or ()
+            if markers and not _has_numeric_marker(content, markers):
+                raise ValueError(
+                    f"{env}: setup узла в старом формате AntiZapret-VPN (нет числовых {', '.join(markers)}). "
+                    "Обновите AntiZapret-VPN на узле — панель записывает y/n."
+                )
             desired[env] = normalize_flag(v)
         elif p["type"] == "choice":
             legacy = re.search(rf"^{re.escape(env)}=[yn]\s*(#.*)?$", content, re.M | re.I) is not None

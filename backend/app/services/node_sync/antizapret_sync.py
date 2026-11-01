@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import BackgroundTask, Node, NodeSyncGroup
-from app.services.antizapret_params import ANTIZAPRET_PARAMS, filter_ha_replicable_settings
+from app.services.antizapret_params import ANTIZAPRET_PARAMS, filter_ha_replicable_settings, needs_antizapret_restart
 from app.services.antizapret_settings import VERIFIED_WRITE_TYPES, setting_write_mismatch_warnings
 from app.services.background_tasks import background_task_service
 from app.services.node_manager import get_adapter_for_node
@@ -42,10 +42,14 @@ def replicate_antizapret_settings(
         return result
 
     has_verified_keys = any(p["type"] in VERIFIED_WRITE_TYPES and p["key"] in filtered for p in ANTIZAPRET_PARAMS)
+    restart_replica = needs_antizapret_restart(filtered)
     for replica_node in get_replica_nodes(db, group):
         try:
             adapter = get_adapter_for_node(replica_node)
-            adapter.update_antizapret_settings(filtered)
+            written = adapter.update_antizapret_settings(filtered)
+            if restart_replica and written.get("changes"):
+                # up.sh применяет firewall/WARP-ключи только при старте службы antizapret.
+                adapter.restart_service("antizapret")
             if has_verified_keys:
                 mismatch = setting_write_mismatch_warnings(filtered, adapter.get_antizapret_settings())
                 if mismatch:

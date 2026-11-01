@@ -86,6 +86,7 @@ const CONFIG_FILE_TITLES: Record<string, string> = {
   'exclude-warp-hosts.txt': 'WARP — исключить домены',
   'deny-rpz.txt': 'RPZ — блокировка (AntiZapret)',
   'deny2-rpz.txt': 'RPZ — блокировка (полный VPN)',
+  'deny3-rpz.txt': 'RPZ — блокировка (Proxy DNS)',
   'warp-rpz.txt': 'RPZ — через WARP',
   'proxy-rpz.txt': 'RPZ — через AntiZapret',
 }

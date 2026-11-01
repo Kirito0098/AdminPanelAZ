@@ -202,6 +202,8 @@
 | `monitoring`, `alert_rules` | NOC: подключения, гео, службы; правила алертов |
 | `openvpn_buffer_guard` | OpenVPN Buffer Guard (`/openvpn-buffer-guard`) |
 | `dns_aaaa` | Переключатель AAAA-ответов резолверов AntiZapret активного узла (`/dns-aaaa`) |
+| `dns_servers` | Выбор upstream DNS для `kresd@1` / `kresd@2`: патч `kresd.conf`, перезапуск резолверов (`/dns-servers`) |
+| `openvpn_tuning` | `duplicate-cn` и подробные логи OpenVPN, состояние установки (MTU, DCO, патч, протоколы) — `/openvpn-tuning` |
 | `traffic` | Сбор и отображение трафика |
 | `routing`, `cidr_db` | CIDR-провайдеры, pipeline, deploy |
 | `warper` | AZ-WARP |

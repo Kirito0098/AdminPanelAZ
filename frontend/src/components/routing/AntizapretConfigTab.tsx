@@ -102,7 +102,7 @@ const FIELD_SECTIONS: {
   },
   {
     title: 'Безопасность сервера',
-    description: 'Защита VPN-сервера от атак и злоупотреблений',
+    description: 'Защита VPN-сервера от атак и злоупотреблений. Применяется сразу — служба antizapret перезапускается',
     icon: Shield,
     keys: [
       'ssh_protection',
@@ -110,6 +110,7 @@ const FIELD_SECTIONS: {
       'scan_protection',
       'torrent_guard',
       'restrict_forward',
+      'client_isolation',
     ],
   },
   {
@@ -121,9 +122,9 @@ const FIELD_SECTIONS: {
   {
     title: 'Cloudflare WARP',
     description:
-      'Встроенный WARP AntiZapret-VPN (не AZ-WARP). Старый формат y/n в setup поддерживает только None / All. Списки доменов WARP — в «Редакторе файлов».',
+      'Встроенный WARP AntiZapret-VPN (не AZ-WARP). Старый формат y/n в setup поддерживает только None / All, режимы Domain и Custom — на AntiZapret-VPN с 26.10.2026. Списки доменов WARP — в «Редакторе файлов».',
     icon: Cloud,
-    keys: ['ANTIZAPRET_WARP', 'VPN_WARP', 'WARP_PROTECTION', 'WARP_MTU'],
+    keys: ['ANTIZAPRET_WARP', 'VPN_WARP', 'WARP_PROTECTION', 'WARP_MTU', 'DNS_WARP'],
   },
   {
     title: 'AdBlock',
@@ -895,6 +896,9 @@ export default function AntizapretConfigTab() {
       setDraft(refreshed.settings)
       setNeedsApply(result.needs_apply)
       success(result.message)
+      if (result.antizapret_restarted) {
+        success('Служба antizapret перезапущена — правила iptables/WARP применены')
+      }
       for (const w of result.warnings ?? []) {
         notifyWarning(w)
       }

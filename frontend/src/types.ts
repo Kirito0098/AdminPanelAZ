@@ -2113,6 +2113,59 @@ export type DnsAaaaTarget = 'antizapret' | 'vpn'
 
 export type DnsAaaaState = Record<DnsAaaaTarget, DnsAaaaMode>
 
+export interface DnsServersOption {
+  value: string
+  label: string
+}
+
+export interface DnsServersState {
+  supported: boolean
+  antizapret: string
+  vpn: string
+  applied_antizapret?: string | null
+  applied_vpn_dns?: string | null
+  antizapret_options: DnsServersOption[]
+  vpn_options: DnsServersOption[]
+  warnings: string[]
+  restarted: string[]
+}
+
+export type OpenVpnToggleState = 'on' | 'off' | 'mixed' | 'unknown'
+
+export interface OpenVpnProtocolState {
+  unit: string
+  enabled?: boolean | null
+}
+
+export interface OpenVpnPatchState {
+  custom_binary: boolean
+  unit_exec?: string | null
+  in_use: boolean
+}
+
+export interface OpenVpnAppliedState {
+  unit: string
+  enabled?: boolean | null
+  ok: boolean
+  error?: string | null
+}
+
+export interface OpenVpnTuningState {
+  duplicate_cn: OpenVpnToggleState
+  logs: OpenVpnToggleState
+  mtu_openvpn?: number | 'mixed' | null
+  mtu_wireguard?: number | 'mixed' | null
+  dco: OpenVpnToggleState
+  patch: OpenVpnPatchState
+  protocols: OpenVpnProtocolState[]
+  update_timer?: boolean | null
+  confs: string[]
+  warnings: string[]
+  restarted: string[]
+  applied?: OpenVpnAppliedState[]
+  patch_output?: string | null
+}
+
 export interface OpenVpnBufferGuardEvent {
   id: number
   node_id: number
@@ -2143,6 +2196,7 @@ export interface AntizapretSettingsUpdateResponse {
   changes: number
   needs_apply: boolean
   warnings?: string[]
+  antizapret_restarted?: boolean
 }
 
 export interface WarperHealthResponse {

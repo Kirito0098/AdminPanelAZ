@@ -17,6 +17,7 @@ from app.schemas import (
     AntizapretSettingsUpdateResponse,
     RoutingOverview,
 )
+from app.services.antizapret_params import needs_antizapret_restart
 from app.services.antizapret_settings import (
     VERIFIED_WRITE_TYPES,
     az_host_updates_conflict_with_panel_domain,
@@ -229,6 +230,19 @@ def put_antizapret_settings(
         if warning not in warnings:
             warnings.append(warning)
     result["warnings"] = warnings
+
+    # up.sh читает firewall/WARP-ключи только при старте службы: без рестарта правила не меняются.
+    if needs_antizapret_restart(filtered) and result.get("changes"):
+        try:
+            adapter.restart_service("antizapret")
+            result["antizapret_restarted"] = True
+        except Exception as exc:  # noqa: BLE001 — настройки уже сохранены, отдаём предупреждение
+            detail = getattr(exc, "detail", str(exc))
+            logger.warning("antizapret restart failed after settings save: %s", detail)
+            result["warnings"].append(
+                f"Служба antizapret не перезапустилась, правила остались прежними: {detail}. "
+                "На удалённом узле нужен node agent 1.15.0 или новее (Узлы → Обновить)."
+            )
 
     active_node = get_active_node(db)
     group = find_sync_group_for_primary(db, active_node.id)

@@ -1238,6 +1238,96 @@ class DnsAaaaUpdate(BaseModel):
     nodata: bool
 
 
+class DnsServersOption(BaseModel):
+    value: str
+    label: str
+
+
+class DnsServersStateOut(BaseModel):
+    """Выбор upstream DNS для резолверов AntiZapret (kresd.conf) активного узла."""
+
+    supported: bool
+    antizapret: str
+    vpn: str
+    applied_antizapret: str | None = None
+    applied_vpn_dns: str | None = None
+    antizapret_options: list[DnsServersOption] = []
+    vpn_options: list[DnsServersOption] = []
+    warnings: list[str] = []
+    restarted: list[str] = []
+
+
+class DnsServersUpdate(BaseModel):
+    antizapret: int = Field(ge=1, le=7)
+    vpn: int = Field(ge=1, le=2)
+
+
+class OpenVpnProtocolState(BaseModel):
+    unit: str
+    enabled: bool | None = None
+
+
+class OpenVpnPatchState(BaseModel):
+    custom_binary: bool = False
+    unit_exec: str | None = None
+    in_use: bool = False
+
+
+class OpenVpnAppliedState(BaseModel):
+    unit: str
+    enabled: bool | None = None
+    ok: bool = True
+    error: str | None = None
+
+
+class OpenVpnTuningStateOut(BaseModel):
+    """Состояние server conf OpenVPN: то, что setup.sh настраивает через sed и systemctl."""
+
+    duplicate_cn: Literal["on", "off", "mixed", "unknown"] = "unknown"
+    logs: Literal["on", "off", "mixed", "unknown"] = "unknown"
+    mtu_openvpn: int | Literal["mixed"] | None = None
+    mtu_wireguard: int | Literal["mixed"] | None = None
+    dco: Literal["on", "off", "mixed", "unknown"] = "unknown"
+    patch: OpenVpnPatchState = OpenVpnPatchState()
+    protocols: list[OpenVpnProtocolState] = []
+    update_timer: bool | None = None
+    confs: list[str] = []
+    warnings: list[str] = []
+    restarted: list[str] = []
+    applied: list[OpenVpnAppliedState] = []
+    patch_output: str | None = None
+
+
+class OpenVpnTuningUpdate(BaseModel):
+    duplicate: bool
+    logs: bool
+
+
+class OpenVpnMtuUpdate(BaseModel):
+    """MTU отдельно: OpenVPN (`tun-mtu`) и WireGuard (`MTU =`), хотя бы одно значение."""
+
+    openvpn: int | None = Field(default=None, ge=1280, le=1420)
+    wireguard: int | None = Field(default=None, ge=1280, le=1420)
+
+    @model_validator(mode="after")
+    def _at_least_one(self) -> "OpenVpnMtuUpdate":
+        if self.openvpn is None and self.wireguard is None:
+            raise ValueError("Укажите MTU OpenVPN и/или MTU WireGuard")
+        return self
+
+
+class OpenVpnDcoUpdate(BaseModel):
+    enabled: bool
+
+
+class OpenVpnProtocolsUpdate(BaseModel):
+    units: dict[str, bool] = Field(min_length=1)
+
+
+class OpenVpnPatchUpdate(BaseModel):
+    algorithm: int = Field(ge=1, le=4)
+
+
 class GeoIpStatusResponse(BaseModel):
     loaded: bool
     source: Literal["local", "ip-api"]
@@ -2173,6 +2263,7 @@ class AntizapretSettingsUpdateResponse(BaseModel):
     changes: int
     needs_apply: bool
     warnings: list[str] = Field(default_factory=list)
+    antizapret_restarted: bool = False
 
 
 class WarperHealthResponse(BaseModel):

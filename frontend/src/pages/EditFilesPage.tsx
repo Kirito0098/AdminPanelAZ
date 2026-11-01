@@ -77,8 +77,8 @@ const EDITOR_TEXTAREA_CLASS =
 
 type FileGroup = 'hosts' | 'ips' | 'adblock' | 'warp' | 'dns'
 
-/** custom.lua / custom2.lua: сохранение перезапускает kresd, doall.sh не нужен. */
-const KRESD_CUSTOM_KEYS = new Set(['kresd_custom', 'kresd_custom2'])
+/** custom.lua / custom2.lua / custom3.lua: сохранение перезапускает kresd, doall.sh не нужен. */
+const KRESD_CUSTOM_KEYS = new Set(['kresd_custom', 'kresd_custom2', 'kresd_custom3'])
 
 type FileMeta = {
   description: string
@@ -194,6 +194,13 @@ const FILE_META: Record<string, FileMeta> = {
     icon: ShieldBan,
     group: 'dns',
   },
+  deny3_rpz: {
+    description: 'Заблокировать сайты в DNS прокси (Proxy DNS)',
+    hint: 'Формат RPZ: example.com CNAME . — ответ 0.0.0.0 · нужен AntiZapret-VPN с kresd@3',
+    placeholder: 'example.com CNAME .\n*.example.com CNAME .',
+    icon: ShieldBan,
+    group: 'dns',
+  },
   warp_rpz: {
     description: 'Направить сайты через WARP правилом RPZ',
     hint: 'Формат RPZ: example.com CNAME .',
@@ -218,6 +225,13 @@ const FILE_META: Record<string, FileMeta> = {
   kresd_custom2: {
     description: 'Свои правила Knot Resolver для полного VPN (Lua)',
     hint: 'Например, свой DNS для отдельных доменов · сохранение перезапускает kresd@2',
+    placeholder: "policy.add(policy.suffix(policy.STUB({'8.8.8.8'}), {todname('example.com')}))",
+    icon: FileCode,
+    group: 'dns',
+  },
+  kresd_custom3: {
+    description: 'Свои правила Knot Resolver для прокси (Proxy DNS, Lua)',
+    hint: 'Например, свой DNS для отдельных доменов · сохранение перезапускает kresd@3',
     placeholder: "policy.add(policy.suffix(policy.STUB({'8.8.8.8'}), {todname('example.com')}))",
     icon: FileCode,
     group: 'dns',

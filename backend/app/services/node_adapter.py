@@ -25,7 +25,9 @@ from app.services.antizapret_settings import (
     update_antizapret_settings,
 )
 from app.services.cidr.service import CidrRoutingService
-from app.services.file_editor import FILES_SINCE_AGENT_1_11, KRESD_CUSTOM_UNITS, ConfigFileUnsupportedError
+from app.services.file_editor import AGENT_GATED_FILES, KRESD_CUSTOM_UNITS, ConfigFileUnsupportedError
+from app.services.kresd_dns_choice import DnsServersUnsupportedError
+from app.services.openvpn_tuning import OpenVpnTuningUnsupportedError
 from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
@@ -169,6 +171,32 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def apply_config_changes(self) -> str: ...
+
+    def get_dns_servers(self) -> dict[str, Any]:
+        """Выбор DNS-резолверов: есть только у VPN-узлов (LocalAdapter / RemoteAdapter)."""
+        raise NotImplementedError("выбор DNS-серверов доступен только на VPN-узле")
+
+    def apply_dns_servers(self, *, antizapret: int, vpn: int) -> dict[str, Any]:
+        raise NotImplementedError("выбор DNS-серверов доступен только на VPN-узле")
+
+    def get_openvpn_tuning(self) -> dict[str, Any]:
+        """Состояние server conf OpenVPN: дубликаты, логи, MTU, DCO, патч."""
+        raise NotImplementedError("настройки OpenVPN доступны только на VPN-узле")
+
+    def apply_openvpn_tuning(self, *, duplicate: bool, logs: bool) -> dict[str, Any]:
+        raise NotImplementedError("настройки OpenVPN доступны только на VPN-узле")
+
+    def apply_mtu(self, *, openvpn_mtu: int | None = None, wireguard_mtu: int | None = None) -> dict[str, Any]:
+        raise NotImplementedError("MTU доступен только на VPN-узле")
+
+    def apply_dco(self, enabled: bool) -> dict[str, Any]:
+        raise NotImplementedError("DCO доступен только на VPN-узле")
+
+    def apply_protocols(self, targets: dict[str, bool]) -> dict[str, Any]:
+        raise NotImplementedError("протоколы доступны только на VPN-узле")
+
+    def apply_openvpn_patch(self, algorithm: int) -> dict[str, Any]:
+        raise NotImplementedError("патч OpenVPN доступен только на VPN-узле")
 
     @abstractmethod
     def get_server_ip(self) -> str | None: ...
@@ -777,6 +805,30 @@ class LocalNodeAdapter(NodeAdapter):
 
     def apply_config_changes(self) -> str:
         return self._service.apply_config_changes()
+
+    def get_dns_servers(self) -> dict[str, Any]:
+        return self._service.get_dns_servers()
+
+    def apply_dns_servers(self, *, antizapret: int, vpn: int) -> dict[str, Any]:
+        return self._service.apply_dns_servers(antizapret=antizapret, vpn=vpn)
+
+    def get_openvpn_tuning(self) -> dict[str, Any]:
+        return self._service.get_openvpn_tuning()
+
+    def apply_openvpn_tuning(self, *, duplicate: bool, logs: bool) -> dict[str, Any]:
+        return self._service.apply_openvpn_tuning(duplicate=duplicate, logs=logs)
+
+    def apply_mtu(self, *, openvpn_mtu: int | None = None, wireguard_mtu: int | None = None) -> dict[str, Any]:
+        return self._service.apply_mtu(openvpn_mtu=openvpn_mtu, wireguard_mtu=wireguard_mtu)
+
+    def apply_dco(self, enabled: bool) -> dict[str, Any]:
+        return self._service.apply_dco(enabled)
+
+    def apply_protocols(self, targets: dict[str, bool]) -> dict[str, Any]:
+        return self._service.apply_protocols(targets)
+
+    def apply_openvpn_patch(self, algorithm: int) -> dict[str, Any]:
+        return self._service.apply_openvpn_patch(algorithm)
 
     def get_server_ip(self) -> str | None:
         return self._service.get_server_ip()
@@ -1540,7 +1592,7 @@ class RemoteNodeAdapter(NodeAdapter):
         try:
             yield
         except HTTPException as exc:
-            if exc.status_code == status.HTTP_400_BAD_REQUEST and filename in FILES_SINCE_AGENT_1_11:
+            if exc.status_code == status.HTTP_400_BAD_REQUEST and filename in AGENT_GATED_FILES:
                 raise ConfigFileUnsupportedError(filename) from exc
             raise
 
@@ -1558,6 +1610,59 @@ class RemoteNodeAdapter(NodeAdapter):
     def apply_config_changes(self) -> str:
         data = self._request("POST", "/configs/apply", timeout=300.0)
         return data.get("detail") or data.get("message", "ok")
+
+    def _dns_servers_request(self, method: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        try:
+            if method == "GET":
+                return self._request("GET", "/configs/dns-servers")
+            # Два перезапуска kresd плюс возможный перезапуск antizapret.
+            return self._request("PUT", "/configs/dns-servers", json=payload or {}, timeout=180.0)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                raise DnsServersUnsupportedError() from exc
+            raise
+
+    def get_dns_servers(self) -> dict[str, Any]:
+        return self._dns_servers_request("GET")
+
+    def apply_dns_servers(self, *, antizapret: int, vpn: int) -> dict[str, Any]:
+        return self._dns_servers_request("PUT", {"antizapret": antizapret, "vpn": vpn})
+
+    def _openvpn_request(
+        self, method: str, path: str, payload: dict[str, Any] | None = None, *, timeout: float = 60.0
+    ) -> dict[str, Any]:
+        try:
+            return self._request(method, path, json=payload or {}, timeout=timeout)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                raise OpenVpnTuningUnsupportedError() from exc
+            raise
+
+    def get_openvpn_tuning(self) -> dict[str, Any]:
+        return self._openvpn_request("GET", "/openvpn/tuning")
+
+    def apply_openvpn_tuning(self, *, duplicate: bool, logs: bool) -> dict[str, Any]:
+        return self._openvpn_request(
+            "PUT", "/openvpn/tuning", {"duplicate": duplicate, "logs": logs}, timeout=240.0
+        )
+
+    def apply_mtu(self, *, openvpn_mtu: int | None = None, wireguard_mtu: int | None = None) -> dict[str, Any]:
+        return self._openvpn_request(
+            "PUT",
+            "/openvpn/mtu",
+            {"openvpn": openvpn_mtu, "wireguard": wireguard_mtu},
+            timeout=240.0,
+        )
+
+    def apply_dco(self, enabled: bool) -> dict[str, Any]:
+        return self._openvpn_request("PUT", "/openvpn/dco", {"enabled": enabled}, timeout=240.0)
+
+    def apply_protocols(self, targets: dict[str, bool]) -> dict[str, Any]:
+        return self._openvpn_request("PUT", "/openvpn/protocols", {"units": targets}, timeout=300.0)
+
+    def apply_openvpn_patch(self, algorithm: int) -> dict[str, Any]:
+        # Сборка OpenVPN из исходников: до 30 минут, как и в агенте.
+        return self._openvpn_request("POST", "/openvpn/patch", {"algorithm": algorithm}, timeout=1800.0)
 
     def get_server_ip(self) -> str | None:
         try:

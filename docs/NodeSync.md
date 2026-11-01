@@ -107,7 +107,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 | Routing UI (route files: include/exclude/forward/drop IPs) | Те же файлы на replica без `doall.sh` по умолчанию |
 | Routing UI (provider files) | Аналогично, если файл в scope HA |
 | Редактор: файлы WARP и RPZ (`include-warp-hosts.txt`, `exclude-warp-hosts.txt`, `*-rpz.txt`) | Те же файлы + опционально `doall.sh` |
-| Редактор: `custom.lua` / `custom2.lua` (`/etc/knot-resolver`) | Тот же файл, перезапуск `kresd@1` / `kresd@2` на replica без `doall.sh`; если резолвер не поднялся — прежний файл возвращается |
+| Редактор: `custom.lua` / `custom2.lua` / `custom3.lua` (`/etc/knot-resolver`) | Тот же файл, перезапуск `kresd@1` / `kresd@2` / `kresd@3` на replica без `doall.sh`; если резолвер не поднялся — прежний файл возвращается |
 | **DNS: ответ на AAAA** | Помеченный блок в `custom.lua` / `custom2.lua` — как при правке Lua |
 
 Файлы WARP, RPZ и Lua поддерживаются с node agent **1.11.0**. При правке на primary реплика со старым агентом получает ошибку («Обновите node agent панели на узле…», группа → `failed`). Фоновое auto-heal такие файлы на старом агенте пропускает, не помечая реплику ошибкой.

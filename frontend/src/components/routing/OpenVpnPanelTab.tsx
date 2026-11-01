@@ -5,8 +5,11 @@ import {
 } from '@/api/client'
 import RemoteHostsCard from '@/components/proxy/RemoteHostsCard'
 import DnsAaaaCard from '@/components/routing/DnsAaaaCard'
+import DnsServersCard from '@/components/routing/DnsServersCard'
+import OpenVpnTuningCard from '@/components/routing/OpenVpnTuningCard'
 import OpenVpnBufferGuardCard from '@/components/routing/OpenVpnBufferGuardCard'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import { SettingsToolbar } from '@/components/settings/SettingsChrome'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -16,6 +19,15 @@ import { useNotifications } from '@/context/NotificationContext'
 import { cn } from '@/lib/utils'
 import { Cable, RefreshCw, Server } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
+
+function SectionHeading({ title, hint }: { title: string; hint: string }) {
+  return (
+    <div className="flex flex-col gap-0.5 border-b pb-2">
+      <h3 className="text-sm font-semibold tracking-tight">{title}</h3>
+      <p className="text-xs text-muted-foreground">{hint}</p>
+    </div>
+  )
+}
 
 function OpenVpnMultihomeToggle({
   nodeId,
@@ -216,41 +228,33 @@ export default function OpenVpnPanelTab({
   onHostsPersisted,
 }: OpenVpnPanelTabProps) {
   return (
-    <div className="space-y-5">
-      <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-card via-card to-muted/30 p-5 shadow-sm">
-        <div className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-primary/5" />
-        <div className="relative flex min-w-0 items-start gap-4">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-            <Cable className="h-6 w-6" />
-          </div>
-          <div className="min-w-0">
-            <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">OpenVPN (панель)</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Функции панели, а не файла{' '}
-              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">setup</span>{' '}
-              AntiZapret: список <span className="font-mono text-xs">remote</span> в клиентских .ovpn и
-              директива <span className="font-mono text-xs">multihome</span> на сервере.
-            </p>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              {nodeName && (
-                <Badge variant="outline" className="gap-1.5">
-                  <Server className="h-3 w-3" />
-                  {nodeName}
-                </Badge>
-              )}
-              <Badge variant="secondary">доработки панели</Badge>
-              {remoteHostsDirty && (
-                <Badge
-                  variant="outline"
-                  className="border-amber-500/50 text-amber-700 dark:text-amber-300"
-                >
-                  адреса не сохранены
-                </Badge>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
+    <div className="space-y-6">
+      <SettingsToolbar
+        title="OpenVPN (панель)"
+        meta={
+          <span className="flex flex-wrap items-center gap-2">
+            {nodeName && (
+              <Badge variant="outline" className="gap-1.5">
+                <Server className="h-3 w-3" />
+                {nodeName}
+              </Badge>
+            )}
+            <span>Адреса в профилях, multihome, DNS и состояние установки — то, чего нет в файле setup.</span>
+          </span>
+        }
+        actions={
+          remoteHostsDirty ? (
+            <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-300">
+              адреса не сохранены
+            </Badge>
+          ) : undefined
+        }
+      />
+
+      <section className="space-y-3">
+        <SectionHeading title="Подключение" hint="Что клиент видит в профилях: адреса входа и multihome" />
+        <div className="grid gap-4 xl:grid-cols-3">
+          <div className="min-w-0 xl:col-span-2">
 
       <Card className="overflow-hidden">
         <CardHeader className="pb-3">
@@ -280,13 +284,15 @@ export default function OpenVpnPanelTab({
           />
         </CardContent>
       </Card>
+          </div>
 
       <Card className="overflow-hidden">
         <CardHeader className="pb-3">
           <CardTitle className="text-base">OpenVPN multihome</CardTitle>
           <CardDescription className="mt-1">
-            Несколько публичных IP на одном VPN-сервере. Флаг панели; после setup.sh восстанавливается
-            с этой страницы.
+            Директива <code>multihome</code> в server conf: сервер отвечает клиенту с того же IP, к которому тот
+            подключился, поэтому несколько публичных адресов работают без «прыжков» соединения. Флаг хранится в
+            панели — после setup.sh конфиги становятся стоковыми, и панель возвращает директиву с этой страницы.
           </CardDescription>
         </CardHeader>
         <CardContent className="border-t px-4 py-4 sm:px-5">
@@ -297,9 +303,25 @@ export default function OpenVpnPanelTab({
           />
         </CardContent>
       </Card>
+        </div>
+      </section>
 
-      <OpenVpnBufferGuardCard activeNodeId={activeNodeId} nodeName={nodeName} disabled={disabled} />
-      <DnsAaaaCard activeNodeId={activeNodeId} disabled={disabled} />
+      <section className="space-y-3">
+        <SectionHeading title="DNS" hint="Резолверы AntiZapret и ответ на AAAA-запросы" />
+        <div className="grid gap-4 xl:grid-cols-2">
+          <DnsServersCard activeNodeId={activeNodeId} disabled={disabled} />
+          <DnsAaaaCard activeNodeId={activeNodeId} disabled={disabled} />
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <SectionHeading
+          title="Диагностика и установка"
+          hint="Профили, логи, MTU/DCO/патч/протоколы OpenVPN и защита буфера"
+        />
+        <OpenVpnTuningCard activeNodeId={activeNodeId} nodeName={nodeName} disabled={disabled} />
+        <OpenVpnBufferGuardCard activeNodeId={activeNodeId} nodeName={nodeName} disabled={disabled} />
+      </section>
     </div>
   )
 }
