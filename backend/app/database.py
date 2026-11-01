@@ -1751,6 +1751,7 @@ def _run_db_migrations() -> None:
     _migrate_user_provisioning_stage2()
     _migrate_users_stage3()
     _migrate_users_commercial()
+    _migrate_config_quota_floor()
     _migrate_user_portal_banner()
     _migrate_revoke_unmanaged_client_portal_links()
     _seed_client_templates_for_nodes()
@@ -2164,6 +2165,58 @@ def _migrate_users_commercial() -> None:
                     )
                 )
                 logger.info("DB migration: added user_action_logs.target_user_id")
+
+
+def _plan_index_count(raw: str | None) -> int:
+    """Сколько имён в плане: длина ``plan_config_indexes`` (невалидные элементы пропускаем)."""
+    try:
+        data = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return 0
+    if not isinstance(data, list):
+        return 0
+    count = 0
+    for item in data:
+        try:
+            int(item)
+        except (TypeError, ValueError):
+            continue
+        count += 1
+    return count
+
+
+def _migrate_config_quota_floor() -> None:
+    """Stage 6: «лимит имён» не ниже числа имён плана.
+
+    Одобрение «ещё один конфиг» расширяло план, но не квоту — у абонента
+    получалось ``3 / 2`` и самосервис блокировался. Явную квоту (>0) поднимаем
+    до размера плана; ``None``/0 — «общий лимит панели», их не трогаем.
+    """
+    inspector = inspect(engine)
+    if "users" not in set(inspector.get_table_names()):
+        return
+    with _migration_transaction() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT id, plan_config_indexes FROM users "
+                "WHERE config_quota IS NOT NULL AND config_quota > 0"
+            )
+        ).fetchall()
+        raised = 0
+        for user_id, raw in rows:
+            names = _plan_index_count(raw)
+            if names <= 0:
+                continue
+            result = conn.execute(
+                text(
+                    "UPDATE users SET config_quota = :names "
+                    "WHERE id = :user_id AND config_quota < :names"
+                ),
+                {"names": names, "user_id": user_id},
+            )
+            raised += result.rowcount or 0
+        if raised:
+            logger.info("DB migration: raised config_quota to plan size for %s user(s)", raised)
 
 
 def _migrate_user_config_access_table() -> None:

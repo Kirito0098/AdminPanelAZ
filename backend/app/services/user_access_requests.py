@@ -41,7 +41,12 @@ from app.services.rate_limit.sliding_window import SlidingWindowLimiter
 from app.services.telegram import send_tg_message
 from app.services import telegram_api
 from app.services.telegram_api import edit_message_text, send_message
-from app.services.user_provisioning import enqueue_user_provision, validate_plan_nodes
+from app.services.user_provisioning import (
+    enqueue_user_provision,
+    plan_add_index,
+    plan_name_count,
+    validate_plan_nodes,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +55,9 @@ REQUEST_TYPE_ADD_CONFIG = "add_config"
 REQUEST_TYPE_EXTEND = "extend_access"
 
 REQUEST_TYPES = (REQUEST_TYPE_NEW_USER, REQUEST_TYPE_ADD_CONFIG, REQUEST_TYPE_EXTEND)
+
+# Верхняя граница ``config_quota`` в схемах панели (``Field(le=1000)``).
+_CONFIG_QUOTA_MAX = 1000
 
 REQUEST_TYPE_LABELS: dict[str, str] = {
     REQUEST_TYPE_NEW_USER: "новый пользователь",
@@ -722,6 +730,19 @@ def _create_user_for_request(
     return user
 
 
+def _bump_config_quota(user: User, *, added: int) -> None:
+    """Поднять «лимит имён» вместе с планом при одобрении доп. конфига.
+
+    Для абонента план и квота — одна величина: если расширить только план,
+    карточка показывает ``3 / 2``, а самосервис считает лимит достигнутым.
+    ``None``/0 означают «общий лимит панели» — их не трогаем.
+    """
+    quota = user.config_quota
+    if quota is None or quota <= 0:
+        return
+    user.config_quota = min(_CONFIG_QUOTA_MAX, max(quota + added, plan_name_count(user)))
+
+
 def approve_request(
     db: Session,
     *,
@@ -799,10 +820,11 @@ def approve_request(
         db.refresh(request)
     elif request.request_type == REQUEST_TYPE_ADD_CONFIG:
         assert user is not None and plan is not None
-        from app.services.user_provisioning import plan_add_index
 
-        for _ in range(max(1, int(plan["count"]))):
+        added = max(1, int(plan["count"]))
+        for _ in range(added):
             plan_add_index(db, user)
+        _bump_config_quota(user, added=added)
         db.commit()
         db.refresh(user)
     elif request.request_type == REQUEST_TYPE_EXTEND:
@@ -908,15 +930,24 @@ def _linked_reply_keyboard(user: User) -> dict[str, Any] | None:
         return None
 
 
-def _delivery_text(portal_url: str, traffic_limit_bytes: int | None) -> str:
-    lines = [
-        "Доступ одобрен",
-        "",
-        f"Ваша ссылка на портал: {portal_url}",
-        "",
-        "Один конфиг WireGuard/AmneziaWG = одно устройство онлайн. "
-        "Нужно ещё устройство — нажмите «Запросить ещё конфиг».",
-    ]
+def _delivery_text(portal_url: str, traffic_limit_bytes: int | None, *, added: bool = False) -> str:
+    if added:
+        lines = [
+            "Дополнительный конфиг одобрен",
+            "",
+            f"Ваша ссылка на портал: {portal_url}",
+            "",
+            "Новый конфиг уже в плане — откройте «Конфиги», чтобы скачать файл.",
+        ]
+    else:
+        lines = [
+            "Доступ одобрен",
+            "",
+            f"Ваша ссылка на портал: {portal_url}",
+            "",
+            "Один конфиг WireGuard/AmneziaWG = одно устройство онлайн. "
+            "Нужно ещё устройство — нажмите «Запросить ещё конфиг».",
+        ]
     if traffic_limit_bytes:
         gb = traffic_limit_bytes / (1024 * 1024 * 1024)
         lines.append(f"Лимит трафика: {gb:g} ГБ.")
@@ -1000,7 +1031,9 @@ def maybe_send_delivery_after_task(db: Session, *, user_id: int, created_count: 
         )
         return
     portal = user_link_response(db, get_or_create_user_portal_token(db, user_id=user_id))
-    text = _delivery_text(portal["url"], user.traffic_limit_bytes)
+    text = _delivery_text(
+        portal["url"], user.traffic_limit_bytes, added=req.request_type == REQUEST_TYPE_ADD_CONFIG
+    )
     if not send_message_sync_or_async(
         bot_token,
         str(user.telegram_id),
