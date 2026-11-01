@@ -196,6 +196,8 @@ export interface User {
   /** Режим предоставления конфигов (unmanaged / pending / partial / ok). */
   provision_state?: string
   client_base_name?: string | null
+  /** Фактическое имя конфигов владельца, когда плана нет. */
+  owned_config_base_name?: string | null
   plan_config_indexes?: number[] | null
   desired_protocols?: string[] | null
   panel_login_enabled?: boolean
@@ -2600,6 +2602,8 @@ export interface UserProvisionSummary {
   username: string
   role: string
   client_base_name: string | null
+  /** Фактическое имя конфигов владельца, когда плана нет. */
+  owned_config_base_name?: string | null
   plan_config_indexes: number[] | null
   desired_protocols: string[] | null
   panel_login_enabled: boolean
@@ -2607,6 +2611,9 @@ export interface UserProvisionSummary {
   access_until: string | null
   node_ids: number[]
   config_quota: number | null
+  /** Права абонента на свои конфиги (панель и Telegram Mini App). */
+  can_create_configs?: boolean
+  can_manage_configs?: boolean
   /** Stage 3: админская приостановка доступа. */
   suspended_at?: string | null
   suspend_reason?: string | null

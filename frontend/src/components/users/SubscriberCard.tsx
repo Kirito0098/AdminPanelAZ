@@ -174,7 +174,7 @@ export default function SubscriberCard({
       key: 'base',
       icon: UserRound,
       label: 'База',
-      value: user.client_base_name || 'не задана',
+      value: user.client_base_name || user.owned_config_base_name || 'не задана',
       wide: !user.telegram_id,
     },
     ...(user.telegram_id

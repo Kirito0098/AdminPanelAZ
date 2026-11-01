@@ -107,6 +107,7 @@ from app.services.node_sync.groups import require_ha_primary_for_client_ops
 from app.services.config_provisioning import deprovision_config
 from app.services.traffic.ha_aggregate import resolve_traffic_scope
 from app.services.user_blocks import apply_user_block, lift_user_block
+from app.services.user_config_summary import owned_configs_summaries, summarize_owned_configs
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
 from app.services.file_download import attachment_response
@@ -218,13 +219,18 @@ def _serialize_plan(plan) -> ProvisionPlanResponse:
 
 
 def _user_summary(
-    user: User, node_ids: list[int], *, traffic_consumed_bytes: int = 0
+    user: User,
+    node_ids: list[int],
+    *,
+    traffic_consumed_bytes: int = 0,
+    owned_base_name: str | None = None,
 ) -> UserProvisionSummary:
     return UserProvisionSummary(
         id=user.id,
         username=user.username,
         role=user.role.value,
         client_base_name=user.client_base_name,
+        owned_config_base_name=owned_base_name,
         plan_config_indexes=parse_plan_indexes(user.plan_config_indexes),
         desired_protocols=_desired_protocols_list(user.desired_protocols),
         panel_login_enabled=user.panel_login_enabled,
@@ -232,6 +238,8 @@ def _user_summary(
         access_until=user.access_until,
         node_ids=list(node_ids),
         config_quota=user.config_quota,
+        can_create_configs=bool(user.can_create_configs),
+        can_manage_configs=bool(user.can_manage_configs),
         suspended_at=user.suspended_at,
         suspend_reason=user.suspend_reason,
         suspend_reason_visible=bool(user.suspend_reason_visible),
@@ -368,11 +376,24 @@ def list_users(
             except ValueError:
                 continue
 
+    # Абоненты без плана (созданные «из существующих») показывают фактические
+    # конфиги владельца: иначе узлы, протоколы и имена в карточке списка пустые.
+    summaries = owned_configs_summaries(
+        db, [user.id for user in users if not user.client_base_name]
+    )
     for user in users:
         node_ids = nodes_by_user.get(user.id, [])
+        protocols = _desired_protocols_list(user.desired_protocols)
+        config_count = len(parse_plan_indexes(user.plan_config_indexes))
+        owned = summaries.get(user.id)
+        if owned is not None and not user.client_base_name:
+            node_ids = owned.node_ids
+            protocols = owned.protocols
+            config_count = owned.name_count
+            user.owned_config_base_name = owned.base_name
         user.plan_node_ids = node_ids
-        user.plan_protocols = _desired_protocols_list(user.desired_protocols)
-        user.plan_config_count = len(parse_plan_indexes(user.plan_config_indexes))
+        user.plan_protocols = protocols
+        user.plan_config_count = config_count
         user.active_task_id = active_task_by_user.get(user.id)
     return users
 
@@ -1288,18 +1309,21 @@ def _last_provision_task(db: Session, user_id: int) -> dict | None:
     return background_task_service.serialize_background_task(task) if task is not None else None
 
 
-def _group_provision_configs(db: Session, user: User) -> list[ProvisioningConfig]:
+def _group_provision_configs(
+    db: Session, user: User, configs: list[VpnConfig] | None = None
+) -> list[ProvisioningConfig]:
     """Все конфиги владельца — и плановые, и оставшиеся вне плана.
 
     Раньше фильтр по namespace ``client_base_name`` и по узлам плана прятал конфиг,
     переназначенный пользователю с другим базовым именем: он исчезал и у прежнего
     владельца (сменился ``owner_id``), и у нового (имя вне namespace).
     """
-    configs = (
-        db.query(VpnConfig)
-        .filter(VpnConfig.owner_id == user.id, VpnConfig.ha_primary_config_id.is_(None))
-        .all()
-    )
+    if configs is None:
+        configs = (
+            db.query(VpnConfig)
+            .filter(VpnConfig.owner_id == user.id, VpnConfig.ha_primary_config_id.is_(None))
+            .all()
+        )
     node_ids = {config.node_id for config in configs}
     labels = (
         {node.id: node.name for node in db.query(Node).filter(Node.id.in_(node_ids)).all()}
@@ -1354,6 +1378,16 @@ def get_provisioning(
     plan = compute_plan(db, user) if has_plan else None
     serialized_plan = _serialize_plan(plan) if plan is not None else ProvisionPlanResponse()
 
+    # Без плана сводку шапки и вкладки «Конфиги» строим по фактическим конфигам
+    # владельца (абонент создан «из существующих» или конфиг привязан позже).
+    owned_configs = (
+        db.query(VpnConfig)
+        .filter(VpnConfig.owner_id == user.id, VpnConfig.ha_primary_config_id.is_(None))
+        .all()
+    )
+    owned = summarize_owned_configs(owned_configs) if owned_configs else None
+    summary_node_ids = owned.node_ids if (owned is not None and not has_plan) else node_ids
+
     from app.services.user_closed_access import grace_hold_view
     from app.services.user_grace import get_grace_months
     from app.services.user_traffic_limit import user_consumed_bytes
@@ -1362,12 +1396,17 @@ def get_provisioning(
     consumed = user_consumed_bytes(db, user)
 
     return UserProvisioningCard(
-        user=_user_summary(user, node_ids, traffic_consumed_bytes=consumed),
+        user=_user_summary(
+            user,
+            summary_node_ids,
+            traffic_consumed_bytes=consumed,
+            owned_base_name=owned.base_name if (owned is not None and not has_plan) else None,
+        ),
         has_plan=has_plan,
         desired=desired,
         suggested=suggested,
         plan=serialized_plan,
-        configs=_group_provision_configs(db, user),
+        configs=_group_provision_configs(db, user, owned_configs),
         last_task=_last_provision_task(db, user.id),
         grace_hold=GraceHoldView(**grace_hold) if grace_hold else None,
     )

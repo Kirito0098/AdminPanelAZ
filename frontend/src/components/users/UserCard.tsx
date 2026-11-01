@@ -57,7 +57,9 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
   const trafficLimit = user.traffic_limit_bytes ?? 0
   const trafficConsumed = user.traffic_consumed_bytes ?? 0
   const trafficPercent = trafficLimit > 0 ? Math.min((trafficConsumed / trafficLimit) * 100, 100) : 0
-  const configCount = user.plan_config_indexes?.length ?? 0
+  // Без плана имена и база берутся из фактических конфигов владельца.
+  const baseName = user.client_base_name ?? user.owned_config_base_name ?? null
+  const configCount = card.has_plan ? (user.plan_config_indexes?.length ?? 0) : card.configs.length
   const quota = user.config_quota ?? null
   const initials = user.username.trim().slice(0, 2).toUpperCase()
 
@@ -110,10 +112,10 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
               <span>узлов: {user.node_ids.length}</span>
               <span aria-hidden>·</span>
               <span>конфигов: {configCount}</span>
-              {user.client_base_name ? (
+              {baseName ? (
                 <>
                   <span aria-hidden>·</span>
-                  <span className="truncate font-mono">{user.client_base_name}</span>
+                  <span className="truncate font-mono">{baseName}</span>
                 </>
               ) : null}
             </p>

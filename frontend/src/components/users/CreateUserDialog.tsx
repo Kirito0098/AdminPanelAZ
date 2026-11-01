@@ -331,9 +331,10 @@ export default function CreateUserDialog({
       return Boolean(clientBaseName.trim())
     }
     if (step === 'access') {
-      if (mode === 'from_existing') return true
+      if (mode === 'from_existing') return configIds.length > 0
       return selectedNodeIds.length > 0 && selectedProtocols.length > 0
     }
+    if (mode === 'from_existing') return configIds.length > 0
     return true
   }
 
@@ -416,7 +417,7 @@ export default function CreateUserDialog({
             </Button>
           )}
           {step === 'summary' ? (
-            <Button type="button" onClick={handleSubmit} disabled={submitting}>
+            <Button type="button" onClick={handleSubmit} disabled={submitting || !canProceed()}>
               {submitting ? 'Создание…' : <><ArrowRight size={16} /> Создать абонента</>}
             </Button>
           ) : (
@@ -626,7 +627,8 @@ export default function CreateUserDialog({
                 <span className="text-xs text-muted-foreground">Загрузка конфигов…</span>
               ) : visibleConfigs.length === 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  Нет подходящих конфигов. Можно создать абонента без привязки.
+                  Нет подходящих конфигов. Создайте конфиг на узле или включите «Показать все
+                  владельцы».
                 </p>
               ) : (
                 <div className="max-h-56 space-y-0.5 overflow-y-auto rounded-lg border p-1">
@@ -659,8 +661,12 @@ export default function CreateUserDialog({
                   })}
                 </div>
               )}
-              {configIds.length > 0 && (
+              {configIds.length > 0 ? (
                 <p className="text-xs text-muted-foreground">Выбрано: {configIds.length}</p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Выберите хотя бы один конфиг — абонент без конфигов не создаётся.
+                </p>
               )}
             </div>
           </>

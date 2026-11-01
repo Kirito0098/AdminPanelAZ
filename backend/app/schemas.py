@@ -313,6 +313,9 @@ class UserResponse(UserBase):
     panel_login_enabled: bool = True
     # Сводка режима предоставления конфигов (заполняется в списке абонентов GET /users).
     provision_state: str = "unmanaged"
+    client_base_name: str | None = None
+    # Фактическое имя конфигов владельца, когда плана нет (создан «из существующих»).
+    owned_config_base_name: str | None = None
     plan_node_ids: list[int] = []
     plan_protocols: list[str] = []
     plan_config_count: int = 0
@@ -408,6 +411,8 @@ class UserProvisionSummary(BaseModel):
     username: str
     role: str
     client_base_name: str | None = None
+    # Фактическое имя конфигов владельца, когда плана нет.
+    owned_config_base_name: str | None = None
     plan_config_indexes: list[int] | None = None
     desired_protocols: list[str] | None = None
     panel_login_enabled: bool = True
@@ -415,6 +420,9 @@ class UserProvisionSummary(BaseModel):
     access_until: datetime | None = None
     node_ids: list[int] = []
     config_quota: int | None = None
+    # Права абонента на свои конфиги (панель и Telegram Mini App).
+    can_create_configs: bool = True
+    can_manage_configs: bool = False
     # Stage 3: приостановка и лимит трафика.
     suspended_at: datetime | None = None
     suspend_reason: str | None = None

@@ -38,6 +38,13 @@ def create_user_from_existing(
             raise pending_deletion_conflict(db, existing, actor, what="Имя пользователя")
         raise HTTPException(status.HTTP_400_BAD_REQUEST, detail="Пользователь уже существует")
 
+    ids = list(dict.fromkeys(payload.config_ids))  # stable unique
+    if not ids:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail="Выберите хотя бы один конфиг: абонент без конфигов не создаётся",
+        )
+
     if not payload.panel_login_enabled:
         password = payload.password or secrets.token_urlsafe(24)
     else:
@@ -49,7 +56,6 @@ def create_user_from_existing(
         password = payload.password
     validate_password(password, username=payload.username)
 
-    ids = list(dict.fromkeys(payload.config_ids))  # stable unique
     if (
         payload.config_quota is not None
         and payload.config_quota > 0
