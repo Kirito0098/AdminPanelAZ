@@ -1750,6 +1750,7 @@ def _run_db_migrations() -> None:
     _migrate_users_provisioning()
     _migrate_user_provisioning_stage2()
     _migrate_users_stage3()
+    _migrate_users_commercial()
     _migrate_user_portal_banner()
     _migrate_revoke_unmanaged_client_portal_links()
     _seed_client_templates_for_nodes()
@@ -2135,6 +2136,34 @@ def _migrate_users_stage3() -> None:
             if "input" not in cols:
                 conn.execute(text("ALTER TABLE background_task ADD COLUMN input TEXT"))
                 logger.info("DB migration: added background_task.input")
+
+
+def _migrate_users_commercial() -> None:
+    """Stage 5: users.note + user_action_logs.target_user_id (история по абоненту)."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    with _migration_transaction() as conn:
+        if "users" in tables:
+            cols = _table_columns(conn, "users")
+            if "note" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN note TEXT"))
+                logger.info("DB migration: added users.note")
+        if "user_action_logs" in tables:
+            cols = _table_columns(conn, "user_action_logs")
+            if "target_user_id" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE user_action_logs ADD COLUMN target_user_id "
+                        "INTEGER REFERENCES users(id)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_user_action_logs_target_user_id "
+                        "ON user_action_logs (target_user_id)"
+                    )
+                )
+                logger.info("DB migration: added user_action_logs.target_user_id")
 
 
 def _migrate_user_config_access_table() -> None:

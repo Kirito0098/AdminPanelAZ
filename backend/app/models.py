@@ -120,6 +120,7 @@ class User(Base):
     # Stage 4: баннер портала для пользователей без привязанного Telegram.
     portal_banner_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     portal_banner_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     vpn_configs: Mapped[list["VpnConfig"]] = relationship(back_populates="owner")
     refresh_tokens: Mapped[list["RefreshToken"]] = relationship(back_populates="user")
@@ -638,6 +639,9 @@ class UserActionLog(Base):
     action: Mapped[str] = mapped_column(String(64))
     details: Mapped[str | None] = mapped_column(Text, nullable=True)
     remote_addr: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    target_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
 
