@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Layers, LogIn, Phone, ShieldCheck, Trash2, Copy } from 'lucide-react'
+import { Layers, LogIn, Phone, ShieldCheck, StickyNote, Trash2, Copy } from 'lucide-react'
 import { createUserTelegramLinkCode } from '@/api/users'
 import { ApiError, updateUser } from '@/api/client'
 import { useNotifications } from '@/context/NotificationContext'
@@ -117,6 +117,12 @@ export default function UserAccountSection({ user, onSave, onDelete, onRefresh }
   const [linkCode, setLinkCode] = useState<string | null>(null)
   const [linkCodeLoading, setLinkCodeLoading] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [note, setNote] = useState(user.note ?? '')
+  const [noteSaving, setNoteSaving] = useState(false)
+  const [quotaInput, setQuotaInput] = useState(
+    user.config_quota != null ? String(user.config_quota) : '',
+  )
+  const [quotaSaving, setQuotaSaving] = useState(false)
 
   const used = user.plan_config_indexes?.length ?? 0
   const limit = user.config_quota ?? null
@@ -160,6 +166,42 @@ export default function UserAccountSection({ user, onSave, onDelete, onRefresh }
     setDeleteOpen(false)
   }
 
+  const handleSaveNote = async () => {
+    setNoteSaving(true)
+    try {
+      await updateUser(user.id, { note: note.trim() ? note.trim() : null })
+      success('Заметка сохранена')
+      onRefresh()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось сохранить заметку')
+    } finally {
+      setNoteSaving(false)
+    }
+  }
+
+  const handleSaveQuota = async () => {
+    const trimmed = quotaInput.trim()
+    let value: number | null = null
+    if (trimmed) {
+      const parsed = Number.parseInt(trimmed, 10)
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        notifyError('Квота — целое число ≥ 0 или пусто')
+        return
+      }
+      value = parsed
+    }
+    setQuotaSaving(true)
+    try {
+      await updateUser(user.id, { config_quota: value })
+      success('Квота сохранена')
+      onRefresh()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось сохранить квоту')
+    } finally {
+      setQuotaSaving(false)
+    }
+  }
+
   return (
     <div className="space-y-3">
       <UserSection
@@ -197,6 +239,25 @@ export default function UserAccountSection({ user, onSave, onDelete, onRefresh }
         </div>
       </UserSection>
 
+      <UserSection
+        icon={StickyNote}
+        title="Заметка"
+        description="Внутренняя заметка администратора — видна только в панели."
+      >
+        <div className="space-y-2">
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            placeholder="Например: оплатил до 1 декабря, VIP…"
+            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+          />
+          <Button type="button" onClick={() => void handleSaveNote()} disabled={noteSaving}>
+            {noteSaving ? 'Сохранение…' : 'Сохранить заметку'}
+          </Button>
+        </div>
+      </UserSection>
+
       {user.role === 'user' && <UserVisibilitySection user={user} onRefresh={onRefresh} />}
       {user.role === 'user' && <MiniAppRightsSection user={user} onRefresh={onRefresh} />}
 
@@ -225,6 +286,27 @@ export default function UserAccountSection({ user, onSave, onDelete, onRefresh }
               ? 'Без личной квоты — действует общий лимит панели.'
               : 'Достижение квоты блокирует добавление имён.'}
           </p>
+          <div className="flex items-end gap-2">
+            <div className="space-y-1">
+              <Label htmlFor="quotaInput">Квота конфигов</Label>
+              <Input
+                id="quotaInput"
+                inputMode="numeric"
+                value={quotaInput}
+                onChange={(e) => setQuotaInput(e.target.value)}
+                placeholder="без квоты"
+                className="h-9 w-32"
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleSaveQuota()}
+              disabled={quotaSaving}
+            >
+              Сохранить
+            </Button>
+          </div>
         </div>
       </UserSection>
 
