@@ -1,5 +1,5 @@
 import { Suspense, lazy, useRef, useState } from 'react'
-import { Activity, BarChart3, CalendarClock, KeyRound, ListChecks, UserCog } from 'lucide-react'
+import { Activity, BarChart3, CalendarClock, History, KeyRound, ListChecks, UserCog } from 'lucide-react'
 import { formatDate } from '@/lib/datetime'
 import { formatBytes } from '@/lib/trafficFormat'
 import type { UserUpdatePayload, UserProvisioningCard, UserProvisionSummary } from '@/types'
@@ -15,6 +15,7 @@ import UserAccountSection from './UserAccountSection'
 
 // Графики статистики тянут recharts: грузим вкладку отдельным чанком, а не вместе со страницей «Пользователи».
 const UserStatsSection = lazy(() => import('./UserStatsSection'))
+const UserHistorySection = lazy(() => import('./UserHistorySection'))
 
 interface UserCardProps {
   card: UserProvisioningCard
@@ -192,6 +193,10 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
               <BarChart3 size={14} aria-hidden />
               Статистика
             </TabsTrigger>
+            <TabsTrigger value="history" className="gap-1.5" title="История действий">
+              <History size={14} aria-hidden />
+              История
+            </TabsTrigger>
             <TabsTrigger value="account" className="gap-1.5">
               <UserCog size={14} aria-hidden />
               Аккаунт
@@ -220,6 +225,11 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
           <TabsContent value="stats" className="mt-0">
             <Suspense fallback={<Spinner label="Загрузка статистики…" className="py-8" />}>
               <UserStatsSection userId={user.id} />
+            </Suspense>
+          </TabsContent>
+          <TabsContent value="history" className="mt-0">
+            <Suspense fallback={<Spinner label="Загрузка истории…" className="py-8" />}>
+              <UserHistorySection userId={user.id} />
             </Suspense>
           </TabsContent>
           <TabsContent value="account" className="mt-0">
