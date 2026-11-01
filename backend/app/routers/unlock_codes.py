@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,13 +12,17 @@ from sqlalchemy.orm import Session
 from app.auth import require_admin, tg_mini_token_allowed
 from app.database import get_db
 from app.models import User
+from app.services.app_setting_store import _get_setting
 from app.services.feature_guards import get_feature_service, module_disabled_message
+from app.services.telegram import send_tg_message
 from app.services.unlock_codes import (
     create_unlock_code,
     list_unlock_codes,
     revoke_unlock_code,
     serialize_unlock_code,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/unlock-codes",
@@ -34,6 +39,8 @@ class UnlockCodeCreateRequest(BaseModel):
     code: str | None = None
     allowed_client_names: list[str] | None = None
     comment: str | None = Field(default=None, max_length=128)
+    # Если задан и у абонента привязан Telegram — отправить код ему в личный чат.
+    send_to_user_id: int | None = None
 
 
 def _require_unlock_codes_enabled() -> None:
@@ -82,7 +89,23 @@ def post_unlock_code(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return serialize_unlock_code(row)
+    result = serialize_unlock_code(row)
+    sent = False
+    if payload.send_to_user_id is not None:
+        target = db.get(User, payload.send_to_user_id)
+        bot_token = _get_setting(db, "telegram_bot_token")
+        if target is not None and target.telegram_id and bot_token:
+            text = (
+                f"🔑 Ключ продления: {row.code}\n"
+                f"Срок: {row.grant_days} дн. Активируйте в боте или Mini App."
+            )
+            try:
+                sent = bool(send_tg_message(bot_token, target.telegram_id, text))
+            except Exception:  # noqa: BLE001 — доставка не должна ломать создание кода
+                logger.exception("unlock code telegram send failed code_id=%s", row.id)
+                sent = False
+    result["sent_to_telegram"] = sent
+    return result
 
 
 @router.post("/{code_id}/revoke")
