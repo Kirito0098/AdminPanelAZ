@@ -90,6 +90,29 @@ const REQUEST_TYPE_LABELS: Record<string, string> = {
   extend_access: 'Продление доступа',
 }
 
+type SortKey = 'username' | 'created_at' | 'access_until' | 'traffic' | 'last_seen'
+
+const SORT_OPTIONS: { value: SortKey; label: string }[] = [
+  { value: 'username', label: 'Имя' },
+  { value: 'created_at', label: 'Дата создания' },
+  { value: 'access_until', label: 'Срок доступа' },
+  { value: 'traffic', label: 'Трафик' },
+  { value: 'last_seen', label: 'Активность' },
+]
+
+const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+const PAGE_SIZE_STORAGE_KEY = 'users-cards:pageSize'
+
+function loadPageSize(): number {
+  try {
+    const raw = window.localStorage.getItem(PAGE_SIZE_STORAGE_KEY)
+    const n = raw ? Number.parseInt(raw, 10) : NaN
+    return (PAGE_SIZE_OPTIONS as readonly number[]).includes(n) ? n : 20
+  } catch {
+    return 20
+  }
+}
+
 type DeletableUser = {
   id: number
   username: string
@@ -133,6 +156,10 @@ export default function UsersPage() {
   }>({ open: false, action: 'add' })
   const [viewPrefs, setViewPrefs] = useState<UsersCardViewPrefs>(() => loadUsersCardViewPrefs())
   const [cardBusyId, setCardBusyId] = useState<number | null>(null)
+  const [sortKey, setSortKey] = useState<SortKey>('username')
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [page, setPage] = useState(0)
+  const [pageSize, setPageSize] = useState<number>(() => loadPageSize())
 
   const provisioningOn = isEnabled('user_provisioning')
   const availableRequestProtocols = useMemo(
@@ -192,10 +219,24 @@ export default function UsersPage() {
     void reloadRequests()
   }, [reloadRequests, pendingRequestsCount])
 
-  // Смена фильтра сбрасывает выбор — иначе в область попадут скрытые пользователи.
+  // Смена фильтра сбрасывает выбор и страницу — иначе в область попадут скрытые пользователи.
   useEffect(() => {
     setSelectedIds([])
+    setPage(0)
   }, [filter, search])
+
+  // Смена сортировки/размера страницы тоже возвращает на первую страницу; размер запоминаем.
+  useEffect(() => {
+    setPage(0)
+  }, [sortKey, sortDir, pageSize])
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(PAGE_SIZE_STORAGE_KEY, String(pageSize))
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, [pageSize])
 
   // Вход с карточки сервера: /users?bulkAddNode={id}
   useEffect(() => {
@@ -386,7 +427,10 @@ export default function UsersPage() {
     const q = search.trim().toLowerCase()
     let list = users.filter((u) => {
       if (!q) return true
-      return u.username.toLowerCase().includes(q) || String(u.id).includes(q)
+      const hay = [u.username, String(u.id), u.telegram_id ?? '', u.client_base_name ?? '']
+        .join('\u0000')
+        .toLowerCase()
+      return hay.includes(q)
     })
     const now = new Date()
     now.setHours(0, 0, 0, 0)
@@ -423,8 +467,24 @@ export default function UsersPage() {
       default:
         break
     }
-    return list.sort((a, b) => a.username.localeCompare(b.username, 'ru'))
-  }, [users, filter, search])
+    const dir = sortDir === 'asc' ? 1 : -1
+    return list.sort((a, b) => {
+      if (sortKey === 'traffic') {
+        return dir * ((a.traffic_consumed_bytes ?? 0) - (b.traffic_consumed_bytes ?? 0))
+      }
+      const field =
+        sortKey === 'last_seen'
+          ? 'last_seen_at'
+          : (sortKey as 'username' | 'created_at' | 'access_until')
+      const av = a[field] ?? ''
+      const bv = b[field] ?? ''
+      return dir * String(av).localeCompare(String(bv), 'ru')
+    })
+  }, [users, filter, search, sortKey, sortDir])
+
+  const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize))
+  const safePage = Math.min(page, totalPages - 1)
+  const pagedUsers = filteredUsers.slice(safePage * pageSize, (safePage + 1) * pageSize)
 
   const listMetrics = useMemo(() => {
     const now = Date.now()
@@ -756,6 +816,30 @@ export default function UsersPage() {
                   </button>
                 ) : null}
               </div>
+              <select
+                value={sortKey}
+                onChange={(e) => setSortKey(e.target.value as SortKey)}
+                className="h-10 shrink-0 rounded-md border border-input bg-background px-2 text-sm"
+                aria-label="Сортировка"
+                title="Сортировка"
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-10 w-10 shrink-0"
+                onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                aria-label={sortDir === 'asc' ? 'По возрастанию' : 'По убыванию'}
+                title={sortDir === 'asc' ? 'По возрастанию' : 'По убыванию'}
+              >
+                {sortDir === 'asc' ? '↑' : '↓'}
+              </Button>
               <UsersCardViewSettings prefs={viewPrefs} onChange={handleChangeViewPrefs} />
             </div>
           </div>
@@ -811,7 +895,7 @@ export default function UsersPage() {
             />
           ) : (
             <div className={cn('grid gap-3', gridColsClass(viewPrefs.gridCols))}>
-              {filteredUsers.map((u) => (
+              {pagedUsers.map((u) => (
                 <SubscriberCard
                   key={u.id}
                   user={u}
@@ -830,6 +914,50 @@ export default function UsersPage() {
                   onOpen={() => openDetail(u.id)}
                 />
               ))}
+            </div>
+          )}
+          {filteredUsers.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+              <div className="flex items-center gap-2">
+                <span>На странице</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number.parseInt(e.target.value, 10))}
+                  className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                  aria-label="Размер страницы"
+                >
+                  {PAGE_SIZE_OPTIONS.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={safePage <= 0}
+                >
+                  ‹
+                </Button>
+                <span>
+                  {safePage + 1} / {totalPages}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                  disabled={safePage >= totalPages - 1}
+                >
+                  ›
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>
