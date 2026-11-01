@@ -899,7 +899,15 @@ def get_request_receipt(
     try:
         data = get_cached_or_build_preview(db, req)
     except ReceiptDecodeError:
-        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Не удалось открыть чек")
+        from app.services.telegram_transport import relay_node_ids
+
+        detail = "Не удалось открыть чек"
+        if relay_node_ids():
+            detail = (
+                "Чек не скачивается: Telegram работает через узел-релей. "
+                "Откройте фото в Telegram — карточка заявки с чеком."
+            )
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail=detail)
     return Response(
         content=data,
         media_type="image/jpeg",
