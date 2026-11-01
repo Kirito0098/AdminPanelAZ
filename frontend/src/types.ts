@@ -2891,3 +2891,31 @@ export interface UserHistoryEntry {
   created_at: string
 }
 
+
+/** Строка ленты чата абонент ↔ администратор. */
+export interface UserMessageItem {
+  id: number
+  direction: 'in' | 'out'
+  admin_id: number | null
+  text: string
+  created_at: string
+  read_by_admin_at: string | null
+}
+
+/** Диалог в списке «Сообщения». */
+export interface MessageThread {
+  user_id: number
+  username: string
+  last_text: string
+  last_at: string
+  last_direction: 'in' | 'out'
+  unread_count: number
+}
+
+/** Ответ на POST /messages/{user_id}: сообщение сохранено, доставка best-effort. */
+export interface SendMessageResult {
+  message: UserMessageItem
+  delivered: boolean
+  warning: string | null
+}
+
