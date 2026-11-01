@@ -58,6 +58,9 @@ MODULE_DISABLED = "Модуль «{name}» отключён в настройк�
 BTN_OPEN_MINI_APP = "📱 Открыть Mini App"
 BTN_OPEN_MINI_APP_CONFIG = "📱 Открыть в Mini App"
 BTN_HELP = "❓ Помощь"
+BTN_MENU_ADMIN = "✉️ Написать администратору"
+BTN_CHAT_STOP = "Завершить"
+BTN_PAY = "💳 Оплатить (чек)"
 BTN_ALL_CONFIGS = "📁 Все конфиги"
 BTN_BACK = "◀️ Назад"
 BTN_BACK_SETTINGS = "◀️ Telegram"
@@ -104,6 +107,9 @@ MENU_ACTIONS: dict[str, str] = {
     BTN_MENU_MORE: "more",
     BTN_MENU_TRAFFIC: "traffic",
     BTN_MENU_HELP: "help",
+    BTN_MENU_ADMIN: "admin_chat",
+    BTN_CHAT_STOP: "chat_stop",
+    BTN_PAY: "pay_request",
     BTN_MENU_HOME: "home",
     BTN_MENU_SETTINGS: "settings",
     BTN_MENU_NODES: "nodes",
@@ -142,6 +148,20 @@ REQUEST_SUBMITTED = "Заявка отправлена администрато�
 REQUEST_MORE_SUBMITTED = "Заявка на ещё один конфиг отправлена администратору. Ожидайте решения."
 REQUEST_RECEIPT_OK = "Чек принят. Администратор проверит оплату."
 REQUEST_LINK_HINT = "Привязка: отправьте боту <code>/link &lt;код&gt;</code>. Код — в панели: «Мой профиль» → Telegram."
+CHAT_ENTER = (
+    "Напишите сообщение — оно уйдёт администратору. "
+    "Чтобы выйти из переписки, нажмите «Завершить»."
+)
+CHAT_SENT = "Отправлено администратору."
+CHAT_STOPPED = "Режим переписки закрыт."
+CHAT_TEXT_ONLY = "В переписке только текст: фото чека отправьте через «Оплатить (чек)»."
+CHAT_TOO_LONG = "Сообщение длиннее 4096 символов — сократите текст."
+CHAT_DISABLED = "Чат с администратором отключён в настройках панели."
+CHAT_NEED_LINK = "Сначала привяжите аккаунт: отправьте /link <код>."
+PAY_REQUEST_CREATED = (
+    "Заявка на продление создана. Отправьте фото чека одним сообщением — "
+    "администратор проверит оплату."
+)
 ADMIN_NO_RIGHTS = "Недостаточно прав."
 ADMIN_REQUEST_APPROVED = "✅ Одобрено в веб-панели: {admin}"
 ADMIN_REQUEST_REJECTED = "❌ Отклонено в веб-панели: {admin}"

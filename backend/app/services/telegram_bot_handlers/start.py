@@ -16,8 +16,22 @@ def _start_role_display(role: str | None) -> str:
     return i18n.START_ROLE_DISPLAY.get(value, f"🔑 {role_label(value)}")
 
 
-async def handle_start(ctx: BotContext) -> None:
+async def handle_start(ctx: BotContext, *, payload: str | None = None) -> None:
     settings_fsm.clear_pending(ctx.telegram_user_id)
+    if payload == "chat":
+        from app.services.telegram_bot_handlers.chat import handle_admin_chat
+
+        await handle_admin_chat(ctx)
+        return
+    if payload == "pay":
+        from app.services.telegram_bot_handlers.access_requests import handle_pay_request
+
+        await handle_pay_request(ctx)
+        return
+    if ctx.user is not None:
+        from app.services.user_messages import leave_chat_mode
+
+        leave_chat_mode(ctx.db, ctx.user)
     if ctx.user is None:
         template = (
             i18n.START_UNLINKED_WITH_REQUESTS

@@ -138,6 +138,33 @@ async def handle_link_code(ctx: BotContext) -> None:
     await send_message(ctx.bot_token, ctx.chat_id, i18n.REQUEST_LINK_HINT)
 
 
+async def handle_pay_request(ctx: BotContext) -> None:
+    """«Оплатить (чек)»: создаём заявку extend_access и просим фото чека."""
+    if ctx.user is None:
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.CHAT_NEED_LINK)
+        return
+    try:
+        submit_access_request(
+            ctx.db,
+            request_type="extend_access",
+            telegram_id=ctx.telegram_user_id,
+            telegram_username=ctx.telegram_username or None,
+            telegram_name=ctx.telegram_name or None,
+            user_id=ctx.user.id,
+            requested_count=1,
+        )
+    except RequestsClosed as exc:
+        await send_message(ctx.bot_token, ctx.chat_id, str(exc) or i18n.REQUESTS_CLOSED)
+        return
+    except AlreadyPending as exc:
+        await send_message(ctx.bot_token, ctx.chat_id, str(exc))
+        return
+    except NotBound:
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.CHAT_NEED_LINK)
+        return
+    await send_message(ctx.bot_token, ctx.chat_id, i18n.PAY_REQUEST_CREATED)
+
+
 async def handle_request_photo(ctx: BotContext, message: dict) -> bool:
     """Фото от пользователя — приложить как чек к его pending-заявке. True — обработано."""
     req = (

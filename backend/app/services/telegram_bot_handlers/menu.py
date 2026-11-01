@@ -88,14 +88,23 @@ def _more_menu_row_actions(ctx: BotContext) -> list[list[str]]:
     return rows
 
 
-def build_linked_reply_keyboard(*, is_admin: bool = False) -> dict:
+def _user_messaging_enabled() -> bool:
+    try:
+        return get_feature_service().is_enabled("user_messaging")
+    except Exception:  # noqa: BLE001 — раскладка меню не должна падать из-за тоглов
+        logger.warning("menu: user_messaging feature check failed", exc_info=True)
+        return False
+
+
+def build_linked_reply_keyboard(
+    *, is_admin: bool = False, in_chat: bool = False, show_pay: bool = False
+) -> dict:
     """Reply-клавиатура привязанного аккаунта — раскладка зависит от роли.
 
-    У абонента меню без «Ещё»: частые действия (Конфиги, Трафик) и то, что раньше
-    лежало в «Ещё» (Продлить по ключу, Запросить ещё конфиг, Справка) — прямо на
-    нижней панели. У админа редкие разделы (CIDR/WARP/AWG2/коды) остаются в «Ещё».
-    Используется и после одобрения заявки, чтобы устаревшая кнопка «Запросить
-    доступ» пропала.
+    У абонента меню без «Ещё»: частые действия (Конфиги, Трафик), оплата/чат с
+    админом и остальное — прямо на нижней панели. У админа редкие разделы
+    (CIDR/WARP/AWG2/коды) остаются в «Ещё». Используется и после одобрения
+    заявки, чтобы устаревшая кнопка «Запросить доступ» пропала.
     """
     if is_admin:
         rows = [
@@ -104,15 +113,22 @@ def build_linked_reply_keyboard(*, is_admin: bool = False) -> dict:
             [reply_button(i18n.BTN_MENU_CONFIGS), reply_button(i18n.BTN_MENU_MORE)],
         ]
     else:
+        rows = [[reply_button(i18n.BTN_MENU_CONFIGS), reply_button(i18n.BTN_MENU_TRAFFIC)]]
         actions_row = []
         if _unlock_codes_enabled():
             actions_row.append(reply_button(i18n.BTN_REDEEM_UNLOCK))
         actions_row.append(reply_button(i18n.BTN_REQUEST_MORE_CONFIG))
-        rows = [
-            [reply_button(i18n.BTN_MENU_CONFIGS), reply_button(i18n.BTN_MENU_TRAFFIC)],
-            actions_row,
-            [reply_button(i18n.BTN_MENU_HELP)],
-        ]
+        rows.append(actions_row)
+        contact_row = []
+        if show_pay:
+            contact_row.append(reply_button(i18n.BTN_PAY))
+        if _user_messaging_enabled():
+            contact_row.append(reply_button(i18n.BTN_MENU_ADMIN))
+        if contact_row:
+            rows.append(contact_row)
+        if in_chat:
+            rows.append([reply_button(i18n.BTN_CHAT_STOP)])
+        rows.append([reply_button(i18n.BTN_MENU_HELP)])
     return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
 
 
@@ -125,7 +141,11 @@ def build_reply_keyboard(ctx: BotContext) -> dict:
         rows.append([reply_button(i18n.BTN_MENU_HELP)])
         return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
 
-    return build_linked_reply_keyboard(is_admin=is_admin(ctx.user))
+    return build_linked_reply_keyboard(
+        is_admin=is_admin(ctx.user),
+        in_chat=ctx.user.chat_mode_since is not None,
+        show_pay=_accept_requests(ctx.db),
+    )
 
 
 def build_more_inline_menu(ctx: BotContext) -> dict:
@@ -150,8 +170,26 @@ async def _dispatch_action(ctx: BotContext, action: str, *, message_id: int | No
         await send_message(ctx.bot_token, ctx.chat_id, i18n.ADMIN_ONLY)
         return
 
+    # Любая кнопка/навигация выводит из режима переписки (кроме входа в него).
+    if action != "admin_chat" and ctx.user is not None:
+        from app.services.user_messages import leave_chat_mode
+
+        leave_chat_mode(ctx.db, ctx.user)
+
     if action == "more":
         await handle_more_menu(ctx, message_id=message_id)
+    elif action == "admin_chat":
+        from app.services.telegram_bot_handlers.chat import handle_admin_chat
+
+        await handle_admin_chat(ctx)
+    elif action == "chat_stop":
+        from app.services.telegram_bot_handlers.chat import handle_chat_stop
+
+        await handle_chat_stop(ctx)
+    elif action == "pay_request":
+        from app.services.telegram_bot_handlers.access_requests import handle_pay_request
+
+        await handle_pay_request(ctx)
     elif action == "status":
         from app.services.telegram_bot_handlers.status import handle_status
 

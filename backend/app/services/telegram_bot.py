@@ -119,7 +119,12 @@ def _profile_from_user(from_user: dict[str, Any]) -> tuple[str, str]:
 
 async def _dispatch_command(ctx: BotContext, command: str, args: str) -> None:
     if command == "/start":
-        await handle_start(ctx)
+        await handle_start(ctx, payload=args.strip() or None)
+        return
+    if command == "/admin":
+        from app.services.telegram_bot_handlers.chat import handle_admin_chat
+
+        await handle_admin_chat(ctx)
         return
     if command == "/help":
         await handle_help(ctx)
@@ -335,6 +340,11 @@ class TelegramBotService:
                 )
 
                 if await handle_request_document(ctx, message):
+                    return
+            if text.strip():
+                from app.services.telegram_bot_handlers.chat import handle_chat_text
+
+                if await handle_chat_text(ctx, message):
                     return
             if text.strip():
                 await handle_unknown_text(ctx)
