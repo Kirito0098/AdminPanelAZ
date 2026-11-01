@@ -8,6 +8,7 @@ from app.services.feature_guards import get_feature_service
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext
 from app.services.telegram_bot_handlers.menu import build_reply_keyboard
+from app.services.user_message_notify import notify_admins_new_message
 
 
 def chat_available() -> bool:
@@ -61,5 +62,9 @@ async def handle_chat_text(ctx: BotContext, message: dict) -> bool:
     if stored is None:
         # Повторная доставка того же апдейта: молчим, чтобы не дублировать ответ.
         return True
+    first_in_thread = chat_service.unread_for_user(ctx.db, user_id=ctx.user.id) == 1
+    notify_admins_new_message(
+        ctx.db, user=ctx.user, message=stored, first_in_thread=first_in_thread
+    )
     await send_message(ctx.bot_token, ctx.chat_id, i18n.CHAT_SENT)
     return True

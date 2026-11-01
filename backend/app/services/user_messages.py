@@ -172,6 +172,19 @@ def mark_read(db: Session, *, user_id: int) -> int:
     return int(updated or 0)
 
 
+def unread_for_user(db: Session, *, user_id: int) -> int:
+    count = (
+        db.query(func.count(UserMessage.id))
+        .filter(
+            UserMessage.user_id == user_id,
+            UserMessage.direction == DIRECTION_IN,
+            UserMessage.read_by_admin_at.is_(None),
+        )
+        .scalar()
+    )
+    return int(count or 0)
+
+
 def unread_total(db: Session) -> int:
     count = (
         db.query(func.count(UserMessage.id))

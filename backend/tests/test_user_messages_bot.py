@@ -187,3 +187,34 @@ def test_start_payload_pay_creates_request(db, subscriber, monkeypatch):
     asyncio.run(handle_start(_ctx(db, subscriber), payload="pay"))
 
     assert calls and calls[0]["request_type"] == "extend_access"
+
+
+def test_new_message_writes_bell_and_one_card(db, subscriber, monkeypatch):
+    import asyncio
+
+    from app.models import AdminPanelNotification
+    from app.services import user_message_notify as notify_mod
+
+    cards = []
+    monkeypatch.setattr(
+        notify_mod, "send_tg_message", lambda token, chat_id, text: cards.append(chat_id)
+    )
+    monkeypatch.setattr(notify_mod, "_get_setting", lambda db, key, default=None: "bot-token")
+    admin = User(
+        username="admin", password_hash="x", role=UserRole.admin, is_active=True,
+        panel_login_enabled=True, telegram_id="777",
+    )
+    db.add(admin)
+    db.commit()
+
+    subscriber.chat_mode_since = datetime.utcnow()
+    db.commit()
+
+    asyncio.run(chat_handler.handle_chat_text(_ctx(db, subscriber), _message("раз", 21)))
+    asyncio.run(chat_handler.handle_chat_text(_ctx(db, subscriber), _message("два", 22)))
+
+    # Карточка в Telegram — только на первое непрочитанное сообщение диалога.
+    assert cards == ["777"]
+    bells = db.query(AdminPanelNotification).filter_by(event_type="user_message").all()
+    assert len(bells) == 2
+    assert bells[0].title.startswith("ivan:")
