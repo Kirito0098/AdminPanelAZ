@@ -73,6 +73,8 @@ interface UnlockCodeCreateDialogProps {
   telegramBound?: boolean
   /** id абонента для отправки ключа в личный Telegram. */
   targetUserId?: number
+  /** Абонент, которому выдан ключ: клиенты, протоколы и режим не выбираются. */
+  boundUser?: { id: number; username: string } | null
 }
 
 export default function UnlockCodeCreateDialog({
@@ -84,11 +86,13 @@ export default function UnlockCodeCreateDialog({
   onCreated,
   telegramBound = false,
   targetUserId,
+  boundUser = null,
 }: UnlockCodeCreateDialogProps) {
   const { success, error: notifyError } = useNotifications()
   const availableProtocolsKey = availableProtocols.join(',')
   const initialProtocolsKey = initialProtocols.join(',')
   const initialClientsKey = initialClientNames.map(normalizeClientName).filter(Boolean).join(',')
+  const boundUserId = boundUser?.id ?? null
   const protocolOptions = useMemo(
     () => ALL_PROTOCOLS.filter((protocol) => availableProtocols.includes(protocol)),
     [availableProtocolsKey],
@@ -147,7 +151,7 @@ export default function UnlockCodeCreateDialog({
   ])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || boundUserId != null) return
     let cancelled = false
     setClientsLoading(true)
     void getConfigs(false)
@@ -179,7 +183,7 @@ export default function UnlockCodeCreateDialog({
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, boundUserId])
 
   const profileBound = selectedClients.length > 0
 
@@ -256,11 +260,12 @@ export default function UnlockCodeCreateDialog({
       }
       const created = await createUnlockCode({
         grant_days: parsedGrantDays,
-        protocols: protocolsForCreate,
-        mode,
-        max_redemptions: mode === 'single' ? 1 : parsedMaxRedemptions,
+        protocols: boundUser ? protocolOptions : protocolsForCreate,
+        mode: boundUser ? 'single' : mode,
+        max_redemptions: boundUser ? 1 : mode === 'single' ? 1 : parsedMaxRedemptions,
         code_expires_at: toEndOfDayIso(codeExpiresAt),
-        allowed_client_names: selectedClients,
+        allowed_client_names: boundUser ? undefined : selectedClients,
+        target_user_id: boundUser ? boundUser.id : undefined,
         send_to_user_id: sendToTelegram && targetUserId != null ? targetUserId : undefined,
       })
       setCreatedCode(created)
@@ -300,9 +305,11 @@ export default function UnlockCodeCreateDialog({
             Создание unlock-ключа
           </DialogTitle>
           <DialogDescription>
-            {profileBound
-              ? 'Ключ привязан к профилю клиента: при активации продлевается общий срок по всем протоколам профиля.'
-              : 'Без списка клиентов ключ может активировать любой клиент с пересечением по выбранным протоколам.'}
+            {boundUser
+              ? `Ключ выдан абоненту ${boundUser.username}: при активации продлевается его срок и все профили на всех узлах.`
+              : profileBound
+                ? 'Ключ привязан к профилю клиента: при активации продлевается общий срок по всем протоколам профиля.'
+                : 'Без списка клиентов ключ может активировать любой клиент с пересечением по выбранным протоколам.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -323,20 +330,28 @@ export default function UnlockCodeCreateDialog({
                 <Badge variant="secondary">{createdCode.mode === 'multi' ? 'multi' : 'single'}</Badge>
                 <Badge variant="outline">{createdCode.grant_days} дн.</Badge>
                 <Badge variant="outline">Активаций: {createdCode.max_redemptions}</Badge>
-                {(createdCode.allowed_client_names?.length ?? 0) > 0 ? (
-                  <Badge variant="outline">Профиль</Badge>
+                {createdCode.target_user_id ? (
+                  <Badge variant="outline">
+                    Абонент: {createdCode.target_user_name ?? createdCode.target_user_id}
+                  </Badge>
                 ) : (
-                  createdCode.protocols.map((protocol) => (
-                    <Badge key={protocol} variant="outline">
-                      {protocolLabel(protocol as UnlockCodeProtocol)}
+                  <>
+                    {(createdCode.allowed_client_names?.length ?? 0) > 0 ? (
+                      <Badge variant="outline">Профиль</Badge>
+                    ) : (
+                      createdCode.protocols.map((protocol) => (
+                        <Badge key={protocol} variant="outline">
+                          {protocolLabel(protocol as UnlockCodeProtocol)}
+                        </Badge>
+                      ))
+                    )}
+                    <Badge variant="outline">
+                      {(createdCode.allowed_client_names?.length ?? 0) > 0
+                        ? `Клиенты: ${createdCode.allowed_client_names!.join(', ')}`
+                        : 'Клиенты: любой'}
                     </Badge>
-                  ))
+                  </>
                 )}
-                <Badge variant="outline">
-                  {(createdCode.allowed_client_names?.length ?? 0) > 0
-                    ? `Клиенты: ${createdCode.allowed_client_names!.join(', ')}`
-                    : 'Клиенты: любой'}
-                </Badge>
                 <Badge variant="outline">До {formatDate(createdCode.code_expires_at)}</Badge>
                 {sentTelegram ? <Badge variant="success">Отправлен в Telegram</Badge> : null}
               </div>
@@ -368,9 +383,18 @@ export default function UnlockCodeCreateDialog({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Режим</Label>
-            <div className="grid grid-cols-2 gap-2">
+          {boundUser && (
+            <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+              Абонент:{' '}
+              <span className="font-medium text-foreground">{boundUser.username}</span> · ключ
+              активируется только им и продлевает его срок со всеми профилями
+            </div>
+          )}
+
+          {!boundUser && (
+            <div className="space-y-2">
+              <Label>Режим</Label>
+              <div className="grid grid-cols-2 gap-2">
               <Button
                 type="button"
                 variant={mode === 'single' ? 'default' : 'outline'}
@@ -393,8 +417,9 @@ export default function UnlockCodeCreateDialog({
               </Button>
             </div>
           </div>
+          )}
 
-          {hasMultiMode && (
+          {!boundUser && hasMultiMode && (
             <div className="space-y-2">
               <Label htmlFor="unlock-max-redemptions">Макс. активаций</Label>
               <Input
@@ -408,9 +433,10 @@ export default function UnlockCodeCreateDialog({
             </div>
           )}
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="unlock-client-search">Клиенты (опционально)</Label>
+          {!boundUser && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="unlock-client-search">Клиенты (опционально)</Label>
               <span className="text-xs text-muted-foreground">{clientsHint}</span>
             </div>
             {selectedClients.length > 0 && (
@@ -479,8 +505,9 @@ export default function UnlockCodeCreateDialog({
               )}
             </div>
           </div>
+          )}
 
-          {!profileBound && (
+          {!boundUser && !profileBound && (
             <div className="space-y-2">
               <Label>Протоколы</Label>
               <div className="grid gap-2 sm:grid-cols-3">

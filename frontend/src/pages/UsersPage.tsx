@@ -1108,9 +1108,7 @@ export default function UsersPage() {
           }}
           availableProtocols={unlockProtocols}
           initialProtocols={unlockProtocols}
-          initialClientNames={[
-            unlockDialogUser.client_base_name ?? unlockDialogUser.owned_config_base_name ?? '',
-          ].filter(Boolean)}
+          boundUser={{ id: unlockDialogUser.id, username: unlockDialogUser.username }}
           telegramBound={Boolean(unlockDialogUser.telegram_id)}
           targetUserId={unlockDialogUser.id}
           onCreated={() => void reloadUsers()}

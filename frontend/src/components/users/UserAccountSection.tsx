@@ -416,9 +416,7 @@ export default function UserAccountSection({ user, onSave, onDelete, onRefresh }
           onOpenChange={setUnlockOpen}
           availableProtocols={unlockProtocols}
           initialProtocols={unlockProtocols}
-          initialClientNames={[
-            user.client_base_name ?? user.owned_config_base_name ?? '',
-          ].filter(Boolean)}
+          boundUser={{ id: user.id, username: user.username }}
           telegramBound={Boolean(user.telegram_id)}
           targetUserId={user.id}
           onCreated={() => onRefresh()}

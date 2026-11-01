@@ -14,6 +14,8 @@ interface UnlockCodeCreateInput {
   max_redemptions?: number
   code_expires_at?: string | null
   allowed_client_names?: string[]
+  /** Абонент, которому выдан ключ (режим «ключ для абонента»). */
+  target_user_id?: number
   send_to_user_id?: number
 }
 

@@ -787,19 +787,24 @@ export default function SubscriptionPage() {
                           {code.grant_days} дн. · активаций {redeemed} / {code.max_redemptions}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {(code.allowed_client_names?.length ?? 0) > 0
-                            ? 'Профиль'
-                            : `Протоколы: ${protocolList || '—'}`}{' '}
+                          {code.target_user_id
+                            ? 'Ключ для абонента'
+                            : (code.allowed_client_names?.length ?? 0) > 0
+                              ? 'Профиль'
+                              : `Протоколы: ${protocolList || '—'}`}{' '}
                           · создан {formatDateTime(code.created_at)}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           Истекает: {formatDateTime(code.code_expires_at)}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Клиенты:{' '}
-                          {(code.allowed_client_names?.length ?? 0) > 0
-                            ? code.allowed_client_names!.join(', ')
-                            : 'любой'}
+                          {code.target_user_id
+                            ? `Абонент: ${code.target_user_name ?? code.target_user_id}`
+                            : `Клиенты: ${
+                                (code.allowed_client_names?.length ?? 0) > 0
+                                  ? code.allowed_client_names!.join(', ')
+                                  : 'любой'
+                              }`}
                         </p>
                         {redemptions.length > 0 && (
                           <div className="space-y-1 pt-1">

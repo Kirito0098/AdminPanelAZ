@@ -1713,6 +1713,8 @@ export interface UnlockCodeRecord {
   redemption_count?: number
   exhausted?: boolean
   allowed_client_names?: string[]
+  target_user_id?: number | null
+  target_user_name?: string | null
   redemptions?: UnlockCodeRedemptionRecord[]
   code_expires_at: string | null
   created_by_user_id: number | null
