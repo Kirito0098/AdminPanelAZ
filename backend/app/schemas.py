@@ -300,6 +300,14 @@ class UserExtendRequest(BaseModel):
     days: int = Field(ge=1, le=3650)
 
 
+class UserHistoryEntry(BaseModel):
+    id: int
+    actor_username: str | None = None
+    action: str
+    details: str | None = None
+    created_at: datetime
+
+
 class UserResponse(UserBase):
     id: int
     must_change_password: bool

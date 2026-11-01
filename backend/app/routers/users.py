@@ -20,6 +20,7 @@ from app.models import (
     Node,
     User,
     UserAccessRequest,
+    UserActionLog,
     UserNodeAssignment,
     UserRole,
     VpnConfig,
@@ -60,6 +61,7 @@ from app.schemas import (
     UserProvisioningUpdate,
     UserResumeRequest,
     UserExtendRequest,
+    UserHistoryEntry,
     UserResponse,
     UserStatsResponse,
     UserSuspendRequest,
@@ -972,6 +974,49 @@ def bulk_nodes_report(
     )
 
 
+def _record_user_history(db, *, action, current_user, user, request, details=None):
+    """Безусловная запись действия по абоненту (не зависит от audit_log_enabled)."""
+    log_action(
+        db,
+        action=action,
+        user_id=current_user.id,
+        username=current_user.username,
+        remote_addr=(
+            ip_restriction_service.get_client_ip(request) if request is not None else None
+        ),
+        details=details or f"target={user.username}",
+        target_user_id=user.id,
+    )
+
+
+@router.get("/{user_id}/history", response_model=list[UserHistoryEntry])
+def user_history(
+    user_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    if db.get(User, user_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    rows = (
+        db.query(UserActionLog)
+        .filter(UserActionLog.target_user_id == user_id)
+        .order_by(UserActionLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        UserHistoryEntry(
+            id=r.id,
+            actor_username=r.username,
+            action=r.action,
+            details=r.details,
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
+
+
 @router.patch("/{user_id}", response_model=UserResponse)
 def update_user(
     user_id: int,
@@ -1139,6 +1184,13 @@ def update_user(
         else:
             normalized = normalize_policy(payload.visible_vpn_profiles, strict=True)
             user.visible_vpn_profiles = policy_to_json(normalized)
+    if "note" in payload.model_fields_set:
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Только администратор может менять заметку",
+            )
+        user.note = (payload.note or "").strip() or None
 
     cascade_warning: str | None = None
     if access_until_updated:
@@ -1172,19 +1224,15 @@ def update_user(
         )
     if payload.password and should_scrub_env_after_password_change(user.username):
         scrub_admin_bootstrap_secret_from_env()
-    if settings.audit_log_enabled and (
+    if (
         payload.password
         or payload.role is not None
         or payload.is_active is not None
         or access_until_updated
+        or "note" in payload.model_fields_set
     ):
-        log_action(
-            db,
-            action="user_update",
-            user_id=current_user.id,
-            username=current_user.username,
-            remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"target={user.username}",
+        _record_user_history(
+            db, action="user_update", current_user=current_user, user=user, request=request
         )
     response = UserResponse.model_validate(user)
     if cascade_warning:
@@ -1224,15 +1272,9 @@ def suspend_user(
             if user.suspend_reason_visible and user.suspend_reason:
                 text += f": {user.suspend_reason}"
             send_tg_message(bot_token, user.telegram_id, text)
-    if settings.audit_log_enabled:
-        log_action(
-            db,
-            action="user_suspend",
-            user_id=current_user.id,
-            username=current_user.username,
-            remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"target={user.username}",
-        )
+    _record_user_history(
+        db, action="user_suspend", current_user=current_user, user=user, request=request
+    )
     return UserResponse.model_validate(user)
 
 
@@ -1261,15 +1303,9 @@ def resume_user(
         bot_token = _get_setting(db, "telegram_bot_token")
         if bot_token:
             send_tg_message(bot_token, user.telegram_id, "Доступ возобновлён.")
-    if settings.audit_log_enabled:
-        log_action(
-            db,
-            action="user_resume",
-            user_id=current_user.id,
-            username=current_user.username,
-            remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"target={user.username}",
-        )
+    _record_user_history(
+        db, action="user_resume", current_user=current_user, user=user, request=request
+    )
     return UserResponse.model_validate(user)
 
 
@@ -1291,6 +1327,9 @@ def extend_user_access(
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
     new_until = compute_extended_access_until(get_user_access_until(user), payload.days)
     set_user_access_until(db, user, new_until, actor=current_user.username)
+    _record_user_history(
+        db, action="user_extend", current_user=current_user, user=user, request=request
+    )
     return UserResponse.model_validate(user)
 
 
@@ -1313,15 +1352,13 @@ def reset_user_traffic_counter_endpoint(
 
     reset_user_traffic_counter(db, user, actor=current_user.username)
     db.refresh(user)
-    if settings.audit_log_enabled:
-        log_action(
-            db,
-            action="user_traffic_counter_reset",
-            user_id=current_user.id,
-            username=current_user.username,
-            remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"target={user.username}",
-        )
+    _record_user_history(
+        db,
+        action="user_traffic_counter_reset",
+        current_user=current_user,
+        user=user,
+        request=request,
+    )
     return UserResponse.model_validate(user)
 
 
@@ -1342,6 +1379,9 @@ def grace_cleanup_user(
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
     result = run_grace_cleanup(db, user, actor=current_user)
+    _record_user_history(
+        db, action="user_grace_cleanup", current_user=current_user, user=user, request=None
+    )
     return {"ok": True, **result}
 
 
@@ -1534,15 +1574,14 @@ def update_provisioning(
     )
     db.refresh(user)
 
-    if settings.audit_log_enabled:
-        log_action(
-            db,
-            action="user_provision_update",
-            user_id=admin.id,
-            username=admin.username,
-            remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"target={user.username}, indexes={indexes}, protocols={protocols}",
-        )
+    _record_user_history(
+        db,
+        action="user_provision_update",
+        current_user=admin,
+        user=user,
+        request=request,
+        details=f"target={user.username}, indexes={indexes}, protocols={protocols}",
+    )
     return UserProvisionedResponse(user=_user_summary(user, [n.id for n in nodes]), task_id=task.id)
 
 
