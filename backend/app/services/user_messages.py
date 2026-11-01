@@ -73,13 +73,18 @@ def deliver_to_user(db: Session, *, user: User, text: str) -> tuple[bool, str | 
     token = (_get_setting(db, SETTING_BOT_TOKEN, "") or "").strip()
     if not token:
         return False, "не задан токен бота"
+    from app.services.feature_guards import get_feature_service
+
+    if not get_feature_service().is_enabled("telegram"):
+        return False, "модуль Telegram выключен"
     ok, code = send_tg_message_result(token, str(user.telegram_id), f"{REPLY_PREFIX}\n{text}")
     if ok:
         return True, None
     if code == 403:
         return False, "бот заблокирован абонентом"
     if code is None:
-        return False, "модуль Telegram выключен"
+        # Сеть или узел-релей недоступны: сообщение сохранено, можно отправить повторно.
+        return False, "Telegram недоступен — проверьте сеть или узел-релей"
     return False, f"Telegram вернул ошибку {code}"
 
 

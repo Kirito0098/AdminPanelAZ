@@ -78,6 +78,13 @@ def send_message_to_user(
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
+    # Префикс «Сообщение от администратора:» тоже уходит в Telegram — учитываем лимит.
+    limit = chat.MESSAGE_MAX_LEN - len(chat.REPLY_PREFIX) - 1
+    if len(payload.text) > limit:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Текст длиннее {limit} символов — не поместится в сообщение Telegram",
+        )
     message, delivered, warning = chat.send_admin_reply(
         db, user=user, admin=admin, text=payload.text
     )

@@ -153,6 +153,37 @@ def test_reply_kept_when_bot_blocked(api, db, subscriber, monkeypatch):
     assert db.query(UserMessage).count() == 1
 
 
+def test_reply_kept_when_relay_unreachable(api, db, subscriber, monkeypatch):
+    """Сеть/узел-релей недоступны: сообщение сохранено, причина внятная."""
+    monkeypatch.setattr(
+        "app.services.user_messages._get_setting", lambda db, key, default=None: "bot-token"
+    )
+    monkeypatch.setattr("app.services.user_messages.send_tg_message_result", lambda *a, **k: (False, None))
+
+    body = api.post(f"/api/messages/{subscriber.id}", json={"text": "Ответ"}).json()
+
+    assert body["delivered"] is False
+    assert "узел-релей" in body["warning"]
+    assert db.query(UserMessage).count() == 1
+
+
+def test_reply_reports_disabled_telegram_module(api, db, subscriber, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "app.services.user_messages._get_setting", lambda db, key, default=None: "bot-token"
+    )
+    monkeypatch.setattr(
+        "app.services.feature_guards.get_feature_service",
+        lambda: SimpleNamespace(is_enabled=lambda key: False),
+    )
+
+    body = api.post(f"/api/messages/{subscriber.id}", json={"text": "Ответ"}).json()
+
+    assert body["delivered"] is False
+    assert body["warning"] == "модуль Telegram выключен"
+
+
 def test_reply_requires_existing_user(api):
     assert api.post("/api/messages/9999", json={"text": "нет"}).status_code == 404
 
@@ -160,6 +191,14 @@ def test_reply_requires_existing_user(api):
 def test_reply_validates_length(api, subscriber):
     assert api.post(f"/api/messages/{subscriber.id}", json={"text": "x" * 4097}).status_code == 422
     assert api.post(f"/api/messages/{subscriber.id}", json={"text": ""}).status_code == 422
+
+
+def test_reply_rejects_text_that_does_not_fit_with_prefix(api, subscriber):
+    # 4096 символов проходят Pydantic, но с префиксом «Сообщение от администратора:» не влезают.
+    response = api.post(f"/api/messages/{subscriber.id}", json={"text": "x" * 4096})
+
+    assert response.status_code == 422, response.text
+    assert "символов" in response.json()["detail"]
 
 
 def test_messages_cascade_on_user_delete(db, subscriber):
