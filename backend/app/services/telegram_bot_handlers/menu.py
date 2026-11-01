@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from app.services.feature_guards import get_feature_service
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import (
@@ -18,6 +20,16 @@ from app.services.telegram_bot_handlers import settings_fsm
 from app.services.user_access_requests import _accept_requests
 
 _ADMIN_ACTIONS = frozenset({"status", "settings", "nodes", "cidr", "warper", "awg2", "unlock"})
+
+logger = logging.getLogger(__name__)
+
+
+def _unlock_codes_enabled() -> bool:
+    try:
+        return get_feature_service().is_enabled("unlock_codes")
+    except Exception:  # noqa: BLE001 — раскладка меню не должна падать из-за чтения тоглов
+        logger.warning("menu: unlock_codes feature check failed", exc_info=True)
+        return False
 
 
 def _linked_user_menu_visible(ctx: BotContext) -> bool:
@@ -79,10 +91,11 @@ def _more_menu_row_actions(ctx: BotContext) -> list[list[str]]:
 def build_linked_reply_keyboard(*, is_admin: bool = False) -> dict:
     """Reply-клавиатура привязанного аккаунта — раскладка зависит от роли.
 
-    Частые действия всегда на экране (2 кнопки в ряд), редкие убраны в «Ещё»:
-    у абонента это «Продлить по ключу» и «Запросить ещё конфиг», у админа —
-    CIDR/WARP/AWG2 и коды доступа. Используется и после одобрения заявки, чтобы
-    устаревшая кнопка «Запросить доступ» пропала.
+    У абонента меню без «Ещё»: частые действия (Конфиги, Трафик) и то, что раньше
+    лежало в «Ещё» (Продлить по ключу, Запросить ещё конфиг, Справка) — прямо на
+    нижней панели. У админа редкие разделы (CIDR/WARP/AWG2/коды) остаются в «Ещё».
+    Используется и после одобрения заявки, чтобы устаревшая кнопка «Запросить
+    доступ» пропала.
     """
     if is_admin:
         rows = [
@@ -91,9 +104,14 @@ def build_linked_reply_keyboard(*, is_admin: bool = False) -> dict:
             [reply_button(i18n.BTN_MENU_CONFIGS), reply_button(i18n.BTN_MENU_MORE)],
         ]
     else:
+        actions_row = []
+        if _unlock_codes_enabled():
+            actions_row.append(reply_button(i18n.BTN_REDEEM_UNLOCK))
+        actions_row.append(reply_button(i18n.BTN_REQUEST_MORE_CONFIG))
         rows = [
             [reply_button(i18n.BTN_MENU_CONFIGS), reply_button(i18n.BTN_MENU_TRAFFIC)],
-            [reply_button(i18n.BTN_MENU_MORE)],
+            actions_row,
+            [reply_button(i18n.BTN_MENU_HELP)],
         ]
     return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
 

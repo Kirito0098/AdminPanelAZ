@@ -279,12 +279,25 @@ def test_admin_reply_layout_puts_admin_sections_first():
     ]
 
 
-def test_user_reply_layout_keeps_frequent_actions_on_screen():
+def test_user_reply_layout_keeps_frequent_actions_on_screen(monkeypatch):
+    _features(monkeypatch)
     keyboard = menu.build_linked_reply_keyboard(is_admin=False)
 
     assert _keyboard_rows(keyboard) == [
         [i18n.BTN_MENU_CONFIGS, i18n.BTN_MENU_TRAFFIC],
-        [i18n.BTN_MENU_MORE],
+        [i18n.BTN_REDEEM_UNLOCK, i18n.BTN_REQUEST_MORE_CONFIG],
+        [i18n.BTN_MENU_HELP],
+    ]
+
+
+def test_user_reply_layout_without_unlock_codes(monkeypatch):
+    _features(monkeypatch, enabled={"routing"})
+    keyboard = menu.build_linked_reply_keyboard(is_admin=False)
+
+    assert _keyboard_rows(keyboard) == [
+        [i18n.BTN_MENU_CONFIGS, i18n.BTN_MENU_TRAFFIC],
+        [i18n.BTN_REQUEST_MORE_CONFIG],
+        [i18n.BTN_MENU_HELP],
     ]
 
 

@@ -190,7 +190,7 @@ START_UNLINKED_WITH_REQUESTS = (
 START_LINKED = (
     "{title}\n\n"
     "Привет, <b>{username}</b> · {role_display}\n\n"
-    "<i>Разделы — кнопками внизу; остальное в «⋯ Ещё».</i>"
+    "<i>Разделы — кнопками внизу чата.</i>"
 )
 START_ROLE_DISPLAY = {
     "admin": "🔑 Администратор",
@@ -204,7 +204,6 @@ HELP_SECTION_MAIN = "<b>📌 Основное</b>"
 HELP_LINES_MAIN = (
     "• /start — главное меню",
     "• Кнопки <b>Конфиги</b> и <b>Трафик</b> — внизу чата",
-    "• <b>⋯ Ещё</b> — помощь и разделы admin",
     "• /help — эта справка",
     "• /link &lt;код&gt; — привязка Telegram",
 )
