@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 import { LogOut, Menu, Moon, Radio, Shield, Sun, User } from 'lucide-react'
 import NodeSelector from '@/components/NodeSelector'
@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import { DOCS, FEEDBACK_URL } from '@/lib/docsUrls'
+import { getMessageUnreadCount } from '@/api/messages'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotificationCenter } from '@/context/NotificationCenterContext'
@@ -90,6 +91,26 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { theme, toggleTheme } = useTheme()
   // Живой счётчик из общего SSE-потока: не застывает до перезагрузки страницы.
   const { pendingRequestsCount } = useNotificationCenter()
+  const [messagesUnread, setMessagesUnread] = useState(0)
+  useEffect(() => {
+    if (!isEnabled('user_messaging')) return
+    let cancelled = false
+    const tick = async () => {
+      if (document.hidden) return
+      try {
+        const { count } = await getMessageUnreadCount()
+        if (!cancelled) setMessagesUnread(count)
+      } catch {
+        // Счётчик не критичен: страница «Сообщения» работает и без него.
+      }
+    }
+    void tick()
+    const timer = window.setInterval(() => void tick(), 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [isEnabled])
   const initials = user?.username?.slice(0, 2).toUpperCase() ?? '?'
   const isAdmin = user?.role === 'admin'
   const profileItem: SidebarNavItem = {
@@ -105,9 +126,11 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   visibleGroups = visibleGroups.map((group) => ({
     ...group,
     items: group.items.map((item) =>
-      item.to === '/users'
-        ? { ...item, badge: pendingRequestsCount }
-        : item,
+      item.to === '/messages'
+        ? { ...item, badge: messagesUnread }
+        : item.to === '/users'
+          ? { ...item, badge: pendingRequestsCount }
+          : item,
     ),
   }))
 

@@ -9,6 +9,7 @@ import {
   Globe,
   HardDrive,
   LayoutDashboard,
+  MessageSquare,
   Network,
   Send,
   Server,
@@ -47,6 +48,14 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
         end: false,
         adminOnly: true,
         featureKey: 'user_provisioning',
+      },
+      {
+        to: '/messages',
+        label: 'Сообщения',
+        icon: MessageSquare,
+        end: false,
+        adminOnly: true,
+        featureKey: 'user_messaging',
       },
       {
         to: '/subscription',
