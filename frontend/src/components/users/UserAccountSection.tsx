@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import { Layers, LogIn, Phone, ShieldCheck, StickyNote, Trash2, Copy } from 'lucide-react'
+import { KeyRound, Layers, LogIn, Phone, ShieldCheck, StickyNote, Trash2, Copy } from 'lucide-react'
 import { createUserTelegramLinkCode } from '@/api/users'
 import { ApiError, updateUser } from '@/api/client'
+import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -112,6 +114,17 @@ function MiniAppRightsSection({
 
 export default function UserAccountSection({ user, onSave, onDelete, onRefresh }: UserAccountSectionProps) {
   const { error: notifyError, success } = useNotifications()
+  const { isEnabled } = useFeatureModules()
+  const [unlockOpen, setUnlockOpen] = useState(false)
+  const unlockProtocols = (
+    [
+      { id: 'openvpn', keys: ['openvpn'] },
+      { id: 'wireguard', keys: ['wireguard', 'amneziawg'] },
+      { id: 'amneziawg2', keys: ['awg2'] },
+    ] as const
+  )
+    .filter((p) => p.keys.some((k) => isEnabled(k)))
+    .map((p) => p.id)
   const [panelLogin, setPanelLogin] = useState(Boolean(user.panel_login_enabled))
   const [password, setPassword] = useState('')
   const [linkCode, setLinkCode] = useState<string | null>(null)
@@ -364,6 +377,22 @@ export default function UserAccountSection({ user, onSave, onDelete, onRefresh }
         </div>
       </UserSection>
 
+      {isEnabled('unlock_codes') && unlockProtocols.length > 0 ? (
+        <UserSection
+          icon={KeyRound}
+          title="Ключ продления"
+          description="Создать unlock-ключ для абонента и отправить в Telegram, если он привязан."
+        >
+          <Button
+            type="button"
+            onClick={() => setUnlockOpen(true)}
+            className="w-full sm:w-auto"
+          >
+            <KeyRound size={15} /> Создать ключ
+          </Button>
+        </UserSection>
+      ) : null}
+
       <UserSection
         icon={Trash2}
         tone="danger"
@@ -380,6 +409,21 @@ export default function UserAccountSection({ user, onSave, onDelete, onRefresh }
           Удалить абонента
         </Button>
       </UserSection>
+
+      {isEnabled('unlock_codes') && unlockProtocols.length > 0 ? (
+        <UnlockCodeCreateDialog
+          open={unlockOpen}
+          onOpenChange={setUnlockOpen}
+          availableProtocols={unlockProtocols}
+          initialProtocols={unlockProtocols}
+          initialClientNames={[
+            user.client_base_name ?? user.owned_config_base_name ?? '',
+          ].filter(Boolean)}
+          telegramBound={Boolean(user.telegram_id)}
+          targetUserId={user.id}
+          onCreated={() => onRefresh()}
+        />
+      ) : null}
 
       <ConfirmDialog
         open={deleteOpen}
