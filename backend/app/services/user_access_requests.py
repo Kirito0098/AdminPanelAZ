@@ -390,6 +390,8 @@ def _admin_request_text(db: Session, request: UserAccessRequest) -> str:
     lines.append(f"Telegram ID: <code>{escape(request.telegram_id, quote=False)}</code>")
     if request.user_note:
         lines.append(f"Комментарий: {escape(request.user_note, quote=False)}")
+    if request.receipt_file_id:
+        lines.append("Чек: приложен")
     if history:
         lines.append(f"История: {escape(history, quote=False)}")
     return "\n".join(lines)
@@ -443,6 +445,31 @@ def _notify_admins_new_request(db: Session, request: UserAccessRequest) -> None:
         db.commit()
 
 
+async def _edit_request_card(
+    token: str, ref: dict[str, Any], text: str, keyboard: dict[str, Any]
+) -> None:
+    """Отредактировать карточку заявки, не зная её типа: текстовая или с фото-чеком."""
+    payload = {"chat_id": str(ref["chat_id"]), "message_id": int(ref["message_id"])}
+    result = await telegram_api.call_bot_api_result(
+        token,
+        "editMessageText",
+        payload={
+            **payload,
+            "text": text,
+            "parse_mode": "HTML",
+            "link_preview_options": {"is_disabled": True},
+            "reply_markup": keyboard,
+        },
+    )
+    if result.ok:
+        return
+    await telegram_api.call_bot_api_result(
+        token,
+        "editMessageCaption",
+        payload={**payload, "caption": text, "parse_mode": "HTML", "reply_markup": keyboard},
+    )
+
+
 async def refresh_admin_request_card(db: Session, request: UserAccessRequest) -> None:
     """Обновить текст уже отправленных админам карточек (сохранив кнопки заявки)."""
     token = _bot_token(db)
@@ -455,28 +482,53 @@ async def refresh_admin_request_card(db: Session, request: UserAccessRequest) ->
     keyboard = _admin_request_keyboard(db, request)
     for ref in refs:
         try:
-            if request.receipt_file_id:
-                await telegram_api.call_bot_api(
-                    token,
-                    "editMessageCaption",
-                    payload={
-                        "chat_id": str(ref["chat_id"]),
-                        "message_id": int(ref["message_id"]),
-                        "caption": text,
-                        "parse_mode": "HTML",
-                        "reply_markup": keyboard,
-                    },
-                )
-            else:
-                await edit_message_text(
-                    token,
-                    str(ref["chat_id"]),
-                    int(ref["message_id"]),
-                    text,
-                    reply_markup=keyboard,
-                )
+            await _edit_request_card(token, ref, text, keyboard)
         except Exception as exc:
             logger.warning("refresh request card %s failed: %s", ref, exc)
+
+
+async def send_receipt_card_to_admins(db: Session, request: UserAccessRequest) -> None:
+    """Чек пришёл после текстовой карточки: заменяем её фото-карточкой с кнопками решения.
+
+    Старое сообщение удаляем (best-effort), новое сохраняем в `admin_message_refs`, чтобы
+    дальнейшие правки и решение по заявке шли уже по фото-карточке.
+    """
+    token = _bot_token(db)
+    if not token or not request.receipt_file_id:
+        return
+    refs = json.loads(request.admin_message_refs or "[]")
+    if not refs:
+        return
+    text = _admin_request_text(db, request)
+    keyboard = _admin_request_keyboard(db, request)
+    new_refs: list[dict[str, Any]] = []
+    for ref in refs:
+        chat_id = str(ref["chat_id"])
+        result = await telegram_api.call_bot_api(
+            token,
+            "sendPhoto",
+            payload={
+                "chat_id": chat_id,
+                "photo": request.receipt_file_id,
+                "caption": text,
+                "parse_mode": "HTML",
+                "reply_markup": keyboard,
+            },
+        )
+        if not (isinstance(result, dict) and result.get("message_id") is not None):
+            # Фото не ушло — оставляем старую карточку с кнопками рабочей.
+            logger.warning("receipt card send failed for chat %s", chat_id)
+            new_refs.append(ref)
+            continue
+        new_refs.append({"chat_id": chat_id, "message_id": int(result["message_id"])})
+        await telegram_api.call_bot_api(
+            token,
+            "deleteMessage",
+            payload={"chat_id": chat_id, "message_id": int(ref["message_id"])},
+        )
+    request.admin_message_refs = json.dumps(new_refs, ensure_ascii=False)
+    db.add(request)
+    db.commit()
 
 
 # Не чаще одного запроса getChat на telegram_id в 10 минут: старые заявки
@@ -1078,13 +1130,7 @@ async def sync_admin_request_messages(db: Session, req: UserAccessRequest, *, te
     refs = json.loads(req.admin_message_refs or "[]")
     for ref in refs:
         try:
-            await edit_message_text(
-                token,
-                str(ref["chat_id"]),
-                int(ref["message_id"]),
-                text,
-                reply_markup={"inline_keyboard": []},
-            )
+            await _edit_request_card(token, ref, text, {"inline_keyboard": []})
         except Exception as exc:
             logger.warning("sync request message %s failed: %s", ref, exc)
 

@@ -265,6 +265,12 @@ export async function listRequests(params?: { status?: string; type?: string }) 
   return apiFetch<AccessRequestResponse[]>(`/users/requests${qs.toString() ? `?${qs}` : ''}`)
 }
 
+/** GET /users/requests/{id}/receipt — превью чека оплаты (JPEG). */
+export async function getRequestReceipt(requestId: number) {
+  const response = await apiFetchResponse(`/users/requests/${requestId}/receipt`)
+  return response.blob()
+}
+
 /** POST /users/requests/{id}/approve — одобрить заявку. */
 export async function approveRequest(requestId: number, data: ApproveRequest) {
   return apiFetch<AccessRequestResponse>(`/users/requests/${requestId}/approve`, {

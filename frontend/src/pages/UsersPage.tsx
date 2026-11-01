@@ -27,6 +27,7 @@ import {
   downloadBulkNodesReport,
   extendUserAccess,
   getProvisioning,
+  getRequestReceipt,
   listPresets,
   listRequests,
   approveRequest,
@@ -140,6 +141,8 @@ export default function UsersPage() {
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [requestsOpen, setRequestsOpen] = useState(false)
+  // Превью чека заявки: blob-URL живёт до закрытия диалога.
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null)
   const [requests, setRequests] = useState<AccessRequestResponse[]>([])
   const [requestsLoading, setRequestsLoading] = useState(false)
   const [focusRequestId, setFocusRequestId] = useState<number | null>(null)
@@ -608,6 +611,18 @@ export default function UsersPage() {
     }
   }
 
+  const handleOpenReceipt = async (requestId: number) => {
+    try {
+      const blob = await getRequestReceipt(requestId)
+      setReceiptUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev)
+        return URL.createObjectURL(blob)
+      })
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось открыть чек')
+    }
+  }
+
   const handleSuspend = async (user: User, data: SuspendUserPayload) => {
     setCardBusyId(user.id)
     try {
@@ -1064,6 +1079,27 @@ export default function UsersPage() {
         />
       )}
 
+      {receiptUrl && (
+        <AppDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              URL.revokeObjectURL(receiptUrl)
+              setReceiptUrl(null)
+            }
+          }}
+          title="Чек оплаты"
+          description="Фото, которое прислал абонент в Telegram"
+          size="xl"
+        >
+          <img
+            src={receiptUrl}
+            alt="Чек оплаты"
+            className="mx-auto max-h-[70dvh] w-auto rounded-lg object-contain"
+          />
+        </AppDialog>
+      )}
+
       {unlockDialogUser && (
         <UnlockCodeCreateDialog
           open={unlockDialogUser != null}
@@ -1237,6 +1273,16 @@ export default function UsersPage() {
                         <p className="text-xs text-muted-foreground">{metaParts.join(' · ')}</p>
                       </div>
                       <div className="flex gap-1">
+                        {r.receipt_file_id && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void handleOpenReceipt(r.id)}
+                          >
+                            Чек
+                          </Button>
+                        )}
                         <Button
                           type="button"
                           size="sm"

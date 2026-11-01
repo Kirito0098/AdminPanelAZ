@@ -34,6 +34,7 @@ from app.services.user_access_requests import (
     reject_request,
     submit_access_request,
     sync_admin_request_messages,
+    send_receipt_card_to_admins,
 )
 
 SETTING_BOT_TOKEN = "telegram_bot_token"
@@ -180,7 +181,7 @@ async def handle_request_photo(ctx: BotContext, message: dict) -> bool:
     if req is None:
         return False
     try:
-        attach_receipt_from_update(
+        req = attach_receipt_from_update(
             ctx.db,
             request_id=req.id,
             message=message,
@@ -195,6 +196,8 @@ async def handle_request_photo(ctx: BotContext, message: dict) -> bool:
     except ValueError as exc:
         await send_message(ctx.bot_token, ctx.chat_id, str(exc))
         return True
+    # Чек пришёл после карточки: у админов появляется фото-карточка с кнопками решения.
+    await send_receipt_card_to_admins(ctx.db, req)
     await send_message(ctx.bot_token, ctx.chat_id, i18n.REQUEST_RECEIPT_OK)
     return True
 
