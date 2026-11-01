@@ -4,6 +4,8 @@ import type {
   ApproveRequest,
   BulkNodesPreviewResponse,
   BulkNodesRequest,
+  BulkUsersRequest,
+  BulkUsersResult,
   PresetCreate,
   PresetResponse,
   PresetUpdate,
@@ -12,6 +14,7 @@ import type {
   User,
   UserFromExistingCreate,
   UserFromExistingResponse,
+  UserHistoryEntry,
   UserProvisionedCreate,
   UserProvisionedResponse,
   UserProvisioningApply,
@@ -299,4 +302,19 @@ export async function startBulkNodes(body: BulkNodesRequest) {
 /** GET /users/bulk/nodes/tasks/{task_id}/report — JSON-отчёт по завершённой задаче. */
 export async function downloadBulkNodesReport(taskId: string) {
   return apiFetchResponse(`/users/bulk/nodes/tasks/${encodeURIComponent(taskId)}/report`)
+}
+
+/* ------------------- Массовые операции над абонентами ------------------- */
+
+/** POST /users/bulk — массовая операция (extend/suspend/resume/limit/delete). */
+export async function bulkUsers(data: BulkUsersRequest) {
+  return apiFetch<BulkUsersResult>('/users/bulk', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+/** GET /users/{id}/history — история действий по абоненту. */
+export async function getUserHistory(userId: number, limit = 50) {
+  return apiFetch<UserHistoryEntry[]>(`/users/${userId}/history?limit=${limit}`)
 }

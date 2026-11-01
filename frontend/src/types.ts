@@ -213,6 +213,9 @@ export interface User {
   traffic_limit_bytes?: number | null
   traffic_counter_reset_at?: string | null
   traffic_limit_blocked?: boolean
+  traffic_consumed_bytes?: number
+  last_seen_at?: string | null
+  note?: string | null
 }
 
 /** Состояние закрытого доступа для портала и Mini App (спека 7.4). */
@@ -254,6 +257,7 @@ export interface UserUpdatePayload {
   panel_login_enabled?: boolean
   /** Stage 3: лимит трафика пользователя (null — снять ограничение). */
   traffic_limit_bytes?: number | null
+  note?: string | null
 }
 
 export interface ClientAccessUntilResponse {
@@ -2680,6 +2684,7 @@ export interface UserProvisionSummary {
   telegram_id?: string | null
   /** Персональное исключение видимости; null — действует умолчание. */
   visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
+  note?: string | null
 }
 
 export interface UserStatsResponse {
@@ -2840,3 +2845,36 @@ export interface BulkNodesPreviewResponse {
   configs_to_create: number
   configs_to_delete: number
 }
+
+export type BulkUsersAction = 'extend' | 'suspend' | 'resume' | 'set_traffic_limit' | 'delete'
+
+export interface BulkUsersRequest {
+  action: BulkUsersAction
+  user_ids: number[]
+  days?: number
+  reason?: string | null
+  show_reason?: boolean
+  notify_telegram?: boolean
+  traffic_limit_bytes?: number | null
+}
+
+export interface BulkUsersFailure {
+  user_id: number
+  username: string
+  error: string
+}
+
+export interface BulkUsersResult {
+  total: number
+  succeeded: number
+  failed: BulkUsersFailure[]
+}
+
+export interface UserHistoryEntry {
+  id: number
+  actor_username?: string | null
+  action: string
+  details?: string | null
+  created_at: string
+}
+
