@@ -157,12 +157,12 @@ BOT_COMMANDS_USER: tuple[tuple[str, str], ...] = (
     ("myconfigs", "Мои VPN-конфиги"),
     ("configs", "Список VPN-конфигов"),
     ("traffic", "Трафик: сводка и топ-5"),
-    ("status", "Статус панели"),
     ("link", "Привязка аккаунта"),
     ("help", "Справка по командам"),
 )
 
 BOT_COMMANDS_ADMIN: tuple[tuple[str, str], ...] = BOT_COMMANDS_USER + (
+    ("status", "Статус панели (admin)"),
     ("settings", "Настройки панели (admin)"),
     ("nodes", "VPN-узлы (admin)"),
     ("cidr", "Статус CIDR pipeline (admin)"),
@@ -190,7 +190,7 @@ START_UNLINKED_WITH_REQUESTS = (
 START_LINKED = (
     "{title}\n\n"
     "Привет, <b>{username}</b> · {role_display}\n\n"
-    "<i>Внизу — Конфиги и Статус; остальное в «⋯ Ещё».</i>"
+    "<i>Разделы — кнопками внизу; остальное в «⋯ Ещё».</i>"
 )
 START_ROLE_DISPLAY = {
     "admin": "🔑 Администратор",
@@ -203,8 +203,8 @@ HELP_TITLE = "❓ <b>Справка</b>"
 HELP_SECTION_MAIN = "<b>📌 Основное</b>"
 HELP_LINES_MAIN = (
     "• /start — главное меню",
-    "• Кнопки <b>Конфиги</b> и <b>Статус</b> — внизу чата",
-    "• <b>⋯ Ещё</b> — трафик, помощь и разделы admin",
+    "• Кнопки <b>Конфиги</b> и <b>Трафик</b> — внизу чата",
+    "• <b>⋯ Ещё</b> — помощь и разделы admin",
     "• /help — эта справка",
     "• /link &lt;код&gt; — привязка Telegram",
 )

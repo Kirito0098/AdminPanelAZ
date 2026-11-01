@@ -14,7 +14,7 @@ from app.database import Base
 from app.models import User, UserRole
 from app.services import telegram_bot_commands as commands
 
-ADMIN_ONLY = {"settings", "nodes", "cidr", "warper", "awg2", "unlock"}
+ADMIN_ONLY = {"status", "settings", "nodes", "cidr", "warper", "awg2", "unlock"}
 
 
 @pytest.fixture()
@@ -52,7 +52,7 @@ def test_default_scope_gets_the_user_list(db, calls):
     assert token == "token"
     assert scope is None
     assert set(names) & ADMIN_ONLY == set()
-    assert {"start", "myconfigs", "configs", "traffic", "status", "link", "help"} == set(names)
+    assert {"start", "myconfigs", "configs", "traffic", "link", "help"} == set(names)
 
 
 def test_linked_admin_gets_a_chat_scope_with_admin_commands(db, calls):

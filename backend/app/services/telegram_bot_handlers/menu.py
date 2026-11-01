@@ -17,7 +17,7 @@ from app.services import telegram_bot_i18n as i18n
 from app.services.telegram_bot_handlers import settings_fsm
 from app.services.user_access_requests import _accept_requests
 
-_ADMIN_ACTIONS = frozenset({"settings", "nodes", "cidr", "warper", "awg2", "unlock"})
+_ADMIN_ACTIONS = frozenset({"status", "settings", "nodes", "cidr", "warper", "awg2", "unlock"})
 
 
 def _linked_user_menu_visible(ctx: BotContext) -> bool:
@@ -93,7 +93,7 @@ def build_linked_reply_keyboard(*, is_admin: bool = False) -> dict:
     else:
         rows = [
             [reply_button(i18n.BTN_MENU_CONFIGS), reply_button(i18n.BTN_MENU_TRAFFIC)],
-            [reply_button(i18n.BTN_MENU_STATUS), reply_button(i18n.BTN_MENU_MORE)],
+            [reply_button(i18n.BTN_MENU_MORE)],
         ]
     return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
 

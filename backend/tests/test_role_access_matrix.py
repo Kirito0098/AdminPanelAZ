@@ -26,6 +26,7 @@ from app.services.telegram_bot_handlers import (
     menu,
     nodes,
     settings,
+    status,
     ui as ui_module,
     unlock_codes,
     warper_status,
@@ -66,6 +67,7 @@ def sent(monkeypatch):
         bot_module,
         telegram_api_module,
         settings,
+        status,
         unlock_codes,
         nodes,
         menu,
@@ -282,8 +284,15 @@ def test_user_reply_layout_keeps_frequent_actions_on_screen():
 
     assert _keyboard_rows(keyboard) == [
         [i18n.BTN_MENU_CONFIGS, i18n.BTN_MENU_TRAFFIC],
-        [i18n.BTN_MENU_STATUS, i18n.BTN_MENU_MORE],
+        [i18n.BTN_MENU_MORE],
     ]
+
+
+def test_panel_status_is_admin_only(db, sent):
+    from app.services.telegram_bot_handlers.status import handle_status
+
+    asyncio.run(handle_status(_context(db, UserRole.user)))
+    assert sent == [i18n.ADMIN_ONLY]
 
 
 def test_user_more_menu_holds_rare_actions(db, monkeypatch):
