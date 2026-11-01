@@ -193,6 +193,54 @@ def test_resume_lifts_only_user_suspended(api, db, node, regular_user, admin_use
     assert row.block_reason == "user_traffic_limit"
 
 
+def test_suspend_notifies_user_with_reason(api, db, regular_user, monkeypatch):
+    """Приостановка с notify_telegram пишет абоненту причину и что делать."""
+    regular_user.telegram_id = "555"
+    db.commit()
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "app.routers.users.send_tg_message",
+        lambda token, chat_id, text: sent.append((chat_id, text)),
+    )
+    monkeypatch.setattr(
+        "app.routers.users._get_setting", lambda db, key, default=None: "bot-token"
+    )
+
+    r = api.post(
+        f"/api/users/{regular_user.id}/suspend",
+        json={"reason": "неоплата", "show_reason": True, "notify_telegram": True},
+    )
+
+    assert r.status_code == 200, r.text
+    assert sent and sent[0][0] == "555"
+    assert "Причина: неоплата" in sent[0][1]
+    assert "напишите администратору" in sent[0][1]
+
+
+def test_suspend_hides_reason_when_not_visible(api, db, regular_user, monkeypatch):
+    """show_reason=False — причина остаётся внутренней и в Telegram не уходит."""
+    regular_user.telegram_id = "556"
+    db.commit()
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "app.routers.users.send_tg_message",
+        lambda token, chat_id, text: sent.append((chat_id, text)),
+    )
+    monkeypatch.setattr(
+        "app.routers.users._get_setting", lambda db, key, default=None: "bot-token"
+    )
+
+    r = api.post(
+        f"/api/users/{regular_user.id}/suspend",
+        json={"reason": "внутренняя заметка", "show_reason": False, "notify_telegram": True},
+    )
+
+    assert r.status_code == 200, r.text
+    assert sent
+    assert "внутренняя заметка" not in sent[0][1]
+    assert "Доступ приостановлен администратором." in sent[0][1]
+
+
 def test_provision_config_while_suspended_creates_blocked(db, node, regular_user, admin_user):
     regular_user.suspended_at = datetime.now(timezone.utc).replace(tzinfo=None)
     db.commit()

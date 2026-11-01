@@ -355,6 +355,8 @@ export default function Configs() {
   const nodeCount = allNodes.length
   const groupCount = visibleGroups.length
   const accessCopy = closedAccessCopy(closedAccess)
+  // t.me-ссылка на бота: открываем через Telegram WebApp API (в WebView обычный <a> не работает).
+  const contactUrl = closedAccess?.contact_url ?? null
 
   const statusAccessLabel = !status
     ? null
@@ -459,18 +461,24 @@ export default function Configs() {
                 </Button>
               </div>
             )}
-            {accessCopy.canContact && closedAccess.contact_url && (
-              <Button type="button" size="sm" variant="outline" asChild>
-                <a href={closedAccess.contact_url} target="_blank" rel="noreferrer">
-                  Написать администратору
-                </a>
+            {accessCopy.canContact && contactUrl && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => openExternalLink(contactUrl)}
+              >
+                Написать администратору
               </Button>
             )}
-            {accessCopy.canRequest && closedAccess.contact_url && (
-              <Button type="button" size="sm" variant="outline" asChild>
-                <a href={closedAccess.contact_url} target="_blank" rel="noreferrer">
-                  Запросить продление
-                </a>
+            {accessCopy.canRequest && contactUrl && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => openExternalLink(contactUrl)}
+              >
+                Запросить продление
               </Button>
             )}
           </div>

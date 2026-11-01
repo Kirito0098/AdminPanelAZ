@@ -83,6 +83,7 @@ import CreateUserDialog, {
 import BulkNodesDialog from '@/components/users/BulkNodesDialog'
 import BulkUsersActionDialog from '@/components/users/BulkUsersActionDialog'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
+import SuspendUserDialog, { type SuspendUserPayload } from '@/components/users/SuspendUserDialog'
 import UsersBulkBar from '@/components/users/UsersBulkBar'
 import SubscriberCard from '@/components/users/SubscriberCard'
 import UserCard from '@/components/users/UserCard'
@@ -165,6 +166,8 @@ export default function UsersPage() {
   const [pageSize, setPageSize] = useState<number>(() => loadPageSize())
   const [bulkActionOpen, setBulkActionOpen] = useState(false)
   const [unlockDialogUser, setUnlockDialogUser] = useState<User | null>(null)
+  // Быстрая приостановка из карточки списка: причина и уведомление спрашиваем в диалоге.
+  const [suspendTarget, setSuspendTarget] = useState<User | null>(null)
 
   const provisioningOn = isEnabled('user_provisioning')
   const availableRequestProtocols = useMemo(
@@ -605,11 +608,10 @@ export default function UsersPage() {
     }
   }
 
-  const handleSuspend = async (user: User) => {
-    if (!window.confirm(`Приостановить доступ для «${user.username}»?`)) return
+  const handleSuspend = async (user: User, data: SuspendUserPayload) => {
     setCardBusyId(user.id)
     try {
-      await suspendUser(user.id, { reason: null, show_reason: false, notify_telegram: false })
+      await suspendUser(user.id, data)
       success(`Доступ «${user.username}» приостановлен`)
       await reloadUsers()
     } catch (err) {
@@ -622,7 +624,7 @@ export default function UsersPage() {
   const handleResume = async (user: User) => {
     setCardBusyId(user.id)
     try {
-      await resumeUser(user.id, { notify_telegram: false })
+      await resumeUser(user.id, { notify_telegram: true })
       success(`Доступ «${user.username}» возобновлён`)
       await reloadUsers()
     } catch (err) {
@@ -931,7 +933,7 @@ export default function UsersPage() {
                   showSelect={provisioningOn}
                   viewPrefs={viewPrefs}
                   actionBusy={cardBusyId === u.id}
-                  onSuspend={() => void handleSuspend(u)}
+                  onSuspend={() => setSuspendTarget(u)}
                   onResume={() => void handleResume(u)}
                   onDelete={() => void handleDeleteUser(u)}
                   onSelectChange={(checked) =>
@@ -1047,6 +1049,18 @@ export default function UsersPage() {
             void reloadUsers()
             setSelectedIds([])
           }}
+        />
+      )}
+
+      {suspendTarget && (
+        <SuspendUserDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) setSuspendTarget(null)
+          }}
+          username={suspendTarget.username}
+          busy={cardBusyId === suspendTarget.id}
+          onConfirm={(data) => void handleSuspend(suspendTarget, data)}
         />
       )}
 

@@ -42,6 +42,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import { formatDate } from '@/lib/datetime'
 import { formatBytes } from '@/lib/trafficFormat'
 import type { UserProvisioningCard, UserProvisionSummary } from '@/types'
+import SuspendUserDialog, { type SuspendUserPayload } from './SuspendUserDialog'
 
 const GIGABYTE = 1024 ** 3
 
@@ -64,15 +65,13 @@ function AccessLifecycleCard({
   busy: boolean
   onExtend: (days: number) => void
   onSetAccessUntil: (value: string | null) => void
-  onSuspend: (data: { reason: string | null; show_reason: boolean; notify_telegram: boolean }) => void
+  onSuspend: (data: SuspendUserPayload) => void
   onResume: (notifyTelegram: boolean) => void
   onError: (message: string) => void
 }) {
   const [suspendOpen, setSuspendOpen] = useState(false)
-  const [suspendReason, setSuspendReason] = useState('')
-  const [showReason, setShowReason] = useState(false)
-  const [suspendNotify, setSuspendNotify] = useState(false)
-  const [resumeNotify, setResumeNotify] = useState(false)
+  // Возобновление по умолчанию пишет абоненту в Telegram.
+  const [resumeNotify, setResumeNotify] = useState(true)
   const [customDays, setCustomDays] = useState('')
   // Дата окончания (включительно) — из API приходит ISO, input[type=date] ждёт YYYY-MM-DD.
   const [customDate, setCustomDate] = useState(
@@ -239,67 +238,13 @@ function AccessLifecycleCard({
         </div>
       </UserSection>
 
-      <AppDialog
+      <SuspendUserDialog
         open={suspendOpen}
         onOpenChange={setSuspendOpen}
-        title="Приостановить доступ"
-        description="Все конфиги абонента будут заблокированы до возобновления."
-        icon={PauseCircle}
-        size="md"
-        footer={
-          <>
-            <Button type="button" variant="outline" onClick={() => setSuspendOpen(false)} disabled={busy}>
-              Отмена
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                onSuspend({
-                  reason: suspendReason.trim() || null,
-                  show_reason: showReason,
-                  notify_telegram: suspendNotify,
-                })
-                setSuspendOpen(false)
-                setSuspendReason('')
-                setShowReason(false)
-                setSuspendNotify(false)
-              }}
-              disabled={busy}
-            >
-              Приостановить
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="suspendReason">Причина (до 200 символов)</Label>
-            <Input
-              id="suspendReason"
-              value={suspendReason}
-              onChange={(e) => setSuspendReason(e.target.value.slice(0, 200))}
-              placeholder="например: неоплата"
-              maxLength={200}
-            />
-          </div>
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={showReason}
-              onCheckedChange={(value) => setShowReason(value === true)}
-              aria-label="Показать причину пользователю"
-            />
-            Показать причину пользователю
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={suspendNotify}
-              onCheckedChange={(value) => setSuspendNotify(value === true)}
-              aria-label="Уведомить в Telegram"
-            />
-            Уведомить в Telegram
-          </label>
-        </div>
-      </AppDialog>
+        username={user.username}
+        busy={busy}
+        onConfirm={onSuspend}
+      />
     </>
   )
 }

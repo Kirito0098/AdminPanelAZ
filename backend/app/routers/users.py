@@ -1279,10 +1279,7 @@ def suspend_user(
     if payload.notify_telegram and user.telegram_id:
         bot_token = _get_setting(db, "telegram_bot_token")
         if bot_token:
-            text = "Доступ приостановлен администратором"
-            if user.suspend_reason_visible and user.suspend_reason:
-                text += f": {user.suspend_reason}"
-            send_tg_message(bot_token, user.telegram_id, text)
+            send_tg_message(bot_token, user.telegram_id, _suspend_notify_text(user))
     _record_user_history(
         db, action="user_suspend", current_user=current_user, user=user, request=request
     )
@@ -2109,6 +2106,15 @@ def _delete_user_core(db, user, current_user, request) -> tuple[str, bool]:
     return deleted_username, True
 
 
+def _suspend_notify_text(user: User) -> str:
+    """Уведомление абоненту о приостановке: причина (если её можно показывать) и что делать."""
+    lines = ["Доступ приостановлен администратором."]
+    if user.suspend_reason_visible and user.suspend_reason:
+        lines.append(f"Причина: {user.suspend_reason}")
+    lines.append("Если это ошибка — напишите администратору.")
+    return "\n".join(lines)
+
+
 def _apply_bulk_action(db, user, payload, current_user, request) -> None:
     action = payload.action
     if action == "extend":
@@ -2127,10 +2133,7 @@ def _apply_bulk_action(db, user, payload, current_user, request) -> None:
         if payload.notify_telegram and user.telegram_id:
             bot_token = _get_setting(db, "telegram_bot_token")
             if bot_token:
-                text = "Доступ приостановлен администратором"
-                if user.suspend_reason_visible and user.suspend_reason:
-                    text += f": {user.suspend_reason}"
-                send_tg_message(bot_token, user.telegram_id, text)
+                send_tg_message(bot_token, user.telegram_id, _suspend_notify_text(user))
     elif action == "resume":
         user.suspended_at = None
         user.suspend_reason = None
