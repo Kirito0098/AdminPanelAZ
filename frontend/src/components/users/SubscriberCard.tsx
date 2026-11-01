@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Copy,
   ExternalLink,
+  KeyRound,
   Loader2,
   Network,
   PauseCircle,
@@ -134,6 +135,7 @@ export interface SubscriberCardProps {
   onResume?: () => void
   onDelete?: () => void
   onExtend?: (user: User, days: number) => void
+  onCreateKey?: () => void
 }
 
 export default function SubscriberCard({
@@ -148,6 +150,7 @@ export default function SubscriberCard({
   onResume,
   onDelete,
   onExtend,
+  onCreateKey,
 }: SubscriberCardProps) {
   const status = resolveCardState(user)
   const StatusIcon = status.icon
@@ -377,6 +380,20 @@ export default function SubscriberCard({
             >
               <Trash2 size={14} />
               Удалить
+            </Button>
+          ) : null}
+          {onCreateKey ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={onCreateKey}
+              disabled={actionBusy}
+              aria-label={`Создать ключ для ${user.username}`}
+            >
+              <KeyRound size={14} />
+              Ключ
             </Button>
           ) : null}
           {onExtend ? (

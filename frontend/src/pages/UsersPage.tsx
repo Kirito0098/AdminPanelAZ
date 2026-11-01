@@ -82,6 +82,7 @@ import CreateUserDialog, {
 } from '@/components/users/CreateUserDialog'
 import BulkNodesDialog from '@/components/users/BulkNodesDialog'
 import BulkUsersActionDialog from '@/components/users/BulkUsersActionDialog'
+import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import UsersBulkBar from '@/components/users/UsersBulkBar'
 import SubscriberCard from '@/components/users/SubscriberCard'
 import UserCard from '@/components/users/UserCard'
@@ -163,6 +164,7 @@ export default function UsersPage() {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState<number>(() => loadPageSize())
   const [bulkActionOpen, setBulkActionOpen] = useState(false)
+  const [unlockDialogUser, setUnlockDialogUser] = useState<User | null>(null)
 
   const provisioningOn = isEnabled('user_provisioning')
   const availableRequestProtocols = useMemo(
@@ -170,6 +172,11 @@ export default function UsersPage() {
       REQUEST_PROTOCOLS.filter((p) => p.featureKeys.some((key) => isEnabled(key))),
     [isEnabled],
   )
+  const unlockProtocols = availableRequestProtocols.map((p) => p.id) as (
+    | 'openvpn'
+    | 'wireguard'
+    | 'amneziawg2'
+  )[]
   const hasNewUserRequests = requests.some((r) => r.request_type === 'new_user')
   const canApproveNewUser =
     approvePresetId != null ||
@@ -934,6 +941,9 @@ export default function UsersPage() {
                   }
                   onOpen={() => openDetail(u.id)}
                   onExtend={handleExtend}
+                  onCreateKey={
+                    isEnabled('unlock_codes') ? () => setUnlockDialogUser(u) : undefined
+                  }
                 />
               ))}
             </div>
@@ -1037,6 +1047,23 @@ export default function UsersPage() {
             void reloadUsers()
             setSelectedIds([])
           }}
+        />
+      )}
+
+      {unlockDialogUser && (
+        <UnlockCodeCreateDialog
+          open={unlockDialogUser != null}
+          onOpenChange={(open) => {
+            if (!open) setUnlockDialogUser(null)
+          }}
+          availableProtocols={unlockProtocols}
+          initialProtocols={unlockProtocols}
+          initialClientNames={[
+            unlockDialogUser.client_base_name ?? unlockDialogUser.owned_config_base_name ?? '',
+          ].filter(Boolean)}
+          telegramBound={Boolean(unlockDialogUser.telegram_id)}
+          targetUserId={unlockDialogUser.id}
+          onCreated={() => void reloadUsers()}
         />
       )}
 
