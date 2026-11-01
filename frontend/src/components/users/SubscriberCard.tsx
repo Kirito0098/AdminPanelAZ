@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
+import { PercentBar } from '@/components/ui/percent-bar'
 import { formatDate } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import { DEFAULT_USERS_CARD_VIEW_PREFS, type UsersCardViewPrefs } from '@/lib/usersCardViewPrefs'
@@ -132,6 +133,7 @@ export interface SubscriberCardProps {
   onSuspend?: () => void
   onResume?: () => void
   onDelete?: () => void
+  onExtend?: (user: User, days: number) => void
 }
 
 export default function SubscriberCard({
@@ -145,6 +147,7 @@ export default function SubscriberCard({
   onSuspend,
   onResume,
   onDelete,
+  onExtend,
 }: SubscriberCardProps) {
   const status = resolveCardState(user)
   const StatusIcon = status.icon
@@ -316,6 +319,22 @@ export default function SubscriberCard({
           ))}
         </div>
 
+        {user.traffic_limit_bytes && user.traffic_limit_bytes > 0 ? (
+          <PercentBar
+            value={user.traffic_consumed_bytes ?? 0}
+            max={user.traffic_limit_bytes}
+            className="h-1.5"
+            barClassName={
+              user.traffic_limit_blocked
+                ? 'fill-destructive'
+                : (user.traffic_consumed_bytes ?? 0) / user.traffic_limit_bytes >= 0.8
+                  ? 'fill-amber-500'
+                  : 'fill-primary'
+            }
+            label="Трафик"
+          />
+        ) : null}
+
         <div className="mt-auto flex flex-wrap gap-2 pt-1">
           {user.suspended_at ? (
             onResume ? (
@@ -359,6 +378,32 @@ export default function SubscriberCard({
               <Trash2 size={14} />
               Удалить
             </Button>
+          ) : null}
+          {onExtend ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                onClick={() => onExtend(user, 30)}
+                disabled={actionBusy}
+                aria-label={`Продлить ${user.username} на 30 дней`}
+              >
+                +30
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="gap-1"
+                onClick={() => onExtend(user, 60)}
+                disabled={actionBusy}
+                aria-label={`Продлить ${user.username} на 60 дней`}
+              >
+                +60
+              </Button>
+            </>
           ) : null}
           <Button
             type="button"

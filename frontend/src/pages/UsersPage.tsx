@@ -25,6 +25,7 @@ import {
   createUserFromExisting,
   deleteProvisionedUser,
   downloadBulkNodesReport,
+  extendUserAccess,
   getProvisioning,
   listPresets,
   listRequests,
@@ -619,6 +620,20 @@ export default function UsersPage() {
     }
   }
 
+  const handleExtend = async (user: User, days: number) => {
+    if (!window.confirm(`Продлить доступ «${user.username}» на ${days} дн.?`)) return
+    setCardBusyId(user.id)
+    try {
+      await extendUserAccess(user.id, days)
+      success(`Доступ «${user.username}» продлён на ${days} дн.`)
+      await reloadUsers()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось продлить доступ')
+    } finally {
+      setCardBusyId(null)
+    }
+  }
+
   const handleChangeViewPrefs = (next: UsersCardViewPrefs) => {
     setViewPrefs(next)
     saveUsersCardViewPrefs(next)
@@ -912,6 +927,7 @@ export default function UsersPage() {
                     )
                   }
                   onOpen={() => openDetail(u.id)}
+                  onExtend={handleExtend}
                 />
               ))}
             </div>
