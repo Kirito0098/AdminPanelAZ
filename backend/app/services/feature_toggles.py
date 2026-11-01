@@ -376,6 +376,20 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         frontend_paths=("/users",),
     ),
     FeatureToggleDefinition(
+        key="user_messaging",
+        env_key="FEATURE_USER_MESSAGING_ENABLED",
+        label="Сообщения абонентов",
+        description="Чат абонент ↔ администратор через Telegram-бота и раздел «Сообщения».",
+        icon="✉️",
+        disable_hint="Кнопки чата в боте скрыты, раздел «Сообщения» и его API недоступны.",
+        resource_impact_level="minimal",
+        default=False,
+        group="app_module",
+        # Префикс, а не api_paths: под /api/messages живут и /threads, и /{id}/read.
+        api_prefixes=("/api/messages",),
+        frontend_paths=("/messages",),
+    ),
+    FeatureToggleDefinition(
         key="action_logs",
         env_key="FEATURE_ACTION_LOGS_ENABLED",
         label="Логи действий",
@@ -1257,6 +1271,14 @@ class FeatureToggleService:
         if intended.get("user_provisioning", False) and not intended.get("user_management", True):
             raise ValueError(
                 "«Пользователи (абоненты)» требуют включённый модуль «Пользователи и доступ»."
+            )
+        # Чат абонентов живёт на Telegram-боте и требует раздела абонентов.
+        if intended.get("user_messaging", False) and not (
+            intended.get("telegram", True) and intended.get("user_provisioning", False)
+        ):
+            raise ValueError(
+                "«Сообщения абонентов» требуют включённых модулей «Telegram» и "
+                "«Пользователи (абоненты)»."
             )
         # Панель без VPN-протокола бессмысленна в любом сценарии.
         if not any(intended.get(key, False) for key in VPN_PROTOCOL_TOGGLES):

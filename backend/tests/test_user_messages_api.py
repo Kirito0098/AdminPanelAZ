@@ -169,3 +169,10 @@ def test_messages_cascade_on_user_delete(db, subscriber):
     db.commit()
 
     assert db.query(UserMessage).count() == 0
+
+
+def test_messages_paths_are_guarded_by_module():
+    from app.services.feature_guards import _modules_for_path
+
+    assert _modules_for_path("/api/messages/threads") == ("user_messaging",)
+    assert _modules_for_path("/api/messages/42") == ("user_messaging",)
