@@ -4,10 +4,6 @@
       "command": "codebase-memory-mcp",
       "args": []
     },
-    "siteaudit": {
-      "command": "uvx",
-      "args": ["--from", "siteaudit-mcp", "siteaudit"]
-    },
     "github": {
       "command": "github-mcp-stdio"
     },

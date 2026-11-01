@@ -62,9 +62,9 @@ alwaysApply: true
 | Пользователь явно `/poteto-mode` / rigor / «доведи PR» в стиле poteto | `poteto-mode` (не вместо brainstorming→плана на **новые** фичи без апрува) |
 | Код пересекает границу модуля / API — сначала форма (и без полного poteto) | `architect` (pstack) |
 | Маленький дифф — что ещё может сломаться (и без полного poteto) | `blast-radius` (pstack) |
-| Как / почему устроена подсистема; объяснить изменение | `how` / `why` / `teach` (pstack) |
+| Как / почему устроена подсистема; объяснить изменение | `explain` (бывшие `how` / `why` / `teach`) |
 | Сами атакуем дифф перед merge (не чужие комментарии) | `interrogate` (pstack) |
-| Docs, RFC, README, описание PR, коммит-сообщение | `technical-writing` (pstack); прозу чистить `unslop`; перед ревью комментарии — `no-comments` |
+| Docs, RFC, README, описание PR, коммит-сообщение | `technical-writing` (pstack); прозу чистить `unslop`; код-комментарии — раздел в `technical-writing` |
 | Дифф трогает auth, 2FA/passkey, JWT, middleware, rate limit, публичную раздачу конфигов, webhook Telegram, node agent | `review-security` (обязательно перед «готово») |
 | Точечный security-аудит конкретной поверхности (JWT, CORS, CSRF, WebSocket, traversal, Host header, GitHub Actions) | соответствующий skill из `~/.agents/skills/` |
 | Пришло ревью / комментарии к PR | `receiving-code-review` (не `interrogate`) |
