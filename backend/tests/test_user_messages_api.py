@@ -176,3 +176,13 @@ def test_messages_paths_are_guarded_by_module():
 
     assert _modules_for_path("/api/messages/threads") == ("user_messaging",)
     assert _modules_for_path("/api/messages/42") == ("user_messaging",)
+
+
+def test_unread_count_for_single_user(api, db, subscriber):
+    _msg(db, subscriber, "раз")
+    _msg(db, subscriber, "два")
+
+    assert api.get(f"/api/messages/{subscriber.id}/unread").json() == {"count": 2}
+
+    api.post(f"/api/messages/{subscriber.id}/read")
+    assert api.get(f"/api/messages/{subscriber.id}/unread").json() == {"count": 0}

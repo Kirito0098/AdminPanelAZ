@@ -1,4 +1,4 @@
-import { Suspense, lazy, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useRef, useState } from 'react'
 import { Activity, BarChart3, CalendarClock, History, KeyRound, ListChecks, MessageSquare, UserCog } from 'lucide-react'
 import { formatDate } from '@/lib/datetime'
 import { formatBytes } from '@/lib/trafficFormat'
@@ -13,6 +13,8 @@ import UserAccessControlSection from './UserAccessControlSection'
 import UserConfigsSection from './UserConfigsSection'
 import UserAccountSection from './UserAccountSection'
 import ChatThread from '@/components/messages/ChatThread'
+import { getUserUnreadCount } from '@/api/messages'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 
 // Графики статистики тянут recharts: грузим вкладку отдельным чанком, а не вместе со страницей «Пользователи».
 const UserStatsSection = lazy(() => import('./UserStatsSection'))
@@ -40,6 +42,25 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
   const [planVisited, setPlanVisited] = useState(false)
   const [planDirty, setPlanDirty] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
+  const { isEnabled } = useFeatureModules()
+  // Чат доступен только привязанным абонентам и только при включённом модуле.
+  const chatEnabled = isEnabled('user_messaging') && Boolean(user.telegram_id)
+  const [chatUnread, setChatUnread] = useState(0)
+
+  useEffect(() => {
+    if (!chatEnabled) return
+    let cancelled = false
+    getUserUnreadCount(user.id)
+      .then(({ count }) => {
+        if (!cancelled) setChatUnread(count)
+      })
+      .catch(() => {
+        // Бейдж не критичен: вкладка «Чат» работает и без него.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [chatEnabled, user.id])
 
   const handleTabChange = (value: string) => {
     setActiveTab(value)
@@ -198,10 +219,17 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
               <History size={14} aria-hidden />
               История
             </TabsTrigger>
-            <TabsTrigger value="chat" className="gap-1.5" title="Переписка с абонентом">
-              <MessageSquare size={14} aria-hidden />
-              Чат
-            </TabsTrigger>
+            {chatEnabled && (
+              <TabsTrigger value="chat" className="gap-1.5" title="Переписка с абонентом">
+                <MessageSquare size={14} aria-hidden />
+                Чат
+                {chatUnread > 0 && (
+                  <Badge variant="destructive" className="text-[10px]">
+                    {chatUnread > 9 ? '9+' : chatUnread}
+                  </Badge>
+                )}
+              </TabsTrigger>
+            )}
             <TabsTrigger value="account" className="gap-1.5">
               <UserCog size={14} aria-hidden />
               Аккаунт
@@ -237,9 +265,11 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
               <UserHistorySection userId={user.id} />
             </Suspense>
           </TabsContent>
-          <TabsContent value="chat" className="mt-0">
-            <ChatThread userId={user.id} />
-          </TabsContent>
+          {chatEnabled && (
+            <TabsContent value="chat" className="mt-0">
+              <ChatThread userId={user.id} onRead={() => setChatUnread(0)} />
+            </TabsContent>
+          )}
 
           <TabsContent value="account" className="mt-0">
             <UserAccountSection user={user} onSave={onSave} onDelete={onDelete} onRefresh={onRefresh} />

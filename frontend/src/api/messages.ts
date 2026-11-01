@@ -33,6 +33,10 @@ export async function markMessagesRead(userId: number) {
   return apiFetch<{ marked: number }>(`/messages/${userId}/read`, { method: 'POST' })
 }
 
+export async function getUserUnreadCount(userId: number) {
+  return apiFetch<{ count: number }>(`/messages/${userId}/unread`)
+}
+
 export async function sendUserMessage(userId: number, text: string) {
   return apiFetch<SendMessageResult>(`/messages/${userId}`, {
     method: 'POST',

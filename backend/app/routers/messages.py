@@ -40,6 +40,14 @@ def unread_count(
     return {"count": chat.unread_total(db)}
 
 
+@router.get("/{user_id}/unread")
+def unread_for_user(
+    user_id: int, db: Session = Depends(get_db), _: User = Depends(require_admin)
+) -> dict[str, int]:
+    """Счётчик непрочитанных по одному абоненту (бейдж на вкладке «Чат»)."""
+    return {"count": chat.unread_for_user(db, user_id=user_id)}
+
+
 @router.get("/{user_id}", response_model=list[UserMessageOut])
 def list_messages(
     user_id: int,
