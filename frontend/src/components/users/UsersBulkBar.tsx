@@ -1,4 +1,4 @@
-import { ChevronDown, Download, Loader2, Server } from 'lucide-react'
+import { ChevronDown, Download, Loader2, Server, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -17,6 +17,7 @@ type UsersBulkBarProps = {
   task: BackgroundTask | null
   onAction: (action: BulkNodesAction) => void
   onDownloadReport: (taskId: string) => void
+  onBulkAction?: () => void
 }
 
 const MENU_ITEMS: { id: BulkNodesAction; label: string }[] = [
@@ -32,6 +33,7 @@ export default function UsersBulkBar({
   task,
   onAction,
   onDownloadReport,
+  onBulkAction,
 }: UsersBulkBarProps) {
   const running = task?.status === 'queued' || task?.status === 'running'
   const finished = task?.status === 'completed' || task?.status === 'failed'
@@ -58,6 +60,18 @@ export default function UsersBulkBar({
           ))}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 text-xs"
+        disabled={busy}
+        onClick={onBulkAction}
+      >
+        <Users size={12} />
+        Действия…
+      </Button>
 
       {running && task && (
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">

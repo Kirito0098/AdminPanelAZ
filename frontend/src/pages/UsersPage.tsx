@@ -81,6 +81,7 @@ import CreateUserDialog, {
   type CreateUserPayload,
 } from '@/components/users/CreateUserDialog'
 import BulkNodesDialog from '@/components/users/BulkNodesDialog'
+import BulkUsersActionDialog from '@/components/users/BulkUsersActionDialog'
 import UsersBulkBar from '@/components/users/UsersBulkBar'
 import SubscriberCard from '@/components/users/SubscriberCard'
 import UserCard from '@/components/users/UserCard'
@@ -161,6 +162,7 @@ export default function UsersPage() {
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState<number>(() => loadPageSize())
+  const [bulkActionOpen, setBulkActionOpen] = useState(false)
 
   const provisioningOn = isEnabled('user_provisioning')
   const availableRequestProtocols = useMemo(
@@ -486,6 +488,9 @@ export default function UsersPage() {
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize))
   const safePage = Math.min(page, totalPages - 1)
   const pagedUsers = filteredUsers.slice(safePage * pageSize, (safePage + 1) * pageSize)
+
+  // Массовые действия: выбранные галочками, иначе — весь отфильтрованный список.
+  const bulkTargetIds = selectedIds.length > 0 ? selectedIds : filteredUsers.map((u) => u.id)
 
   const listMetrics = useMemo(() => {
     const now = Date.now()
@@ -880,6 +885,7 @@ export default function UsersPage() {
               task={backgroundTask?.task_type === 'bulk_user_nodes' ? backgroundTask : null}
               onAction={(action) => setBulkDialog({ open: true, action })}
               onDownloadReport={(taskId) => void handleDownloadReport(taskId)}
+              onBulkAction={() => setBulkActionOpen(true)}
             />
           )}
 
@@ -1019,6 +1025,18 @@ export default function UsersPage() {
           selectedUserIds={selectedIds}
           listFilter={{ state: filter, q: search }}
           onStarted={handleBulkStarted}
+        />
+      )}
+
+      {provisioningOn && (
+        <BulkUsersActionDialog
+          open={bulkActionOpen}
+          onOpenChange={setBulkActionOpen}
+          userIds={bulkTargetIds}
+          onDone={() => {
+            void reloadUsers()
+            setSelectedIds([])
+          }}
         />
       )}
 
