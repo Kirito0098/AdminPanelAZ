@@ -141,3 +141,49 @@ def test_chat_disabled_without_module(db, subscriber):
 
     db.refresh(subscriber)
     assert subscriber.chat_mode_since is None
+
+
+def test_start_payload_chat_enters_mode(db, subscriber):
+    import asyncio
+
+    from app.services.telegram_bot_handlers.start import handle_start
+
+    asyncio.run(handle_start(_ctx(db, subscriber), payload="chat"))
+
+    db.refresh(subscriber)
+    assert subscriber.chat_mode_since is not None
+
+
+def test_pay_button_creates_extend_request(db, subscriber, monkeypatch):
+    import asyncio
+
+    from app.services.telegram_bot_handlers import access_requests as ar
+
+    calls = []
+    monkeypatch.setattr(
+        ar, "submit_access_request", lambda db, **kwargs: calls.append(kwargs)
+    )
+    monkeypatch.setattr(ar, "send_message", AsyncMock())
+
+    asyncio.run(ar.handle_pay_request(_ctx(db, subscriber)))
+
+    assert calls and calls[0]["request_type"] == "extend_access"
+    assert calls[0]["user_id"] == subscriber.id
+    assert calls[0]["requested_count"] == 1
+
+
+def test_start_payload_pay_creates_request(db, subscriber, monkeypatch):
+    import asyncio
+
+    from app.services.telegram_bot_handlers import access_requests as ar
+    from app.services.telegram_bot_handlers.start import handle_start
+
+    calls = []
+    monkeypatch.setattr(
+        ar, "submit_access_request", lambda db, **kwargs: calls.append(kwargs)
+    )
+    monkeypatch.setattr(ar, "send_message", AsyncMock())
+
+    asyncio.run(handle_start(_ctx(db, subscriber), payload="pay"))
+
+    assert calls and calls[0]["request_type"] == "extend_access"
