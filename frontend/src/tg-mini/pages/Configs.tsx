@@ -551,7 +551,7 @@ export default function Configs() {
         canShareLink={canShareInTelegram}
         isForeignConfig={false}
         ownerLabel={null}
-        canManage={activeConfig ? true : false}
+        canManage={Boolean(isAdmin || settings?.can_manage_configs)}
         isAdmin={isAdmin}
         onClose={closeSheet}
         onSend={(destination) => void handleSend(destination)}

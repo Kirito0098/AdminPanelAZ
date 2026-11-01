@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Layers, LogIn, Phone, Trash2, Copy } from 'lucide-react'
+import { Layers, LogIn, Phone, ShieldCheck, Trash2, Copy } from 'lucide-react'
 import { createUserTelegramLinkCode } from '@/api/users'
+import { ApiError, updateUser } from '@/api/client'
 import { useNotifications } from '@/context/NotificationContext'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -18,6 +19,95 @@ interface UserAccountSectionProps {
   onSave: (id: number, data: Partial<UserUpdatePayload>) => void
   onDelete: (user: UserProvisionSummary) => void
   onRefresh: () => void
+}
+
+/** Права абонента на свои конфиги в Telegram Mini App и веб-панели. */
+function MiniAppRightsSection({
+  user,
+  onRefresh,
+}: {
+  user: UserProvisionSummary
+  onRefresh: () => void
+}) {
+  const { success, error: notifyError } = useNotifications()
+  const [canCreate, setCanCreate] = useState(user.can_create_configs !== false)
+  const [canManage, setCanManage] = useState(user.can_manage_configs === true)
+  const [saving, setSaving] = useState(false)
+
+  const save = async (
+    data: { can_create_configs?: boolean; can_manage_configs?: boolean },
+    message: string,
+    rollback: () => void,
+  ) => {
+    setSaving(true)
+    try {
+      await updateUser(user.id, data)
+      success(message)
+      onRefresh()
+    } catch (err) {
+      rollback()
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения прав')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const toggleCreate = (next: boolean) => {
+    setCanCreate(next)
+    void save(
+      { can_create_configs: next },
+      next ? 'Создание конфигураций разрешено' : 'Создание конфигураций запрещено',
+      () => setCanCreate(!next),
+    )
+  }
+
+  const toggleManage = (next: boolean) => {
+    setCanManage(next)
+    void save(
+      { can_manage_configs: next },
+      next ? 'Управление конфигурациями разрешено' : 'Управление конфигурациями запрещено',
+      () => setCanManage(!next),
+    )
+  }
+
+  return (
+    <UserSection
+      icon={ShieldCheck}
+      title="Права в Mini App"
+      description="Что абонент может делать со своими конфигами в Telegram Mini App и веб-панели."
+    >
+      <div className="space-y-2">
+        <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2.5">
+          <div className="space-y-0.5">
+            <Label htmlFor="accountCanCreate">Может создавать конфигурации</Label>
+            <p className="text-xs text-muted-foreground">
+              Выкл. — только просмотр и скачивание своих конфигов.
+            </p>
+          </div>
+          <Switch
+            id="accountCanCreate"
+            checked={canCreate}
+            disabled={saving}
+            onCheckedChange={toggleCreate}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-3 rounded-lg border bg-muted/20 px-3 py-2.5">
+          <div className="space-y-0.5">
+            <Label htmlFor="accountCanManage">Может управлять конфигурациями</Label>
+            <p className="text-xs text-muted-foreground">
+              Выкл. — только получение и скачивание: продление сертификата и удаление недоступны.
+            </p>
+          </div>
+          <Switch
+            id="accountCanManage"
+            checked={canManage}
+            disabled={saving}
+            onCheckedChange={toggleManage}
+          />
+        </div>
+      </div>
+    </UserSection>
+  )
 }
 
 export default function UserAccountSection({ user, onSave, onDelete, onRefresh }: UserAccountSectionProps) {
@@ -108,6 +198,7 @@ export default function UserAccountSection({ user, onSave, onDelete, onRefresh }
       </UserSection>
 
       {user.role === 'user' && <UserVisibilitySection user={user} onRefresh={onRefresh} />}
+      {user.role === 'user' && <MiniAppRightsSection user={user} onRefresh={onRefresh} />}
 
       <UserSection
         icon={Layers}
