@@ -1114,6 +1114,22 @@ class UserMessage(Base):
     read_by_admin_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class UserMessageCard(Base):
+    """Карточка «новое сообщение» в Telegram: reply на неё = ответ абоненту."""
+
+    __tablename__ = "user_message_cards"
+    __table_args__ = (
+        Index("uq_user_message_cards_tg", "admin_chat_id", "message_id", unique=True),
+        Index("ix_user_message_cards_user", "user_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    admin_chat_id: Mapped[str] = mapped_column(String(32))
+    message_id: Mapped[int] = mapped_column(Integer)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class TelegramRequestBan(Base):
     __tablename__ = "telegram_request_bans"
 

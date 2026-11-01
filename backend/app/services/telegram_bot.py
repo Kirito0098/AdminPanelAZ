@@ -311,6 +311,11 @@ class TelegramBotService:
             telegram_name=tg_name,
         )
         if not command:
+            if text.strip():
+                from app.services.telegram_bot_handlers.chat import handle_admin_card_reply
+
+                if await handle_admin_card_reply(ctx, message):
+                    return
             if text.strip() and await handle_menu_text(ctx, text):
                 return
             if text.strip() and await handle_settings_text(ctx, text):

@@ -7,9 +7,10 @@ import logging
 from sqlalchemy.orm import Session
 
 from app.models import User, UserMessage, UserRole
+from app.services import telegram_api
 from app.services.admin_panel_notifications import write_admin_panel_notification
 from app.services.app_setting_store import _get_setting
-from app.services.telegram import send_tg_message
+from app.services.user_messages import record_card
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +18,13 @@ SETTING_BOT_TOKEN = "telegram_bot_token"
 PREVIEW_LEN = 120
 
 
-def notify_admins_new_message(
+async def notify_admins_new_message(
     db: Session, *, user: User, message: UserMessage, first_in_thread: bool
 ) -> None:
-    """Колокол на каждое сообщение; карточка в Telegram — только на первое в диалоге."""
+    """Колокол на каждое сообщение; карточка в Telegram — только на первое в диалоге.
+
+    `message_id` карточки сохраняем: ответ админа реплаем на неё уходит этому абоненту.
+    """
     write_admin_panel_notification(
         db,
         event_type="user_message",
@@ -46,7 +50,24 @@ def notify_admins_new_message(
     text = (
         f"✉️ {user.username}: новое сообщение\n"
         f"{message.text[:PREVIEW_LEN]}\n\n"
-        "Ответить — в панели, раздел «Сообщения»."
+        "Ответить — реплаем на это сообщение или в панели, раздел «Сообщения»."
     )
     for admin in admins:
-        send_tg_message(token, str(admin.telegram_id), text)
+        chat_id = str(admin.telegram_id)
+        result = await telegram_api.call_bot_api(
+            token,
+            "sendMessage",
+            payload={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML",
+                "link_preview_options": {"is_disabled": True},
+            },
+        )
+        if isinstance(result, dict) and isinstance(result.get("message_id"), int):
+            record_card(
+                db,
+                admin_chat_id=chat_id,
+                message_id=int(result["message_id"]),
+                user_id=user.id,
+            )

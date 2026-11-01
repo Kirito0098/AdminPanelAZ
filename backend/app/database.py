@@ -1753,6 +1753,7 @@ def _run_db_migrations() -> None:
     _migrate_users_commercial()
     _migrate_config_quota_floor()
     _migrate_user_messages()
+    _migrate_user_message_cards()
     _migrate_user_portal_banner()
     _migrate_revoke_unmanaged_client_portal_links()
     _seed_client_templates_for_nodes()
@@ -2268,6 +2269,40 @@ def _migrate_user_messages() -> None:
             if "chat_mode_since" not in cols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN chat_mode_since DATETIME"))
                 logger.info("DB migration: added users.chat_mode_since")
+
+
+def _migrate_user_message_cards() -> None:
+    """Stage 8: user_message_cards (ответы админа реплаем из Telegram)."""
+    inspector = inspect(engine)
+    if "user_message_cards" in set(inspector.get_table_names()):
+        return
+    with _migration_transaction() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE user_message_cards (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    admin_chat_id VARCHAR(32) NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_message_cards_tg "
+                "ON user_message_cards (admin_chat_id, message_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_user_message_cards_user "
+                "ON user_message_cards (user_id)"
+            )
+        )
+        logger.info("DB migration: created user_message_cards table")
 
 
 def _migrate_user_config_access_table() -> None:

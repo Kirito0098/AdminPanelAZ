@@ -155,6 +155,7 @@ class Settings(BaseSettings):
     traffic_sample_retention_days: int = 90
     traffic_session_retention_days: int = 30
     action_log_retention_days: int = 365
+    user_messages_retention_days: int = 180
     retention_batch_size: int = 5000
     health_deep_node_ping: bool = True
     bulk_config_op_max_workers: int = 4

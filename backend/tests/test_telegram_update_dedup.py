@@ -92,6 +92,7 @@ def test_retention_purges_processed_updates_older_than_the_window(db, monkeypatc
             resource_metrics_retention_days=30,
             panel_resource_metrics_retention_days=30,
             traffic_session_retention_days=30,
+            user_messages_retention_days=180,
         ),
     )
     now = retention._utcnow()

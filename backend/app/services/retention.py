@@ -24,6 +24,8 @@ from app.models import (
     AdminPanelNotification,
     TelegramUserArchive,
     UserAccessRequest,
+    UserMessage,
+    UserMessageCard,
 )
 from app.services.server_reboot import ACTIVE_STATUSES as REBOOT_ACTIVE_STATUSES
 from app.services.telegram_update_dedup import PROCESSED_UPDATE_RETENTION
@@ -196,6 +198,14 @@ def run_retention_purge(db: Session) -> dict[str, int]:
         TelegramUserArchive,
         TelegramUserArchive.deleted_at < now - timedelta(days=ARCHIVE_RETENTION_DAYS),
         batch_size=batch_size,
+    )
+
+    messages_days = max(1, int(settings.user_messages_retention_days or 180))
+    counts["user_messages"] = _purge_model_before(
+        db, UserMessage, now - timedelta(days=messages_days), batch_size=batch_size
+    )
+    counts["user_message_cards"] = _purge_model_before(
+        db, UserMessageCard, now - timedelta(days=messages_days), batch_size=batch_size
     )
 
     counts["total"] = sum(counts.values())

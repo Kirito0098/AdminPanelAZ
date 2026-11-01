@@ -8,7 +8,7 @@ from app.services.feature_guards import get_feature_service
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext
 from app.services.telegram_bot_handlers.menu import build_reply_keyboard
-from app.models import UserRole
+from app.models import User, UserRole
 from app.services.user_message_notify import notify_admins_new_message
 
 
@@ -43,6 +43,43 @@ async def handle_chat_stop(ctx: BotContext) -> None:
     )
 
 
+async def handle_admin_card_reply(ctx: BotContext, message: dict) -> bool:
+    """Ответ админа реплаем на карточку «новое сообщение» → абоненту."""
+    if ctx.user is None or ctx.user.role != UserRole.admin:
+        return False
+    if not chat_available():
+        return False
+    reply = message.get("reply_to_message") or {}
+    reply_id = reply.get("message_id")
+    if not isinstance(reply_id, int):
+        return False
+    card = chat_service.find_card(
+        ctx.db, admin_chat_id=str(ctx.chat_id), message_id=reply_id
+    )
+    if card is None:
+        return False
+    target = ctx.db.get(User, card.user_id)
+    if target is None:
+        return False
+    text = (message.get("text") or "").strip()
+    if not text:
+        return False
+    limit = chat_service.MESSAGE_MAX_LEN - len(chat_service.REPLY_PREFIX) - 1
+    if len(text) > limit:
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.CHAT_TOO_LONG)
+        return True
+    _, delivered, warning = chat_service.send_admin_reply(
+        ctx.db, user=target, admin=ctx.user, text=text
+    )
+    confirm = (
+        f"Отправлено абоненту {target.username}."
+        if delivered
+        else f"Сохранено, но не доставлено: {warning}"
+    )
+    await send_message(ctx.bot_token, ctx.chat_id, confirm)
+    return True
+
+
 async def handle_chat_text(ctx: BotContext, message: dict) -> bool:
     """Текст в режиме переписки → в чат админу.
 
@@ -74,7 +111,7 @@ async def handle_chat_text(ctx: BotContext, message: dict) -> bool:
         # Повторная доставка того же апдейта: молчим, чтобы не дублировать ответ.
         return True
     first_in_thread = chat_service.unread_for_user(ctx.db, user_id=ctx.user.id) == 1
-    notify_admins_new_message(
+    await notify_admins_new_message(
         ctx.db, user=ctx.user, message=stored, first_in_thread=first_in_thread
     )
     await send_message(ctx.bot_token, ctx.chat_id, i18n.CHAT_SENT)

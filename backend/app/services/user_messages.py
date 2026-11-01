@@ -10,7 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import User, UserMessage
+from app.models import User, UserMessage, UserMessageCard
 from app.services.app_setting_store import _get_setting
 from app.services.telegram import send_tg_message_result
 
@@ -188,6 +188,30 @@ def unread_for_user(db: Session, *, user_id: int) -> int:
         .scalar()
     )
     return int(count or 0)
+
+
+def record_card(db: Session, *, admin_chat_id: str, message_id: int, user_id: int) -> None:
+    """Запомнить карточку в Telegram, чтобы принимать ответы реплаем."""
+    db.add(
+        UserMessageCard(
+            admin_chat_id=str(admin_chat_id), message_id=int(message_id), user_id=user_id
+        )
+    )
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+
+
+def find_card(db: Session, *, admin_chat_id: str, message_id: int) -> UserMessageCard | None:
+    return (
+        db.query(UserMessageCard)
+        .filter(
+            UserMessageCard.admin_chat_id == str(admin_chat_id),
+            UserMessageCard.message_id == int(message_id),
+        )
+        .first()
+    )
 
 
 def unread_total(db: Session) -> int:
