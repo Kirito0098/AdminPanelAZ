@@ -1,6 +1,26 @@
-import { useState } from 'react'
-import { CalendarPlus, Gauge, PauseCircle, PlayCircle, RotateCcw } from 'lucide-react'
-import { ApiError } from '@/api/client'
+import { useEffect, useState } from 'react'
+import {
+  CalendarPlus,
+  Copy,
+  ExternalLink,
+  Gauge,
+  Link2,
+  Loader2,
+  PauseCircle,
+  PlayCircle,
+  RefreshCw,
+  RotateCcw,
+} from 'lucide-react'
+import {
+  ApiError,
+  createUserPortalLink,
+  getUserPortalLink,
+  rotateUserPortalLink,
+  updateUser,
+} from '@/api/client'
+import { userPortalActionConfirm } from '@/lib/userPortalConfirm'
+import { useConfirmDialog } from '@/hooks/useConfirmDialog'
+import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import {
   extendUserAccess,
   resetUserTrafficCounter,
@@ -35,6 +55,7 @@ function AccessLifecycleCard({
   user,
   busy,
   onExtend,
+  onSetAccessUntil,
   onSuspend,
   onResume,
   onError,
@@ -42,6 +63,7 @@ function AccessLifecycleCard({
   user: UserProvisionSummary
   busy: boolean
   onExtend: (days: number) => void
+  onSetAccessUntil: (value: string | null) => void
   onSuspend: (data: { reason: string | null; show_reason: boolean; notify_telegram: boolean }) => void
   onResume: (notifyTelegram: boolean) => void
   onError: (message: string) => void
@@ -52,6 +74,14 @@ function AccessLifecycleCard({
   const [suspendNotify, setSuspendNotify] = useState(false)
   const [resumeNotify, setResumeNotify] = useState(false)
   const [customDays, setCustomDays] = useState('')
+  // Дата окончания (включительно) — из API приходит ISO, input[type=date] ждёт YYYY-MM-DD.
+  const [customDate, setCustomDate] = useState(
+    user.access_until ? user.access_until.slice(0, 10) : '',
+  )
+  // Продление кнопками меняет срок — подтягиваем новую дату в календарь.
+  useEffect(() => {
+    setCustomDate(user.access_until ? user.access_until.slice(0, 10) : '')
+  }, [user.access_until])
 
   const suspended = Boolean(user.suspended_at)
   // Администраторов приостановить нельзя (API отклоняет) — прячем действие.
@@ -132,6 +162,43 @@ function AccessLifecycleCard({
                 Продлить
               </Button>
             </div>
+          </div>
+
+          <div className="space-y-1.5 rounded-lg border bg-muted/20 px-3 py-2.5">
+            <p className="text-xs font-medium text-muted-foreground">Дата окончания доступа</p>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
+                type="date"
+                value={customDate}
+                onChange={(e) => setCustomDate(e.target.value)}
+                aria-label="Дата окончания доступа"
+                className="h-9 w-44"
+              />
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => onSetAccessUntil(customDate)}
+                disabled={busy || customDate === ''}
+              >
+                Установить дату
+              </Button>
+              {user.access_until && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => onSetAccessUntil(null)}
+                  disabled={busy}
+                >
+                  Бессрочно
+                </Button>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Доступ действует до конца выбранного дня. Продление по дням считается от текущего
+              срока.
+            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/20 px-3 py-2.5">
@@ -233,6 +300,122 @@ function AccessLifecycleCard({
           </label>
         </div>
       </AppDialog>
+    </>
+  )
+}
+
+/** Постоянная ссылка клиентского портала: все профили абонента в одном месте. */
+function ClientPortalCard({
+  user,
+  onError,
+}: {
+  user: UserProvisionSummary
+  onError: (message: string) => void
+}) {
+  const { success } = useNotifications()
+  const { confirm, dialogProps } = useConfirmDialog()
+  const [url, setUrl] = useState<string | null>(null)
+  const [busyKey, setBusyKey] = useState<string | null>(null)
+
+  const applyLink = async (key: string, action: () => Promise<{ url: string }>, message: string) => {
+    setBusyKey(key)
+    try {
+      const link = await action()
+      setUrl(link.url)
+      await navigator.clipboard.writeText(link.url)
+      success(message)
+    } catch (err) {
+      onError(err instanceof ApiError ? err.message : 'Ошибка ссылки портала')
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
+  const copyLink = (create: boolean) =>
+    applyLink(
+      create ? 'create' : 'copy',
+      () => (create ? createUserPortalLink(user.id) : getUserPortalLink(user.id)),
+      create ? 'Ссылка портала создана и скопирована' : 'Ссылка портала скопирована',
+    )
+
+  const rotateLink = () =>
+    applyLink(
+      'rotate',
+      () => rotateUserPortalLink(user.id),
+      'Ссылка портала перевыпущена и скопирована',
+    )
+
+  return (
+    <>
+      <UserSection
+        icon={Link2}
+        title="Клиентский портал"
+        description="Постоянная ссылка со всеми профилями абонента: открывается на устройстве без входа в панель, оттуда можно скачать нужный файл."
+      >
+        <div className="space-y-3">
+          {url ? (
+            <p className="break-all rounded-lg border bg-muted/20 px-3 py-2 font-mono text-xs">
+              {url}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Ссылка создаётся один раз и не меняется — отправьте её абоненту в Telegram или
+              скопируйте.
+            </p>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => void copyLink(url == null)}
+              disabled={busyKey !== null}
+            >
+              {busyKey === 'create' || busyKey === 'copy' ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Copy size={14} />
+              )}
+              {url ? 'Скопировать' : 'Получить ссылку'}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={!url}
+              onClick={() => {
+                if (url) window.open(url, '_blank', 'noopener,noreferrer')
+              }}
+            >
+              <ExternalLink size={14} />
+              Открыть
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={url == null || busyKey !== null}
+              onClick={() =>
+                confirm({
+                  ...userPortalActionConfirm('rotate', user.username),
+                  destructive: true,
+                  onConfirm: rotateLink,
+                })
+              }
+            >
+              {busyKey === 'rotate' ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <RefreshCw size={14} />
+              )}
+              Перевыпустить
+            </Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Отозвать ссылку или выпустить новую для всех абонентов можно в разделе «Подписка».
+          </p>
+        </div>
+      </UserSection>
+      <ConfirmDialogHost dialogProps={dialogProps} />
     </>
   )
 }
@@ -412,6 +595,8 @@ export default function UserAccessControlSection({
   const trafficSyncOn = isEnabled('traffic_sync')
   // Приостановка/продление — только при включённом модуле «Пользователи (абоненты)».
   const provisioningOn = isEnabled('user_provisioning')
+  // Ссылка портала — только при включённом «Клиентском портале».
+  const clientPortalEnabled = isEnabled('client_portal')
 
   const [busy, setBusy] = useState(false)
 
@@ -432,6 +617,17 @@ export default function UserAccessControlSection({
     void run(async () => {
       await extendUserAccess(user.id, days)
     }, `Доступ продлён на ${days} дн.`)
+  }
+
+  const handleSetAccessUntil = (value: string | null) => {
+    void run(
+      async () => {
+        await updateUser(user.id, { access_until: value })
+      },
+      value
+        ? `Доступ установлен до ${formatDate(`${value}T23:59:59`)}`
+        : 'Срок доступа снят — доступ бессрочный',
+    )
   }
 
   const handleSuspend = (data: {
@@ -475,11 +671,13 @@ export default function UserAccessControlSection({
           user={user}
           busy={busy}
           onExtend={handleExtend}
+          onSetAccessUntil={handleSetAccessUntil}
           onSuspend={handleSuspend}
           onResume={handleResume}
           onError={notifyError}
         />
       )}
+      {clientPortalEnabled && <ClientPortalCard user={user} onError={notifyError} />}
       <TrafficLimitCard
         user={user}
         busy={busy}
