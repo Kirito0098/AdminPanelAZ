@@ -1,28 +1,39 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react'
-import { Activity, BarChart3, CalendarClock, History, KeyRound, ListChecks, MessageSquare, UserCog } from 'lucide-react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import {
+  Activity,
+  CalendarClock,
+  History,
+  KeyRound,
+  MessageSquare,
+  Settings,
+  StickyNote,
+  UserCog,
+} from 'lucide-react'
 import { formatDate } from '@/lib/datetime'
 import { formatBytes } from '@/lib/trafficFormat'
 import type { UserUpdatePayload, UserProvisioningCard, UserProvisionSummary } from '@/types'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import Spinner from '@/components/ui/Spinner'
 import UserMetric from './UserMetric'
-import UserAccessSection from './UserAccessSection'
 import UserAccessControlSection from './UserAccessControlSection'
+import UserTrafficSection from './UserTrafficSection'
 import UserConfigsSection from './UserConfigsSection'
+import UserRightsSection from './UserRightsSection'
 import UserAccountSection from './UserAccountSection'
 import ChatThread from '@/components/messages/ChatThread'
 import { getUserUnreadCount } from '@/api/messages'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 
-// Графики статистики тянут recharts: грузим вкладку отдельным чанком, а не вместе со страницей «Пользователи».
-const UserStatsSection = lazy(() => import('./UserStatsSection'))
+// История грузится отдельным чанком: в карточке она нужна редко.
 const UserHistorySection = lazy(() => import('./UserHistorySection'))
 
 interface UserCardProps {
   card: UserProvisioningCard
-  onSave: (id: number, data: Partial<UserUpdatePayload>) => void
+  onSave: (id: number, data: Partial<UserUpdatePayload>, message?: string) => void
   onDelete: (user: UserProvisionSummary) => void
   onRefresh: () => void
 }
@@ -38,14 +49,28 @@ const STATE_LABEL: Record<string, { label: string; variant: BadgeVariant }> = {
 
 export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCardProps) {
   const { user } = card
-  const [activeTab, setActiveTab] = useState<string>('access')
-  const [planVisited, setPlanVisited] = useState(false)
-  const [planDirty, setPlanDirty] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const { isEnabled } = useFeatureModules()
   // Чат доступен только привязанным абонентам и только при включённом модуле.
   const chatEnabled = isEnabled('user_messaging') && Boolean(user.telegram_id)
+  const rightsVisible = user.role === 'user'
   const [chatUnread, setChatUnread] = useState(0)
+  const [planDirty, setPlanDirty] = useState(false)
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const allowedTabs = useMemo(() => {
+    const tabs = ['access', 'traffic', 'configs']
+    if (rightsVisible) tabs.push('rights')
+    tabs.push('account', 'history')
+    if (chatEnabled) tabs.push('chat')
+    return new Set(tabs)
+  }, [rightsVisible, chatEnabled])
+
+  // Deep-link ?tab=traffic — чтобы ссылкой можно было открыть нужную вкладку.
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    const requested = searchParams.get('tab')
+    return requested && allowedTabs.has(requested) ? requested : 'access'
+  })
 
   useEffect(() => {
     if (!chatEnabled) return
@@ -64,7 +89,14 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
 
   const handleTabChange = (value: string) => {
     setActiveTab(value)
-    if (value === 'plan') setPlanVisited(true)
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('tab', value)
+        return next
+      },
+      { replace: true },
+    )
     // Возвращаем прокрутку диалога наверх, чтобы вкладка открывалась с заголовка.
     rootRef.current?.parentElement?.scrollTo({ top: 0 })
   }
@@ -142,6 +174,15 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
                 </>
               ) : null}
             </p>
+            {user.note && user.note.trim() ? (
+              <p
+                className="mt-1.5 flex items-start gap-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1 text-xs leading-snug text-amber-900 dark:text-amber-200"
+                title={user.note}
+              >
+                <StickyNote size={12} className="mt-0.5 shrink-0 opacity-70" aria-hidden />
+                <span className="line-clamp-2 [overflow-wrap:anywhere]">{user.note.trim()}</span>
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -191,74 +232,99 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
 
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
         <div className="sticky top-0 z-20 border-b bg-background/95 px-3 py-2 backdrop-blur sm:px-4">
-          <TabsList className="h-auto w-full justify-start gap-1 overflow-x-auto bg-muted/60 p-1">
-            <TabsTrigger value="access" className="gap-1.5" title="Срок доступа, пауза и лимит трафика">
-              <CalendarClock size={14} aria-hidden />
-              Доступ
-            </TabsTrigger>
-            <TabsTrigger
-              value="plan"
-              className="gap-1.5"
-              title={planDirty ? 'Узлы, протоколы и имена конфигов · есть несохранённые изменения' : 'Узлы, протоколы и имена конфигов'}
-            >
-              <ListChecks size={14} aria-hidden />
-              План
-              {planDirty && (
-                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="configs" className="gap-1.5" title="Созданные конфиги и файлы">
-              <KeyRound size={14} aria-hidden />
-              Конфиги
-            </TabsTrigger>
-            <TabsTrigger value="stats" className="gap-1.5">
-              <BarChart3 size={14} aria-hidden />
-              Статистика
-            </TabsTrigger>
-            <TabsTrigger value="history" className="gap-1.5" title="История действий">
-              <History size={14} aria-hidden />
-              История
-            </TabsTrigger>
-            {chatEnabled && (
-              <TabsTrigger value="chat" className="gap-1.5" title="Переписка с абонентом">
-                <MessageSquare size={14} aria-hidden />
-                Чат
-                {chatUnread > 0 && (
-                  <Badge variant="destructive" className="text-[10px]">
-                    {chatUnread > 9 ? '9+' : chatUnread}
-                  </Badge>
-                )}
+          <div className="flex items-center gap-2">
+            <TabsList className="h-auto min-w-0 flex-1 justify-start gap-1 overflow-x-auto bg-muted/60 p-1">
+              <TabsTrigger value="access" className="gap-1.5" title="Срок доступа, пауза и ключ продления">
+                <CalendarClock size={14} aria-hidden />
+                Доступ
               </TabsTrigger>
-            )}
-            <TabsTrigger value="account" className="gap-1.5">
-              <UserCog size={14} aria-hidden />
-              Аккаунт
-            </TabsTrigger>
-          </TabsList>
+              <TabsTrigger value="traffic" className="gap-1.5" title="Лимит трафика и графики расхода">
+                <Activity size={14} aria-hidden />
+                Трафик
+              </TabsTrigger>
+              <TabsTrigger
+                value="configs"
+                className="gap-1.5"
+                title={
+                  planDirty
+                    ? 'Конфиги и план · есть несохранённые изменения'
+                    : 'Выданные конфиги и план'
+                }
+              >
+                <KeyRound size={14} aria-hidden />
+                Конфиги
+                {planDirty && <span className="h-1.5 w-1.5 rounded-full bg-amber-500" aria-hidden />}
+              </TabsTrigger>
+              {rightsVisible && (
+                <TabsTrigger value="rights" className="gap-1.5" title="Квота и права абонента">
+                  <UserCog size={14} aria-hidden />
+                  Права
+                </TabsTrigger>
+              )}
+              <TabsTrigger value="account" className="gap-1.5" title="Заметка, вход в панель, Telegram">
+                <Settings size={14} aria-hidden />
+                Аккаунт
+              </TabsTrigger>
+            </TabsList>
+
+            <div className="flex shrink-0 items-center gap-1">
+              {chatEnabled && (
+                <Button
+                  type="button"
+                  size="icon"
+                  variant={activeTab === 'chat' ? 'secondary' : 'ghost'}
+                  className="relative h-9 w-9"
+                  aria-pressed={activeTab === 'chat'}
+                  aria-label="Переписка с абонентом"
+                  title="Переписка с абонентом"
+                  onClick={() => handleTabChange('chat')}
+                >
+                  <MessageSquare size={16} />
+                  {chatUnread > 0 && (
+                    <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold text-destructive-foreground">
+                      {chatUnread > 9 ? '9+' : chatUnread}
+                    </span>
+                  )}
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="icon"
+                variant={activeTab === 'history' ? 'secondary' : 'ghost'}
+                className="h-9 w-9"
+                aria-pressed={activeTab === 'history'}
+                aria-label="История действий"
+                title="История действий"
+                onClick={() => handleTabChange('history')}
+              >
+                <History size={16} />
+              </Button>
+            </div>
+          </div>
         </div>
 
         <div className="px-4 py-4 sm:px-5">
           <TabsContent value="access" className="mt-0 space-y-4">
             <UserAccessControlSection card={card} onRefresh={onRefresh} />
           </TabsContent>
-          <TabsContent
-            value="plan"
-            forceMount={planVisited ? true : undefined}
-            className="mt-0 data-[state=inactive]:hidden"
-          >
-            <UserAccessSection
+          <TabsContent value="traffic" className="mt-0 space-y-4">
+            <UserTrafficSection card={card} onRefresh={onRefresh} />
+          </TabsContent>
+          <TabsContent value="configs" className="mt-0">
+            <UserConfigsSection
+              userId={user.id}
               card={card}
               onRefresh={onRefresh}
               onDirtyChange={setPlanDirty}
             />
           </TabsContent>
-          <TabsContent value="configs" className="mt-0">
-            <UserConfigsSection userId={user.id} card={card} />
-          </TabsContent>
-          <TabsContent value="stats" className="mt-0">
-            <Suspense fallback={<Spinner label="Загрузка статистики…" className="py-8" />}>
-              <UserStatsSection userId={user.id} />
-            </Suspense>
+          {rightsVisible && (
+            <TabsContent value="rights" className="mt-0">
+              <UserRightsSection user={user} onRefresh={onRefresh} />
+            </TabsContent>
+          )}
+          <TabsContent value="account" className="mt-0">
+            <UserAccountSection user={user} onSave={onSave} onDelete={onDelete} />
           </TabsContent>
           <TabsContent value="history" className="mt-0">
             <Suspense fallback={<Spinner label="Загрузка истории…" className="py-8" />}>
@@ -270,10 +336,6 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
               <ChatThread userId={user.id} onRead={() => setChatUnread(0)} />
             </TabsContent>
           )}
-
-          <TabsContent value="account" className="mt-0">
-            <UserAccountSection user={user} onSave={onSave} onDelete={onDelete} onRefresh={onRefresh} />
-          </TabsContent>
         </div>
       </Tabs>
     </div>

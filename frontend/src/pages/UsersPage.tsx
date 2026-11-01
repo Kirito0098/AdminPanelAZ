@@ -723,11 +723,15 @@ export default function UsersPage() {
     success('CSV экспортирован')
   }
 
-  const handleSaveUser = async (userId: number, data: UserUpdatePayload) => {
+  const handleSaveUser = async (
+    userId: number,
+    data: UserUpdatePayload,
+    message?: string,
+  ) => {
     try {
       const updated = await updateUser(userId, data)
       setUsers((prev) => prev.map((u) => (u.id === updated.id ? { ...u, ...updated } : u)))
-      success(`Данные «${updated.username}» сохранены`)
+      success(message ?? `Данные «${updated.username}» сохранены`)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения пользователя')
     }
@@ -1028,7 +1032,7 @@ export default function UsersPage() {
             key={detailId}
             userId={detailId}
             onBack={closeDetail}
-            onSave={(id, data) => void handleSaveUser(id, data)}
+            onSave={(id, data, message) => void handleSaveUser(id, data, message)}
             onDelete={(user) => void handleDeleteUser(user, { skipConfirm: true })}
           />
         ) : null}
@@ -1321,7 +1325,7 @@ function UserCardView({
 }: {
   userId: number
   onBack: () => void
-  onSave: (id: number, data: Partial<UserUpdatePayload>) => void
+  onSave: (id: number, data: Partial<UserUpdatePayload>, message?: string) => void
   onDelete: (user: UserProvisionSummary) => void
 }) {
   const [card, setCard] = useState<UserProvisioningCard | null>(null)

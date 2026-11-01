@@ -15,6 +15,7 @@ import {
   Play,
   Server,
   Shield,
+  StickyNote,
   Trash2,
   UserRound,
 } from 'lucide-react'
@@ -161,6 +162,7 @@ export default function SubscriberCard({
   const nodeCount = user.plan_node_ids?.length ?? 0
   const nameCount = user.plan_config_count ?? user.plan_config_indexes?.length ?? 0
   const fields = viewPrefs.fields
+  const userNote = (user.note ?? '').trim()
 
   const metaRows: MetaRow[] = [
     {
@@ -321,6 +323,16 @@ export default function SubscriberCard({
             <MetaLine key={row.key} row={row} />
           ))}
         </div>
+
+        {fields.note && userNote ? (
+          <div
+            className="flex items-start gap-1.5 rounded-md border border-amber-500/25 bg-amber-500/10 px-2 py-1.5 text-xs leading-snug text-amber-900 dark:text-amber-200"
+            title={userNote}
+          >
+            <StickyNote size={12} className="mt-0.5 shrink-0 opacity-70" aria-hidden />
+            <span className="line-clamp-2 [overflow-wrap:anywhere]">{userNote}</span>
+          </div>
+        ) : null}
 
         {user.traffic_limit_bytes && user.traffic_limit_bytes > 0 ? (
           <PercentBar

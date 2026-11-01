@@ -1,6 +1,14 @@
 import type { CardGridCols } from './configCardViewPrefs'
 
-export type UsersCardFieldKey = 'access' | 'nodes' | 'base' | 'tg' | 'protocols' | 'names' | 'task'
+export type UsersCardFieldKey =
+  | 'access'
+  | 'nodes'
+  | 'base'
+  | 'tg'
+  | 'protocols'
+  | 'names'
+  | 'task'
+  | 'note'
 
 export type UsersCardFieldVisibility = Record<UsersCardFieldKey, boolean>
 
@@ -17,6 +25,7 @@ export const USERS_CARD_FIELD_LABELS: Record<UsersCardFieldKey, string> = {
   protocols: 'Протоколы',
   names: 'Число имён',
   task: 'Задача',
+  note: 'Заметка',
 }
 
 const FIELD_KEYS = Object.keys(USERS_CARD_FIELD_LABELS) as UsersCardFieldKey[]
@@ -32,6 +41,7 @@ export const DEFAULT_USERS_CARD_VIEW_PREFS: UsersCardViewPrefs = {
     protocols: true,
     names: true,
     task: true,
+    note: true,
   },
 }
 

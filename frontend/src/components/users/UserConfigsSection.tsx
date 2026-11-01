@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Copy, Download, FileKey, KeyRound, Loader2, QrCode, Trash2 } from 'lucide-react'
 import {
   deleteUserConfig,
@@ -25,6 +25,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
 import { triggerFileDownload } from '@/lib/triggerFileDownload'
 import UserSection from './UserSection'
+import UserAccessSection from './UserAccessSection'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 
 interface ConfigEntry extends ProvisioningConfigNode {
@@ -35,7 +36,11 @@ interface ConfigEntry extends ProvisioningConfigNode {
 interface UserConfigsSectionProps {
   userId: number
   card: UserProvisioningCard
+  onRefresh?: () => void
+  onDirtyChange?: (dirty: boolean) => void
 }
+
+type ConfigSegment = 'issued' | 'plan'
 
 type FilePickMode = 'download' | 'qr'
 
@@ -69,8 +74,21 @@ function fileDisplayName(file: UserConfigFile): string {
   return file.download_filename || file.filename || file.path.split('/').pop() || 'config'
 }
 
-export default function UserConfigsSection({ userId, card }: UserConfigsSectionProps) {
+export default function UserConfigsSection({
+  userId,
+  card,
+  onRefresh,
+  onDirtyChange,
+}: UserConfigsSectionProps) {
   const { success, error: notifyError } = useNotifications()
+  // Два взгляда на конфиги: что выдано на узлах и что требует план.
+  const [segment, setSegment] = useState<ConfigSegment>('issued')
+  // План монтируется при первом открытии и остаётся смонтированным:
+  // так несохранённые правки не теряются при переключении сегментов.
+  const [planVisited, setPlanVisited] = useState(false)
+  useEffect(() => {
+    if (segment === 'plan') setPlanVisited(true)
+  }, [segment])
 
   // Имена плана: индекс 1 → base, k → base-k (как plan_name_for_index на бэкенде).
   const base = (card.user.client_base_name ?? '').trim()
@@ -252,140 +270,181 @@ export default function UserConfigsSection({ userId, card }: UserConfigsSectionP
 
   return (
     <div className="space-y-4">
-      <UserSection
-        icon={KeyRound}
-        title="Конфиги"
-        description="По имени и узлу. Действия выполняются на узле конфига."
-        actions={
-          <Badge variant="secondary">
-            {card.configs.length} имён ·{' '}
-            {card.configs.reduce((total, group) => total + group.nodes.length, 0)} узлов
-          </Badge>
-        }
+      <div
+        className="inline-flex items-center gap-1 rounded-xl border bg-muted/40 p-1"
+        role="tablist"
+        aria-label="Конфиги: выдано и план"
       >
-        <div className="space-y-3">
-          {!base && (
-            <p className="rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-              Плана нет — показаны записи конфигов из базы панели. Конфиги, удалённые на узле
-              напрямую, остаются здесь до синхронизации.
-            </p>
-          )}
-          {card.configs.length === 0 ? (
-            <EmptyState
-              icon={KeyRound}
-              title="Конфигов нет"
-              description="Создайте их во вкладке «План» или дождитесь применения."
-              className="py-10"
-            />
-          ) : (
-            <div className="space-y-3">
-              {card.configs.map((group) => (
-                <div key={group.name} className="overflow-hidden rounded-xl border">
-                  <div className="flex items-center justify-between gap-2 border-b bg-muted/50 px-3 py-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="truncate font-mono text-sm font-medium">{group.name}</span>
-                      {base ? (
-                        <Badge
-                          variant={inPlan(group.name) ? 'success' : 'secondary'}
-                          className="text-[10px]"
-                        >
-                          {inPlan(group.name) ? 'в плане' : 'вне плана'}
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary" className="text-[10px]">
-                          без плана
-                        </Badge>
-                      )}
-                    </div>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      узлов: {group.nodes.length}
-                    </span>
-                  </div>
-                  <div className="p-3">
-                    <div className="space-y-2">
-                      {group.nodes.map((entry: ProvisioningConfigNode) => {
-                        const configEntry: ConfigEntry = {
-                          ...entry,
-                          userId,
-                          clientName: group.name,
-                        }
-                        const created = entry.config_id != null
-                        const loadingKey = configKey(configEntry)
-                        return (
-                          <div
-                            key={entry.config_id ?? entry.node_id}
-                            className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-sm font-medium">{entry.node_label}</span>
-                                <Badge variant="outline" className="text-[10px]">
-                                  {entry.vpn_type}
-                                </Badge>
-                              </div>
-                              <p className="mt-0.5 text-[11px] text-muted-foreground">
-                                узел ID {entry.node_id}
-                                {entry.config_id ? ` · конфиг #${entry.config_id}` : ''}
-                              </p>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <Button
-                                type="button"
-                                size="sm"
-                                title="Скачать"
-                                disabled={!created || isLoading(loadingKey)}
-                                onClick={() => void openFileAction(configEntry, 'download')}
-                              >
-                                {filesLoading.has(loadingKey) ? (
-                                  <Loader2 size={13} className="animate-spin" />
-                                ) : (
-                                  <Download size={13} />
-                                )}
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                title="QR-код"
-                                disabled={!created || isLoading(loadingKey)}
-                                onClick={() => void openFileAction(configEntry, 'qr')}
-                              >
-                                {actionLoading.has(`qr-${loadingKey}`) ||
-                                filesLoading.has(loadingKey) ? (
-                                  <Loader2 size={13} className="animate-spin" />
-                                ) : (
-                                  <QrCode size={13} />
-                                )}
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="outline"
-                                disabled={!created}
-                                onClick={() => void handleAccessToggle(configEntry, 'unblock')}
-                              >
-                                Доступ
-                              </Button>
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="destructive"
-                                disabled={!created || isLoading(loadingKey)}
-                                onClick={() => void openDelete(configEntry)}
-                              >
-                                <Trash2 size={13} />
-                              </Button>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+        <Button
+          type="button"
+          role="tab"
+          aria-selected={segment === 'issued'}
+          size="sm"
+          variant={segment === 'issued' ? 'default' : 'ghost'}
+          className="h-8 px-3 text-xs"
+          onClick={() => setSegment('issued')}
+        >
+          Выдано
+        </Button>
+        <Button
+          type="button"
+          role="tab"
+          aria-selected={segment === 'plan'}
+          size="sm"
+          variant={segment === 'plan' ? 'default' : 'ghost'}
+          className="h-8 px-3 text-xs"
+          onClick={() => setSegment('plan')}
+        >
+          План
+        </Button>
+      </div>
+
+      {planVisited ? (
+        <div className={segment === 'plan' ? '' : 'hidden'}>
+          <UserAccessSection
+            card={card}
+            onRefresh={onRefresh}
+            onDirtyChange={onDirtyChange}
+          />
         </div>
-      </UserSection>
+      ) : null}
+
+      <div className={segment === 'issued' ? 'space-y-4' : 'hidden'}>
+        <UserSection
+          icon={KeyRound}
+          title="Конфиги"
+          description="По имени и узлу. Действия выполняются на узле конфига."
+          actions={
+            <Badge variant="secondary">
+              {card.configs.length} имён ·{' '}
+              {card.configs.reduce((total, group) => total + group.nodes.length, 0)} узлов
+            </Badge>
+          }
+        >
+          <div className="space-y-3">
+            {!base && (
+              <p className="rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                Плана нет — показаны записи конфигов из базы панели. Конфиги, удалённые на узле
+                напрямую, остаются здесь до синхронизации.
+              </p>
+            )}
+            {card.configs.length === 0 ? (
+              <EmptyState
+                icon={KeyRound}
+                title="Конфигов нет"
+                description="Создайте их в сегменте «План» или дождитесь применения."
+                className="py-10"
+              />
+            ) : (
+              <div className="space-y-3">
+                {card.configs.map((group) => (
+                  <div key={group.name} className="overflow-hidden rounded-xl border">
+                    <div className="flex items-center justify-between gap-2 border-b bg-muted/50 px-3 py-2">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate font-mono text-sm font-medium">{group.name}</span>
+                        {base ? (
+                          <Badge
+                            variant={inPlan(group.name) ? 'success' : 'secondary'}
+                            className="text-[10px]"
+                          >
+                            {inPlan(group.name) ? 'в плане' : 'вне плана'}
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-[10px]">
+                            без плана
+                          </Badge>
+                        )}
+                      </div>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">
+                        узлов: {group.nodes.length}
+                      </span>
+                    </div>
+                    <div className="p-3">
+                      <div className="space-y-2">
+                        {group.nodes.map((entry: ProvisioningConfigNode) => {
+                          const configEntry: ConfigEntry = {
+                            ...entry,
+                            userId,
+                            clientName: group.name,
+                          }
+                          const created = entry.config_id != null
+                          const loadingKey = configKey(configEntry)
+                          return (
+                            <div
+                              key={entry.config_id ?? entry.node_id}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border px-3 py-2"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-sm font-medium">{entry.node_label}</span>
+                                  <Badge variant="outline" className="text-[10px]">
+                                    {entry.vpn_type}
+                                  </Badge>
+                                </div>
+                                <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                  узел ID {entry.node_id}
+                                  {entry.config_id ? ` · конфиг #${entry.config_id}` : ''}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  title="Скачать"
+                                  disabled={!created || isLoading(loadingKey)}
+                                  onClick={() => void openFileAction(configEntry, 'download')}
+                                >
+                                  {filesLoading.has(loadingKey) ? (
+                                    <Loader2 size={13} className="animate-spin" />
+                                  ) : (
+                                    <Download size={13} />
+                                  )}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  title="QR-код"
+                                  disabled={!created || isLoading(loadingKey)}
+                                  onClick={() => void openFileAction(configEntry, 'qr')}
+                                >
+                                  {actionLoading.has(`qr-${loadingKey}`) ||
+                                  filesLoading.has(loadingKey) ? (
+                                    <Loader2 size={13} className="animate-spin" />
+                                  ) : (
+                                    <QrCode size={13} />
+                                  )}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={!created}
+                                  onClick={() => void handleAccessToggle(configEntry, 'unblock')}
+                                >
+                                  Доступ
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="destructive"
+                                  disabled={!created || isLoading(loadingKey)}
+                                  onClick={() => void openDelete(configEntry)}
+                                >
+                                  <Trash2 size={13} />
+                                </Button>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </UserSection>
+      </div>
 
       <Dialog
         open={filePick != null}

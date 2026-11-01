@@ -3,13 +3,12 @@ import {
   CalendarPlus,
   Copy,
   ExternalLink,
-  Gauge,
+  KeyRound,
   Link2,
   Loader2,
   PauseCircle,
   PlayCircle,
   RefreshCw,
-  RotateCcw,
 } from 'lucide-react'
 import {
   ApiError,
@@ -21,35 +20,24 @@ import {
 import { userPortalActionConfirm } from '@/lib/userPortalConfirm'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
-import {
-  extendUserAccess,
-  resetUserTrafficCounter,
-  resumeUser,
-  setUserTrafficLimit,
-  suspendUser,
-} from '@/api/users'
-import AppDialog from '@/components/shared/AppDialog'
+import { extendUserAccess, resumeUser, suspendUser } from '@/api/users'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { PercentBar } from '@/components/ui/percent-bar'
-import { cn } from '@/lib/utils'
-import UserSection from './UserSection'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
+import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
+import UserSection from './UserSection'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { formatDate } from '@/lib/datetime'
-import { formatBytes } from '@/lib/trafficFormat'
 import type { UserProvisioningCard, UserProvisionSummary } from '@/types'
 import SuspendUserDialog, { type SuspendUserPayload } from './SuspendUserDialog'
-
-const GIGABYTE = 1024 ** 3
 
 interface UserAccessControlSectionProps {
   card: UserProvisioningCard
   onRefresh: () => void
 }
+
 
 /** Продление доступа и приостановка (модуль «Пользователи (абоненты)»). */
 function AccessLifecycleCard({
@@ -365,171 +353,6 @@ function ClientPortalCard({
   )
 }
 
-/** Лимит трафика пользователя. */
-function TrafficLimitCard({
-  user,
-  busy,
-  trafficSyncOn,
-  onSave,
-  onClear,
-  onResetCounter,
-  onError,
-}: {
-  user: UserProvisionSummary
-  busy: boolean
-  trafficSyncOn: boolean
-  onSave: (bytes: number) => void
-  onClear: () => void
-  onResetCounter: () => void
-  onError: (message: string) => void
-}) {
-  const [trafficOpen, setTrafficOpen] = useState(false)
-  const [trafficGb, setTrafficGb] = useState('')
-
-  const limitBytes = user.traffic_limit_bytes ?? null
-  const consumedBytes = user.traffic_consumed_bytes ?? 0
-
-  const handleSave = (): boolean => {
-    const gb = Number.parseFloat(trafficGb.replace(',', '.'))
-    if (!Number.isFinite(gb) || gb <= 0) {
-      onError('Укажите лимит трафика в ГБ (например, 100)')
-      return false
-    }
-    onSave(Math.round(gb * GIGABYTE))
-    return true
-  }
-
-  const percent = limitBytes ? Math.min((consumedBytes / limitBytes) * 100, 100) : 0
-  const openTraffic = () => {
-    setTrafficGb(limitBytes != null ? String(Math.round((limitBytes / GIGABYTE) * 100) / 100) : '')
-    setTrafficOpen(true)
-  }
-
-  return (
-    <>
-      <UserSection
-        icon={Gauge}
-        title="Лимит трафика"
-        description="Общий лимит на все конфиги. По умолчанию без ограничений."
-        actions={
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={openTraffic}
-            disabled={busy || !trafficSyncOn}
-          >
-            {limitBytes == null ? 'Задать лимит' : 'Изменить лимит'}
-          </Button>
-        }
-      >
-        <div className="space-y-3">
-          {!trafficSyncOn && (
-            <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-              Модуль «Синхронизация трафика» выключен — лимит не работает. Включите его в
-              Настройках → Модули.
-            </p>
-          )}
-          {limitBytes == null ? (
-            <p className="text-sm text-muted-foreground">Без ограничений.</p>
-          ) : (
-            <>
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <p className="text-2xl font-semibold leading-none">{formatBytes(consumedBytes)}</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    из {formatBytes(limitBytes)}
-                    {user.traffic_counter_reset_at
-                      ? ` · счётчик с ${formatDate(user.traffic_counter_reset_at)}`
-                      : ''}
-                  </p>
-                </div>
-                <span
-                  className={cn(
-                    'text-sm font-semibold',
-                    user.traffic_limit_blocked ? 'text-destructive' : 'text-muted-foreground',
-                  )}
-                >
-                  {Math.round(percent)}%
-                </span>
-              </div>
-              <PercentBar
-                value={consumedBytes}
-                max={limitBytes}
-                className="h-2"
-                barClassName={
-                  user.traffic_limit_blocked
-                    ? 'fill-destructive'
-                    : percent >= 80
-                      ? 'fill-amber-500'
-                      : 'fill-primary'
-                }
-                label="Использование лимита трафика"
-              />
-              {user.traffic_limit_blocked && (
-                <p className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                  Лимит исчерпан — доступ заблокирован.
-                </p>
-              )}
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={onResetCounter}
-                  disabled={busy || !trafficSyncOn}
-                >
-                  <RotateCcw size={15} />
-                  Сбросить счётчик
-                </Button>
-                <Button type="button" size="sm" variant="ghost" onClick={onClear} disabled={busy}>
-                  Снять ограничение
-                </Button>
-              </div>
-            </>
-          )}
-        </div>
-      </UserSection>
-
-      <AppDialog
-        open={trafficOpen}
-        onOpenChange={setTrafficOpen}
-        title="Лимит трафика"
-        description="Укажите лимит в гигабайтах. Счётчик отсчитывается с момента установки лимита."
-        icon={Gauge}
-        size="sm"
-        footer={
-          <>
-            <Button type="button" variant="outline" onClick={() => setTrafficOpen(false)} disabled={busy}>
-              Отмена
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                if (handleSave()) setTrafficOpen(false)
-              }}
-              disabled={busy}
-            >
-              Сохранить
-            </Button>
-          </>
-        }
-      >
-        <div className="space-y-1.5">
-          <Label htmlFor="trafficLimitGb">Лимит, ГБ</Label>
-          <Input
-            id="trafficLimitGb"
-            value={trafficGb}
-            onChange={(e) => setTrafficGb(e.target.value)}
-            inputMode="decimal"
-            placeholder="100"
-          />
-        </div>
-      </AppDialog>
-    </>
-  )
-}
-
 export default function UserAccessControlSection({
   card,
   onRefresh,
@@ -537,13 +360,24 @@ export default function UserAccessControlSection({
   const { user } = card
   const { isEnabled } = useFeatureModules()
   const { success, error: notifyError } = useNotifications()
-  const trafficSyncOn = isEnabled('traffic_sync')
   // Приостановка/продление — только при включённом модуле «Пользователи (абоненты)».
   const provisioningOn = isEnabled('user_provisioning')
   // Ссылка портала — только при включённом «Клиентском портале».
   const clientPortalEnabled = isEnabled('client_portal')
+  // Ключ продления — при включённых unlock-кодах и хотя бы одном VPN-протоколе.
+  const unlockEnabled = isEnabled('unlock_codes')
+  const unlockProtocols = (
+    [
+      { id: 'openvpn', keys: ['openvpn'] },
+      { id: 'wireguard', keys: ['wireguard', 'amneziawg'] },
+      { id: 'amneziawg2', keys: ['awg2'] },
+    ] as const
+  )
+    .filter((p) => p.keys.some((k) => isEnabled(k)))
+    .map((p) => p.id)
 
   const [busy, setBusy] = useState(false)
+  const [unlockOpen, setUnlockOpen] = useState(false)
 
   const run = async (action: () => Promise<void>, message: string) => {
     setBusy(true)
@@ -591,47 +425,50 @@ export default function UserAccessControlSection({
     }, 'Доступ возобновлён')
   }
 
-  const handleSaveTraffic = (bytes: number) => {
-    void run(async () => {
-      await setUserTrafficLimit(user.id, bytes)
-    }, 'Лимит трафика сохранён')
-  }
-
-  const handleClearTraffic = () => {
-    void run(async () => {
-      await setUserTrafficLimit(user.id, null)
-    }, 'Ограничение трафика снято')
-  }
-
-  const handleResetCounter = () => {
-    void run(async () => {
-      await resetUserTrafficCounter(user.id)
-    }, 'Счётчик трафика сброшен')
-  }
-
   return (
-    <div className="space-y-4">
-      {provisioningOn && (
-        <AccessLifecycleCard
-          user={user}
-          busy={busy}
-          onExtend={handleExtend}
-          onSetAccessUntil={handleSetAccessUntil}
-          onSuspend={handleSuspend}
-          onResume={handleResume}
-          onError={notifyError}
+    <>
+      <div className="space-y-4">
+        {provisioningOn && (
+          <AccessLifecycleCard
+            user={user}
+            busy={busy}
+            onExtend={handleExtend}
+            onSetAccessUntil={handleSetAccessUntil}
+            onSuspend={handleSuspend}
+            onResume={handleResume}
+            onError={notifyError}
+          />
+        )}
+        {unlockEnabled && unlockProtocols.length > 0 ? (
+          <UserSection
+            icon={KeyRound}
+            title="Ключ продления"
+            description="Создать unlock-ключ для абонента и отправить в Telegram, если он привязан."
+          >
+            <Button
+              type="button"
+              onClick={() => setUnlockOpen(true)}
+              className="w-full sm:w-auto"
+            >
+              <KeyRound size={15} /> Создать ключ
+            </Button>
+          </UserSection>
+        ) : null}
+        {clientPortalEnabled && <ClientPortalCard user={user} onError={notifyError} />}
+      </div>
+
+      {unlockEnabled && unlockProtocols.length > 0 ? (
+        <UnlockCodeCreateDialog
+          open={unlockOpen}
+          onOpenChange={setUnlockOpen}
+          availableProtocols={unlockProtocols}
+          initialProtocols={unlockProtocols}
+          boundUser={{ id: user.id, username: user.username }}
+          telegramBound={Boolean(user.telegram_id)}
+          targetUserId={user.id}
+          onCreated={() => onRefresh()}
         />
-      )}
-      {clientPortalEnabled && <ClientPortalCard user={user} onError={notifyError} />}
-      <TrafficLimitCard
-        user={user}
-        busy={busy}
-        trafficSyncOn={trafficSyncOn}
-        onSave={handleSaveTraffic}
-        onClear={handleClearTraffic}
-        onResetCounter={handleResetCounter}
-        onError={notifyError}
-      />
-    </div>
+      ) : null}
+    </>
   )
 }
