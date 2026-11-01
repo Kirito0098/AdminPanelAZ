@@ -55,6 +55,7 @@ _REDEEM_SUSPENDED_MESSAGE = (
 )
 _REDEEM_GENERIC_ERROR_MESSAGE = "Не удалось активировать unlock-ключ"
 _REDEEM_NOTHING_TO_EXTEND_MESSAGE = "Срок ваших профилей не ограничен — продлевать нечего"
+_REDEEM_WRONG_USER_MESSAGE = "Этот ключ выдан другому абоненту"
 
 
 def _now() -> datetime:
@@ -355,6 +356,23 @@ def _client_config_name_and_protocols(db: Session, node_id: int, client_name: st
     return canonical_name, protocols
 
 
+def _owner_user_id_for_client(db: Session, node_id: int, client_name: str) -> int | None:
+    """Владелец клиента на узле: нужен, чтобы проверить абонентский ключ в портале клиента."""
+    client_key = _normalize_client_name(client_name)
+    row = (
+        db.query(VpnConfig.owner_id)
+        .filter(
+            VpnConfig.node_id == node_id,
+            func.lower(VpnConfig.client_name) == client_key,
+            VpnConfig.ha_primary_config_id.is_(None),
+        )
+        .first()
+    )
+    if row is None or row[0] is None:
+        return None
+    return int(row[0])
+
+
 def _vpn_config_client_name_for_protocol(
     db: Session,
     *,
@@ -543,7 +561,16 @@ def redeem_unlock_code(
             raise ValueError(_REDEEM_EXPIRED_MESSAGE)
 
         allowed_clients = _parse_allowed_client_names(row.allowed_client_names)
-        if allowed_clients and client_key not in allowed_clients:
+        if row.target_user_id is not None:
+            # Ключ выдан конкретному абоненту: активировать может только он.
+            redeemer_id = (
+                user_id if user_id is not None else _owner_user_id_for_client(db, node_id, client_key)
+            )
+            if redeemer_id != row.target_user_id:
+                raise ValueError(_REDEEM_WRONG_USER_MESSAGE)
+            user_id = row.target_user_id
+            allowed_clients = []
+        elif allowed_clients and client_key not in allowed_clients:
             raise ValueError(_REDEEM_CLIENT_NOT_ALLOWED_MESSAGE)
 
         canonical_client_name, client_protocols = _client_config_name_and_protocols(db, node_id, client_key)
@@ -566,7 +593,7 @@ def redeem_unlock_code(
         code_protocols = _parse_code_protocols(row.protocols)
         # Client-bound codes extend the whole profile (all protocols the client has on this node).
         # Unrestricted codes still apply only the protocols stored on the code.
-        if allowed_clients:
+        if allowed_clients or row.target_user_id is not None:
             protocols_applied = [protocol for protocol in ("openvpn", "wireguard", "amneziawg2") if protocol in client_protocols]
         else:
             protocols_applied = [protocol for protocol in code_protocols if protocol in client_protocols]
@@ -619,7 +646,7 @@ def redeem_unlock_code(
                 owner_user,
                 now=grant_until_base,
                 days=grant_days,
-                protocols=set(_ALLOWED_PROTOCOLS) if allowed_clients else set(code_protocols),
+                protocols=set(_ALLOWED_PROTOCOLS) if (allowed_clients or row.target_user_id is not None) else set(code_protocols),
                 actor="unlock_codes",
                 client_names=set(allowed_clients) if allowed_clients else None,
             )

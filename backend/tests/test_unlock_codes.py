@@ -1431,3 +1431,97 @@ def test_create_user_bound_code_serializes_target_user(db):
     assert items[0]["target_user_id"] == user.id
     assert items[0]["target_user_name"] == "bound-user"
     assert items[0]["allowed_client_names"] == []
+
+
+def _redeem_bound_now(db, **kwargs):
+    with (
+        patch("app.services.unlock_codes._now", return_value=_OWNER_NOW),
+        patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()),
+        patch("app.services.user_blocks.get_adapter_for_node", return_value=_adapter()),
+    ):
+        return redeem_unlock_code(db, **kwargs)
+
+
+def test_user_bound_code_owner_redeem_extends_subscription_and_all_profiles(db):
+    node_a = _make_node(db, name="node-a")
+    node_b = _make_node(db, name="node-b", is_local=False)
+    owner = _make_user(db, username="bound-owner", role=UserRole.user)
+    owner.access_until = _naive(_OWNER_NOW + timedelta(days=2))
+    owner.traffic_limit_bytes = 1000
+    owner.traffic_limit_blocked = True
+    owner.traffic_counter_reset_at = _naive(_OWNER_NOW - timedelta(days=1))
+    db.commit()
+    _owned_client(db, node_a.id, owner.id, "Mira", _OWNER_NOW + timedelta(days=1))
+    _owned_client(db, node_b.id, owner.id, "Mira", _OWNER_NOW + timedelta(days=5))
+    stranger = _make_user(db, username="stranger", role=UserRole.user)
+    _owned_client(db, node_a.id, stranger.id, "Solo", _OWNER_NOW + timedelta(days=1))
+    _user_bound_code(db, owner, owner.id, "BOUND-OWN-01", days=30)
+
+    result = _redeem_bound_now(
+        db, code="BOUND-OWN-01", client_name="Mira", node_id=node_a.id, user_id=owner.id
+    )
+
+    expected = _naive(_OWNER_NOW + timedelta(days=32))
+    db.refresh(owner)
+    assert result["grant_days"] == 30
+    assert owner.access_until == expected
+    assert owner.traffic_limit_blocked is False
+    assert owner.traffic_counter_reset_at is not None
+    assert _ovpn_until(db, node_a.id, "Mira") == expected
+    assert _ovpn_until(db, node_b.id, "Mira") == expected
+    assert _ovpn_until(db, node_a.id, "Solo") == _naive(_OWNER_NOW + timedelta(days=1))
+
+
+def test_user_bound_code_rejected_for_another_user(db):
+    node = _make_node(db)
+    owner = _make_user(db, username="bound-owner", role=UserRole.user)
+    stranger = _make_user(db, username="stranger", role=UserRole.user)
+    _owned_client(db, node.id, owner.id, "Mira", _OWNER_NOW + timedelta(days=1))
+    _owned_client(db, node.id, stranger.id, "Solo", _OWNER_NOW + timedelta(days=1))
+    _user_bound_code(db, owner, owner.id, "BOUND-FOR-01")
+
+    with pytest.raises(ValueError, match="другому абоненту"):
+        _redeem_bound_now(
+            db, code="BOUND-FOR-01", client_name="Solo", node_id=node.id, user_id=stranger.id
+        )
+
+    code = db.query(UnlockCode).filter_by(code="BOUND-FOR-01").one()
+    assert code.redemption_count == 0
+
+
+def test_user_bound_code_client_portal_resolves_owner_and_rejects_foreign(db):
+    node = _make_node(db)
+    owner = _make_user(db, username="bound-owner", role=UserRole.user)
+    owner.access_until = _naive(_OWNER_NOW + timedelta(days=2))
+    stranger = _make_user(db, username="stranger", role=UserRole.user)
+    db.commit()
+    _owned_client(db, node.id, owner.id, "Mira", _OWNER_NOW + timedelta(days=1))
+    _owned_client(db, node.id, stranger.id, "Solo", _OWNER_NOW + timedelta(days=1))
+    _user_bound_code(db, owner, owner.id, "BOUND-PORT-01")
+
+    # Портальная ссылка клиента не передаёт user_id: владельца находит сам redeem.
+    _redeem_bound_now(db, code="BOUND-PORT-01", client_name="Mira", node_id=node.id)
+
+    db.refresh(owner)
+    assert owner.access_until == _naive(_OWNER_NOW + timedelta(days=32))
+
+    _user_bound_code(db, owner, owner.id, "BOUND-PORT-02")
+    with pytest.raises(ValueError, match="другому абоненту"):
+        _redeem_bound_now(db, code="BOUND-PORT-02", client_name="Solo", node_id=node.id)
+
+
+def test_user_bound_code_single_redemption_per_user(db):
+    node = _make_node(db)
+    owner = _make_user(db, username="bound-owner", role=UserRole.user)
+    owner.access_until = _naive(_OWNER_NOW + timedelta(days=2))
+    db.commit()
+    _owned_client(db, node.id, owner.id, "Mira", _OWNER_NOW + timedelta(days=1))
+    _user_bound_code(db, owner, owner.id, "BOUND-TWICE-01")
+
+    _redeem_bound_now(
+        db, code="BOUND-TWICE-01", client_name="Mira", node_id=node.id, user_id=owner.id
+    )
+    with pytest.raises(ValueError, match="уже использован"):
+        _redeem_bound_now(
+            db, code="BOUND-TWICE-01", client_name="Mira", node_id=node.id, user_id=owner.id
+        )
