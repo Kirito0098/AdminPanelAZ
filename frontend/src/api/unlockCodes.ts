@@ -14,9 +14,10 @@ interface UnlockCodeCreateInput {
   max_redemptions?: number
   code_expires_at?: string | null
   allowed_client_names?: string[]
+  send_to_user_id?: number
 }
 
-type UnlockCodeCreateResponse = UnlockCodeRecord
+type UnlockCodeCreateResponse = UnlockCodeRecord & { sent_to_telegram?: boolean }
 
 export async function setClientAccessUntil(
   protocol: 'openvpn' | 'wireguard' | 'amneziawg2',

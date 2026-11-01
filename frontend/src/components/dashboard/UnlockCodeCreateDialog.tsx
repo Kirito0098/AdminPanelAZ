@@ -14,6 +14,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useNotifications } from '@/context/NotificationContext'
 import { formatDate } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
@@ -68,6 +69,10 @@ interface UnlockCodeCreateDialogProps {
   availableProtocols?: UnlockCodeProtocol[]
   initialClientNames?: string[]
   onCreated?: (code: UnlockCodeRecord) => Promise<void> | void
+  /** Привязан ли Telegram у целевого абонента (показывать чекбокс отправки). */
+  telegramBound?: boolean
+  /** id абонента для отправки ключа в личный Telegram. */
+  targetUserId?: number
 }
 
 export default function UnlockCodeCreateDialog({
@@ -77,6 +82,8 @@ export default function UnlockCodeCreateDialog({
   availableProtocols = ALL_PROTOCOLS,
   initialClientNames = [],
   onCreated,
+  telegramBound = false,
+  targetUserId,
 }: UnlockCodeCreateDialogProps) {
   const { success, error: notifyError } = useNotifications()
   const availableProtocolsKey = availableProtocols.join(',')
@@ -97,6 +104,8 @@ export default function UnlockCodeCreateDialog({
   const [clientsLoading, setClientsLoading] = useState(false)
   const [createdCode, setCreatedCode] = useState<UnlockCodeRecord | null>(null)
   const [saving, setSaving] = useState(false)
+  const [sendToTelegram, setSendToTelegram] = useState(false)
+  const [sentTelegram, setSentTelegram] = useState(false)
   const createdCodeRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -125,7 +134,17 @@ export default function UnlockCodeCreateDialog({
     setSelectedClients(nextClients)
     setClientSearch('')
     setCreatedCode(null)
-  }, [availableProtocolsKey, initialClientsKey, initialProtocolsKey, open, protocolOptions])
+    setSentTelegram(false)
+    setSendToTelegram(Boolean(telegramBound && targetUserId != null))
+  }, [
+    availableProtocolsKey,
+    initialClientsKey,
+    initialProtocolsKey,
+    open,
+    protocolOptions,
+    telegramBound,
+    targetUserId,
+  ])
 
   useEffect(() => {
     if (!open) return
@@ -242,9 +261,11 @@ export default function UnlockCodeCreateDialog({
         max_redemptions: mode === 'single' ? 1 : parsedMaxRedemptions,
         code_expires_at: toEndOfDayIso(codeExpiresAt),
         allowed_client_names: selectedClients,
+        send_to_user_id: sendToTelegram && targetUserId != null ? targetUserId : undefined,
       })
       setCreatedCode(created)
-      success('Unlock-ключ создан')
+      setSentTelegram(Boolean(created.sent_to_telegram))
+      success(created.sent_to_telegram ? 'Ключ создан и отправлен в Telegram' : 'Unlock-ключ создан')
       await onCreated?.(created)
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Не удалось создать unlock-ключ')
@@ -317,6 +338,7 @@ export default function UnlockCodeCreateDialog({
                     : 'Клиенты: любой'}
                 </Badge>
                 <Badge variant="outline">До {formatDate(createdCode.code_expires_at)}</Badge>
+                {sentTelegram ? <Badge variant="success">Отправлен в Telegram</Badge> : null}
               </div>
             </div>
           )}
@@ -482,6 +504,16 @@ export default function UnlockCodeCreateDialog({
               </div>
             </div>
           )}
+
+          {telegramBound && targetUserId != null ? (
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={sendToTelegram}
+                onCheckedChange={(v) => setSendToTelegram(v === true)}
+              />
+              Отправить ключ в Telegram абоненту
+            </label>
+          ) : null}
 
           <DialogFooter className="gap-2 sm:gap-0">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
