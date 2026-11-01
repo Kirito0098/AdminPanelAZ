@@ -22,20 +22,28 @@ export default function MessagesPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
     try {
       setThreads(await getMessageThreads({ q: search.trim() || undefined, unread: unreadOnly }))
       setError(null)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось загрузить диалоги')
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [search, unreadOnly])
 
   useEffect(() => {
     void load()
+  }, [load])
+
+  // Список диалогов освежаем раз в 30 с (тихо, только на видимой вкладке).
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void load(true)
+    }, 30_000)
+    return () => window.clearInterval(timer)
   }, [load])
 
   const selected = useMemo(

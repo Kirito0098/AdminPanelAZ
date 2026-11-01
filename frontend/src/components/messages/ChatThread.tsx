@@ -48,6 +48,35 @@ export default function ChatThread({ userId, onSent, onRead }: ChatThreadProps) 
     void load()
   }, [load])
 
+  const messagesRef = useRef<UserMessageItem[]>([])
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+
+  // Автообновление ленты: раз в 10 с, только на видимой вкладке, без мигания.
+  const refresh = useCallback(async () => {
+    try {
+      const next = await getUserMessages(userId, { limit: 100 })
+      const prev = messagesRef.current
+      const same =
+        prev.length === next.length && prev[prev.length - 1]?.id === next[next.length - 1]?.id
+      if (same) return
+      setMessages(next)
+      await markMessagesRead(userId)
+      onReadRef.current?.()
+    } catch {
+      // Тик best-effort: ошибку покажет следующая ручная загрузка/открытие диалога.
+    }
+  }, [userId])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.hidden) return
+      void refresh()
+    }, 10_000)
+    return () => window.clearInterval(timer)
+  }, [refresh])
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: 'end' })
   }, [messages.length])
