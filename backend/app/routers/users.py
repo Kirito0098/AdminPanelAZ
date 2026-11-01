@@ -395,7 +395,56 @@ def list_users(
         user.plan_protocols = protocols
         user.plan_config_count = config_count
         user.active_task_id = active_task_by_user.get(user.id)
+    consumed, last_seen = _user_list_traffic(db, users)
+    for user in users:
+        user.traffic_consumed_bytes = int(consumed.get(user.id, 0))
+        user.last_seen_at = last_seen.get(user.id)
     return users
+
+
+def _user_list_traffic(
+    db: Session, users: list[User]
+) -> tuple[dict[int, int], dict[int, datetime | None]]:
+    """Потреблённый трафик и последняя активность для списка (только при traffic_sync)."""
+    from sqlalchemy import func
+
+    from app.services.user_traffic_limit import user_consumed_bytes
+
+    consumed: dict[int, int] = {}
+    last_seen: dict[int, datetime | None] = {}
+    if not get_feature_service().is_enabled("traffic_sync"):
+        return consumed, last_seen
+    ids = [u.id for u in users]
+    owned = (
+        db.query(VpnConfig)
+        .filter(VpnConfig.owner_id.in_(ids), VpnConfig.ha_primary_config_id.is_(None))
+        .all()
+    )
+    names_by_user: dict[int, set[str]] = {}
+    for c in owned:
+        names_by_user.setdefault(c.owner_id, set()).add(c.client_name.strip())
+    all_names = {n for names in names_by_user.values() for n in names if n}
+    name_seen: dict[str, datetime | None] = {}
+    if all_names:
+        rows = (
+            db.query(
+                UserTrafficStatProtocol.common_name,
+                func.max(UserTrafficStatProtocol.last_seen_at),
+            )
+            .filter(UserTrafficStatProtocol.common_name.in_(all_names))
+            .group_by(UserTrafficStatProtocol.common_name)
+            .all()
+        )
+        name_seen = {r[0]: r[1] for r in rows}
+    for u in users:
+        names = names_by_user.get(u.id, set())
+        if not names:
+            continue
+        if u.traffic_limit_bytes and u.traffic_counter_reset_at:
+            consumed[u.id] = user_consumed_bytes(db, u)
+        seen = [name_seen[n] for n in names if name_seen.get(n)]
+        last_seen[u.id] = max(seen) if seen else None
+    return consumed, last_seen
 
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)

@@ -15,6 +15,7 @@ def log_action(
     username: str | None = None,
     details: str | None = None,
     remote_addr: str | None = None,
+    target_user_id: int | None = None,
 ) -> UserActionLog | None:
     row = UserActionLog(
         user_id=user_id,
@@ -22,6 +23,7 @@ def log_action(
         action=action,
         details=details,
         remote_addr=remote_addr,
+        target_user_id=target_user_id,
     )
     db.add(row)
     db.commit()

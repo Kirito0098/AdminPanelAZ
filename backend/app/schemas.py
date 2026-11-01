@@ -272,6 +272,7 @@ class UserUpdate(BaseModel):
     panel_login_enabled: bool | None = None
     # Stage 3: лимит трафика пользователя (None — без ограничения).
     traffic_limit_bytes: int | None = Field(default=None, ge=0)
+    note: str | None = Field(default=None, max_length=2000)
 
     @field_validator("access_until", mode="before")
     @classmethod
@@ -332,6 +333,9 @@ class UserResponse(UserBase):
     traffic_limit_bytes: int | None = None
     traffic_counter_reset_at: datetime | None = None
     traffic_limit_blocked: bool = False
+    traffic_consumed_bytes: int = 0
+    last_seen_at: datetime | None = None
+    note: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -433,6 +437,7 @@ class UserProvisionSummary(BaseModel):
     traffic_consumed_bytes: int = 0
     telegram_id: str | None = None
     visible_vpn_profiles: dict | None = None
+    note: str | None = None
 
 
 class GraceHoldView(BaseModel):
