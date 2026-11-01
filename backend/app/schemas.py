@@ -1982,6 +1982,40 @@ class AccessRequestResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class UserMessageOut(BaseModel):
+    """Строка ленты чата абонент ↔ администратор."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    direction: str
+    admin_id: int | None = None
+    text: str
+    created_at: datetime
+    read_by_admin_at: datetime | None = None
+
+
+class MessageThreadOut(BaseModel):
+    """Диалог в списке «Сообщения»: последнее сообщение и непрочитанные."""
+
+    user_id: int
+    username: str
+    last_text: str
+    last_at: datetime
+    last_direction: str
+    unread_count: int
+
+
+class SendMessageRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=4096)
+
+
+class SendMessageResult(BaseModel):
+    message: UserMessageOut
+    delivered: bool
+    warning: str | None = None
+
+
 class ApproveRequest(BaseModel):
     preset_id: int | None = None
     node_ids: list[int] | None = None
