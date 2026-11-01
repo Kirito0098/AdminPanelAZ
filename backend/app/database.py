@@ -1752,6 +1752,7 @@ def _run_db_migrations() -> None:
     _migrate_users_stage3()
     _migrate_users_commercial()
     _migrate_config_quota_floor()
+    _migrate_user_messages()
     _migrate_user_portal_banner()
     _migrate_revoke_unmanaged_client_portal_links()
     _seed_client_templates_for_nodes()
@@ -2217,6 +2218,56 @@ def _migrate_config_quota_floor() -> None:
             raised += result.rowcount or 0
         if raised:
             logger.info("DB migration: raised config_quota to plan size for %s user(s)", raised)
+
+
+def _migrate_user_messages() -> None:
+    """Stage 7: user_messages (чат абонент ↔ админ) + users.chat_mode_since."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    with _migration_transaction() as conn:
+        if "user_messages" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE user_messages (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        direction VARCHAR(8) NOT NULL,
+                        admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                        text TEXT NOT NULL,
+                        telegram_message_id BIGINT,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        read_by_admin_at DATETIME
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_messages_user_created "
+                    "ON user_messages (user_id, created_at)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_messages_unread "
+                    "ON user_messages (user_id) "
+                    "WHERE direction = 'in' AND read_by_admin_at IS NULL"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_messages_tg "
+                    "ON user_messages (user_id, telegram_message_id) "
+                    "WHERE telegram_message_id IS NOT NULL"
+                )
+            )
+            logger.info("DB migration: created user_messages table")
+        if "users" in tables:
+            cols = _table_columns(conn, "users")
+            if "chat_mode_since" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN chat_mode_since DATETIME"))
+                logger.info("DB migration: added users.chat_mode_since")
 
 
 def _migrate_user_config_access_table() -> None:

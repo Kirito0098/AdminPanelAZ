@@ -114,6 +114,8 @@ class User(Base):
     )
     traffic_limit_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     traffic_counter_reset_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Chat abonent ↔ admin: время входа в режим переписки (None — режим выключен).
+    chat_mode_since: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     traffic_limit_blocked: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0"
     )
@@ -1072,6 +1074,44 @@ class UserAccessRequest(Base):
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     receipt_file_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
+class UserMessage(Base):
+    """Сообщение чата абонент ↔ администратор.
+
+    ``direction="in"`` — написал абонент, ``"out"`` — ответил администратор.
+    ``telegram_message_id`` защищает от повторной доставки одного апдейта Telegram.
+    """
+
+    __tablename__ = "user_messages"
+    __table_args__ = (
+        Index("ix_user_messages_user_created", "user_id", "created_at"),
+        Index(
+            "ix_user_messages_unread",
+            "user_id",
+            sqlite_where=text("direction = 'in' AND read_by_admin_at IS NULL"),
+        ),
+        Index(
+            "uq_user_messages_tg",
+            "user_id",
+            "telegram_message_id",
+            unique=True,
+            sqlite_where=text("telegram_message_id IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+    direction: Mapped[str] = mapped_column(String(8))
+    admin_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    text: Mapped[str] = mapped_column(Text)
+    telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    read_by_admin_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class TelegramRequestBan(Base):
