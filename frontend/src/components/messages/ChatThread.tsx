@@ -22,19 +22,27 @@ export default function ChatThread({ userId, onSent, onRead }: ChatThreadProps) 
   const [warning, setWarning] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  // Колбэки держим в ref: иначе inline-пропсы меняют identity `load` и запускают
+  // бесконечный цикл «загрузка → markRead → onRead → ре-рендер → загрузка».
+  const onReadRef = useRef(onRead)
+  const onSentRef = useRef(onSent)
+  useEffect(() => {
+    onReadRef.current = onRead
+    onSentRef.current = onSent
+  }, [onRead, onSent])
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       setMessages(await getUserMessages(userId, { limit: 100 }))
       await markMessagesRead(userId)
-      onRead?.()
+      onReadRef.current?.()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось загрузить переписку')
     } finally {
       setLoading(false)
     }
-  }, [userId, onRead])
+  }, [userId])
 
   useEffect(() => {
     void load()
@@ -55,7 +63,7 @@ export default function ChatThread({ userId, onSent, onRead }: ChatThreadProps) 
       setMessages((prev) => [...prev, result.message])
       setDraft('')
       if (!result.delivered) setWarning(result.warning ?? 'Сообщение не доставлено')
-      onSent?.()
+      onSentRef.current?.()
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Не удалось отправить сообщение')
     } finally {

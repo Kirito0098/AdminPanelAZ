@@ -12,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.models import User, UserMessage, UserRole
 from app.services.telegram_bot_handlers import chat as chat_handler
+from app.services import telegram_bot_i18n as i18n
 
 
 class _Feature:
@@ -218,3 +219,46 @@ def test_new_message_writes_bell_and_one_card(db, subscriber, monkeypatch):
     bells = db.query(AdminPanelNotification).filter_by(event_type="user_message").all()
     assert len(bells) == 2
     assert bells[0].title.startswith("ivan:")
+
+
+def test_user_message_notification_goes_to_requests_tab():
+    from app.services.admin_panel_notifications import category_for_event
+
+    assert category_for_event("user_message") == "requests"
+
+
+def test_admin_does_not_enter_chat_mode(db):
+    import asyncio
+
+    admin = User(
+        username="boss", password_hash="x", role=UserRole.admin, is_active=True,
+        panel_login_enabled=True, telegram_id="999",
+    )
+    db.add(admin)
+    db.commit()
+    db.refresh(admin)
+
+    asyncio.run(chat_handler.handle_admin_chat(_ctx(db, admin)))
+
+    db.refresh(admin)
+    assert admin.chat_mode_since is None
+    assert chat_handler.send_message.await_args.args[2] == i18n.CHAT_ADMIN_HINT
+
+
+def test_photo_in_chat_mode_hints_text_only(db, subscriber):
+    import asyncio
+
+    subscriber.chat_mode_since = datetime.utcnow()
+    db.commit()
+    photo_message = {
+        "message_id": 31,
+        "photo": [{"file_id": "f"}],
+        "chat": {"id": 555, "type": "private"},
+        "from": {"id": 555},
+    }
+
+    handled = asyncio.run(chat_handler.handle_chat_text(_ctx(db, subscriber), photo_message))
+
+    assert handled is True
+    assert db.query(UserMessage).count() == 0
+    assert chat_handler.send_message.await_args.args[2] == i18n.CHAT_TEXT_ONLY

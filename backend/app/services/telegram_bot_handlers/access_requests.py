@@ -72,9 +72,10 @@ def _linked_keyboard(ctx: BotContext) -> dict | None:
     """Reply-клавиатура абонента (``None``, если Telegram не привязан к пользователю)."""
     if ctx.user is None:
         return None
-    from app.services.telegram_bot_handlers.menu import build_linked_reply_keyboard
+    from app.services.telegram_bot_handlers.menu import build_reply_keyboard
 
-    return build_linked_reply_keyboard(is_admin=is_admin(ctx.user))
+    # Полная раскладка: «Оплатить (чек)», «Написать администратору», «Завершить» в режиме чата.
+    return build_reply_keyboard(ctx)
 
 
 async def handle_request_access(ctx: BotContext) -> None:

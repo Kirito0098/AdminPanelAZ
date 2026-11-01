@@ -93,7 +93,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { pendingRequestsCount } = useNotificationCenter()
   const [messagesUnread, setMessagesUnread] = useState(0)
   useEffect(() => {
-    if (!isEnabled('user_messaging')) return
+    // Счётчик админский: обычным пользователям не опрашиваем (иначе 403 каждую минуту).
+    if (user?.role !== 'admin' || !isEnabled('user_messaging')) return
     let cancelled = false
     const tick = async () => {
       if (document.hidden) return
@@ -110,7 +111,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [isEnabled])
+  }, [isEnabled, user?.role])
   const initials = user?.username?.slice(0, 2).toUpperCase() ?? '?'
   const isAdmin = user?.role === 'admin'
   const profileItem: SidebarNavItem = {

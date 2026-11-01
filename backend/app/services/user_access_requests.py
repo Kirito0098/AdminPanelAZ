@@ -919,12 +919,19 @@ def send_message_sync_or_async(token: str, chat_id: str, text: str, **kwargs: An
         return False
 
 
-def _linked_reply_keyboard(user: User) -> dict[str, Any] | None:
+def _linked_reply_keyboard(db: Session, user: User) -> dict[str, Any] | None:
     """Reply-клавиатура абонента: после одобрения убирает кнопку «Запросить доступ»."""
     try:
-        from app.services.telegram_bot_handlers.menu import build_linked_reply_keyboard
+        from app.services.telegram_bot_handlers.menu import (
+            _accept_requests,
+            build_linked_reply_keyboard,
+        )
 
-        return build_linked_reply_keyboard(is_admin=user.role == UserRole.admin)
+        return build_linked_reply_keyboard(
+            is_admin=user.role == UserRole.admin,
+            in_chat=user.chat_mode_since is not None,
+            show_pay=_accept_requests(db),
+        )
     except Exception as exc:  # клавиатура не должна ломать доставку
         logger.warning("delivery keyboard build failed for user_id=%s: %s", user.id, exc)
         return None
@@ -1038,7 +1045,7 @@ def maybe_send_delivery_after_task(db: Session, *, user_id: int, created_count: 
         bot_token,
         str(user.telegram_id),
         text,
-        reply_markup=_linked_reply_keyboard(user),
+        reply_markup=_linked_reply_keyboard(db, user),
     ):
         write_admin_panel_notification(
             db,

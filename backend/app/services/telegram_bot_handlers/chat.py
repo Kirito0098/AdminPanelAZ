@@ -8,6 +8,7 @@ from app.services.feature_guards import get_feature_service
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import BotContext
 from app.services.telegram_bot_handlers.menu import build_reply_keyboard
+from app.models import UserRole
 from app.services.user_message_notify import notify_admins_new_message
 
 
@@ -22,6 +23,10 @@ async def handle_admin_chat(ctx: BotContext) -> None:
         return
     if ctx.user is None:
         await send_message(ctx.bot_token, ctx.chat_id, i18n.CHAT_NEED_LINK)
+        return
+    if ctx.user.role == UserRole.admin:
+        # Админ отвечает из панели; режим переписки ему не нужен.
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.CHAT_ADMIN_HINT)
         return
     chat_service.enter_chat_mode(ctx.db, ctx.user)
     await send_message(
@@ -44,8 +49,14 @@ async def handle_chat_text(ctx: BotContext, message: dict) -> bool:
     ``False`` — режим выключен или сообщение пустое: пусть решает обычная
     маршрутизация (меню, коды, «не понял»).
     """
-    if ctx.user is None or not chat_service.in_chat_mode(ctx.user):
+    if ctx.user is None or ctx.user.role == UserRole.admin:
         return False
+    if not chat_service.in_chat_mode(ctx.user):
+        return False
+    if message.get("photo") or message.get("document"):
+        # Фото в переписке не принимаем: чек идёт через «Оплатить (чек)».
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.CHAT_TEXT_ONLY)
+        return True
     text = (message.get("text") or "").strip()
     if not text:
         return False

@@ -184,6 +184,7 @@ EVENT_CATEGORY: dict[str, str] = {
     "access_request_new_user": "requests",
     "access_request_add_config": "requests",
     "access_request_extend_access": "requests",
+    "user_message": "requests",
     "access_request_delivery_failed": "requests",
 }
 
