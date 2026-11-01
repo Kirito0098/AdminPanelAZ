@@ -7,7 +7,9 @@ HA-тени (``ha_primary_config_id IS NOT NULL``) скрыты из списк�
 
 from __future__ import annotations
 
+import math
 from collections import defaultdict
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
@@ -57,6 +59,33 @@ def _node_for_config(db: Session, config: VpnConfig) -> Node:
     return node
 
 
+def _user_status(db: Session, user: User) -> dict:
+    """Срок доступа, остаток дней, приостановка и остаток трафика для Mini App."""
+    from app.services.user_traffic_limit import user_consumed_bytes
+
+    now = datetime.now(timezone.utc)
+    until = user.access_until
+    if until is not None and until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    days_left = None
+    if until is not None:
+        days_left = max(0, math.ceil((until - now).total_seconds() / 86400))
+    limit = user.traffic_limit_bytes
+    consumed = user_consumed_bytes(db, user) if limit else None
+    left = max(int(limit) - int(consumed), 0) if (limit is not None and consumed is not None) else None
+    return {
+        "access_until": until.isoformat() if until else None,
+        "access_days_left": days_left,
+        "access_expired": bool(until is not None and until <= now),
+        "suspended": user.suspended_at is not None,
+        "suspend_reason": user.suspend_reason if user.suspend_reason_visible else None,
+        "traffic_limit_bytes": limit,
+        "traffic_consumed_bytes": consumed,
+        "traffic_bytes_left": left,
+        "traffic_limit_exceeded": bool(user.traffic_limit_blocked),
+    }
+
+
 @router.get("/me/configs")
 def me_configs(
     current_user: User = Depends(get_tg_mini_user), db: Session = Depends(get_db)
@@ -100,6 +129,7 @@ def me_configs(
     return {
         "configs": configs_out,
         "closed_access": closed_access_payload(db, current_user),
+        "status": _user_status(db, current_user),
     }
 
 

@@ -30,6 +30,8 @@ import {
   sendTgConfig,
 } from '@/tg-mini/api'
 import { closedAccessCopy } from '@/lib/closedAccess'
+import { formatDate } from '@/lib/datetime'
+import { formatBytes } from '@/lib/trafficFormat'
 import { cn } from '@/lib/utils'
 import { copyText, openExternalLink, shareViaTelegram } from '@/tg-mini/lib/shareDownloadLink'
 import type {
@@ -38,6 +40,7 @@ import type {
   SelfServiceQuota,
   TgMeConfig,
   TgMeConfigNode,
+  TgMeStatus,
   TgMiniConfigFile,
   TgMiniQrLink,
 } from '@/types'
@@ -62,6 +65,7 @@ export default function Configs() {
   const [configs, setConfigs] = useState<TgMeConfig[]>([])
   const [closedAccess, setClosedAccess] = useState<ClosedAccessView | null>(null)
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
+  const [status, setStatus] = useState<TgMeStatus | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -92,6 +96,7 @@ export default function Configs() {
       const [data, quotaData] = await Promise.all([getTgMeConfigs(), getTgConfigQuota()])
       setConfigs(data.configs)
       setClosedAccess(data.closed_access ?? null)
+      setStatus(data.status ?? null)
       setQuota(quotaData)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Ошибка загрузки')
@@ -351,6 +356,39 @@ export default function Configs() {
   const groupCount = visibleGroups.length
   const accessCopy = closedAccessCopy(closedAccess)
 
+  const statusAccessLabel = !status
+    ? null
+    : status.suspended
+      ? 'Приостановлен'
+      : status.access_expired
+        ? `Истёк${status.access_until ? ` ${formatDate(status.access_until)}` : ''}`
+        : status.access_until
+          ? `до ${formatDate(status.access_until)} · осталось ${status.access_days_left ?? 0} дн.`
+          : 'Бессрочно'
+  const statusAccessTone =
+    status && (status.suspended || status.access_expired)
+      ? 'text-destructive'
+      : status && status.access_days_left != null && status.access_days_left <= 7
+        ? 'text-amber-600 dark:text-amber-400'
+        : ''
+  const trafficLimit = status?.traffic_limit_bytes ?? null
+  const trafficConsumed = status?.traffic_consumed_bytes ?? 0
+  const trafficLeft = status?.traffic_bytes_left ?? null
+  const trafficPercent =
+    trafficLimit && trafficLimit > 0 ? Math.min((trafficConsumed / trafficLimit) * 100, 100) : 0
+  const statusTrafficLabel = !status
+    ? null
+    : trafficLimit
+      ? `${formatBytes(trafficConsumed)} из ${formatBytes(trafficLimit)}${
+          trafficLeft != null ? ` · осталось ${formatBytes(trafficLeft)}` : ''
+        }`
+      : 'Без лимита'
+  const statusTrafficBarClass = status?.traffic_limit_exceeded
+    ? 'bg-destructive'
+    : trafficPercent >= 80
+      ? 'bg-amber-500'
+      : 'bg-primary'
+
   return (
     <div className="tg-mini-dashboard space-y-3">
       <MiniPageHeader
@@ -365,6 +403,32 @@ export default function Configs() {
         onRefresh={() => void load({ silent: true })}
         refreshing={refreshing}
       />
+
+      {status && (
+        <Card>
+          <CardContent className="space-y-2 p-3">
+            <div className="flex items-center justify-between gap-2 text-sm">
+              <span className="text-muted-foreground">Доступ</span>
+              <span className={cn('font-medium', statusAccessTone)}>{statusAccessLabel}</span>
+            </div>
+            {status.suspend_reason ? (
+              <p className="text-xs text-muted-foreground">Причина: {status.suspend_reason}</p>
+            ) : null}
+            <div className="flex items-center justify-between gap-2 text-sm">
+              <span className="text-muted-foreground">Трафик</span>
+              <span className="font-medium">{statusTrafficLabel}</span>
+            </div>
+            {trafficLimit ? (
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className={cn('h-full rounded-full', statusTrafficBarClass)}
+                  style={{ width: `${trafficPercent}%` }}
+                />
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      )}
 
       {accessCopy && closedAccess && (
         <div

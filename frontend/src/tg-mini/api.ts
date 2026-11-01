@@ -17,6 +17,7 @@ import type {
   TgMiniConfig,
   TgMiniConfigFile,
   TgMeConfig,
+  TgMeStatus,
   TgMiniDashboard,
   TgMiniNodeActionResponse,
   TgMiniNodesResponse,
@@ -161,8 +162,13 @@ export async function getTgConfigs(): Promise<{ configs: TgMiniConfig[] }> {
 export async function getTgMeConfigs(): Promise<{
   configs: TgMeConfig[]
   closed_access: ClosedAccessView | null
+  status: TgMeStatus
 }> {
-  return tgFetch<{ configs: TgMeConfig[]; closed_access: ClosedAccessView | null }>('/me/configs')
+  return tgFetch<{
+    configs: TgMeConfig[]
+    closed_access: ClosedAccessView | null
+    status: TgMeStatus
+  }>('/me/configs')
 }
 
 /** Продление доступа unlock-кодом (owner scope) — Mini App. */

@@ -231,6 +231,19 @@ export interface ClosedAccessView {
   contact_url?: string | null
 }
 
+/** ClosedAccessView плюс «открытое» состояние: срок, трафик, приостановка. */
+export interface TgMeStatus {
+  access_until: string | null
+  access_days_left: number | null
+  access_expired: boolean
+  suspended: boolean
+  suspend_reason: string | null
+  traffic_limit_bytes: number | null
+  traffic_consumed_bytes: number | null
+  traffic_bytes_left: number | null
+  traffic_limit_exceeded: boolean
+}
+
 /** Удержание конфигов после истечения срока (grace). */
 export interface GraceHold {
   elapsed_months: number
