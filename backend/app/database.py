@@ -419,6 +419,7 @@ def _migrate_unlock_codes_tables() -> None:
                         max_redemptions INTEGER NOT NULL,
                         redemption_count INTEGER NOT NULL DEFAULT 0,
                         allowed_client_names TEXT NOT NULL DEFAULT '[]',
+                        target_user_id INTEGER,
                         code_expires_at DATETIME,
                         created_by_user_id INTEGER,
                         created_at DATETIME,
@@ -469,6 +470,13 @@ def _migrate_unlock_codes_tables() -> None:
                     )
                 )
             logger.info("DB migration: added unlock_codes.allowed_client_names")
+
+        inspector = inspect(engine)
+        unlock_cols = {col["name"] for col in inspector.get_columns("unlock_codes")}
+        if "target_user_id" not in unlock_cols:
+            with _migration_transaction() as conn:
+                conn.execute(text("ALTER TABLE unlock_codes ADD COLUMN target_user_id INTEGER"))
+            logger.info("DB migration: added unlock_codes.target_user_id")
 
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())

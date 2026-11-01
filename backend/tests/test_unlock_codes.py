@@ -1367,3 +1367,67 @@ def test_list_unlock_codes_comment_filter_case_insensitive(db):
     assert codes("НАЛИЧНЫЕ") == ["COMMENT-010"]
     assert codes("сотруд") == ["COMMENT-011"]
     assert codes("нет такого") == []
+
+
+def _user_bound_code(db, creator, target_user_id: int, code: str, *, days: int = 30) -> UnlockCode:
+    return create_unlock_code(
+        db,
+        grant_days=days,
+        protocols=["openvpn", "wireguard", "amneziawg2"],
+        mode="single",
+        max_redemptions=1,
+        code_expires_at=datetime(2031, 1, 1, tzinfo=timezone.utc),
+        creator=creator,
+        code=code,
+        target_user_id=target_user_id,
+    )
+
+
+def test_create_user_bound_code_rejects_allowlist_multi_and_missing_user(db):
+    user = _make_user(db, username="bound-user", role=UserRole.user)
+
+    with pytest.raises(ValueError, match="режиме single"):
+        create_unlock_code(
+            db,
+            grant_days=30,
+            protocols=["openvpn"],
+            mode="multi",
+            max_redemptions=3,
+            code_expires_at=None,
+            creator=user,
+            target_user_id=user.id,
+        )
+    with pytest.raises(ValueError, match="список клиентов"):
+        create_unlock_code(
+            db,
+            grant_days=30,
+            protocols=["openvpn"],
+            mode="single",
+            max_redemptions=1,
+            code_expires_at=None,
+            creator=user,
+            target_user_id=user.id,
+            allowed_client_names=["alice"],
+        )
+    with pytest.raises(ValueError, match="Абонент не найден"):
+        create_unlock_code(
+            db,
+            grant_days=30,
+            protocols=["openvpn"],
+            mode="single",
+            max_redemptions=1,
+            code_expires_at=None,
+            creator=user,
+            target_user_id=999_999,
+        )
+
+
+def test_create_user_bound_code_serializes_target_user(db):
+    user = _make_user(db, username="bound-user", role=UserRole.user)
+    _user_bound_code(db, user, user.id, "BOUND-CODE-01")
+
+    items = list_unlock_codes(db)
+
+    assert items[0]["target_user_id"] == user.id
+    assert items[0]["target_user_name"] == "bound-user"
+    assert items[0]["allowed_client_names"] == []

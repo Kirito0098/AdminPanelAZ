@@ -499,6 +499,7 @@ class UnlockCode(Base):
     max_redemptions: Mapped[int] = mapped_column(Integer)
     redemption_count: Mapped[int] = mapped_column(Integer, default=0)
     allowed_client_names: Mapped[str] = mapped_column(Text, default="[]")
+    target_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     code_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

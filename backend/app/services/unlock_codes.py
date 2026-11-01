@@ -148,7 +148,7 @@ def _serialize_redemption(row: UnlockCodeRedemption) -> dict:
     }
 
 
-def _serialize_code(code: UnlockCode) -> dict:
+def _serialize_code(code: UnlockCode, *, target_user_name: str | None = None) -> dict:
     redemptions = sorted(code.redemptions, key=lambda item: item.id, reverse=True)
     redemption_count = code.redemption_count
     max_redemptions = code.max_redemptions
@@ -163,6 +163,8 @@ def _serialize_code(code: UnlockCode) -> dict:
         "redemption_count": redemption_count,
         "exhausted": exhausted,
         "allowed_client_names": _parse_allowed_client_names(code.allowed_client_names),
+        "target_user_id": code.target_user_id,
+        "target_user_name": target_user_name,
         "comment": code.comment,
         "redemptions": [_serialize_redemption(item) for item in redemptions],
         "code_expires_at": _as_utc(code.code_expires_at).isoformat() if code.code_expires_at else None,
@@ -172,8 +174,8 @@ def _serialize_code(code: UnlockCode) -> dict:
     }
 
 
-def serialize_unlock_code(code: UnlockCode) -> dict:
-    return _serialize_code(code)
+def serialize_unlock_code(code: UnlockCode, *, target_user_name: str | None = None) -> dict:
+    return _serialize_code(code, target_user_name=target_user_name)
 
 
 def generate_code_value() -> str:
@@ -196,6 +198,7 @@ def create_unlock_code(
     creator: User | None,
     code: str | None = None,
     allowed_client_names: list[str] | None = None,
+    target_user_id: int | None = None,
     comment: str | None = None,
 ) -> UnlockCode:
     if int(grant_days) < 1:
@@ -212,6 +215,13 @@ def create_unlock_code(
 
     normalized_protocols = _normalize_protocols(protocols)
     normalized_clients = _normalize_allowed_client_names(allowed_client_names)
+    if target_user_id is not None:
+        if db.get(User, int(target_user_id)) is None:
+            raise ValueError("Абонент не найден")
+        if normalized_clients:
+            raise ValueError("Нельзя совмещать привязку к абоненту и список клиентов")
+        if normalized_mode != "single" or int(max_redemptions) != 1:
+            raise ValueError("Ключ для абонента создаётся в режиме single")
     code_value = _validate_custom_code(code) if code is not None and _normalize_code(code) else ""
     if not code_value:
         for _ in range(32):
@@ -232,6 +242,7 @@ def create_unlock_code(
         max_redemptions=int(max_redemptions),
         redemption_count=0,
         allowed_client_names=json.dumps(normalized_clients, ensure_ascii=False),
+        target_user_id=int(target_user_id) if target_user_id is not None else None,
         code_expires_at=_to_db_datetime(code_expires_at),
         created_by_user_id=creator.id if creator is not None else None,
         comment=(comment or "").strip() or None,
@@ -267,7 +278,16 @@ def list_unlock_codes(
             # are typically stored lowercase and match the casefolded needle.
             query = query.filter(func.lower(UnlockCode.comment).like(f"%{needle}%"))
     rows = query.order_by(UnlockCode.created_at.desc(), UnlockCode.id.desc()).all()
-    return [_serialize_code(row) for row in rows]
+    target_ids = {row.target_user_id for row in rows if row.target_user_id is not None}
+    target_names: dict[int, str] = {}
+    if target_ids:
+        target_names = dict(
+            db.query(User.id, User.username).filter(User.id.in_(target_ids)).all()
+        )
+    return [
+        _serialize_code(row, target_user_name=target_names.get(row.target_user_id))
+        for row in rows
+    ]
 
 
 def _policy_rows_for_client(db: Session, node_id: int, client_name: str) -> dict[str, object | None]:

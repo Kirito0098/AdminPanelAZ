@@ -38,6 +38,7 @@ class UnlockCodeCreateRequest(BaseModel):
     code_expires_at: datetime | None = None
     code: str | None = None
     allowed_client_names: list[str] | None = None
+    target_user_id: int | None = None
     comment: str | None = Field(default=None, max_length=128)
     # Если задан и у абонента привязан Telegram — отправить код ему в личный чат.
     send_to_user_id: int | None = None
@@ -85,11 +86,16 @@ def post_unlock_code(
             creator=current_user,
             code=payload.code,
             allowed_client_names=payload.allowed_client_names,
+            target_user_id=payload.target_user_id,
             comment=payload.comment,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    result = serialize_unlock_code(row)
+    target_name = None
+    if row.target_user_id is not None:
+        target_user = db.get(User, row.target_user_id)
+        target_name = target_user.username if target_user is not None else None
+    result = serialize_unlock_code(row, target_user_name=target_name)
     sent = False
     if payload.send_to_user_id is not None:
         target = db.get(User, payload.send_to_user_id)
