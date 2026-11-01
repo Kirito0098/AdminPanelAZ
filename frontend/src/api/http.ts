@@ -20,6 +20,18 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * FastAPI отдаёт `{"detail": ...}` для HTTPException, но часть 409 приходит через
+ * JSONResponse с полями на верхнем уровне. Приводим payload к одной форме (объект
+ * деталей), чтобы потребители читали `err.payload.code` одинаково в обоих случаях.
+ */
+export function unwrapErrorPayload(payload: unknown): unknown {
+  if (payload && typeof payload === 'object' && payload !== null && 'detail' in payload) {
+    return (payload as { detail: unknown }).detail
+  }
+  return payload
+}
+
 /** @deprecated Prefer getAccessToken — kept as alias for existing API modules. */
 export function getToken(): string | null {
   return getAccessToken()
@@ -187,7 +199,7 @@ async function requestAtBase(
     }
     if (response.status === 409 && isActiveNodeChangedPayload(payload)) notifyActiveNodeChanged()
     const detail = parseHttpErrorBody(body, response.status)
-    throw new ApiError(detail, response.status, payload)
+    throw new ApiError(detail, response.status, unwrapErrorPayload(payload))
   }
   return response
 }
