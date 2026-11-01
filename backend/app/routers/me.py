@@ -11,7 +11,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.auth import get_current_user, tg_mini_token_allowed
 from app.database import get_db
 from app.models import User, UserNodeAssignment, UserRole
 from app.schemas import UserProvisionedResponse
@@ -42,6 +42,7 @@ def _user_summary(user: User, node_ids: list[int]) -> dict:
 
 
 @router.post("/plan-configs")
+@tg_mini_token_allowed
 def add_me_plan_config(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -75,6 +76,7 @@ def add_me_plan_config(
 
 
 @router.delete("/plan-configs/{index}")
+@tg_mini_token_allowed
 def remove_me_plan_config(
     index: int,
     confirm_deletions: bool = Query(default=False),

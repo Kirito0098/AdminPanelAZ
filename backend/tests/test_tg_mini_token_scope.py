@@ -139,6 +139,8 @@ _MINI_APP_CALLS = [
     ("GET", "/api/unlock-codes"),
     ("POST", "/api/unlock-codes"),
     ("POST", "/api/unlock-codes/999/revoke"),
+    ("POST", "/api/me/plan-configs"),
+    ("DELETE", "/api/me/plan-configs/2"),
 ]
 
 _PANEL_ONLY_CALLS = [
@@ -152,10 +154,10 @@ _PANEL_ONLY_CALLS = [
 
 @pytest.fixture
 def real_client(db_factory):
-    from app.routers import client_access, client_templates, configs, tg_mini, unlock_codes, users
+    from app.routers import client_access, client_templates, configs, me, tg_mini, unlock_codes, users
 
     app = FastAPI()
-    for module in (configs, users, client_templates, client_access, unlock_codes, tg_mini):
+    for module in (configs, users, client_templates, client_access, unlock_codes, me, tg_mini):
         app.include_router(module.router, prefix="/api")
     app.dependency_overrides[get_db] = _db_override(db_factory)
     return TestClient(app, raise_server_exceptions=False)
