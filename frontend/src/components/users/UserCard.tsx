@@ -1,5 +1,5 @@
 import { Suspense, lazy, useRef, useState } from 'react'
-import { Activity, BarChart3, CalendarClock, History, KeyRound, ListChecks, UserCog } from 'lucide-react'
+import { Activity, BarChart3, CalendarClock, History, KeyRound, ListChecks, MessageSquare, UserCog } from 'lucide-react'
 import { formatDate } from '@/lib/datetime'
 import { formatBytes } from '@/lib/trafficFormat'
 import type { UserUpdatePayload, UserProvisioningCard, UserProvisionSummary } from '@/types'
@@ -12,6 +12,7 @@ import UserAccessSection from './UserAccessSection'
 import UserAccessControlSection from './UserAccessControlSection'
 import UserConfigsSection from './UserConfigsSection'
 import UserAccountSection from './UserAccountSection'
+import ChatThread from '@/components/messages/ChatThread'
 
 // Графики статистики тянут recharts: грузим вкладку отдельным чанком, а не вместе со страницей «Пользователи».
 const UserStatsSection = lazy(() => import('./UserStatsSection'))
@@ -197,6 +198,10 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
               <History size={14} aria-hidden />
               История
             </TabsTrigger>
+            <TabsTrigger value="chat" className="gap-1.5" title="Переписка с абонентом">
+              <MessageSquare size={14} aria-hidden />
+              Чат
+            </TabsTrigger>
             <TabsTrigger value="account" className="gap-1.5">
               <UserCog size={14} aria-hidden />
               Аккаунт
@@ -232,6 +237,10 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
               <UserHistorySection userId={user.id} />
             </Suspense>
           </TabsContent>
+          <TabsContent value="chat" className="mt-0">
+            <ChatThread userId={user.id} />
+          </TabsContent>
+
           <TabsContent value="account" className="mt-0">
             <UserAccountSection user={user} onSave={onSave} onDelete={onDelete} onRefresh={onRefresh} />
           </TabsContent>
