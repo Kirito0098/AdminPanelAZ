@@ -17,6 +17,8 @@ export interface ClosedAccessCopy {
   canRequest: boolean
   /** Показать действие «Написать администратору». */
   canContact: boolean
+  /** Показать действие «Оплатить и прислать чек» (deep-link ?start=pay). */
+  canPay: boolean
 }
 
 /** Дата в формате DD.MM (спека 7.4). */
@@ -44,6 +46,7 @@ export function closedAccessCopy(view: ClosedAccessView | null | undefined): Clo
         redeemLabel: 'Ввести ключ',
         canRequest: Boolean(view.requests_enabled),
         canContact: false,
+        canPay: true,
       }
     case 'traffic_limit':
       return {
@@ -54,6 +57,7 @@ export function closedAccessCopy(view: ClosedAccessView | null | undefined): Clo
         redeemLabel: 'Ввести ключ',
         canRequest: Boolean(view.requests_enabled),
         canContact: false,
+        canPay: true,
       }
     case 'suspended':
       return {
@@ -64,6 +68,7 @@ export function closedAccessCopy(view: ClosedAccessView | null | undefined): Clo
         redeemLabel: 'Продлить',
         canRequest: false,
         canContact: Boolean(view.contact_url),
+        canPay: false,
       }
     case 'expiring':
     default:
@@ -75,6 +80,7 @@ export function closedAccessCopy(view: ClosedAccessView | null | undefined): Clo
         redeemLabel: 'Продлить',
         canRequest: Boolean(view.requests_enabled),
         canContact: false,
+        canPay: false,
       }
   }
 }

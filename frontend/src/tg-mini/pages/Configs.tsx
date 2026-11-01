@@ -357,6 +357,9 @@ export default function Configs() {
   const accessCopy = closedAccessCopy(closedAccess)
   // t.me-ссылка на бота: открываем через Telegram WebApp API (в WebView обычный <a> не работает).
   const contactUrl = closedAccess?.contact_url ?? null
+  // Deep-link в бота: ?start=chat включает режим переписки, ?start=pay создаёт заявку с чеком.
+  const chatUrl = contactUrl ? `${contactUrl}?start=chat` : null
+  const payUrl = contactUrl ? `${contactUrl}?start=pay` : null
 
   const statusAccessLabel = !status
     ? null
@@ -461,22 +464,32 @@ export default function Configs() {
                 </Button>
               </div>
             )}
-            {accessCopy.canContact && contactUrl && (
+            {accessCopy.canContact && chatUrl && (
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => openExternalLink(contactUrl)}
+                onClick={() => openExternalLink(chatUrl)}
               >
                 Написать администратору
               </Button>
             )}
-            {accessCopy.canRequest && contactUrl && (
+            {accessCopy.canPay && payUrl && (
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => openExternalLink(contactUrl)}
+                onClick={() => openExternalLink(payUrl)}
+              >
+                Оплатить и прислать чек
+              </Button>
+            )}
+            {accessCopy.canRequest && chatUrl && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => openExternalLink(chatUrl)}
               >
                 Запросить продление
               </Button>
