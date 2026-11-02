@@ -749,11 +749,15 @@ export default function UsersPage() {
           {filteredUsers.length === 0 ? (
             <EmptyState
               icon={Users}
-              title="Пока нет пользователей"
+              title={
+                filter === 'deleting' || (!search && filter === 'all' && stale == null)
+                  ? 'Пока нет пользователей'
+                  : 'Ничего не найдено'
+              }
               description={
                 filter === 'deleting'
                   ? 'Нет абонентов, ожидающих удаления.'
-                  : search || filter !== 'all'
+                  : search || filter !== 'all' || stale != null
                     ? 'Измените фильтр или поисковый запрос'
                     : provisioningOn
                       ? 'Создайте первого абонента — панель сама выпустит конфиги на выбранных серверах.'
@@ -761,7 +765,7 @@ export default function UsersPage() {
               }
               className="py-10"
               action={
-                provisioningOn && !search && filter === 'all' ? (
+                provisioningOn && !search && filter === 'all' && stale == null ? (
                   <Button
                     type="button"
                     onClick={() => setCreateOpen(true)}
