@@ -1,6 +1,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
+  Activity,
   AlertTriangle,
   CalendarClock,
   Download,
@@ -33,6 +34,7 @@ import {
   approveRequest,
   rejectRequest,
   resumeUser,
+  resetUserTrafficCounter,
   suspendUser,
 } from '@/api/users'
 import { useAuth } from '@/context/AuthContext'
@@ -61,6 +63,7 @@ import {
   type UsersCardViewPrefs,
 } from '@/lib/usersCardViewPrefs'
 import { loadUsersListPrefs, saveUsersListPrefs, type UsersSortKey } from '@/lib/usersListPrefs'
+import { parseTimestamp } from '@/lib/datetime'
 import type {
   AccessRequestResponse,
   Node,
@@ -536,12 +539,16 @@ export default function UsersPage() {
   const listMetrics = useMemo(() => {
     const now = Date.now()
     const week = now + 7 * 86400000
+    const dayAgo = now - 86400000
     let withPlan = 0
     let expiringOrExpired = 0
     let suspended = 0
+    let active24h = 0
     for (const u of users) {
       if (u.client_base_name && u.provision_state && u.provision_state !== 'unmanaged') withPlan += 1
       if (u.suspended_at) suspended += 1
+      const seenAt = u.last_seen_at ? parseTimestamp(u.last_seen_at)?.getTime() : null
+      if (seenAt != null && seenAt >= dayAgo) active24h += 1
       if (u.access_until) {
         const t = new Date(u.access_until).getTime()
         if (t < now || t <= week) expiringOrExpired += 1
@@ -552,6 +559,7 @@ export default function UsersPage() {
       withPlan,
       expiringOrExpired,
       suspended,
+      active24h,
     }
   }, [users])
   const handleCreate = async (data: CreateUserPayload) => {
@@ -704,6 +712,20 @@ export default function UsersPage() {
     }
   }
 
+  const handleResetTraffic = async (user: User) => {
+    if (!window.confirm(`Сбросить счётчик трафика «${user.username}»?`)) return
+    setCardBusyId(user.id)
+    try {
+      await resetUserTrafficCounter(user.id)
+      success(`Счётчик трафика «${user.username}» сброшен`)
+      await reloadUsers()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось сбросить счётчик трафика')
+    } finally {
+      setCardBusyId(null)
+    }
+  }
+
   const handleChangeViewPrefs = (next: UsersCardViewPrefs) => {
     setViewPrefs(next)
     saveUsersCardViewPrefs(next)
@@ -841,13 +863,20 @@ export default function UsersPage() {
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard
           label="Всего"
           value={String(listMetrics.total)}
           sub={`${filteredUsers.length} на экране`}
           icon={Users}
           accent="cyan"
+        />
+        <MetricCard
+          label="Активны"
+          value={String(listMetrics.active24h)}
+          sub="заходили за 24 часа"
+          icon={Activity}
+          accent="green"
         />
         <MetricCard
           label="С тарифом"
@@ -1034,6 +1063,11 @@ export default function UsersPage() {
                   }
                   onOpen={() => openDetail(u.id)}
                   onExtend={handleExtend}
+                  onResetTraffic={
+                    u.traffic_limit_bytes && u.traffic_limit_bytes > 0
+                      ? () => void handleResetTraffic(u)
+                      : undefined
+                  }
                   onCreateKey={
                     isEnabled('unlock_codes') ? () => setUnlockDialogUser(u) : undefined
                   }

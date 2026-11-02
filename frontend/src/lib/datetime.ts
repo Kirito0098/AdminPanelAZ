@@ -93,6 +93,27 @@ export function formatTime(value: DateInput, opts?: Intl.DateTimeFormatOptions, 
   }
 }
 
+const MINUTE_MS = 60_000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
+
+/**
+ * Относительное время в активном поясе: «только что», «5 мин назад», «2 ч назад»,
+ * «вчера», «3 дн назад», иначе дата. Для дат из будущего/рассинхрона — «только что».
+ */
+export function formatRelative(value: DateInput, now: number = Date.now(), fallback = '—'): string {
+  const d = toDate(value)
+  if (!d) return fallback
+  const diff = now - d.getTime()
+  if (diff < MINUTE_MS) return 'только что'
+  if (diff < HOUR_MS) return `${Math.floor(diff / MINUTE_MS)} мин назад`
+  if (diff < DAY_MS) return `${Math.floor(diff / HOUR_MS)} ч назад`
+  const days = Math.floor(diff / DAY_MS)
+  if (days === 1) return 'вчера'
+  if (days < 30) return `${days} дн назад`
+  return formatDate(value)
+}
+
 /** Short label of the active timezone, e.g. "UTC+3" / "MSK", for hints. */
 export function getTimeZoneLabel(tz?: string): string {
   const zone = tz || getActiveTimeZone()

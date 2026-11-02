@@ -1,6 +1,7 @@
 import type { MouseEvent } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
+  Activity,
   AlertTriangle,
   AtSign,
   Ban,
@@ -26,7 +27,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { PercentBar } from '@/components/ui/percent-bar'
-import { formatDate } from '@/lib/datetime'
+import { formatDate, formatRelative, parseTimestamp } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import { DEFAULT_USERS_CARD_VIEW_PREFS, type UsersCardViewPrefs } from '@/lib/usersCardViewPrefs'
 
@@ -92,6 +93,14 @@ function resolveCardState(user: User): {
   return { tone: 'neutral', label: 'Без набора', variant: 'secondary', icon: Shield }
 }
 
+const STALE_ACTIVITY_MS = 30 * 86400000
+
+/** Давно не заходил — подсвечиваем «Активность» предупреждением. */
+function isStaleActivity(value: string): boolean {
+  const t = parseTimestamp(value)?.getTime()
+  return t != null && Date.now() - t > STALE_ACTIVITY_MS
+}
+
 function MetaLine({ row }: { row: MetaRow }) {
   const Icon = row.icon
   return (
@@ -143,6 +152,8 @@ export interface SubscriberCardProps {
   /** Абонент застрял в pending_deletion: повторно запустить очистку. */
   onRetryDelete?: () => void
   onExtend?: (user: User, days: number) => void
+  /** Сбросить счётчик трафика; передаётся только при заданном лимите. */
+  onResetTraffic?: () => void
   onCreateKey?: () => void
 }
 
@@ -159,6 +170,7 @@ export default function SubscriberCard({
   onDelete,
   onRetryDelete,
   onExtend,
+  onResetTraffic,
   onCreateKey,
 }: SubscriberCardProps) {
   const status = resolveCardState(user)
@@ -180,6 +192,17 @@ export default function SubscriberCard({
       value: access.text,
       tone: access.tone,
     },
+    ...(fields.lastSeen && user.last_seen_at
+      ? [
+          {
+            key: 'lastSeen',
+            icon: Activity,
+            label: 'Активность',
+            value: formatRelative(user.last_seen_at),
+            tone: isStaleActivity(user.last_seen_at) ? 'warning' : 'default',
+          } satisfies MetaRow,
+        ]
+      : []),
     {
       key: 'nodes',
       icon: Server,
@@ -459,6 +482,21 @@ export default function SubscriberCard({
                 +60
               </Button>
             </>
+          ) : null}
+          {onResetTraffic ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={onResetTraffic}
+              disabled={actionBusy}
+              aria-label={`Сбросить счётчик трафика ${user.username}`}
+              title="Сбросить счётчик трафика"
+            >
+              <RotateCcw size={14} />
+              Сброс
+            </Button>
           ) : null}
           <Button
             type="button"

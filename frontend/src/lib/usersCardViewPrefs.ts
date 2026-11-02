@@ -2,6 +2,7 @@ import type { CardGridCols } from './configCardViewPrefs'
 
 export type UsersCardFieldKey =
   | 'access'
+  | 'lastSeen'
   | 'nodes'
   | 'base'
   | 'tg'
@@ -19,6 +20,7 @@ export interface UsersCardViewPrefs {
 
 export const USERS_CARD_FIELD_LABELS: Record<UsersCardFieldKey, string> = {
   access: 'Срок доступа',
+  lastSeen: 'Активность',
   nodes: 'Узлы',
   base: 'База имени',
   tg: 'Telegram',
@@ -35,6 +37,7 @@ export const DEFAULT_USERS_CARD_VIEW_PREFS: UsersCardViewPrefs = {
   gridCols: 'auto',
   fields: {
     access: true,
+    lastSeen: true,
     nodes: true,
     base: true,
     tg: true,
