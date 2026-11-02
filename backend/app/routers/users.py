@@ -35,6 +35,7 @@ from app.schemas import (
     BulkNodesPreviewItem,
     BulkNodesPreviewResponse,
     BulkNodesRequest,
+    BulkNotifyRequest,
     BulkUsersFailure,
     BulkUsersRequest,
     BulkUsersResult,
@@ -78,6 +79,7 @@ from app.services.admin_notify import admin_notify_service
 from app.services.app_setting_store import _get_setting
 from app.services.active_web_session import active_web_session_service
 from app.services.background_tasks import background_task_service
+from app.services.bulk_user_notify import BULK_NOTIFY_TASK_TYPE, start_bulk_user_notify
 from app.services.bulk_user_nodes import (
     BulkNodesPreview,
     assert_assignable_vpn_node,
@@ -1030,6 +1032,89 @@ def bulk_nodes_report(
         media_type="application/json",
         headers={
             "Content-Disposition": f'attachment; filename="bulk-nodes-{task_id}.json"'
+        },
+    )
+
+
+def _telegram_bot_token(db: Session) -> str:
+    return _get_setting(db, "telegram_bot_token", "").strip()
+
+
+@router.post("/bulk/notify", status_code=status.HTTP_202_ACCEPTED)
+def bulk_notify_start(
+    body: BulkNotifyRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Запустить массовое сообщение выбранным абонентам в Telegram."""
+    _require_provisioning()
+    if not get_feature_service().is_enabled("telegram"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Модуль Telegram выключен"
+        )
+    bot_token = _telegram_bot_token(db)
+    if not bot_token:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Telegram-бот не настроен"
+        )
+    users = db.query(User).filter(User.id.in_(body.user_ids)).all()
+    if not users:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Абоненты не найдены"
+        )
+    recipients = [u for u in users if (u.telegram_id or "").strip()]
+    if not recipients:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Нет абонентов с привязанным Telegram",
+        )
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Текст сообщения пуст"
+        )
+    task_id = start_bulk_user_notify(
+        user_ids=[u.id for u in recipients],
+        text=text,
+        bot_token=bot_token,
+        actor_username=admin.username,
+    )
+    log_action(
+        db,
+        action="user_bulk_notify",
+        user_id=admin.id,
+        username=admin.username,
+        remote_addr=ip_restriction_service.get_client_ip(request),
+        details=f"recipients={len(recipients)}",
+    )
+    return {"task_id": task_id}
+
+
+@router.get("/bulk/notify/tasks/{task_id}/report")
+def bulk_notify_report(
+    task_id: str,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Скачать JSON-отчёт по массовому уведомлению."""
+    _require_provisioning()
+    task = db.get(BackgroundTask, task_id)
+    if task is None or task.task_type != BULK_NOTIFY_TASK_TYPE:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Отчёт не найден")
+    if task.status not in ("completed", "failed"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail="Задача ещё выполняется"
+        )
+    try:
+        data = json.loads(task.output or "{}")
+    except (TypeError, ValueError):
+        data = {}
+    return Response(
+        content=json.dumps(data, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="bulk-notify-{task_id}.json"'
         },
     )
 

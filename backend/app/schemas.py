@@ -318,6 +318,13 @@ class BulkUsersRequest(BaseModel):
     traffic_limit_bytes: int | None = Field(default=None, ge=0)
 
 
+class BulkNotifyRequest(BaseModel):
+    """Массовое сообщение выбранным абонентам (только с Telegram)."""
+
+    user_ids: list[int] = Field(min_length=1, max_length=200)
+    text: str = Field(min_length=1, max_length=1000)
+
+
 class BulkUsersFailure(BaseModel):
     user_id: int
     username: str
