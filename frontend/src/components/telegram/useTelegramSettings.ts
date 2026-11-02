@@ -45,6 +45,7 @@ export function useTelegramSettings() {
   const [nodeOfflineGraceMinutes, setNodeOfflineGraceMinutes] = useState('3')
   const [saving, setSaving] = useState(false)
   const [savingInteractive, setSavingInteractive] = useState(false)
+  const [savingAccessRequests, setSavingAccessRequests] = useState(false)
   const [savingNotify, setSavingNotify] = useState(false)
   const [loading, setLoading] = useState(true)
   const [testing, setTesting] = useState(false)
@@ -213,6 +214,37 @@ export function useTelegramSettings() {
       setInteractiveEnabled(settings?.interactive_enabled ?? false)
     } finally {
       setSavingInteractive(false)
+    }
+  }
+
+  const handleSaveAcceptRequests = async (enabled: boolean) => {
+    setSavingAccessRequests(true)
+    try {
+      const updated = await updateTelegramSettings({ accept_access_requests: enabled })
+      setSettings(updated)
+      setAcceptAccessRequests(Boolean(updated.accept_access_requests))
+      success(enabled ? 'Приём заявок включён' : 'Приём заявок выключен')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
+      setAcceptAccessRequests(Boolean(settings?.accept_access_requests))
+    } finally {
+      setSavingAccessRequests(false)
+    }
+  }
+
+  const handleSavePendingRequestCap = async (value: number) => {
+    if (value === (settings?.pending_request_cap ?? 50)) return
+    setSavingAccessRequests(true)
+    try {
+      const updated = await updateTelegramSettings({ pending_request_cap: value })
+      setSettings(updated)
+      setPendingRequestCap(updated.pending_request_cap ?? 50)
+      success('Лимит ожидающих заявок сохранён')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
+      setPendingRequestCap(settings?.pending_request_cap ?? 50)
+    } finally {
+      setSavingAccessRequests(false)
     }
   }
 
@@ -403,6 +435,9 @@ export function useTelegramSettings() {
     setAcceptAccessRequests,
     pendingRequestCap,
     setPendingRequestCap,
+    savingAccessRequests,
+    handleSaveAcceptRequests,
+    handleSavePendingRequestCap,
     load,
     loginConfigured,
     oidcLoginReady,

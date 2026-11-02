@@ -858,8 +858,8 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               label="Принимать заявки на доступ из Telegram"
               description="Новые пользователи могут присылать заявки на доступ боту в личные сообщения. Выкл. — приём закрыт по умолчанию."
               checked={tg.acceptAccessRequests}
-              disabled={tg.saving || !tg.settings?.bot_token_set}
-              onCheckedChange={(checked) => void tg.setAcceptAccessRequests(checked)}
+              disabled={tg.savingAccessRequests || !tg.settings?.bot_token_set}
+              onCheckedChange={(checked) => void tg.handleSaveAcceptRequests(checked)}
             />
             <div className="flex items-center gap-2">
               <Label htmlFor="pendingRequestCap">Лимит ожидающих заявок</Label>
@@ -873,8 +873,9 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
                   const v = Number.parseInt(e.target.value, 10)
                   if (Number.isFinite(v) && v >= 0) tg.setPendingRequestCap(v)
                 }}
+                onBlur={() => void tg.handleSavePendingRequestCap(tg.pendingRequestCap)}
                 className="w-24"
-                disabled={tg.saving || !tg.acceptAccessRequests}
+                disabled={tg.savingAccessRequests || !tg.acceptAccessRequests}
               />
               <p className="text-xs text-muted-foreground">Максимум pending-заявок новых пользователей (0 = без лимита).</p>
             </div>
