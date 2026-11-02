@@ -424,6 +424,8 @@ export default function UsersPage() {
       }
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка одобрения')
+      // Решение не принято: перечитываем список, чтобы заявка осталась на экране.
+      await reloadRequests()
     } finally {
       setApprovingId(null)
     }

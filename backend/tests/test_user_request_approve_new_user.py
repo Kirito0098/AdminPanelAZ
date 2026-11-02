@@ -104,20 +104,48 @@ def _approve(db, request, *, node: Node, username: str | None = None) -> UserAcc
     )
 
 
-def test_taken_login_is_a_clear_error_not_500(db):
+def test_taken_login_of_deleting_user_explains_the_wait(db):
+    """Имя держит абонент «на удаление» — просим подождать, а не просто «занято»."""
     node = _node(db)
     _leftover_user(db, name="TopTinker2")
     request = _request(db)
 
-    with pytest.raises(ValueError, match="Логин .* уже занят"):
+    with pytest.raises(ValueError) as exc:
         _approve(db, request, node=node, username="TopTinker2")
 
+    message = str(exc.value)
+    assert "ещё занят" in message
+    assert "TopTinker2" in message and "удаляется" in message
     db.refresh(request)
     assert request.status == "pending"
     assert db.query(User).filter(User.username == "TopTinker2").count() == 1
 
 
+def test_taken_login_of_active_user_asks_for_another_name(db):
+    node = _node(db)
+    active = User(
+        username="busy",
+        password_hash="x",
+        role=UserRole.user,
+        is_active=True,
+        panel_login_enabled=True,
+        client_base_name="busy",
+        provision_state="ok",
+    )
+    db.add(active)
+    db.commit()
+    request = _request(db)
+
+    with pytest.raises(ValueError) as exc:
+        _approve(db, request, node=node, username="busy")
+
+    assert "уже занят абонентом busy" in str(exc.value)
+    db.refresh(request)
+    assert request.status == "pending"
+
+
 def test_taken_base_name_is_a_clear_error_not_500(db):
+    """Логин свободен, но имя конфигов держит удаляемый абонент — тоже понятная ошибка."""
     node = _node(db)
     leftover = _leftover_user(db, name="other")
     leftover.client_base_name = "TopTinker2"
@@ -125,9 +153,11 @@ def test_taken_base_name_is_a_clear_error_not_500(db):
     db.commit()
     request = _request(db)
 
-    with pytest.raises(ValueError, match="Имя конфигов .* уже занято"):
+    with pytest.raises(ValueError) as exc:
         _approve(db, request, node=node, username="TopTinker2")
 
+    message = str(exc.value)
+    assert "Имя конфигов" in message and "удаляется" in message
     db.refresh(request)
     assert request.status == "pending"
 

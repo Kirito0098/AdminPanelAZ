@@ -151,7 +151,12 @@ def _login_is_free(db: Session, username: str) -> bool:
     Абонент в ``pending_deletion`` всё ещё занимает свой логин, иначе вставка
     падает на уникальном индексе.
     """
-    return db.query(User.id).filter(User.username == username).first() is None
+    return _login_holder(db, username) is None
+
+
+def _login_holder(db: Session, username: str) -> User | None:
+    """Абонент, который уже занял этот логин (в любом состоянии)."""
+    return db.query(User).filter(User.username == username).first()
 
 
 def _base_name_is_free(db: Session, base_name: str) -> bool:
@@ -160,12 +165,26 @@ def _base_name_is_free(db: Session, base_name: str) -> bool:
     ``uq_users_client_base_name_lower`` не различает ``provision_state``, поэтому
     база, занятая абонентом «в удалении», тоже считается занятой.
     """
+    return _base_name_holder(db, base_name) is None
+
+
+def _base_name_holder(db: Session, base_name: str) -> User | None:
+    """Абонент, который уже занял это имя конфигов (без учёта регистра)."""
     lowered = (base_name or "").strip().lower()
     if not lowered:
-        return False
-    return (
-        db.query(User.id).filter(func.lower(User.client_base_name) == lowered).first()
-        is None
+        return None
+    return db.query(User).filter(func.lower(User.client_base_name) == lowered).first()
+
+
+def _name_conflict_error(holder: User, *, label: str, value: str, word: str) -> ValueError:
+    """Понятная ошибка о занятом имени: отдельно — когда абонент ещё удаляется."""
+    if holder.provision_state == "pending_deletion":
+        return ValueError(
+            f"{label} «{value}» ещё {word}: абонент {holder.username} удаляется — "
+            "подождите немного или укажите другое имя"
+        )
+    return ValueError(
+        f"{label} «{value}» уже {word} абонентом {holder.username} — укажите другое имя"
     )
 
 
@@ -757,12 +776,12 @@ def _create_user_for_request(
     requested = (plan.get("username") or "").strip()
     if requested:
         # Админ указал логин явно — молча переименовывать нельзя, пусть исправит.
-        if not _login_is_free(db, requested):
-            raise ValueError(f"Логин «{requested}» уже занят — укажите другой")
-        if not _base_name_is_free(db, requested):
-            raise ValueError(
-                f"Имя конфигов «{requested}» уже занято другим абонентом — укажите другой логин"
-            )
+        holder = _login_holder(db, requested)
+        if holder is not None:
+            raise _name_conflict_error(holder, label="Логин", value=requested, word="занят")
+        holder = _base_name_holder(db, requested)
+        if holder is not None:
+            raise _name_conflict_error(holder, label="Имя конфигов", value=requested, word="занято")
         username = requested
     else:
         username = _propose_login(db, request.telegram_username, request.telegram_id)
