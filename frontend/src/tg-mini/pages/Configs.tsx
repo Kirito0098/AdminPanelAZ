@@ -182,8 +182,9 @@ export default function Configs() {
   const unlimited = quota?.unlimited ?? false
   const quotaReached = limit != null && used >= limit
   const createDisabledByAdmin = quota ? !quota.can_create && !quotaReached : false
+  const anyProtocolEnabled = openvpnEnabled || wireguardEnabled || awg2Enabled
   const canCreate =
-    (openvpnEnabled || wireguardEnabled || awg2Enabled) &&
+    anyProtocolEnabled &&
     (quota?.can_create ?? true) &&
     (unlimited || (limit != null && used < limit))
 
@@ -498,14 +499,22 @@ export default function Configs() {
         </div>
       )}
 
-      {canCreate && (
+      {/* Админ создаёт конфиги напрямую, без плана и тарифа; абонент — именем из своего плана. */}
+      {isAdmin && anyProtocolEnabled && (
+        <Button type="button" className="w-full gap-2" onClick={() => setShowCreate(true)}>
+          <Plus size={18} aria-hidden />
+          Создать конфиг
+        </Button>
+      )}
+
+      {!isAdmin && canCreate && (
         <Button type="button" className="w-full gap-2" onClick={handlePlanAdd} disabled={planAdding}>
           <Plus size={18} aria-hidden />
           {planAdding ? 'Добавление…' : 'Добавить конфиг'}
         </Button>
       )}
 
-      {!canCreate && (
+      {!isAdmin && !canCreate && (
         <p className="text-xs text-muted-foreground">
           {createDisabledByAdmin
             ? 'Создание новых конфигов отключено администратором.'
