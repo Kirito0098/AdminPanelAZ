@@ -214,6 +214,7 @@ export interface User {
   traffic_counter_reset_at?: string | null
   traffic_limit_blocked?: boolean
   traffic_consumed_bytes?: number
+  online?: boolean
   last_seen_at?: string | null
   note?: string | null
 }
@@ -2698,6 +2699,7 @@ export interface UserProvisionSummary {
   traffic_counter_reset_at?: string | null
   traffic_limit_blocked?: boolean
   traffic_consumed_bytes?: number
+  online?: boolean
   telegram_id?: string | null
   /** Персональное исключение видимости; null — действует умолчание. */
   visible_vpn_profiles?: VisibleVpnProfilesPolicy | null

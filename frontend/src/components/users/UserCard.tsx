@@ -150,6 +150,11 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
               <Badge variant={stateMeta?.variant ?? 'secondary'} className="text-[10px]">
                 {stateMeta?.label ?? user.provision_state}
               </Badge>
+              {user.online && (
+                <Badge variant="success" className="text-[10px]" title="Есть активная VPN-сессия">
+                  Онлайн
+                </Badge>
+              )}
               {user.suspended_at && (
                 <Badge variant="destructive" className="text-[10px]">
                   Приостановлен

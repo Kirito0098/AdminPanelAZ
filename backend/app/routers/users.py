@@ -18,6 +18,7 @@ from app.database import get_db
 from app.models import (
     BackgroundTask,
     Node,
+    TrafficSessionState,
     User,
     UserAccessRequest,
     UserActionLog,
@@ -229,6 +230,7 @@ def _user_summary(
     node_ids: list[int],
     *,
     traffic_consumed_bytes: int = 0,
+    online: bool = False,
     owned_base_name: str | None = None,
 ) -> UserProvisionSummary:
     return UserProvisionSummary(
@@ -253,6 +255,7 @@ def _user_summary(
         traffic_counter_reset_at=user.traffic_counter_reset_at,
         traffic_limit_blocked=bool(user.traffic_limit_blocked),
         traffic_consumed_bytes=int(traffic_consumed_bytes),
+        online=bool(online),
         telegram_id=(user.telegram_id or "").strip() or None,
         visible_vpn_profiles=parse_user_visible_vpn_profiles(user.visible_vpn_profiles),
     )
@@ -411,6 +414,9 @@ def list_users(
     for user in users:
         user.traffic_consumed_bytes = int(consumed.get(user.id, 0))
         user.last_seen_at = last_seen.get(user.id)
+    online = _user_list_online(db, users)
+    for user in users:
+        user.online = bool(online.get(user.id, False))
     return users
 
 
@@ -457,6 +463,42 @@ def _user_list_traffic(
         seen = [name_seen[n] for n in names if name_seen.get(n)]
         last_seen[u.id] = max(seen) if seen else None
     return consumed, last_seen
+
+
+def _user_list_online(db: Session, users: list[User]) -> dict[int, bool]:
+    """Есть ли у абонента активная VPN-сессия (по owned-конфигам)."""
+    if not get_feature_service().is_enabled("traffic_sync"):
+        return {}
+    ids = [u.id for u in users]
+    if not ids:
+        return {}
+    owned = (
+        db.query(VpnConfig.owner_id, VpnConfig.client_name)
+        .filter(VpnConfig.owner_id.in_(ids), VpnConfig.ha_primary_config_id.is_(None))
+        .all()
+    )
+    names_by_user: dict[int, set[str]] = {}
+    for owner_id, client_name in owned:
+        name = (client_name or "").strip()
+        if name:
+            names_by_user.setdefault(owner_id, set()).add(name)
+    all_names = {n for names in names_by_user.values() for n in names}
+    if not all_names:
+        return {}
+    threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5)
+    rows = (
+        db.query(TrafficSessionState.common_name)
+        .filter(
+            TrafficSessionState.common_name.in_(all_names),
+            TrafficSessionState.is_active.is_(True),
+            TrafficSessionState.last_seen_at.isnot(None),
+            TrafficSessionState.last_seen_at >= threshold,
+        )
+        .distinct()
+        .all()
+    )
+    active_names = {row[0] for row in rows}
+    return {u.id: bool(names_by_user.get(u.id, set()) & active_names) for u in users}
 
 
 @router.post("", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
@@ -1504,12 +1546,14 @@ def get_provisioning(
 
     grace_hold = grace_hold_view(user, get_grace_months(db))
     consumed = user_consumed_bytes(db, user)
+    online = bool(_user_list_online(db, [user]).get(user.id, False))
 
     return UserProvisioningCard(
         user=_user_summary(
             user,
             summary_node_ids,
             traffic_consumed_bytes=consumed,
+            online=online,
             owned_base_name=owned.base_name if (owned is not None and not has_plan) else None,
         ),
         has_plan=has_plan,

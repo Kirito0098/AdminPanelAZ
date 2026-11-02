@@ -198,7 +198,7 @@ export default function SubscriberCard({
             key: 'lastSeen',
             icon: Activity,
             label: 'Активность',
-            value: formatRelative(user.last_seen_at),
+            value: user.online ? 'онлайн' : formatRelative(user.last_seen_at),
             tone: isStaleActivity(user.last_seen_at) ? 'warning' : 'default',
           } satisfies MetaRow,
         ]
@@ -311,13 +311,25 @@ export default function SubscriberCard({
                   <Copy size={13} />
                 </button>
               </CardTitle>
-              <Badge variant={status.variant} className="shrink-0 gap-1 px-2 py-0.5 text-[11px]">
-                <StatusIcon
-                  size={11}
-                  className={status.tone === 'attention' && user.provision_state === 'pending' ? 'animate-spin' : undefined}
-                />
-                {status.label}
-              </Badge>
+              <div className="flex shrink-0 items-center gap-1">
+                {user.online ? (
+                  <Badge
+                    variant="success"
+                    className="gap-1 px-2 py-0.5 text-[11px]"
+                    title="Есть активная VPN-сессия"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                    Онлайн
+                  </Badge>
+                ) : null}
+                <Badge variant={status.variant} className="gap-1 px-2 py-0.5 text-[11px]">
+                  <StatusIcon
+                    size={11}
+                    className={status.tone === 'attention' && user.provision_state === 'pending' ? 'animate-spin' : undefined}
+                  />
+                  {status.label}
+                </Badge>
+              </div>
             </div>
           </div>
         </div>
