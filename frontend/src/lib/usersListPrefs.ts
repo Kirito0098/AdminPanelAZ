@@ -79,3 +79,17 @@ export function savePageSize(size: number) {
 }
 
 export { loadPageSize }
+
+export type UsersViewMode = 'cards' | 'table'
+
+const VIEW_MODES: readonly UsersViewMode[] = ['cards', 'table']
+
+export function loadUsersViewMode(): UsersViewMode {
+  const raw = readStored('view')
+  return raw && (VIEW_MODES as readonly string[]).includes(raw) ? (raw as UsersViewMode) : 'cards'
+}
+
+export function saveUsersViewMode(mode: UsersViewMode) {
+  writeStored('view', mode)
+}
+

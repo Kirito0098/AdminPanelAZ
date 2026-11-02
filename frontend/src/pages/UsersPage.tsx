@@ -6,8 +6,10 @@ import {
   CalendarClock,
   Download,
   Filter,
+  LayoutGrid,
   PauseCircle,
   Search,
+  Table2,
   Ticket,
   UserPlus,
   UserRound,
@@ -50,7 +52,7 @@ import {
   saveUsersCardViewPrefs,
   type UsersCardViewPrefs,
 } from '@/lib/usersCardViewPrefs'
-import { PAGE_SIZE_OPTIONS, type UsersSortKey } from '@/lib/usersListPrefs'
+import { PAGE_SIZE_OPTIONS, type UsersSortKey, loadUsersViewMode, saveUsersViewMode, type UsersViewMode } from '@/lib/usersListPrefs'
 import { REQUEST_PROTOCOLS } from '@/lib/accessRequests'
 import type {
   User,
@@ -61,6 +63,7 @@ import type {
 } from '@/types'
 
 import { UsersFilters } from '@/components/users/UsersFilters'
+import UsersTable from '@/components/users/UsersTable'
 import UsersCardViewSettings from '@/components/users/UsersCardViewSettings'
 import CreateUserDialog, {
   type CreateUserPayload,
@@ -141,6 +144,10 @@ export default function UsersPage() {
     presetNodeId?: number
   }>({ open: false, action: 'add' })
   const [viewPrefs, setViewPrefs] = useState<UsersCardViewPrefs>(() => loadUsersCardViewPrefs())
+  const [viewMode, setViewMode] = useState<UsersViewMode>(() => loadUsersViewMode())
+  useEffect(() => {
+    saveUsersViewMode(viewMode)
+  }, [viewMode])
   const [cardBusyId, setCardBusyId] = useState<number | null>(null)
   const [bulkActionOpen, setBulkActionOpen] = useState(false)
   const [unlockDialogUser, setUnlockDialogUser] = useState<User | null>(null)
@@ -383,6 +390,21 @@ export default function UsersPage() {
     saveUsersCardViewPrefs(next)
   }
 
+  const handleSelectOne = (id: number, checked: boolean) => {
+    setSelectedIds((prev) =>
+      checked ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((item) => item !== id),
+    )
+  }
+
+  const handleSortChange = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortKey(key)
+      setSortDir('asc')
+    }
+  }
+
   const handleExportCsv = () => {
     const header = [
       'id',
@@ -616,7 +638,33 @@ export default function UsersPage() {
               >
                 {sortDir === 'asc' ? '↑' : '↓'}
               </Button>
-              <UsersCardViewSettings prefs={viewPrefs} onChange={handleChangeViewPrefs} />
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant={viewMode === 'cards' ? 'secondary' : 'ghost'}
+                  size="icon"
+                  className="h-10 w-10"
+                  aria-pressed={viewMode === 'cards'}
+                  aria-label="Вид карточками"
+                  onClick={() => setViewMode('cards')}
+                >
+                  <LayoutGrid size={16} />
+                </Button>
+                <Button
+                  type="button"
+                  variant={viewMode === 'table' ? 'secondary' : 'ghost'}
+                  size="icon"
+                  className="h-10 w-10"
+                  aria-pressed={viewMode === 'table'}
+                  aria-label="Вид таблицей"
+                  onClick={() => setViewMode('table')}
+                >
+                  <Table2 size={16} />
+                </Button>
+                {viewMode === 'cards' ? (
+                  <UsersCardViewSettings prefs={viewPrefs} onChange={handleChangeViewPrefs} />
+                ) : null}
+              </div>
             </div>
           </div>
         </CardHeader>
@@ -699,6 +747,24 @@ export default function UsersPage() {
                   </Button>
                 ) : null
               }
+            />
+          ) : viewMode === 'table' ? (
+            <UsersTable
+              users={pagedUsers}
+              selectedIds={selectedIds}
+              onSelectChange={handleSelectOne}
+              onOpen={(user) => openDetail(user.id)}
+              onExtend={handleExtend}
+              onResetTraffic={(user) => void handleResetTraffic(user)}
+              onSuspend={(user) => setSuspendTarget(user)}
+              onResume={(user) => void handleResume(user)}
+              onDelete={(user) => void handleDeleteUser(user)}
+              onRetryDelete={(user) => void handleRetryDelete(user)}
+              onCreateKey={isEnabled('unlock_codes') ? (user) => setUnlockDialogUser(user) : undefined}
+              sortKey={sortKey}
+              sortDir={sortDir}
+              onSortChange={handleSortChange}
+              actionBusyId={cardBusyId}
             />
           ) : (
             <div className={cn('grid gap-3', gridColsClass(viewPrefs.gridCols))}>

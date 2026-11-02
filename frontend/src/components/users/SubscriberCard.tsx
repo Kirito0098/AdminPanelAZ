@@ -2,11 +2,8 @@ import type { MouseEvent } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
-  AlertTriangle,
   AtSign,
-  Ban,
   Calendar,
-  CheckCircle2,
   Copy,
   ExternalLink,
   KeyRound,
@@ -27,70 +24,19 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { PercentBar } from '@/components/ui/percent-bar'
-import { formatDate, formatRelative, parseTimestamp } from '@/lib/datetime'
+import { formatRelative, parseTimestamp } from '@/lib/datetime'
+import { accessParts, resolveCardState, type MetaTone } from '@/lib/userState'
 import { cn } from '@/lib/utils'
 import { DEFAULT_USERS_CARD_VIEW_PREFS, type UsersCardViewPrefs } from '@/lib/usersCardViewPrefs'
-
-type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'
-type CardTone = 'active' | 'expiring' | 'expired' | 'suspended' | 'attention' | 'neutral'
 
 type MetaRow = {
   key: string
   icon: LucideIcon
   label: string
   value: string
-  tone?: 'default' | 'warning' | 'danger' | 'success'
+  tone?: MetaTone
   wide?: boolean
   mono?: boolean
-}
-
-function accessParts(user: User): { text: string; tone: MetaRow['tone']; cardTone: CardTone | null } {
-  if (!user.access_until) return { text: 'не задан', tone: 'default', cardTone: null }
-  const d = new Date(user.access_until)
-  const now = new Date()
-  if (d < now) {
-    return { text: `истёк ${formatDate(user.access_until)}`, tone: 'danger', cardTone: 'expired' }
-  }
-  if (d.getTime() <= now.getTime() + 7 * 86400000) {
-    return { text: `до ${formatDate(user.access_until)}`, tone: 'warning', cardTone: 'expiring' }
-  }
-  return { text: formatDate(user.access_until), tone: 'default', cardTone: null }
-}
-
-function resolveCardState(user: User): {
-  tone: CardTone
-  label: string
-  variant: BadgeVariant
-  icon: LucideIcon
-} {
-  // Абонент в удалении — первым: иначе карточка покажет «Отключён» (is_active=false).
-  if ((user.provision_state ?? '') === 'pending_deletion') {
-    return { tone: 'neutral', label: 'Удаляется', variant: 'outline', icon: Trash2 }
-  }
-  if (user.suspended_at) {
-    return { tone: 'suspended', label: 'Приостановлен', variant: 'destructive', icon: PauseCircle }
-  }
-  if (user.is_active === false) {
-    return { tone: 'neutral', label: 'Отключён', variant: 'outline', icon: Ban }
-  }
-  const access = accessParts(user)
-  if (access.cardTone === 'expired') {
-    return { tone: 'expired', label: 'Истёк', variant: 'destructive', icon: AlertTriangle }
-  }
-  if (access.cardTone === 'expiring') {
-    return { tone: 'expiring', label: 'Истекает', variant: 'warning', icon: AlertTriangle }
-  }
-  const state = user.provision_state ?? 'unmanaged'
-  if (state === 'partial') {
-    return { tone: 'attention', label: 'Требует внимания', variant: 'warning', icon: AlertTriangle }
-  }
-  if (state === 'pending') {
-    return { tone: 'attention', label: 'Применяется', variant: 'default', icon: Loader2 }
-  }
-  if (state === 'ok') {
-    return { tone: 'active', label: 'Активный', variant: 'success', icon: CheckCircle2 }
-  }
-  return { tone: 'neutral', label: 'Без набора', variant: 'secondary', icon: Shield }
 }
 
 const STALE_ACTIVITY_MS = 30 * 86400000
