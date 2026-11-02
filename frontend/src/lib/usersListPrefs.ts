@@ -65,3 +65,17 @@ export function saveUsersListPrefs(prefs: UsersListPrefs) {
   writeStored('sortKey', prefs.sortKey)
   writeStored('sortDir', prefs.sortDir)
 }
+
+export const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
+
+function loadPageSize(): number {
+  const raw = readStored('pageSize')
+  const n = raw ? Number.parseInt(raw, 10) : NaN
+  return (PAGE_SIZE_OPTIONS as readonly number[]).includes(n) ? n : PAGE_SIZE_OPTIONS[0]
+}
+
+export function savePageSize(size: number) {
+  writeStored('pageSize', String(size))
+}
+
+export { loadPageSize }
