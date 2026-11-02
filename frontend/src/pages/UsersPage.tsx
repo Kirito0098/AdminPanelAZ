@@ -108,6 +108,8 @@ export default function UsersPage() {
     setFilter,
     search,
     setSearch,
+    stale,
+    setStale,
     sortKey,
     setSortKey,
     sortDir,
@@ -626,7 +628,12 @@ export default function UsersPage() {
                   <Filter size={13} />
                   Статус
                 </span>
-                <UsersFilters filter={filter} onFilterChange={setFilter} />
+                <UsersFilters
+                  filter={filter}
+                  onFilterChange={setFilter}
+                  stale={stale}
+                  onStaleChange={setStale}
+                />
               </div>
               {provisioningOn && filter !== 'deleting' && pagedUserIds.length > 0 ? (
                 <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">

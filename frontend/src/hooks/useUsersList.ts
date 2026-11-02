@@ -1,6 +1,6 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { ApiError, getUsers } from '@/api/client'
-import { USERS_FILTER_IDS } from '@/components/users/UsersFilters'
+import { USERS_FILTER_IDS, type StaleFilter } from '@/components/users/UsersFilters'
 import { useNotifications } from '@/context/NotificationContext'
 import { parseTimestamp } from '@/lib/datetime'
 import {
@@ -39,6 +39,7 @@ export function useUsersList() {
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState<number>(() => loadPageSize())
   const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [stale, setStale] = useState<StaleFilter>(null)
 
   const reloadUsers = useCallback(async () => {
     try {
@@ -74,7 +75,7 @@ export function useUsersList() {
   useEffect(() => {
     setSelectedIds([])
     setPage(0)
-  }, [filter, search])
+  }, [filter, search, stale])
 
   // Фильтр и сортировку запоминаем между заходами; поиск — нет (временный запрос).
   useEffect(() => {
@@ -109,6 +110,13 @@ export function useUsersList() {
     // «Удаляется» — отдельный список: обычные фильтры удаляемых не показывают.
     const deleting = filter === 'deleting'
     list = list.filter((u) => (u.provision_state === 'pending_deletion') === deleting)
+    list = list.filter((u) => {
+      if (stale == null) return true
+      if (stale === 'never') return !u.last_seen_at
+      const seen = u.last_seen_at ? parseTimestamp(u.last_seen_at)?.getTime() : null
+      if (seen == null) return false
+      return Date.now() - seen > stale * 86_400_000
+    })
     switch (filter) {
       case 'attention':
         list = list.filter(
@@ -153,7 +161,7 @@ export function useUsersList() {
       const bv = b[field] ?? ''
       return dir * String(av).localeCompare(String(bv), 'ru')
     })
-  }, [users, filter, deferredSearch, sortKey, sortDir])
+  }, [users, filter, deferredSearch, sortKey, sortDir, stale])
 
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize))
   const safePage = Math.min(page, totalPages - 1)
@@ -198,6 +206,8 @@ export function useUsersList() {
     setFilter,
     search,
     setSearch,
+    stale,
+    setStale,
     sortKey,
     setSortKey,
     sortDir,
