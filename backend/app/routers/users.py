@@ -350,10 +350,16 @@ def list_users(
     role: str | None = None,
     q: str | None = None,
     state: str | None = None,
+    include_deleting: bool = Query(default=False),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    query = db.query(User).filter(User.provision_state != "pending_deletion")
+    # Абоненты в pending_deletion не попадают в обычный список: их видно только
+    # отдельным фильтром «Удаляется» (state=pending_deletion) или явным флагом.
+    wants_deleting = include_deleting or (state or "").strip().lower() == "pending_deletion"
+    query = db.query(User)
+    if not wants_deleting:
+        query = query.filter(User.provision_state != "pending_deletion")
     query = apply_users_list_filters(query, role=role, q=q, state=state)
     users = query.order_by(User.id).all()
 

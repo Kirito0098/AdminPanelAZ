@@ -13,6 +13,7 @@ import {
   Network,
   PauseCircle,
   Play,
+  RotateCcw,
   Server,
   Shield,
   StickyNote,
@@ -61,6 +62,10 @@ function resolveCardState(user: User): {
   variant: BadgeVariant
   icon: LucideIcon
 } {
+  // Абонент в удалении — первым: иначе карточка покажет «Отключён» (is_active=false).
+  if ((user.provision_state ?? '') === 'pending_deletion') {
+    return { tone: 'neutral', label: 'Удаляется', variant: 'outline', icon: Trash2 }
+  }
   if (user.suspended_at) {
     return { tone: 'suspended', label: 'Приостановлен', variant: 'destructive', icon: PauseCircle }
   }
@@ -135,6 +140,8 @@ export interface SubscriberCardProps {
   onSuspend?: () => void
   onResume?: () => void
   onDelete?: () => void
+  /** Абонент застрял в pending_deletion: повторно запустить очистку. */
+  onRetryDelete?: () => void
   onExtend?: (user: User, days: number) => void
   onCreateKey?: () => void
 }
@@ -150,6 +157,7 @@ export default function SubscriberCard({
   onSuspend,
   onResume,
   onDelete,
+  onRetryDelete,
   onExtend,
   onCreateKey,
 }: SubscriberCardProps) {
@@ -351,49 +359,67 @@ export default function SubscriberCard({
         ) : null}
 
         <div className="mt-auto flex flex-wrap gap-2 pt-1">
-          {user.suspended_at ? (
-            onResume ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                onClick={onResume}
-                disabled={actionBusy}
-                aria-label={`Возобновить доступ ${user.username}`}
-              >
-                <Play size={14} />
-                Возобновить
-              </Button>
-            ) : null
-          ) : onSuspend ? (
+          {onRetryDelete ? (
+            // Застрял в pending_deletion: остальные действия бессмысленны (учётка выключена).
             <Button
               type="button"
               variant="outline"
               size="sm"
               className="gap-1.5"
-              onClick={onSuspend}
+              onClick={onRetryDelete}
               disabled={actionBusy}
-              aria-label={`Приостановить доступ ${user.username}`}
+              aria-label={`Повторить удаление ${user.username}`}
             >
-              <PauseCircle size={14} />
-              Приостановить
+              <RotateCcw size={14} />
+              Повторить удаление
             </Button>
-          ) : null}
-          {onDelete ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              onClick={onDelete}
-              disabled={actionBusy}
-              aria-label={`Удалить ${user.username}`}
-            >
-              <Trash2 size={14} />
-              Удалить
-            </Button>
-          ) : null}
+          ) : (
+            <>
+              {user.suspended_at ? (
+                onResume ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={onResume}
+                    disabled={actionBusy}
+                    aria-label={`Возобновить доступ ${user.username}`}
+                  >
+                    <Play size={14} />
+                    Возобновить
+                  </Button>
+                ) : null
+              ) : onSuspend ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  onClick={onSuspend}
+                  disabled={actionBusy}
+                  aria-label={`Приостановить доступ ${user.username}`}
+                >
+                  <PauseCircle size={14} />
+                  Приостановить
+                </Button>
+              ) : null}
+              {onDelete ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={onDelete}
+                  disabled={actionBusy}
+                  aria-label={`Удалить ${user.username}`}
+                >
+                  <Trash2 size={14} />
+                  Удалить
+                </Button>
+              ) : null}
+            </>
+          )}
           {onCreateKey ? (
             <Button
               type="button"

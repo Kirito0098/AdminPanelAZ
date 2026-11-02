@@ -38,8 +38,9 @@ export async function updateSettings(data: Partial<AppSettings>) {
   })
 }
 
-export async function getUsers() {
-  return apiFetch<User[]>('/users')
+export async function getUsers(options?: { includeDeleting?: boolean }) {
+  const qs = options?.includeDeleting ? '?include_deleting=true' : ''
+  return apiFetch<User[]>(`/users${qs}`)
 }
 
 export async function createUser(data: {

@@ -190,7 +190,7 @@ export default function UsersPage() {
 
   const reloadUsers = useCallback(async () => {
     try {
-      const list = await getUsers()
+      const list = await getUsers({ includeDeleting: true })
       setUsers(list)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить пользователей')
@@ -215,7 +215,7 @@ export default function UsersPage() {
     const load = async () => {
       setLoading(true)
       try {
-        const list = await getUsers()
+        const list = await getUsers({ includeDeleting: true })
         if (!cancelled) setUsers(list)
       } catch (err) {
         if (!cancelled) notifyError(err instanceof ApiError ? err.message : 'Не удалось загрузить пользователей')
@@ -403,7 +403,7 @@ export default function UsersPage() {
         await approveRequest(requestId, {})
       }
       success('Заявка одобрена — создаётся абонент и конфиги')
-      const list = await getUsers()
+      const list = await getUsers({ includeDeleting: true })
       setUsers(list)
       await reloadRequests()
       const userRow = telegramId
@@ -454,6 +454,9 @@ export default function UsersPage() {
     now.setHours(0, 0, 0, 0)
     const weekLater = new Date(now)
     weekLater.setDate(weekLater.getDate() + 7)
+    // «Удаляется» — отдельный список: обычные фильтры удаляемых не показывают.
+    const deleting = filter === 'deleting'
+    list = list.filter((u) => (u.provision_state === 'pending_deletion') === deleting)
     switch (filter) {
       case 'attention':
         list = list.filter(
@@ -610,6 +613,19 @@ export default function UsersPage() {
       if (detailId === user.id) closeDetail()
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка удаления пользователя')
+    }
+  }
+
+  const handleRetryDelete = async (user: User) => {
+    setCardBusyId(user.id)
+    try {
+      await deleteProvisionedUser(user.id)
+      success(`Удаление «${user.username}» запущено заново`)
+      window.setTimeout(() => void reloadUsers(), 2500)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось повторить удаление')
+    } finally {
+      setCardBusyId(null)
     }
   }
 
@@ -905,7 +921,7 @@ export default function UsersPage() {
             </div>
           </div>
 
-          {provisioningOn && (
+          {provisioningOn && filter !== 'deleting' && (
             <UsersBulkBar
               selectedCount={selectedIds.length}
               busy={
@@ -924,11 +940,13 @@ export default function UsersPage() {
               icon={Users}
               title="Пока нет пользователей"
               description={
-                search || filter !== 'all'
-                  ? 'Измените фильтр или поисковый запрос'
-                  : provisioningOn
-                    ? 'Создайте первого абонента — панель сама выпустит конфиги на выбранных серверах.'
-                    : 'Включите модуль «Пользователи (абоненты)» в настройках разделов, чтобы управлять абонентами VPN.'
+                filter === 'deleting'
+                  ? 'Нет абонентов, ожидающих удаления.'
+                  : search || filter !== 'all'
+                    ? 'Измените фильтр или поисковый запрос'
+                    : provisioningOn
+                      ? 'Создайте первого абонента — панель сама выпустит конфиги на выбранных серверах.'
+                      : 'Включите модуль «Пользователи (абоненты)» в настройках разделов, чтобы управлять абонентами VPN.'
               }
               className="py-10"
               action={
@@ -966,6 +984,11 @@ export default function UsersPage() {
                   onExtend={handleExtend}
                   onCreateKey={
                     isEnabled('unlock_codes') ? () => setUnlockDialogUser(u) : undefined
+                  }
+                  onRetryDelete={
+                    u.provision_state === 'pending_deletion'
+                      ? () => void handleRetryDelete(u)
+                      : undefined
                   }
                 />
               ))}
