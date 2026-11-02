@@ -197,6 +197,24 @@ def test_admin_is_exempt_from_expired_subscription_gate():
     enforce_user_can_create_config(db, user)
 
 
+def test_admin_can_create_even_without_flag_and_plan():
+    """Админ создаёт конфиги без плана и тарифа: флаг can_create_configs на него не действует."""
+    admin = SimpleNamespace(
+        id=7, role=UserRole.admin, can_create_configs=False, config_quota=None
+    )
+    db = _FakeDb(setting_value="5")
+
+    assert build_quota_payload(db, admin)["can_create"] is True
+    enforce_user_can_create_config(db, admin)
+
+
+def test_new_user_cannot_create_configs_by_default():
+    """Новый абонент создаётся без права создавать конфиги — право выдаётся явно."""
+    from app.models import User
+
+    assert User.__table__.c.can_create_configs.default.arg is False
+
+
 def test_user_role_enum_has_no_viewer():
     assert set(UserRole.__members__) == {"admin", "user"}
     assert "viewer" not in UserRole.__members__

@@ -167,7 +167,8 @@ def build_quota_payload(db: Session, user: User) -> dict:
         "remaining": remaining,
         "unlimited": limit is None,
         "can_manage": user.role == UserRole.admin or bool(getattr(user, "can_manage_configs", False)),
-        "can_create": bool(getattr(user, "can_create_configs", True)) and (limit is None or used < limit),
+        "can_create": user.role == UserRole.admin
+        or (bool(user.can_create_configs) and (limit is None or used < limit)),
         "create_rate_max": rate_max if user.role == UserRole.user else None,
         "create_rate_window_seconds": rate_window if user.role == UserRole.user else None,
     }

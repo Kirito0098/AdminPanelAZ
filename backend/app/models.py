@@ -95,7 +95,7 @@ class User(Base):
     telegram_id: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True, index=True)
     tg_notify_events: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     config_quota: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
-    can_create_configs: Mapped[bool] = mapped_column(Boolean, default=True)
+    can_create_configs: Mapped[bool] = mapped_column(Boolean, default=False)
     can_manage_configs: Mapped[bool] = mapped_column(Boolean, default=False)
     visible_vpn_profiles: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     access_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
