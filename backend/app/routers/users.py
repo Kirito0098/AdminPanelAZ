@@ -46,7 +46,6 @@ from app.schemas import (
     ProvisionPlanItem,
     ProvisionPlanResponse,
     ProvisioningConfig,
-    ProvisioningConfigNode,
     RejectRequest,
     TelegramLinkCodeResponse,
     UserConfigAccessResponse,
@@ -107,7 +106,7 @@ from app.services.telegram import send_tg_message
 from app.services.request_receipt_preview import ReceiptDecodeError, get_cached_or_build_preview
 from app.services.ip_restriction import ip_restriction_service
 from app.services.notify_time import get_client_timezone_from_request
-from app.services.node_manager import get_adapter_for_node, get_node_antizapret_path, node_metadata_dict
+from app.services.node_manager import get_adapter_for_node, node_metadata_dict
 from app.services.node_sync.groups import require_ha_primary_for_client_ops
 from app.services.config_provisioning import deprovision_config
 from app.services.traffic.ha_aggregate import resolve_traffic_scope
@@ -122,7 +121,6 @@ from app.services.telegram_link import create_link_code
 from app.services.user_identity_conflict import pending_deletion_conflict as _pending_deletion_conflict
 from app.services.user_provisioning import (
     TASK_TYPE,
-    USER_DELETE_CLEANUP_TASK_TYPE,
     apply_users_list_filters,
     compute_plan,
     enqueue_user_delete_cleanup,

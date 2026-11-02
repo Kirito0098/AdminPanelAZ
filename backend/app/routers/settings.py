@@ -12,7 +12,6 @@ from app.models import User
 from app.schemas import (
     AppSettingsResponse,
     AppSettingsUpdate,
-    MessageResponse,
     MonitorSettingsResponse,
     MonitorSettingsUpdate,
     RetentionSettingsResponse,

@@ -24,11 +24,10 @@ from app.auth import (
     get_password_hash,
     oauth2_scheme,
     verify_current_password,
-    verify_password,
 )
 from app.config import get_settings
 from app.database import get_db
-from app.models import AppSetting, User, UserRole
+from app.models import AppSetting, User
 from app.schemas import (
     Login2FARequest,
     Login2FARequired,

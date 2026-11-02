@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from app.config import get_settings
 from app.services.feature_guards import get_feature_service
 
 

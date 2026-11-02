@@ -55,7 +55,6 @@ from app.services.node_sync.client_sync import (
 from app.services.node_sync.groups import (
     build_ha_metadata,
     find_sync_group_containing_node,
-    find_sync_group_for_primary,
     require_ha_primary_for_client_ops,
 )
 from app.services.openvpn_cert import days_remaining_until, refresh_config_cert_expiry

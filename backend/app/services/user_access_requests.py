@@ -30,18 +30,16 @@ from app.models import (
     UserAccessRequest,
     UserNodeAssignment,
     UserRole,
-    VpnType,
 )
 from app.services.admin_panel_notifications import write_admin_panel_notification
-from app.services.app_setting_store import _get_setting, _set_setting
+from app.services.app_setting_store import _get_setting
 from app.auth import get_password_hash
 from app.services.feature_guards import get_feature_service
 from app.services.client_portal import get_or_create_user_portal_token, user_link_response
 from app.services.rate_limit.backends import MemoryRateLimitBackend
 from app.services.rate_limit.sliding_window import SlidingWindowLimiter
-from app.services.telegram import send_tg_message
 from app.services import telegram_api
-from app.services.telegram_api import edit_message_text, send_message
+from app.services.telegram_api import send_message
 from app.services.user_provisioning import (
     enqueue_user_provision,
     plan_add_index,

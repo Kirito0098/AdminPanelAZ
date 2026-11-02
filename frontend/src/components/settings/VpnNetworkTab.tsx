@@ -575,7 +575,6 @@ export default function VpnNetworkTab() {
     backendPort,
     httpsPublicPort,
     settings,
-    domainLetsEncrypt,
     accessPath,
   )
   const showAccessPathField = selectedMode.startsWith('nginx_')

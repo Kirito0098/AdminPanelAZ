@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import httpx
 import json
-import re
 import threading
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
@@ -142,8 +141,9 @@ def plan_name_count(user: User) -> int:
     return len(parse_plan_indexes(getattr(user, "plan_config_indexes", None) or []))
 
 
-def _desired_protocols(user: User) -> list[str]:
-    raw = getattr(user, "desired_protocols", None) or ""
+def desired_protocols_for_user(user: User) -> list[str]:
+    """Протоколы, заявленные пользователем в ``desired_protocols`` (JSON-массив строк)."""
+    raw = user.desired_protocols or ""
     try:
         data = json.loads(raw)
     except (TypeError, ValueError):
@@ -153,8 +153,9 @@ def _desired_protocols(user: User) -> list[str]:
     return [str(p) for p in data]
 
 
-def _plan_names(user: User) -> list[str]:
-    base = (getattr(user, "client_base_name", None) or "").strip()
+def plan_names_for_user(user: User) -> list[str]:
+    """Имена плана пользователя: ``base``, ``base-2`` … по ``plan_config_indexes``."""
+    base = (user.client_base_name or "").strip()
     if not base:
         return []
     return [plan_name_for_index(base, index) for index in parse_plan_indexes(user.plan_config_indexes)]
@@ -307,8 +308,8 @@ def compute_plan(db: Session, user: User) -> ProvisionPlan:
             plan.block_reason = "access_expired"
             return plan
 
-    names = _plan_names(user)
-    protocols = _desired_protocols(user)
+    names = plan_names_for_user(user)
+    protocols = desired_protocols_for_user(user)
     if not names or not protocols:
         return plan
 
@@ -433,9 +434,9 @@ def is_in_plan_config(db: Session, user: User, config: VpnConfig) -> bool:
         return False
     if config.owner_id != user.id:
         return False
-    if (config.client_name or "").lower() not in {name.lower() for name in _plan_names(user)}:
+    if (config.client_name or "").lower() not in {name.lower() for name in plan_names_for_user(user)}:
         return False
-    if config.vpn_type.value not in _desired_protocols(user):
+    if config.vpn_type.value not in desired_protocols_for_user(user):
         return False
     return (
         db.query(UserNodeAssignment)

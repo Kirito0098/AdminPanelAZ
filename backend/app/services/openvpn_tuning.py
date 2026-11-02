@@ -92,7 +92,7 @@ def with_logs(content: str, enabled: bool) -> str:
         raise OpenVpnTuningError("в конфиге нет строк verb/log-append/status — поправьте файл вручную")
 
     def _replace(match: re.Match[str]) -> str:
-        marker, line = match.group(1), match.group(2)
+        _marker, line = match.group(1), match.group(2)
         return line if enabled else f"#{line}"
 
     return _LOG_LINES.sub(_replace, content)

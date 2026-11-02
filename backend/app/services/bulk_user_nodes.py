@@ -42,7 +42,6 @@ from app.services.bulk_user_nodes_notify import (
     maybe_notify_after_user,
     render_bulk_notify_text,
 )
-from app.services.client_names import parse_plan_indexes, plan_name_for_index
 from app.services.config_provisioning import deprovision_config, provision_config
 from app.services.expected_node import forget_confirmed_node
 from app.services.feature_guards import get_feature_service
@@ -51,7 +50,9 @@ from app.services.user_provisioning import (
     TASK_TYPE as USER_PROVISION_TASK_TYPE,
     _protocol_feature_enabled,
     apply_users_list_filters,
+    desired_protocols_for_user,
     is_in_plan_config,
+    plan_names_for_user,
     recompute_provision_state,
 )
 from app.services.user_subscription import user_subscription_expired
@@ -135,27 +136,6 @@ def _node_label(node: Node) -> str:
     return (node.portal_label or node.name or str(node.id)).strip()
 
 
-def _plan_names(user: User) -> list[str]:
-    base = (getattr(user, "client_base_name", None) or "").strip()
-    if not base:
-        return []
-    return [
-        plan_name_for_index(base, index)
-        for index in parse_plan_indexes(getattr(user, "plan_config_indexes", None))
-    ]
-
-
-def _desired_protocols(user: User) -> list[str]:
-    raw = getattr(user, "desired_protocols", None) or ""
-    try:
-        data = json.loads(raw)
-    except (TypeError, ValueError):
-        return []
-    if not isinstance(data, list):
-        return []
-    return [str(item) for item in data]
-
-
 def _missing_plan_items(
     db: Session, user: User, node: Node
 ) -> list[tuple[str, VpnType]]:
@@ -164,8 +144,8 @@ def _missing_plan_items(
     Протоколы отключённых модулей панели пропускаются — так же, как в
     Stage 1 (``compute_plan``), чтобы предпросмотр совпадал с планом.
     """
-    names = _plan_names(user)
-    protocols = _desired_protocols(user)
+    names = plan_names_for_user(user)
+    protocols = desired_protocols_for_user(user)
     if not names or not protocols:
         return []
     existing = {

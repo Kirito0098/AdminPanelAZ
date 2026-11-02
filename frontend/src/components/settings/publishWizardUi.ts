@@ -129,7 +129,6 @@ export function guessPublishAccessUrl(
   backendPort: string,
   httpsPublicPort: string,
   settings: VpnNetworkSettings | null,
-  domainLetsEncrypt?: boolean | null,
   accessPath = '',
 ): string | undefined {
   const host = domainHost(domain)
@@ -196,7 +195,6 @@ export function buildPublishConfirmPlan(
     backendPort,
     httpsPublicPort,
     settings,
-    domainLetsEncrypt,
     accessPath,
   )
   const filteredWarnings = filterWarningsForDomain(
