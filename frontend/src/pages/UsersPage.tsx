@@ -26,6 +26,7 @@ import {
   getProvisioning,
   resumeUser,
   resetUserTrafficCounter,
+  downloadBulkNotifyReport,
   suspendUser,
 } from '@/api/users'
 import { useAuth } from '@/context/AuthContext'
@@ -70,6 +71,7 @@ import CreateUserDialog, {
 } from '@/components/users/CreateUserDialog'
 import BulkNodesDialog from '@/components/users/BulkNodesDialog'
 import BulkUsersActionDialog from '@/components/users/BulkUsersActionDialog'
+import BulkUsersNotifyDialog from '@/components/users/BulkUsersNotifyDialog'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import SuspendUserDialog, { type SuspendUserPayload } from '@/components/users/SuspendUserDialog'
 import AccessRequestsDialog from '@/components/users/AccessRequestsDialog'
@@ -150,6 +152,8 @@ export default function UsersPage() {
   }, [viewMode])
   const [cardBusyId, setCardBusyId] = useState<number | null>(null)
   const [bulkActionOpen, setBulkActionOpen] = useState(false)
+  const [notifyOpen, setNotifyOpen] = useState(false)
+  const [notifyTaskId, setNotifyTaskId] = useState<string | null>(null)
   const [unlockDialogUser, setUnlockDialogUser] = useState<User | null>(null)
   // Быстрая приостановка из карточки списка: причина и уведомление спрашиваем в диалоге.
   const [suspendTarget, setSuspendTarget] = useState<User | null>(null)
@@ -221,6 +225,24 @@ export default function UsersPage() {
       onComplete: (task) => success(task.message || 'Массовая операция завершена'),
       onError: (_task, message) => notifyError(message),
     })
+  }
+
+  const handleNotifyStarted = (taskId: string) => {
+    setNotifyTaskId(taskId)
+    success('Рассылка запущена')
+    trackBackgroundTask(taskId, {
+      onComplete: (task) => success(task.message || 'Рассылка завершена'),
+      onError: (_task, message) => notifyError(message),
+    })
+  }
+
+  const handleDownloadNotifyReport = async (taskId: string) => {
+    try {
+      const res = await downloadBulkNotifyReport(taskId)
+      triggerFileDownload(await res.blob(), `bulk-notify-${taskId}.json`)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось скачать отчёт')
+    }
   }
 
   const handleDownloadReport = async (taskId: string) => {
@@ -718,6 +740,9 @@ export default function UsersPage() {
               onAction={(action) => setBulkDialog({ open: true, action })}
               onDownloadReport={(taskId) => void handleDownloadReport(taskId)}
               onBulkAction={() => setBulkActionOpen(true)}
+              onNotify={() => setNotifyOpen(true)}
+              notifyTaskId={notifyTaskId}
+              onDownloadNotifyReport={(id) => void handleDownloadNotifyReport(id)}
             />
           )}
 
@@ -902,6 +927,16 @@ export default function UsersPage() {
             void reloadUsers()
             setSelectedIds([])
           }}
+        />
+      )}
+
+      {provisioningOn && (
+        <BulkUsersNotifyDialog
+          open={notifyOpen}
+          onOpenChange={setNotifyOpen}
+          users={filteredUsers}
+          selectedIds={selectedIds}
+          onStarted={handleNotifyStarted}
         />
       )}
 

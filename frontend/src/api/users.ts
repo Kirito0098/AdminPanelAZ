@@ -324,3 +324,24 @@ export async function bulkUsers(data: BulkUsersRequest) {
 export async function getUserHistory(userId: number, limit = 50) {
   return apiFetch<UserHistoryEntry[]>(`/users/${userId}/history?limit=${limit}`)
 }
+
+/* ------------------- Массовое уведомление в Telegram (D5) ------------------- */
+
+export interface BulkNotifyPayload {
+  user_ids: number[]
+  text: string
+}
+
+/** POST /users/bulk/notify — запустить фоновую рассылку. */
+export async function startBulkNotify(payload: BulkNotifyPayload) {
+  return apiFetch<{ task_id: string }>('/users/bulk/notify', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+/** GET /users/bulk/notify/tasks/{id}/report — JSON-отчёт по рассылке. */
+export async function downloadBulkNotifyReport(taskId: string) {
+  return apiFetchResponse(`/users/bulk/notify/tasks/${encodeURIComponent(taskId)}/report`)
+}
+

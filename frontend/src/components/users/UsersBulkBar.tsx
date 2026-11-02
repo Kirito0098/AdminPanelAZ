@@ -1,4 +1,4 @@
-import { ChevronDown, Download, Loader2, Server, Users } from 'lucide-react'
+import { ChevronDown, Download, Loader2, Send, Server, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -18,6 +18,10 @@ type UsersBulkBarProps = {
   onAction: (action: BulkNodesAction) => void
   onDownloadReport: (taskId: string) => void
   onBulkAction?: () => void
+  onNotify?: () => void
+  /** id последней рассылки — показать «Отчёт рассылки». */
+  notifyTaskId?: string | null
+  onDownloadNotifyReport?: (taskId: string) => void
 }
 
 const MENU_ITEMS: { id: BulkNodesAction; label: string }[] = [
@@ -34,6 +38,9 @@ export default function UsersBulkBar({
   onAction,
   onDownloadReport,
   onBulkAction,
+  onNotify,
+  notifyTaskId,
+  onDownloadNotifyReport,
 }: UsersBulkBarProps) {
   const running = task?.status === 'queued' || task?.status === 'running'
   const finished = task?.status === 'completed' || task?.status === 'failed'
@@ -72,6 +79,31 @@ export default function UsersBulkBar({
         <Users size={12} />
         Действия…
       </Button>
+
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 text-xs"
+        disabled={busy}
+        onClick={onNotify}
+      >
+        <Send size={12} />
+        Уведомить…
+      </Button>
+
+      {notifyTaskId && onDownloadNotifyReport ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs"
+          onClick={() => onDownloadNotifyReport(notifyTaskId)}
+        >
+          <Download size={12} />
+          Отчёт рассылки
+        </Button>
+      ) : null}
 
       {running && task && (
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
