@@ -589,6 +589,12 @@ def purge_user_before_delete(db: Session, user: User, successor: User) -> None:
         {UserActionLog.user_id: None},
         synchronize_session=False,
     )
+    # target_user_id — тоже FK без ON DELETE: без него DELETE users падал на
+    # FOREIGN KEY constraint, и абонент навсегда оставался в pending_deletion.
+    db.query(UserActionLog).filter(UserActionLog.target_user_id == user.id).update(
+        {UserActionLog.target_user_id: None},
+        synchronize_session=False,
+    )
     # Stage 2: заявки / баны ссылаются на users без ON DELETE CASCADE.
     db.query(UserAccessRequest).filter(UserAccessRequest.reviewed_by_id == user.id).update(
         {UserAccessRequest.reviewed_by_id: None},
