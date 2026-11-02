@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import AppSetting, User, VpnConfig
-from app.services.app_setting_store import _get_setting
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.panel_publish_info import resolve_public_base_url
 from app.services.qr_download import QrDownloadService
 from app.services.security import SecurityService
