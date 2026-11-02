@@ -17,6 +17,7 @@ from html import escape
 from time import monotonic
 from typing import Any
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from fastapi import HTTPException
@@ -145,10 +146,25 @@ def _is_bound(db: Session, telegram_id: str) -> User | None:
 
 
 def _login_is_free(db: Session, username: str) -> bool:
+    """Логин уникален по таблице целиком: ``ix_users_username`` не смотрит на состояние.
+
+    Абонент в ``pending_deletion`` всё ещё занимает свой логин, иначе вставка
+    падает на уникальном индексе.
+    """
+    return db.query(User.id).filter(User.username == username).first() is None
+
+
+def _base_name_is_free(db: Session, base_name: str) -> bool:
+    """Имя конфигов свободно без учёта регистра среди всех абонентов.
+
+    ``uq_users_client_base_name_lower`` не различает ``provision_state``, поэтому
+    база, занятая абонентом «в удалении», тоже считается занятой.
+    """
+    lowered = (base_name or "").strip().lower()
+    if not lowered:
+        return False
     return (
-        db.query(User)
-        .filter(User.username == username, User.provision_state != "pending_deletion")
-        .first()
+        db.query(User.id).filter(func.lower(User.client_base_name) == lowered).first()
         is None
     )
 
@@ -738,11 +754,23 @@ def _create_user_for_request(
     actor_username: str,
 ) -> User:
     """Создать пользователя по заявке new_user (вход в панель выключен, пароль случайный)."""
-    username = plan.get("username") or _propose_login(db, request.telegram_username, request.telegram_id)
-    if not _login_is_free(db, username):
-        username = f"tg{request.telegram_id}"
-        if not _login_is_free(db, username):
-            username = f"tg{request.telegram_id}_{secrets.token_hex(4)}"
+    requested = (plan.get("username") or "").strip()
+    if requested:
+        # Админ указал логин явно — молча переименовывать нельзя, пусть исправит.
+        if not _login_is_free(db, requested):
+            raise ValueError(f"Логин «{requested}» уже занят — укажите другой")
+        if not _base_name_is_free(db, requested):
+            raise ValueError(
+                f"Имя конфигов «{requested}» уже занято другим абонентом — укажите другой логин"
+            )
+        username = requested
+    else:
+        username = _propose_login(db, request.telegram_username, request.telegram_id)
+        # Логин и имя конфигов — разные пространства имён: подбираем свободное в обоих.
+        if not _login_is_free(db, username) or not _base_name_is_free(db, username):
+            username = f"tg{request.telegram_id}"
+            if not _login_is_free(db, username) or not _base_name_is_free(db, username):
+                username = f"tg{request.telegram_id}_{secrets.token_hex(4)}"
     config_count = int(plan.get("config_count") or 1)
     protocols = list(plan.get("protocols") or [])
     access_days = plan.get("access_days")
@@ -793,6 +821,27 @@ def _bump_config_quota(user: User, *, added: int) -> None:
     if quota is None or quota <= 0:
         return
     user.config_quota = min(_CONFIG_QUOTA_MAX, max(quota + added, plan_name_count(user)))
+
+
+def _reopen_request(db: Session, request_id: int) -> None:
+    """Вернуть заявку в pending, если создать абонента по ней не удалось."""
+    db.rollback()
+    (
+        db.query(UserAccessRequest)
+        .filter(
+            UserAccessRequest.id == request_id,
+            UserAccessRequest.status == "approved",
+        )
+        .update(
+            {
+                UserAccessRequest.status: "pending",
+                UserAccessRequest.reviewed_by_id: None,
+                UserAccessRequest.reviewed_at: None,
+            },
+            synchronize_session=False,
+        )
+    )
+    db.commit()
 
 
 def approve_request(
@@ -865,7 +914,14 @@ def approve_request(
 
     if request.request_type == REQUEST_TYPE_NEW_USER:
         assert plan is not None
-        user = _create_user_for_request(db, request, plan, actor_username=admin.username)
+        try:
+            user = _create_user_for_request(db, request, plan, actor_username=admin.username)
+        except Exception:
+            # Заявка уже переведена в approved — без отката она навсегда осталась бы
+            # «одобренной» без абонента, а админ видел бы 500 и не смог повторить.
+            logger.exception("approve request %s: user creation failed", request_id)
+            _reopen_request(db, request_id)
+            raise
         request.user_id = user.id
         db.add(request)
         db.commit()
