@@ -68,6 +68,9 @@ def _silent_telegram(monkeypatch):
     monkeypatch.setattr(chat_handler, "get_feature_service", lambda: _Feature())
     # send_message в хендлерах асинхронный — подменяем AsyncMock, иначе await падает.
     monkeypatch.setattr(chat_handler, "send_message", AsyncMock())
+    # Вход в переписку шлёт сообщение и дорисовывает inline-кнопку «Завершить».
+    monkeypatch.setattr(chat_handler, "send_message_result", AsyncMock(return_value=None))
+    monkeypatch.setattr(chat_handler, "edit_message_reply_markup", AsyncMock())
 
 
 def test_admin_button_enters_chat_mode(db, subscriber):
@@ -351,3 +354,43 @@ def test_photo_in_chat_mode_hints_text_only(db, subscriber):
     assert handled is True
     assert db.query(UserMessage).count() == 0
     assert chat_handler.send_message.await_args.args[2] == i18n.CHAT_TEXT_ONLY
+
+
+def test_dispatcher_hints_photo_in_chat_mode(db, subscriber, monkeypatch):
+    """Фото без текста в режиме переписки доходит до чата, а не теряется в маршрутизации."""
+    import asyncio
+
+    from app.services.telegram_bot import TelegramBotService
+    from app.services.telegram_bot_handlers.base import TelegramBotSettingsSnapshot
+
+    snap = TelegramBotSettingsSnapshot(
+        bot_token="tok",
+        interactive_enabled=True,
+        bot_username="bot",
+        webhook_set_at="",
+        webhook_secret_set=True,
+        token_set=True,
+    )
+    monkeypatch.setattr(
+        "app.services.telegram_bot.load_telegram_bot_settings_snapshot", lambda _db: snap
+    )
+    monkeypatch.setattr("app.services.telegram_bot.resolve_user", lambda _db, _tg: subscriber)
+    subscriber.chat_mode_since = datetime.utcnow()
+    db.commit()
+
+    update = {
+        "message": {
+            # Без text: раньше такой апдейт проваливался мимо чата и бот молчал.
+            "message_id": 41,
+            "photo": [{"file_id": "f"}],
+            "from": {"id": 555},
+            "chat": {"id": 555, "type": "private"},
+        }
+    }
+
+    asyncio.run(
+        TelegramBotService().handle_update(db, update, mini_app_url="https://panel.test")
+    )
+
+    assert chat_handler.send_message.await_args.args[2] == i18n.CHAT_TEXT_ONLY
+    assert db.query(UserMessage).count() == 0

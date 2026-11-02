@@ -5,8 +5,8 @@ from __future__ import annotations
 from app.services import telegram_bot_i18n as i18n
 from app.services import user_messages as chat_service
 from app.services.feature_guards import get_feature_service
-from app.services.telegram_api import send_message
-from app.services.telegram_bot_handlers.base import BotContext
+from app.services.telegram_api import edit_message_reply_markup, send_message, send_message_result
+from app.services.telegram_bot_handlers.base import BotContext, inline_button, inline_keyboard
 from app.services.telegram_bot_handlers.menu import build_reply_keyboard
 from app.models import User, UserRole
 from app.services.user_message_notify import notify_admins_new_message
@@ -29,9 +29,21 @@ async def handle_admin_chat(ctx: BotContext) -> None:
         await send_message(ctx.bot_token, ctx.chat_id, i18n.CHAT_ADMIN_HINT)
         return
     chat_service.enter_chat_mode(ctx.db, ctx.user)
-    await send_message(
+    sent = await send_message_result(
         ctx.bot_token, ctx.chat_id, i18n.CHAT_ENTER, reply_markup=build_reply_keyboard(ctx)
     )
+    # Reply-клавиатуру в Telegram можно свернуть (кнопка-иконка у поля ввода) — тогда
+    # «Завершить» не видно. Дублируем её inline-кнопкой в самом сообщении.
+    message_id = (sent or {}).get("message_id")
+    if isinstance(message_id, int):
+        await edit_message_reply_markup(
+            ctx.bot_token,
+            ctx.chat_id,
+            message_id,
+            reply_markup=inline_keyboard(
+                [[inline_button(i18n.BTN_CHAT_STOP, callback_data="nav:chat_stop")]]
+            ),
+        )
 
 
 async def handle_chat_stop(ctx: BotContext) -> None:
@@ -90,13 +102,12 @@ async def handle_chat_text(ctx: BotContext, message: dict) -> bool:
         return False
     if not chat_service.in_chat_mode(ctx.user):
         return False
-    if message.get("photo") or message.get("document"):
-        # Фото в переписке не принимаем: чек идёт через «Оплатить (чек)».
-        await send_message(ctx.bot_token, ctx.chat_id, i18n.CHAT_TEXT_ONLY)
-        return True
     text = (message.get("text") or "").strip()
     if not text:
-        return False
+        # Фото, файлы, стикеры и прочие вложения в переписке не принимаем:
+        # чек идёт через «Оплатить (чек)».
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.CHAT_TEXT_ONLY)
+        return True
     if len(text) > chat_service.MESSAGE_MAX_LEN:
         await send_message(ctx.bot_token, ctx.chat_id, i18n.CHAT_TOO_LONG)
         return True

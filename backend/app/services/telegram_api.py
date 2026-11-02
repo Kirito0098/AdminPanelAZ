@@ -227,14 +227,15 @@ async def get_webhook_info_result(bot_token: str) -> BotApiResult:
     return BotApiResult(ok=True, result=info)
 
 
-async def send_message(
+async def send_message_result(
     bot_token: str,
     chat_id: str | int,
     text: str,
     *,
     parse_mode: str = "HTML",
     reply_markup: dict[str, Any] | None = None,
-) -> bool:
+) -> dict[str, Any] | None:
+    """Отправить сообщение и вернуть объект Message из ответа Telegram (``None`` при ошибке)."""
     payload: dict[str, Any] = {
         "chat_id": chat_id,
         "text": text,
@@ -243,7 +244,21 @@ async def send_message(
     }
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
-    return (await call_bot_api(bot_token, "sendMessage", payload=payload)) is not None
+    return await call_bot_api(bot_token, "sendMessage", payload=payload)
+
+
+async def send_message(
+    bot_token: str,
+    chat_id: str | int,
+    text: str,
+    *,
+    parse_mode: str = "HTML",
+    reply_markup: dict[str, Any] | None = None,
+) -> bool:
+    result = await send_message_result(
+        bot_token, chat_id, text, parse_mode=parse_mode, reply_markup=reply_markup
+    )
+    return result is not None
 
 
 async def send_photo(

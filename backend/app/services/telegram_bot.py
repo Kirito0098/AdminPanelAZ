@@ -332,6 +332,11 @@ class TelegramBotService:
                     text=text,
                 ):
                     return
+            # Режим переписки: текст уходит админу, вложения — подсказкой (чек через «Оплатить»).
+            from app.services.telegram_bot_handlers.chat import handle_chat_text
+
+            if await handle_chat_text(ctx, message):
+                return
             if message.get("photo"):
                 from app.services.telegram_bot_handlers.access_requests import (
                     handle_request_photo,
@@ -345,11 +350,6 @@ class TelegramBotService:
                 )
 
                 if await handle_request_document(ctx, message):
-                    return
-            if text.strip():
-                from app.services.telegram_bot_handlers.chat import handle_chat_text
-
-                if await handle_chat_text(ctx, message):
                     return
             if text.strip():
                 await handle_unknown_text(ctx)
