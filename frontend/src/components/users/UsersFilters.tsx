@@ -17,6 +17,8 @@ const FILTERS: { id: string; label: string }[] = [
   { id: 'deleting', label: 'Удаляется' },
 ]
 
+export const USERS_FILTER_IDS: readonly string[] = FILTERS.map((item) => item.id)
+
 export function UsersFilters({ filter, onFilterChange }: UsersFiltersProps) {
   const handleClick = useCallback(
     (id: string) => () => {

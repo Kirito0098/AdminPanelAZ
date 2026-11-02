@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -60,6 +60,7 @@ import {
   saveUsersCardViewPrefs,
   type UsersCardViewPrefs,
 } from '@/lib/usersCardViewPrefs'
+import { loadUsersListPrefs, saveUsersListPrefs, type UsersSortKey } from '@/lib/usersListPrefs'
 import type {
   AccessRequestResponse,
   Node,
@@ -76,7 +77,7 @@ const REQUEST_PROTOCOLS: { id: string; label: string; featureKeys: string[] }[] 
   { id: 'openvpn', label: 'OpenVPN', featureKeys: ['openvpn'] },
   { id: 'amneziawg2', label: 'AmneziaWG 2.0', featureKeys: ['awg2'] },
 ]
-import { UsersFilters } from '@/components/users/UsersFilters'
+import { USERS_FILTER_IDS, UsersFilters } from '@/components/users/UsersFilters'
 import UsersCardViewSettings from '@/components/users/UsersCardViewSettings'
 import CreateUserDialog, {
   type CreateUserPayload,
@@ -95,7 +96,7 @@ const REQUEST_TYPE_LABELS: Record<string, string> = {
   extend_access: 'Продление доступа',
 }
 
-type SortKey = 'username' | 'created_at' | 'access_until' | 'traffic' | 'last_seen'
+type SortKey = UsersSortKey
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'username', label: 'Имя' },
@@ -136,8 +137,12 @@ export default function UsersPage() {
   const { backgroundTask, trackBackgroundTask } = useProgress()
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<string>('all')
+  const [initialListPrefs] = useState(() => loadUsersListPrefs(USERS_FILTER_IDS))
+  const [filter, setFilter] = useState<string>(initialListPrefs.filter)
   const [search, setSearch] = useState('')
+  // Фильтрация идёт по отложенному значению: поле ввода остаётся мгновенным,
+  // а пересчёт списка не блокирует ввод на сотнях карточек.
+  const deferredSearch = useDeferredValue(search)
   const [selectedIds, setSelectedIds] = useState<number[]>([])
   const [createOpen, setCreateOpen] = useState(false)
   const [requestsOpen, setRequestsOpen] = useState(false)
@@ -163,8 +168,8 @@ export default function UsersPage() {
   }>({ open: false, action: 'add' })
   const [viewPrefs, setViewPrefs] = useState<UsersCardViewPrefs>(() => loadUsersCardViewPrefs())
   const [cardBusyId, setCardBusyId] = useState<number | null>(null)
-  const [sortKey, setSortKey] = useState<SortKey>('username')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [sortKey, setSortKey] = useState<SortKey>(initialListPrefs.sortKey)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>(initialListPrefs.sortDir)
   const [page, setPage] = useState(0)
   const [pageSize, setPageSize] = useState<number>(() => loadPageSize())
   const [bulkActionOpen, setBulkActionOpen] = useState(false)
@@ -240,6 +245,11 @@ export default function UsersPage() {
     setSelectedIds([])
     setPage(0)
   }, [filter, search])
+
+  // Фильтр и сортировку запоминаем между заходами; поиск — нет (временный запрос).
+  useEffect(() => {
+    saveUsersListPrefs({ filter, sortKey, sortDir })
+  }, [filter, sortKey, sortDir])
 
   // Смена сортировки/размера страницы тоже возвращает на первую страницу; размер запоминаем.
   useEffect(() => {
@@ -442,10 +452,17 @@ export default function UsersPage() {
   }
 
   const filteredUsers = useMemo(() => {
-    const q = search.trim().toLowerCase()
+    const q = deferredSearch.trim().toLowerCase()
     let list = users.filter((u) => {
       if (!q) return true
-      const hay = [u.username, String(u.id), u.telegram_id ?? '', u.client_base_name ?? '']
+      const hay = [
+        u.username,
+        String(u.id),
+        u.telegram_id ?? '',
+        u.client_base_name ?? '',
+        u.owned_config_base_name ?? '',
+        u.note ?? '',
+      ]
         .join('\u0000')
         .toLowerCase()
       return hay.includes(q)
@@ -501,7 +518,7 @@ export default function UsersPage() {
       const bv = b[field] ?? ''
       return dir * String(av).localeCompare(String(bv), 'ru')
     })
-  }, [users, filter, search, sortKey, sortDir])
+  }, [users, filter, deferredSearch, sortKey, sortDir])
 
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize))
   const safePage = Math.min(page, totalPages - 1)
@@ -509,6 +526,12 @@ export default function UsersPage() {
 
   // Массовые действия: выбранные галочками, иначе — весь отфильтрованный список.
   const bulkTargetIds = selectedIds.length > 0 ? selectedIds : filteredUsers.map((u) => u.id)
+
+  // «Выбрать всех на странице»: состояние чекбокса по текущей странице пагинации.
+  const pagedUserIds = pagedUsers.map((u) => u.id)
+  const selectedOnPage = pagedUserIds.filter((id) => selectedIds.includes(id)).length
+  const allPageSelected = pagedUserIds.length > 0 && selectedOnPage === pagedUserIds.length
+  const somePageSelected = selectedOnPage > 0 && !allPageSelected
 
   const listMetrics = useMemo(() => {
     const now = Date.now()
@@ -703,6 +726,9 @@ export default function UsersPage() {
       'suspend_reason',
       'traffic_limit_bytes',
       'traffic_limit_blocked',
+      'traffic_consumed_bytes',
+      'last_seen_at',
+      'note',
       'panel_login_enabled',
       'can_create_configs',
       'can_manage_configs',
@@ -728,6 +754,9 @@ export default function UsersPage() {
         user.suspend_reason ?? '',
         user.traffic_limit_bytes ?? '',
         user.traffic_limit_blocked ?? '',
+        user.traffic_consumed_bytes ?? '',
+        user.last_seen_at ?? '',
+        user.note ?? '',
         user.panel_login_enabled ?? '',
         user.can_create_configs ?? '',
         user.can_manage_configs ?? '',
@@ -867,7 +896,7 @@ export default function UsersPage() {
                 <Input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Поиск по логину…"
+                  placeholder="Поиск по логину, TG, заметке…"
                   className="h-10 bg-background pl-9 pr-9"
                   aria-label="Поиск пользователей"
                 />
@@ -912,12 +941,35 @@ export default function UsersPage() {
         </CardHeader>
         <CardContent className="space-y-4 p-4 sm:p-5">
           <div className="space-y-3 rounded-xl border border-dashed bg-muted/15 p-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                <Filter size={13} />
-                Статус
-              </span>
-              <UsersFilters filter={filter} onFilterChange={setFilter} />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                  <Filter size={13} />
+                  Статус
+                </span>
+                <UsersFilters filter={filter} onFilterChange={setFilter} />
+              </div>
+              {provisioningOn && filter !== 'deleting' && pagedUserIds.length > 0 ? (
+                <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                  <Checkbox
+                    checked={allPageSelected ? true : somePageSelected ? 'indeterminate' : false}
+                    onCheckedChange={(checked) => {
+                      const ids = new Set(pagedUserIds)
+                      if (checked === true) {
+                        setSelectedIds((prev) => {
+                          const next = new Set(prev)
+                          for (const id of ids) next.add(id)
+                          return [...next]
+                        })
+                      } else {
+                        setSelectedIds((prev) => prev.filter((id) => !ids.has(id)))
+                      }
+                    }}
+                    aria-label="Выбрать всех на странице"
+                  />
+                  Выбрать всех на странице ({pagedUserIds.length})
+                </label>
+              ) : null}
             </div>
           </div>
 
