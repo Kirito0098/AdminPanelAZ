@@ -16,7 +16,6 @@ import { Label } from '@/components/ui/label'
 import { useNotificationCenter } from '@/context/NotificationCenterContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
-import { REQUEST_TYPE_LABELS } from '@/lib/accessRequests'
 import { cn } from '@/lib/utils'
 import type { AccessRequestResponse, User } from '@/types'
 
@@ -222,6 +221,19 @@ export default function AccessRequestsDialog({
       notifyError(err instanceof ApiError ? err.message : 'Не удалось открыть чек')
     }
   }
+  const grouped = (
+    [
+      { key: 'new_user', title: 'Новый доступ' },
+      { key: 'add_config', title: 'Дополнительный конфиг' },
+      { key: 'extend_access', title: 'Продление доступа' },
+    ] as const
+  )
+    .map((group) => ({
+      ...group,
+      items: requests.filter((r) => r.request_type === group.key),
+    }))
+    .filter((group) => group.items.length > 0)
+
   return (
     <>
       {receiptUrl && (
@@ -265,7 +277,12 @@ export default function AccessRequestsDialog({
               aria-label="Поиск по заявкам"
             />
             <div className="space-y-2">
-              {requests.map((r) => {
+              {grouped.map((group) => (
+                <div key={group.key} className="space-y-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {group.title} · {group.items.length}
+                  </p>
+                  {group.items.map((r) => {
                 const approveDisabled = approvingId === r.id
                 const title =
                   r.telegram_name ||
@@ -273,7 +290,6 @@ export default function AccessRequestsDialog({
                 const metaParts = [
                   r.telegram_username ? `@${r.telegram_username}` : null,
                   `TG ${r.telegram_id}`,
-                  REQUEST_TYPE_LABELS[r.request_type] ?? r.request_type,
                   new Date(r.created_at).toLocaleString('ru-RU'),
                 ].filter(Boolean)
                 return (
@@ -328,8 +344,10 @@ export default function AccessRequestsDialog({
                       </Button>
                     </div>
                   </div>
-                )
-              })}
+                  )
+                  })}
+                </div>
+              ))}
               {hasMore && (
                 <Button
                   variant="outline"
