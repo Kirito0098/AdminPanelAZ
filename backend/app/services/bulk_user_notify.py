@@ -85,7 +85,7 @@ def start_bulk_user_notify(
         input=json.dumps({"user_ids": user_ids, "text": text}, ensure_ascii=False),
     )
 
-    def worker(updater: Callable[[int, str, str | None], None]) -> dict[str, Any]:
+    def worker(progress_updater: Callable[[int, str, str | None], None]) -> dict[str, Any]:
         db = SessionLocal()
         try:
             users = (
@@ -98,7 +98,7 @@ def start_bulk_user_notify(
                 users,
                 text,
                 bot_token,
-                lambda percent, stage: updater(percent, stage, None),
+                lambda percent, stage: progress_updater(percent, stage, None),
             )
         finally:
             db.close()
