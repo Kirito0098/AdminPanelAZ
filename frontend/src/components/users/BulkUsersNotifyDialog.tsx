@@ -80,8 +80,11 @@ export default function BulkUsersNotifyDialog({
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
             placeholder="Например: завтра с 03:00 до 04:00 возможны перебои…"
           />
-          <div className="text-right text-xs text-muted-foreground">
-            {text.length} / {MAX_LEN}
+          <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+            <span>Получатель увидит подпись «📢 Уведомление от администратора» и ниже ваш текст</span>
+            <span>
+              {text.length} / {MAX_LEN}
+            </span>
           </div>
         </div>
         <div className="flex justify-end gap-2">

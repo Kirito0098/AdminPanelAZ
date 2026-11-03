@@ -32,6 +32,11 @@ def _run_bulk_notify(
     updater: ProgressUpdater,
 ) -> dict[str, Any]:
     """Отправить текст каждому пользователю. Без БД и сети — тестируется напрямую."""
+    body = (text or "").strip()
+    # Абонент должен понимать, от кого сообщение: подпись добавляем один раз.
+    if body and "Уведомление от администратора" not in body:
+        body = f"📢 Уведомление от администратора\n\n{body}"
+
     throttle = TelegramBulkThrottle()
     stats: dict[str, Any] = {
         "total": len(users),
@@ -50,7 +55,7 @@ def _run_bulk_notify(
                 lambda telegram_id=telegram_id: send_bulk_user_notify(
                     bot_token=bot_token,
                     telegram_id=telegram_id,
-                    text=text,
+                    text=body,
                 )
             )
             if status == "sent":
