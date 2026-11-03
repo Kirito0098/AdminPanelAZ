@@ -149,7 +149,7 @@ export default function CidrPipelineTab({
 
   return (
     <div className="space-y-6">
-      <div className="sticky top-0 z-20 -mx-1 rounded-lg border bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <div className="sticky top-14 z-20 -mx-1 rounded-lg border bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="flex flex-wrap items-center gap-2">
           {pipelineStageNav.map((item) => {
             const step = workflow?.steps.find((s) => s.stage === item.num)

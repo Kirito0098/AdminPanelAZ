@@ -85,7 +85,7 @@ export default function NotificationsFeed() {
   return (
     <div className="mx-auto grid w-full max-w-[1400px] grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="flex min-w-0 flex-col gap-3">
-        <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-xl border border-border/60 bg-background/95 p-2 backdrop-blur">
+        <div className="z-10 flex flex-col gap-2 rounded-xl border border-border/60 bg-background/95 p-2 backdrop-blur xl:sticky xl:top-14">
           <div className="flex flex-wrap items-center gap-2">
             <div className="relative min-w-0 flex-1 basis-52">
               <Search
@@ -247,7 +247,7 @@ export default function NotificationsFeed() {
         )}
       </div>
 
-      <aside className="hidden flex-col gap-3 self-start xl:sticky xl:top-0 xl:flex">
+      <aside className="hidden flex-col gap-3 self-start xl:sticky xl:top-14 xl:flex">
         <section className="rounded-xl border border-border/60 bg-card/60 p-2">
           <h2 className="px-1.5 pb-1 pt-0.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/80">
             Категории

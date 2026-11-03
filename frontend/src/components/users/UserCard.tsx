@@ -236,7 +236,7 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
       </div>
 
       <Tabs value={activeTab} onValueChange={handleTabChange} className="w-full">
-        <div className="sticky top-0 z-20 border-b bg-background/95 px-3 py-2 backdrop-blur sm:px-4">
+        <div className="sticky top-14 z-20 border-b bg-background/95 px-3 py-2 backdrop-blur sm:px-4">
           <div className="flex items-center gap-2">
             <TabsList className="h-auto min-w-0 flex-1 justify-start gap-1 overflow-x-auto bg-muted/60 p-1">
               <TabsTrigger value="access" className="gap-1.5" title="Срок доступа, пауза и ключ продления">

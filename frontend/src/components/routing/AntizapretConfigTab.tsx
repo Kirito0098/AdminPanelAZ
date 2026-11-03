@@ -1127,7 +1127,7 @@ export default function AntizapretConfigTab() {
               {(dirty || needsApply) && (
                 <div
                   className={cn(
-                    'sticky top-0 z-30 flex flex-col gap-3 rounded-lg border px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/90 sm:flex-row sm:items-center sm:justify-between',
+                    'sticky top-14 z-30 flex flex-col gap-3 rounded-lg border px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/90 sm:flex-row sm:items-center sm:justify-between',
                     dirty
                       ? 'border-amber-500/30 bg-amber-500/5'
                       : 'border-amber-500/30 bg-background/95',

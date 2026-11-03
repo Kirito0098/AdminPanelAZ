@@ -296,7 +296,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
-        <aside className="hidden w-56 shrink-0 lg:sticky lg:top-4 lg:block">
+        <aside className="hidden w-56 shrink-0 lg:sticky lg:top-[4.5rem] lg:block">
           <SettingsSectionBrowser groups={visibleGroups} variant="nav" activeSection={section} />
         </aside>
 
