@@ -2796,6 +2796,7 @@ export interface AccessRequestResponse {
 }
 
 export interface ApproveRequest {
+  config_ids?: number[]
   preset_id?: number
   node_ids?: number[]
   protocols?: string[]

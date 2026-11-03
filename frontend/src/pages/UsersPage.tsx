@@ -189,14 +189,22 @@ export default function UsersPage() {
 
   const handleApproveRequestViaDialog = async (id: number, data: CreateUserPayload) => {
     try {
-      await approveRequest(id, {
-        preset_id: data.preset_id ?? undefined,
-        node_ids: data.node_ids,
-        protocols: data.protocols,
-        config_count: data.config_count,
-        username: data.username,
-        access_until: data.access_until ?? null,
-      })
+      if (data.mode === 'from_existing') {
+        await approveRequest(id, {
+          config_ids: data.config_ids,
+          username: data.username,
+          access_until: data.access_until ?? null,
+        })
+      } else {
+        await approveRequest(id, {
+          preset_id: data.preset_id ?? undefined,
+          node_ids: data.node_ids,
+          protocols: data.protocols,
+          config_count: data.config_count,
+          username: data.username,
+          access_until: data.access_until ?? null,
+        })
+      }
       success('Заявка одобрена — абонент создан')
       setApproveReq(null)
       await reloadUsers()

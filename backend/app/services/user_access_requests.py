@@ -722,6 +722,13 @@ def _resolve_plan(
 ) -> dict[str, Any]:
     """Разрешить план заявки: из шаблона или ad-hoc параметров."""
     if request.request_type == REQUEST_TYPE_NEW_USER:
+        if ad_hoc and ad_hoc.get("config_ids"):
+            # Одобрение с привязкой готовых конфигов: план не нужен.
+            return {
+                "config_ids": [int(cid) for cid in ad_hoc["config_ids"]],
+                "username": ad_hoc.get("username"),
+                "access_until": ad_hoc.get("access_until"),
+            }
         if preset_id is not None:
             preset = db.get(ProvisioningPreset, preset_id)
             if preset is None:
@@ -832,6 +839,33 @@ def _create_user_for_request(
     return user
 
 
+def _create_user_from_existing_for_request(
+    db: Session,
+    request: UserAccessRequest,
+    plan: dict[str, Any],
+    *,
+    actor: User,
+) -> User:
+    """Одобрение заявки new_user с привязкой готовых конфигов (без выпуска новых)."""
+    from app.services.config_ownership import create_user_from_existing
+    from app.schemas import UserFromExistingCreate
+
+    requested = (plan.get("username") or "").strip().rstrip("_") or ""
+    username = requested or _propose_login(db, request.telegram_username, request.telegram_id)
+    if not _login_is_free(db, username) or not _base_name_is_free(db, username):
+        username = f"tg{request.telegram_id}"
+        if not _login_is_free(db, username) or not _base_name_is_free(db, username):
+            username = f"tg{request.telegram_id}_{secrets.token_hex(4)}"
+    payload = UserFromExistingCreate(
+        username=username,
+        config_ids=[int(cid) for cid in plan["config_ids"]],
+        access_until=plan.get("access_until"),
+        panel_login_enabled=False,
+        telegram_id=request.telegram_id,
+    )
+    return create_user_from_existing(db, payload=payload, actor=actor)
+
+
 def _bump_config_quota(user: User, *, added: int) -> None:
     """Поднять «лимит имён» вместе с планом при одобрении доп. конфига.
 
@@ -900,10 +934,13 @@ def approve_request(
                 username=bound.username,
             )
         plan = _resolve_plan(db, request, preset_id=preset_id, ad_hoc=ad_hoc)
-        if not plan["node_ids"] or not plan["protocols"]:
+        if plan.get("config_ids"):
+            pass  # готовые конфиги: узлы и протоколы не нужны
+        elif not plan["node_ids"] or not plan["protocols"]:
             raise ValueError("Укажите узлы и протоколы плана")
         try:
-            validate_plan_nodes(db, plan["node_ids"])
+            if not plan.get("config_ids"):
+                validate_plan_nodes(db, plan["node_ids"])
         except HTTPException as exc:
             raise ValueError(exc.detail if isinstance(exc.detail, str) else "Неверные узлы плана") from exc
     elif request.request_type == REQUEST_TYPE_ADD_CONFIG:
@@ -937,7 +974,12 @@ def approve_request(
     if request.request_type == REQUEST_TYPE_NEW_USER:
         assert plan is not None
         try:
-            user = _create_user_for_request(db, request, plan, actor_username=admin.username)
+            if plan.get("config_ids"):
+                user = _create_user_from_existing_for_request(
+                    db, request, plan, actor=admin
+                )
+            else:
+                user = _create_user_for_request(db, request, plan, actor_username=admin.username)
         except Exception:
             # Заявка уже переведена в approved — без отката она навсегда осталась бы
             # «одобренной» без абонента, а админ видел бы 500 и не смог повторить.
@@ -965,7 +1007,11 @@ def approve_request(
         new_until = max(now_naive, user.access_until or now_naive) + timedelta(days=int(plan["days"]))
         set_user_access_until(db, user, new_until, actor=admin.username, sync_clients=False, commit=True)
 
-    if request.request_type in (REQUEST_TYPE_NEW_USER, REQUEST_TYPE_ADD_CONFIG):
+    if plan is not None and plan.get("config_ids"):
+        # Конфиги уже привязаны: провижининг не нужен, сразу пишем абоненту.
+        assert user is not None
+        maybe_send_delivery_after_task(db, user_id=user.id, created_count=len(plan["config_ids"]))
+    elif request.request_type in (REQUEST_TYPE_NEW_USER, REQUEST_TYPE_ADD_CONFIG):
         assert user is not None
         deliver_approved_request(db, request=request, user=user, plan=plan, actor=admin)
     return request

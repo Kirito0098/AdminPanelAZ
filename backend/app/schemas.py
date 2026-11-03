@@ -2031,6 +2031,8 @@ class ApproveRequest(BaseModel):
     node_ids: list[int] | None = None
     protocols: list[str] | None = None
     config_count: int | None = Field(default=None, ge=1, le=20)
+    # Одобрение с привязкой готовых конфигов вместо выпуска новых.
+    config_ids: list[int] | None = None
     access_until: datetime | None = None
     traffic_limit_bytes: int | None = Field(default=None, ge=0)
     username: str | None = Field(default=None, min_length=1, max_length=64)

@@ -362,51 +362,37 @@ export default function CreateUserDialog({
   const handleSubmit = async () => {
     setSubmitting(true)
     try {
-      const provisionPayload: CreateUserPayload = {
-        mode: 'provision',
-        username: username.trim(),
-        client_base_name: clientBaseName.trim(),
-        node_ids: selectedNodeIds,
-        protocols: selectedProtocols,
-        config_count: configCount,
-        config_quota: parsedQuota,
-        access_until: parsedAccessUntil,
-        panel_login_enabled: panelLogin,
-        password: panelLogin ? password : undefined,
-        telegram_id: telegramId.trim() === '' ? undefined : telegramId.trim(),
-        preset_id: selectedPresetId,
-      }
+      const payload: CreateUserPayload =
+        mode === 'from_existing'
+          ? {
+              mode: 'from_existing',
+              username: username.trim(),
+              config_ids: configIds,
+              config_quota: parsedQuota,
+              access_until: parsedAccessUntil,
+              panel_login_enabled: panelLogin,
+              password: panelLogin ? password : undefined,
+              telegram_id: telegramId.trim() === '' ? undefined : telegramId.trim(),
+            }
+          : {
+              mode: 'provision',
+              username: username.trim(),
+              client_base_name: clientBaseName.trim(),
+              node_ids: selectedNodeIds,
+              protocols: selectedProtocols,
+              config_count: configCount,
+              config_quota: parsedQuota,
+              access_until: parsedAccessUntil,
+              panel_login_enabled: panelLogin,
+              password: panelLogin ? password : undefined,
+              telegram_id: telegramId.trim() === '' ? undefined : telegramId.trim(),
+              preset_id: selectedPresetId,
+            }
       if (approveRequest && onApproveRequest) {
-        await onApproveRequest(approveRequest.id, provisionPayload)
+        await onApproveRequest(approveRequest.id, payload)
         return
       }
-      if (mode === 'from_existing') {
-        await onCreate({
-          mode: 'from_existing',
-          username: username.trim(),
-          config_ids: configIds,
-          config_quota: parsedQuota,
-          access_until: parsedAccessUntil,
-          panel_login_enabled: panelLogin,
-          password: panelLogin ? password : undefined,
-          telegram_id: telegramId.trim() === '' ? undefined : telegramId.trim(),
-        })
-      } else {
-        await onCreate({
-          mode: 'provision',
-          username: username.trim(),
-          client_base_name: clientBaseName.trim(),
-          node_ids: selectedNodeIds,
-          protocols: selectedProtocols,
-          config_count: configCount,
-          config_quota: parsedQuota,
-          access_until: parsedAccessUntil,
-          panel_login_enabled: panelLogin,
-          password: panelLogin ? password : undefined,
-          telegram_id: telegramId.trim() === '' ? undefined : telegramId.trim(),
-          preset_id: selectedPresetId,
-        })
-      }
+      await onCreate(payload)
     } finally {
       setSubmitting(false)
     }
@@ -495,10 +481,9 @@ export default function CreateUserDialog({
                 ? 'Логин абонента. Существующие конфиги привяжете на следующем шаге.'
                 : 'Логин абонента и базовое имя конфигов. Имена конфигов будут client, client-2, …',
             )}
-            {!approveRequest && (
-              <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/20 p-3">
-                <div className="space-y-0.5">
-                  <Label htmlFor="createFromExisting">Без новых конфигов (привязать существующие)</Label>
+            <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/20 p-3">
+              <div className="space-y-0.5">
+                <Label htmlFor="createFromExisting">Без новых конфигов (привязать существующие)</Label>
                   <p className="text-xs text-muted-foreground">
                     VPN на серверах не создаются — только смена владельца.
                   </p>
@@ -515,9 +500,8 @@ export default function CreateUserDialog({
                       setConfigOptions([])
                     }
                   }}
-                />
-              </div>
-            )}
+              />
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="createUsername">Логин</Label>
               <Input
