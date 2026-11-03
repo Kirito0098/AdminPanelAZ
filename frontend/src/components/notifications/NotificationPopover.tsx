@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { NavLink } from 'react-router-dom'
 import { BellOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -10,13 +9,12 @@ export interface NotificationPopoverProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   sheet?: boolean
+  /** Только непрочитанные: список для колокола готовит NotificationCenterContext. */
   items: NotificationItem[]
   counts: NotificationCounts
   onMarkAllRead: () => void
   onMarkRead: (id: number) => void
 }
-
-const PREVIEW_LIMIT = 5
 
 export default function NotificationPopover({
   open,
@@ -27,8 +25,6 @@ export default function NotificationPopover({
   onMarkAllRead,
   onMarkRead,
 }: NotificationPopoverProps) {
-  const preview = useMemo(() => items.slice(0, PREVIEW_LIMIT), [items])
-
   const body = (
     <div className="flex flex-col">
       <div className="flex items-center justify-between gap-2 border-b border-border/60 bg-muted/50 px-3 py-2">
@@ -41,14 +37,21 @@ export default function NotificationPopover({
       </div>
 
       <div className="flex max-h-[52vh] flex-col gap-2 overflow-y-auto p-2">
-        {preview.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 py-8 text-sm text-muted-foreground">
+        {items.length === 0 ? (
+          <div className="flex flex-col items-center gap-1 py-8 text-center text-sm text-muted-foreground">
             <BellOff size={20} />
-            Уведомлений нет
+            <span>Новых уведомлений нет</span>
+            <span className="text-xs">Прочитанные — в истории ниже</span>
           </div>
         ) : (
-          preview.map((item) => (
-            <NotificationCard key={item.id} item={item} compact onMarkRead={onMarkRead} />
+          items.map((item) => (
+            <NotificationCard
+              key={item.id}
+              item={item}
+              compact
+              onMarkRead={onMarkRead}
+              onNavigate={() => onOpenChange(false)}
+            />
           ))
         )}
       </div>

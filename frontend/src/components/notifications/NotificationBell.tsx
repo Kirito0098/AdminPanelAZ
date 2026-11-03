@@ -18,7 +18,7 @@ function bellBadge(unreadCount: number) {
 }
 
 export default function NotificationBell() {
-  const { items, counts, unreadCount, markAllRead, setState } = useNotificationCenter()
+  const { bellItems, counts, unreadCount, markAllRead, setState } = useNotificationCenter()
   const [desktopOpen, setDesktopOpen] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -44,7 +44,7 @@ export default function NotificationBell() {
             <NotificationPopover
               open={desktopOpen}
               onOpenChange={setDesktopOpen}
-              items={items}
+              items={bellItems}
               counts={counts}
               onMarkAllRead={() => void markAllRead()}
               onMarkRead={markRead}
@@ -69,7 +69,7 @@ export default function NotificationBell() {
           open={mobileOpen}
           onOpenChange={setMobileOpen}
           sheet
-          items={items}
+          items={bellItems}
           counts={counts}
           onMarkAllRead={() => void markAllRead()}
           onMarkRead={markRead}

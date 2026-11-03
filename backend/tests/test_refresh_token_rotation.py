@@ -302,6 +302,10 @@ def test_migration_adds_rotation_columns_to_legacy_table(monkeypatch):
     from sqlalchemy import inspect
 
     engine = create_engine("sqlite://", poolclass=StaticPool)
+    # Легаси-схема старой панели: миграции после refresh-токенов правят и users
+    # (роль, bell_notify_categories), поэтому таблица нужна в актуальном виде —
+    # проверяется только refresh_tokens.
+    User.__table__.create(engine)
     with engine.begin() as conn:
         conn.execute(
             text(

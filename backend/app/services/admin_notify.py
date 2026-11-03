@@ -38,6 +38,19 @@ from app.services.traffic_limit import (
 
 logger = logging.getLogger(__name__)
 
+# Действия админа в панели: автору они не приходят как новые — ни в колокол, ни в Telegram.
+# Ошибки, входы, напоминания и результаты фоновых задач сюда не входят: их автору видно.
+SELF_ACTION_EVENTS = frozenset(
+    {
+        "config_create",
+        "config_delete",
+        "user_create",
+        "user_delete",
+        "client_ban",
+        "settings_change",
+    }
+)
+
 TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("login_success", "Успешный вход"),
     ("login_failed", "Неверный пароль"),
@@ -562,7 +575,13 @@ class AdminNotifyService:
         node_name: str | None = None,
         user_agent: str | None = None,
         login_via: str | None = None,
+        read_for_author: bool | None = None,
     ) -> None:
+        # Своё действие автору не показываем новым. По умолчанию — по списку событий,
+        # результат фоновой задачи передаёт флаг сам: успех — да, с ошибками — нет.
+        author_action = (
+            event_type in SELF_ACTION_EVENTS if read_for_author is None else read_for_author
+        )
         # Bell first — must run even when Telegram is off; never blocks Telegram delivery.
         try:
             context = " · ".join(
@@ -583,6 +602,7 @@ class AdminNotifyService:
                 )[:2000],
                 level="error" if "fail" in event_type or event_type.endswith("_failed") else "info",
                 action_payload={"node_id": node_id} if node_id is not None else None,
+                read_for_username=actor_username if author_action else None,
             )
         except Exception as exc:
             self.logger.warning("bell notify error: %s", exc)
@@ -610,6 +630,9 @@ class AdminNotifyService:
                 notify_users,
                 lambda key, default="": _get_setting(db, key, default),
             )
+            if author_action and actor_username:
+                # Своё действие не дублируем автору в личку; остальным админам — по-прежнему.
+                notify_users = [u for u in notify_users if u.username != actor_username]
             if not notify_users:
                 return
 
@@ -806,6 +829,7 @@ class AdminNotifyService:
         node_id: int | None = None,
         node_name: str | None = None,
         client_timezone: str | None = None,
+        read_for_author: bool | None = None,
     ) -> None:
         self.send(
             db,
@@ -818,6 +842,7 @@ class AdminNotifyService:
             node_id=node_id,
             node_name=node_name,
             client_timezone=client_timezone,
+            read_for_author=read_for_author,
         )
 
     def send_traffic_limit_block(

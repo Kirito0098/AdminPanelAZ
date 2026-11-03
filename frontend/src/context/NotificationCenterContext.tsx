@@ -40,9 +40,12 @@ export const EMPTY_NOTIFICATION_COUNTS: NotificationCounts = {
 }
 
 const PAGE_SIZE = 50
+const BELL_PREVIEW_LIMIT = 5
 
 interface NotificationCenterValue {
   items: NotificationItem[]
+  /** Только непрочитанные для колокола: свои параметры запроса, фильтры ленты на них не влияют. */
+  bellItems: NotificationItem[]
   counts: NotificationCounts
   unreadCount: number
   pendingRequestsCount: number
@@ -91,6 +94,7 @@ export function NotificationCenterProvider({ children }: { children: React.React
 
   const [query, setQueryState] = useState<NotificationQuery>(DEFAULT_NOTIFICATION_QUERY)
   const [items, setItems] = useState<NotificationItem[]>([])
+  const [bellItems, setBellItems] = useState<NotificationItem[]>([])
   const [counts, setCounts] = useState<NotificationCounts>(EMPTY_NOTIFICATION_COUNTS)
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -98,6 +102,7 @@ export function NotificationCenterProvider({ children }: { children: React.React
 
   const queryRef = useRef<NotificationQuery>(DEFAULT_NOTIFICATION_QUERY)
   const prevPendingRef = useRef<number | null>(null)
+  const bellGenerationRef = useRef(0)
 
   const buildParams = useCallback((beforeId?: number) => {
     const current = queryRef.current
@@ -154,6 +159,24 @@ export function NotificationCenterProvider({ children }: { children: React.React
     }
   }, [buildParams, info, isAdmin, notifyError, notifySnoozedDue])
 
+  const refetchBell = useCallback(async () => {
+    if (!isAdmin) return
+    // Колокол дёргают SSE, фокус и действия пользователя: ответы могут прийти в обратном
+    // порядке, и устаревший не должен вернуть уже прочитанную карточку. counts живут
+    // у refetch(), чтобы два параллельных запроса не писали счётчики вразнобой.
+    const generation = ++bellGenerationRef.current
+    try {
+      const data = await fetchNotifications({ unread_only: true, limit: BELL_PREVIEW_LIMIT })
+      if (generation === bellGenerationRef.current) setBellItems(data.items)
+    } catch {
+      // Колокол — вторичный список: при сбое остаются прошлые карточки, тост не поднимаем.
+    }
+  }, [isAdmin])
+
+  const refetchAll = useCallback(async () => {
+    await Promise.all([refetch(), refetchBell()])
+  }, [refetch, refetchBell])
+
   const setQuery = useCallback((patch: Partial<NotificationQuery>) => {
     setQueryState((prev) => {
       const next = { ...prev, ...patch }
@@ -169,14 +192,19 @@ export function NotificationCenterProvider({ children }: { children: React.React
 
   useEffect(() => {
     if (!isAdmin) return
-    const stream = openNotificationsStream(() => void refetch())
-    const onFocus = () => void refetch()
+    void refetchBell()
+  }, [isAdmin, refetchBell])
+
+  useEffect(() => {
+    if (!isAdmin) return
+    const stream = openNotificationsStream(() => void refetchAll())
+    const onFocus = () => void refetchAll()
     window.addEventListener('focus', onFocus)
     return () => {
       window.removeEventListener('focus', onFocus)
       stream.close()
     }
-  }, [isAdmin, refetch])
+  }, [isAdmin, refetchAll])
 
   const loadMore = useCallback(async () => {
     if (!isAdmin || !items.length) return
@@ -202,9 +230,9 @@ export function NotificationCenterProvider({ children }: { children: React.React
     } catch {
       notifyError('Не удалось отметить уведомления прочитанными')
     } finally {
-      await refetch()
+      await refetchAll()
     }
-  }, [isAdmin, notifyError, refetch])
+  }, [isAdmin, notifyError, refetchAll])
 
   const markReadUpTo = useCallback(
     async (id: number) => {
@@ -214,10 +242,10 @@ export function NotificationCenterProvider({ children }: { children: React.React
       } catch {
         notifyError('Не удалось отметить уведомление прочитанным')
       } finally {
-        await refetch()
+        await refetchAll()
       }
     },
-    [isAdmin, notifyError, refetch],
+    [isAdmin, notifyError, refetchAll],
   )
 
   const setState = useCallback(
@@ -228,15 +256,16 @@ export function NotificationCenterProvider({ children }: { children: React.React
       } catch {
         notifyError('Не удалось изменить состояние уведомления')
       } finally {
-        await refetch()
+        await refetchAll()
       }
     },
-    [isAdmin, notifyError, refetch],
+    [isAdmin, notifyError, refetchAll],
   )
 
   const value = useMemo<NotificationCenterValue>(
     () => ({
       items,
+      bellItems,
       counts,
       unreadCount: counts.unread,
       pendingRequestsCount,
@@ -252,6 +281,7 @@ export function NotificationCenterProvider({ children }: { children: React.React
     }),
     [
       items,
+      bellItems,
       counts,
       pendingRequestsCount,
       query,
@@ -278,4 +308,3 @@ export function useNotificationCenter(): NotificationCenterValue {
   }
   return ctx
 }
-

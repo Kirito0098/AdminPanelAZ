@@ -752,6 +752,7 @@ def _notify_admin(*, actor_username: str | None, summary: dict[str, Any]) -> Non
                 actor_username=actor_username,
                 target_name=str(summary["title"]),
                 details=details,
+                read_for_author=summary["failed_count"] == 0,
             )
         finally:
             session.close()

@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils'
 import type { NotificationItem } from '@/api/notifications'
 import { CATEGORY_ICON, categoryLabel } from './labels'
 import { pathForNotification } from './paths'
+import { isUnread } from './state'
 import { SNOOZE_PRESETS, formatRelative, isSnoozed, type SnoozePreset } from './time'
 
 interface NotificationCardProps {
@@ -44,11 +45,15 @@ export default function NotificationCard({
   const navigate = useNavigate()
   const Icon = CATEGORY_ICON[item.category] ?? Bell
   const snoozed = isSnoozed(item.state.snoozed_until)
-  const unread = !item.state.read && !item.state.hidden && !snoozed
+  const unread = isUnread(item)
   const target = pathForNotification(item)
   const dimmed = snoozed || item.state.hidden
+  const actionable = target !== null || unread
 
   const open = () => {
+    // Переход по уведомлению — это и есть прочтение: иначе карточка, по которой уже
+    // сходили, продолжает висеть с точкой до явного «Отметить прочитанным».
+    if (unread) onMarkRead(item.id)
     if (!target) return
     onNavigate?.()
     navigate(target)
@@ -60,13 +65,13 @@ export default function NotificationCard({
         'relative flex gap-3 rounded-xl border border-border/70 bg-card p-3 transition-colors',
         unread && 'border-primary/25 bg-primary/[0.04]',
         dimmed && 'opacity-60',
-        target && 'cursor-pointer hover:bg-muted/40',
+        actionable && 'cursor-pointer hover:bg-muted/40',
       )}
-      onClick={open}
-      role={target ? 'button' : undefined}
-      tabIndex={target ? 0 : undefined}
+      onClick={actionable ? open : undefined}
+      role={actionable ? 'button' : undefined}
+      tabIndex={actionable ? 0 : undefined}
       onKeyDown={(event) => {
-        if (!target) return
+        if (!actionable) return
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault()
           open()

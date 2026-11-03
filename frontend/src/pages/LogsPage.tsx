@@ -836,49 +836,64 @@ export default function LogsPage() {
 
   return (
     <div className="space-y-6">
-      <PageSectionHeader
-        icon={ScrollText}
-        title="Журналы"
-        docsHref={DOCS.logs}
-        titleAddon={<NodeBadge name={activeNode?.name} status={activeNode?.status} />}
-        description={
-          <>
-            Подключения, события OpenVPN, аудит QR и действия администраторов
-            {connections?.timestamp && <> · обновлено {formatDateTime(connections.timestamp)}</>}
-          </>
-        }
-        actions={
-          <AutoRefreshControl
-            enabled={autoRefresh}
-            onToggle={() => setAutoRefresh((v) => !v)}
-            countdown={countdown}
-            intervalSec={REFRESH_INTERVAL}
-            refreshing={refreshing}
-            onManualRefresh={handleRefresh}
+      {activeTab === 'notifications' ? (
+        <PageSectionHeader
+          icon={Bell}
+          title="Уведомления"
+          description={
+            <>
+              События панели по всем узлам: заявки, безопасность, серверы и сеть, задачи. Колокол в
+              шапке показывает только непрочитанные.
+            </>
+          }
+        />
+      ) : (
+        <>
+          <PageSectionHeader
+            icon={ScrollText}
+            title="Журналы"
+            docsHref={DOCS.logs}
+            titleAddon={<NodeBadge name={activeNode?.name} status={activeNode?.status} />}
+            description={
+              <>
+                Подключения, события OpenVPN, аудит QR и действия администраторов
+                {connections?.timestamp && <> · обновлено {formatDateTime(connections.timestamp)}</>}
+              </>
+            }
+            actions={
+              <AutoRefreshControl
+                enabled={autoRefresh}
+                onToggle={() => setAutoRefresh((v) => !v)}
+                countdown={countdown}
+                intervalSec={REFRESH_INTERVAL}
+                refreshing={refreshing}
+                onManualRefresh={handleRefresh}
+              />
+            }
           />
-        }
-      />
 
-      <SettingsAlert variant="info" title="Данные активного узла">
-        Логи собираются с <strong>{activeNode?.name ?? 'активного узла'}</strong>
-        {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
-        Переключите узел в шапке или на странице «Узлы», чтобы смотреть другой сервер.
-      </SettingsAlert>
+          <SettingsAlert variant="info" title="Данные активного узла">
+            Логи собираются с <strong>{activeNode?.name ?? 'активного узла'}</strong>
+            {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
+            Переключите узел в шапке или на странице «Узлы», чтобы смотреть другой сервер.
+          </SettingsAlert>
 
-      {nodeOffline && (
-        <SettingsAlert variant="warning" title="Узел офлайн">
-          Активный узел недоступен. Логи подключений и событий могут быть устаревшими или отсутствовать.
-          Проверьте связь с node agent и повторите обновление.
-        </SettingsAlert>
+          {nodeOffline && (
+            <SettingsAlert variant="warning" title="Узел офлайн">
+              Активный узел недоступен. Логи подключений и событий могут быть устаревшими или отсутствовать.
+              Проверьте связь с node agent и повторите обновление.
+            </SettingsAlert>
+          )}
+
+          {nodeUnknown && !nodeOffline && (
+            <SettingsAlert variant="warning" title="Статус узла неизвестен">
+              Связь с узлом не подтверждена. Запустите проверку здоровья на странице «Узлы».
+            </SettingsAlert>
+          )}
+
+          <InlineProgressBar active={refreshing} label="Обновление логов..." />
+        </>
       )}
-
-      {nodeUnknown && !nodeOffline && (
-        <SettingsAlert variant="warning" title="Статус узла неизвестен">
-          Связь с узлом не подтверждена. Запустите проверку здоровья на странице «Узлы».
-        </SettingsAlert>
-      )}
-
-      <InlineProgressBar active={refreshing} label="Обновление логов..." />
 
       {loadError && !connections && events.length === 0 && activeTab !== 'notifications' ? (
         <Card>

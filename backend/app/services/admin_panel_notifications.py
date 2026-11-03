@@ -22,6 +22,7 @@ from app.models import (
     BackgroundTask,
     User,
     UserAccessRequest,
+    UserRole,
 )
 
 logger = logging.getLogger(__name__)
@@ -206,8 +207,14 @@ def write_admin_panel_notification(
     message: str = "",
     level: str = "info",
     action_payload: dict[str, Any] | None = None,
+    read_for_username: str | None = None,
 ) -> AdminPanelNotification | None:
-    """Store one notification row. Never raises; returns None on DB failure."""
+    """Store one notification row. Never raises; returns None on DB failure.
+
+    ``read_for_username`` — автор действия: строка пишется для всех админов, но у него
+    сразу помечена прочитанной, и в той же транзакции, чтобы SSE-поток не успел отдать
+    её как новую.
+    """
     try:
         row = AdminPanelNotification(
             category=category_for_event(event_type),
@@ -220,6 +227,17 @@ def write_admin_panel_notification(
             else None,
         )
         db.add(row)
+        db.flush()
+        if read_for_username:
+            author = db.query(User).filter(User.username == read_for_username).first()
+            if author is not None and author.role == UserRole.admin:
+                db.add(
+                    AdminPanelNotificationState(
+                        user_id=author.id,
+                        notification_id=row.id,
+                        read_at=datetime.utcnow(),
+                    )
+                )
         db.commit()
         db.refresh(row)
         return row
@@ -405,9 +423,15 @@ def list_notifications_for_admin(
         query = query.filter(AdminPanelNotification.level == level)
     if before_id is not None:
         query = query.filter(AdminPanelNotification.id < before_id)
+    if unread_only:
+        # Непрочитанное всегда новее водяного знака (см. is_unread) — узкий префильтр,
+        # чтобы расширенное окно ниже не тянуло всю прочитанную ленту.
+        query = query.filter(AdminPanelNotification.id > last_read)
 
     needle = (q or "").strip().casefold()
-    rows = query.limit(SEARCH_WINDOW if needle else limit).all()
+    # unread_only и поиск отсеиваются в Python, поэтому окно шире страницы: иначе верхние
+    # прочитанные съедают слоты и страница возвращается короче запрошенной.
+    rows = query.limit(SEARCH_WINDOW if (needle or unread_only) else limit).all()
     states = _states_by_notification(db, admin.id, [row.id for row in rows])
 
     items: list[dict[str, object]] = []

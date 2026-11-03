@@ -918,6 +918,8 @@ def run_user_provision_task(task_id: str, user_id: int) -> dict[str, Any]:
             actor_username=actor_username,
             target_name=user_row.username if user_row else str(user_id),
             details=details,
+            # Успешная выдача — подтверждение своего действия; с ошибками автор должен её увидеть.
+            read_for_author=errors == 0,
         )
     finally:
         session.close()

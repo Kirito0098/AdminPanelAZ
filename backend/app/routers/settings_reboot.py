@@ -114,6 +114,9 @@ def schedule_server_reboot(
                     details=details,
                     node_id=pending.node_id,
                     node_name=pending.node_name,
+                    # Отложенный результат — не «своё действие»: это единственное подтверждение,
+                    # что перезагрузка выполнилась, и провал должен дойти до автора как ошибка.
+                    read_for_author=False,
                 )
             finally:
                 worker_db.close()
