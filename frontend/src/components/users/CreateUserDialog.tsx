@@ -71,6 +71,9 @@ interface CreateUserDialogProps {
   /** Current admin user id — filters configs to unowned ∪ this owner by default. */
   adminUserId?: number
   onCreate: (data: CreateUserPayload) => void | Promise<void>
+  /** Режим одобрения заявки: поля предзаполнены, отправка одобряет заявку. */
+  approveRequest?: { id: number; telegramId: string; username?: string | null } | null
+  onApproveRequest?: (id: number, data: CreateUserPayload) => void | Promise<void>
 }
 
 const PROTOCOLS: { id: string; label: string; featureKeys: string[] }[] = [
@@ -95,6 +98,8 @@ export default function CreateUserDialog({
   onOpenChange,
   adminUserId,
   onCreate,
+  approveRequest = null,
+  onApproveRequest,
 }: CreateUserDialogProps) {
   const { isEnabled } = useFeatureModules()
   const availableProtocols = useMemo(
@@ -150,6 +155,16 @@ export default function CreateUserDialog({
       setConfigSearch('')
     }
   }, [open])
+
+  useEffect(() => {
+    if (!open || !approveRequest) return
+    const suggested = (approveRequest.username || `tg${approveRequest.telegramId}`).trim()
+    setStep('who')
+    setMode('provision')
+    setUsername(suggested)
+    setClientBaseName(suggested)
+    setTelegramId(approveRequest.telegramId)
+  }, [open, approveRequest])
 
   useEffect(() => {
     if (!open) return
@@ -345,6 +360,24 @@ export default function CreateUserDialog({
   const handleSubmit = async () => {
     setSubmitting(true)
     try {
+      const provisionPayload: CreateUserPayload = {
+        mode: 'provision',
+        username: username.trim(),
+        client_base_name: clientBaseName.trim(),
+        node_ids: selectedNodeIds,
+        protocols: selectedProtocols,
+        config_count: configCount,
+        config_quota: parsedQuota,
+        access_until: parsedAccessUntil,
+        panel_login_enabled: panelLogin,
+        password: panelLogin ? password : undefined,
+        telegram_id: telegramId.trim() === '' ? undefined : telegramId.trim(),
+        preset_id: selectedPresetId,
+      }
+      if (approveRequest && onApproveRequest) {
+        await onApproveRequest(approveRequest.id, provisionPayload)
+        return
+      }
       if (mode === 'from_existing') {
         await onCreate({
           mode: 'from_existing',
@@ -397,7 +430,17 @@ export default function CreateUserDialog({
     <AppDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={step === 'summary' ? 'Сводка создания' : step === 'access' ? 'Доступ' : 'Кто'}
+      title={
+        approveRequest
+          ? step === 'summary'
+            ? 'Сводка одобрения'
+            : 'Одобрение заявки'
+          : step === 'summary'
+            ? 'Сводка создания'
+            : step === 'access'
+              ? 'Доступ'
+              : 'Кто'
+      }
       description={
         step === 'summary'
           ? mode === 'from_existing'
@@ -418,7 +461,11 @@ export default function CreateUserDialog({
           )}
           {step === 'summary' ? (
             <Button type="button" onClick={handleSubmit} disabled={submitting || !canProceed()}>
-              {submitting ? 'Создание…' : <><ArrowRight size={16} /> Создать абонента</>}
+              {submitting
+                ? '…'
+                : approveRequest
+                  ? <><ArrowRight size={16} /> Одобрить заявку</>
+                  : <><ArrowRight size={16} /> Создать абонента</>}
             </Button>
           ) : (
             <>
@@ -446,27 +493,29 @@ export default function CreateUserDialog({
                 ? 'Логин абонента. Существующие конфиги привяжете на следующем шаге.'
                 : 'Логин абонента и базовое имя конфигов. Имена конфигов будут client, client-2, …',
             )}
-            <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/20 p-3">
-              <div className="space-y-0.5">
-                <Label htmlFor="createFromExisting">Без новых конфигов (привязать существующие)</Label>
-                <p className="text-xs text-muted-foreground">
-                  VPN на серверах не создаются — только смена владельца.
-                </p>
+            {!approveRequest && (
+              <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/20 p-3">
+                <div className="space-y-0.5">
+                  <Label htmlFor="createFromExisting">Без новых конфигов (привязать существующие)</Label>
+                  <p className="text-xs text-muted-foreground">
+                    VPN на серверах не создаются — только смена владельца.
+                  </p>
+                </div>
+                <Switch
+                  id="createFromExisting"
+                  checked={mode === 'from_existing'}
+                  onCheckedChange={(on) => {
+                    setMode(on ? 'from_existing' : 'provision')
+                    setSelectedPresetId(null)
+                    setConfigIds([])
+                    if (!on) {
+                      setConfigsLoaded(false)
+                      setConfigOptions([])
+                    }
+                  }}
+                />
               </div>
-              <Switch
-                id="createFromExisting"
-                checked={mode === 'from_existing'}
-                onCheckedChange={(on) => {
-                  setMode(on ? 'from_existing' : 'provision')
-                  setSelectedPresetId(null)
-                  setConfigIds([])
-                  if (!on) {
-                    setConfigsLoaded(false)
-                    setConfigOptions([])
-                  }
-                }}
-              />
-            </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="createUsername">Логин</Label>
               <Input

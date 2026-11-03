@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { ApiError, deleteUser, updateUser } from '@/api/client'
 import {
+  approveRequest,
   createProvisionedUser,
   createUserFromExisting,
   deleteProvisionedUser,
@@ -58,6 +59,7 @@ import {
 import { PAGE_SIZE_OPTIONS, type UsersSortKey, loadUsersViewMode, saveUsersViewMode, type UsersViewMode } from '@/lib/usersListPrefs'
 import { REQUEST_PROTOCOLS } from '@/lib/accessRequests'
 import type {
+  AccessRequestResponse,
   User,
   UserUpdatePayload,
   UserProvisioningCard,
@@ -140,6 +142,8 @@ export default function UsersPage() {
   } = useUsersList()
   const [createOpen, setCreateOpen] = useState(false)
   const [requestsOpen, setRequestsOpen] = useState(false)
+  /** Заявка, которую одобряем через диалог «Создание пользователя». */
+  const [approveReq, setApproveReq] = useState<AccessRequestResponse | null>(null)
   const [requestsCount, setRequestsCount] = useState(0)
   const [focusRequestId, setFocusRequestId] = useState<number | null>(null)
   /** Уже обработанный deep-link (?requests=1 / ?request=<id>), чтобы не открывать диалог циклично. */
@@ -182,6 +186,24 @@ export default function UsersPage() {
     },
     [reloadUsers],
   )
+
+  const handleApproveRequestViaDialog = async (id: number, data: CreateUserPayload) => {
+    try {
+      await approveRequest(id, {
+        preset_id: data.preset_id ?? undefined,
+        node_ids: data.node_ids,
+        protocols: data.protocols,
+        config_count: data.config_count,
+        username: data.username,
+        access_until: data.access_until ?? null,
+      })
+      success('Заявка одобрена — абонент создан')
+      setApproveReq(null)
+      await reloadUsers()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось одобрить заявку')
+    }
+  }
 
   const handleRequestsCount = useCallback((count: number) => {
     setRequestsCount(count)
@@ -924,10 +946,23 @@ export default function UsersPage() {
 
       {createOpen ? (
         <CreateUserDialog
-          open={createOpen}
-          onOpenChange={setCreateOpen}
+          open={createOpen || approveReq !== null}
+          onOpenChange={(next) => {
+            setCreateOpen(next)
+            if (!next) setApproveReq(null)
+          }}
           adminUserId={authUser?.id}
           onCreate={handleCreate}
+          approveRequest={
+            approveReq
+              ? {
+                  id: approveReq.id,
+                  telegramId: approveReq.telegram_id,
+                  username: approveReq.telegram_username ?? approveReq.telegram_name ?? null,
+                }
+              : null
+          }
+          onApproveRequest={handleApproveRequestViaDialog}
         />
       ) : null}
 
@@ -1003,6 +1038,11 @@ export default function UsersPage() {
           focusRequestId={focusRequestId}
           onCountChange={handleRequestsCount}
           onUsersChanged={handleUsersChanged}
+          onApproveNewUser={(request) => {
+            setRequestsOpen(false)
+            setFocusRequestId(null)
+            setApproveReq(request)
+          }}
         />
       )}
     </div>

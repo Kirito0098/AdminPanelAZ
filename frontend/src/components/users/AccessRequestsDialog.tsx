@@ -38,6 +38,8 @@ export interface AccessRequestsDialogProps {
   focusRequestId: number | null
   /** Сколько ожидающих заявок — для бейджа в шапке страницы. */
   onCountChange: (count: number) => void
+  /** Заявку на нового пользователя одобряем в диалоге создания абонента. */
+  onApproveNewUser?: (request: AccessRequestResponse) => void
   /** Список абонентов изменился; при наличии списка родитель обновляет его без повторного запроса. */
   onUsersChanged: (list?: User[]) => void
 }
@@ -49,6 +51,7 @@ export default function AccessRequestsDialog({
   focusRequestId,
   onCountChange,
   onUsersChanged,
+  onApproveNewUser,
 }: AccessRequestsDialogProps) {
   const { isEnabled } = useFeatureModules()
   const { pendingRequestsCount } = useNotificationCenter()
@@ -469,7 +472,9 @@ export default function AccessRequestsDialog({
                         size="sm"
                         variant="default"
                         onClick={() => {
-                          if (r.request_type === 'extend_access') {
+                          if (r.request_type === 'new_user' && onApproveNewUser) {
+                            onApproveNewUser(r)
+                          } else if (r.request_type === 'extend_access') {
                             setExtendTarget({ id: r.id, date: defaultExtendDate() })
                           } else {
                             void handleApproveRequest(r.id, r.request_type)
