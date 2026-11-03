@@ -818,7 +818,6 @@ export default function UsersPage() {
                     )
                   }
                   onOpen={() => openDetail(u.id)}
-                  onExtend={handleExtend}
                   onResetTraffic={
                     u.traffic_limit_bytes && u.traffic_limit_bytes > 0
                       ? () => void handleResetTraffic(u)

@@ -100,7 +100,6 @@ export interface SubscriberCardProps {
   onDelete?: () => void
   /** Абонент застрял в pending_deletion: повторно запустить очистку. */
   onRetryDelete?: () => void
-  onExtend?: (user: User, days: number) => void
   /** Сбросить счётчик трафика; передаётся только при заданном лимите. */
   onResetTraffic?: () => void
   onCreateKey?: () => void
@@ -118,7 +117,6 @@ export default function SubscriberCard({
   onResume,
   onDelete,
   onRetryDelete,
-  onExtend,
   onResetTraffic,
   onCreateKey,
 }: SubscriberCardProps) {
@@ -404,32 +402,6 @@ export default function SubscriberCard({
               <KeyRound size={14} />
               Ключ
             </Button>
-          ) : null}
-          {onExtend ? (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="gap-1"
-                onClick={() => onExtend(user, 30)}
-                disabled={actionBusy}
-                aria-label={`Продлить ${user.username} на 30 дней`}
-              >
-                +30
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="gap-1"
-                onClick={() => onExtend(user, 60)}
-                disabled={actionBusy}
-                aria-label={`Продлить ${user.username} на 60 дней`}
-              >
-                +60
-              </Button>
-            </>
           ) : null}
           {onResetTraffic ? (
             <Button
