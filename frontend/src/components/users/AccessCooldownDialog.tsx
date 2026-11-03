@@ -76,20 +76,20 @@ export default function AccessCooldownDialog({
       onOpenChange={onOpenChange}
       title="Кулдаун отказов"
       description="Сколько часов после отказа нельзя подать заявку повторно и кто сейчас в кулдауне"
-      size="md"
+      size="lg"
     >
       {loading && !data ? (
         <Spinner label="Загрузка…" />
       ) : (
         <div className="space-y-4">
-          <div className="flex flex-wrap items-end justify-between gap-3 rounded-lg border bg-muted/20 p-3">
-            <div>
+          <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 p-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="min-w-0">
               <p className="text-sm font-medium">Кулдаун после отказа</p>
-              <p className="text-xs text-muted-foreground">
-                Часов, в течение которых повторная заявка отклоняется. 0 — выключен.
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Сколько часов повторная заявка отклоняется. 0 — выключен.
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex shrink-0 items-center gap-2">
               <Input
                 type="number"
                 min={0}
@@ -112,10 +112,10 @@ export default function AccessCooldownDialog({
                 {data.blocked.map((item) => (
                   <div
                     key={item.telegram_id}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2 text-sm"
+                    className="flex flex-col gap-2 rounded-lg border border-border/60 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="min-w-0">
-                      <p className="truncate font-medium">{item.name}</p>
+                      <p className="break-words font-medium">{item.name}</p>
                       <p className="text-xs text-muted-foreground">
                         {item.request_type} · до {new Date(item.until).toLocaleString('ru-RU')}
                       </p>

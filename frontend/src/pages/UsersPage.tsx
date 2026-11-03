@@ -581,7 +581,7 @@ export default function UsersPage() {
             </div>
           </div>
 
-          <div className="flex w-full flex-wrap gap-2 lg:max-w-xl lg:justify-end">
+          <div className="flex w-full flex-wrap gap-2 lg:max-w-2xl lg:justify-end">
             {provisioningOn && (
               <ToolbarButton
                 variant="outline"
@@ -597,7 +597,7 @@ export default function UsersPage() {
                 variant="outline"
                 className="bg-card/80"
                 icon={<CalendarClock size={16} />}
-                label="Кулдаун отказов"
+                label="Кулдаун"
                 shortLabel="Кулдаун"
                 onClick={() => setCooldownOpen(true)}
               />
