@@ -258,11 +258,27 @@ export async function deletePreset(presetId: number) {
 /* ------------------------- заявки на доступ ------------------------- */
 
 /** GET /users/requests — список заявок (с фильтрами ?status=&type=). */
-export async function listRequests(params?: { status?: string; type?: string }) {
+export async function listRequests(params?: {
+  status?: string
+  type?: string
+  q?: string
+  limit?: number
+  offset?: number
+}) {
   const qs = new URLSearchParams()
   if (params?.status) qs.set('status', params.status)
   if (params?.type) qs.set('type', params.type)
+  if (params?.q) qs.set('q', params.q)
+  if (params?.limit) qs.set('limit', String(params.limit))
+  if (params?.offset) qs.set('offset', String(params.offset))
   return apiFetch<AccessRequestResponse[]>(`/users/requests${qs.toString() ? `?${qs}` : ''}`)
+}
+
+/** GET /users/requests/count — сколько заявок с таким статусом. */
+export async function getRequestsCount(status?: string): Promise<number> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+  const data = await apiFetch<{ count: number }>(`/users/requests/count${qs}`)
+  return data.count
 }
 
 /** GET /users/requests/{id}/receipt — превью чека оплаты (JPEG). */
@@ -361,11 +377,12 @@ export interface CooldownSettings {
 
 /** GET /users/requests/cooldown — настройка кулдауна и страница списка. */
 export async function getRequestsCooldown(
-  params: { limit?: number; offset?: number } = {},
+  params: { limit?: number; offset?: number; q?: string } = {},
 ): Promise<CooldownSettings> {
   const search = new URLSearchParams()
   if (params.limit) search.set('limit', String(params.limit))
   if (params.offset) search.set('offset', String(params.offset))
+  if (params.q) search.set('q', params.q)
   const qs = search.toString()
   return apiFetch<CooldownSettings>(qs ? `/users/requests/cooldown?${qs}` : '/users/requests/cooldown')
 }

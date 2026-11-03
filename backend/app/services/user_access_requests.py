@@ -17,7 +17,7 @@ from html import escape
 from time import monotonic
 from typing import Any
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from fastapi import HTTPException
@@ -143,7 +143,7 @@ def set_cooldown_hours(db: Session, hours: int) -> int:
 
 
 def list_cooldown_blocked(
-    db: Session, *, limit: int = 50, offset: int = 0
+    db: Session, *, limit: int = 50, offset: int = 0, q: str | None = None
 ) -> tuple[list[dict[str, Any]], int]:
     """Кто сейчас в кулдауне: страница списка и общее число людей.
 
@@ -154,17 +154,28 @@ def list_cooldown_blocked(
     if hours <= 0:
         return [], 0
     since = datetime.utcnow() - timedelta(hours=hours)
+    filters = [
+        UserAccessRequest.status == "rejected",
+        UserAccessRequest.reviewed_at.isnot(None),
+        UserAccessRequest.reviewed_at >= since,
+        UserAccessRequest.cooldown_waived.is_(False),
+    ]
+    needle = (q or "").strip().lower()
+    if needle:
+        pattern = f"%{needle}%"
+        filters.append(
+            or_(
+                func.lower(UserAccessRequest.telegram_id).like(pattern),
+                func.lower(func.coalesce(UserAccessRequest.telegram_username, "")).like(pattern),
+                func.lower(func.coalesce(UserAccessRequest.telegram_name, "")).like(pattern),
+            )
+        )
     grouped = (
         db.query(
             UserAccessRequest.telegram_id.label("telegram_id"),
             func.max(UserAccessRequest.reviewed_at).label("rejected_at"),
         )
-        .filter(
-            UserAccessRequest.status == "rejected",
-            UserAccessRequest.reviewed_at.isnot(None),
-            UserAccessRequest.reviewed_at >= since,
-            UserAccessRequest.cooldown_waived.is_(False),
-        )
+        .filter(*filters)
         .group_by(UserAccessRequest.telegram_id)
         .order_by(func.max(UserAccessRequest.reviewed_at).desc())
     )

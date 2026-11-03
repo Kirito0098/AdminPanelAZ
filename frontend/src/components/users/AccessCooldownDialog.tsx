@@ -26,6 +26,8 @@ export default function AccessCooldownDialog({
   const [blocked, setBlocked] = useState<CooldownBlockedItem[]>([])
   const [total, setTotal] = useState(0)
   const [hours, setHours] = useState('24')
+  const [search, setSearch] = useState('')
+  const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -35,7 +37,7 @@ export default function AccessCooldownDialog({
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const next = await getRequestsCooldown({ limit: PAGE })
+      const next = await getRequestsCooldown({ limit: PAGE, q: query || undefined })
       setData(next)
       setBlocked(next.blocked)
       setTotal(next.total)
@@ -45,13 +47,13 @@ export default function AccessCooldownDialog({
     } finally {
       setLoading(false)
     }
-  }, [notifyError])
+  }, [notifyError, query])
 
   const loadMore = async () => {
     if (loadingMore || blocked.length >= total) return
     setLoadingMore(true)
     try {
-      const next = await getRequestsCooldown({ limit: PAGE, offset: blocked.length })
+      const next = await getRequestsCooldown({ limit: PAGE, offset: blocked.length, q: query || undefined })
       setBlocked((prev) => [...prev, ...next.blocked])
       setTotal(next.total)
     } catch {
@@ -64,6 +66,11 @@ export default function AccessCooldownDialog({
   useEffect(() => {
     if (open) void load()
   }, [open, load])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(search.trim()), 300)
+    return () => window.clearTimeout(timer)
+  }, [search])
 
   const save = async () => {
     const value = Number.parseInt(hours, 10)
@@ -131,6 +138,13 @@ export default function AccessCooldownDialog({
           </div>
 
           <div className="space-y-2">
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Поиск по TG ID или нику"
+              className="h-9"
+              aria-label="Поиск в кулдауне"
+            />
             <p className="text-sm font-medium">Сейчас в кулдауне</p>
             {blocked.length > 0 ? (
               <div className="flex flex-col gap-1">

@@ -3,6 +3,7 @@ import { ApiError, getUsers } from '@/api/client'
 import {
   approveRequest,
   getRequestReceipt,
+  getRequestsCount,
   listRequests,
   rejectRequest,
 } from '@/api/users'
@@ -56,6 +57,10 @@ export default function AccessRequestsDialog({
   const [requests, setRequests] = useState<AccessRequestResponse[]>([])
   const [requestsLoading, setRequestsLoading] = useState(false)
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [query, setQuery] = useState('')
+  const [hasMore, setHasMore] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [approvingId, setApprovingId] = useState<number | null>(null)
   const [extendTarget, setExtendTarget] = useState<{ id: number; date: string } | null>(null)
   const [rejectTarget, setRejectTarget] = useState<{ id: number; reason: string } | null>(null)
@@ -80,18 +85,51 @@ export default function AccessRequestsDialog({
     [],
   )
 
+  const PAGE = 100
+
   const reloadRequests = useCallback(async () => {
     setRequestsLoading(true)
     try {
-      const list = await listRequests({ status: 'pending' })
+      const list = await listRequests({
+        status: 'pending',
+        q: query || undefined,
+        limit: PAGE,
+      })
       setRequests(list)
-      onCountChangeRef.current(list.length)
+      setHasMore(list.length >= PAGE)
+      getRequestsCount('pending')
+        .then((count) => onCountChangeRef.current(count))
+        .catch(() => onCountChangeRef.current(list.length))
     } catch {
       /* Список заявок не критичен: диалог покажет пустое состояние. */
     } finally {
       setRequestsLoading(false)
     }
-  }, [])
+  }, [query])
+
+  const loadMoreRequests = async () => {
+    if (loadingMore) return
+    setLoadingMore(true)
+    try {
+      const list = await listRequests({
+        status: 'pending',
+        q: query || undefined,
+        limit: PAGE,
+        offset: requests.length,
+      })
+      setRequests((prev) => [...prev, ...list])
+      setHasMore(list.length >= PAGE)
+    } catch {
+      notifyError('Не удалось догрузить заявки')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(search.trim()), 300)
+    return () => window.clearTimeout(timer)
+  }, [search])
 
   // Новая заявка из Telegram (SSE-счётчик) появляется без перезагрузки страницы.
   useEffect(() => {
@@ -219,6 +257,13 @@ export default function AccessRequestsDialog({
           <div className="py-8 text-center text-sm text-muted-foreground">Нет ожидающих заявок</div>
         ) : (
           <div className="space-y-4">
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Поиск по TG ID, нику или имени"
+              className="h-9"
+              aria-label="Поиск по заявкам"
+            />
             <div className="space-y-2">
               {requests.map((r) => {
                 const approveDisabled = approvingId === r.id
@@ -285,6 +330,16 @@ export default function AccessRequestsDialog({
                   </div>
                 )
               })}
+              {hasMore && (
+                <Button
+                  variant="outline"
+                  className="self-center"
+                  onClick={() => void loadMoreRequests()}
+                  disabled={loadingMore}
+                >
+                  {loadingMore ? 'Загрузка…' : 'Загрузить ещё'}
+                </Button>
+              )}
             </div>
           </div>
         )}

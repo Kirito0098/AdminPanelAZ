@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse, Response
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, get_password_hash, require_admin, tg_mini_token_allowed
@@ -812,17 +812,32 @@ def _sync_request_messages_after_decide(
 def list_access_requests(
     status: str | None = None,
     type: str | None = Query(default=None, alias="type"),
+    q: str | None = Query(default=None, max_length=100, description="Поиск по TG ID, нику и имени"),
+    limit: int = Query(default=100, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
 ):
-    """Список заявок на предоставление доступа (с фильтрами по статусу/типу)."""
+    """Список заявок на предоставление доступа: фильтры, поиск и страницы."""
     _require_provisioning()
     query = db.query(UserAccessRequest)
     if status:
         query = query.filter(UserAccessRequest.status == status)
     if type:
         query = query.filter(UserAccessRequest.request_type == type)
-    rows = query.order_by(UserAccessRequest.id.desc()).all()
+    needle = (q or "").strip().lower()
+    if needle:
+        pattern = f"%{needle}%"
+        query = query.filter(
+            or_(
+                func.lower(UserAccessRequest.telegram_id).like(pattern),
+                func.lower(func.coalesce(UserAccessRequest.telegram_username, "")).like(pattern),
+                func.lower(func.coalesce(UserAccessRequest.telegram_name, "")).like(pattern),
+            )
+        )
+    rows = (
+        query.order_by(UserAccessRequest.id.desc()).offset(offset).limit(limit).all()
+    )
     # Старые заявки создавались без имени/@ника — дозаполняем из Telegram
     # (best-effort, не чаще одного getChat на telegram_id в 10 минут).
     backfill_missing_request_profiles(
@@ -832,15 +847,29 @@ def list_access_requests(
     return [AccessRequestResponse.model_validate(row) for row in rows]
 
 
+@router.get("/requests/count")
+def count_access_requests(
+    status: str | None = None,
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Сколько заявок с таким статусом — для бейджа и подписи кнопки."""
+    query = db.query(func.count(UserAccessRequest.id))
+    if status:
+        query = query.filter(UserAccessRequest.status == status)
+    return {"count": int(query.scalar() or 0)}
+
+
 @router.get("/requests/cooldown", response_model=CooldownSettingsResponse)
 def get_requests_cooldown(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    q: str | None = Query(default=None, max_length=100, description="Поиск по TG ID или нику"),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
     """Настройка кулдауна после отказа и страница тех, кто сейчас в нём."""
-    blocked, total = list_cooldown_blocked(db, limit=limit, offset=offset)
+    blocked, total = list_cooldown_blocked(db, limit=limit, offset=offset, q=q)
     return {"hours": cooldown_hours(db), "total": total, "blocked": blocked}
 
 
