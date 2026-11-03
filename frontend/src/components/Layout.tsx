@@ -191,7 +191,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                         navigate('/users?requests=1')
                         onNavigate?.()
                       }}
-                      title="Заявки на доступ ждут решения"
+                      title="Заявки ждут решения"
                       className="mt-0.5 flex w-full items-center gap-2 rounded-lg py-1 pl-11 pr-2 text-left text-xs font-medium text-primary transition-colors hover:bg-primary/10"
                     >
                       <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">

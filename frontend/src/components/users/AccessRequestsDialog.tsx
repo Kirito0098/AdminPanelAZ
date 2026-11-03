@@ -41,7 +41,7 @@ export interface AccessRequestsDialogProps {
   onUsersChanged: (list?: User[]) => void
 }
 
-/** Диалог «Заявки на доступ»: план для new_user, одобрение/отказ и превью чека. */
+/** Диалог «Заявки»: одобрение/отказ запросов абонентов и превью чека. */
 export default function AccessRequestsDialog({
   open,
   onOpenChange,
@@ -245,8 +245,8 @@ export default function AccessRequestsDialog({
       <AppDialog
         open={open}
         onOpenChange={onOpenChange}
-        title="Заявки на доступ"
-        description="Запросы доступа из Telegram-бота: одобрите или отклоните"
+        title="Заявки"
+        description="Запросы из Telegram-бота: новый доступ, дополнительный конфиг или продление"
         size="lg"
         className="w-[min(96vw,42rem)] max-w-2xl"
         bodyClassName="px-4 py-3 sm:px-6"
