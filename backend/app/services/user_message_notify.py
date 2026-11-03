@@ -10,6 +10,7 @@ from app.models import User, UserMessage, UserRole
 from app.services import telegram_api
 from app.services.admin_panel_notifications import write_admin_panel_notification
 from app.services.app_setting_store import _get_setting
+from app.services.telegram_recipients import filter_notify_recipients
 from app.services.user_messages import record_card
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,10 @@ async def notify_admins_new_message(
             User.telegram_id.isnot(None),
         )
         .all()
+    )
+    admins = [admin for admin in admins if admin.has_tg_notify_event("user_message")]
+    admins = filter_notify_recipients(
+        db, admins, lambda key, default="": _get_setting(db, key, default)
     )
     text = (
         f"✉️ {user.username}: новое сообщение\n"

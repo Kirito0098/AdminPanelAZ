@@ -63,6 +63,8 @@ DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
     "alert_rule": True,
     "openvpn_buffer_guard_triggered": True,
     "bulk_user_nodes": True,
+    "access_request": True,
+    "user_message": True,
 }
 
 # Категории колокольчика в панели. Единственный источник правды для API и фильтра ленты.

@@ -67,10 +67,13 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("alert_rule", "Alert rule: срабатывание порога"),
     ("openvpn_buffer_guard_triggered", "OpenVPN Buffer Guard"),
     ("bulk_user_nodes", "Массовая операция с серверами"),
+    ("access_request", "Заявки на доступ"),
+    ("user_message", "Сообщения в чат"),
 ]
 
 TG_NOTIFY_EVENT_GROUPS: list[tuple[str, str, str, tuple[str, ...]]] = [
     ("login", "Входы", "🔐", ("login_success", "login_failed", "tg_unlinked")),
+    ("requests", "Заявки и сообщения", "📨", ("access_request", "user_message")),
     (
         "clients",
         "Клиенты и пользователи",

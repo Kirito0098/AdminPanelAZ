@@ -33,6 +33,7 @@ from app.models import (
 )
 from app.services.admin_panel_notifications import write_admin_panel_notification
 from app.services.app_setting_store import _get_setting
+from app.services.telegram_recipients import filter_notify_recipients
 from app.auth import get_password_hash
 from app.services.feature_guards import get_feature_service
 from app.services.client_portal import get_or_create_user_portal_token, user_link_response
@@ -438,6 +439,10 @@ def _notify_admins_new_request(db: Session, request: UserAccessRequest) -> None:
         db.query(User)
         .filter(User.role == UserRole.admin, User.is_active.is_(True), User.telegram_id.isnot(None))
         .all()
+    )
+    admins = [admin for admin in admins if admin.has_tg_notify_event("access_request")]
+    admins = filter_notify_recipients(
+        db, admins, lambda key, default="": _get_setting(db, key, default)
     )
     if not admins:
         return
