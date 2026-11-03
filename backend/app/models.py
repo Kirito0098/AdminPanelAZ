@@ -1093,6 +1093,8 @@ class UserAccessRequest(Base):
     reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     reject_reason: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    # Админ снял 24-часовой кулдаун после отказа (заявку отклонили случайно).
+    cooldown_waived: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     delivered_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     receipt_file_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

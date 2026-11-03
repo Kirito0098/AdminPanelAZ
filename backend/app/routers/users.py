@@ -31,6 +31,9 @@ from app.models import (
     UserTrafficStatProtocol,
 )
 from app.schemas import (
+    CooldownReleaseRequest,
+    CooldownSettingsResponse,
+    CooldownSettingsUpdate,
     AccessRequestResponse,
     ApproveRequest,
     BulkNodesPreviewItem,
@@ -97,6 +100,10 @@ from app.services.client_portal import revoke_creator_portal_links
 from app.services.config_access import get_user_config_grants, set_user_config_access
 from app.services.feature_guards import get_feature_service, module_disabled_message
 from app.services.user_access_requests import (
+    cooldown_hours,
+    list_cooldown_blocked,
+    release_cooldown,
+    set_cooldown_hours,
     AlreadyDecided,
     TelegramAlreadyBound,
     approve_request,
@@ -823,6 +830,48 @@ def list_access_requests(
         [row for row in rows if not row.telegram_name and not row.telegram_username],
     )
     return [AccessRequestResponse.model_validate(row) for row in rows]
+
+
+@router.get("/requests/cooldown", response_model=CooldownSettingsResponse)
+def get_requests_cooldown(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """Настройка кулдауна после отказа и список тех, кто сейчас в нём."""
+    return {"hours": cooldown_hours(db), "blocked": list_cooldown_blocked(db)}
+
+
+@router.put("/requests/cooldown", response_model=CooldownSettingsResponse)
+def put_requests_cooldown(
+    body: CooldownSettingsUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    set_cooldown_hours(db, body.hours)
+    return {"hours": cooldown_hours(db), "blocked": list_cooldown_blocked(db)}
+
+
+@router.post("/requests/cooldown/release", response_model=MessageResponse)
+def release_requests_cooldown(
+    body: CooldownReleaseRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Снять кулдаун с конкретного Telegram ID (отклонили случайно)."""
+    released = release_cooldown(db, body.telegram_id)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="access_request_cooldown_release",
+            user_id=admin.id,
+            username=admin.username,
+            details=f"telegram_id={body.telegram_id}, requests={released}",
+        )
+    return MessageResponse(
+        message=(
+            f"Кулдаун снят ({released})" if released else "Этот Telegram ID не в кулдауне"
+        )
+    )
 
 
 @router.post("/requests/{request_id}/approve", response_model=AccessRequestResponse)

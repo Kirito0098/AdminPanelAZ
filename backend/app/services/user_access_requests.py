@@ -32,7 +32,7 @@ from app.models import (
     UserRole,
 )
 from app.services.admin_panel_notifications import write_admin_panel_notification
-from app.services.app_setting_store import _get_setting
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.telegram_recipients import filter_notify_recipients
 from app.auth import get_password_hash
 from app.services.feature_guards import get_feature_service
@@ -70,6 +70,8 @@ SETTING_PENDING_CAP = "telegram_new_user_request_pending_cap"
 SETTING_BOT_TOKEN = "telegram_bot_token"
 
 COOLDOWN_HOURS = 24
+# Настройка панели: сколько часов держать кулдаун после отказа (0 — выключен).
+COOLDOWN_SETTING = "access_request_cooldown_hours"
 TELEGRAM_USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{5,32}$")
 
 # Приём чеков (Task 11): фото только, лимит 5 шт на 600 с.
@@ -122,6 +124,77 @@ class TelegramAlreadyBound(RequestError):
 
 class ReceiptMustBePhoto(RequestError):
     """Пользователь прислал не фото (документ/файл) вместо чека."""
+
+
+def cooldown_hours(db: Session) -> int:
+    """Часы кулдауна после отказа; 0 — выключен."""
+    raw = _get_setting(db, COOLDOWN_SETTING, str(COOLDOWN_HOURS)).strip()
+    try:
+        hours = int(raw)
+    except ValueError:
+        return COOLDOWN_HOURS
+    return max(0, min(720, hours))
+
+
+def set_cooldown_hours(db: Session, hours: int) -> int:
+    value = max(0, min(720, int(hours)))
+    _set_setting(db, COOLDOWN_SETTING, str(value))
+    return value
+
+
+def list_cooldown_blocked(db: Session) -> list[dict[str, Any]]:
+    """Кто сейчас в кулдауне после отказа (последняя отклонённая заявка на telegram_id)."""
+    hours = cooldown_hours(db)
+    if hours <= 0:
+        return []
+    since = datetime.utcnow() - timedelta(hours=hours)
+    rows = (
+        db.query(UserAccessRequest)
+        .filter(
+            UserAccessRequest.status == "rejected",
+            UserAccessRequest.reviewed_at.isnot(None),
+            UserAccessRequest.reviewed_at >= since,
+            UserAccessRequest.cooldown_waived.is_(False),
+        )
+        .order_by(UserAccessRequest.reviewed_at.desc())
+        .all()
+    )
+    seen: set[str] = set()
+    blocked: list[dict[str, Any]] = []
+    for row in rows:
+        if row.telegram_id in seen:
+            continue
+        seen.add(row.telegram_id)
+        blocked.append(
+            {
+                "telegram_id": row.telegram_id,
+                "name": row.telegram_username or row.telegram_name or row.telegram_id,
+                "request_type": row.request_type,
+                "rejected_at": row.reviewed_at,
+                "until": row.reviewed_at + timedelta(hours=hours),
+            }
+        )
+    return blocked
+
+
+def release_cooldown(db: Session, telegram_id: str) -> int:
+    """Снять кулдаун для telegram_id: помечаем отказы как прощённые."""
+    hours = cooldown_hours(db)
+    query = db.query(UserAccessRequest).filter(
+        UserAccessRequest.telegram_id == str(telegram_id).strip(),
+        UserAccessRequest.status == "rejected",
+        UserAccessRequest.cooldown_waived.is_(False),
+    )
+    if hours > 0:
+        query = query.filter(
+            UserAccessRequest.reviewed_at.isnot(None),
+            UserAccessRequest.reviewed_at >= datetime.utcnow() - timedelta(hours=hours),
+        )
+    released = query.update(
+        {UserAccessRequest.cooldown_waived: True}, synchronize_session=False
+    )
+    db.commit()
+    return int(released or 0)
 
 
 def _accept_requests(db: Session) -> bool:
@@ -284,14 +357,16 @@ def submit_access_request(
             UserAccessRequest.request_type == request_type,
             UserAccessRequest.status == "rejected",
             UserAccessRequest.reviewed_at.isnot(None),
+            UserAccessRequest.cooldown_waived.is_(False),
         )
         .order_by(UserAccessRequest.reviewed_at.desc())
         .first()
     )
-    if last_rejected is not None and last_rejected.reviewed_at is not None:
-        if datetime.utcnow() - last_rejected.reviewed_at < timedelta(hours=COOLDOWN_HOURS):
+    hours = cooldown_hours(db)
+    if hours > 0 and last_rejected is not None and last_rejected.reviewed_at is not None:
+        if datetime.utcnow() - last_rejected.reviewed_at < timedelta(hours=hours):
             raise CooldownActive(
-                "Подать заявку повторно можно не ранее чем через 24 часа после отказа"
+                f"Подать заявку повторно можно не ранее чем через {hours} ч после отказа"
             )
 
     # add_config / extend_access только от привязанного Telegram-аккаунта.

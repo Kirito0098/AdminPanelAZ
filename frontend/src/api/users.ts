@@ -345,3 +345,36 @@ export async function downloadBulkNotifyReport(taskId: string) {
   return apiFetchResponse(`/users/bulk/notify/tasks/${encodeURIComponent(taskId)}/report`)
 }
 
+export interface CooldownBlockedItem {
+  telegram_id: string
+  name: string
+  request_type: string
+  rejected_at: string
+  until: string
+}
+
+export interface CooldownSettings {
+  hours: number
+  blocked: CooldownBlockedItem[]
+}
+
+/** GET /users/requests/cooldown — настройка кулдауна и кто в нём. */
+export async function getRequestsCooldown(): Promise<CooldownSettings> {
+  return apiFetch<CooldownSettings>('/users/requests/cooldown')
+}
+
+/** PUT /users/requests/cooldown — часы кулдауна после отказа (0 — выключен). */
+export async function updateRequestsCooldown(hours: number): Promise<CooldownSettings> {
+  return apiFetch<CooldownSettings>('/users/requests/cooldown', {
+    method: 'PUT',
+    body: JSON.stringify({ hours }),
+  })
+}
+
+/** POST /users/requests/cooldown/release — снять кулдаун с Telegram ID. */
+export async function releaseRequestsCooldown(telegramId: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/users/requests/cooldown/release', {
+    method: 'POST',
+    body: JSON.stringify({ telegram_id: telegramId }),
+  })
+}

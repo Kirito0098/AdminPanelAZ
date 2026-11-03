@@ -3,8 +3,12 @@ import { ApiError, getUsers } from '@/api/client'
 import {
   approveRequest,
   getRequestReceipt,
+  getRequestsCooldown,
+  releaseRequestsCooldown,
+  updateRequestsCooldown,
   listRequests,
   rejectRequest,
+  type CooldownSettings,
 } from '@/api/users'
 import AppDialog from '@/components/shared/AppDialog'
 import Spinner from '@/components/ui/Spinner'
@@ -59,6 +63,9 @@ export default function AccessRequestsDialog({
   const [approvingId, setApprovingId] = useState<number | null>(null)
   const [extendTarget, setExtendTarget] = useState<{ id: number; date: string } | null>(null)
   const [rejectTarget, setRejectTarget] = useState<{ id: number; reason: string } | null>(null)
+  const [cooldown, setCooldown] = useState<CooldownSettings | null>(null)
+  const [cooldownHours, setCooldownHours] = useState('24')
+  const [cooldownSaving, setCooldownSaving] = useState(false)
 
   // Новый identity колбэка из родителя не должен перезапускать загрузку заявок.
   const onCountChangeRef = useRef(onCountChange)
@@ -103,6 +110,47 @@ export default function AccessRequestsDialog({
     if (!open) return
     void reloadRequests()
   }, [open, reloadRequests])
+
+  const loadCooldown = useCallback(async () => {
+    try {
+      const data = await getRequestsCooldown()
+      setCooldown(data)
+      setCooldownHours(String(data.hours))
+    } catch {
+      /* настройка не критична для списка заявок */
+    }
+  }, [])
+
+  useEffect(() => {
+    if (open) void loadCooldown()
+  }, [open, loadCooldown])
+
+  const saveCooldown = async () => {
+    const hours = Number.parseInt(cooldownHours, 10)
+    if (!Number.isFinite(hours) || hours < 0 || hours > 720) {
+      notifyError('Кулдаун: целое число от 0 до 720 часов')
+      return
+    }
+    setCooldownSaving(true)
+    try {
+      setCooldown(await updateRequestsCooldown(hours))
+      success('Настройка кулдауна сохранена')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось сохранить кулдаун')
+    } finally {
+      setCooldownSaving(false)
+    }
+  }
+
+  const releaseCooldownFor = async (telegramId: string) => {
+    try {
+      const result = await releaseRequestsCooldown(telegramId)
+      success(result.message)
+      await loadCooldown()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось снять кулдаун')
+    }
+  }
 
   // Подсветить и подскроллить заявку, к которой вела ссылка из Telegram.
   useEffect(() => {
@@ -232,6 +280,57 @@ export default function AccessRequestsDialog({
           <div className="py-8 text-center text-sm text-muted-foreground">Нет ожидающих заявок</div>
         ) : (
           <div className="space-y-4">
+            <div className="rounded-lg border bg-muted/20 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-medium">Кулдаун после отказа</p>
+                  <p className="text-xs text-muted-foreground">
+                    Сколько часов нельзя подать заявку повторно. 0 — выключен.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={0}
+                    max={720}
+                    className="h-8 w-20"
+                    value={cooldownHours}
+                    onChange={(event) => setCooldownHours(event.target.value)}
+                    aria-label="Часы кулдауна"
+                  />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void saveCooldown()}
+                    disabled={cooldownSaving}
+                  >
+                    Сохранить
+                  </Button>
+                </div>
+              </div>
+              {cooldown && cooldown.blocked.length > 0 && (
+                <div className="mt-2 space-y-1 border-t pt-2">
+                  <p className="text-xs font-medium text-muted-foreground">Сейчас в кулдауне</p>
+                  {cooldown.blocked.map((item) => (
+                    <div
+                      key={item.telegram_id}
+                      className="flex items-center justify-between gap-2 text-xs"
+                    >
+                      <span className="min-w-0 truncate">
+                        {item.name} · до {new Date(item.until).toLocaleString('ru-RU')}
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void releaseCooldownFor(item.telegram_id)}
+                      >
+                        Снять
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
             <div className="space-y-2">
               {requests.map((r) => {
                 const approveDisabled = approvingId === r.id

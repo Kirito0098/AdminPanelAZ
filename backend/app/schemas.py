@@ -2040,6 +2040,27 @@ class ApproveRequest(BaseModel):
     days: int | None = Field(default=None, ge=1, le=3650)
 
 
+class CooldownBlockedItem(BaseModel):
+    telegram_id: str
+    name: str
+    request_type: str
+    rejected_at: datetime
+    until: datetime
+
+
+class CooldownSettingsResponse(BaseModel):
+    hours: int
+    blocked: list[CooldownBlockedItem]
+
+
+class CooldownSettingsUpdate(BaseModel):
+    hours: int = Field(ge=0, le=720)
+
+
+class CooldownReleaseRequest(BaseModel):
+    telegram_id: str = Field(min_length=1, max_length=32)
+
+
 class RejectRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=256)
     ban: bool = False
