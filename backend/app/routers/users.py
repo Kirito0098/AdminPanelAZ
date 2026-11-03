@@ -834,11 +834,14 @@ def list_access_requests(
 
 @router.get("/requests/cooldown", response_model=CooldownSettingsResponse)
 def get_requests_cooldown(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     _: User = Depends(require_admin),
 ):
-    """Настройка кулдауна после отказа и список тех, кто сейчас в нём."""
-    return {"hours": cooldown_hours(db), "blocked": list_cooldown_blocked(db)}
+    """Настройка кулдауна после отказа и страница тех, кто сейчас в нём."""
+    blocked, total = list_cooldown_blocked(db, limit=limit, offset=offset)
+    return {"hours": cooldown_hours(db), "total": total, "blocked": blocked}
 
 
 @router.put("/requests/cooldown", response_model=CooldownSettingsResponse)
@@ -848,7 +851,8 @@ def put_requests_cooldown(
     _: User = Depends(require_admin),
 ):
     set_cooldown_hours(db, body.hours)
-    return {"hours": cooldown_hours(db), "blocked": list_cooldown_blocked(db)}
+    blocked, total = list_cooldown_blocked(db, limit=50, offset=0)
+    return {"hours": cooldown_hours(db), "total": total, "blocked": blocked}
 
 
 @router.post("/requests/cooldown/release", response_model=MessageResponse)

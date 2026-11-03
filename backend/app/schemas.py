@@ -2050,6 +2050,7 @@ class CooldownBlockedItem(BaseModel):
 
 class CooldownSettingsResponse(BaseModel):
     hours: int
+    total: int = 0
     blocked: list[CooldownBlockedItem]
 
 

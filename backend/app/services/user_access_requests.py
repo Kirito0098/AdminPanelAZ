@@ -142,39 +142,67 @@ def set_cooldown_hours(db: Session, hours: int) -> int:
     return value
 
 
-def list_cooldown_blocked(db: Session) -> list[dict[str, Any]]:
-    """Кто сейчас в кулдауне после отказа (последняя отклонённая заявка на telegram_id)."""
+def list_cooldown_blocked(
+    db: Session, *, limit: int = 50, offset: int = 0
+) -> tuple[list[dict[str, Any]], int]:
+    """Кто сейчас в кулдауне: страница списка и общее число людей.
+
+    Группировка в SQL по telegram_id (последний отказ), поэтому тысячи отказов
+    не тянутся в Python целиком.
+    """
     hours = cooldown_hours(db)
     if hours <= 0:
-        return []
+        return [], 0
     since = datetime.utcnow() - timedelta(hours=hours)
-    rows = (
-        db.query(UserAccessRequest)
+    grouped = (
+        db.query(
+            UserAccessRequest.telegram_id.label("telegram_id"),
+            func.max(UserAccessRequest.reviewed_at).label("rejected_at"),
+        )
         .filter(
             UserAccessRequest.status == "rejected",
             UserAccessRequest.reviewed_at.isnot(None),
             UserAccessRequest.reviewed_at >= since,
             UserAccessRequest.cooldown_waived.is_(False),
         )
+        .group_by(UserAccessRequest.telegram_id)
+        .order_by(func.max(UserAccessRequest.reviewed_at).desc())
+    )
+    total = grouped.count()
+    page = grouped.offset(max(0, offset)).limit(max(1, min(200, limit))).all()
+    if not page:
+        return [], int(total or 0)
+
+    page_ids = [row.telegram_id for row in page]
+    details = (
+        db.query(UserAccessRequest)
+        .filter(
+            UserAccessRequest.telegram_id.in_(page_ids),
+            UserAccessRequest.status == "rejected",
+            UserAccessRequest.cooldown_waived.is_(False),
+        )
         .order_by(UserAccessRequest.reviewed_at.desc())
         .all()
     )
-    seen: set[str] = set()
+    latest: dict[str, UserAccessRequest] = {}
+    for row in details:
+        latest.setdefault(row.telegram_id, row)
+
     blocked: list[dict[str, Any]] = []
-    for row in rows:
-        if row.telegram_id in seen:
+    for row in page:
+        detail = latest.get(row.telegram_id)
+        if detail is None:
             continue
-        seen.add(row.telegram_id)
         blocked.append(
             {
                 "telegram_id": row.telegram_id,
-                "name": row.telegram_username or row.telegram_name or row.telegram_id,
-                "request_type": row.request_type,
-                "rejected_at": row.reviewed_at,
-                "until": row.reviewed_at + timedelta(hours=hours),
+                "name": detail.telegram_username or detail.telegram_name or row.telegram_id,
+                "request_type": detail.request_type,
+                "rejected_at": row.rejected_at,
+                "until": row.rejected_at + timedelta(hours=hours),
             }
         )
-    return blocked
+    return blocked, int(total or 0)
 
 
 def release_cooldown(db: Session, telegram_id: str) -> int:

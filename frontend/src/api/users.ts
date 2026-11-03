@@ -355,12 +355,19 @@ export interface CooldownBlockedItem {
 
 export interface CooldownSettings {
   hours: number
+  total: number
   blocked: CooldownBlockedItem[]
 }
 
-/** GET /users/requests/cooldown — настройка кулдауна и кто в нём. */
-export async function getRequestsCooldown(): Promise<CooldownSettings> {
-  return apiFetch<CooldownSettings>('/users/requests/cooldown')
+/** GET /users/requests/cooldown — настройка кулдауна и страница списка. */
+export async function getRequestsCooldown(
+  params: { limit?: number; offset?: number } = {},
+): Promise<CooldownSettings> {
+  const search = new URLSearchParams()
+  if (params.limit) search.set('limit', String(params.limit))
+  if (params.offset) search.set('offset', String(params.offset))
+  const qs = search.toString()
+  return apiFetch<CooldownSettings>(qs ? `/users/requests/cooldown?${qs}` : '/users/requests/cooldown')
 }
 
 /** PUT /users/requests/cooldown — часы кулдауна после отказа (0 — выключен). */

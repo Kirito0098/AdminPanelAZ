@@ -4,6 +4,7 @@ import {
   getRequestsCooldown,
   releaseRequestsCooldown,
   updateRequestsCooldown,
+  type CooldownBlockedItem,
   type CooldownSettings,
 } from '@/api/users'
 import AppDialog from '@/components/shared/AppDialog'
@@ -22,15 +23,22 @@ export default function AccessCooldownDialog({
 }) {
   const { success, error: notifyError } = useNotifications()
   const [data, setData] = useState<CooldownSettings | null>(null)
+  const [blocked, setBlocked] = useState<CooldownBlockedItem[]>([])
+  const [total, setTotal] = useState(0)
   const [hours, setHours] = useState('24')
   const [loading, setLoading] = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  const PAGE = 50
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const next = await getRequestsCooldown()
+      const next = await getRequestsCooldown({ limit: PAGE })
       setData(next)
+      setBlocked(next.blocked)
+      setTotal(next.total)
       setHours(String(next.hours))
     } catch {
       notifyError('Не удалось загрузить настройки кулдауна')
@@ -38,6 +46,20 @@ export default function AccessCooldownDialog({
       setLoading(false)
     }
   }, [notifyError])
+
+  const loadMore = async () => {
+    if (loadingMore || blocked.length >= total) return
+    setLoadingMore(true)
+    try {
+      const next = await getRequestsCooldown({ limit: PAGE, offset: blocked.length })
+      setBlocked((prev) => [...prev, ...next.blocked])
+      setTotal(next.total)
+    } catch {
+      notifyError('Не удалось догрузить список')
+    } finally {
+      setLoadingMore(false)
+    }
+  }
 
   useEffect(() => {
     if (open) void load()
@@ -51,7 +73,10 @@ export default function AccessCooldownDialog({
     }
     setSaving(true)
     try {
-      setData(await updateRequestsCooldown(value))
+      const next = await updateRequestsCooldown(value)
+      setData(next)
+      setBlocked(next.blocked)
+      setTotal(next.total)
       success('Настройка кулдауна сохранена')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Не удалось сохранить кулдаун')
@@ -107,9 +132,9 @@ export default function AccessCooldownDialog({
 
           <div className="space-y-2">
             <p className="text-sm font-medium">Сейчас в кулдауне</p>
-            {data && data.blocked.length > 0 ? (
+            {blocked.length > 0 ? (
               <div className="flex flex-col gap-1">
-                {data.blocked.map((item) => (
+                {blocked.map((item) => (
                   <div
                     key={item.telegram_id}
                     className="flex flex-col gap-2 rounded-lg border border-border/60 px-3 py-2 text-sm sm:flex-row sm:items-center sm:justify-between"
@@ -129,10 +154,26 @@ export default function AccessCooldownDialog({
                     </Button>
                   </div>
                 ))}
+                {blocked.length < total && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="self-center"
+                    onClick={() => void loadMore()}
+                    disabled={loadingMore}
+                  >
+                    {loadingMore ? 'Загрузка…' : `Показать ещё (${total - blocked.length})`}
+                  </Button>
+                )}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
                 Никого нет — повторную заявку никто не ждёт.
+              </p>
+            )}
+            {total > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Показаны {blocked.length} из {total}
               </p>
             )}
           </div>
