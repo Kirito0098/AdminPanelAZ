@@ -945,10 +945,10 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               <div>
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Bell size={18} />
-                  Уведомления
+                  Telegram
                 </CardTitle>
                 <CardDescription className="mt-1.5">
-                  Получатели сообщений и бэкапов, типы событий и NOC-сводки
+                  Кому уходят сообщения бота: получатели, типы событий и NOC-сводки
                 </CardDescription>
               </div>
               {tg.notifyEnabled && (
