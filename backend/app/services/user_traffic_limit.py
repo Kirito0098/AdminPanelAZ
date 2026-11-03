@@ -60,7 +60,10 @@ def user_consumed_bytes(db: Session, user: User) -> int:
 
 
 def _tg_text_exhausted(limit: int) -> str:
-    return f"Лимит трафика {human_bytes(limit)} исчерпан. Доступ откроется после продления."
+    return (
+        f"Лимит трафика {human_bytes(limit)} исчерпан. "
+        "Доступ откроется после продления или после сброса счётчика администратором."
+    )
 
 
 def _tg_text_cleared() -> str:

@@ -8,6 +8,7 @@ from app.models import Node, VpnConfig, VpnType
 from app.services.node_manager import get_adapter_for_node
 from app.services.profile_download_name import enrich_profile_files
 from app.services.telegram_api import send_message
+from app.services.telegram_bot_handlers.base import is_admin
 from app.services.telegram_bot_handlers.ui import nav_footer_keyboard, send_or_edit
 from app.services.telegram_bot_data import (
     config_node_label,
@@ -32,6 +33,7 @@ from app.services.telegram_profile_ui import (
 from app.services import telegram_bot_i18n as i18n
 from app.services.vpn_profile_visibility import (
     EMPTY_CATALOG_MESSAGE,
+    EMPTY_CATALOG_MESSAGE_USER,
     filter_profile_files,
     resolve_effective_visible_vpn_profiles,
 )
@@ -453,7 +455,11 @@ async def _show_config_picker(
     filter_key = _normalize_filter_key(filter_key)
     groups = _load_profile_groups(ctx, config)
     if not groups:
-        await send_message(ctx.bot_token, ctx.chat_id, EMPTY_CATALOG_MESSAGE)
+        await send_message(
+            ctx.bot_token,
+            ctx.chat_id,
+            EMPTY_CATALOG_MESSAGE if is_admin(ctx.user) else EMPTY_CATALOG_MESSAGE_USER,
+        )
         return
 
     active_groups = _narrow_profile_groups(groups, filter_key)
@@ -496,7 +502,11 @@ async def handle_configs(
 
     configs = list_user_configs(ctx.db, ctx.user)
     if not configs:
-        await send_message(ctx.bot_token, ctx.chat_id, i18n.CONFIGS_NONE)
+        await send_message(
+            ctx.bot_token,
+            ctx.chat_id,
+            i18n.CONFIGS_NONE if is_admin(ctx.user) else i18n.CONFIGS_NONE_USER,
+        )
         return
 
     protocol_map = _load_config_protocol_map(ctx, configs)
@@ -505,14 +515,20 @@ async def handle_configs(
     if node_id and node_id not in labels:
         node_id = 0
     if node_id and not any(config.node_id == node_id for config in configs_with_files):
+        if is_admin(ctx.user):
+            text = i18n.CONFIGS_NODE_NO_FILES.format(
+                node=escape(labels.get(node_id, str(node_id)))
+            )
+        else:
+            text = i18n.CONFIGS_NODE_NO_FILES_USER
+        await send_message(ctx.bot_token, ctx.chat_id, text)
+        return
+    if not configs_with_files:
         await send_message(
             ctx.bot_token,
             ctx.chat_id,
-            i18n.CONFIGS_NODE_NO_FILES.format(node=escape(labels.get(node_id, str(node_id)))),
+            EMPTY_CATALOG_MESSAGE if is_admin(ctx.user) else EMPTY_CATALOG_MESSAGE_USER,
         )
-        return
-    if not configs_with_files:
-        await send_message(ctx.bot_token, ctx.chat_id, EMPTY_CATALOG_MESSAGE)
         return
 
     filter_key = _normalize_filter_key(filter_key)

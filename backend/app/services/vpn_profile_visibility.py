@@ -48,6 +48,9 @@ FULL_POLICY: dict[str, Any] = {
 }
 
 EMPTY_CATALOG_MESSAGE = "Администратор ограничил доступные типы конфигураций"
+EMPTY_CATALOG_MESSAGE_USER = (
+    "Конфигурации этого типа сейчас недоступны.\n\nНапишите администратору — он проверит настройки доступа."
+)
 
 
 def copy_policy(policy: Mapping[str, Any] | None = None) -> dict[str, Any]:

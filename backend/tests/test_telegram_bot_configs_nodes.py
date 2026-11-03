@@ -272,8 +272,9 @@ def test_selecting_a_node_without_files_explains_why(ctx, nodes, configs, monkey
 
     asyncio.run(handler.handle_configs(ctx, node_id=usa.id))
 
-    assert sent and "нет файлов профилей" in sent[0]
-    assert "USA" in sent[0]
+    # Абоненту не показываем технические инструкции администратора.
+    assert sent and "Напишите администратору" in sent[0]
+    assert "Пересоздать профили" not in sent[0]
 
 
 def test_configs_preview_numbers_rows_from_one(nodes, configs):
