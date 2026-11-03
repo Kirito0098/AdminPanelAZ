@@ -37,6 +37,21 @@ def settings_root_secret_state(webhook_secret_set: bool) -> str:
     return "не задан"
 
 
+# --- Protocol labels ---
+
+VPN_TYPE_LABELS: dict[str, str] = {
+    "openvpn": "OpenVPN",
+    "wireguard": "WireGuard",
+    "amneziawg2": "AmneziaWG 2.0",
+}
+
+
+def vpn_type_label(value: str | None) -> str:
+    """Человеческое имя протокола вместо enum из базы."""
+    key = (value or "").strip().lower()
+    return VPN_TYPE_LABELS.get(key, value or "—")
+
+
 # --- Common ---
 
 UNLINKED = (
@@ -279,7 +294,7 @@ STATUS_FOOTER = "\n\n🕐 <i>Обновлено: {timestamp}</i>"
 
 CONFIGS_LIST = (
     "📁 <b>Конфигурации</b> · {filter_label}\n"
-    "Стр. {page}/{total_pages} · <b>{count}</b> клиент(ов){hint}\n\n"
+    "Стр. {page}/{total_pages} · <b>{count}</b> конфиг(ов){hint}\n\n"
     "{preview}\n"
     "<i>Выберите клиента ↓</i>"
 )
@@ -304,7 +319,7 @@ CONFIGS_NODE_NO_FILES_USER = (
 
 CONFIGS_NONE_ON_NODE = (
     "📭 На активном узле нет файлов конфигурации.\n\n"
-    "Клиенты есть в панели, но профили на сервере не найдены."
+    "Конфиги есть в панели, но файлы профилей на сервере не найдены."
 )
 CONFIGS_FILTER_EMPTY = "<i>Нет клиентов с файлами этого типа.</i>"
 CONFIGS_NODE_NO_FILES = (
@@ -322,7 +337,7 @@ TRAFFIC_SUMMARY = (
     "{title}\n\n"
     "🖥 Узел: <b>{node_name}</b>\n"
     "{scope_hint}"
-    "Клиентов: <b>{count}</b> · online <b>{active}</b>\n"
+    "Конфигов: <b>{count}</b> · онлайн <b>{active}</b>\n"
     "За 24 ч: <b>{traffic_1d}</b> · всего: <b>{total_all}</b>\n\n"
     "🏆 <b>Топ-5 за сутки</b>\n"
     "{top_lines}"

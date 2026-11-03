@@ -70,15 +70,17 @@ def _private_only_article() -> dict[str, Any]:
 def _config_article(ctx: BotContext, config: VpnConfig) -> dict[str, Any]:
     message = i18n.INLINE_CONFIG_MESSAGE.format(
         name=config.client_name,
-        vpn_type=config.vpn_type.value,
+        vpn_type=i18n.vpn_type_label(config.vpn_type.value),
         mini_app_url=ctx.mini_app_url or "—",
     )
     return {
         "type": "article",
         "id": f"cfg:{config.id}",
-        "title": i18n.INLINE_CONFIG_TITLE.format(name=config.client_name, vpn_type=config.vpn_type.value),
+        "title": i18n.INLINE_CONFIG_TITLE.format(
+            name=config.client_name, vpn_type=i18n.vpn_type_label(config.vpn_type.value)
+        ),
         "description": i18n.INLINE_CONFIG_ARTICLE_DESC.format(
-            vpn_type=config.vpn_type.value,
+            vpn_type=i18n.vpn_type_label(config.vpn_type.value),
             node=config_node_label(ctx.db, config),
         ),
         "input_message_content": {

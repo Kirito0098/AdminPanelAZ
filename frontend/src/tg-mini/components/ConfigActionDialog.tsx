@@ -222,7 +222,7 @@ export default function ConfigActionDialog({
                   ? 'Конфиг и инструкция отправлены в Telegram'
                   : isForeignConfig
                     ? `Отправка пользователю ${ownerLabel || ''}`.trim()
-                    : 'Выберите профиль и устройство — бот пришлёт файл с инструкцией'}
+                    : 'Выберите конфиг и устройство — бот пришлёт файл с инструкцией'}
               </DialogDescription>
             </div>
           </div>
@@ -264,7 +264,7 @@ export default function ConfigActionDialog({
           {loading ? (
             <div className="tg-mini-center py-12">
               <Loader2 size={28} className="animate-spin text-muted-foreground" aria-hidden />
-              <p className="text-sm text-muted-foreground">Загрузка профилей…</p>
+              <p className="text-sm text-muted-foreground">Загрузка файлов профиля…</p>
             </div>
           ) : sentSuccess ? (
             <div className="tg-mini-success-panel">

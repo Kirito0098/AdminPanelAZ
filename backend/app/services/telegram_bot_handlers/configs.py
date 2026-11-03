@@ -477,7 +477,7 @@ async def _show_config_picker(
 
     text = i18n.CONFIG_PICK_PROTOCOL.format(
         name=escape(config.client_name),
-        vpn_type=config.vpn_type.value,
+        vpn_type=i18n.vpn_type_label(config.vpn_type.value),
         node=escape(_node_label(ctx.db, config)),
     )
     await send_or_edit(

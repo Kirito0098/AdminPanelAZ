@@ -404,7 +404,7 @@ export default function Configs() {
             ? `${nodeCount} конфиг${nodeCount === 1 ? '' : 'а'} на ${groupCount} имени${
                 groupCount !== 1 ? 'ах' : ''
               }`
-            : 'Создайте или получите VPN-профиль'
+            : 'Создайте или получите конфиг'
         }
         onRefresh={() => void load({ silent: true })}
         refreshing={refreshing}

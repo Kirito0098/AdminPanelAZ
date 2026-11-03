@@ -146,7 +146,7 @@ export default function CreateConfigDialog({
   }
 
   const validateClientName = (trimmedName: string): string | null => {
-    if (!trimmedName) return 'Укажите имя клиента'
+    if (!trimmedName) return 'Укажите имя конфига'
     if (!/^[a-zA-Z0-9_-]{1,32}$/.test(trimmedName)) {
       return 'Имя: латиница, цифры, _ и -, до 32 символов'
     }
@@ -309,7 +309,7 @@ export default function CreateConfigDialog({
 
         <form onSubmit={(e) => void handleSubmit(e)} className="tg-mini-config-sheet-form">
           <DialogHeader className="shrink-0 space-y-2 px-4 pb-3 pt-2 text-left">
-            <DialogTitle className="text-base font-semibold">Новый профиль</DialogTitle>
+            <DialogTitle className="text-base font-semibold">Новый конфиг</DialogTitle>
             <DialogDescription className="text-xs leading-relaxed">
               Одно имя — несколько конфигураций на активном узле.
             </DialogDescription>
@@ -324,7 +324,7 @@ export default function CreateConfigDialog({
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="tg-mini-client-name">Имя профиля</Label>
+              <Label htmlFor="tg-mini-client-name">Имя конфига</Label>
               <Input
                 id="tg-mini-client-name"
                 value={clientName}
@@ -497,7 +497,7 @@ export default function CreateConfigDialog({
                 value={ownerId}
                 onChange={setOwnerId}
                 disabled={busy || quotaReached}
-                description="Владелец увидит все конфигурации профиля"
+                description="Владелец увидит все конфиги"
               />
             )}
 
