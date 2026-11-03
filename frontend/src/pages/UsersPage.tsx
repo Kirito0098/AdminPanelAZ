@@ -944,7 +944,7 @@ export default function UsersPage() {
         ) : null}
       </AppDialog>
 
-      {createOpen ? (
+      {createOpen || approveReq !== null ? (
         <CreateUserDialog
           open={createOpen || approveReq !== null}
           onOpenChange={(next) => {
