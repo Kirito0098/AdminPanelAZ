@@ -18,7 +18,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { useNode } from '@/context/NodeContext'
 import { formatRelative } from '@/lib/datetime'
+import { nodeLabelMap, userNodeLabels } from '@/lib/nodeLabels'
 import { formatBytes } from '@/lib/trafficFormat'
 import { accessParts, resolveCardState } from '@/lib/userState'
 import type { UsersSortDir, UsersSortKey } from '@/lib/usersListPrefs'
@@ -69,6 +71,8 @@ export default function UsersTable({
   onSortChange,
   actionBusyId,
 }: UsersTableProps) {
+  const { nodes } = useNode()
+  const nodeLabelById = nodeLabelMap(nodes)
   if (users.length === 0) {
     return <div className="py-10 text-center text-sm text-muted-foreground">Нет абонентов</div>
   }
@@ -100,6 +104,7 @@ export default function UsersTable({
           {users.map((user) => {
             const state = resolveCardState(user)
             const access = accessParts(user)
+            const nodeLabels = userNodeLabels(user, nodeLabelById)
             const limit = user.traffic_limit_bytes ?? null
             const consumed = user.traffic_consumed_bytes ?? 0
             const selected = selectedIds.includes(user.id)
@@ -144,7 +149,14 @@ export default function UsersTable({
                     '—'
                   )}
                 </td>
-                <td className="whitespace-nowrap px-3 py-2">{user.plan_node_ids?.length ?? 0}</td>
+                <td className="px-3 py-2">
+                  <span
+                    className="line-clamp-2 max-w-[12rem] [overflow-wrap:anywhere]"
+                    title={nodeLabels.join(', ')}
+                  >
+                    {nodeLabels.length ? nodeLabels.join(', ') : '—'}
+                  </span>
+                </td>
                 <td className="px-3 py-2 text-right">
                   <div className="flex justify-end gap-1">
                     <Button

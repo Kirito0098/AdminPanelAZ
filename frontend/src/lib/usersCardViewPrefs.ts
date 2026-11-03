@@ -6,7 +6,6 @@ export type UsersCardFieldKey =
   | 'nodes'
   | 'base'
   | 'tg'
-  | 'protocols'
   | 'names'
   | 'task'
   | 'note'
@@ -24,8 +23,7 @@ export const USERS_CARD_FIELD_LABELS: Record<UsersCardFieldKey, string> = {
   nodes: 'Узлы',
   base: 'База имени',
   tg: 'Telegram',
-  protocols: 'Протоколы',
-  names: 'Число имён',
+  names: 'Число имён конфигов',
   task: 'Задача',
   note: 'Заметка',
 }
@@ -41,7 +39,6 @@ export const DEFAULT_USERS_CARD_VIEW_PREFS: UsersCardViewPrefs = {
     nodes: true,
     base: true,
     tg: true,
-    protocols: true,
     names: true,
     task: true,
     note: true,

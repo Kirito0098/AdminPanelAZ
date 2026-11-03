@@ -41,11 +41,13 @@ import { CardContent, CardDescription, CardHeader, CardTitle } from '@/component
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
+import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useUsersList } from '@/hooks/useUsersList'
 import { DOCS } from '@/lib/docsUrls'
 import { gridColsClass } from '@/lib/configCardViewPrefs'
+import { nodeLabelMap, userNodeLabels } from '@/lib/nodeLabels'
 import { triggerFileDownload } from '@/lib/triggerFileDownload'
 import { cn } from '@/lib/utils'
 import {
@@ -104,6 +106,8 @@ export default function UsersPage() {
   const { isEnabled } = useFeatureModules()
   const { success, error: notifyError } = useNotifications()
   const { backgroundTask, trackBackgroundTask } = useProgress()
+  const { nodes } = useNode()
+  const nodeLabelById = nodeLabelMap(nodes)
   const {
     users,
     setUsers,
@@ -465,7 +469,7 @@ export default function UsersPage() {
         user.client_base_name ?? '',
         user.plan_config_count ?? user.plan_config_indexes?.length ?? '',
         protocolsOf(user),
-        user.plan_node_ids?.join('|') ?? '',
+        userNodeLabels(user, nodeLabelById).join('|'),
         user.access_until ?? '',
         user.telegram_id ?? '',
         user.suspended_at ?? '',

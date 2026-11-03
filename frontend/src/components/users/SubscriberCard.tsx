@@ -13,7 +13,6 @@ import {
   Play,
   RotateCcw,
   Server,
-  Shield,
   StickyNote,
   Trash2,
   UserRound,
@@ -24,7 +23,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { PercentBar } from '@/components/ui/percent-bar'
+import { useNode } from '@/context/NodeContext'
 import { formatRelative, parseTimestamp } from '@/lib/datetime'
+import { nodeLabelMap, userNodeLabels } from '@/lib/nodeLabels'
 import { accessParts, resolveCardState, type MetaTone } from '@/lib/userState'
 import { cn } from '@/lib/utils'
 import { DEFAULT_USERS_CARD_VIEW_PREFS, type UsersCardViewPrefs } from '@/lib/usersCardViewPrefs'
@@ -37,6 +38,7 @@ type MetaRow = {
   tone?: MetaTone
   wide?: boolean
   mono?: boolean
+  title?: string
 }
 
 const STALE_ACTIVITY_MS = 30 * 86400000
@@ -51,6 +53,7 @@ function MetaLine({ row }: { row: MetaRow }) {
   const Icon = row.icon
   return (
     <div
+      title={row.title}
       className={cn(
         'flex min-w-0 items-baseline gap-1.5 text-xs leading-snug',
         row.wide && 'sm:col-span-2',
@@ -125,8 +128,11 @@ export default function SubscriberCard({
   const protocols = user.plan_protocols?.length
     ? user.plan_protocols
     : (user.desired_protocols ?? [])
-  const nodeCount = user.plan_node_ids?.length ?? 0
+  const { nodes } = useNode()
+  const nodeLabels = userNodeLabels(user, nodeLabelMap(nodes))
   const nameCount = user.plan_config_count ?? user.plan_config_indexes?.length ?? 0
+  const activityTone: MetaTone =
+    user.last_seen_at && isStaleActivity(user.last_seen_at) ? 'warning' : 'default'
   const fields = viewPrefs.fields
   const userNote = (user.note ?? '').trim()
 
@@ -138,54 +144,38 @@ export default function SubscriberCard({
       value: access.text,
       tone: access.tone,
     },
-    ...(fields.lastSeen && user.last_seen_at
-      ? [
-          {
-            key: 'lastSeen',
-            icon: Activity,
-            label: 'Активность',
-            value: user.online ? 'онлайн' : formatRelative(user.last_seen_at),
-            tone: isStaleActivity(user.last_seen_at) ? 'warning' : 'default',
-          } satisfies MetaRow,
-        ]
-      : []),
+    {
+      key: 'lastSeen',
+      icon: Activity,
+      label: 'Активность',
+      value: user.online ? 'онлайн' : user.last_seen_at ? formatRelative(user.last_seen_at) : '—',
+      tone: activityTone,
+    },
     {
       key: 'nodes',
       icon: Server,
       label: 'Узлы',
-      value: nodeCount > 0 ? String(nodeCount) : '—',
+      value: nodeLabels.length ? nodeLabels.join(', ') : '—',
     },
     {
       key: 'base',
       icon: UserRound,
       label: 'База',
       value: user.client_base_name || user.owned_config_base_name || 'не задана',
-      wide: !user.telegram_id,
     },
-    ...(user.telegram_id
-      ? [
-          {
-            key: 'tg',
-            icon: AtSign,
-            label: 'Telegram',
-            value: user.telegram_id,
-            mono: true,
-          } satisfies MetaRow,
-        ]
-      : []),
     {
-      key: 'protocols',
-      icon: Shield,
-      label: 'Протоколы',
-      value: protocols.length ? protocols.join(', ') : '—',
-      mono: true,
-      wide: true,
+      key: 'tg',
+      icon: AtSign,
+      label: 'Telegram',
+      value: user.telegram_id || '—',
+      mono: Boolean(user.telegram_id),
     },
     {
       key: 'names',
       icon: Network,
-      label: 'Имён',
+      label: 'Имён конфигов',
       value: nameCount > 0 ? String(nameCount) : '—',
+      title: 'Имя — отдельный конфиг на каждом узле и протоколе абонента',
     },
     ...(user.active_task_id
       ? [
@@ -306,7 +296,7 @@ export default function SubscriberCard({
         </div>
       </CardHeader>
 
-      <CardContent className="flex flex-1 flex-col space-y-2.5 p-4 pt-0">
+      <CardContent className="flex flex-1 flex-col gap-2.5 p-4 pt-0">
         <div className="grid grid-cols-1 gap-x-4 gap-y-1.5 sm:grid-cols-2">
           {metaRows.map((row) => (
             <MetaLine key={row.key} row={row} />
