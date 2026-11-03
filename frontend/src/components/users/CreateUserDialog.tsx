@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowRight, ChevronLeft, Users as UsersIcon } from 'lucide-react'
 import { getAssignableConfigs } from '@/api/configs'
 import { getNodeSyncGroups, getNodes } from '@/api/nodes'
@@ -156,8 +156,17 @@ export default function CreateUserDialog({
     }
   }, [open])
 
+  const prefilledRequestRef = useRef<number | null>(null)
+
   useEffect(() => {
-    if (!open || !approveRequest) return
+    if (!open) {
+      prefilledRequestRef.current = null
+      return
+    }
+    if (!approveRequest) return
+    // Родитель пересоздаёт объект заявки на каждый рендер — заполняем поля один раз.
+    if (prefilledRequestRef.current === approveRequest.id) return
+    prefilledRequestRef.current = approveRequest.id
     // Логин и имя клиента: только [A-Za-z0-9_-], иначе узел отклонит создание конфига.
     const raw = (approveRequest.username || `tg${approveRequest.telegramId}`).trim()
     const suggested = raw.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 28) || `tg${approveRequest.telegramId}`

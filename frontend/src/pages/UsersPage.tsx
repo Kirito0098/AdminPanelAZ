@@ -189,6 +189,18 @@ export default function UsersPage() {
     [reloadUsers],
   )
 
+  const approvePayload = useMemo(
+    () =>
+      approveReq
+        ? {
+            id: approveReq.id,
+            telegramId: approveReq.telegram_id,
+            username: approveReq.telegram_username ?? null,
+          }
+        : null,
+    [approveReq],
+  )
+
   const handleApproveRequestViaDialog = async (id: number, data: CreateUserPayload) => {
     try {
       if (data.mode === 'from_existing') {
@@ -973,15 +985,7 @@ export default function UsersPage() {
           }}
           adminUserId={authUser?.id}
           onCreate={handleCreate}
-          approveRequest={
-            approveReq
-              ? {
-                  id: approveReq.id,
-                  telegramId: approveReq.telegram_id,
-                  username: approveReq.telegram_username ?? null,
-                }
-              : null
-          }
+          approveRequest={approvePayload}
           onApproveRequest={handleApproveRequestViaDialog}
         />
       ) : null}
