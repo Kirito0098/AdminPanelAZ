@@ -1,27 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError, getUsers } from '@/api/client'
-import { getNodes } from '@/api/nodes'
 import {
   approveRequest,
   getRequestReceipt,
-  listPresets,
   listRequests,
   rejectRequest,
 } from '@/api/users'
 import AppDialog from '@/components/shared/AppDialog'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
-import { Checkbox } from '@/components/ui/checkbox'
 import DatePickerField from '@/components/ui/DatePickerField'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotificationCenter } from '@/context/NotificationCenterContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
-import { REQUEST_PROTOCOLS, REQUEST_TYPE_LABELS } from '@/lib/accessRequests'
+import { REQUEST_TYPE_LABELS } from '@/lib/accessRequests'
 import { cn } from '@/lib/utils'
-import type { AccessRequestResponse, Node, PresetResponse, User } from '@/types'
+import type { AccessRequestResponse, User } from '@/types'
 
 /** Дата «сегодня + 30 дней» в формате YYYY-MM-DD для календаря продления. */
 function defaultExtendDate(days = 30): string {
@@ -53,7 +49,6 @@ export default function AccessRequestsDialog({
   onUsersChanged,
   onApproveNewUser,
 }: AccessRequestsDialogProps) {
-  const { isEnabled } = useFeatureModules()
   const { pendingRequestsCount } = useNotificationCenter()
   const { success, error: notifyError } = useNotifications()
   const { trackBackgroundTask } = useProgress()
@@ -61,13 +56,6 @@ export default function AccessRequestsDialog({
   const [requests, setRequests] = useState<AccessRequestResponse[]>([])
   const [requestsLoading, setRequestsLoading] = useState(false)
   const [receiptUrl, setReceiptUrl] = useState<string | null>(null)
-  const [requestPresets, setRequestPresets] = useState<PresetResponse[]>([])
-  const [requestNodes, setRequestNodes] = useState<Node[]>([])
-  const [approvePresetId, setApprovePresetId] = useState<number | null>(null)
-  const [approveNodeIds, setApproveNodeIds] = useState<number[]>([])
-  const [approveProtocols, setApproveProtocols] = useState<string[]>([])
-  const [approveUsername, setApproveUsername] = useState('')
-  const [approveAccessDays, setApproveAccessDays] = useState('')
   const [approvingId, setApprovingId] = useState<number | null>(null)
   const [extendTarget, setExtendTarget] = useState<{ id: number; date: string } | null>(null)
   const [rejectTarget, setRejectTarget] = useState<{ id: number; reason: string } | null>(null)
@@ -92,13 +80,6 @@ export default function AccessRequestsDialog({
     [],
   )
 
-  const availableRequestProtocols = useMemo(
-    () => REQUEST_PROTOCOLS.filter((p) => p.featureKeys.some((key) => isEnabled(key))),
-    [isEnabled],
-  )
-  const hasNewUserRequests = requests.some((r) => r.request_type === 'new_user')
-  const canApproveNewUser =
-    approvePresetId != null || (approveNodeIds.length > 0 && approveProtocols.length > 0)
   const reloadRequests = useCallback(async () => {
     setRequestsLoading(true)
     try {
@@ -122,38 +103,6 @@ export default function AccessRequestsDialog({
     if (!open) return
     void reloadRequests()
   }, [open, reloadRequests])
-
-  // План для одобрения new_user: шаблон или узлы+протоколы.
-  useEffect(() => {
-    if (!open) return
-    let cancelled = false
-    const load = async () => {
-      try {
-        const [presets, nodes] = await Promise.all([listPresets(), getNodes()])
-        if (cancelled) return
-        setRequestPresets(presets)
-        setRequestNodes(nodes)
-        const defaultPreset = presets.find((p) => p.is_default) ?? presets[0] ?? null
-        setApprovePresetId(defaultPreset?.id ?? null)
-        setApproveNodeIds(nodes.filter((n) => n.node_kind !== 'proxy').map((n) => n.id))
-        setApproveProtocols((prev) => {
-          const allowed = new Set(availableRequestProtocols.map((p) => p.id))
-          const kept = prev.filter((id) => allowed.has(id))
-          if (kept.length > 0) return kept
-          return availableRequestProtocols[0] ? [availableRequestProtocols[0].id] : []
-        })
-      } catch {
-        if (!cancelled) {
-          setRequestPresets([])
-          setRequestNodes([])
-        }
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [open, availableRequestProtocols])
 
   // Подсветить и подскроллить заявку, к которой вела ссылка из Telegram.
   useEffect(() => {
@@ -209,49 +158,12 @@ export default function AccessRequestsDialog({
   }
 
   const handleApproveRequest = async (requestId: number, requestType: string) => {
-    if (requestType === 'new_user' && !canApproveNewUser) {
-      notifyError('Выберите шаблон или узлы и протоколы')
-      return
-    }
+    // new_user одобряется в диалоге создания абонента (onApproveNewUser).
     const telegramId = requests.find((r) => r.id === requestId)?.telegram_id
-    const username = approveUsername.trim() || undefined
-    let accessUntil: string | undefined
-    const daysRaw = approveAccessDays.trim()
-    if (daysRaw !== '') {
-      const days = Number.parseInt(daysRaw, 10)
-      if (!Number.isFinite(days) || days < 1) {
-        notifyError('Срок в днях — целое число от 1')
-        return
-      }
-      const until = new Date()
-      until.setUTCDate(until.getUTCDate() + days)
-      accessUntil = until.toISOString()
-    }
     setApprovingId(requestId)
     try {
-      if (requestType === 'new_user') {
-        if (approvePresetId != null) {
-          await approveRequest(requestId, {
-            preset_id: approvePresetId,
-            username,
-            access_until: accessUntil,
-          })
-        } else {
-          await approveRequest(requestId, {
-            node_ids: approveNodeIds,
-            protocols: approveProtocols,
-            config_count: 1,
-            username,
-            access_until: accessUntil,
-          })
-        }
-      } else if (requestType === 'add_config') {
+      if (requestType === 'add_config') {
         await approveRequest(requestId, { count: 1 })
-      } else if (requestType === 'extend_access') {
-        const days = daysRaw !== '' ? Number.parseInt(daysRaw, 10) : 30
-        await approveRequest(requestId, {
-          days: Number.isFinite(days) && days >= 1 ? days : 30,
-        })
       } else {
         await approveRequest(requestId, {})
       }
@@ -320,120 +232,9 @@ export default function AccessRequestsDialog({
           <div className="py-8 text-center text-sm text-muted-foreground">Нет ожидающих заявок</div>
         ) : (
           <div className="space-y-4">
-            {hasNewUserRequests && (
-              <div className="space-y-3 rounded-lg border bg-muted/30 p-3">
-                <p className="text-sm font-medium">План для новых пользователей</p>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="approve-username">Логин (необязательно)</Label>
-                    <Input
-                      id="approve-username"
-                      value={approveUsername}
-                      onChange={(e) => setApproveUsername(e.target.value)}
-                      placeholder="пусто → tg… или @ник"
-                      autoComplete="off"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="approve-days">Срок, дней (необязательно)</Label>
-                    <Input
-                      id="approve-days"
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={approveAccessDays}
-                      onChange={(e) => setApproveAccessDays(e.target.value)}
-                      placeholder="пусто → без срока"
-                    />
-                  </div>
-                </div>
-                {requestPresets.length > 0 ? (
-                  <div className="space-y-1.5">
-                    <Label htmlFor="approve-preset">Шаблон предоставления</Label>
-                    <select
-                      id="approve-preset"
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                      value={approvePresetId ?? ''}
-                      onChange={(e) => {
-                        const raw = e.target.value
-                        setApprovePresetId(raw === '' ? null : Number.parseInt(raw, 10))
-                      }}
-                    >
-                      <option value="">Без шаблона — выбрать узлы ниже</option>
-                      {requestPresets.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                          {p.is_default ? ' (по умолчанию)' : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    Шаблонов пока нет — укажите узлы и протоколы для создания абонента.
-                  </p>
-                )}
-                {approvePresetId == null && (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>Узлы</Label>
-                      {requestNodes.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">Нет узлов</p>
-                      ) : (
-                        requestNodes
-                          .filter((n) => n.node_kind !== 'proxy')
-                          .map((n) => (
-                            <label key={n.id} className="flex items-center gap-2 text-sm">
-                              <Checkbox
-                                checked={approveNodeIds.includes(n.id)}
-                                onCheckedChange={(checked) => {
-                                  setApproveNodeIds((prev) =>
-                                    checked
-                                      ? prev.includes(n.id)
-                                        ? prev
-                                        : [...prev, n.id]
-                                      : prev.filter((id) => id !== n.id),
-                                  )
-                                }}
-                              />
-                              {n.name}
-                            </label>
-                          ))
-                      )}
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Протоколы</Label>
-                      {availableRequestProtocols.length === 0 ? (
-                        <p className="text-xs text-muted-foreground">Нет включённых протоколов</p>
-                      ) : (
-                        availableRequestProtocols.map((p) => (
-                          <label key={p.id} className="flex items-center gap-2 text-sm">
-                            <Checkbox
-                              checked={approveProtocols.includes(p.id)}
-                              onCheckedChange={(checked) => {
-                                setApproveProtocols((prev) =>
-                                  checked
-                                    ? prev.includes(p.id)
-                                      ? prev
-                                      : [...prev, p.id]
-                                    : prev.filter((id) => id !== p.id),
-                                )
-                              }}
-                            />
-                            {p.label}
-                          </label>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
             <div className="space-y-2">
               {requests.map((r) => {
-                const approveDisabled =
-                  approvingId === r.id ||
-                  (r.request_type === 'new_user' && !canApproveNewUser)
+                const approveDisabled = approvingId === r.id
                 const title =
                   r.telegram_name ||
                   (r.telegram_username ? `@${r.telegram_username}` : r.telegram_id)
