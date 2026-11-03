@@ -27,6 +27,7 @@ import {
   scheduleServerReboot,
   updateRetentionSettings,
 } from '@/api/client'
+import { purgeChatAttachments } from '@/api/maintenance'
 import { getVpnServiceLabel } from '@/components/settings/settingsLabels'
 import { SettingsCollapsible, SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -173,6 +174,7 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
   const [rebootCancelling, setRebootCancelling] = useState(false)
   const [rebootScheduling, setRebootScheduling] = useState(false)
   const [retention, setRetention] = useState<RetentionSettings | null>(null)
+  const [purgingPhotos, setPurgingPhotos] = useState(false)
   const [retentionSaving, setRetentionSaving] = useState(false)
   const [geoIpStatus, setGeoIpStatus] = useState<GeoIpStatus | null>(null)
   const [geoIpLoading, setGeoIpLoading] = useState(false)
@@ -261,6 +263,27 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
 
   const vpnNodes = nodes
   const selectedRebootNode = vpnNodes.find((n) => n.id === rebootNodeId) ?? null
+
+  const handlePurgeChatPhotos = () => {
+    confirm({
+      title: 'Удалить фото из переписок?',
+      description:
+        'Ссылки на картинки исчезнут из «Сообщений», кэш превью в памяти очистится. Сами фото остаются в Telegram — на сервере панели они не хранятся.',
+      confirmLabel: 'Удалить фото',
+      destructive: true,
+      onConfirm: async () => {
+        setPurgingPhotos(true)
+        try {
+          const result = await purgeChatAttachments()
+          success(result.message)
+        } catch (err) {
+          notifyError(err instanceof ApiError ? err.message : 'Не удалось очистить фото')
+        } finally {
+          setPurgingPhotos(false)
+        }
+      },
+    })
+  }
 
   const handleScheduleReboot = () => {
     if (rebootNodeId == null || pendingReboot) return
@@ -465,6 +488,25 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
               checked={retention.enabled}
               onCheckedChange={(checked) => saveRetentionPatch({ enabled: checked })}
             />
+
+            <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border bg-muted/20 p-3">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">Фото в переписках и чеках</p>
+                <p className="text-xs text-muted-foreground">
+                  На сервере хранятся только идентификаторы Telegram — картинки скачиваются на
+                  просмотр и живут в памяти меньше минуты. Кнопка убирает ссылки из переписок
+                  сразу, не дожидаясь автоочистки.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handlePurgeChatPhotos}
+                disabled={purgingPhotos}
+              >
+                {purgingPhotos ? 'Очистка…' : 'Очистить фото'}
+              </Button>
+            </div>
 
             {retention.enabled && (
               <>

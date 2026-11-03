@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -30,6 +32,8 @@ from app.routers.settings_telegram import (
     update_admin_notify_settings,
     update_telegram_settings,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["maintenance"])
 
@@ -105,6 +109,35 @@ def restart_service(
         client_timezone=get_client_timezone_from_request(request),
     )
     return MessageResponse(message=f"Служба {payload.service_name} перезапущена", detail=output)
+
+
+@router.post("/maintenance/chat-attachments/purge", response_model=MessageResponse)
+def purge_chat_attachments(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Убрать ссылки на фото из переписок и очистить кэш превью.
+
+    Сами картинки лежат в Telegram: на сервере хранится только file_id, байты
+    скачиваются на просмотр и живут в памяти не дольше минуты.
+    """
+    from app.models import UserMessage
+    from app.services.request_receipt_preview import clear_preview_cache
+
+    cleared = (
+        db.query(UserMessage)
+        .filter(UserMessage.attachment_file_id.isnot(None))
+        .update({UserMessage.attachment_file_id: None}, synchronize_session=False)
+    )
+    db.commit()
+    cached = clear_preview_cache()
+    logger.info(
+        "chat attachments purged by %s: %s messages, %s cached previews",
+        admin.username,
+        cleared,
+        cached,
+    )
+    return MessageResponse(message=f"Удалено фото из переписок: {cleared}")
 
 
 @router.get("/maintenance/session-stats")

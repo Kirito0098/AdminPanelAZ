@@ -114,3 +114,11 @@ def get_cached_or_build_preview(db: Session, req: UserAccessRequest) -> bytes:
     data = build_receipt_preview_jpeg(req.receipt_file_id, bot_token)
     _cache_set(key, data)
     return data
+
+
+def clear_preview_cache() -> int:
+    """Очистить кэш превью в памяти; возвращает число удалённых записей."""
+    with _PREVIEW_CACHE_LOCK:
+        count = len(_PREVIEW_CACHE)
+        _PREVIEW_CACHE.clear()
+    return count

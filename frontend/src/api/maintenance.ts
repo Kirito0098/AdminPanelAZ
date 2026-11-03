@@ -375,3 +375,8 @@ export async function checkSystemUpdates() {
 export function downloadBackup(fileName: string) {
   return apiFetchResponse(`/backups/${encodeURIComponent(fileName)}/download`)
 }
+
+/** POST /maintenance/chat-attachments/purge — убрать фото из переписок и очистить кэш превью. */
+export async function purgeChatAttachments() {
+  return apiFetch<{ message: string }>('/maintenance/chat-attachments/purge', { method: 'POST' })
+}
