@@ -557,32 +557,30 @@ export default function CidrPipelineTab({
       {(cidrDb?.history?.length ?? 0) > 0 && (
         <StatusPanel title="История обновлений БД" icon={CloudDownload}>
           <div className="rounded-md border overflow-hidden">
-            <div className="max-h-64 overflow-auto">
-              <Table>
-                <TableHeader className="sticky top-0 bg-muted/95">
-                  <TableRow>
-                    <TableHead>Начало</TableHead>
-                    <TableHead>Окончание</TableHead>
-                    <TableHead>Статус</TableHead>
-                    <TableHead className="text-right">CIDR</TableHead>
-                    <TableHead>Инициатор</TableHead>
+            <Table containerClassName="max-h-64">
+              <TableHeader className="sticky top-0 z-10 bg-muted/95">
+                <TableRow>
+                  <TableHead>Начало</TableHead>
+                  <TableHead>Окончание</TableHead>
+                  <TableHead>Статус</TableHead>
+                  <TableHead className="text-right">CIDR</TableHead>
+                  <TableHead>Инициатор</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {cidrDb!.history!.map((h) => (
+                  <TableRow key={h.id}>
+                    <TableCell className="text-xs">{formatDt(h.started_at)}</TableCell>
+                    <TableCell className="text-xs">{formatDt(h.finished_at)}</TableCell>
+                    <TableCell>
+                      <Badge variant={statusBadgeVariant(h.status)}>{statusLabel(h.status)}</Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-xs">{h.total_cidrs ?? '—'}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">{h.triggered_by ?? '—'}</TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {cidrDb!.history!.map((h) => (
-                    <TableRow key={h.id}>
-                      <TableCell className="text-xs">{formatDt(h.started_at)}</TableCell>
-                      <TableCell className="text-xs">{formatDt(h.finished_at)}</TableCell>
-                      <TableCell>
-                        <Badge variant={statusBadgeVariant(h.status)}>{statusLabel(h.status)}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right font-mono text-xs">{h.total_cidrs ?? '—'}</TableCell>
-                      <TableCell className="text-xs text-muted-foreground">{h.triggered_by ?? '—'}</TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                ))}
+              </TableBody>
+            </Table>
           </div>
         </StatusPanel>
       )}

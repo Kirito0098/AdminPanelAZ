@@ -77,7 +77,7 @@ export default function UsersTable({
     return <div className="py-10 text-center text-sm text-muted-foreground">Нет абонентов</div>
   }
   return (
-    <div className="overflow-x-auto rounded-xl border">
+    <div className="max-h-[70dvh] overflow-auto rounded-xl border">
       <table className="w-full min-w-[960px] border-collapse text-sm">
         <thead className="sticky top-0 z-10 bg-muted/80 backdrop-blur">
           <tr className="border-b text-left text-xs text-muted-foreground">
