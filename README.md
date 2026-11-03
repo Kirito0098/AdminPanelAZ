@@ -71,7 +71,7 @@ wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanel
 sudo bash /tmp/install.sh
 ```
 
-Мастер спросит: тип установки, порты, логин/пароль администратора, ключ node agent (если ставите узел) и каталог бэкапов.
+Мастер задаёт 5 шагов: что ставим, порт панели, сценарий (**Домашняя** по умолчанию или **Коммерческая**), сервисы (модуль Telegram, авто-бэкап) и логин/пароль администратора. Каталог бэкапов — `/var/backups/adminpanelaz`, меняется в панели. Ключ node agent спрашивается только для узла или прокси.
 
 На **RU-прокси** (репозиторий уже на машине, `proxy.sh` установлен вручную):
 
@@ -87,7 +87,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
 - **Настройки → Адрес сайта и HTTPS** — DDNS, домен, Let's Encrypt. **Рекомендуем сразу перейти на HTTPS** — так доступ к панели защищён (шифрование трафика, безопасный вход).
 - **Telegram** — bot token / chat (раздел уже в меню)
 
-Подробнее: [после установки](#-после-установки) · [DDNS](#-бесплатный-адрес-для-панели-ddns) · [Production](#️-production-vds-redis-и-профили)
+Подробнее: [после установки](#-после-установки) · [DDNS](#-бесплатный-адрес-для-панели-ddns) · [Production](#️-production-vds-redis-и-сценарии)
 
 ## 📑 Содержание
 
@@ -101,7 +101,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
 - [📖 Руководства пользователя](#-руководства-пользователя)
 - [🌐 Бесплатный адрес (DDNS)](#-бесплатный-адрес-для-панели-ddns)
 - [🔗 StatusOpenVPN на одном домене](#-statusopenvpn-на-одном-домене)
-- [⚙️ Production: VDS, Redis и профили](#️-production-vds-redis-и-профили)
+- [⚙️ Production: VDS, Redis и сценарии](#️-production-vds-redis-и-сценарии)
 - [🔐 Безопасность](#-безопасность)
 - [💻 Полезные команды](#-полезные-команды-на-сервере)
 - [📝 История изменений](#-история-изменений)
@@ -302,11 +302,11 @@ CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|
 
 Подробно: [docs/nastrojki/set-i-publikaciya.md](docs/nastrojki/set-i-publikaciya.md#совместно-со-statusopenvpn-на-одном-домене)
 
-## ⚙️ Production: VDS, Redis и профили
+## ⚙️ Production: VDS, Redis и сценарии
 
-После установки: профиль **Full**, `UVICORN_WORKERS=1`. Профиль и модули меняются в **Настройки → Разделы панели** ([инструкция](docs/nastrojki/moduli.md)), затем `sudo systemctl restart adminpanelaz`.
+После установки: сценарий из мастера (`SCENARIO_PRESET=home` по умолчанию), `UVICORN_WORKERS=1`. Сценарий и модули меняются в **Настройки → Разделы панели** ([инструкция](docs/nastrojki/moduli.md)), затем `sudo systemctl restart adminpanelaz`.
 
-**Ориентир по RAM** (Full, панель + локальная нода): ~**411 MB** стек (ср. ~148 MB за 7 дней). Для одного VDS с VPN — **1–2 GB**; только панель на Minimal — **1 GB** + swap.
+**Ориентир по RAM** (панель + локальная нода): ~**411 MB** стек (ср. ~148 MB за 7 дней) в сценарии «Коммерческое». Для одного VDS с VPN — **1–2 GB**; только панель в сценарии «Только панель» — **1 GB** + swap.
 
 **Workers > 1:** в `backend/.env` задайте `UVICORN_WORKERS=N` и Redis (`AUTH_RATE_LIMIT_BACKEND=redis`, `API_RATE_LIMIT_BACKEND=redis`, `REDIS_URL=redis://127.0.0.1:6379/0`), затем перезапустите панель. См. [SECURITY.md](SECURITY.md).
 

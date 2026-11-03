@@ -1312,6 +1312,10 @@ apply_wiz_env_settings() {
       fi
     fi
   fi
+  if [[ "$WIZARD_RAN" == true && -n "${WIZ_TELEGRAM_ENABLED:-}" ]] \
+    || _wiz_should_apply WIZ_TELEGRAM_ENABLED; then
+    env_set FEATURE_TELEGRAM_ENABLED "$WIZ_TELEGRAM_ENABLED"
+  fi
   if [[ "${WIZ_NODE_AGENT_MTLS_ENABLED:-false}" == "true" ]] \
     && { [[ "$WIZARD_RAN" == true ]] || _wiz_should_apply WIZ_NODE_AGENT_MTLS_ENABLED; }; then
     env_set NODE_AGENT_MTLS_ENABLED "true"
@@ -1554,10 +1558,6 @@ seed_wizard_db_settings() {
   if ! wiz_config_active || ! install_controller_selected; then
     return 0
   fi
-  if [[ "${WIZ_TELEGRAM_ENABLED:-false}" != true && "${WIZ_AUTO_BACKUP_ENABLED:-true}" != true ]]; then
-    return 0
-  fi
-
   log "Применение настроек мастера в БД (Telegram, auto-backup)..."
   (
     cd "$BACKEND_DIR" || exit 1

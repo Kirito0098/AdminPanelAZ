@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/test-install-scenario-preset.sh
 # Stage 5 §8.2: install/wizard apply scenario presets.
-# Non-interactive panel-only → panel_only; wizard default commercial; legacy env var name rejected.
+# Non-interactive panel-only → panel_only; wizard asks home/commercial (default home); legacy env rejected.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -45,15 +45,35 @@ ENV_FILE="$TMP_DIR/backend/.env" ROOT_DIR="$TMP_DIR" BACKEND_DIR="$TMP_DIR/backe
 grep -qx "SCENARIO_PRESET=panel_only" "$TMP_DIR/backend/.env" || fail "panel_only not applied"
 echo "  OK"
 
-echo "[test] wizard default WIZ_SCENARIO_PRESET is commercial"
-WIZ="$(extract "$ROOT_DIR/scripts/install-wizard.sh" wizard_ask_scenario_preset)"
-out="$(WIZ_INSTALL_TYPE=controller bash -c '
-  set -euo pipefail
-  eval "$1"
-  wizard_ask_scenario_preset
-  echo "$WIZ_SCENARIO_PRESET"
-' bash "$WIZ")"
-[[ "$out" == "commercial" ]] || fail "wizard default: $out"
+echo "[test] wizard asks home/commercial; -y ставит домашний сценарий"
+WIZ="$(extract "$ROOT_DIR/scripts/install-wizard.sh" wiz_prompt_choice wizard_ask_scenario_preset)"
+run_scenario() {
+  local accept="$1" preset="$2" input="${3:-}"
+  ACCEPT="$accept" PRESET="$preset" bash -c '
+    set -euo pipefail
+    wiz_step() { :; }
+    ui_info_box() { :; }
+    print_info() { :; }
+    WIZ_INSTALL_TYPE=controller
+    WIZ_ACCEPT_DEFAULTS="$ACCEPT"
+    WIZ_SCENARIO_PRESET="$PRESET"
+    eval "$1"
+    wizard_ask_scenario_preset
+    echo "RESULT $WIZ_SCENARIO_PRESET"
+  ' bash "$WIZ" <<<"$input" | tail -1
+}
+
+[[ "$(run_scenario true "")" == "RESULT home" ]] || fail "дефолт: $(run_scenario true "")"
+echo "  OK"
+
+echo "[test] интерактивно: ответ 2 — коммерческий, Enter — домашний"
+[[ "$(run_scenario false "" 2)" == "RESULT commercial" ]] || fail "ответ 2: $(run_scenario false "" 2)"
+[[ "$(run_scenario false "" "")" == "RESULT home" ]] || fail "Enter: $(run_scenario false "" "")"
+echo "  OK"
+
+echo "[test] WIZ_SCENARIO_PRESET из env: commercial — вариант по умолчанию, panel_only — без вопроса"
+[[ "$(run_scenario true commercial)" == "RESULT commercial" ]] || fail "env commercial"
+[[ "$(run_scenario true panel_only)" == "RESULT panel_only" ]] || fail "env panel_only"
 echo "  OK"
 
 echo "[test] install.sh still references apply-scenario-preset.py (not resource-profile)"
@@ -80,7 +100,7 @@ grep -q 'wizard_ask_resource_profile' "$ROOT_DIR/scripts/install-wizard.sh" \
 echo "  OK"
 
 echo "[test] wizard summary shows the scenario row"
-grep -q 'ui_summary_row "Сценарий" "$WIZ_SCENARIO_PRESET"' "$ROOT_DIR/scripts/install-wizard.sh" \
+grep -q 'ui_summary_row "Сценарий" "$scenario_label ($WIZ_SCENARIO_PRESET)"' "$ROOT_DIR/scripts/install-wizard.sh" \
   || fail "wizard summary row for scenario missing"
 echo "  OK"
 

@@ -48,7 +48,7 @@ WIZ_PROXY_AGENT_MTLS_ENABLED="${WIZ_PROXY_AGENT_MTLS_ENABLED:-false}"
 WIZ_AUTH_RATE_LIMIT_BACKEND="${WIZ_AUTH_RATE_LIMIT_BACKEND:-memory}"
 WIZ_API_RATE_LIMIT_BACKEND="${WIZ_API_RATE_LIMIT_BACKEND:-memory}"
 WIZ_REDIS_URL="${WIZ_REDIS_URL:-}"
-WIZ_SCENARIO_PRESET="${WIZ_SCENARIO_PRESET:-commercial}"
+WIZ_SCENARIO_PRESET="${WIZ_SCENARIO_PRESET:-home}"
 WIZ_NODE_AGENT_MTLS_ENABLED="${WIZ_NODE_AGENT_MTLS_ENABLED:-false}"
 WIZ_NODE_API_KEY_ROTATION_DAYS="${WIZ_NODE_API_KEY_ROTATION_DAYS:-0}"
 WIZ_RUN_MODE="${WIZ_RUN_MODE:-systemd}"
@@ -92,8 +92,8 @@ wiz_set_total_steps() {
       WIZ_TOTAL_STEPS=3
       ;;
     controller)
-      # тип → сеть → admin → paths (DDNS — в панели)
-      WIZ_TOTAL_STEPS=4
+      # тип → сеть → сценарий → сервисы → админ
+      WIZ_TOTAL_STEPS=5
       ;;
     *)
       # тип → сеть → admin → node agent → paths
@@ -449,6 +449,7 @@ wizard_configure_antizapret() {
 wizard_ask_install_type() {
   WIZ_CURRENT_STEP=0
   WIZ_TOTAL_STEPS="?"
+  wiz_set_total_steps
   wiz_step "Тип установки"
   # node / proxy приходят только из --node-only / --proxy-only (или WIZ_INSTALL_TYPE в env) — не переспрашиваем.
   case "$WIZ_INSTALL_TYPE" in
@@ -467,26 +468,23 @@ wizard_ask_install_type() {
       return 0
       ;;
   esac
-  ui_info_box "Что именно ставим на этот сервер" \
-    "1) Только панель — веб-интерфейс управления; VPN-серверы (AntiZapret)" \
-    "   работают на других машинах и подключаются как узлы." \
-    "2) Панель + локальный AntiZapret — этот сервер сразу и панель, и VPN" \
-    "   (AntiZapret уже должен быть установлен в /root/antizapret)." \
-    "3) Только Node agent — это VPN-сервер (узел); панель управляет им с" \
-    "   другого хоста." \
-    "4) Только proxy_agent — RU-прокси (порт 9101); proxy.sh ставится отдельно." \
-    "Не уверены? Один сервер с уже установленным AntiZapret — выберите 2."
+  ui_info_box "Что ставим на этот сервер" \
+    "1) Панель — веб-интерфейс; VPN работает на других серверах и подключается как узлы." \
+    "2) Панель + VPN здесь же — AntiZapret уже установлен в /root/antizapret." \
+    "3) Только VPN-узел — агент для панели с другого сервера." \
+    "4) Только RU-прокси — proxy_agent; proxy.sh ставится отдельно." \
+    "Не уверены? Один сервер с установленным AntiZapret — вариант 2."
   echo
   if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
     WIZ_INSTALL_TYPE="controller"
     WIZ_REQUIRE_ANTIZAPRET=true
-    echo "Какой компонент устанавливаем? [2]: Панель + локальный AntiZapret"
+    echo "Что устанавливаем? [2]: Панель + VPN на этом сервере"
   else
-    wiz_prompt_choice "Какой компонент устанавливаем?" 2 \
-      "Только панель (управление удалёнными узлами, без локального AntiZapret)" \
-      "Панель + локальный AntiZapret (AntiZapret уже установлен в /root/antizapret)" \
-      "Только Node agent (удалённый VPN-сервер)" \
-      "Только proxy_agent (RU-прокси, без панели)"
+    wiz_prompt_choice "Что устанавливаем?" 2 \
+      "Панель (VPN на других серверах)" \
+      "Панель + VPN на этом сервере" \
+      "Только VPN-узел (агент)" \
+      "Только RU-прокси (агент)"
 
     case "$REPLY" in
       1)
@@ -527,11 +525,10 @@ wizard_ask_network() {
     return 0
   fi
 
-  wiz_step "Сеть и порты"
+  wiz_step "Сеть"
   ui_info_box "Как устроен доступ" \
-    "Панель слушает на всех интерфейсах (0.0.0.0) по HTTP — сразу доступна по IP:порту." \
-    "Домен и HTTPS настраиваются позже в панели: Настройки → Адрес сайта и HTTPS." \
-    "CORS и подсказки URL собираются автоматически (localhost + IP сервера)."
+    "Сразу после установки панель откроется по HTTP: http://IP:порт." \
+    "HTTPS, домен и DDNS — позже в панели: Настройки → Адрес сайта и HTTPS."
   echo
   # WIZ_SERVER_ADDRESS / ALLOW_INTERNAL_NODES интерактивно не спрашиваем.
   # Env-override WIZ_SERVER_ADDRESS учитывается в wizard_derive_cors_origins.
@@ -540,7 +537,7 @@ wizard_ask_network() {
   if [[ "$WIZ_ALLOW_INTERNAL_NODES" != "true" ]]; then
     WIZ_ALLOW_INTERNAL_NODES="false"
   fi
-  wiz_prompt_port "Порт панели (доступ по IP:порт)" "$WIZ_BACKEND_PORT" "Панель" "any"
+  wiz_prompt_port "Порт панели" "$WIZ_BACKEND_PORT" "Панель" "any"
   WIZ_BACKEND_PORT="$REPLY"
   # HOST задаёт wizard_apply_default_publish_http_direct (не форсируем 127.0.0.1)
 
@@ -651,11 +648,9 @@ wizard_ask_admin() {
   fi
 
   wiz_step "Администратор"
-  wiz_prompt "Имя администратора по умолчанию" "$WIZ_ADMIN_USERNAME"
+  wiz_prompt "Логин администратора" "$WIZ_ADMIN_USERNAME"
   WIZ_ADMIN_USERNAME="$REPLY"
 
-  echo "Пароль администратора (Enter — сгенерировать случайный):"
-  echo "  Политика (production): минимум 8 символов, буквы и цифры; не используйте admin/admin."
   if [[ "$WIZ_ACCEPT_DEFAULTS" == true ]]; then
     if admin_password_is_weak "$WIZ_ADMIN_PASSWORD" "$WIZ_ADMIN_USERNAME"; then
       if [[ -n "$WIZ_ADMIN_PASSWORD" ]]; then
@@ -668,8 +663,9 @@ wizard_ask_admin() {
       echo "  [используется заданный пароль]"
     fi
   else
+    echo "  Минимум 8 символов, буквы и цифры; admin/admin и логин не подходят."
     while true; do
-      read -r -s -p "Пароль (пусто = сгенерировать случайный): " _admin_pw
+      read -r -s -p "Пароль администратора (Enter — сгенерировать): " _admin_pw
       echo
       if [[ -z "$_admin_pw" ]]; then
         WIZ_ADMIN_PASSWORD="$(generate_admin_password)"
@@ -708,9 +704,8 @@ wizard_ask_node_agent() {
   wiz_step "Node agent"
   ui_info_box "Что это" \
     "Node agent — служба на VPN-сервере, которой управляет панель." \
-    "API-ключ (NODE_AGENT_API_KEY) — общий секрет: панель предъявляет его" \
-    "узлу при подключении. Тот же ключ нужно указать в панели для этого узла." \
-    "Проще всего сгенерировать ключ автоматически — мы покажем его в конце."
+    "API-ключ — общий секрет: панель предъявляет его узлу, тот же ключ указывается в панели." \
+    "Проще сгенерировать ключ автоматически — покажем его в конце установки."
   echo
   if [[ "$WIZ_INSTALL_TYPE" == "node" ]]; then
     print_info "Порт node agent: ${WIZ_NODE_AGENT_PORT} (задан на шаге сети)"
@@ -739,8 +734,8 @@ wizard_ask_node_agent() {
     fi
   fi
 
-  print_info "Ограничьте доступ к порту ${WIZ_NODE_AGENT_PORT} firewall: только IP панели управления."
-  wiz_prompt "Разрешённые IP панели (NODE_AGENT_ALLOWED_IPS, CIDR через запятую, пусто = без ограничения)" ""
+  print_info "Порт ${WIZ_NODE_AGENT_PORT} лучше закрыть firewall: пускать только IP панели."
+  wiz_prompt "IP панели для доступа к агенту (через запятую, пусто — без ограничения)" ""
   WIZ_NODE_AGENT_ALLOWED_IPS="$REPLY"
   echo
 }
@@ -752,9 +747,9 @@ wizard_ask_proxy_agent() {
 
   wiz_step "Proxy agent"
   ui_info_box "Что это" \
-    "proxy_agent — служба на RU-прокси (порт 9101), которой управляет панель." \
-    "API-ключ нужно указать в панели при добавлении узла типа «Прокси»." \
-    "Скрипт proxy.sh AntiZapret этим установщиком не ставится."
+    "proxy_agent — служба на RU-прокси, которой управляет панель." \
+    "API-ключ укажете в панели при добавлении узла типа «Прокси»." \
+    "Скрипт proxy.sh AntiZapret этот установщик не ставит."
   echo
   print_info "Порт proxy_agent: ${WIZ_PROXY_AGENT_PORT} (задан на шаге сети)"
 
@@ -781,8 +776,8 @@ wizard_ask_proxy_agent() {
     fi
   fi
 
-  print_info "Ограничьте доступ к порту ${WIZ_PROXY_AGENT_PORT} firewall: только IP панели управления."
-  wiz_prompt "Разрешённые IP панели (PROXY_AGENT_ALLOWED_IPS, CIDR через запятую, пусто = без ограничения)" ""
+  print_info "Порт ${WIZ_PROXY_AGENT_PORT} лучше закрыть firewall: пускать только IP панели."
+  wiz_prompt "IP панели для доступа к агенту (через запятую, пусто — без ограничения)" ""
   WIZ_PROXY_AGENT_ALLOWED_IPS="$REPLY"
   echo
 }
@@ -803,14 +798,82 @@ wizard_ask_services() {
   fi
 }
 
-# Сценарий всегда commercial (apply-scenario-preset вызывается из install.sh).
+# Сценарий использования панели. panel_only — технический пресет, только в UI.
+# Env WIZ_SCENARIO_PRESET=commercial задаёт вариант по умолчанию, panel_only пропускает вопрос.
 wizard_ask_scenario_preset() {
   if [[ "$WIZ_INSTALL_TYPE" == "node" || "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
     return 0
   fi
-  WIZ_SCENARIO_PRESET="commercial"
+  if [[ "${WIZ_SCENARIO_PRESET:-}" == "panel_only" ]]; then
+    print_info "Сценарий задан извне: panel_only (вопрос пропущен)"
+    return 0
+  fi
+
+  wiz_step "Сценарий"
+  ui_info_box "Для чего эта панель" \
+    "Домашняя — мониторинг, узлы и конфиги; без абонентов, портала и unlock-кодов." \
+    "Коммерческая — плюс абоненты, клиентский портал, unlock-коды, лимиты трафика," \
+    "NOC-отчёты и CIDR по расписанию (ключевые модули нельзя выключить, пока сценарий активен)." \
+    "Позже меняется в Настройках → Разделы панели."
+  echo
+
+  local default_choice=1
+  if [[ "${WIZ_SCENARIO_PRESET:-home}" == "commercial" ]]; then
+    default_choice=2
+  fi
+  wiz_prompt_choice "Сценарий" "$default_choice" \
+    "Домашняя — для себя, семьи и друзей" \
+    "Коммерческая — раздача доступа абонентам"
+
+  if [[ "$REPLY" == "2" ]]; then
+    WIZ_SCENARIO_PRESET="commercial"
+  else
+    WIZ_SCENARIO_PRESET="home"
+  fi
   WIZ_CIDR_DB_REFRESH_ENABLED="true"
   WIZ_TRAFFIC_SYNC_ENABLED="true"
+  echo
+}
+
+# Модуль Telegram и авто-бэкап: включаем/выключаем, настройка — в панели.
+wizard_ask_extras() {
+  if [[ "$WIZ_INSTALL_TYPE" == "node" || "$WIZ_INSTALL_TYPE" == "proxy" ]]; then
+    return 0
+  fi
+
+  wiz_step "Сервисы"
+  wiz_prompt_yesno "Включить модуль Telegram? (бот и уведомления настроите в панели)" "y"
+  if [[ "$REPLY" == "y" ]]; then
+    WIZ_TELEGRAM_ENABLED="true"
+  else
+    WIZ_TELEGRAM_ENABLED="false"
+  fi
+
+  wiz_prompt_choice "Авто-бэкап панели" 1 \
+    "Включить, каждые 7 дней" \
+    "Включить, свой срок" \
+    "Выключить"
+  case "$REPLY" in
+    2)
+      while true; do
+        wiz_prompt "Раз в сколько дней? (1–90)" "7"
+        if [[ "$REPLY" =~ ^[0-9]+$ ]] && (( REPLY >= 1 && REPLY <= 90 )); then
+          break
+        fi
+        echo "Введите число от 1 до 90."
+      done
+      WIZ_AUTO_BACKUP_ENABLED="true"
+      WIZ_AUTO_BACKUP_DAYS="$REPLY"
+      ;;
+    3)
+      WIZ_AUTO_BACKUP_ENABLED="false"
+      ;;
+    *)
+      WIZ_AUTO_BACKUP_ENABLED="true"
+      WIZ_AUTO_BACKUP_DAYS="7"
+      ;;
+  esac
+  echo
 }
 
 # Опциональные функции (Telegram/CIDR/backup) — не спрашиваем в install.
@@ -836,10 +899,7 @@ wizard_ask_paths() {
   fi
 
   if [[ "$WIZ_INSTALL_TYPE" != "node" && "$WIZ_INSTALL_TYPE" != "proxy" ]]; then
-    wiz_step "Пути"
-    wiz_prompt "Каталог бэкапов (BACKUP_ROOT)" "$WIZ_BACKUP_ROOT"
-    WIZ_BACKUP_ROOT="$REPLY"
-    echo
+    WIZ_BACKUP_ROOT="${WIZ_BACKUP_ROOT:-/var/backups/adminpanelaz}"
   fi
 }
 
@@ -979,11 +1039,28 @@ wizard_show_summary() {
     ui_summary_row "Режим (APP_ENV)" "$WIZ_APP_ENV"
 
     wiz_summary_section "Производительность и задачи"
+    local scenario_label backup_label telegram_label
+    case "$WIZ_SCENARIO_PRESET" in
+      commercial) scenario_label="Коммерческая" ;;
+      panel_only) scenario_label="Только панель" ;;
+      *) scenario_label="Домашняя" ;;
+    esac
+    if [[ "$WIZ_AUTO_BACKUP_ENABLED" == "true" ]]; then
+      backup_label="каждые ${WIZ_AUTO_BACKUP_DAYS} дн."
+    else
+      backup_label="выключен"
+    fi
+    if [[ "$WIZ_TELEGRAM_ENABLED" == "true" ]]; then
+      telegram_label="модуль включён, настройка в панели"
+    else
+      telegram_label="модуль выключен"
+    fi
     ui_summary_row "Uvicorn workers" "$WIZ_UVICORN_WORKERS"
-    ui_summary_row "Сценарий" "$WIZ_SCENARIO_PRESET"
+    ui_summary_row "Сценарий" "$scenario_label ($WIZ_SCENARIO_PRESET)"
+    ui_summary_row "Telegram" "$telegram_label"
     ui_summary_row "Обновление CIDR" "$WIZ_CIDR_DB_REFRESH_ENABLED"
     ui_summary_row "Сбор трафика" "$WIZ_TRAFFIC_SYNC_ENABLED"
-    ui_summary_row "Авто-бэкап" "$WIZ_AUTO_BACKUP_ENABLED"
+    ui_summary_row "Авто-бэкап" "$backup_label"
     ui_summary_row "Каталог бэкапов" "$WIZ_BACKUP_ROOT"
   fi
 
@@ -1053,13 +1130,14 @@ run_install_wizard() {
   wizard_ask_ddns  # только env-override; интерактивно — none (DDNS в UI)
   wizard_ask_app_env
   wizard_apply_default_publish_http_direct
+  wizard_ask_scenario_preset
+  wizard_ask_extras
   wizard_ask_admin
   wizard_ask_node_agent
   wizard_ask_proxy_agent
   wizard_ask_services
   wizard_ask_security_hardening
-  wizard_ask_scenario_preset
-  # optional (Telegram/CIDR/backup prompts) и firewall — не спрашиваем
+  # CIDR/traffic задаёт сценарий; firewall из мастера не настраиваем
   WIZ_CONFIGURE_FIREWALL="false"
   wizard_ask_paths
   wizard_show_summary
