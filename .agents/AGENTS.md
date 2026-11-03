@@ -1,6 +1,6 @@
 # AdminPanelAZ — правила для агента
 
-Источник правды по процессу — **always-on rules** в `.cursor/rules/` (читаются Cursor автоматически). Этот файл — краткая карта для агентов, которые смотрят в `.agents/`.
+Источник правды по процессу — **always-on rules** в `.cursor/rules/` (агент читает их как обычные файлы). Этот файл — краткая карта для агентов, которые смотрят в `.agents/`.
 
 ## Обязательно до работы
 
@@ -28,11 +28,11 @@
 
 ## Плагины и опциональное (не в git)
 
-Ставятся локально — см. [`CONTRIBUTING.md`](../CONTRIBUTING.md):
+Агент — **DSH**; правила и маршрутизация скиллов описаны в корневом [`AGENTS.md`](../AGENTS.md).
+Профиль DSH, скиллы и MCP-серверы живут на машине оператора (`~/.dsh/`) и в репозиторий не попадают.
 
-- Marketplace: **superpowers**, **pstack** (`/setup-pstack` один раз)
-- По желанию: `site-architecture`, cyber-skills, **impeccable** (дизайн UI — если нужен)
-- MCP: скопировать `.cursor/mcp.json.example` → `.cursor/mcp.json` и поправить пути/токены (**не коммитить**)
+- Marketplace Cursor (`superpowers`, `pstack`, `site-architecture`, `impeccable`) больше не используется — Cursor удалён.
+- MCP: серверы подключены через `dsh-mcp-client` в профиле DSH, а не через `.cursor/mcp.json`.
 
 ## Тесты
 
