@@ -67,6 +67,7 @@ import type {
   BulkNodesAction,
 } from '@/types'
 
+import AccessCooldownDialog from '@/components/users/AccessCooldownDialog'
 import { UsersFilters } from '@/components/users/UsersFilters'
 import UsersTable from '@/components/users/UsersTable'
 import UsersCardViewSettings from '@/components/users/UsersCardViewSettings'
@@ -144,6 +145,7 @@ export default function UsersPage() {
   const [requestsOpen, setRequestsOpen] = useState(false)
   /** Заявка, которую одобряем через диалог «Создание пользователя». */
   const [approveReq, setApproveReq] = useState<AccessRequestResponse | null>(null)
+  const [cooldownOpen, setCooldownOpen] = useState(false)
   const [requestsCount, setRequestsCount] = useState(0)
   const [focusRequestId, setFocusRequestId] = useState<number | null>(null)
   /** Уже обработанный deep-link (?requests=1 / ?request=<id>), чтобы не открывать диалог циклично. */
@@ -588,6 +590,16 @@ export default function UsersPage() {
                 label={requestsCount > 0 ? `Заявки (${requestsCount})` : 'Заявки'}
                 shortLabel="Заявки"
                 onClick={() => setRequestsOpen(true)}
+              />
+            )}
+            {provisioningOn && (
+              <ToolbarButton
+                variant="outline"
+                className="bg-card/80"
+                icon={<CalendarClock size={16} />}
+                label="Кулдаун отказов"
+                shortLabel="Кулдаун"
+                onClick={() => setCooldownOpen(true)}
               />
             )}
             <ToolbarButton
@@ -1035,6 +1047,8 @@ export default function UsersPage() {
           onCreated={() => void reloadUsers()}
         />
       )}
+
+      <AccessCooldownDialog open={cooldownOpen} onOpenChange={setCooldownOpen} />
 
       {provisioningOn && (
         <AccessRequestsDialog

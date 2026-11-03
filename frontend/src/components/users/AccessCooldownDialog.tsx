@@ -1,0 +1,143 @@
+import { useCallback, useEffect, useState } from 'react'
+import { ApiError } from '@/api/client'
+import {
+  getRequestsCooldown,
+  releaseRequestsCooldown,
+  updateRequestsCooldown,
+  type CooldownSettings,
+} from '@/api/users'
+import AppDialog from '@/components/shared/AppDialog'
+import Spinner from '@/components/ui/Spinner'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { useNotifications } from '@/context/NotificationContext'
+
+/** Настройка кулдауна после отказа и список тех, с кого его можно снять. */
+export default function AccessCooldownDialog({
+  open,
+  onOpenChange,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { success, error: notifyError } = useNotifications()
+  const [data, setData] = useState<CooldownSettings | null>(null)
+  const [hours, setHours] = useState('24')
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      const next = await getRequestsCooldown()
+      setData(next)
+      setHours(String(next.hours))
+    } catch {
+      notifyError('Не удалось загрузить настройки кулдауна')
+    } finally {
+      setLoading(false)
+    }
+  }, [notifyError])
+
+  useEffect(() => {
+    if (open) void load()
+  }, [open, load])
+
+  const save = async () => {
+    const value = Number.parseInt(hours, 10)
+    if (!Number.isFinite(value) || value < 0 || value > 720) {
+      notifyError('Кулдаун: целое число от 0 до 720 часов')
+      return
+    }
+    setSaving(true)
+    try {
+      setData(await updateRequestsCooldown(value))
+      success('Настройка кулдауна сохранена')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось сохранить кулдаун')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const release = async (telegramId: string) => {
+    try {
+      const result = await releaseRequestsCooldown(telegramId)
+      success(result.message)
+      await load()
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось снять кулдаун')
+    }
+  }
+
+  return (
+    <AppDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Кулдаун отказов"
+      description="Сколько часов после отказа нельзя подать заявку повторно и кто сейчас в кулдауне"
+      size="md"
+    >
+      {loading && !data ? (
+        <Spinner label="Загрузка…" />
+      ) : (
+        <div className="space-y-4">
+          <div className="flex flex-wrap items-end justify-between gap-3 rounded-lg border bg-muted/20 p-3">
+            <div>
+              <p className="text-sm font-medium">Кулдаун после отказа</p>
+              <p className="text-xs text-muted-foreground">
+                Часов, в течение которых повторная заявка отклоняется. 0 — выключен.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={0}
+                max={720}
+                className="h-9 w-20"
+                value={hours}
+                onChange={(event) => setHours(event.target.value)}
+                aria-label="Часы кулдауна"
+              />
+              <Button size="sm" onClick={() => void save()} disabled={saving}>
+                {saving ? '…' : 'Сохранить'}
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Сейчас в кулдауне</p>
+            {data && data.blocked.length > 0 ? (
+              <div className="flex flex-col gap-1">
+                {data.blocked.map((item) => (
+                  <div
+                    key={item.telegram_id}
+                    className="flex items-center justify-between gap-3 rounded-lg border border-border/60 px-3 py-2 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{item.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {item.request_type} · до {new Date(item.until).toLocaleString('ru-RU')}
+                      </p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void release(item.telegram_id)}
+                    >
+                      Снять
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Никого нет — повторную заявку никто не ждёт.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+    </AppDialog>
+  )
+}
