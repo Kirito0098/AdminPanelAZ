@@ -539,7 +539,7 @@ export default function AccessRequestsDialog({
             if (!next) setRejectTarget(null)
           }}
           title="Отклонить заявку"
-          description="Причина необязательна: абонент получит нейтральный ответ"
+          description="Причина уйдёт абоненту в Telegram; без неё он получит нейтральный ответ"
           size="md"
           footer={
             <>

@@ -1017,12 +1017,17 @@ def reject_request(
             db.add(TelegramRequestBan(telegram_id=request.telegram_id, banned_by_id=admin.id, note=reason))
             db.commit()
 
-    # Requester learns only the neutral fact (E1 — reason stays admin-only).
+    # Причину отказа, если админ её указал, показываем абоненту; без неё — нейтральный ответ.
+    reason_text = (reason or "").strip()
+    if reason_text:
+        reject_text = f"❌ <b>Заявку отклонили</b>\n\nПричина: {escape(reason_text)}"
+    else:
+        reject_text = "Вашу заявку рассмотрели администратором."
     bot_token = _bot_token(db)
     if bot_token and request.telegram_id:
         try:
             _run_async(
-                send_message(bot_token, str(request.telegram_id), "Вашу заявку рассмотрели администратором.")
+                send_message(bot_token, str(request.telegram_id), reject_text)
             )
         except Exception as exc:  # уведомление не ломает решение
             logger.warning("requester reject notify to %s failed: %s", request.telegram_id, exc)
