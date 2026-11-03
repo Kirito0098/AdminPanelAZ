@@ -183,6 +183,27 @@ def test_actor_does_not_get_own_action_unread(env):
     assert second_unread == 5
 
 
+def test_unread_only_skips_hidden_and_snoozed(env):
+    """Колокол не показывает скрытое и отложенное: фильтр живёт в SQL, а не только в ленте."""
+    db, first, _ = env
+    set_notification_state(db, first, 1, snoozed_until=datetime.utcnow() + timedelta(hours=2))
+    set_notification_state(db, first, 2, hidden=True)
+    set_notification_state(db, first, 3, read=True)
+
+    items, unread, _ = list_notifications_for_admin(db, first, unread_only=True, limit=10)
+
+    assert items == []
+    assert unread == 0
+
+    # Отложенное «до вчера» снова непрочитано: проверяем границу сравнения datetime в SQL,
+    # иначе колокол молча терял бы такие записи (Python-фильтр может только отбросить).
+    set_notification_state(db, first, 1, snoozed_until=datetime.utcnow() - timedelta(minutes=1))
+    items, unread, _ = list_notifications_for_admin(db, first, unread_only=True, limit=10)
+
+    assert [item["id"] for item in items] == [1]
+    assert unread == 1
+
+
 def test_deferred_settings_result_stays_new_for_author(env):
     """Результат отложенной перезагрузки — не «своё действие»: провал должен дойти автору."""
     db, first, _ = env

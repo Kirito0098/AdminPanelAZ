@@ -13,8 +13,8 @@ import re
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import desc, func
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, desc, func, or_
+from sqlalchemy.orm import Session, aliased
 
 from app.models import (
     AdminPanelNotification,
@@ -424,14 +424,28 @@ def list_notifications_for_admin(
     if before_id is not None:
         query = query.filter(AdminPanelNotification.id < before_id)
     if unread_only:
-        # Непрочитанное всегда новее водяного знака (см. is_unread) — узкий префильтр,
-        # чтобы расширенное окно ниже не тянуло всю прочитанную ленту.
-        query = query.filter(AdminPanelNotification.id > last_read)
+        # «Непрочитано» считается в Python (is_unread), но колоколу нужны ровно пять строк:
+        # отдаём фильтр в SQL по тем же правилам — водяной знак, прочтение, скрытие, отложенное.
+        # Состояние уникально по (user_id, notification_id), поэтому join не размножает строки.
+        state_row = aliased(AdminPanelNotificationState)
+        query = (
+            query.outerjoin(
+                state_row,
+                and_(
+                    state_row.notification_id == AdminPanelNotification.id,
+                    state_row.user_id == admin.id,
+                ),
+            )
+            .filter(AdminPanelNotification.id > last_read)
+            .filter(state_row.read_at.is_(None))
+            .filter(state_row.hidden_at.is_(None))
+            .filter(or_(state_row.snoozed_until.is_(None), state_row.snoozed_until <= now))
+        )
 
     needle = (q or "").strip().casefold()
-    # unread_only и поиск отсеиваются в Python, поэтому окно шире страницы: иначе верхние
-    # прочитанные съедают слоты и страница возвращается короче запрошенной.
-    rows = query.limit(SEARCH_WINDOW if (needle or unread_only) else limit).all()
+    # Поиск отсеивается в Python: LIKE в SQLite не сворачивает регистр кириллицы. Поэтому
+    # окно шире страницы, иначе верхние неподходящие строки съедают слоты.
+    rows = query.limit(SEARCH_WINDOW if needle else limit).all()
     states = _states_by_notification(db, admin.id, [row.id for row in rows])
 
     items: list[dict[str, object]] = []

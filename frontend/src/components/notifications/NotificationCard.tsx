@@ -14,7 +14,6 @@ import { cn } from '@/lib/utils'
 import type { NotificationItem } from '@/api/notifications'
 import { CATEGORY_ICON, categoryLabel } from './labels'
 import { pathForNotification } from './paths'
-import { isUnread } from './state'
 import { SNOOZE_PRESETS, formatRelative, isSnoozed, type SnoozePreset } from './time'
 
 interface NotificationCardProps {
@@ -45,7 +44,8 @@ export default function NotificationCard({
   const navigate = useNavigate()
   const Icon = CATEGORY_ICON[item.category] ?? Bell
   const snoozed = isSnoozed(item.state.snoozed_until)
-  const unread = isUnread(item)
+  // То же правило, что is_unread на сервере: не прочитано, не скрыто и не отложено.
+  const unread = !item.state.read && !item.state.hidden && !snoozed
   const target = pathForNotification(item)
   const dimmed = snoozed || item.state.hidden
   const actionable = target !== null || unread

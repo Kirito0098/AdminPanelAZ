@@ -727,7 +727,8 @@ export default function LogsPage() {
     },
     1000,
     {
-      enabled: autoRefresh,
+      // На вкладке «Уведомления» плашки автообновления нет — логи там не нужны.
+      enabled: autoRefresh && activeTab !== 'notifications',
       onBecomeVisible: () => {
         setCountdown(REFRESH_INTERVAL)
         void load(false, false)
@@ -742,6 +743,7 @@ export default function LogsPage() {
       skipTabFetchRef.current = false
       return
     }
+    if (activeTab === 'notifications') return
     void load(false, false, activeTab)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on explicit tab switches
   }, [activeTab])

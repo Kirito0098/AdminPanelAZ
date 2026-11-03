@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BellOff, Check, EyeOff, Search, Settings2 } from 'lucide-react'
+import { AlertTriangle, BellOff, Check, EyeOff, Search, Settings2 } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -123,6 +123,11 @@ export default function NotificationsFeed() {
               >
                 Скрытые
               </Button>
+              {counts.attention > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-1 text-[11px] font-medium text-destructive xl:hidden">
+                  <AlertTriangle size={11} /> {counts.attention} требует внимания
+                </span>
+              )}
               <Button
                 size="sm"
                 variant="outline"
@@ -166,6 +171,13 @@ export default function NotificationsFeed() {
                 </button>
               )
             })}
+            <NavLink
+              to="/settings/notifications"
+              className="ml-auto inline-flex items-center gap-1 self-center text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <Settings2 size={12} />
+              Настройки
+            </NavLink>
           </div>
         </div>
 
