@@ -367,7 +367,7 @@ def test_public_portal_redeem_returns_bad_request_for_redeem_errors(public_clien
         patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
         patch(
             "app.routers.public_portal.redeem_public_portal_code",
-            side_effect=ValueError("Этот unlock-ключ уже использован вами"),
+            side_effect=ValueError("Этот ключ вы уже активировали."),
         ),
     ):
         feats.return_value.is_enabled.side_effect = lambda key: True
@@ -379,7 +379,7 @@ def test_public_portal_redeem_returns_bad_request_for_redeem_errors(public_clien
         )
 
     assert resp.status_code == 400
-    assert resp.json()["detail"] == "Этот unlock-ключ уже использован вами"
+    assert resp.json()["detail"] == "Этот ключ вы уже активировали."
     rl.consume.assert_called_once_with("198.51.100.1")
 
 
@@ -562,7 +562,7 @@ def test_redeem_public_portal_code_user_retries_next_owned_client():
         patch("app.services.unlock_codes.redeem_unlock_code") as redeem,
     ):
         redeem.side_effect = [
-            ValueError("Нет пересечения протоколов клиента и unlock-ключа"),
+            ValueError(unlock_codes._REDEEM_PROTOCOL_MISMATCH_MESSAGE),
             {
                 "grant_days": 7,
                 "protocols_applied": ["openvpn"],

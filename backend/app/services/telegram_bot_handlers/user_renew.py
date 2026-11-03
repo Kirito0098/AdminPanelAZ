@@ -15,7 +15,11 @@ _awaiting_code: set[str] = set()
 
 async def start_redeem_prompt(bot_token: str, chat_id: str) -> None:
     _awaiting_code.add(str(chat_id))
-    await send_message(bot_token, chat_id, "Отправьте unlock-ключ одним сообщением.")
+    await send_message(
+        bot_token,
+        chat_id,
+        "Пришлите ключ продления одним сообщением. Ключ выдаёт администратор; передумали — /start.",
+    )
 
 
 async def try_handle_code_message(
@@ -36,12 +40,20 @@ async def try_handle_code_message(
         .first()
     )
     if user is None:
-        await send_message(bot_token, tid, "Аккаунт не найден.")
+        await send_message(
+            bot_token,
+            tid,
+            "Аккаунт не найден. Нажмите «Запросить доступ» или напишите администратору.",
+        )
         return True
     try:
         result = redeem_unlock_code_for_user(db, code=text.strip(), user=user)
         days = result.get("grant_days") or 0
-        await send_message(bot_token, tid, f"Ключ принят. Доступ продлён на {days} дн.")
+        await send_message(
+            bot_token,
+            tid,
+            f"✅ Ключ принят. Доступ продлён на {days} дн. Срок и конфиги — в Mini App или на портале.",
+        )
     except ValueError as exc:
         await send_message(bot_token, tid, str(exc))
     return True

@@ -92,7 +92,10 @@ def release_telegram_of_pending_deletion(
 def redeem_link_code(db: Session, code: str, telegram_id: str) -> tuple[bool, str, User | None]:
     normalized = (code or "").strip().lower()
     if not normalized:
-        return False, "Укажите код: /link &lt;код&gt;", None
+        return False, (
+            "Пришлите код привязки: <code>/link КОД</code>. "
+            "Код — в панели: «Мой профиль» → Telegram."
+        ), None
 
     codes = _purge_expired(_load_codes(db))
     meta = codes.pop(normalized, None)
@@ -100,30 +103,41 @@ def redeem_link_code(db: Session, code: str, telegram_id: str) -> tuple[bool, st
 
     if not meta:
         db.commit()
-        return False, "Код не найден или истёк. Получите новый в панели: Мой профиль.", None
+        return False, (
+            "Код не найден или истёк. Получите новый: панель → «Мой профиль» → Telegram."
+        ), None
 
     user_id = int(meta["user_id"])
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         db.commit()
-        return False, "Пользователь панели не найден.", None
+        return False, "Код верный, но аккаунт панели не найден. Напишите администратору.", None
 
     existing = db.query(User).filter(User.telegram_id == telegram_id, User.id != user.id).first()
     if existing and existing.provision_state != "pending_deletion":
         db.commit()
-        return False, "Этот Telegram ID уже привязан к другому пользователю.", None
+        return False, (
+            "Этот Telegram уже привязан к другому аккаунту панели. "
+            "Отвяжите его там или напишите администратору."
+        ), None
 
     release_telegram_of_pending_deletion(db, telegram_id, keep_user_id=user.id)
 
     current = (user.telegram_id or "").strip()
     if current and current != telegram_id:
         db.commit()
-        return False, "К аккаунту уже привязан другой Telegram. Сначала отвяжите его в панели.", None
+        return False, (
+            "К аккаунту уже привязан другой Telegram. "
+            "Сначала отвяжите его: панель → «Мой профиль» → Telegram."
+        ), None
 
     user.telegram_id = telegram_id
     db.commit()
     db.refresh(user)
-    return True, f"Аккаунт привязан: <code>{escape(user.username)}</code> ({user.role.value})", user
+    role_text = "администратор" if user.role.value == "admin" else "пользователь"
+    return True, (
+        f"✅ Telegram привязан к аккаунту <code>{escape(user.username)}</code> ({role_text})."
+    ), user
 
 
 def notify_telegram_unlinked(

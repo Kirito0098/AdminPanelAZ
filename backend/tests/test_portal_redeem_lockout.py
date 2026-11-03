@@ -52,7 +52,7 @@ def test_portal_redeem_lockout_after_five_failures(public_client):
         patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
         patch(
             "app.routers.public_portal.redeem_public_portal_code",
-            side_effect=ValueError("Неверный unlock-ключ"),
+            side_effect=ValueError("Неверный ключ"),
         ) as redeem,
     ):
         feats.return_value.is_enabled.side_effect = lambda key: True
@@ -61,7 +61,7 @@ def test_portal_redeem_lockout_after_five_failures(public_client):
         for _ in range(5):
             resp = _post_redeem(public_client)
             assert resp.status_code == 400
-            assert resp.json()["detail"] == "Неверный unlock-ключ"
+            assert resp.json()["detail"] == "Неверный ключ"
 
         locked = _post_redeem(public_client)
         assert locked.status_code == 429
@@ -84,7 +84,7 @@ def test_portal_redeem_lockout_is_per_token(public_client):
         patch("app.routers.public_portal.get_valid_portal_token", side_effect=_token),
         patch(
             "app.routers.public_portal.redeem_public_portal_code",
-            side_effect=ValueError("Неверный unlock-ключ"),
+            side_effect=ValueError("Неверный ключ"),
         ),
     ):
         feats.return_value.is_enabled.side_effect = lambda key: True

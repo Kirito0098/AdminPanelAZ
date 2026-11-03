@@ -462,7 +462,7 @@ def test_redeem_unlock_code_same_client_twice_fails(db):
         patch("app.services.unlock_codes._reconcile_access_until", return_value=None),
     ):
         redeem_unlock_code(db, code="same-client-01", client_name="Alice", node_id=node.id)
-        with pytest.raises(ValueError, match="использован вами"):
+        with pytest.raises(ValueError, match="уже активировали"):
             redeem_unlock_code(db, code="same-client-01", client_name="alice", node_id=node.id)
 
 
@@ -584,7 +584,7 @@ def test_redeem_single_code_second_client_hits_atomic_limit(db):
         patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()),
     ):
         redeem_unlock_code(db, code="LIMIT-0001", client_name="Alice", node_id=node.id)
-        with pytest.raises(ValueError, match="Лимит"):
+        with pytest.raises(ValueError, match="максимальное число раз"):
             redeem_unlock_code(db, code="LIMIT-0001", client_name="Bob", node_id=node.id)
 
     row = db.query(UnlockCode).filter_by(code="LIMIT-0001").one()
@@ -620,7 +620,7 @@ def test_redeem_unlock_code_respects_client_allowlist(db):
         patch("app.services.unlock_codes._policy_service_for_node", return_value=SimpleNamespace()),
     ):
         ok = redeem_unlock_code(db, code="ALLOW-LIST1", client_name="Alice", node_id=node.id)
-        with pytest.raises(ValueError, match="не предназначен"):
+        with pytest.raises(ValueError, match="выдан для другого конфига"):
             redeem_unlock_code(db, code="ALLOW-LIST1", client_name="Bob", node_id=node.id)
 
     assert ok["grant_days"] == 5
@@ -723,7 +723,7 @@ def test_redeem_unlock_rejects_manual_permanent_ban_with_message(db):
         patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
         patch("app.services.unlock_codes._policy_service_for_node", return_value=SimpleNamespace()),
     ):
-        with pytest.raises(ValueError, match="заблокирован администратором вручную"):
+        with pytest.raises(ValueError, match="заблокирован администратором"):
             redeem_unlock_code(db, code="PERM-BAN-01", client_name="Alice", node_id=node.id)
 
     ovpn = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
@@ -779,7 +779,7 @@ def test_redeem_unlock_rejects_permanent_ban_when_reason_rewritten_to_access_exp
         patch("app.services.unlock_codes._now", return_value=datetime(2030, 1, 1, tzinfo=timezone.utc)),
         patch("app.services.unlock_codes._policy_service_for_node", return_value=SimpleNamespace()),
     ):
-        with pytest.raises(ValueError, match="заблокирован администратором вручную"):
+        with pytest.raises(ValueError, match="заблокирован администратором"):
             redeem_unlock_code(db, code="PERM-BAN-EXPIRED-REASON", client_name="Alice", node_id=node.id)
 
     ovpn = db.query(OpenVpnAccessPolicy).filter_by(node_id=node.id, client_name="alice").one()
@@ -1016,7 +1016,7 @@ def test_redeem_owner_rollback_defers_reconcile_until_commit(db):
             patch("app.services.access_until.get_adapter_for_node", return_value=_adapter()),
             patch("app.services.user_subscription._reconcile_access_until") as reconcile,
         ):
-            with pytest.raises(ValueError, match="Не удалось активировать unlock-ключ"):
+            with pytest.raises(ValueError, match="Не удалось активировать ключ"):
                 redeem_unlock_code(db, code="OWNER-ROLLBACK", client_name="Alice", node_id=node.id, user_id=owner.id)
     finally:
         db.commit = orig_commit  # type: ignore[method-assign]
@@ -1522,7 +1522,7 @@ def test_user_bound_code_single_redemption_per_user(db):
     _redeem_bound_now(
         db, code="BOUND-TWICE-01", client_name="Mira", node_id=node.id, user_id=owner.id
     )
-    with pytest.raises(ValueError, match="уже использован"):
+    with pytest.raises(ValueError, match="уже активировали"):
         _redeem_bound_now(
             db, code="BOUND-TWICE-01", client_name="Mira", node_id=node.id, user_id=owner.id
         )

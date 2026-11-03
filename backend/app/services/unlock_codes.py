@@ -40,22 +40,31 @@ _PROTOCOL_VPN_TYPE = {
 }
 _CODE_CHARS = string.ascii_uppercase + string.digits
 _CUSTOM_CODE_RE = re.compile(r"^[A-Z0-9-]+$")
-_REDEEM_INVALID_MESSAGE = "Неверный unlock-ключ"
-_REDEEM_REVOKED_MESSAGE = "Unlock-ключ отозван"
-_REDEEM_EXPIRED_MESSAGE = "Срок действия unlock-ключа истёк"
-_REDEEM_LIMIT_MESSAGE = "Лимит активаций unlock-ключа исчерпан"
-_REDEEM_ALREADY_USED_MESSAGE = "Этот unlock-ключ уже использован вами"
-_REDEEM_CLIENT_NOT_ALLOWED_MESSAGE = "Этот unlock-ключ не предназначен для вашего клиента"
-_REDEEM_PROTOCOL_MISMATCH_MESSAGE = "Нет пересечения протоколов клиента и unlock-ключа"
+_REDEEM_INVALID_MESSAGE = (
+    "Неверный ключ. Проверьте, что скопировали его целиком: обычно он вида XXXX-XXXX-XXXX."
+)
+_REDEEM_REVOKED_MESSAGE = "Ключ отозван администратором — попросите новый."
+_REDEEM_EXPIRED_MESSAGE = "Срок действия ключа истёк — попросите новый у администратора."
+_REDEEM_LIMIT_MESSAGE = "Ключ уже активировали максимальное число раз — попросите новый."
+_REDEEM_ALREADY_USED_MESSAGE = "Этот ключ вы уже активировали."
+_REDEEM_CLIENT_NOT_ALLOWED_MESSAGE = (
+    "Ключ выдан для другого конфига. Проверьте, тот ли конфиг продлеваете."
+)
+_REDEEM_PROTOCOL_MISMATCH_MESSAGE = (
+    "Ключ не подходит к протоколам вашего конфига. Напишите администратору."
+)
 _REDEEM_MANUAL_BLOCK_MESSAGE = (
-    "Данный пользователь заблокирован администратором вручную. Обратитесь к администратору."
+    "Аккаунт заблокирован администратором — продление ключом недоступно. "
+    "Напишите администратору."
 )
 _REDEEM_SUSPENDED_MESSAGE = (
-    "Доступ приостановлен администратором. Обратитесь к администратору."
+    "Доступ приостановлен администратором. Сначала снимите приостановку — напишите администратору."
 )
-_REDEEM_GENERIC_ERROR_MESSAGE = "Не удалось активировать unlock-ключ"
-_REDEEM_NOTHING_TO_EXTEND_MESSAGE = "Срок ваших профилей не ограничен — продлевать нечего"
-_REDEEM_WRONG_USER_MESSAGE = "Этот ключ выдан другому абоненту"
+_REDEEM_GENERIC_ERROR_MESSAGE = (
+    "Не удалось активировать ключ. Попробуйте ещё раз или напишите администратору."
+)
+_REDEEM_NOTHING_TO_EXTEND_MESSAGE = "Продлевать нечего: срок ваших конфигов не ограничен."
+_REDEEM_WRONG_USER_MESSAGE = "Этот ключ выдан другому абоненту."
 
 
 def _now() -> datetime:

@@ -80,6 +80,7 @@ def _build_owner_message(
         _fmt_when,
         _line_code,
         _line_html,
+        _line_text,
     )
     from app.services.notify_time import format_notify_when
 
@@ -92,8 +93,17 @@ def _build_owner_message(
     }
     detail_lines = []
     if config is not None:
-        detail_lines.append(_line_code("📁", "Клиент", config.client_name))
+        detail_lines.append(_line_code("📁", "Конфиг", config.client_name))
     detail_lines.append(_line_html("📋", "Детали", details))
+    hints = {
+        REMINDER_ACCESS: "Продлить: «Продлить по ключу» в боте или напишите администратору.",
+        REMINDER_CERT: "Сертификат обновит администратор.",
+        REMINDER_TRAFFIC: "Поднять лимит может администратор.",
+        REMINDER_TEMP_BLOCK: "Если это ошибка — напишите администратору.",
+    }
+    hint = hints.get(reminder_type)
+    if hint:
+        detail_lines.append(_line_text("💡", "Что делать", hint))
     return _format_notify_card(
         titles[reminder_type],
         when,

@@ -77,11 +77,11 @@ def on_user_access_extended(
         if bot_token:
             if not configs_were_kept or task is not None:
                 text = (
-                    "Доступ продлён. Конфиги выпущены заново — скачайте их и "
+                    "✅ Доступ продлён. Конфиги выпущены заново — скачайте их и "
                     "замените старые на устройствах."
                 )
             else:
-                text = "Доступ продлён."
+                text = "✅ Доступ продлён. Срок и конфиги — в Mini App или на портале."
             send_tg_message(bot_token, str(user.telegram_id), text)
 
     return {"task_id": getattr(task, "id", None)}
