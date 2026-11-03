@@ -29,6 +29,8 @@ from app.services.user_access_requests import (
     AlreadyDecided,
     AlreadyHasAccess,
     AlreadyPending,
+    Banned,
+    CooldownActive,
     NotBound,
     ReceiptMustBePhoto,
     RequestsClosed,
@@ -109,6 +111,19 @@ async def handle_request_access(ctx: BotContext) -> None:
     except AlreadyPending as exc:
         await send_message(ctx.bot_token, ctx.chat_id, str(exc))
         return
+    except CooldownActive as exc:
+        await send_message(ctx.bot_token, ctx.chat_id, str(exc))
+        return
+    except Banned as exc:
+        await send_message(ctx.bot_token, ctx.chat_id, str(exc) or i18n.REQUESTS_CLOSED)
+        return
+    except TelegramAlreadyBound:
+        await send_message(
+            ctx.bot_token,
+            ctx.chat_id,
+            "Этот Telegram уже привязан к аккаунту в панели. Войдите в панель или напишите администратору.",
+        )
+        return
     await send_message(ctx.bot_token, ctx.chat_id, i18n.REQUEST_SUBMITTED)
 
 
@@ -131,6 +146,9 @@ async def handle_request_more_config(ctx: BotContext) -> None:
         await send_message(ctx.bot_token, ctx.chat_id, str(exc) or i18n.REQUESTS_CLOSED)
         return
     except AlreadyPending as exc:
+        await send_message(ctx.bot_token, ctx.chat_id, str(exc))
+        return
+    except CooldownActive as exc:
         await send_message(ctx.bot_token, ctx.chat_id, str(exc))
         return
     except NotBound:
@@ -163,6 +181,9 @@ async def handle_pay_request(ctx: BotContext) -> None:
         await send_message(ctx.bot_token, ctx.chat_id, str(exc) or i18n.REQUESTS_CLOSED)
         return
     except AlreadyPending as exc:
+        await send_message(ctx.bot_token, ctx.chat_id, str(exc))
+        return
+    except CooldownActive as exc:
         await send_message(ctx.bot_token, ctx.chat_id, str(exc))
         return
     except NotBound:
