@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Copy, LogIn, Phone, StickyNote, Trash2 } from 'lucide-react'
+import { Copy, Link2Off, LogIn, Phone, StickyNote, Trash2 } from 'lucide-react'
 import { createUserTelegramLinkCode } from '@/api/users'
 import { useNotifications } from '@/context/NotificationContext'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,7 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
   const [linkCode, setLinkCode] = useState<string | null>(null)
   const [linkCodeLoading, setLinkCodeLoading] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [unlinkOpen, setUnlinkOpen] = useState(false)
   const [note, setNote] = useState(user.note ?? '')
 
   const hasChanges = panelLogin !== Boolean(user.panel_login_enabled) || password.trim().length > 0
@@ -61,6 +62,11 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
     }
   }
 
+  const handleUnlink = () => {
+    onSave(user.id, { telegram_id: '' }, 'Telegram отвязан')
+    setUnlinkOpen(false)
+  }
+
   const handleDelete = () => {
     onDelete(user)
     setDeleteOpen(false)
@@ -85,22 +91,35 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
                 Выкл. — абонент не сможет войти под своим логином
               </p>
             </div>
-            <Switch id="accountPanelLogin" checked={panelLogin} onCheckedChange={setPanelLogin} />
-          </div>
-          <div className="space-y-1.5 rounded-lg border bg-muted/20 px-3 py-2.5">
-            <Label htmlFor="accountPassword">Сброс пароля</Label>
-            <Input
-              id="accountPassword"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Новый пароль (минимум 4 символа)"
-              className="h-9"
+            <Switch
+              id="accountPanelLogin"
+              checked={panelLogin}
+              onCheckedChange={(next) => {
+                setPanelLogin(next)
+                if (!next) setPassword('')
+              }}
             />
-            <p className="text-xs text-muted-foreground">
-              Оставьте пустым, чтобы не менять пароль
-            </p>
           </div>
+          {panelLogin ? (
+            <div className="space-y-1.5 rounded-lg border bg-muted/20 px-3 py-2.5">
+              <Label htmlFor="accountPassword">Сброс пароля</Label>
+              <Input
+                id="accountPassword"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Новый пароль (минимум 4 символа)"
+                className="h-9"
+              />
+              <p className="text-xs text-muted-foreground">
+                Оставьте пустым, чтобы не менять пароль
+              </p>
+            </div>
+          ) : (
+            <p className="rounded-lg border border-dashed bg-muted/10 px-3 py-2.5 text-xs text-muted-foreground">
+              Вход в панель выключен — пароль не нужен. Включите вход, чтобы задать новый.
+            </p>
+          )}
           <Button type="button" onClick={handleSave} disabled={!hasChanges} title={!hasChanges ? 'Нет изменений' : undefined}>
             Сохранить
           </Button>
@@ -142,6 +161,7 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
               <p className="font-mono text-sm font-medium">{user.telegram_id}</p>
             </div>
           ) : null}
+          <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             onClick={handleCreateLinkCode}
@@ -156,6 +176,17 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
               </>
             )}
           </Button>
+          {user.telegram_id ? (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setUnlinkOpen(true)}
+              className="w-full sm:w-auto"
+            >
+              <Link2Off size={15} /> Отвязать
+            </Button>
+          ) : null}
+          </div>
           {linkCode && (
             <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2.5">
               <span className="font-mono text-sm font-medium">/link {linkCode}</span>
@@ -196,6 +227,22 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
           Удалить абонента
         </Button>
       </UserSection>
+
+      <ConfirmDialog
+        open={unlinkOpen}
+        onOpenChange={setUnlinkOpen}
+        title="Отвязать Telegram?"
+        description={
+          <>
+            У аккаунта «<strong>{user.username}</strong>» отвяжется Telegram ID{' '}
+            <strong>{user.telegram_id}</strong>. Бот перестанет ему писать, вход через Telegram
+            пропадёт.
+          </>
+        }
+        confirmLabel="Отвязать"
+        destructive
+        onConfirm={handleUnlink}
+      />
 
       <ConfirmDialog
         open={deleteOpen}
