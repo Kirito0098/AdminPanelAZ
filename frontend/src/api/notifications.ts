@@ -52,6 +52,27 @@ export interface NotificationPreferences {
   categories: Record<NotificationCategory, boolean>
 }
 
+export interface BellNotifyAdmin {
+  user_id: number
+  username: string
+  categories: Record<NotificationCategory, boolean>
+}
+
+export async function fetchBellNotifyAdmins(): Promise<BellNotifyAdmin[]> {
+  const data = await apiFetch<{ admins: BellNotifyAdmin[] }>('/notifications/admins')
+  return data.admins
+}
+
+export async function saveBellNotifyAdmin(
+  userId: number,
+  categories: Record<NotificationCategory, boolean>,
+): Promise<BellNotifyAdmin> {
+  return apiFetch<BellNotifyAdmin>(`/notifications/admins/${userId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ categories }),
+  })
+}
+
 export async function fetchNotificationPreferences(): Promise<NotificationPreferences> {
   return apiFetch<NotificationPreferences>('/notifications/preferences')
 }

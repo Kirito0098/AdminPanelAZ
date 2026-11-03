@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
   Archive,
+  Bell,
   Download,
   FlaskConical,
   Globe,
@@ -23,6 +24,7 @@ export type SettingsSection =
   | 'maintenance'
   | 'backup'
   | 'monitoring'
+  | 'notifications'
   | 'vpn_network'
   | 'modules'
   | 'updates'
@@ -104,6 +106,7 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
       navItem('vpn_network', Globe, { settingsTab: 'vpn_network' }),
       navItem('backup', Archive, { settingsTab: 'backup' }),
       navItem('monitoring', Activity, { settingsTab: 'monitoring' }),
+      navItem('notifications', Bell),
     ],
   },
   {

@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, BellOff, EyeOff, Search, Settings } from 'lucide-react'
+import { AlertTriangle, BellOff, EyeOff, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import EmptyState from '@/components/ui/EmptyState'
 import NotificationCard from '@/components/notifications/NotificationCard'
-import NotificationPreferencesDialog from '@/components/notifications/NotificationPreferencesDialog'
 import { CATEGORY_ICON, CATEGORY_LABEL } from '@/components/notifications/labels'
 import { dayKey, dayLabel, snoozeUntil, type SnoozePreset } from '@/components/notifications/time'
 import { useNotificationCenter, type NotificationTabKey } from '@/context/NotificationCenterContext'
@@ -18,10 +17,9 @@ import {
 const CATEGORY_TABS: NotificationTabKey[] = ['all', 'requests', 'security', 'nodes', 'services', 'tasks']
 
 export default function NotificationsFeed() {
-  const { items, counts, query, setQuery, loading, hasMore, loadMore, markAllRead, setState, refetch } =
+  const { items, counts, query, setQuery, loading, hasMore, loadMore, markAllRead, setState } =
     useNotificationCenter()
   const [search, setSearch] = useState(query.q)
-  const [prefsOpen, setPrefsOpen] = useState(false)
   const [enabled, setEnabled] = useState<Record<NotificationCategory, boolean>>({
     requests: true,
     security: true,
@@ -91,15 +89,6 @@ export default function NotificationsFeed() {
           variant="outline"
           size="sm"
           className="ml-auto"
-          onClick={() => setPrefsOpen(true)}
-          aria-label="Настройки уведомлений"
-        >
-          <Settings size={14} />
-          <span className="ml-1 hidden sm:inline">Настройки</span>
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
           onClick={() => void markAllRead()}
           disabled={!items.length}
         >
@@ -244,12 +233,6 @@ export default function NotificationsFeed() {
           )}
         </div>
       )}
-
-      <NotificationPreferencesDialog
-        open={prefsOpen}
-        onOpenChange={setPrefsOpen}
-        onSaved={() => void refetch()}
-      />
     </div>
   )
 }

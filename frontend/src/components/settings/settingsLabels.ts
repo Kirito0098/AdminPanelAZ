@@ -47,6 +47,12 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     hint: 'Перед крупными изменениями рекомендуется сделать копию — так проще откатиться при ошибке.',
     docsHref: DOCS.backup,
   },
+  notifications: {
+    title: 'Уведомления',
+    description: 'Кому из админов что приходит: Telegram и колокольчик панели',
+    hint: 'Для Telegram — получатели и типы событий; для панели — категории в колокольчике у каждого админа.',
+    docsHref: DOCS.monitoringAlerts,
+  },
   monitoring: {
     title: 'Нагрузка и уведомления',
     description: 'Когда предупреждать о высокой нагрузке и куда отправлять сообщения',

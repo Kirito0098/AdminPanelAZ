@@ -2800,6 +2800,16 @@ class NotificationPreferencesUpdate(BaseModel):
     categories: dict[str, bool]
 
 
+class BellNotifyAdmin(BaseModel):
+    user_id: int
+    username: str
+    categories: dict[str, bool]
+
+
+class BellNotifyAdminsResponse(BaseModel):
+    admins: list[BellNotifyAdmin]
+
+
 class NotificationItem(BaseModel):
     id: int
     category: str

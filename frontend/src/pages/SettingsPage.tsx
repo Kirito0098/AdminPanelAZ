@@ -13,6 +13,7 @@ import ConfigDeliveryTab from '@/components/settings/ConfigDeliveryTab'
 import FeatureTogglesTab from '@/components/settings/FeatureTogglesTab'
 import MaintenanceTab from '@/components/settings/MaintenanceTab'
 import MonitoringTab from '@/components/settings/MonitoringTab'
+import NotificationsSection from '@/components/settings/NotificationsSection'
 import PersonalTab from '@/components/settings/PersonalTab'
 import SecurityTab from '@/components/settings/SecurityTab'
 import {
@@ -249,6 +250,8 @@ export default function SettingsPage() {
         return <BackupTab />
       case 'monitoring':
         return <MonitoringTab />
+      case 'notifications':
+        return <NotificationsSection />
       case 'modules':
         return <FeatureTogglesTab />
       case 'updates':

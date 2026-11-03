@@ -21,8 +21,10 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_admin
 from app.database import SessionLocal, get_db
-from app.models import BELL_NOTIFY_CATEGORIES, User, UserAccessRequest
+from app.models import BELL_NOTIFY_CATEGORIES, User, UserAccessRequest, UserRole
 from app.schemas import (
+    BellNotifyAdmin,
+    BellNotifyAdminsResponse,
     MarkReadRequest,
     MarkReadResponse,
     NotificationPreferences,
@@ -129,6 +131,67 @@ def put_notification_preferences(
     db.commit()
     db.refresh(admin)
     return {"categories": admin.bell_categories()}
+
+
+@router.get(
+    "/admins",
+    response_model=BellNotifyAdminsResponse,
+    summary="Подписки админов на категории уведомлений",
+)
+def get_bell_notify_admins(
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    admins = (
+        db.query(User)
+        .filter(User.role == UserRole.admin)
+        .order_by(User.username)
+        .all()
+    )
+    return {
+        "admins": [
+            {
+                "user_id": item.id,
+                "username": item.username,
+                "categories": item.bell_categories(),
+            }
+            for item in admins
+        ]
+    }
+
+
+@router.put(
+    "/admins/{user_id}",
+    response_model=BellNotifyAdmin,
+    summary="Сохранить подписку админа на категории уведомлений",
+)
+def put_bell_notify_admin(
+    user_id: int,
+    body: NotificationPreferencesUpdate,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    target = db.get(User, user_id)
+    if target is None or target.role != UserRole.admin:
+        raise HTTPException(status_code=404, detail="Админ не найден")
+    unknown = set(body.categories) - set(BELL_NOTIFY_CATEGORIES)
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Неизвестные категории: {', '.join(sorted(unknown))}",
+        )
+    target.bell_notify_categories = json.dumps(
+        {key: bool(body.categories.get(key, True)) for key in BELL_NOTIFY_CATEGORIES},
+        ensure_ascii=False,
+    )
+    db.add(target)
+    db.commit()
+    db.refresh(target)
+    return {
+        "user_id": target.id,
+        "username": target.username,
+        "categories": target.bell_categories(),
+    }
 
 
 @router.post(

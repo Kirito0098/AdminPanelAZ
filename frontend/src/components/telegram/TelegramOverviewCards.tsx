@@ -1,4 +1,4 @@
-import { Bell, Bot, LogIn, Send, Smartphone } from 'lucide-react'
+import { Bot, LogIn, Send, Smartphone } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
@@ -83,20 +83,6 @@ export default function TelegramOverviewCards({ tg, loading = false, onNavigate 
           ? 'border-l-amber-500'
           : 'border-l-muted-foreground/30',
       tone: tg.commandsReady ? 'text-emerald-600 dark:text-emerald-400' : undefined,
-    },
-    {
-      key: 'notify',
-      title: 'Уведомления',
-      icon: Bell,
-      value: tg.notifyEnabled
-        ? tg.notifyEventsEnabled > 0
-          ? `${tg.notifyEventsEnabled} включено`
-          : 'Включены'
-        : 'Выключены',
-      sub: tg.notifyEnabled
-        ? `из ${tg.adminNotify?.events.length ?? 0} типов событий`
-        : 'Сообщения от бота в личку',
-      accent: tg.notifyEnabled && tg.notifyEventsEnabled > 0 ? 'border-l-sky-500' : 'border-l-muted-foreground/30',
     },
   ]
 
