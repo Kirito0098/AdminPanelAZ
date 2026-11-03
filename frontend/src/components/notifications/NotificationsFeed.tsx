@@ -83,7 +83,7 @@ export default function NotificationsFeed() {
       : counts.by_category[key]
 
   return (
-    <div className="mx-auto grid w-full max-w-6xl grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+    <div className="mx-auto grid w-full max-w-[1400px] grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
       <div className="flex min-w-0 flex-col gap-3">
         <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-xl border border-border/60 bg-background/95 p-2 backdrop-blur">
           <div className="flex flex-wrap items-center gap-2">
