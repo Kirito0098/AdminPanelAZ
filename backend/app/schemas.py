@@ -2792,6 +2792,14 @@ class NotificationCounts(BaseModel):
     by_category: dict[str, NotificationCategoryCount]
 
 
+class NotificationPreferences(BaseModel):
+    categories: dict[str, bool]
+
+
+class NotificationPreferencesUpdate(BaseModel):
+    categories: dict[str, bool]
+
+
 class NotificationItem(BaseModel):
     id: int
     category: str

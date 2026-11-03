@@ -21,10 +21,12 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_admin
 from app.database import SessionLocal, get_db
-from app.models import User, UserAccessRequest
+from app.models import BELL_NOTIFY_CATEGORIES, User, UserAccessRequest
 from app.schemas import (
     MarkReadRequest,
     MarkReadResponse,
+    NotificationPreferences,
+    NotificationPreferencesUpdate,
     NotificationStateResponse,
     NotificationStateUpdate,
     NotificationsListResponse,
@@ -92,6 +94,41 @@ def get_notifications(
         "pending_requests_count": pending,
         "counts": counts,
     }
+
+
+@router.get(
+    "/preferences",
+    response_model=NotificationPreferences,
+    summary="Подписка админа на категории уведомлений",
+)
+def get_notification_preferences(admin: User = Depends(require_admin)):
+    return {"categories": admin.bell_categories()}
+
+
+@router.put(
+    "/preferences",
+    response_model=NotificationPreferences,
+    summary="Сохранить подписку на категории уведомлений",
+)
+def put_notification_preferences(
+    body: NotificationPreferencesUpdate,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    unknown = set(body.categories) - set(BELL_NOTIFY_CATEGORIES)
+    if unknown:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Неизвестные категории: {', '.join(sorted(unknown))}",
+        )
+    admin.bell_notify_categories = json.dumps(
+        {key: bool(body.categories.get(key, True)) for key in BELL_NOTIFY_CATEGORIES},
+        ensure_ascii=False,
+    )
+    db.add(admin)
+    db.commit()
+    db.refresh(admin)
+    return {"categories": admin.bell_categories()}
 
 
 @router.post(
