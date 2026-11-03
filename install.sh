@@ -877,6 +877,7 @@ ensure_backend_data_dirs() {
     "$BACKEND_DIR/data" \
     "$BACKEND_DIR/data/cidr/list" \
     "$BACKEND_DIR/data/cidr/staging" \
+    "$BACKEND_DIR/data/geoip" \
     "${WIZ_BACKUP_ROOT:-/var/backups/adminpanelaz}"
 }
 

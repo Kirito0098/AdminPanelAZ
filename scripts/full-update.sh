@@ -227,6 +227,8 @@ fu_step_pip() {
   fi
   ui_info "pip install -r backend/requirements.txt…"
   "$pip" install -q -r "$INSTALL_DIR/backend/requirements.txt"
+  # Каталог локальной GeoIP (docs/GeoIP.md): mmdb кладут руками, но mkdir делает обновление.
+  mkdir -p "$INSTALL_DIR/backend/data/geoip"
   ui_ok "Python-зависимости обновлены"
   fu_row pip ok
 }

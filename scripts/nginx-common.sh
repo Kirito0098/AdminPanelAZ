@@ -420,6 +420,15 @@ nginx_rollback_privacy_log() {
   else
     rm -f "$dest"
   fi
+  NGINX_PRIVACY_LOG_CHANGED=false
+  NGINX_PRIVACY_LOG_BAK=""
+}
+
+nginx_cleanup_privacy_log_bak() {
+  if [[ -n "${NGINX_PRIVACY_LOG_BAK:-}" && -f "$NGINX_PRIVACY_LOG_BAK" ]]; then
+    rm -f "$NGINX_PRIVACY_LOG_BAK"
+  fi
+  NGINX_PRIVACY_LOG_BAK=""
 }
 
 nginx_rollback_server_names_hash() {
@@ -631,10 +640,12 @@ EOF
     rm -f "$enabled_link" "$conf_file"
     nginx_acme_restore_enabled_default "$base"
     nginx_rollback_server_names_hash
+    nginx_rollback_privacy_log
     nginx_warn "Временный ACME vhost для ${domain} не прошёл nginx -t — пробуем без webroot"
     return 1
   fi
   nginx_cleanup_server_names_hash_bak
+  nginx_cleanup_privacy_log_bak
   if systemctl is-active --quiet nginx 2>/dev/null; then
     systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1 || true
   else
@@ -1983,6 +1994,7 @@ nginx_rollback_site_install() {
     rm -f "$NGINX_CONF_FILE"
   fi
   nginx_rollback_server_names_hash
+  nginx_rollback_privacy_log
   nginx_install_txn_rollback
 }
 
@@ -2027,6 +2039,7 @@ nginx_install_site() {
   fi
   [[ -n "$bak" && -f "$bak" ]] && rm -f "$bak"
   nginx_cleanup_server_names_hash_bak
+  nginx_cleanup_privacy_log_bak
   nginx_install_txn_commit
   nginx_install_default_deny
 
