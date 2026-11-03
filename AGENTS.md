@@ -12,7 +12,8 @@
 | `.cursor/rules/use-skills.mdc` | выбор skill'а, тесты только на критических узлах |
 | `.cursor/rules/release-train-branching.mdc` | ветки `release/X.Y.Z` |
 | `.cursor/rules/gitea-agent-sync.mdc` | что идёт в GitHub, что в личный Gitea |
-| `.clinerules` | тот же свод для Cline, полный |
+
+Полный каталог скиллов с маршрутизацией — `~/.dsh/skills/skills-catalog/SKILL.md`.
 
 ## Проект лежит на сервере
 
@@ -134,7 +135,7 @@ nginx/firewall/systemd/install, бэкапы и миграции, node/proxy age
 | «Где я остановился» | `recall` |
 
 - Глобальные скиллы — `~/.dsh/skills/` (DSH находит их без настройки).
-- Проектные — `.cursor/skills/` (их же видят Cline и Cursor); если их нет в каталоге сессии,
+- Проектные — `.cursor/skills/` (их же видит Cursor); если их нет в каталоге сессии,
   читать `SKILL.md` напрямую файловым инструментом.
 - Security-пак (18 скиллов) в рабочем каталоге не подключён, чтобы не раздувать каталог:
   `~/.dsh/skills-extra/security/` — подключить копированием в `~/.dsh/skills/` на время аудита.
