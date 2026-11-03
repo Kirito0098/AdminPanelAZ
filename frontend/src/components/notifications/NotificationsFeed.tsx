@@ -1,21 +1,54 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertTriangle, BellOff, EyeOff, Search } from 'lucide-react'
+import { AlertTriangle, BellOff, EyeOff, Search, Settings } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import EmptyState from '@/components/ui/EmptyState'
 import NotificationCard from '@/components/notifications/NotificationCard'
+import NotificationPreferencesDialog from '@/components/notifications/NotificationPreferencesDialog'
 import { CATEGORY_ICON, CATEGORY_LABEL } from '@/components/notifications/labels'
 import { dayKey, dayLabel, snoozeUntil, type SnoozePreset } from '@/components/notifications/time'
 import { useNotificationCenter, type NotificationTabKey } from '@/context/NotificationCenterContext'
-import type { NotificationItem } from '@/api/notifications'
+import {
+  fetchNotificationPreferences,
+  type NotificationCategory,
+  type NotificationItem,
+} from '@/api/notifications'
 
 const CATEGORY_TABS: NotificationTabKey[] = ['all', 'requests', 'security', 'nodes', 'services', 'tasks']
 
 export default function NotificationsFeed() {
-  const { items, counts, query, setQuery, loading, hasMore, loadMore, markAllRead, setState } =
+  const { items, counts, query, setQuery, loading, hasMore, loadMore, markAllRead, setState, refetch } =
     useNotificationCenter()
   const [search, setSearch] = useState(query.q)
+  const [prefsOpen, setPrefsOpen] = useState(false)
+  const [enabled, setEnabled] = useState<Record<NotificationCategory, boolean>>({
+    requests: true,
+    security: true,
+    nodes: true,
+    services: true,
+    tasks: true,
+  })
+
+  useEffect(() => {
+    let cancelled = false
+    fetchNotificationPreferences()
+      .then((prefs) => {
+        if (!cancelled) setEnabled((prev) => ({ ...prev, ...prefs.categories }))
+      })
+      .catch(() => {
+        /* настройки не загрузились — показываем все категории */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (query.category !== 'all' && !enabled[query.category]) setQuery({ category: 'all' })
+  }, [enabled, query.category, setQuery])
+
+  const visibleTabs = CATEGORY_TABS.filter((key) => key === 'all' || enabled[key])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -58,6 +91,15 @@ export default function NotificationsFeed() {
           variant="outline"
           size="sm"
           className="ml-auto"
+          onClick={() => setPrefsOpen(true)}
+          aria-label="Настройки уведомлений"
+        >
+          <Settings size={14} />
+          <span className="ml-1 hidden sm:inline">Настройки</span>
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
           onClick={() => void markAllRead()}
           disabled={!items.length}
         >
@@ -67,7 +109,7 @@ export default function NotificationsFeed() {
 
       <div className="sticky top-0 z-10 flex flex-col gap-2 rounded-xl border border-border/60 bg-background/95 px-2 py-2 backdrop-blur">
         <div className="flex flex-wrap gap-1.5">
-          {CATEGORY_TABS.map((key) => {
+          {visibleTabs.map((key) => {
             const Icon = CATEGORY_ICON[key]
             const stat =
               key === 'all'
@@ -202,6 +244,12 @@ export default function NotificationsFeed() {
           )}
         </div>
       )}
+
+      <NotificationPreferencesDialog
+        open={prefsOpen}
+        onOpenChange={setPrefsOpen}
+        onSaved={() => void refetch()}
+      />
     </div>
   )
 }
