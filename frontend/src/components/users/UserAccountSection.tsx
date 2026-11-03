@@ -41,7 +41,9 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
     try {
       const data = await createUserTelegramLinkCode(user.id)
       setLinkCode(data.code)
-      success(`Код привязки Telegram: ${data.code} (действителен ${Math.round(data.expires_in_seconds / 60)} мин.)`)
+      success(
+        `Команда привязки: /link ${data.code} (действует ${Math.round(data.expires_in_seconds / 60)} мин.)`,
+      )
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Ошибка создания кода')
     } finally {
@@ -52,8 +54,8 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
   const handleCopyLinkCode = async () => {
     if (!linkCode) return
     try {
-      await navigator.clipboard.writeText(linkCode)
-      success('Код скопирован')
+      await navigator.clipboard.writeText(`/link ${linkCode}`)
+      success('Команда /link скопирована')
     } catch {
       notifyError('Не удалось скопировать код')
     }
@@ -156,7 +158,7 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
           </Button>
           {linkCode && (
             <div className="flex items-center justify-between gap-2 rounded-lg border bg-muted/20 px-3 py-2.5">
-              <span className="font-mono text-sm font-medium">{linkCode}</span>
+              <span className="font-mono text-sm font-medium">/link {linkCode}</span>
               <div className="flex items-center gap-1">
                 <Button
                   type="button"
@@ -164,7 +166,7 @@ export default function UserAccountSection({ user, onSave, onDelete }: UserAccou
                   variant="ghost"
                   className="h-8 w-8"
                   onClick={() => void handleCopyLinkCode()}
-                  aria-label="Скопировать код привязки"
+                  aria-label="Скопировать команду привязки"
                   title="Скопировать"
                 >
                   <Copy size={14} />
