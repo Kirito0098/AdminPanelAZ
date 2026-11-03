@@ -326,16 +326,26 @@ def set_notification_state(
     return _state_payload(state)
 
 
+def enabled_bell_categories(user: User) -> set[str]:
+    """Категории, которые админ разрешил показывать в колокольчике и ленте."""
+    return {key for key, enabled in user.bell_categories().items() if enabled}
+
+
 def _notification_counts(
-    db: Session, admin_id: int, last_read: int, now: datetime
+    db: Session, admin: User, last_read: int, now: datetime
 ) -> dict[str, object]:
     """Счётчики по всем уведомлениям админа: чипы категорий, бейдж, «требует внимания»."""
-    rows = db.query(
-        AdminPanelNotification.id,
-        AdminPanelNotification.category,
-        AdminPanelNotification.level,
-    ).all()
-    states = _states_by_notification(db, admin_id)
+    enabled = enabled_bell_categories(admin)
+    rows = (
+        db.query(
+            AdminPanelNotification.id,
+            AdminPanelNotification.category,
+            AdminPanelNotification.level,
+        )
+        .filter(AdminPanelNotification.category.in_(sorted(enabled)))
+        .all()
+    )
+    states = _states_by_notification(db, admin.id)
     by_category: dict[str, dict[str, int]] = {}
     unread = attention = snoozed = hidden = 0
     for row in rows:
@@ -380,8 +390,13 @@ def list_notifications_for_admin(
     limit = max(1, min(int(limit), 100))
     now = datetime.utcnow()
     last_read = admin.last_read_notification_id or 0
+    enabled = enabled_bell_categories(admin)
 
-    query = db.query(AdminPanelNotification).order_by(desc(AdminPanelNotification.id))
+    query = (
+        db.query(AdminPanelNotification)
+        .filter(AdminPanelNotification.category.in_(sorted(enabled)))
+        .order_by(desc(AdminPanelNotification.id))
+    )
     if category:
         query = query.filter(AdminPanelNotification.category == category)
     if level:
@@ -424,7 +439,7 @@ def list_notifications_for_admin(
         if len(items) >= limit:
             break
 
-    counts = _notification_counts(db, admin.id, last_read, now)
+    counts = _notification_counts(db, admin, last_read, now)
     return items, int(counts["unread"]), counts
 
 
