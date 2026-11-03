@@ -24,6 +24,8 @@ interface CidrPipelineTabProps {
   pipelineTask: CidrPipelineTask | null
   pendingPipelineAction: PipelinePendingAction | null
   nodes: Node[]
+  /** Узлы-реплики HA: в списке они есть (ручной ремонт), но помечены. */
+  replicaNodeIds?: ReadonlySet<number>
   deployAllOnline: boolean
   deployTargetNodeIds: number[]
   selectedProviderFiles: string[]
@@ -61,9 +63,15 @@ const workflowSteps = [
   { num: 3, text: 'Списки на узел' },
 ]
 
-function nodeCheckboxLabel(node: Node): string {
+function nodeCheckboxLabel(node: Node, replicaNodeIds?: ReadonlySet<number>): string {
   const status = nodeStatusRu(node.status)
-  return `${node.name}${node.is_local ? ' (локальная)' : ''} — ${status}`
+  const role =
+    (node.node_kind ?? 'vpn') === 'proxy'
+      ? ' (прокси)'
+      : replicaNodeIds?.has(node.id)
+        ? ' (реплика)'
+        : ''
+  return `${node.name}${node.is_local ? ' (локальная)' : ''}${role} — ${status}`
 }
 
 export default function CidrPipelineTab({
@@ -73,6 +81,7 @@ export default function CidrPipelineTab({
   pipelineTask,
   pendingPipelineAction,
   nodes,
+  replicaNodeIds,
   deployAllOnline,
   deployTargetNodeIds,
   selectedProviderFiles,
@@ -448,7 +457,7 @@ export default function CidrPipelineTab({
                       htmlFor={`deploy-node-${node.id}`}
                       className={`text-sm cursor-pointer ${node.status !== 'online' ? 'text-muted-foreground' : ''}`}
                     >
-                      {nodeCheckboxLabel(node)}
+                      {nodeCheckboxLabel(node, replicaNodeIds)}
                     </Label>
                   </div>
                 ))

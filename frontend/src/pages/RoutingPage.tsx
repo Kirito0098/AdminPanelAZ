@@ -74,9 +74,15 @@ const PUBLIC_TABS = new Set<RoutingTab>(['overview', 'providers', 'analysis'])
 
 export default function RoutingPage() {
   const { user } = useAuth()
-  const { activeNode, nodes } = useNode()
+  const { activeNode, nodes, syncGroups } = useNode()
   const isAdmin = user?.role === 'admin'
   const [searchParams, setSearchParams] = useSearchParams()
+  // Развёртывать можно и на реплику (ремонт), но в списке видно, что она реплика:
+  // файлы туда обычно приезжают сами с primary.
+  const replicaNodeIds = useMemo(
+    () => new Set(syncGroups.flatMap((group) => group.replica_node_ids ?? [])),
+    [syncGroups],
+  )
 
   const tab = useMemo(() => {
     const value = searchParams.get('tab') as RoutingTab | null
@@ -250,6 +256,7 @@ export default function RoutingPage() {
               pipelineTask={pipelineTask}
               pendingPipelineAction={pendingPipelineAction}
               nodes={nodes}
+              replicaNodeIds={replicaNodeIds}
               deployAllOnline={deployAllOnline}
               deployTargetNodeIds={deployTargetNodeIds}
               selectedProviderFiles={selectedProviderFiles}
