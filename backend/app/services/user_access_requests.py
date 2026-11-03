@@ -30,6 +30,7 @@ from app.models import (
     UserAccessRequest,
     UserNodeAssignment,
     UserRole,
+    VpnConfig,
 )
 from app.services.admin_panel_notifications import write_admin_panel_notification
 from app.services.app_setting_store import _get_setting, _set_setting
@@ -1232,7 +1233,14 @@ def _linked_reply_keyboard(db: Session, user: User) -> dict[str, Any] | None:
         return None
 
 
-def _delivery_text(portal_url: str, traffic_limit_bytes: int | None, *, added: bool = False) -> str:
+def _delivery_text(
+    portal_url: str,
+    traffic_limit_bytes: int | None,
+    *,
+    added: bool = False,
+    protocols: set[str] | None = None,
+) -> str:
+    """Текст абоненту после одобрения; подсказка про устройства — только для WireGuard."""
     if added:
         lines = [
             "Дополнительный конфиг одобрен",
@@ -1247,9 +1255,19 @@ def _delivery_text(portal_url: str, traffic_limit_bytes: int | None, *, added: b
             "",
             f"Ваша ссылка на портал: {portal_url}",
             "",
-            "Один конфиг WireGuard/AmneziaWG = одно устройство онлайн. "
-            "Нужно ещё устройство — нажмите «Запросить ещё конфиг».",
         ]
+        issued = protocols or set()
+        if issued & {"wireguard", "amneziawg2"}:
+            lines.append(
+                "Один конфиг WireGuard/AmneziaWG = одно устройство онлайн. "
+                "Нужно ещё устройство — нажмите «Запросить ещё конфиг»."
+            )
+        elif "openvpn" in issued:
+            lines.append(
+                "Профиль OpenVPN уже в портале — раздел «Конфиги», файл .ovpn."
+            )
+        else:
+            lines.append("Конфиги уже в портале — откройте раздел «Конфиги».")
     if traffic_limit_bytes:
         gb = traffic_limit_bytes / (1024 * 1024 * 1024)
         lines.append(f"Лимит трафика: {gb:g} ГБ.")
@@ -1333,8 +1351,14 @@ def maybe_send_delivery_after_task(db: Session, *, user_id: int, created_count: 
         )
         return
     portal = user_link_response(db, get_or_create_user_portal_token(db, user_id=user_id))
+    issued_protocols = {
+        str(row[0]) for row in db.query(VpnConfig.vpn_type).filter(VpnConfig.owner_id == user_id).all()
+    }
     text = _delivery_text(
-        portal["url"], user.traffic_limit_bytes, added=req.request_type == REQUEST_TYPE_ADD_CONFIG
+        portal["url"],
+        user.traffic_limit_bytes,
+        added=req.request_type == REQUEST_TYPE_ADD_CONFIG,
+        protocols=issued_protocols,
     )
     if not send_message_sync_or_async(
         bot_token,
