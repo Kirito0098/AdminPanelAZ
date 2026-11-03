@@ -1237,7 +1237,7 @@ def _linked_reply_keyboard(db: Session, user: User) -> dict[str, Any] | None:
 
 
 def _delivery_text(
-    portal_url: str,
+    portal_url: str | None,
     traffic_limit_bytes: int | None,
     *,
     added: bool = False,
@@ -1245,20 +1245,16 @@ def _delivery_text(
 ) -> str:
     """Текст абоненту после одобрения; подсказка про устройства — только для WireGuard."""
     if added:
-        lines = [
-            "Дополнительный конфиг одобрен",
-            "",
-            f"Ваша ссылка на портал: {portal_url}",
-            "",
-            "Новый конфиг уже в плане — откройте «Конфиги», чтобы скачать файл.",
-        ]
+        lines = ["✅ Дополнительный конфиг одобрен", ""]
+        if portal_url:
+            lines += [f"Ваша ссылка на портал: {portal_url}", ""]
+        lines.append(
+            "Новый конфиг уже в плане — откройте «Конфиги» в Mini App, чтобы скачать файл."
+        )
     else:
-        lines = [
-            "✅ <b>Ваша заявка одобрена</b>",
-            "",
-            f"Ваша ссылка на портал: {portal_url}",
-            "",
-        ]
+        lines = ["✅ <b>Ваша заявка одобрена</b>", ""]
+        if portal_url:
+            lines += [f"Ваша ссылка на портал: {portal_url}", ""]
         issued = protocols or set()
         if issued & {"wireguard", "amneziawg2"}:
             lines.append(
@@ -1266,11 +1262,11 @@ def _delivery_text(
                 "Нужно ещё устройство — нажмите «Запросить ещё конфиг»."
             )
         elif "openvpn" in issued:
-            lines.append(
-                "Профиль OpenVPN уже в портале — раздел «Конфиги», файл .ovpn."
-            )
+            where = "в портале или Mini App" if portal_url else "в Mini App"
+            lines.append(f"Профиль OpenVPN — раздел «Конфиги» {where}, файл .ovpn.")
         else:
-            lines.append("Конфиги уже в портале — откройте раздел «Конфиги».")
+            where = "в портале или Mini App" if portal_url else "в Mini App"
+            lines.append(f"Конфиги уже доступны — откройте раздел «Конфиги» {where}.")
     if traffic_limit_bytes:
         gb = traffic_limit_bytes / (1024 * 1024 * 1024)
         lines.append(f"Лимит трафика: {gb:g} ГБ.")
@@ -1308,6 +1304,16 @@ def deliver_approved_request(
     )
     db.refresh(user)
     return user, task
+
+
+def _portal_enabled() -> bool:
+    """Портал абонента включается модулем client_portal; иначе про него не пишем."""
+    try:
+        from app.services.feature_guards import get_feature_service
+
+        return get_feature_service().is_enabled("client_portal")
+    except Exception:  # noqa: BLE001 — текст не должен падать из-за тоглов
+        return False
 
 
 def maybe_send_delivery_after_task(db: Session, *, user_id: int, created_count: int) -> None:
@@ -1362,12 +1368,16 @@ def maybe_send_delivery_after_task(db: Session, *, user_id: int, created_count: 
             level="warning",
         )
         return
-    portal = user_link_response(db, get_or_create_user_portal_token(db, user_id=user_id))
+    portal_url = None
+    if _portal_enabled():
+        portal_url = user_link_response(
+            db, get_or_create_user_portal_token(db, user_id=user_id)
+        )["url"]
     issued_protocols = {
         str(row[0]) for row in db.query(VpnConfig.vpn_type).filter(VpnConfig.owner_id == user_id).all()
     }
     text = _delivery_text(
-        portal["url"],
+        portal_url,
         user.traffic_limit_bytes,
         added=req.request_type == REQUEST_TYPE_ADD_CONFIG,
         protocols=issued_protocols,

@@ -13,6 +13,18 @@ from app.services.unlock_redeem_rate_limit import unlock_redeem_rate_limit_servi
 _awaiting_code: set[str] = set()
 
 
+def _where_text() -> str:
+    """Где абонент смотрит срок и конфиги: портал упоминаем только если он включён."""
+    try:
+        from app.services.feature_guards import get_feature_service
+
+        if get_feature_service().is_enabled("client_portal"):
+            return "в Mini App или на портале"
+    except Exception:  # noqa: BLE001 — текст не должен падать из-за тоглов
+        pass
+    return "в Mini App"
+
+
 async def start_redeem_prompt(bot_token: str, chat_id: str) -> None:
     _awaiting_code.add(str(chat_id))
     await send_message(
@@ -52,7 +64,7 @@ async def try_handle_code_message(
         await send_message(
             bot_token,
             tid,
-            f"✅ Ключ принят. Доступ продлён на {days} дн. Срок и конфиги — в Mini App или на портале.",
+            f"✅ Ключ принят. Доступ продлён на {days} дн. Срок и конфиги — {_where_text()}.",
         )
     except ValueError as exc:
         await send_message(bot_token, tid, str(exc))

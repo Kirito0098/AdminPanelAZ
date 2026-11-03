@@ -75,13 +75,22 @@ def on_user_access_extended(
     if user.telegram_id:
         bot_token = _get_setting(db, "telegram_bot_token")
         if bot_token:
+            until_text = (
+                f" до {user.access_until.strftime('%d.%m.%Y')}" if user.access_until else ""
+            )
+            where = "в Mini App"
+            try:
+                if get_feature_service().is_enabled("client_portal"):
+                    where = "в Mini App или на портале"
+            except Exception:  # noqa: BLE001 — текст не должен падать из-за тоглов
+                pass
             if not configs_were_kept or task is not None:
                 text = (
-                    "✅ Доступ продлён. Конфиги выпущены заново — скачайте их и "
-                    "замените старые на устройствах."
+                    f"✅ Доступ продлён{until_text}. Конфиги выпущены заново — скачайте их "
+                    f"{where} и замените старые на устройствах."
                 )
             else:
-                text = "✅ Доступ продлён. Срок и конфиги — в Mini App или на портале."
+                text = f"✅ Доступ продлён{until_text}. Срок и конфиги — {where}."
             send_tg_message(bot_token, str(user.telegram_id), text)
 
     return {"task_id": getattr(task, "id", None)}

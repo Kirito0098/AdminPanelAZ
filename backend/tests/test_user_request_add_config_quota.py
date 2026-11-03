@@ -110,5 +110,5 @@ def test_add_config_approval_keeps_panel_default_quota(db, monkeypatch):
 def test_add_config_delivery_text_differs_from_access():
     text = uar._delivery_text("https://panel.test/u/token", None, added=True)
 
-    assert text.splitlines()[0] == "Дополнительный конфиг одобрен"
+    assert text.splitlines()[0] == "✅ Дополнительный конфиг одобрен"
     assert "Доступ одобрен" not in text
