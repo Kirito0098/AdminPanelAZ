@@ -65,6 +65,7 @@ DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
     "bulk_user_nodes": True,
     "access_request": True,
     "user_message": True,
+    "unlock_redeem": True,
 }
 
 # Категории колокольчика в панели. Единственный источник правды для API и фильтра ленты.

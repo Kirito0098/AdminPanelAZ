@@ -541,6 +541,25 @@ def _is_duplicate_redemption_error(exc: IntegrityError) -> bool:
     )
 
 
+def _notify_unlock_redeemed(
+    db: Session, *, user_id: int | None, client_name: str, code: str, grant_days: int
+) -> None:
+    """Белл + Telegram: абонент активировал ключ продления. Продление не роняет."""
+    try:
+        from app.services.admin_notify import admin_notify_service
+
+        user = db.get(User, user_id) if user_id is not None else None
+        admin_notify_service.send(
+            db,
+            "unlock_redeem",
+            actor_username=user.username if user is not None else client_name,
+            target_name=code,
+            target_type=f"{grant_days} дн.",
+        )
+    except Exception:  # noqa: BLE001 — уведомление не должно ломать выдачу доступа
+        logger.warning("unlock redeem notify failed", exc_info=True)
+
+
 def redeem_unlock_code(
     db: Session,
     *,
@@ -785,10 +804,18 @@ def redeem_unlock_code_for_user(db: Session, *, code: str, user: User) -> dict:
     if not configs:
         raise ValueError("Нет конфигураций для продления — обратитесь к администратору")
     anchor = configs[0]
-    return redeem_unlock_code(
+    result = redeem_unlock_code(
         db,
         code=code,
         client_name=anchor.client_name,
         node_id=anchor.node_id,
         user_id=user.id,
     )
+    _notify_unlock_redeemed(
+        db,
+        user_id=user.id,
+        client_name=anchor.client_name,
+        code=code,
+        grant_days=int(result.get("grant_days") or 0),
+    )
+    return result

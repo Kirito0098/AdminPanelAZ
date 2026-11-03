@@ -59,6 +59,7 @@ BELL_TITLES: dict[str, str] = {
     "access_request_add_config": "Заявка: новый конфиг",
     "access_request_extend_access": "Заявка: продление доступа",
     "access_request_delivery_failed": "Заявка: не удалось доставить",
+    "unlock_redeem": "Абонент активировал ключ",
 }
 
 # Подписи для технических ключей из details, чтобы не показывать сырой JSON.
@@ -186,6 +187,7 @@ EVENT_CATEGORY: dict[str, str] = {
     "access_request_extend_access": "requests",
     "user_message": "requests",
     "access_request_delivery_failed": "requests",
+    "unlock_redeem": "requests",
 }
 
 

@@ -69,11 +69,12 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("bulk_user_nodes", "Массовая операция с серверами"),
     ("access_request", "Заявки на доступ"),
     ("user_message", "Сообщения в чат"),
+    ("unlock_redeem", "Активация unlock-ключа"),
 ]
 
 TG_NOTIFY_EVENT_GROUPS: list[tuple[str, str, str, tuple[str, ...]]] = [
     ("login", "Входы", "🔐", ("login_success", "login_failed", "tg_unlinked")),
-    ("requests", "Заявки и сообщения", "📨", ("access_request", "user_message")),
+    ("requests", "Заявки и сообщения", "📨", ("access_request", "user_message", "unlock_redeem")),
     (
         "clients",
         "Клиенты и пользователи",
@@ -1108,6 +1109,18 @@ class AdminNotifyService:
             return _format_notify_card(
                 "🚫 <b>TG ID не привязан</b>",
                 when,
+                detail_lines=detail_lines,
+            )
+
+        if event_type == "unlock_redeem":
+            detail_lines = [
+                _line_code("🎟", "Ключ", target_name),
+                _line_text("📅", "Продление", target_type or "—"),
+            ]
+            return _format_notify_card(
+                "🎟 <b>Абонент активировал ключ</b>",
+                when,
+                actor_line=actor_user,
                 detail_lines=detail_lines,
             )
 
