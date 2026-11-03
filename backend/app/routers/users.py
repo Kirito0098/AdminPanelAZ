@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import math
 import secrets
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
@@ -858,7 +859,28 @@ def approve_access_request(
     elif row.request_type == "add_config":
         ad_hoc = {"count": payload.count}
     elif row.request_type == "extend_access":
-        ad_hoc = {"days": payload.days}
+        if payload.access_until is not None:
+            target_user = db.get(User, row.user_id) if row.user_id else None
+            if target_user is None:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST, detail="Пользователь заявки не найден"
+                )
+            base = datetime.utcnow()
+            if target_user.access_until is not None and target_user.access_until > base:
+                base = target_user.access_until
+            target = payload.access_until
+            if target.tzinfo is not None:
+                target = target.astimezone(timezone.utc).replace(tzinfo=None)
+            delta = (target - base).total_seconds()
+            if delta < 3600:
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Дата продления должна быть позже текущего срока доступа",
+                )
+            # Сервис продлевает на целое число дней от max(сейчас, текущий срок).
+            ad_hoc = {"days": max(1, math.ceil(delta / 86400))}
+        else:
+            ad_hoc = {"days": payload.days}
     try:
         decided = approve_request(
             db, request_id=request_id, admin=admin, preset_id=payload.preset_id, ad_hoc=ad_hoc

@@ -12,6 +12,7 @@ import AppDialog from '@/components/shared/AppDialog'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
+import DatePickerField from '@/components/ui/DatePickerField'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
@@ -21,6 +22,15 @@ import { useProgress } from '@/context/ProgressContext'
 import { REQUEST_PROTOCOLS, REQUEST_TYPE_LABELS } from '@/lib/accessRequests'
 import { cn } from '@/lib/utils'
 import type { AccessRequestResponse, Node, PresetResponse, User } from '@/types'
+
+/** Дата «сегодня + 30 дней» в формате YYYY-MM-DD для календаря продления. */
+function defaultExtendDate(days = 30): string {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  return `${date.getFullYear()}-${mm}-${dd}`
+}
 
 export interface AccessRequestsDialogProps {
   open: boolean
@@ -56,6 +66,8 @@ export default function AccessRequestsDialog({
   const [approveUsername, setApproveUsername] = useState('')
   const [approveAccessDays, setApproveAccessDays] = useState('')
   const [approvingId, setApprovingId] = useState<number | null>(null)
+  const [extendTarget, setExtendTarget] = useState<{ id: number; date: string } | null>(null)
+  const [rejectTarget, setRejectTarget] = useState<{ id: number; reason: string } | null>(null)
 
   // Новый identity колбэка из родителя не должен перезапускать загрузку заявок.
   const onCountChangeRef = useRef(onCountChange)
@@ -153,6 +165,46 @@ export default function AccessRequestsDialog({
     if (!open) setReceipt(null)
   }, [open, setReceipt])
 
+  const finishApprove = async (telegramId: string | undefined) => {
+    const list = await getUsers({ includeDeleting: true })
+    onUsersChanged(list)
+    await reloadRequests()
+    const userRow = telegramId ? list.find((u) => u.telegram_id === telegramId) : undefined
+    if (userRow?.active_task_id) {
+      trackBackgroundTask(userRow.active_task_id, {
+        onComplete: () => {
+          onUsersChanged()
+          success('Конфиги для заявки применены')
+        },
+        onError: (_task, message) => notifyError(message),
+      })
+    } else {
+      window.setTimeout(() => onUsersChanged(), 2500)
+    }
+  }
+
+  const handleApproveExtend = async () => {
+    if (!extendTarget) return
+    const target = new Date(`${extendTarget.date}T23:59:59`)
+    if (Number.isNaN(target.getTime())) {
+      notifyError('Выберите дату продления')
+      return
+    }
+    const requestId = extendTarget.id
+    setApprovingId(requestId)
+    try {
+      await approveRequest(requestId, { access_until: target.toISOString() })
+      success(`Доступ продлён до ${target.toLocaleDateString('ru-RU')}`)
+      setExtendTarget(null)
+      await finishApprove(requests.find((r) => r.id === requestId)?.telegram_id)
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Ошибка продления')
+      await reloadRequests()
+    } finally {
+      setApprovingId(null)
+    }
+  }
+
   const handleApproveRequest = async (requestId: number, requestType: string) => {
     if (requestType === 'new_user' && !canApproveNewUser) {
       notifyError('Выберите шаблон или узлы и протоколы')
@@ -201,21 +253,7 @@ export default function AccessRequestsDialog({
         await approveRequest(requestId, {})
       }
       success('Заявка одобрена — создаётся абонент и конфиги')
-      const list = await getUsers({ includeDeleting: true })
-      onUsersChanged(list)
-      await reloadRequests()
-      const userRow = telegramId ? list.find((u) => u.telegram_id === telegramId) : undefined
-      if (userRow?.active_task_id) {
-        trackBackgroundTask(userRow.active_task_id, {
-          onComplete: () => {
-            onUsersChanged()
-            success('Конфиги для заявки применены')
-          },
-          onError: (_task, message) => notifyError(message),
-        })
-      } else {
-        window.setTimeout(() => onUsersChanged(), 2500)
-      }
+      await finishApprove(telegramId)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка одобрения')
       // Решение не принято: перечитываем список, чтобы заявка осталась на экране.
@@ -225,10 +263,11 @@ export default function AccessRequestsDialog({
     }
   }
 
-  const handleRejectRequest = async (requestId: number) => {
+  const handleRejectRequest = async (requestId: number, reason?: string) => {
     try {
-      await rejectRequest(requestId, { ban: false })
+      await rejectRequest(requestId, { ban: false, reason: reason?.trim() || undefined })
       success('Заявка отклонена')
+      setRejectTarget(null)
       await reloadRequests()
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка отказа')
@@ -429,7 +468,13 @@ export default function AccessRequestsDialog({
                         type="button"
                         size="sm"
                         variant="default"
-                        onClick={() => void handleApproveRequest(r.id, r.request_type)}
+                        onClick={() => {
+                          if (r.request_type === 'extend_access') {
+                            setExtendTarget({ id: r.id, date: defaultExtendDate() })
+                          } else {
+                            void handleApproveRequest(r.id, r.request_type)
+                          }
+                        }}
                         disabled={approveDisabled}
                       >
                         {approvingId === r.id ? '…' : 'Одобрить'}
@@ -438,7 +483,7 @@ export default function AccessRequestsDialog({
                         type="button"
                         size="sm"
                         variant="destructive"
-                        onClick={() => void handleRejectRequest(r.id)}
+                        onClick={() => setRejectTarget({ id: r.id, reason: '' })}
                         disabled={approvingId === r.id}
                       >
                         Отклонить
@@ -451,6 +496,79 @@ export default function AccessRequestsDialog({
           </div>
         )}
       </AppDialog>
+
+      {extendTarget && (
+        <AppDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setExtendTarget(null)
+          }}
+          title="Продлить доступ"
+          description="До какой даты продлить доступ абонента по заявке"
+          size="md"
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setExtendTarget(null)}>
+                Отмена
+              </Button>
+              <Button onClick={() => void handleApproveExtend()} disabled={approvingId !== null}>
+                {approvingId === extendTarget.id ? '…' : 'Одобрить'}
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-2">
+            <Label htmlFor="extend-until">Продлить до</Label>
+            <DatePickerField
+              id="extend-until"
+              value={extendTarget.date}
+              onChange={(value) => setExtendTarget({ ...extendTarget, date: value })}
+              fromDate={new Date()}
+            />
+            <p className="text-xs text-muted-foreground">
+              Продление добавляется к текущему сроку, если он ещё не истёк.
+            </p>
+          </div>
+        </AppDialog>
+      )}
+
+      {rejectTarget && (
+        <AppDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setRejectTarget(null)
+          }}
+          title="Отклонить заявку"
+          description="Причина необязательна: абонент получит нейтральный ответ"
+          size="md"
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setRejectTarget(null)}>
+                Отмена
+              </Button>
+              <Button
+                variant="destructive"
+                onClick={() => void handleRejectRequest(rejectTarget.id, rejectTarget.reason)}
+              >
+                Отклонить
+              </Button>
+            </>
+          }
+        >
+          <div className="space-y-2">
+            <Label htmlFor="reject-reason">Причина отказа (необязательно)</Label>
+            <Input
+              id="reject-reason"
+              value={rejectTarget.reason}
+              onChange={(event) =>
+                setRejectTarget({ ...rejectTarget, reason: event.target.value })
+              }
+              placeholder="Например: чек не читается"
+              maxLength={256}
+            />
+          </div>
+        </AppDialog>
+      )}
     </>
   )
 }
