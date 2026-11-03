@@ -508,8 +508,26 @@ export default function UsersPage() {
 
   if (loading) return <Spinner label="Загрузка пользователей…" />
 
+  const requestsWord =
+    requestsCount === 1 ? 'заявка' : requestsCount < 5 ? 'заявки' : 'заявок'
+
   return (
     <div className="space-y-4">
+      {provisioningOn && requestsCount > 0 && (
+        <button
+          type="button"
+          onClick={() => setRequestsOpen(true)}
+          className="flex w-full items-center gap-3 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-left transition-colors hover:bg-primary/10"
+        >
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/15 text-primary">
+            <Ticket size={16} />
+          </span>
+          <span className="min-w-0 flex-1 text-sm">
+            <b>{requestsCount}</b> {requestsWord} {requestsCount === 1 ? 'ждёт' : 'ждут'} решения
+            <span className="ml-2 font-medium text-primary">Открыть →</span>
+          </span>
+        </button>
+      )}
       <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-gradient-to-br from-primary/5 via-card to-card p-5 shadow-sm">
         <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
         <div className="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { LogOut, Menu, Moon, Radio, Shield, Sun, User } from 'lucide-react'
 import NodeSelector from '@/components/NodeSelector'
 import NotificationBell from '@/components/notifications/NotificationBell'
@@ -91,6 +91,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { theme, toggleTheme } = useTheme()
   // Живой счётчик из общего SSE-потока: не застывает до перезагрузки страницы.
   const { pendingRequestsCount } = useNotificationCenter()
+  const navigate = useNavigate()
   const [messagesUnread, setMessagesUnread] = useState(0)
   useEffect(() => {
     // Счётчик админский: обычным пользователям не опрашиваем (иначе 403 каждую минуту).
@@ -127,11 +128,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   visibleGroups = visibleGroups.map((group) => ({
     ...group,
     items: group.items.map((item) =>
-      item.to === '/messages'
-        ? { ...item, badge: messagesUnread }
-        : item.to === '/users'
-          ? { ...item, badge: pendingRequestsCount }
-          : item,
+      item.to === '/messages' ? { ...item, badge: messagesUnread } : item,
     ),
   }))
 
@@ -187,6 +184,22 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
               {group.items.map((item) => (
                 <li key={item.to}>
                   <SidebarNavLink item={item} onNavigate={onNavigate} />
+                  {item.to === '/users' && pendingRequestsCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigate('/users?requests=1')
+                        onNavigate?.()
+                      }}
+                      title="Заявки на доступ ждут решения"
+                      className="mt-0.5 flex w-full items-center gap-2 rounded-lg py-1 pl-11 pr-2 text-left text-xs font-medium text-primary transition-colors hover:bg-primary/10"
+                    >
+                      <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold text-primary-foreground">
+                        {pendingRequestsCount > 9 ? '9+' : pendingRequestsCount}
+                      </span>
+                      Заявки ждут решения
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
