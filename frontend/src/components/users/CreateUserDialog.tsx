@@ -158,7 +158,9 @@ export default function CreateUserDialog({
 
   useEffect(() => {
     if (!open || !approveRequest) return
-    const suggested = (approveRequest.username || `tg${approveRequest.telegramId}`).trim()
+    // Логин и имя клиента: только [A-Za-z0-9_-], иначе узел отклонит создание конфига.
+    const raw = (approveRequest.username || `tg${approveRequest.telegramId}`).trim()
+    const suggested = raw.replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 28) || `tg${approveRequest.telegramId}`
     setStep('who')
     setMode('provision')
     setUsername(suggested)

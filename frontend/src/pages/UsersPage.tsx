@@ -958,7 +958,7 @@ export default function UsersPage() {
               ? {
                   id: approveReq.id,
                   telegramId: approveReq.telegram_id,
-                  username: approveReq.telegram_username ?? approveReq.telegram_name ?? null,
+                  username: approveReq.telegram_username ?? null,
                 }
               : null
           }
