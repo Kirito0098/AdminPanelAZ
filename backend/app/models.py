@@ -65,6 +65,9 @@ DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
     "bulk_user_nodes": True,
 }
 
+# Категории колокольчика в панели. Единственный источник правды для API и фильтра ленты.
+BELL_NOTIFY_CATEGORIES: tuple[str, ...] = ("requests", "security", "nodes", "services", "tasks")
+
 # Event split out of an older one: until the user saves prefs again, it follows the old event,
 # so a muted "settings_change" keeps HA drift muted after the split.
 TG_NOTIFY_EVENT_INHERITS: dict[str, str] = {
@@ -94,6 +97,7 @@ class User(Base):
     totp_backup_codes_encrypted: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     telegram_id: Mapped[str | None] = mapped_column(String(32), unique=True, nullable=True, index=True)
     tg_notify_events: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    bell_notify_categories: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     config_quota: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     can_create_configs: Mapped[bool] = mapped_column(Boolean, default=False)
     can_manage_configs: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -145,6 +149,20 @@ class User(Base):
         if not stored:
             return dict(DEFAULT_TG_NOTIFY_EVENTS)
         return {key: _stored_tg_notify_event(stored, key) for key in DEFAULT_TG_NOTIFY_EVENTS}
+
+    def bell_categories(self) -> dict[str, bool]:
+        """Пять категорий колокольчика; отсутствующий ключ — включён.
+
+        Пустое поле и битый JSON читаются как «всё включено»: старые записи и
+        ручная правка БД ленту не ломают.
+        """
+        try:
+            stored = json.loads(self.bell_notify_categories or "{}")
+        except (ValueError, TypeError):
+            stored = {}
+        if not isinstance(stored, dict):
+            stored = {}
+        return {key: bool(stored.get(key, True)) for key in BELL_NOTIFY_CATEGORIES}
 
 
 def _stored_tg_notify_event(stored: dict[str, bool], event_type: str) -> bool:
