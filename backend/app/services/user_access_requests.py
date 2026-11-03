@@ -1181,9 +1181,12 @@ def reject_request(
     # Причину отказа, если админ её указал, показываем абоненту; без неё — нейтральный ответ.
     reason_text = (reason or "").strip()
     if reason_text:
-        reject_text = f"❌ <b>Заявку отклонили</b>\n\nПричина: {escape(reason_text)}"
+        reject_text = f"❌ <b>Ваша заявка отклонена</b>\n\nПричина: {escape(reason_text)}"
     else:
-        reject_text = "Вашу заявку рассмотрели администратором."
+        reject_text = (
+            "❌ <b>Ваша заявка отклонена</b>\n\n"
+            "Если это ошибка — напишите администратору."
+        )
     bot_token = _bot_token(db)
     if bot_token and request.telegram_id:
         try:
@@ -1251,7 +1254,7 @@ def _delivery_text(
         ]
     else:
         lines = [
-            "Доступ одобрен",
+            "✅ <b>Ваша заявка одобрена</b>",
             "",
             f"Ваша ссылка на портал: {portal_url}",
             "",
@@ -1338,6 +1341,15 @@ def maybe_send_delivery_after_task(db: Session, *, user_id: int, created_count: 
             action_payload={"request_id": req.id, "user_id": user_id},
             level="warning",
         )
+        # Абонент не должен висеть в тишине: заявку одобрили, но конфигов пока нет.
+        token = _get_setting(db, SETTING_BOT_TOKEN, "").strip()
+        if token and user.telegram_id:
+            send_message_sync_or_async(
+                token,
+                str(user.telegram_id),
+                "✅ Ваша заявка одобрена, но конфиги пока не готовы. "
+                "Администратор уже разбирается — мы напишем, когда всё будет.",
+            )
         return
     bot_token = _get_setting(db, SETTING_BOT_TOKEN, "").strip()
     if not bot_token or not user.telegram_id:
