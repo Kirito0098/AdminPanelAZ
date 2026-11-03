@@ -6,6 +6,7 @@ import {
   markMessagesRead,
   sendUserMessage,
 } from '@/api/messages'
+import AppDialog from '@/components/shared/AppDialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatDate } from '@/lib/datetime'
@@ -15,6 +16,7 @@ import type { UserMessageItem } from '@/types'
 
 function MessageAttachment({ userId, messageId }: { userId: number; messageId: number }) {
   const [url, setUrl] = useState<string | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -36,13 +38,34 @@ function MessageAttachment({ userId, messageId }: { userId: number; messageId: n
 
   if (!url) return <p className="mt-1 text-[10px] opacity-70">Загрузка фото…</p>
   return (
-    <a href={url} target="_blank" rel="noreferrer" className="mt-2 block">
-      <img
-        src={url}
-        alt="Фото из переписки"
-        className="max-h-64 w-auto rounded-md border border-border/60"
-      />
-    </a>
+    <>
+      <button
+        type="button"
+        onClick={() => setPreviewOpen(true)}
+        className="mt-2 block cursor-zoom-in"
+        aria-label="Открыть фото"
+      >
+        <img
+          src={url}
+          alt="Фото из переписки"
+          className="max-h-64 w-auto rounded-md border border-border/60"
+        />
+      </button>
+      <AppDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        title="Фото из переписки"
+        description="Нажмите вне фото или Esc, чтобы закрыть"
+        size="xl"
+      >
+        <img
+          src={url}
+          alt="Фото из переписки"
+          className="mx-auto max-h-[70dvh] w-auto cursor-zoom-out rounded-lg object-contain"
+          onClick={() => setPreviewOpen(false)}
+        />
+      </AppDialog>
+    </>
   )
 }
 
