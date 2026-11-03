@@ -1645,6 +1645,7 @@ def _run_db_migrations() -> None:
     _migrate_nodes_columns()
     _migrate_admin_panel_notification_states()
     _migrate_users_bell_notify_categories()
+    _migrate_user_messages_attachment()
     _migrate_alert_rules_table()
     _migrate_openvpn_buffer_guard_tables()
     _migrate_openvpn_buffer_guard_factory_thresholds()
@@ -2071,6 +2072,19 @@ def _migrate_users_bell_notify_categories() -> None:
         if "bell_notify_categories" not in _table_columns(conn, "users"):
             conn.execute(text("ALTER TABLE users ADD COLUMN bell_notify_categories TEXT"))
             logger.info("DB migration: added users.bell_notify_categories")
+
+
+def _migrate_user_messages_attachment() -> None:
+    """Фото в переписке (чек оплаты) — Telegram file_id вложения."""
+    with _migration_transaction() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_messages'")
+        ).fetchone()
+        if not exists:
+            return
+        if "attachment_file_id" not in _table_columns(conn, "user_messages"):
+            conn.execute(text("ALTER TABLE user_messages ADD COLUMN attachment_file_id TEXT"))
+            logger.info("DB migration: added user_messages.attachment_file_id")
 
 
 def _migrate_admin_panel_notification_states() -> None:

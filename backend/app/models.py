@@ -1132,6 +1132,8 @@ class UserMessage(Base):
     )
     text: Mapped[str] = mapped_column(Text)
     telegram_message_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Фото в переписке (чек оплаты): Telegram file_id, отдаётся через прокси панели.
+    attachment_file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     read_by_admin_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

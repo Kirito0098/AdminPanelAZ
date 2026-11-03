@@ -1,4 +1,4 @@
-import { apiFetch } from './http'
+import { apiFetch, apiFetchResponse } from './http'
 import type { MessageThread, SendMessageResult, UserMessageItem } from '../types'
 
 function query(params: Record<string, string | number | undefined>): string {
@@ -42,4 +42,10 @@ export async function sendUserMessage(userId: number, text: string) {
     method: 'POST',
     body: JSON.stringify({ text }),
   })
+}
+
+/** GET /messages/{userId}/{messageId}/attachment — фото из переписки (JPEG). */
+export async function getMessageAttachment(userId: number, messageId: number): Promise<Blob> {
+  const response = await apiFetchResponse(`/messages/${userId}/${messageId}/attachment`)
+  return response.blob()
 }

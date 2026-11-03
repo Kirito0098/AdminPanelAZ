@@ -46,7 +46,12 @@ def leave_chat_mode(db: Session, user: User) -> None:
 
 
 def record_inbound(
-    db: Session, *, user: User, text: str, telegram_message_id: int | None
+    db: Session,
+    *,
+    user: User,
+    text: str,
+    telegram_message_id: int | None,
+    attachment_file_id: str | None = None,
 ) -> UserMessage | None:
     """Сохранить сообщение абонента; None — повторная доставка того же апдейта."""
     message = UserMessage(
@@ -54,6 +59,7 @@ def record_inbound(
         direction=DIRECTION_IN,
         text=text[:MESSAGE_MAX_LEN],
         telegram_message_id=telegram_message_id,
+        attachment_file_id=attachment_file_id,
     )
     db.add(message)
     try:

@@ -2002,6 +2002,7 @@ class UserMessageOut(BaseModel):
     text: str
     created_at: datetime
     read_by_admin_at: datetime | None = None
+    attachment_url: str | None = None
 
 
 class MessageThreadOut(BaseModel):

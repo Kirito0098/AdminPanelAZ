@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy.orm import Session
 
 from app.models import User, UserAccessRequest
@@ -21,6 +23,8 @@ from app.services.telegram_bot_handlers.base import (
     panel_root_url,
 )
 from app.services import telegram_bot_i18n as i18n
+
+logger = logging.getLogger(__name__)
 from app.services.user_access_requests import (
     AlreadyDecided,
     AlreadyHasAccess,
@@ -167,6 +171,31 @@ async def handle_pay_request(ctx: BotContext) -> None:
     await send_message(ctx.bot_token, ctx.chat_id, i18n.PAY_REQUEST_CREATED)
 
 
+def _record_receipt_in_chat(ctx: BotContext, req: UserAccessRequest, message: dict) -> None:
+    """Фото чека попадает и в переписку «Сообщения», не только в заявку."""
+    try:
+        from app.services.user_messages import record_inbound
+
+        user = (
+            ctx.db.query(User)
+            .filter(User.telegram_id == str(ctx.telegram_user_id))
+            .first()
+        )
+        if user is None:
+            return
+        photo = message.get("photo") or []
+        file_id = photo[-1].get("file_id") if photo else None
+        record_inbound(
+            ctx.db,
+            user=user,
+            text=f"📷 Чек по заявке №{req.id}",
+            telegram_message_id=message.get("message_id"),
+            attachment_file_id=file_id,
+        )
+    except Exception:  # noqa: BLE001 — переписка не должна ломать приём чека
+        logger.warning("receipt chat record failed", exc_info=True)
+
+
 async def handle_request_photo(ctx: BotContext, message: dict) -> bool:
     """Фото от пользователя — приложить как чек к его pending-заявке. True — обработано."""
     req = (
@@ -198,6 +227,7 @@ async def handle_request_photo(ctx: BotContext, message: dict) -> bool:
         return True
     # Чек пришёл после карточки: у админов появляется фото-карточка с кнопками решения.
     await send_receipt_card_to_admins(ctx.db, req)
+    _record_receipt_in_chat(ctx, req, message)
     await send_message(ctx.bot_token, ctx.chat_id, i18n.REQUEST_RECEIPT_OK)
     return True
 

@@ -2906,6 +2906,7 @@ export interface UserMessageItem {
   text: string
   created_at: string
   read_by_admin_at: string | null
+  attachment_url?: string | null
 }
 
 /** Диалог в списке «Сообщения». */

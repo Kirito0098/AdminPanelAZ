@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
@@ -57,7 +57,57 @@ def list_messages(
     _: User = Depends(require_admin),
 ):
     """Лента диалога; `before_id` — подгрузка более ранних сообщений."""
-    return chat.list_messages(db, user_id=user_id, limit=limit, before_id=before_id)
+    rows = chat.list_messages(db, user_id=user_id, limit=limit, before_id=before_id)
+    return [
+        UserMessageOut(
+            id=row.id,
+            direction=row.direction,
+            admin_id=row.admin_id,
+            text=row.text,
+            created_at=row.created_at,
+            read_by_admin_at=row.read_by_admin_at,
+            attachment_url=(
+                f"/messages/{user_id}/{row.id}/attachment" if row.attachment_file_id else None
+            ),
+        )
+        for row in rows
+    ]
+
+
+@router.get("/{user_id}/{message_id}/attachment")
+def get_message_attachment(
+    user_id: int,
+    message_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
+    """Фото из переписки (чек): скачивание из Telegram и перекодировка в памяти."""
+    from app.models import UserMessage
+    from app.services.app_setting_store import _get_setting
+    from app.services.request_receipt_preview import (
+        ReceiptDecodeError,
+        build_receipt_preview_jpeg,
+    )
+
+    row = db.get(UserMessage, message_id)
+    if row is None or row.user_id != user_id or not row.attachment_file_id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Вложение не найдено")
+    token = (_get_setting(db, "telegram_bot_token", "") or "").strip()
+    try:
+        data = build_receipt_preview_jpeg(row.attachment_file_id, token)
+    except ReceiptDecodeError:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Не удалось открыть фото"
+        )
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={
+            "Content-Disposition": "inline",
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, no-store",
+        },
+    )
 
 
 @router.post("/{user_id}/read")
