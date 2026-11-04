@@ -23,6 +23,7 @@ from app.services.node_sync.vpn_state_sync import (
     sync_openvpn_pki_from_primary,
     sync_vpn_crypto_from_primary,
 )
+from app.services.policy_import import copy_single_client_policy
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +129,7 @@ def _handle_client_create(db: Session, group: NodeSyncGroup, payload: dict[str, 
     primary_config: VpnConfig = payload["primary_config"]
     result = ReplicateResult(operation=ReplicateOperation.CLIENT_CREATE)
     primary_adapter = _primary_adapter(db, group)
+    primary_node = db.get(Node, group.primary_node_id)
 
     for replica_node in get_replica_nodes(db, group):
         try:
@@ -165,6 +167,16 @@ def _handle_client_create(db: Session, group: NodeSyncGroup, payload: dict[str, 
             .first()
         )
         shadow = upsert_shadow_config(db, group, replica_node.id, primary_config, existing)
+        # Скопировать политику доступа (block/limit/access_until) на свежую shadow-строку —
+        # синхронный replicate_inherited_access_until в provision_config гонялся до её создания.
+        if primary_node is not None:
+            copy_single_client_policy(
+                db,
+                primary_node,
+                replica_node,
+                primary_config.client_name,
+                vpn_type=primary_config.vpn_type,
+            )
         result.successes.append({"node_id": replica_node.id, "config_id": shadow.id})
 
     primary_config.sync_group_id = group.id

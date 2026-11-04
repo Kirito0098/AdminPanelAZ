@@ -131,11 +131,6 @@ def test_provision_openvpn_skips_recreate_and_enqueues_ha(db, node, admin, monke
     )
     monkeypatch.setattr(
         config_provisioning,
-        "replicate_inherited_access_until",
-        lambda *_a, **_k: {},
-    )
-    monkeypatch.setattr(
-        config_provisioning,
         "find_sync_group_for_primary",
         lambda *_a, **_k: SimpleNamespace(id=42, sync_mode="auto"),
     )
@@ -318,3 +313,61 @@ def test_try_claim_pending_releases_write_lock(tmp_path):
     finally:
         s1.close()
         s2.close()
+
+
+def test_client_create_copies_access_policy_to_shadow(db, node, admin, monkeypatch):
+    import json
+    from datetime import datetime
+
+    from app.models import Node, NodeSyncGroup, OpenVpnAccessPolicy, SyncStatus, VpnConfig
+    from app.services.node_sync import replicate
+
+    replica = Node(
+        name="replica", host="127.0.0.2", port=9100, api_key_hash="", api_key_encrypted="",
+        status=NodeStatus.online, is_local=False, node_metadata="{}",
+    )
+    db.add(replica)
+    db.commit()
+    db.refresh(replica)
+
+    group = NodeSyncGroup(
+        name="g", shared_domain="vpn.example", primary_node_id=node.id,
+        replica_node_ids=json.dumps([replica.id]), sync_mode="auto", sync_status=SyncStatus.synced,
+    )
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+
+    config = VpnConfig(
+        node_id=node.id, client_name="policy_client", vpn_type=VpnType.openvpn,
+        owner_id=admin.id, cert_expire_days=3650,
+    )
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+
+    until = datetime(2036, 1, 1, 12, 0, 0)
+    db.add(OpenVpnAccessPolicy(node_id=node.id, client_name="policy_client", access_until=until))
+    db.commit()
+
+    monkeypatch.setattr(replicate, "sync_vpn_crypto_from_primary", lambda *a, **k: None)
+    monkeypatch.setattr(replicate, "get_adapter_for_node", lambda _n: MagicMock())
+
+    result = replicate._handle_client_create(db, group, {"primary_config": config})
+
+    assert result.successes, result.errors
+
+    shadow = (
+        db.query(VpnConfig)
+        .filter(VpnConfig.node_id == replica.id, VpnConfig.ha_primary_config_id == config.id)
+        .first()
+    )
+    assert shadow is not None
+
+    policy = (
+        db.query(OpenVpnAccessPolicy)
+        .filter_by(node_id=replica.id, client_name="policy_client")
+        .first()
+    )
+    assert policy is not None
+    assert policy.access_until == until

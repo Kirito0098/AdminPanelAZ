@@ -37,10 +37,7 @@ from app.services.openvpn_cert import refresh_config_cert_expiry
 from app.services.openvpn_profile_repair import finalize_openvpn_profiles_after_add
 from app.services.profile_delivery import load_node_remote_hosts
 from app.services.traffic.maintenance import purge_traffic_history_for_reused_name
-from app.services.user_subscription import (
-    apply_owner_access_until_to_config,
-    replicate_inherited_access_until,
-)
+from app.services.user_subscription import apply_owner_access_until_to_config
 from app.services.vpn_profile_visibility import enforce_can_create_vpn_type
 
 _VPN_PROTOCOLS = {
@@ -173,7 +170,6 @@ def provision_config(
                 ha_sync_task_id = str(queued.get("task_id") or "") or None
         except Exception as exc:  # noqa: BLE001 — create already succeeded on primary
             ha_replicate_warning = f"Не удалось поставить HA sync в очередь: {exc}"
-        inherit = replicate_inherited_access_until(db, config, inherit, actor=actor.username)
 
     if inherit.get("warning"):
         if ha_replicate_warning:
