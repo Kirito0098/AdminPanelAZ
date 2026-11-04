@@ -91,12 +91,15 @@ def apply_shared_domain_to_members(
     group: NodeSyncGroup,
     *,
     run_apply: bool = True,
+    apply_replicas: bool = True,
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     """Write shared domain hosts to setup on all members, then doall.sh + client.sh 7.
 
-    Errors on one node are recorded but never abort the rest (partial failure is
-    reflected via ``success=False`` and the ``errors`` list).
+    ``apply_replicas=False`` skips the heavy apply (doall / client.sh 7 / .ovpn copy /
+    restart) on replicas — used by the one-shot Setup, where ``push_full`` redoes that
+    work right after. Errors on one node are recorded but never abort the rest (partial
+    failure is reflected via ``success=False`` and the ``errors`` list).
     """
     openvpn_host = effective_openvpn_domain(group)
     wireguard_host = effective_wireguard_domain(group)
@@ -156,9 +159,11 @@ def apply_shared_domain_to_members(
     if run_apply:
         primary_adapter = None
         for index, node in enumerate(nodes):
+            is_primary = node.id == group.primary_node_id
+            if not apply_replicas and not is_primary:
+                continue
             percent = 45 + int((index / total) * 50)
             progress(percent, f"{node.name}: doall.sh + client.sh 7…")
-            is_primary = node.id == group.primary_node_id
             try:
                 adapter = get_adapter_for_node(node)
                 doall_output = adapter.apply_config_changes()
