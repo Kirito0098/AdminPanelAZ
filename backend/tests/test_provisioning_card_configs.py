@@ -30,7 +30,7 @@ def test_card_shows_a_config_reassigned_outside_the_plan_namespace(factory):
         db.add_all(
             [
                 Node(id=1, name="node-a", host="h1", is_local=True, status=NodeStatus.online),
-                Node(id=2, name="2Cent-EE", host="h2", is_local=False, status=NodeStatus.online),
+                Node(id=2, name="node-b", host="h2", is_local=False, status=NodeStatus.online),
             ]
         )
         db.commit()
@@ -46,7 +46,7 @@ def test_card_shows_a_config_reassigned_outside_the_plan_namespace(factory):
 
     assert {group.name for group in groups} == {"test10", "android_test"}
     reassigned = next(group for group in groups if group.name == "android_test")
-    assert [(node.node_label, node.vpn_type) for node in reassigned.nodes] == [("2Cent-EE", "openvpn")]
+    assert [(node.node_label, node.vpn_type) for node in reassigned.nodes] == [("node-b", "openvpn")]
 
 
 def test_card_hides_ha_shadow_configs(factory):

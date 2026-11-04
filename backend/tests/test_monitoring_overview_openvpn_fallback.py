@@ -42,7 +42,7 @@ def test_fallback_uses_only_active_openvpn_sessions_of_the_node(factory):
         db.add_all(
             [
                 Node(id=1, name="node-a", host="h1", is_local=True, status=NodeStatus.online),
-                Node(id=2, name="2Cent-EE", host="h2", is_local=False, status=NodeStatus.online),
+                Node(id=2, name="node-b", host="h2", is_local=False, status=NodeStatus.online),
             ]
         )
         db.commit()
