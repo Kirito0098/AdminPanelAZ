@@ -35,12 +35,16 @@ def _collect_all_nodes():
     db = SessionLocal()
     try:
         nodes = db.query(Node).all()
+        from app.services.node_http_gate import NodeHttpBusy, node_http_gate_nonblocking
+
         for node in nodes:
             if not is_vpn_node(node):
                 continue
             try:
-                adapter = get_adapter_for_node(node)
-                metrics = adapter.get_server_metrics()
+                with node_http_gate_nonblocking():
+                    adapter = get_adapter_for_node(node)
+                    metrics = adapter.get_server_metrics()
+                # Sample and alert write to the DB: keep them out of the node slot.
                 persist_sample(db, node.id, metrics)
                 admin_notify_service.maybe_send_resource_alert(
                     db,
@@ -49,6 +53,8 @@ def _collect_all_nodes():
                     node_id=node.id,
                     node_name=node.name,
                 )
+            except NodeHttpBusy:
+                logger.debug("Resource metrics skipped for %s: agent slot busy", node.name)
             except Exception as exc:
                 logger.debug("Resource metrics collect failed for node %s: %s", node.name, exc)
         # Retention worker purges node_resource_sample when enabled.

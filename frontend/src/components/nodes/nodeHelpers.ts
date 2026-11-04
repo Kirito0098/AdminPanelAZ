@@ -1,5 +1,5 @@
 import { formatDateTime } from '@/lib/datetime'
-import type { Node } from '@/types'
+import type { Node, NodeTransportId } from '@/types'
 
 export function getSelectedNodes(nodes: Node[], selectedNodeIds: number[]) {
   const idSet = new Set(selectedNodeIds)
@@ -36,4 +36,14 @@ export function formatLastSeen(lastSeen?: string | null) {
 
 export function isWrongVersionSslError(error: string) {
   return /WRONG_VERSION_NUMBER|wrong version number/i.test(error)
+}
+
+export function nodeTransportId(node: Node): NodeTransportId {
+  const raw = (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase()
+  if (raw === 'mtls' || raw === 'ssh') return raw
+  return 'http'
+}
+
+export function nodeUsesInsecureHttp(node: Node): boolean {
+  return !node.is_local && nodeTransportId(node) === 'http'
 }

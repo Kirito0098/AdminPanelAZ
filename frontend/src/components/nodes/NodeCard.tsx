@@ -9,7 +9,7 @@ import type { Node, NodeSyncGroup, NodeTransportId } from '@/types'
 import NodeActions from './NodeActions'
 import NodeConnectionErrorAlert from './NodeConnectionErrorAlert'
 import NodeTransportBadge from './NodeTransportBadge'
-import { formatLastSeen, getNodeMeta } from './nodeHelpers'
+import { formatLastSeen, getNodeMeta, nodeUsesInsecureHttp } from './nodeHelpers'
 import { isProxyNode } from './nodeKind'
 
 type NodeCardProps = {
@@ -195,6 +195,18 @@ export default function NodeCard({
             </Badge>
           )}
           <NodeTransportBadge node={node} />
+          {nodeUsesInsecureHttp(node) && (
+            <span
+              className="text-amber-800 dark:text-amber-100"
+              title={
+                isProxy
+                  ? 'API-ключ и данные узла идут открытым текстом. Включите HTTPS + mTLS для proxy_agent (сертификаты ставятся вручную) или SSH-туннель.'
+                  : 'API-ключ и данные узла идут открытым текстом. Включите HTTPS + mTLS (сертификаты панель выдаст сама) или SSH-туннель.'
+              }
+            >
+              открытый текст — включите mTLS
+            </span>
+          )}
           {lastSeen && <span>Последняя проверка: {lastSeen}</span>}
         </div>
         {node.status === 'offline' && meta.lastError && (

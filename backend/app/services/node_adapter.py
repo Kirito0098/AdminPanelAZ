@@ -1,4 +1,7 @@
+import atexit
+import logging
 import tempfile
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -50,6 +53,7 @@ from app.services.warper import WarperService, build_ip_ranges_text_from_items, 
 from app.services.awg2 import Awg2Service, is_awg2_profile_path
 
 _settings = get_settings()
+logger = logging.getLogger(__name__)
 
 HTTP_TIMEOUT = 120.0
 _TELEGRAM_OIDC_RELAY_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
@@ -83,6 +87,56 @@ def _effective_timeout(timeout: float | httpx.Timeout | None) -> float | httpx.T
             pool=_capped(timeout.pool, cap),
         )
     return _capped(timeout, cap)
+
+
+# Requests allowed to run for minutes (patch build, backups, config apply, node update)
+# bypass the per-node slot: holding it for their whole duration would stall the node UI.
+LONG_REQUEST_TIMEOUT_SECONDS = 180.0
+
+# One keep-alive client per node endpoint: every call for the same node reuses the
+# connection pool instead of opening a new TCP/TLS session per request.
+_HTTP_CLIENTS: dict[tuple[str, bool, float], httpx.Client] = {}
+_HTTP_CLIENTS_LOCK = threading.Lock()
+
+
+def shared_http_client(
+    base_url: str,
+    mtls_enabled: bool,
+    verify,
+    *,
+    timeout: float,
+) -> httpx.Client:
+    key = (base_url, mtls_enabled, float(timeout))
+    with _HTTP_CLIENTS_LOCK:
+        client = _HTTP_CLIENTS.get(key)
+        if client is None:
+            kwargs: dict[str, Any] = {}
+            if verify is not None:
+                kwargs["verify"] = verify
+            client = httpx.Client(timeout=timeout, **kwargs)
+            _HTTP_CLIENTS[key] = client
+        return client
+
+
+def close_shared_http_clients() -> None:
+    with _HTTP_CLIENTS_LOCK:
+        clients = list(_HTTP_CLIENTS.values())
+        _HTTP_CLIENTS.clear()
+    for client in clients:
+        try:
+            client.close()
+        except Exception:
+            logger.debug("Failed to close shared node HTTP client", exc_info=True)
+
+
+atexit.register(close_shared_http_clients)
+
+
+def _timeout_seconds(timeout: float | httpx.Timeout | None) -> float:
+    if not isinstance(timeout, httpx.Timeout):
+        return float(timeout or 0)
+    parts = (timeout.connect, timeout.read, timeout.write, timeout.pool)
+    return max((float(p) for p in parts if p is not None), default=0.0)
 
 
 class NodeAdapter(ABC):
@@ -1218,17 +1272,20 @@ class RemoteNodeAdapter(NodeAdapter):
         self.api_key = api_key
         self._verify = build_node_agent_ssl_context(mtls_enabled=mtls_enabled)
         self._overview_cache_key = monitoring_overview_cache_key(host, port)
-        self._http_client: httpx.Client | None = None
+        from app.services.node_http_gate import node_http_gate_key
+
+        self._http_gate_key = node_http_gate_key(host, port)
 
     def _get_http_client(self) -> httpx.Client:
-        if self._http_client is None:
-            self._http_client = httpx.Client(timeout=HTTP_TIMEOUT, **self._client_kwargs())
-        return self._http_client
+        return shared_http_client(
+            self.base_url,
+            self._mtls_enabled,
+            self._verify,
+            timeout=HTTP_TIMEOUT,
+        )
 
     def close(self) -> None:
-        if self._http_client is not None:
-            self._http_client.close()
-            self._http_client = None
+        """The client is shared per endpoint and closed at process shutdown."""
 
     def _get_monitoring_overview(self) -> dict[str, Any]:
         ttl = max(0, int(_settings.monitoring_overview_cache_ttl_seconds))
@@ -1254,6 +1311,28 @@ class RemoteNodeAdapter(NodeAdapter):
         _code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
         return message
 
+    @contextmanager
+    def _node_slot(self, timeout: float | httpx.Timeout | None) -> Iterator[None]:
+        # Long admin requests bypass the slot; a full interactive wait becomes node_busy.
+        from app.services.node_http_gate import (
+            NodeHttpTimeout,
+            hold_node_http,
+            node_http_gate_bypass,
+        )
+        from app.services.node_link_errors import CODE_BUSY, raise_link_error
+
+        try:
+            if _timeout_seconds(timeout) >= LONG_REQUEST_TIMEOUT_SECONDS:
+                with node_http_gate_bypass():
+                    yield
+                return
+            with hold_node_http(self._http_gate_key):
+                yield
+        except NodeHttpTimeout:
+            raise_link_error(
+                CODE_BUSY, "Узел занят другой операцией — повторите через несколько секунд"
+            )
+
     def _request(self, method: str, path: str, **kwargs) -> Any:
         from app.services.node_link_errors import (
             classify_http_status,
@@ -1264,50 +1343,55 @@ class RemoteNodeAdapter(NodeAdapter):
         url = f"{self.base_url}{path}"
         timeout = _effective_timeout(kwargs.pop("timeout", HTTP_TIMEOUT))
         headers = {**self._headers(), **kwargs.pop("headers", {})}
-        try:
-            client = self._get_http_client()
-            response = client.request(
-                method,
-                url,
-                headers=headers,
-                timeout=timeout,
-                **kwargs,
-            )
-        except httpx.RequestError as exc:
-            code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
-            raise_link_error(code, message)
-
-        if response.status_code >= 400:
-            detail = response.text
-            from_agent = False
+        with self._node_slot(timeout):
             try:
-                data = response.json()
-                detail = data.get("detail", detail)
-                from_agent = True
-            except Exception:
-                pass
-            code, message = classify_http_status(
-                response.status_code,
-                detail,
-                mtls_enabled=self._mtls_enabled,
-                from_agent=from_agent,
-            )
-            raise_link_error(code, message, upstream_status=response.status_code)
+                client = self._get_http_client()
+                response = client.request(
+                    method,
+                    url,
+                    headers=headers,
+                    timeout=timeout,
+                    **kwargs,
+                )
+            except httpx.RequestError as exc:
+                code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
+                raise_link_error(code, message)
 
-        if response.status_code == 204 or not response.content:
-            return None
-        return response.json()
+            if response.status_code >= 400:
+                detail = response.text
+                from_agent = False
+                try:
+                    data = response.json()
+                    detail = data.get("detail", detail)
+                    from_agent = True
+                except Exception:
+                    pass
+                code, message = classify_http_status(
+                    response.status_code,
+                    detail,
+                    mtls_enabled=self._mtls_enabled,
+                    from_agent=from_agent,
+                )
+                raise_link_error(code, message, upstream_status=response.status_code)
+
+            if response.status_code == 204 or not response.content:
+                return None
+            return response.json()
 
     def telegram_bot_api(
         self, token: str, method: str, body: bytes, content_type: str, *, timeout: httpx.Timeout
     ) -> dict:
-        return self._request(
-            "POST",
-            f"/telegram/bot-api/{method}",
-            content=body,
-            headers={"X-Telegram-Bot-Token": token, "Content-Type": content_type},
-            timeout=timeout,
-        )
+        # Relay traffic (including long-poll getUpdates) is not agent VPN work.
+        from app.services.node_http_gate import node_http_gate_bypass
+
+        with node_http_gate_bypass():
+            return self._request(
+                "POST",
+                f"/telegram/bot-api/{method}",
+                content=body,
+                headers={"X-Telegram-Bot-Token": token, "Content-Type": content_type},
+                timeout=timeout,
+            )
 
     def telegram_oidc_token(self, body: bytes, authorization: str) -> dict:
         return self._request(
@@ -1333,36 +1417,37 @@ class RemoteNodeAdapter(NodeAdapter):
 
         url = f"{self.base_url}{path}"
         timeout = _effective_timeout(kwargs.pop("timeout", HTTP_TIMEOUT))
-        try:
-            client = self._get_http_client()
-            response = client.request(
-                method,
-                url,
-                headers=self._headers(),
-                timeout=timeout,
-                **kwargs,
-            )
-        except httpx.RequestError as exc:
-            code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
-            raise_link_error(code, message)
-
-        if response.status_code >= 400:
-            detail = response.text
-            from_agent = False
+        with self._node_slot(timeout):
             try:
-                data = response.json()
-                detail = data.get("detail", detail)
-                from_agent = True
-            except Exception:
-                pass
-            code, message = classify_http_status(
-                response.status_code,
-                detail,
-                mtls_enabled=self._mtls_enabled,
-                from_agent=from_agent,
-            )
-            raise_link_error(code, message, upstream_status=response.status_code)
-        return response.content
+                client = self._get_http_client()
+                response = client.request(
+                    method,
+                    url,
+                    headers=self._headers(),
+                    timeout=timeout,
+                    **kwargs,
+                )
+            except httpx.RequestError as exc:
+                code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
+                raise_link_error(code, message)
+
+            if response.status_code >= 400:
+                detail = response.text
+                from_agent = False
+                try:
+                    data = response.json()
+                    detail = data.get("detail", detail)
+                    from_agent = True
+                except Exception:
+                    pass
+                code, message = classify_http_status(
+                    response.status_code,
+                    detail,
+                    mtls_enabled=self._mtls_enabled,
+                    from_agent=from_agent,
+                )
+                raise_link_error(code, message, upstream_status=response.status_code)
+            return response.content
 
     def health_check(self) -> dict[str, Any]:
         return self._request("GET", "/health", timeout=10.0)

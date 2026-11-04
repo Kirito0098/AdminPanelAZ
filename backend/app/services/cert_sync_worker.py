@@ -96,7 +96,10 @@ def sync_cert_expiry(db) -> int:
         if node is None or not is_vpn_node(node):
             continue
         try:
-            count = _sync_node(db, node)
+            from app.services.node_http_gate import NodeHttpBusy, node_http_gate_nonblocking
+
+            with node_http_gate_nonblocking():
+                count = _sync_node(db, node)
             updated += count
             if count:
                 logger.info(
@@ -105,6 +108,8 @@ def sync_cert_expiry(db) -> int:
                     count,
                     node.is_local,
                 )
+        except NodeHttpBusy:
+            logger.debug("cert_sync: skip node %s: agent slot busy", node.name)
         except Exception:
             logger.exception("cert_sync: skip node id=%s name=%s", node.id, node.name)
     if updated:

@@ -15,6 +15,7 @@ CODE_ERROR = "node_error"
 CODE_SSH_AUTH = "node_ssh_auth"
 CODE_SSH_UNREACHABLE = "node_ssh_unreachable"
 CODE_SSH_TUNNEL = "node_ssh_tunnel"
+CODE_BUSY = "node_busy"
 
 # Text markers produced by a TLS proxy in front of the agent, not by the agent itself.
 # The agent's own JSON errors may mention "SSL" (e.g. EasyRSA output) and must not land here.
@@ -36,6 +37,7 @@ _HINTS = {
     CODE_SSH_AUTH: "Проверьте SSH username, private key и passphrase для узла.",
     CODE_SSH_UNREACHABLE: "Проверьте SSH host:port, firewall и доступность узла по SSH.",
     CODE_SSH_TUNNEL: "Проверьте SSH tunnel и remote agent host:port на узле.",
+    CODE_BUSY: "Агент узла занят другой операцией — повторите запрос через несколько секунд.",
 }
 
 
@@ -44,6 +46,8 @@ def link_error_detail(code: str, message: str) -> dict[str, str]:
 
 
 def http_status_for_code(code: str, *, upstream_status: int | None = None) -> int:
+    if code == CODE_BUSY:
+        return status.HTTP_503_SERVICE_UNAVAILABLE
     if code == CODE_TIMEOUT:
         return status.HTTP_504_GATEWAY_TIMEOUT
     # Preserve agent 4xx (except auth) so callers can still distinguish 404 vs generic 502.

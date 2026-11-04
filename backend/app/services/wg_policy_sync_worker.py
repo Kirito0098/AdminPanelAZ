@@ -48,7 +48,13 @@ def reconcile_wg_policies_for_all_nodes(db: Session, *, sync_all_runtime: bool =
                 nodes_skipped_empty += 1
                 continue
         try:
-            result = _reconcile_for_node(db, node, sync_all_runtime=sync_all_runtime)
+            from app.services.node_http_gate import NodeHttpBusy, node_http_gate_nonblocking
+
+            with node_http_gate_nonblocking():
+                result = _reconcile_for_node(db, node, sync_all_runtime=sync_all_runtime)
+        except NodeHttpBusy:
+            logger.debug("WG policy sync skipped node %s: agent slot busy", node.name)
+            continue
         except Exception as exc:
             db.rollback()
             nodes_failed += 1

@@ -1485,9 +1485,14 @@ export default function NodesPage() {
               )}
 
               {!editing && nodeKind === 'vpn' && createTransport === 'http' && (
-                <p className="text-xs text-muted-foreground">
-                  Агент на VPN должен слушать публичный IP · порт {VPN_DEFAULT_PORT} · тот же API-ключ.
-                </p>
+                <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-900 dark:text-amber-100">
+                  <p className="font-medium">HTTP — связь открытым текстом</p>
+                  <p className="mt-1">
+                    API-ключ и данные узла идут без шифрования. Агент должен быть доступен панели на
+                    порту {VPN_DEFAULT_PORT}. После добавления переключите узел на «HTTPS + mTLS» —
+                    панель сама выдаст сертификаты, — или выберите SSH-туннель.
+                  </p>
+                </div>
               )}
               {!editing && nodeKind === 'vpn' && createTransport === 'mtls' && (
                 <p className="text-xs text-muted-foreground">

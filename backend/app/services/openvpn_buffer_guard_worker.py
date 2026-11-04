@@ -55,17 +55,15 @@ def _run_once() -> None:
                 logger.exception("openvpn_buffer_guard: temp ban expiry processing failed")
             return
 
+        from app.services.node_http_gate import NodeHttpBusy, node_http_gate_nonblocking
+
         for node in nodes:
             if background_pause_requested():
                 break
             try:
-                adapter = get_adapter_for_node(node)
-            except Exception as exc:  # pragma: no cover - defensive
-                logger.debug("openvpn_buffer_guard: adapter for node %s failed: %s", node.id, exc)
-                continue
-
-            try:
-                results = run_guard_pass(db, adapter, node.id, manual=False)
+                with node_http_gate_nonblocking():
+                    adapter = get_adapter_for_node(node)
+                    results = run_guard_pass(db, adapter, node.id, manual=False)
                 _outdated_agent_nodes.discard(node.id)
                 if results:
                     triggered = sum(1 for item in results if item.get("threshold_exceeded"))
@@ -76,6 +74,8 @@ def _run_once() -> None:
                             len(results),
                             triggered,
                         )
+            except NodeHttpBusy:
+                logger.debug("openvpn_buffer_guard: node %s skipped: agent slot busy", node.id)
             except BufferGuardAgentOutdated as exc:
                 if node.id not in _outdated_agent_nodes:
                     _outdated_agent_nodes.add(node.id)

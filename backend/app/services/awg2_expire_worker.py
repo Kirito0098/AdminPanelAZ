@@ -115,8 +115,14 @@ def run_awg2_expire_once(db_session_factory: Callable[[], Session] = SessionLoca
                 continue
             # One unreachable or un-provisioned node must not abort expiry for the others.
             try:
-                cli_count, db_count, refresh_count = _reconcile_node(db, node)
+                from app.services.node_http_gate import NodeHttpBusy, node_http_gate_nonblocking
+
+                with node_http_gate_nonblocking():
+                    cli_count, db_count, refresh_count = _reconcile_node(db, node)
                 db.commit()
+            except NodeHttpBusy:
+                logger.debug("awg2_expire: skip node %s: agent slot busy", node.name)
+                continue
             except Exception:
                 db.rollback()
                 nodes_failed += 1

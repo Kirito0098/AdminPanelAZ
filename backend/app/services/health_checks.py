@@ -116,12 +116,17 @@ def build_deep_health(db: Session, *, app_root: Path) -> dict[str, Any]:
             if node.status == NodeStatus.online:
                 online += 1
                 try:
+                    from app.services.node_http_gate import NodeHttpBusy, node_http_gate_nonblocking
                     from app.services.node_manager import check_node_health
 
-                    health = check_node_health(node)
+                    with node_http_gate_nonblocking():
+                        health = check_node_health(node)
                     entry["reachable"] = bool(health.get("online"))
                     if not entry["reachable"]:
                         entry["error"] = health.get("error") or "unreachable"
+                except NodeHttpBusy:
+                    entry["reachable"] = None
+                    entry["skipped"] = "node_busy"
                 except Exception as exc:
                     entry["reachable"] = False
                     entry["error"] = str(exc)

@@ -36,17 +36,22 @@ async def run_node_health_loop():
 
 
 def _poll_all_nodes():
+    from app.services.node_http_gate import NodeHttpBusy, node_http_gate_nonblocking
+
     db = SessionLocal()
     try:
         nodes = db.query(Node).all()
         for node in nodes:
             try:
-                health = check_node_health(node)
+                with node_http_gate_nonblocking():
+                    health = check_node_health(node)
                 if node.api_key_pending_encrypted and (
                     health.get("status") == "online" or health.get("error_code") == "node_auth"
                 ):
                     health = _finish_key_rotation(db, node, health)
                 update_node_from_health(node, health, db)
+            except NodeHttpBusy:
+                logger.debug("Node health skipped for %s: agent slot busy", node.name)
             except Exception as exc:
                 logger.debug("Node health poll failed for %s: %s", node.name, exc)
     finally:

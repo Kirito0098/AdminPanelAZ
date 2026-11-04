@@ -112,9 +112,33 @@ ALLOW_INTERNAL_NODES=true
 
 mTLS включается per-node из UI: **Способ связи** → **HTTPS + mTLS** в карточке узла или **Включить mTLS** для выбранных узлов. Глобальный `NODE_AGENT_MTLS_ENABLED` в `.env` устарел.
 
+Сертификаты передаются автоматически: панель генерирует CA и сертификат агента и отправляет их на узел по текущему bootstrap-каналу (обычно HTTP), агент сам пишет файлы в `/etc/adminpanelaz/mtls` и перезапускается. Вручную копировать файлы не нужно.
+
 Если после отправки сертификатов агент не ответил по HTTPS, панель проверяет и HTTP: агент остался на HTTP — в карточке остаётся **HTTP** и показывается ошибка; не ответил ни так, ни так — остаётся **HTTPS + mTLS** (сертификаты уже на узле), узел offline. Причину смотрите на узле: `journalctl -u adminpanelaz-node -n 50`.
 
 Агент 1.12.0 и новее с `NODE_AGENT_MTLS_ENABLED=true` в `backend/node_agent.env`, но без файлов `agent.crt` / `agent.key` / `ca.crt` в `/etc/adminpanelaz/mtls`, **не запускается**: в журнале «mTLS включён (NODE_AGENT_MTLS_ENABLED=true), сертификатов нет: …», в панели узел offline. Верните файлы или поставьте `NODE_AGENT_MTLS_ENABLED=false` и выполните `sudo systemctl restart adminpanelaz-node`. Раньше агент в этом случае молча работал по HTTP.
+
+### Доступ к агенту по сети (allowlist)
+
+Порт агента (VPN — `9100`, прокси — `9101`) по умолчанию закрыт в firewall: установщик и обновление
+добавляют `ufw deny`, а при заданном allowlist — `ufw allow from <IP панели>`. Пока список пуст,
+агент принимает запросы с любого IP и защищён только API-ключом — это второй рубеж, а не первый.
+
+Для узла, доступного из интернета, задайте IP панели в env-файле агента на узле:
+
+```env
+# backend/node_agent.env (VPN-узел)
+NODE_AGENT_ALLOWED_IPS=203.0.113.10/32
+```
+
+```env
+# backend/proxy_agent.env (прокси-узел)
+PROXY_AGENT_ALLOWED_IPS=203.0.113.10/32
+```
+
+Можно перечислить несколько адресов/подсетей через запятую. Затем перезапустите агент
+(`sudo systemctl restart adminpanelaz-node` / `adminpanelaz-proxy`) и при необходимости
+примените правила firewall (`sudo ./install.sh --full-update`).
 
 ### API-ключ агента: где хранится и как сменить
 
