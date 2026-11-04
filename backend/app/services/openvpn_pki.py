@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 import re
-import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
+
+from cryptography import x509
 
 from app.models import VpnType
 from app.services.openvpn_cert import (
@@ -22,7 +23,6 @@ logger = logging.getLogger(__name__)
 EASYRSA_INDEX_PATH = Path("/etc/openvpn/easyrsa3/pki/index.txt")
 
 _CN_RE = re.compile(r"/CN=([^/\t]+)")
-_SERIAL_OPENSSL_RE = re.compile(r"serial\s*=\s*([0-9A-Fa-f]+)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -117,22 +117,14 @@ def cert_serial_hex_from_pem(pem: str) -> str | None:
     if not pem:
         return None
     try:
-        result = subprocess.run(
-            ["openssl", "x509", "-noout", "-serial"],
-            input=pem,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
+        cert = x509.load_pem_x509_certificate(pem.encode())
+        serial_hex = format(cert.serial_number, "X")
+        if len(serial_hex) % 2:
+            serial_hex = "0" + serial_hex
+        return _normalize_serial_hex(serial_hex)
+    except Exception as exc:
+        logger.debug("cert serial parse failed: %s", exc)
         return None
-    if result.returncode != 0:
-        return None
-    match = _SERIAL_OPENSSL_RE.search(result.stdout or "")
-    if not match:
-        return None
-    return _normalize_serial_hex(match.group(1))
 
 
 def serial_status(serial_hex: str, entries: list[EasyRsaIndexEntry]) -> str | None:
