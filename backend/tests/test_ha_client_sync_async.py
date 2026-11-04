@@ -224,3 +224,55 @@ def test_enqueue_create_uses_ha_group_subject_key(monkeypatch):
     assert captured["group_id"] == 7
     assert captured["op"] == "create"
     assert captured["payload"]["primary_config_id"] == 11
+
+
+def test_ha_client_sync_skips_when_group_pending(db, node, monkeypatch):
+    from app.models import NodeSyncGroup, SyncStatus
+
+    group = NodeSyncGroup(
+        name="g",
+        shared_domain="vpn.example",
+        primary_node_id=node.id,
+        replica_node_ids="[]",
+        sync_mode="auto",
+        sync_status=SyncStatus.pending,
+    )
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+
+    monkeypatch.setattr(client_sync, "SessionLocal", lambda: db)
+
+    with patch.object(client_sync, "replicate_client_create") as replicate:
+        result = client_sync._run_ha_client_sync_payload(
+            {"op": "create", "group_id": group.id, "primary_config_id": 12345}
+        )
+
+    assert result == {"ok": True, "op": "create", "skipped_pending": True}
+    replicate.assert_not_called()
+
+
+def test_try_claim_pending_is_atomic(db, node):
+    from app.models import NodeSyncGroup, SyncStatus
+    from app.services.node_sync.group_status import try_claim_pending
+
+    group = NodeSyncGroup(
+        name="g",
+        shared_domain="vpn.example",
+        primary_node_id=node.id,
+        replica_node_ids="[]",
+        sync_mode="manual_full",
+        sync_status=SyncStatus.synced,
+    )
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+
+    assert try_claim_pending(db, group.id) is True
+    db.commit()
+    db.refresh(group)
+    assert group.sync_status == SyncStatus.pending
+    assert group.last_sync_error is None
+
+    # Повторный claim на уже pending-группе не проходит.
+    assert try_claim_pending(db, group.id) is False

@@ -18,6 +18,7 @@ from app.services.node_sync.groups import (
     get_replica_nodes,
     is_auto_sync_enabled,
 )
+from app.services.node_sync.group_status import group_is_pending
 from app.services.node_sync.manual_link import link_primary_config_to_group
 from app.services.node_sync.replicate import (
     ReplicateOperation,
@@ -155,6 +156,13 @@ def _run_ha_client_sync_payload(payload: dict[str, Any]) -> dict[str, Any]:
         group = db.get(NodeSyncGroup, group_id)
         if not group:
             raise RuntimeError(f"HA-группа {group_id} не найдена")
+
+        if group_is_pending(db, group):
+            logger.info(
+                "HA client sync пропущен: группа %s в статусе pending (идёт Push full)",
+                group_id,
+            )
+            return {"ok": True, "op": op, "skipped_pending": True}
 
         if op == "create":
             config = db.get(VpnConfig, int(payload["primary_config_id"]))

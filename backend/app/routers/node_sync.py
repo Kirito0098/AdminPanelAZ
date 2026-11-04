@@ -35,6 +35,7 @@ from app.services.node_sync.groups import (
     validate_sync_group_payload,
 )
 from app.services.node_sync.dissolve import clear_shadow_links_for_group, dissolve_sync_group
+from app.services.node_sync.group_status import try_claim_pending
 from app.services.node_sync.manual_link import link_primary_configs_to_group
 from app.services.node_sync.setup import make_group_setup_callable
 from app.services.node_sync.shadow_link import link_shadow_configs_for_group
@@ -302,8 +303,20 @@ def setup_sync_group(
     )
     raise_if_preflight_errors(errors)
 
-    group.sync_status = SyncStatus.pending
-    group.last_sync_error = None
+    if not try_claim_pending(db, group.id):
+        db.rollback()
+        pending_task_id = (
+            db.query(NodeSyncGroup.last_sync_task_id)
+            .filter(NodeSyncGroup.id == group.id)
+            .scalar()
+        )
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": "Синхронизация уже выполняется",
+                "last_sync_task_id": pending_task_id,
+            },
+        )
 
     task = background_task_service.enqueue_background_task(
         "node_sync_setup",
@@ -362,8 +375,20 @@ def apply_shared_domain_endpoint(
         effective_wireguard_domain(group),
     )
 
-    group.sync_status = SyncStatus.pending
-    group.last_sync_error = None
+    if not try_claim_pending(db, group.id):
+        db.rollback()
+        pending_task_id = (
+            db.query(NodeSyncGroup.last_sync_task_id)
+            .filter(NodeSyncGroup.id == group.id)
+            .scalar()
+        )
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": "Синхронизация уже выполняется",
+                "last_sync_task_id": pending_task_id,
+            },
+        )
 
     task = background_task_service.enqueue_background_task(
         "node_sync_shared_domain",
