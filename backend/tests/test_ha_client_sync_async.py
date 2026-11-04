@@ -164,7 +164,8 @@ def test_provision_openvpn_skips_recreate_and_enqueues_ha(db, node, admin, monke
     assert config.client_name == "matvey"
 
 
-def test_ha_group_lock_serializes_same_group():
+def test_ha_group_lock_serializes_same_group(tmp_path, monkeypatch):
+    monkeypatch.setattr(client_sync, "HA_GROUP_LOCK_DIR", tmp_path)
     order: list[str] = []
     first_holds = threading.Event()
     release_first = threading.Event()

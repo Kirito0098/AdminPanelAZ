@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import fcntl
 import logging
-import threading
-from typing import Any
+import os
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Iterator
 
 from sqlalchemy.orm import Session
 
@@ -35,21 +38,27 @@ logger = logging.getLogger(__name__)
 
 HA_CLIENT_SYNC_TASK = "ha_client_sync"
 
-_ha_group_locks: dict[int, threading.Lock] = {}
-_ha_group_locks_guard = threading.Lock()
+HA_GROUP_LOCK_DIR = Path(os.environ.get("HA_GROUP_LOCK_DIR", "/run/adminpanelaz/ha-locks"))
 
 
-def ha_group_lock(group_id: int) -> threading.Lock:
-    """Serialize HA crypto ops (client sync, AWG2 overlay) per sync group."""
-    with _ha_group_locks_guard:
-        lock = _ha_group_locks.get(group_id)
-        if lock is None:
-            lock = threading.Lock()
-            _ha_group_locks[group_id] = lock
-        return lock
+@contextmanager
+def ha_group_lock(group_id: int) -> Iterator[None]:
+    """Serialize HA crypto ops (client sync, AWG2 overlay) per sync group.
+
+    File-based ``flock``: cross-process safe (multi-worker) and still serializes
+    threads within one process (separate open file descriptions block each other).
+    """
+    HA_GROUP_LOCK_DIR.mkdir(parents=True, exist_ok=True)
+    handle = (HA_GROUP_LOCK_DIR / f"group-{group_id}.lock").open("a+")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        handle.close()
 
 
-def _ha_group_lock(group_id: int) -> threading.Lock:
+def _ha_group_lock(group_id: int) -> Iterator[None]:
     return ha_group_lock(group_id)
 
 
