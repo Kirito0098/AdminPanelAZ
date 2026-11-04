@@ -22,7 +22,7 @@ def db():
     Base.metadata.create_all(engine)
     make = sessionmaker(bind=engine)
     session = make()
-    session.add(Node(id=1, name="1Cent-EE", host="h", is_local=True, status=NodeStatus.online))
+    session.add(Node(id=1, name="node-a", host="h", is_local=True, status=NodeStatus.online))
     session.commit()
     try:
         yield session
@@ -36,7 +36,7 @@ def _service(db, tmp_path: Path, monkeypatch) -> tuple[AccessPolicyService, list
         db,
         antizapret_path=tmp_path,
         node_id=1,
-        node_name="1Cent-EE",
+        node_name="node-a",
         adapter=SimpleNamespace(),
     )
     reconciled: list[str] = []

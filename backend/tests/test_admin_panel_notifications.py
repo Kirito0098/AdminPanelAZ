@@ -19,7 +19,7 @@ DRIFT_DETAILS = json.dumps(
     {
         "group_id": 1,
         "name": "Test",
-        "shared_domain": "vpn.claymore.com",
+        "shared_domain": "vpn.example.com",
         "summary": "Расхождения между узлами",
     },
     ensure_ascii=False,
@@ -39,7 +39,7 @@ def test_details_json_becomes_labelled_lines():
     message = humanize_bell_message(DRIFT_DETAILS)
 
     assert "Группа: Test" in message
-    assert "Домен: vpn.claymore.com" in message
+    assert "Домен: vpn.example.com" in message
     assert "Расхождения: Расхождения между узлами" in message
     assert "{" not in message and '"' not in message
 
@@ -74,10 +74,10 @@ def test_send_writes_a_readable_bell_row(db, monkeypatch):
     monkeypatch.setattr(notify_module, "get_feature_service", lambda: _Features())
     service = AdminNotifyService()
 
-    service.send(db, "node_sync_drift", details=DRIFT_DETAILS, node_name="1Cent-EE")
+    service.send(db, "node_sync_drift", details=DRIFT_DETAILS, node_name="node-a")
 
     row = db.query(AdminPanelNotification).one()
     assert row.title == "HA: расхождение узлов"
     assert "Группа: Test" in row.message
-    assert "Узел: 1Cent-EE" in row.message
+    assert "Узел: node-a" in row.message
     assert "{" not in row.message

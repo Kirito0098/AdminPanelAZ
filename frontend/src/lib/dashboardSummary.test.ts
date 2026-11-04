@@ -10,17 +10,17 @@ const baseOverview = {
   wireguard_peers: [],
   amneziawg2_peers: [],
   nodes_summary: [
-    { node_id: 1, node_name: 'Germani', status: 'online', active_services: 4, total_services: 4 },
-    { node_id: 2, node_name: 'Test_serv', status: 'online', active_services: 3, total_services: 4 },
+    { node_id: 1, node_name: 'node-a', status: 'online', active_services: 4, total_services: 4 },
+    { node_id: 2, node_name: 'node-b', status: 'online', active_services: 3, total_services: 4 },
   ],
   node_id: 1,
-  node_name: 'Germani',
-  server_ip: '138.124.36.24, 138.124.37.133',
+  node_name: 'node-a',
+  server_ip: '203.0.113.10, 203.0.113.11',
 } as unknown as MonitoringOverview
 
 describe('buildDashboardSummary', () => {
   it('takes service counts of the active node when scope=all has no flat services', () => {
-    const summary = buildDashboardSummary([], baseOverview, 'Germani')
+    const summary = buildDashboardSummary([], baseOverview, 'node-a')
 
     // Раньше карточка «VPN-службы» показывала 0/0: агрегат scope=all отдаёт services=[].
     expect(summary.active_services).toBe(4)
@@ -44,7 +44,7 @@ describe('buildDashboardSummary', () => {
   })
 
   it('keeps zeros without an overview', () => {
-    const summary = buildDashboardSummary([], null, 'Germani')
+    const summary = buildDashboardSummary([], null, 'node-a')
 
     expect(summary.active_services).toBe(0)
     expect(summary.total_services).toBe(0)

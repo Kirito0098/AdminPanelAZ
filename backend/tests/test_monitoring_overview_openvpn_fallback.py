@@ -41,7 +41,7 @@ def test_fallback_uses_only_active_openvpn_sessions_of_the_node(factory):
     with factory() as db:
         db.add_all(
             [
-                Node(id=1, name="1Cent-EE", host="h1", is_local=True, status=NodeStatus.online),
+                Node(id=1, name="node-a", host="h1", is_local=True, status=NodeStatus.online),
                 Node(id=2, name="2Cent-EE", host="h2", is_local=False, status=NodeStatus.online),
             ]
         )
@@ -66,7 +66,7 @@ def test_fallback_uses_only_active_openvpn_sessions_of_the_node(factory):
 
 def test_node_overview_marks_the_db_fallback_source(factory, monkeypatch):
     with factory() as db:
-        node = Node(id=1, name="1Cent-EE", host="h1", is_local=True, status=NodeStatus.online)
+        node = Node(id=1, name="node-a", host="h1", is_local=True, status=NodeStatus.online)
         db.add(node)
         db.commit()
         db.add(_session(1, "antizapret-udp", "alice"))

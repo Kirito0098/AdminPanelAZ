@@ -29,7 +29,7 @@ def test_card_shows_a_config_reassigned_outside_the_plan_namespace(factory):
         db.add(owner)
         db.add_all(
             [
-                Node(id=1, name="1Cent-EE", host="h1", is_local=True, status=NodeStatus.online),
+                Node(id=1, name="node-a", host="h1", is_local=True, status=NodeStatus.online),
                 Node(id=2, name="2Cent-EE", host="h2", is_local=False, status=NodeStatus.online),
             ]
         )

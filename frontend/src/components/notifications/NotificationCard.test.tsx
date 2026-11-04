@@ -17,9 +17,9 @@ const item: NotificationItem = {
   created_at: new Date().toISOString(),
   action_payload: null,
   details: [
-    { label: 'Кто', value: 'Claymore' },
+    { label: 'Кто', value: 'admin' },
     { label: 'Объект', value: 'ivan' },
-    { label: 'Узел', value: 'Test_serv' },
+    { label: 'Узел', value: 'node-b' },
   ],
   state: { read: false, hidden: false, snoozed_until: null },
 }

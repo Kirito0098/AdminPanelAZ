@@ -94,7 +94,7 @@ _KEY_VALUE_RE = re.compile(r"(\w+)=([^,\s]+)")
 
 
 def parse_bell_details(message: str | None) -> list[dict[str, str]]:
-    """«Кто: Claymore · Объект: ivan · Узел: Test_serv» → пары подпись/значение.
+    """«Кто: admin · Объект: user-example · Узел: node-b» → пары подпись/значение.
 
     Формат пишут два места: ``humanize_bell_message`` и ``AdminNotifyService``
     («Кто: …»). Части без «подпись: значение» (например, свободный хвост

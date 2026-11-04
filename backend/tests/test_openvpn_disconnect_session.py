@@ -22,7 +22,7 @@ def db():
     Base.metadata.create_all(engine)
     make = sessionmaker(bind=engine)
     session = make()
-    session.add(Node(id=1, name="1Cent-EE", host="h", is_local=True, status=NodeStatus.online))
+    session.add(Node(id=1, name="node-a", host="h", is_local=True, status=NodeStatus.online))
     session.add(User(id=1, username="admin", password_hash="x", role=UserRole.admin, is_active=True))
     session.commit()
     try:

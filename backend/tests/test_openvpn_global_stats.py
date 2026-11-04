@@ -56,7 +56,7 @@ def factory():
 
 def test_node_overview_exposes_global_stats(factory, monkeypatch):
     with factory() as db:
-        node = Node(id=1, name="1Cent-EE", host="h", is_local=True, status=NodeStatus.online)
+        node = Node(id=1, name="node-a", host="h", is_local=True, status=NodeStatus.online)
         db.add(node)
         db.commit()
 
@@ -79,7 +79,7 @@ def test_node_overview_exposes_global_stats(factory, monkeypatch):
 
 def test_node_overview_survives_an_old_agent_without_global_stats(factory, monkeypatch):
     with factory() as db:
-        node = Node(id=1, name="1Cent-EE", host="h", is_local=True, status=NodeStatus.online)
+        node = Node(id=1, name="node-a", host="h", is_local=True, status=NodeStatus.online)
         db.add(node)
         db.commit()
 

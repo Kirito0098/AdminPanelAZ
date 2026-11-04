@@ -25,8 +25,8 @@ def _vpn_node(id_: int, name: str) -> Node:
 
 
 def test_assert_awg2_available_raises_listing_missing_nodes(monkeypatch):
-    good = _vpn_node(1, "Germani")
-    bad = _vpn_node(2, "Test_serv")
+    good = _vpn_node(1, "node-a")
+    bad = _vpn_node(2, "node-b")
 
     def fake_adapter(node):
         ad = MagicMock()
@@ -40,8 +40,8 @@ def test_assert_awg2_available_raises_listing_missing_nodes(monkeypatch):
     assert ei.value.status_code == 409
     detail = ei.value.detail
     assert isinstance(detail, dict)
-    assert "Test_serv" in detail["message"]
-    assert "Germani" not in detail["message"]
+    assert "node-b" in detail["message"]
+    assert "node-a" not in detail["message"]
     assert "install_command" in detail
 
 
@@ -62,12 +62,12 @@ def test_apply_node_continues_after_awg2_not_installed(monkeypatch):
     owner = MagicMock()
     actor = MagicMock()
     node = MagicMock()
-    node.name = "Test_serv"
+    node.name = "node-b"
     session.get.return_value = node
 
     items = [
-        PlanItem(node_id=2, node_label="Test_serv", client_name="node", vpn_type="amneziawg2", action=ACTION_CREATE),
-        PlanItem(node_id=2, node_label="Test_serv", client_name="node", vpn_type="openvpn", action=ACTION_CREATE),
+        PlanItem(node_id=2, node_label="node-b", client_name="node", vpn_type="amneziawg2", action=ACTION_CREATE),
+        PlanItem(node_id=2, node_label="node-b", client_name="node", vpn_type="openvpn", action=ACTION_CREATE),
     ]
 
     calls = {"n": 0}
@@ -77,7 +77,7 @@ def test_apply_node_continues_after_awg2_not_installed(monkeypatch):
         if item.vpn_type == "amneziawg2":
             return {
                 "node_id": 2,
-                "node_label": "Test_serv",
+                "node_label": "node-b",
                 "client_name": item.client_name,
                 "vpn_type": item.vpn_type,
                 "action": ACTION_CREATE,
@@ -86,7 +86,7 @@ def test_apply_node_continues_after_awg2_not_installed(monkeypatch):
             }
         return {
             "node_id": 2,
-            "node_label": "Test_serv",
+            "node_label": "node-b",
             "client_name": item.client_name,
             "vpn_type": item.vpn_type,
             "action": ACTION_CREATE,
@@ -115,12 +115,12 @@ def test_apply_node_skips_after_unreachable(monkeypatch):
     owner = MagicMock()
     actor = MagicMock()
     node = MagicMock()
-    node.name = "Test_serv"
+    node.name = "node-b"
     session.get.return_value = node
 
     items = [
-        PlanItem(node_id=2, node_label="Test_serv", client_name="a", vpn_type="openvpn", action=ACTION_CREATE),
-        PlanItem(node_id=2, node_label="Test_serv", client_name="b", vpn_type="wireguard", action=ACTION_CREATE),
+        PlanItem(node_id=2, node_label="node-b", client_name="a", vpn_type="openvpn", action=ACTION_CREATE),
+        PlanItem(node_id=2, node_label="node-b", client_name="b", vpn_type="wireguard", action=ACTION_CREATE),
     ]
 
     calls = {"n": 0}
@@ -130,7 +130,7 @@ def test_apply_node_skips_after_unreachable(monkeypatch):
         if calls["n"] == 1:
             return {
                 "node_id": 2,
-                "node_label": "Test_serv",
+                "node_label": "node-b",
                 "client_name": item.client_name,
                 "vpn_type": item.vpn_type,
                 "action": ACTION_CREATE,
@@ -140,7 +140,7 @@ def test_apply_node_skips_after_unreachable(monkeypatch):
             }
         return {
             "node_id": 2,
-            "node_label": "Test_serv",
+            "node_label": "node-b",
             "client_name": item.client_name,
             "vpn_type": item.vpn_type,
             "action": ACTION_CREATE,
