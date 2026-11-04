@@ -47,6 +47,9 @@ def try_claim_pending(db: Session, group_id: int) -> bool:
 
     Closes the read-then-write race in the router: two concurrent Setup / Push full
     requests both read ``sync_status != pending``, but only one UPDATE matches the row.
+    Commits immediately so the SQLite write lock is released before the caller enqueues
+    its background task in a separate session (a bare ``flush`` would hold the lock and
+    make that INSERT fail with ``database is locked``).
     """
     claimed = (
         db.query(NodeSyncGroup)
@@ -60,7 +63,7 @@ def try_claim_pending(db: Session, group_id: int) -> bool:
         )
     )
     if claimed:
-        db.flush()
+        db.commit()
     return bool(claimed)
 
 

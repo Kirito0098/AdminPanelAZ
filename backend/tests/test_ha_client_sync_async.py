@@ -276,3 +276,45 @@ def test_try_claim_pending_is_atomic(db, node):
 
     # Повторный claim на уже pending-группе не проходит.
     assert try_claim_pending(db, group.id) is False
+
+
+
+def test_try_claim_pending_releases_write_lock(tmp_path):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.database import Base
+    from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus
+    from app.services.node_sync.group_status import try_claim_pending
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'lock.db'}")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+
+    s1 = Session()
+    s2 = Session()
+    try:
+        node = Node(
+            name="n", host="h", port=9100, api_key_hash="", api_key_encrypted="",
+            status=NodeStatus.online, is_local=True, node_metadata="{}",
+        )
+        s1.add(node)
+        s1.commit()
+        s1.refresh(node)
+
+        group = NodeSyncGroup(
+            name="g", shared_domain="d", primary_node_id=node.id,
+            replica_node_ids="[]", sync_mode="manual_full", sync_status=SyncStatus.synced,
+        )
+        s1.add(group)
+        s1.commit()
+        s1.refresh(group)
+
+        assert try_claim_pending(s1, group.id) is True
+
+        # Отдельная сессия (как create_queued_task) должна суметь писать без "database is locked".
+        g2 = s2.get(NodeSyncGroup, group.id)
+        g2.last_sync_error = "ok"
+        s2.commit()
+    finally:
+        s1.close()
+        s2.close()
