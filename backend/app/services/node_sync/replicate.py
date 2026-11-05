@@ -132,6 +132,9 @@ def _handle_client_create(db: Session, group: NodeSyncGroup, payload: dict[str, 
     primary_node = db.get(Node, group.primary_node_id)
 
     for replica_node in get_replica_nodes(db, group):
+        # Не держим транзакцию записи через сетевой вызов к узлу: иначе узел,
+        # который отвечает секундами, блокирует всех писателей SQLite.
+        db.commit()
         try:
             sync_vpn_crypto_from_primary(
                 primary_adapter,
@@ -190,6 +193,9 @@ def _handle_client_delete(db: Session, group: NodeSyncGroup, payload: dict[str, 
     primary_adapter = _primary_adapter(db, group)
 
     for shadow in get_shadow_configs(db, group, primary_config):
+        # Коммит до сетевого вызова: удаление shadow на этой итерации не должно
+        # держать write-lock, пока идёт сеть к следующей реплике.
+        db.commit()
         replica_node = db.get(Node, shadow.node_id)
         if not replica_node:
             db.delete(shadow)
@@ -241,6 +247,9 @@ def _handle_client_renew_cert(db: Session, group: NodeSyncGroup, payload: dict[s
     primary_adapter = _primary_adapter(db, group)
     shadow_by_node_id = {shadow.node_id: shadow for shadow in get_shadow_configs(db, group, primary_config)}
     for replica_node in get_replica_nodes(db, group):
+        # Обновлённый cert_expires_at предыдущей итерации не должен держать
+        # write-lock во время сетевого вызова к следующей реплике.
+        db.commit()
         shadow = shadow_by_node_id.get(replica_node.id)
         try:
             sync_openvpn_pki_from_primary(

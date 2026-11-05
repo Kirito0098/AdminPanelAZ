@@ -260,6 +260,9 @@ def _sync_delete_to_replicas_disk(
     successes: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
     for replica_node in get_replica_nodes(db, group):
+        # Сброс banned_clients прошлой итерации не должен держать write-lock,
+        # пока идёт сеть к следующей реплике.
+        db.commit()
         try:
             replica_adapter = get_adapter_for_node(replica_node)
             sync_vpn_crypto_from_primary(

@@ -372,3 +372,102 @@ def test_client_create_copies_access_policy_to_shadow(db, node, admin, monkeypat
     )
     assert policy is not None
     assert policy.access_until == until
+
+
+def test_client_create_releases_write_lock_during_replica_network(tmp_path, monkeypatch):
+    """Регрессия: создание клиента в HA не держит write-lock SQLite, пока идёт сеть к реплике.
+
+    Раньше shadow-строка (upsert_shadow_config) писалась и не коммитилась до конца цикла,
+    поэтому сетевой вызов к следующей реплике шёл под открытой транзакцией записи — все
+    писатели панели получали ``database is locked``.
+    """
+    import json
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.database import Base
+    from app.models import Node, NodeSyncGroup, SyncStatus, VpnConfig
+    from app.services.node_sync import replicate
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'ha.db'}",
+        connect_args={"check_same_thread": False, "timeout": 1},
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    s1 = Session()
+    s2 = Session()
+
+    def _node(name, host, local=False):
+        n = Node(
+            name=name, host=host, port=9100, api_key_hash="", api_key_encrypted="",
+            status=NodeStatus.online, is_local=local, node_metadata="{}",
+        )
+        s1.add(n)
+        s1.commit()
+        s1.refresh(n)
+        return n
+
+    owner = User(
+        username="owner", password_hash="x", role=UserRole.user, is_active=True,
+        theme="dark", timezone="", last_client_timezone="",
+        noc_daily_time="", noc_weekly_dow="", noc_weekly_time="",
+        can_create_configs=True, can_manage_configs=True,
+        panel_login_enabled=True, provision_state="unmanaged",
+    )
+    s1.add(owner)
+    s1.commit()
+    s1.refresh(owner)
+
+    primary = _node("primary", "127.0.0.1", local=True)
+    replica1 = _node("replica1", "127.0.0.2")
+    replica2 = _node("replica2", "127.0.0.3")
+
+    group = NodeSyncGroup(
+        name="g", shared_domain="vpn.example", primary_node_id=primary.id,
+        replica_node_ids=json.dumps([replica1.id, replica2.id]),
+        sync_mode="auto", sync_status=SyncStatus.synced,
+    )
+    s1.add(group)
+    s1.commit()
+    s1.refresh(group)
+
+    config = VpnConfig(
+        node_id=primary.id, client_name="lock_client", vpn_type=VpnType.wireguard,
+        owner_id=owner.id, cert_expire_days=3650,
+    )
+    s1.add(config)
+    s1.commit()
+    s1.refresh(config)
+
+    entered = threading.Event()
+    release = threading.Event()
+    calls = {"n": 0}
+
+    def fake_sync(*_a, **_k):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            entered.set()
+            release.wait(timeout=5)
+
+    monkeypatch.setattr(replicate, "get_adapter_for_node", lambda _n: MagicMock())
+    monkeypatch.setattr(replicate, "sync_vpn_crypto_from_primary", fake_sync)
+    monkeypatch.setattr(replicate, "copy_single_client_policy", lambda *a, **k: None)
+
+    def run():
+        replicate._handle_client_create(s1, group, {"primary_config": config})
+
+    t = threading.Thread(target=run)
+    t.start()
+    assert entered.wait(timeout=3), "второй сетевой вызов не начался"
+
+    # Пока сеть висит на второй реплике, отдельная сессия обязана уметь писать.
+    g2 = s2.get(NodeSyncGroup, group.id)
+    g2.last_sync_error = "ping"
+    s2.commit()
+
+    release.set()
+    t.join(timeout=5)
+    s1.close()
+    s2.close()
