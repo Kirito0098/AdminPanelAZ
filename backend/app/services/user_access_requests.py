@@ -36,6 +36,7 @@ from app.services.admin_panel_notifications import write_admin_panel_notificatio
 from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.telegram_recipients import filter_notify_recipients
 from app.auth import get_password_hash
+from app.database import SessionLocal
 from app.services.feature_guards import get_feature_service
 from app.services.client_portal import get_or_create_user_portal_token, user_link_response
 from app.services.rate_limit.backends import MemoryRateLimitBackend
@@ -1125,7 +1126,7 @@ def approve_request(
     if plan is not None and plan.get("config_ids"):
         # Конфиги уже привязаны: провижининг не нужен, сразу пишем абоненту.
         assert user is not None
-        maybe_send_delivery_after_task(db, user_id=user.id, created_count=len(plan["config_ids"]))
+        maybe_send_delivery_after_task(user_id=user.id, created_count=len(plan["config_ids"]))
     elif request.request_type in (REQUEST_TYPE_NEW_USER, REQUEST_TYPE_ADD_CONFIG):
         assert user is not None
         deliver_approved_request(db, request=request, user=user, plan=plan, actor=admin)
@@ -1316,96 +1317,128 @@ def _portal_enabled() -> bool:
         return False
 
 
-def maybe_send_delivery_after_task(db: Session, *, user_id: int, created_count: int) -> None:
+def maybe_send_delivery_after_task(*, user_id: int, created_count: int) -> None:
     """После завершения задачи provision: отправить «Доступ одобрен» один раз.
 
     Сообщение только в личный чат requester'а; портал-ссылка не логируется.
     ``delivered_at`` ставится только после успешной отправки — иначе можно повторить.
     Если конфигов не создано / Telegram не принял — админ получает колокол.
+
+    Сессия БД закрывается **до** отправки: релей или узел могут отвечать минутами,
+    а держать соединение пула (и тем более транзакцию записи SQLite) всё это
+    время нельзя — это общий ресурс всей панели.
     """
-    user = db.get(User, user_id)
-    if user is None:
-        return
-    req = (
-        db.query(UserAccessRequest)
-        .filter(
-            UserAccessRequest.user_id == user_id,
-            UserAccessRequest.status == "approved",
-            UserAccessRequest.delivered_at.is_(None),
+    bot_token = ""
+    chat_id = ""
+    text = ""
+    keyboard: dict[str, Any] | None = None
+    username = ""
+    req_id = 0
+
+    db = SessionLocal()
+    try:
+        user = db.get(User, user_id)
+        if user is None:
+            return
+        req = (
+            db.query(UserAccessRequest)
+            .filter(
+                UserAccessRequest.user_id == user_id,
+                UserAccessRequest.status == "approved",
+                UserAccessRequest.delivered_at.is_(None),
+            )
+            .order_by(UserAccessRequest.id.desc())
+            .first()
         )
-        .order_by(UserAccessRequest.id.desc())
-        .first()
-    )
-    if req is None:
-        return
+        if req is None:
+            return
+        username = user.username
+        req_id = int(req.id)
+        if created_count <= 0:
+            write_admin_panel_notification(
+                db,
+                event_type="access_request_delivery_failed",
+                title=f"{user.username}: заявка одобрена, но конфиги не созданы",
+                message="Все узлы провалились при создании конфигов",
+                action_payload={"request_id": req.id, "user_id": user_id},
+                level="warning",
+            )
+            # Абонент не должен висеть в тишине: заявку одобрили, но конфигов пока нет.
+            bot_token = _get_setting(db, SETTING_BOT_TOKEN, "").strip()
+            chat_id = str(user.telegram_id or "")
+            db.commit()
+        else:
+            bot_token = _get_setting(db, SETTING_BOT_TOKEN, "").strip()
+            if not bot_token or not user.telegram_id:
+                write_admin_panel_notification(
+                    db,
+                    event_type="access_request_delivery_failed",
+                    title=f"{user.username}: не удалось написать в Telegram",
+                    message="Нет токена бота или у пользователя нет telegram_id",
+                    action_payload={"request_id": req.id, "user_id": user_id},
+                    level="warning",
+                )
+                db.commit()
+                return
+            portal_url = None
+            if _portal_enabled():
+                portal_url = user_link_response(
+                    db, get_or_create_user_portal_token(db, user_id=user_id)
+                )["url"]
+            issued_protocols = {
+                str(row[0])
+                for row in db.query(VpnConfig.vpn_type).filter(VpnConfig.owner_id == user_id).all()
+            }
+            text = _delivery_text(
+                portal_url,
+                user.traffic_limit_bytes,
+                added=req.request_type == REQUEST_TYPE_ADD_CONFIG,
+                protocols=issued_protocols,
+            )
+            keyboard = _linked_reply_keyboard(db, user)
+            chat_id = str(user.telegram_id)
+            db.commit()
+    finally:
+        db.close()
+
     if created_count <= 0:
-        write_admin_panel_notification(
-            db,
-            event_type="access_request_delivery_failed",
-            title=f"{user.username}: заявка одобрена, но конфиги не созданы",
-            message="Все узлы провалились при создании конфигов",
-            action_payload={"request_id": req.id, "user_id": user_id},
-            level="warning",
-        )
-        # Абонент не должен висеть в тишине: заявку одобрили, но конфигов пока нет.
-        token = _get_setting(db, SETTING_BOT_TOKEN, "").strip()
-        if token and user.telegram_id:
+        if bot_token and chat_id:
             send_message_sync_or_async(
-                token,
-                str(user.telegram_id),
+                bot_token,
+                chat_id,
                 "✅ Ваша заявка одобрена, но конфиги пока не готовы. "
                 "Администратор уже разбирается — мы напишем, когда всё будет.",
             )
         return
-    bot_token = _get_setting(db, SETTING_BOT_TOKEN, "").strip()
-    if not bot_token or not user.telegram_id:
-        write_admin_panel_notification(
-            db,
-            event_type="access_request_delivery_failed",
-            title=f"{user.username}: не удалось написать в Telegram",
-            message="Нет токена бота или у пользователя нет telegram_id",
-            action_payload={"request_id": req.id, "user_id": user_id},
-            level="warning",
-        )
+
+    if not send_message_sync_or_async(bot_token, chat_id, text, reply_markup=keyboard):
+        db = SessionLocal()
+        try:
+            write_admin_panel_notification(
+                db,
+                event_type="access_request_delivery_failed",
+                title=f"{username}: Telegram не принял сообщение",
+                message="Проверьте, что пользователь нажал /start у бота и не заблокировал его",
+                action_payload={"request_id": req_id, "user_id": user_id},
+                level="warning",
+            )
+        finally:
+            db.close()
         return
-    portal_url = None
-    if _portal_enabled():
-        portal_url = user_link_response(
-            db, get_or_create_user_portal_token(db, user_id=user_id)
-        )["url"]
-    issued_protocols = {
-        str(row[0]) for row in db.query(VpnConfig.vpn_type).filter(VpnConfig.owner_id == user_id).all()
-    }
-    text = _delivery_text(
-        portal_url,
-        user.traffic_limit_bytes,
-        added=req.request_type == REQUEST_TYPE_ADD_CONFIG,
-        protocols=issued_protocols,
-    )
-    if not send_message_sync_or_async(
-        bot_token,
-        str(user.telegram_id),
-        text,
-        reply_markup=_linked_reply_keyboard(db, user),
-    ):
-        write_admin_panel_notification(
-            db,
-            event_type="access_request_delivery_failed",
-            title=f"{user.username}: Telegram не принял сообщение",
-            message="Проверьте, что пользователь нажал /start у бота и не заблокировал его",
-            action_payload={"request_id": req.id, "user_id": user_id},
-            level="warning",
+
+    db = SessionLocal()
+    try:
+        updated = (
+            db.query(UserAccessRequest)
+            .filter(UserAccessRequest.id == req_id, UserAccessRequest.delivered_at.is_(None))
+            .update({UserAccessRequest.delivered_at: datetime.utcnow()}, synchronize_session=False)
         )
-        return
-    updated = (
-        db.query(UserAccessRequest)
-        .filter(UserAccessRequest.id == req.id, UserAccessRequest.delivered_at.is_(None))
-        .update({UserAccessRequest.delivered_at: datetime.utcnow()}, synchronize_session=False)
-    )
-    db.commit()
-    if not updated:
-        # Гонка: другой воркер уже пометил — сообщение могло уйти дважды, это редкость.
-        logger.info("delivery already marked for request_id=%s user_id=%s", req.id, user_id)
+        db.commit()
+        if not updated:
+            # Гонка: другой воркер уже пометил — сообщение могло уйти дважды, это редкость.
+            logger.info("delivery already marked for request_id=%s user_id=%s", req_id, user_id)
+    finally:
+        db.close()
 
 
 async def sync_admin_request_messages(db: Session, req: UserAccessRequest, *, text: str) -> None:

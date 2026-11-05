@@ -936,11 +936,7 @@ def run_user_provision_task(task_id: str, user_id: int) -> dict[str, Any]:
     try:
         from app.services.user_access_requests import maybe_send_delivery_after_task
 
-        delivery_db = SessionLocal()
-        try:
-            maybe_send_delivery_after_task(delivery_db, user_id=user_id, created_count=created)
-        finally:
-            delivery_db.close()
+        maybe_send_delivery_after_task(user_id=user_id, created_count=created)
     except Exception as exc:  # доставка не должна ломать завершение задачи
         logger.exception("delivery follow-up after provision task failed: %s", exc)
 

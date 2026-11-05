@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, get_password_hash, require_admin, tg_mini_token_allowed
 from app.config import get_settings
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.models import (
     BackgroundTask,
     Node,
@@ -793,19 +793,49 @@ def _require_provisioning() -> None:
 
 
 def _sync_request_messages_after_decide(
-    db: Session, request: UserAccessRequest, *, admin_username: str, approved: bool
+    request: UserAccessRequest, *, admin_username: str, approved: bool
 ) -> None:
-    """Task 11: после решения в веб-панели обновить карточки заявки в чатах админов."""
+    """Task 11: после решения в веб-панели обновить карточки заявки в чатах админов.
+
+    В фоне: решение не должно ждать релей. Мёртвый узел в цепочке держал бы
+    HTTP-ответ и соединение с БД десятками секунд, а панель выглядела бы зависшей.
+    """
     text = (
         f"✅ Одобрено в веб-панели: {admin_username}"
         if approved
         else f"❌ Отклонено в веб-панели: {admin_username}"
     )
+    request_id = request.id
     try:
+        background_task_service.enqueue_background_task(
+            "access_request_card_sync",
+            lambda: _run_request_card_sync(request_id, text),
+            queued_message="Обновление карточки заявки…",
+        )
+    except Exception as exc:  # never fail a panel decision because of Telegram
+        logging.warning("telegram request cards sync enqueue failed: %s", exc)
+
+
+def _run_request_card_sync(request_id: int, text: str) -> dict[str, Any]:
+    """Фоновое обновление карточек заявки: своя сессия, свой event loop."""
+    db = SessionLocal()
+    try:
+        request = db.get(UserAccessRequest, request_id)
+        if request is None:
+            return {"skipped": "request_not_found"}
         telegram_api.reset_bot_api_client_for_tests()
-        asyncio.run(sync_admin_request_messages(db, request, text=text))
+        try:
+            asyncio.run(sync_admin_request_messages(db, request, text=text))
+        finally:
+            # Клиент httpx остался в уже закрытом цикле — без сброса следующий
+            # вызов Telegram падает с «Event loop is closed».
+            telegram_api.reset_bot_api_client_for_tests()
+        return {"ok": True}
     except Exception as exc:  # never fail a panel decision because of Telegram
         logging.warning("telegram request cards sync failed: %s", exc)
+        return {"error": str(exc)}
+    finally:
+        db.close()
 
 
 @router.get("/requests", response_model=list[AccessRequestResponse])
@@ -996,7 +1026,7 @@ def approve_access_request(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"request_id={request_id}, type={row.request_type}",
         )
-    _sync_request_messages_after_decide(db, decided, admin_username=admin.username, approved=True)
+    _sync_request_messages_after_decide(decided, admin_username=admin.username, approved=True)
     return AccessRequestResponse.model_validate(decided)
 
 
@@ -1035,7 +1065,7 @@ def reject_access_request(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"request_id={request_id}, ban={payload.ban}",
         )
-    _sync_request_messages_after_decide(db, decided, admin_username=admin.username, approved=False)
+    _sync_request_messages_after_decide(decided, admin_username=admin.username, approved=False)
     return AccessRequestResponse.model_validate(decided)
 
 

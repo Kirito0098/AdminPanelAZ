@@ -87,6 +87,7 @@ from app.services.lifespan_workers import (
 from app.services.background_gate import configure_background_gate
 from app.services.node_http_gate import configure_node_http_gate
 from app.services.shared_state import configure_shared_state
+from app.services.sqlite_tx_watchdog import install as install_sqlite_tx_watchdog
 from app.services.worker_leader import WorkerLeaderLock
 from app.services.worker_lifecycle import should_start_resource_monitor
 
@@ -279,6 +280,7 @@ async def lifespan(_: FastAPI):
     configure_background_gate(db_path)
     configure_node_http_gate(db_path)
     configure_shared_state(SessionLocal)
+    install_sqlite_tx_watchdog(engine)
     leader_lock = WorkerLeaderLock(leader_lock_path(db_path))
     background_tasks = start_leader_workers(
         leader_lock, start=_start_workers, on_startup=run_leader_startup_actions
