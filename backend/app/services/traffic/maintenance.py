@@ -629,41 +629,48 @@ class TrafficMaintenanceService:
             return False, f"Ошибка удаления статистики: {exc}"
 
 
+_PURGE_CHUNK_ROWS = 2000
+
+
 def _delete_traffic_rows_for_names(
     db: Session,
     node_id: int,
     normalized_names: list[str],
 ) -> tuple[int, int, int]:
-    """Delete samples, sessions and protocol stats for the given names. Does not commit."""
+    """Delete samples, sessions and protocol stats for the given names.
+
+    Удаление идёт порциями с коммитом между ними: у клиента с долгой историей
+    один общий DELETE держал write-lock SQLite минутами и вешал всю панель
+    (``database is locked`` у каждого писателя).
+    """
 
     def _name_in_target_set(column):
         return func.lower(func.trim(column)).in_(normalized_names)
 
-    deleted_samples = (
-        db.query(UserTrafficSample)
-        .filter(
-            UserTrafficSample.node_id == node_id,
-            _name_in_target_set(UserTrafficSample.common_name),
-        )
-        .delete(synchronize_session=False)
+    def _delete_chunked(model) -> int:
+        total = 0
+        while True:
+            ids = [
+                row[0]
+                for row in db.query(model.id)
+                .filter(model.node_id == node_id, _name_in_target_set(model.common_name))
+                .limit(_PURGE_CHUNK_ROWS)
+                .all()
+            ]
+            if not ids:
+                break
+            db.query(model).filter(model.id.in_(ids)).delete(synchronize_session=False)
+            db.commit()
+            total += len(ids)
+            if len(ids) < _PURGE_CHUNK_ROWS:
+                break
+        return total
+
+    return (
+        _delete_chunked(UserTrafficSample),
+        _delete_chunked(TrafficSessionState),
+        _delete_chunked(UserTrafficStatProtocol),
     )
-    deleted_sessions = (
-        db.query(TrafficSessionState)
-        .filter(
-            TrafficSessionState.node_id == node_id,
-            _name_in_target_set(TrafficSessionState.common_name),
-        )
-        .delete(synchronize_session=False)
-    )
-    deleted_protocol_stats = (
-        db.query(UserTrafficStatProtocol)
-        .filter(
-            UserTrafficStatProtocol.node_id == node_id,
-            _name_in_target_set(UserTrafficStatProtocol.common_name),
-        )
-        .delete(synchronize_session=False)
-    )
-    return int(deleted_samples or 0), int(deleted_sessions or 0), int(deleted_protocol_stats or 0)
 
 
 def purge_traffic_history_for_reused_name(db: Session, *, node_id: int, client_name: str) -> int:

@@ -1762,6 +1762,8 @@ def _run_db_migrations() -> None:
     _migrate_user_provisioning_stage2()
     _migrate_users_stage3()
     _migrate_users_commercial()
+    _migrate_user_action_logs_user_id_index()
+    _migrate_user_traffic_sample_name_norm_index()
     _migrate_config_quota_floor()
     _migrate_user_messages()
     _migrate_user_message_cards()
@@ -2216,6 +2218,46 @@ def _migrate_users_commercial() -> None:
                     )
                 )
                 logger.info("DB migration: added user_action_logs.target_user_id")
+
+
+def _migrate_user_action_logs_user_id_index() -> None:
+    """Индекс на user_action_logs.user_id: без него обнуление истории при удалении
+    абонента (purge_user_before_delete) делает full-scan под write-локом SQLite и
+    на минуты блокирует всех писателей панели (``database is locked``)."""
+    inspector = inspect(engine)
+    if "user_action_logs" not in inspector.get_table_names():
+        return
+    indexes = {idx.get("name") for idx in inspector.get_indexes("user_action_logs")}
+    if "ix_user_action_logs_user_id" in indexes:
+        return
+    with _migration_transaction() as conn:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_user_action_logs_user_id "
+                "ON user_action_logs (user_id)"
+            )
+        )
+    logger.info("DB migration: added user_action_logs.user_id index")
+
+
+def _migrate_user_traffic_sample_name_norm_index() -> None:
+    """Индекс по lower(trim(common_name)): очистка статистики при переиспользовании
+    имени (purge_traffic_history_for_reused_name) иначе сканирует всю таблицу
+    трафика под write-локом SQLite."""
+    inspector = inspect(engine)
+    if "user_traffic_sample" not in inspector.get_table_names():
+        return
+    indexes = {idx.get("name") for idx in inspector.get_indexes("user_traffic_sample")}
+    if "ix_user_traffic_sample_node_name_norm" in indexes:
+        return
+    with _migration_transaction() as conn:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_user_traffic_sample_node_name_norm "
+                "ON user_traffic_sample (node_id, lower(trim(common_name)))"
+            )
+        )
+    logger.info("DB migration: added user_traffic_sample node/name-norm index")
 
 
 def _plan_index_count(raw: str | None) -> int:

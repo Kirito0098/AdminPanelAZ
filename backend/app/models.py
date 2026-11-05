@@ -658,7 +658,7 @@ class UserActionLog(Base):
     __tablename__ = "user_action_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     action: Mapped[str] = mapped_column(String(64))
     details: Mapped[str | None] = mapped_column(Text, nullable=True)

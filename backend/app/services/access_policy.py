@@ -459,29 +459,25 @@ class AccessPolicyService:
                 self.write_banned_clients(banned)
             return
         now = _now()
-        changed = self._cleanup_ovpn_temp_block(row, now)
+        self._cleanup_ovpn_temp_block(row, now)
         access_expired = _policy_access_expired(row, now)
         if not access_expired and row.block_reason == "access_expired":
             row.block_reason = None
-            changed = True
         traffic_state = self._ovpn_traffic_state(row)
-        if self._cleanup_ovpn_traffic_limit(row, traffic_state, traffic_limit_changed=traffic_limit_changed):
-            changed = True
+        self._cleanup_ovpn_traffic_limit(row, traffic_state, traffic_limit_changed=traffic_limit_changed)
         state = self._ovpn_state(row, now)
         target_reason = self._ovpn_target_reason(state, row=row)
         if row.block_reason != target_reason:
             row.block_reason = target_reason
-            changed = True
         if state["is_blocked"]:
             banned.add(client_name)
         else:
             banned.discard(client_name)
         if self._openvpn_runtime_ban_active(node_id, client_name):
             banned.add(client_name)
-        if changed:
-            self.db.commit()
-        else:
-            self.db.flush()
+        # Коммит до сетевых вызовов: write_banned_clients() ходит на узел, и открытая
+        # транзакция записи SQLite всё это время блокирует остальных писателей панели.
+        self.db.commit()
         self.write_banned_clients(banned)
 
     def openvpn_temp_block(self, client_name: str, days: int, *, actor: str | None = None) -> dict:
@@ -1142,11 +1138,13 @@ class AccessPolicyService:
         after_blocked = bool(state["is_blocked"])
         after_reason = row.block_reason
         runtime_changed = before_blocked != after_blocked or before_reason != after_reason
+        # Коммит до сетевых вызовов: применение runtime идёт на узел, и открытая
+        # транзакция записи SQLite всё это время держит write-lock всей панели.
+        self.db.commit()
         if apply_runtime and (runtime_changed or force_runtime):
             self._apply_wg_client_runtime(normalized, is_blocked=after_blocked)
             if not after_blocked:
                 self._reapply_all_blocked_runtime(exclude_client=normalized)
-        self.db.commit()
 
     @staticmethod
     def _wg_expiry_from(existing: datetime | None, days: int, *, extend: bool) -> datetime:
