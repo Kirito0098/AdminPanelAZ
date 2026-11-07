@@ -14,7 +14,7 @@
 | Путь | Что |
 | ------ | ----- |
 | `.cursor/rules/` | `use-skills`, `lean-code`, `release-train-branching`, `telegram-release-post`. Это просто markdown-правила, их читают оба клиента — и Zoo Code, и Cursor |
-| `.cursor/skills/` | project skills: `tdd`, `ponytail-review`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design` |
+| `.cursor/skills/` | project skills: `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design` |
 | `.agents/skills/` | те же скиллы относительными симлинками на `.cursor/skills/` |
 | `.agents/skills-lock.json` | пин стороннего скилла `tui-design` (source `gfargo/skills`) |
 | `.cursor/mcp.json.example` | шаблон MCP **без** секретов |
@@ -119,7 +119,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 | Где | Что |
 | ----- | ----- |
 | `~/.dsh/skills/<name>/` | глобальные скиллы DSH: процесс, инженерные приёмы, тексты, фронт. Подхватываются без настройки |
-| `.cursor/skills/<name>/` | проектные скиллы из этого репозитория: `tdd`, `ponytail-review`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design` |
+| `.cursor/skills/<name>/` | проектные скиллы из этого репозитория: `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design` |
 | `~/.dsh/skills-extra/security/` | security-пак, **не подключён** (см. ниже) |
 
 Скилл — это каталог с `SKILL.md` и frontmatter (`name`, `description`); описание нужно, чтобы агент выбрал скилл по ситуации, а не по названию.
@@ -136,7 +136,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 | **`systematic-debugging`** | Баг и красный тест: сначала root cause, не «подкрутить симптом» |
 | **`verification-before-completion`** | Запрет говорить «готово» без реальных прогонов проверок |
 | **`requesting-code-review`** / **`receiving-code-review`** | Запросить ревью по плану / разобрать пришедшие замечания по существу |
-| **`ponytail-review`** | Свой новый код: что удалить как переусложнение |
+| **`karpathy-ponytail`** | Свой новый код: думать до кода, ладдер простоты, не трогать лишнее |
 | **`architect`** | Типы и границы модулей до кода |
 | **`blast-radius`** | Маленький дифф — что ещё сломается за его пределами |
 | **`interrogate`** | Сами атакуем дифф перед merge |
@@ -151,7 +151,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 | Skill | Зачем |
 | ------- | -------- |
 | `tdd` | Точечная регрессия на критическом узле; вызывается только когда тест дешёвый и путь ясен |
-| `ponytail-review` | Убрать переусложнение перед «готово» |
+| `karpathy-ponytail` | Убрать переусложнение перед «готово» |
 | `react-best-practices` | Perf React для Vite SPA: правила `server-*` и `rendering-hydration-*` неприменимы |
 | `vercel-composition-patterns` | Компонент оброс boolean-пропсами (4+ флагов режима) |
 | `web-design-guidelines` | Чеклист UI и a11y по коду |
@@ -220,7 +220,7 @@ HTTPS заголовки домена     → siteaudit
 Фича (после «да»)          → executing-plans
 Баг                        → systematic-debugging (+ project tdd)
 Перед «готово»             → verification-before-completion
-Свой новый код             → ponytail-review
+Свой новый код             → karpathy-ponytail
 Security диффа             → security-пак, точечно
 Проверить UI после правок  → webapp-testing / playwright
 ```

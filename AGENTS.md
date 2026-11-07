@@ -126,7 +126,7 @@ nginx/firewall/systemd/install, бэкапы и миграции, node/proxy age
 | Баг, красный тест, «не работает» | `systematic-debugging` |
 | Багфикс с дешёвым тестом на критическом узле | `tdd` |
 | Перед «готово», коммитом, PR | `verification-before-completion` |
-| Свой новый код: «не переусложнено ли» | `ponytail-review` |
+| Свой новый код: «не переусложнено ли» | `karpathy-ponytail` |
 | UI, вёрстка, a11y | `web-design-guidelines` |
 | Проверить UI в браузере | `webapp-testing` |
 | React: ререндеры, бандл | `react-best-practices` |

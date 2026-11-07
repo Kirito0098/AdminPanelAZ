@@ -19,7 +19,7 @@
 | Skill | Зачем |
 | ------- | -------- |
 | `tdd` | Точечная регрессия на критическом узле (не Superpowers TDD) |
-| `ponytail-review` | Убрать переусложнение перед «готово» |
+| `karpathy-ponytail` | Думать до кода, ладдер простоты, хирургические правки |
 | `react-best-practices` | Perf React (Vite SPA — без Next `server-*`) |
 | `vercel-composition-patterns` | Раздутые boolean-пропсы |
 | `web-design-guidelines` | Чеклист UI/a11y по коду |

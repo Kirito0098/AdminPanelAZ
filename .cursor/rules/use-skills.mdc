@@ -51,7 +51,7 @@ alwaysApply: true
 | Багфикс с дешёвым локальным тестом, или пользователь явно просит TDD / регрессию / `/tdd` | **project** `tdd` (`.cursor/skills/tdd`); не Superpowers `test-driven-development`; не копировать текст из pstack-plugin `tdd` |
 | Баг, красный тест, CI упал, «не работает» (нет `/poteto-mode`) | `systematic-debugging` |
 | Перед словами «готово», «исправлено», «тесты проходят», перед коммитом | `verification-before-completion` |
-| Перед «готово» по любому коду, «не переусложнено ли», «что можно удалить» | `ponytail-review` (свой новый код чистишь сам, по старому — только список) |
+| Перед «готово» по любому коду, «не переусложнено ли», «что можно удалить» | `karpathy-ponytail` (свой новый код чистишь сам, по старому — только список) |
 | UI: страницы, компоненты, Mini App, вёрстка, копирайт интерфейса | `web-design-guidelines` |
 | Перестройка меню / сайдбара / маршрутов / IA («куда положить раздел») | `site-architecture` (опциональный skill; см. CONTRIBUTING); экран — `web-design-guidelines` |
 | React-код: ререндеры, бандл, тяжёлые вычисления | `react-best-practices`, кроме `server-*`, `async-api-routes`, `rendering-hydration-*` (у нас Vite SPA без Next.js и SSR) |

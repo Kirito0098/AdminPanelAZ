@@ -1,6 +1,13 @@
 {
   "version": 1,
   "skills": {
+    "karpathy-ponytail": {
+      "source": "AbdullahHameedKhan/karpathy-ponytail-skills",
+      "sourceType": "github",
+      "skillPath": ".cursor/skills/karpathy-ponytail/SKILL.md",
+      "computedHash": "2e314f4b8a717d1092386d577bd134616d7527b151eb8bfa69463a2bcf813753",
+      "note": "vendored into project .cursor/skills"
+    },
     "tui-design": {
       "source": "gfargo/skills",
       "sourceType": "github",
