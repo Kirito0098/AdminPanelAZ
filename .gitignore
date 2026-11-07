@@ -46,6 +46,9 @@ backend/app/data/
 *.tar
 .tmp_*
 
+# --- Локальные планы агента (не часть продукта) ---
+/plans/
+
 # --- Python ---
 backend/.venv/
 **/__pycache__/

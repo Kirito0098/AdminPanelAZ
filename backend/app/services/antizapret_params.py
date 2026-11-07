@@ -175,6 +175,15 @@ ANTIZAPRET_PARAMS = [
         "description": "Весь исходящий DNS уходит через встроенный WARP — включите, если выбранные DNS-серверы заблокированы или недоступны с этого сервера. Нужен AntiZapret-VPN с 26.10.2026: на старом setup (DNS_WARP=1|2) панель значение не меняет",
     },
     {
+        "key": "reconnect_warp",
+        "env": "RECONNECT_WARP",
+        "type": "flag",
+        "default": "n",
+        "html_id": "reconnect_warp-toggle",
+        "title": "Переподключать WARP",
+        "description": "При обновлении списков AntiZapret переподключает встроенный WARP, если сервер работает больше минуты — помогает, когда WARP «отвалился» и домены идут напрямую. Нужно «Применить (doall.sh)»",
+    },
+    {
         "key": "ssh_protection",
         "env": "SSH_PROTECTION",
         "type": "flag",
@@ -200,6 +209,15 @@ ANTIZAPRET_PARAMS = [
         "html_id": "scan_protection-toggle",
         "title": "Scan protection",
         "description": "Скрывает сервер от простого сканирования: отключает ответ на ping и на запросы к закрытым портам.",
+    },
+    {
+        "key": "flood_protection",
+        "env": "FLOOD_PROTECTION",
+        "type": "flag",
+        "default": "n",
+        "html_id": "flood_protection-toggle",
+        "title": "Защита от флуда",
+        "description": "Ограничивает поток новых соединений с одного клиентского адреса (hashlimit 100/сек, всплеск 1000). Применяется сразу — служба antizapret перезапускается",
     },
     {
         "key": "torrent_guard",
@@ -230,6 +248,24 @@ ANTIZAPRET_PARAMS = [
         "description": "Блокирует входящие соединения с клиентских адресов на сервер и к другим клиентам, кроме DNS (порт 53). С 31.10.2026 AntiZapret больше не блокирует форвардинг между клиентами",
     },
     {
+        "key": "alternative_client_ip",
+        "env": "ALTERNATIVE_CLIENT_IP",
+        "type": "flag",
+        "default": "y",
+        "html_id": "alternative_client_ip-toggle",
+        "title": "Подсети клиентов 172.x",
+        "description": "Включено — клиенты получают 172.29.8.x / 172.28.8.x, DNS 172.29.8.1 (как в текущих профилях). Выключено — 10.29.8.x / 10.28.8.x: меняются адреса у всех клиентов, старые профили перестают работать. Панель перепишет kresd.conf и профили нужно пересобрать",
+    },
+    {
+        "key": "alternative_fake_ip",
+        "env": "ALTERNATIVE_FAKE_IP",
+        "type": "flag",
+        "default": "y",
+        "html_id": "alternative_fake_ip-toggle",
+        "title": "Fake-IP 198.18",
+        "description": "Включено — fake-IP пул 198.18.0.0/15. Выключено — 10.30.0.0/15: панель дополнительно правит --fake-cidr в proxy.py, иначе resolver продолжит выдавать 198.18. После смены клиентам нужно переподключиться",
+    },
+    {
         "key": "clear_hosts",
         "env": "CLEAR_HOSTS",
         "type": "flag",
@@ -240,6 +276,9 @@ ANTIZAPRET_PARAMS = [
     },
     {"key": "openvpn_host", "env": "OPENVPN_HOST", "type": "string", "default": "", "html_id": "openvpn-host-input"},
     {"key": "wireguard_host", "env": "WIREGUARD_HOST", "type": "string", "default": "", "html_id": "wireguard-host-input"},
+    # Только для записи в setup из карточки OpenVPN: своих переключателей в разделе «Конфиг» у них нет.
+    {"key": "OPENVPN_DUPLICATE", "env": "OPENVPN_DUPLICATE", "type": "flag", "default": "y", "html_id": "openvpn-duplicate-env", "hidden": True},
+    {"key": "OPENVPN_LOG", "env": "OPENVPN_LOG", "type": "flag", "default": "n", "html_id": "openvpn-log-env", "hidden": True},
 ]
 
 KNOWN_SETTING_KEYS = frozenset(p["key"] for p in ANTIZAPRET_PARAMS)
@@ -251,9 +290,12 @@ RUNTIME_RESTART_KEYS: frozenset[str] = frozenset(
         "ssh_protection",
         "attack_protection",
         "scan_protection",
+        "flood_protection",
         "torrent_guard",
         "restrict_forward",
         "client_isolation",
+        "alternative_client_ip",
+        "alternative_fake_ip",
         "ANTIZAPRET_WARP",
         "VPN_WARP",
         "WARP_PROTECTION",

@@ -1635,6 +1635,7 @@ def _migrate_nodes_columns() -> None:
     _migrate_nodes_wireguard_use_first_remote()
     _migrate_nodes_openvpn_multihome()
     _migrate_nodes_openvpn_restart_pending()
+    _migrate_nodes_openvpn_tuning_intent()
     _migrate_nodes_proxy_fields()
     _migrate_nodes_portal_label()
     _migrate_nodes_api_key_pending()
@@ -2584,6 +2585,26 @@ def _migrate_nodes_openvpn_multihome() -> None:
     with _migration_transaction() as conn:
         conn.execute(text("ALTER TABLE nodes ADD COLUMN openvpn_multihome INTEGER DEFAULT 0"))
         logger.info("DB migration: added nodes.openvpn_multihome")
+
+
+def _migrate_nodes_openvpn_tuning_intent() -> None:
+    """Намерение панели по OpenVPN-тюнингу (duplicate-cn / подробные логи).
+
+    AntiZapret хранит OPENVPN_DUPLICATE / OPENVPN_LOG в setup, но применяет их только при
+    установке. Панель правит server conf напрямую, поэтому ей нужно помнить выбор, чтобы
+    вернуть его после повторного setup.sh.
+    """
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("nodes")}
+    missing = [name for name in ("openvpn_duplicate_cn", "openvpn_detailed_logs") if name not in cols]
+    if not missing:
+        return
+    with _migration_transaction() as conn:
+        for name in missing:
+            conn.execute(text(f"ALTER TABLE nodes ADD COLUMN {name} BOOLEAN"))
+            logger.info("DB migration: added nodes.%s", name)
 
 
 def _migrate_nodes_openvpn_restart_pending() -> None:

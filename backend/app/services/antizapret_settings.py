@@ -155,6 +155,9 @@ def setting_write_mismatch_warnings(requested: Mapping[str, Any], actual: Mappin
 def build_schema() -> list[dict[str, Any]]:
     schema: list[dict[str, Any]] = []
     for p in ANTIZAPRET_PARAMS:
+        if p.get("hidden"):
+            # Служебные ключи setup: пишет панель из своей карточки, в разделе «Конфиг AntiZapret» их нет.
+            continue
         item: dict[str, Any] = {
             "key": p["key"],
             "html_id": p["html_id"],

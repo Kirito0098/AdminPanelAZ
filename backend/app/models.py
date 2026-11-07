@@ -365,6 +365,9 @@ class Node(Base):
     # When True, saving remotes also writes hosts[0] to WIREGUARD_HOST (GubernievS proxy.sh).
     wireguard_use_first_remote: Mapped[bool] = mapped_column(Boolean, default=False)
     openvpn_multihome: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Panel intent for server conf tuning (None = никогда не задавали из панели).
+    openvpn_duplicate_cn: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    openvpn_detailed_logs: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     # HA replica got a new OpenVPN server identity on disk; running servers still use the old one.
     openvpn_restart_pending: Mapped[bool] = mapped_column(Boolean, default=False)
     # Built-in client templates were added once; templates deleted later are not re-created.

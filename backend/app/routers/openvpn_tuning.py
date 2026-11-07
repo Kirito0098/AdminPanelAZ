@@ -19,7 +19,7 @@ from app.schemas import (
     OpenVpnTuningUpdate,
 )
 from app.services.action_log import log_action
-from app.services.node_manager import get_active_adapter, get_adapter_for_node
+from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node
 from app.services.node_sync.groups import (
     find_sync_group_for_primary,
     get_replica_nodes,
@@ -39,13 +39,97 @@ def _proxy_node_error() -> HTTPException:
     )
 
 
+_SETUP_TUNING_ENVS = ("OPENVPN_DUPLICATE", "OPENVPN_LOG")
+
+
+def _setup_tuning_updates(duplicate: bool, logs: bool) -> dict[str, str]:
+    """Ключи setup AntiZapret: их читает установщик, поэтому переустановка повторит выбор панели."""
+    return {
+        "OPENVPN_DUPLICATE": "y" if duplicate else "n",
+        "OPENVPN_LOG": "y" if logs else "n",
+    }
+
+
+def _write_setup_tuning(adapter, duplicate: bool, logs: bool) -> list[str]:
+    """Best-effort: без записи setup следующий setup.sh вернёт значения по умолчанию."""
+    try:
+        adapter.update_antizapret_settings(_setup_tuning_updates(duplicate, logs))
+    except Exception as exc:  # noqa: BLE001 — конфиги уже изменены, это только страховка на переустановку
+        logger.warning("openvpn tuning: setup keys not written: %s", exc)
+        return [
+            "Ключи OPENVPN_DUPLICATE / OPENVPN_LOG в setup не записаны — "
+            "повторный setup.sh вернёт свои значения"
+        ]
+    return []
+
+
+def _store_tuning_intent(db: Session, duplicate: bool, logs: bool) -> None:
+    """Запомнить выбор панели на активном узле и репликах HA."""
+    active = get_active_node(db)
+    active.openvpn_duplicate_cn = bool(duplicate)
+    active.openvpn_detailed_logs = bool(logs)
+    group = find_sync_group_for_primary(db, active.id)
+    if group is not None and is_auto_sync_enabled(group):
+        for replica in get_replica_nodes(db, group):
+            replica.openvpn_duplicate_cn = bool(duplicate)
+            replica.openvpn_detailed_logs = bool(logs)
+    db.commit()
+
+
+def _resolved(desired_duplicate, desired_logs, state: dict) -> tuple[bool, bool]:
+    """Желаемое значение: намерение панели, иначе то, что уже лежит в конфиге."""
+    duplicate = desired_duplicate
+    if duplicate is None:
+        duplicate = state.get("duplicate_cn") == "on"
+    logs = desired_logs
+    if logs is None:
+        logs = state.get("logs") == "on"
+    return bool(duplicate), bool(logs)
+
+
+def _intent_fields(node, state: dict) -> dict:
+    duplicate_desired = node.openvpn_duplicate_cn
+    logs_desired = node.openvpn_detailed_logs
+    in_sync = True
+    if duplicate_desired is not None:
+        in_sync = in_sync and state.get("duplicate_cn") == ("on" if duplicate_desired else "off")
+    if logs_desired is not None:
+        in_sync = in_sync and state.get("logs") == ("on" if logs_desired else "off")
+    return {
+        "duplicate_cn_desired": duplicate_desired,
+        "logs_desired": logs_desired,
+        "in_sync": in_sync,
+    }
+
+
+def _restore_tuning(adapter, node, state: dict) -> dict:
+    """setup.sh / обновление AntiZapret вернули стоковые conf — вернуть выбор панели."""
+    duplicate, logs = _resolved(node.openvpn_duplicate_cn, node.openvpn_detailed_logs, state)
+    adapter.apply_openvpn_tuning(duplicate=duplicate, logs=logs)
+    return adapter.get_openvpn_tuning()
+
+
 @router.get("", response_model=OpenVpnTuningStateOut)
 def get_openvpn_tuning(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    adapter = get_active_adapter(db)
+    node = get_active_node(db)
     try:
-        state = get_active_adapter(db).get_openvpn_tuning()
+        state = adapter.get_openvpn_tuning()
     except NotImplementedError as exc:
         raise _proxy_node_error() from exc
-    return OpenVpnTuningStateOut(**state)
+    if not _intent_fields(node, state)["in_sync"]:
+        try:
+            state = _restore_tuning(adapter, node, state)
+        except Exception as exc:  # noqa: BLE001 — состояние показываем как есть, с предупреждением
+            logger.warning("openvpn tuning self-heal failed: %s", exc)
+            state = {
+                **state,
+                "warnings": [
+                    *(state.get("warnings") or []),
+                    f"Выбор панели не удалось вернуть на диск: {exc}. Нажмите «Сохранить» ещё раз.",
+                ],
+            }
+    return OpenVpnTuningStateOut(**{**state, **_intent_fields(node, state)})
 
 
 @router.put("", response_model=OpenVpnTuningStateOut)
@@ -63,11 +147,18 @@ def apply_openvpn_tuning(
 
     result["warnings"] = [
         *(result.get("warnings") or []),
+        *_write_setup_tuning(get_active_adapter(db), payload.duplicate, payload.logs),
         *_replicate_to_replicas(
             db,
-            lambda adapter: adapter.apply_openvpn_tuning(duplicate=payload.duplicate, logs=payload.logs),
+            lambda adapter: (
+                adapter.apply_openvpn_tuning(duplicate=payload.duplicate, logs=payload.logs),
+                adapter.update_antizapret_settings(
+                    _setup_tuning_updates(payload.duplicate, payload.logs)
+                ),
+            ),
         ),
     ]
+    _store_tuning_intent(db, payload.duplicate, payload.logs)
     log_action(
         db,
         action="openvpn_tuning",

@@ -1329,6 +1329,10 @@ class OpenVpnTuningStateOut(BaseModel):
 
     duplicate_cn: Literal["on", "off", "mixed", "unknown"] = "unknown"
     logs: Literal["on", "off", "mixed", "unknown"] = "unknown"
+    # Намерение панели (nodes.openvpn_duplicate_cn / openvpn_detailed_logs); None — не задавали.
+    duplicate_cn_desired: bool | None = None
+    logs_desired: bool | None = None
+    in_sync: bool = True
     mtu_openvpn: int | Literal["mixed"] | None = None
     mtu_wireguard: int | Literal["mixed"] | None = None
     dco: Literal["on", "off", "mixed", "unknown"] = "unknown"

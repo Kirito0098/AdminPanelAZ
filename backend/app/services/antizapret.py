@@ -729,6 +729,98 @@ class AntiZapretService:
         result["warnings"] = [*result["warnings"], *warnings]
         return result
 
+    def apply_client_subnets(
+        self, *, alternative_client_ip: bool, alternative_fake_ip: bool
+    ) -> dict[str, Any]:
+        """Подсети клиентов в kresd.conf, fake-пул в proxy.py и services.env AZ-AWG2.
+
+        Одна запись в setup их не меняет: kresd.conf пишет setup.sh, а fake-cidr живёт
+        в default у proxy.py. При неудачном рестарте резолвера файл возвращается как был.
+        """
+        from app.services.kresd_subnets import (
+            with_awg_services_env,
+            with_client_subnets,
+            with_fake_cidr,
+        )
+
+        warnings: list[str] = []
+        restarted: list[str] = []
+        units = ("kresd@1", "kresd@2", "kresd@3")
+        conf_path = self.knot_resolver_dir / "kresd.conf"
+        if conf_path.is_file():
+            previous = conf_path.read_text(encoding="utf-8")
+            updated = with_client_subnets(previous, alternative=alternative_client_ip)
+            if updated != previous:
+                conf_path.write_text(updated, encoding="utf-8")
+                failed: str | None = None
+                for unit in units:
+                    failed = self._restart_kresd(unit)
+                    if failed is not None:
+                        break
+                    restarted.append(unit)
+                if failed is not None:
+                    conf_path.write_text(previous, encoding="utf-8")
+                    for unit in units:
+                        self._restart_kresd(unit)
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"kresd не запустился с новыми подсетями, прежний kresd.conf восстановлен. "
+                            f"Ошибка: {failed}"
+                        ),
+                    )
+
+        proxy_path = self.base_path / "proxy.py"
+        if proxy_path.is_file():
+            before = proxy_path.read_text(encoding="utf-8")
+            after = with_fake_cidr(before, alternative=alternative_fake_ip)
+            if after != before:
+                proxy_path.write_text(after, encoding="utf-8")
+                warnings.append(
+                    "proxy.py: --fake-cidr обновлён под новый fake-пул. Обновление AntiZapret "
+                    "скачивает proxy.py заново — после него сохраните настройки ещё раз "
+                    "(или это повторит custom-up.sh)"
+                )
+
+        awg_env = Path("/etc/amnezia/amneziawg/services.env")
+        if awg_env.is_file():
+            before = awg_env.read_text(encoding="utf-8")
+            after = with_awg_services_env(before, alternative=alternative_client_ip)
+            if after != before:
+                awg_env.write_text(after, encoding="utf-8")
+                for iface in ("antizapret-awg", "vpn-awg"):
+                    error = self._systemctl_restart(f"awg-quick@{iface}")
+                    if error is None:
+                        restarted.append(f"awg-quick@{iface}")
+                    else:
+                        warnings.append(f"awg-quick@{iface} не перезапустился: {error}")
+
+        warnings.append(
+            "Пересоберите профили клиентов («Пересоздать профили» / client.sh 7): в старых "
+            ".ovpn и .conf остались прежние адреса, без пересборки они не подключатся"
+        )
+        warnings.append(
+            "Если в /root/antizapret/custom-up.sh есть правила для 172.29/198.18 — поправьте их под новый режим"
+        )
+        warnings.append("В AZ-WARP после смены подсетей нажмите «Запустить resync»")
+        return {"warnings": warnings, "restarted": restarted}
+
+    @staticmethod
+    def _systemctl_restart(unit: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["systemctl", "restart", unit],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            return str(exc)
+        if result.returncode == 0:
+            return None
+        return ((result.stdout or "") + (result.stderr or "")).strip() or f"exit {result.returncode}"
+
     @staticmethod
     def _restart_antizapret() -> str | None:
         """Restart the AntiZapret unit (re-applies up.sh rules); return an error text on failure."""
