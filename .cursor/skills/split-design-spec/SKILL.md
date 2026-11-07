@@ -1,12 +1,7 @@
 ---
 name: split-design-spec
 description: >
-  Splits a monolithic design doc under docs/superpowers/specs/ into a dated
-  folder of section files plus README index, and labels each piece as already
-  shipped (reuse), to-build, partial, or separate-delivery after checking the
-  codebase. Use when the user asks to «разбить спек», «разложить дизайн по
-  папкам», «split design spec», or to prepare a large
-  docs/superpowers/specs/*-design.md for staged planning.
+  Разбить большой design-спек из docs/superpowers/specs на папку этапов.
 ---
 
 # Split design spec into a folder
@@ -48,19 +43,19 @@ Rules:
 title: <short title>
 stage: 1 | 2 | 3 | 4 | shared | separate
 status: reuse | partial | to-build | separate-delivery
-depends_on: []          # other part filenames in this folder
-target_release: "2.26.6"  # from the design header, or empty
+depends_on: [] # other part filenames in this folder
+target_release: "2.26.6" # from the design header, or empty
 ---
 ```
 
 Status meanings:
 
-| Status | Meaning |
-|--------|---------|
-| `reuse` | Already in the repo; this stage only wires/extends it. List concrete paths in the body. |
-| `partial` | Core exists; listed gaps are still to-build. |
-| `to-build` | Not implemented; this is new work. |
-| `separate-delivery` | Out of the main stage train (e.g. install.sh / scenario presets). |
+| Status              | Meaning                                                                                 |
+| ------------------- | --------------------------------------------------------------------------------------- |
+| `reuse`             | Already in the repo; this stage only wires/extends it. List concrete paths in the body. |
+| `partial`           | Core exists; listed gaps are still to-build.                                            |
+| `to-build`          | Not implemented; this is new work.                                                      |
+| `separate-delivery` | Out of the main stage train (e.g. install.sh / scenario presets).                       |
 
 ## README.md required sections
 
@@ -75,7 +70,7 @@ Status meanings:
 Verify against the codebase (prefer codebase-memory graph `search_graph` / `get_file_outline`, else grep). Table columns:
 
 | Capability | Where in code | Used by stages | Notes |
-|------------|---------------|----------------|-------|
+| ---------- | ------------- | -------------- | ----- |
 
 Only list items that **exist today**. Gaps go in the relevant part file under `### Gaps (to-build)`, not here.
 
@@ -91,8 +86,8 @@ If the design already has an «existing pieces» table, start from it, then conf
 > Читать с [README.md](./YYYY-MM-DD-<topic>/README.md). Что уже в коде —
 > [ALREADY-SHIPPED.md](./YYYY-MM-DD-<topic>/ALREADY-SHIPPED.md).
 
-Date: YYYY-MM-DD  
-Target release: **X.Y.Z**  
+Date: YYYY-MM-DD
+Target release: **X.Y.Z**
 Status: split — edit files inside the folder, not this stub.
 ```
 

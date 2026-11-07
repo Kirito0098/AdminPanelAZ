@@ -1,6 +1,6 @@
 ---
 name: tui-design
-description: Design, build, refactor, or review terminal interfaces—full-screen TUIs, interactive prompts, and command-line tools. Use for terminal-app layout and UX, CLI behavior, ncurses-style tools, dashboards, REPLs, fzf-like pickers, and libraries such as Bubble Tea, Ratatui, Textual, or Ink, including requests that name a known TUI such as lazygit, k9s, btop, helix, or yazi instead of saying “TUI.” Do not use for browser or web UI, native GUI, editor or font configuration, or backend and shell work that has no terminal interface.
+description: "CLI и консольное меню: install.sh, терминальный интерфейс. Не для веб-UI."
 ---
 
 # TUI & CLI Design
@@ -9,31 +9,29 @@ Design terminal software that is calm, predictable, fast, and honest about the m
 
 ## Route before answering
 
-| Need | Authoritative reference |
-|---|---|
-| Go, Bubble Tea, Lipgloss, Bubbles, tview, gocui | `references/ecosystem-go.md` |
-| Rust, Ratatui, crossterm, Cursive | `references/ecosystem-rust.md` |
-| Python, Textual, Rich, prompt_toolkit, urwid | `references/ecosystem-python.md` |
-| TypeScript/JavaScript, Ink, OpenTUI, Clack, Inquirer | `references/ecosystem-typescript.md` |
-| One-shot commands, arguments, streams, exit codes, automation | `references/cli-basics.md` |
-| Layouts, buffers, borders, hierarchy, color, density, responsive behavior, tables, themes, accessibility | `references/visual-patterns.md` |
-| Keys, focus, navigation, modes, forms, mouse, confirmation, undo, OSC features | `references/interaction-patterns.md` |
-| Case studies: lazygit, k9s, fzf, btop, helix, yazi, atuin | `references/exemplar-apps.md` |
-| Screenshots or demo recordings | Use the separate `vhs-cli-demos` skill |
+| Need                                                                                                     | Authoritative reference              |
+| -------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| One-shot commands, arguments, streams, exit codes, automation                                            | `references/cli-basics.md`           |
+| Layouts, buffers, borders, hierarchy, color, density, responsive behavior, tables, themes, accessibility | `references/visual-patterns.md`      |
+| Keys, focus, navigation, modes, forms, mouse, confirmation, undo, OSC features                           | `references/interaction-patterns.md` |
 
-Load only the references the task needs. When the prompt names a framework or ecosystem, always load its ecosystem reference before making API, lifecycle, implementation, or testing claims. Ecosystem references own those specifics. The visual and interaction references own their domains for every ecosystem. Exemplar apps are evidence and inspiration, not substitutes for the pattern references.
+Load only the references the task needs. Ecosystem references for Go/Rust/Python/Ink were
+removed on purpose: this project's terminal surface is `install.sh` and the bash console
+menu in `scripts/`, with no TUI framework. Do not re-add a framework to the project just
+because a pattern reference exists.
 
-If no language is named, ask only when ecosystem choice would materially change the answer or implementation. Otherwise state a reasonable recommendation and proceed: Go for polished single binaries, Rust for control and reliability, Python for rapid product work, and TypeScript when React or npm distribution is already an advantage.
+If the language matters, state the recommendation and proceed: bash for install and menu
+scripts, Python only where a script already lives in `scripts/`.
 
 ## Classify the product first
 
 Choose the output contract before choosing a framework or layout:
 
-| Product shape | Default contract |
-|---|---|
-| One-shot CLI | No live full-screen UI. Stable stdout for results, stderr for diagnostics, meaningful exit codes. Load `cli-basics.md`. |
+| Product shape           | Default contract                                                                                                                                                                                         |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One-shot CLI            | No live full-screen UI. Stable stdout for results, stderr for diagnostics, meaningful exit codes. Load `cli-basics.md`.                                                                                  |
 | Summon–choose–exit tool | Prefer inline when shell context matters. Put interactive chrome on stderr or `/dev/tty` and the selected result on stdout. Use full-screen only when a large preview or working set needs stable space. |
-| Full-screen session | Use the alternate screen and a stable spatial model. Treat terminal restoration, resize, suspend, and redraw behavior as product requirements. |
+| Full-screen session     | Use the alternate screen and a stable spatial model. Treat terminal restoration, resize, suspend, and redraw behavior as product requirements.                                                           |
 
 Then name the workflow shape—persistent panels, Miller columns, drill-down stack, dashboard, IDE-style panes, overlay, or tabs—and verify it against `visual-patterns.md`. Sketch the states and layout before writing code: initial, loading, empty, partial, success, error, disconnected, and too-small.
 
@@ -41,9 +39,9 @@ Then name the workflow shape—persistent panels, Miller columns, drill-down sta
 
 1. Classify the product shape and its stdout/stderr contract.
 2. Identify the dominant user loop and the 5–8 most common actions.
-3. Select the ecosystem and load its reference plus any relevant pattern reference.
+3. Pick the existing script conventions in this repo and load the relevant pattern reference.
 4. Sketch the layout and state transitions at wide, standard, narrow, and minimum sizes.
-5. Implement in the ecosystem's native architecture; keep state/update/event work separate from rendering where the framework permits.
+5. Implement in the project's existing script style; keep state and rendering separate where the language allows.
 6. Verify lifecycle cleanup, input discoverability, output behavior, width handling, and async work.
 7. Test the cheapest stable layer first, then rendered frames, then a small PTY smoke path only if its integration risk justifies it.
 
@@ -89,11 +87,11 @@ Make “busy” countable. Report:
 - markers present on every row, which therefore mark nothing;
 - the share of cells spent on chrome, labels, and repeated boilerplate instead of data.
 
-Name the exact borders, markers, labels, or repeated fields to remove. Do not stop at “simplify it.” Use the full method in `visual-patterns.md` → *The clutter audit*.
+Name the exact borders, markers, labels, or repeated fields to remove. Do not stop at “simplify it.” Use the full method in `visual-patterns.md` → _The clutter audit_.
 
 ### Pressure-test the floor
 
-State what happens at 80×24 and in a 60-column tmux split: which pane wins, what hides, what truncates, what becomes drill-down, and when the truthful “terminal too small” state appears. Every multi-column design needs a single-pane fallback. Use the breakpoint ladder and minimum-size method in `visual-patterns.md` → *Responsive design*.
+State what happens at 80×24 and in a 60-column tmux split: which pane wins, what hides, what truncates, what becomes drill-down, and when the truthful “terminal too small” state appears. Every multi-column design needs a single-pane fallback. Use the breakpoint ladder and minimum-size method in `visual-patterns.md` → _Responsive design_.
 
 ## Build and verification discipline
 
@@ -115,7 +113,7 @@ Verify at least:
 - wide characters, combining marks, truncation, sorting, and virtualization;
 - no stdout corruption and no blocking I/O in the event/render path.
 
-Use the ecosystem reference's exact testing and debugging APIs. Never print diagnostics into an active raw-mode or alternate-screen UI.
+Use the shell test harness in `scripts/test-*.sh` (see `scripts/run-shell-tests.sh`). Never print diagnostics into an active raw-mode or alternate-screen UI.
 
 ## Review existing interfaces
 
@@ -136,4 +134,4 @@ Avoid generic verdicts. Tie each recommendation to a user-visible failure, an im
 
 Be decisive where practice has converged: semantic colors, clean terminal restoration, responsive fallback, non-blocking work, width-aware rendering, and honest stream contracts. Explain real tradeoffs for inline versus full-screen, modal versus modeless input, mouse support, and destructive-action confirmation.
 
-Use the chosen ecosystem's idioms rather than translating another framework's architecture literally. When a design choice remains abstract, point to the relevant case study in `exemplar-apps.md` and explain which part of its solution transfers.
+Use the idioms of the language already in the file rather than translating another framework's architecture literally. When a design choice remains abstract, name the concrete terminal app whose behaviour should transfer, without inventing a framework dependency.

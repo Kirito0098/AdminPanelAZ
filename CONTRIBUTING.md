@@ -14,9 +14,11 @@
 | Путь | Что |
 | ------ | ----- |
 | `.cursor/rules/` | `use-skills`, `lean-code`, `release-train-branching`, `telegram-release-post`. Это просто markdown-правила, их читают оба клиента — и Zoo Code, и Cursor |
-| `.cursor/skills/` | project skills: `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
-| `.agents/skills/` | те же скиллы относительными симлинками на `.cursor/skills/` |
-| `.agents/skills-lock.json` | пин стороннего скилла `tui-design` (source `gfargo/skills`) |
+| `.cursor/skills/` | project skills: `brainstorming`, `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
+| `.agents/skills/` | симлинки на `.cursor/skills/` для скиллов, нужных в любом режиме Zoo Code |
+| `.agents/skills-code/` | те же симлинки, активны только в Code: React, UI, tui, tdd, браузерные проверки |
+| `.agents/skills-architect/` | симлинк `split-design-spec`, активен только в Architect |
+| `.agents/skills-lock.json` | провенанс скиллов: `karpathy-ponytail`, `tui-design` (хеши), вендорные Vercel и локальные |
 | `.cursor/mcp.json.example` | шаблон MCP **без** секретов |
 | `.agents/mcp_config.json.example` | тот же шаблон для обёртки `.agents/bin/mcp` (симлинк на файл выше) |
 | `.agents/AGENTS.md` | краткая карта для агентов, которые смотрят в `.agents/` |
@@ -115,7 +117,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 | Где | Что |
 | ----- | ----- |
 | `.cursor/skills/<name>/` | скиллы этого репозитория: `karpathy-ponytail`, `tdd`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
-| `.agents/skills/` | те же каталоги относительными симлинками — для агентов, которые смотрят в `.agents/` |
+| `.agents/skills*/` | относительные симлинки на `.cursor/skills/`, разложенные по режимам Zoo Code |
 
 Внешних каталогов скиллов нет: если скилла нет в `.cursor/skills/`, значит его нет.
 
@@ -162,7 +164,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 
 Пак в [`Anthropic Cybersecurity Skills`](https://github.com/mukul975/Anthropic-Cybersecurity-Skills) — узкие playbooks с маппингом на MITRE ATT&CK, NIST CSF, ATLAS, D3FEND. Это **не** замена security-ревью диффа.
 
-Пак не входит в репозиторий и агентом не подключается: у контрибьютора он лежит в `~/.agents/skills/` (ставится `npx skills add`). При точечном аудите агент читает нужный `SKILL.md` файловым инструментом — описания не висят в каждом запросе.
+Пак не входит в репозиторий и в автопоиске скиллов отключён: у контрибьютора он лежит в `~/.agents/skill-packs/` (ставится `npx skills add`, затем каталог переименовывается из `skills`). При точечном аудите агент читает нужный `SKILL.md` файловым инструментом — описания не висят в каждом запросе.
 
 Только для **своей** панели и авторизованного тестирования. Точечный аудит поверхности: JWT → `testing-jwt-token-security`; подпись и верификация → `implementing-jwt-signing-and-verification`; CORS → `testing-cors-misconfiguration`; CSRF → `performing-csrf-attack-simulation`; WebSocket → `testing-websocket-api-security`; обход путей → `performing-directory-traversal-testing`; Host → `testing-for-host-header-injection`; XSS → `testing-for-xss-vulnerabilities`; BAC/IDOR → `testing-for-broken-access-control`; заголовки → `performing-security-headers-audit`; API auth → `testing-api-authentication-weaknesses`; OWASP API → `testing-api-security-with-owasp-top-10`; CI → `securing-github-actions-workflows`; секреты → `implementing-secret-scanning-with-gitleaks`; харденинг хоста → `hardening-linux-endpoint-with-cis-benchmark`; passkey → `implementing-passwordless-authentication-with-fido2`; лимиты → `implementing-api-rate-limiting-and-throttling`.
 

@@ -14,19 +14,22 @@
 
 ## Project skills (в репо)
 
-Лежат в `.cursor/skills/` (в `.agents/skills/` — относительные symlink’и на них):
+Источник — `.cursor/skills/`; в `.agents/` лежат симлинки, разложенные по режимам Zoo Code:
 
-| Skill | Зачем |
-| ------- | -------- |
-| `tdd` | Точечная регрессия на критическом узле |
-| `karpathy-ponytail` | Думать до кода, ладдер простоты, хирургические правки |
-| `react-best-practices` | Perf React (Vite SPA — без Next `server-*`) |
-| `vercel-composition-patterns` | Раздутые boolean-пропсы |
-| `web-design-guidelines` | Чеклист UI/a11y по коду |
-| `webapp-testing` | Проверка UI в браузере |
-| `split-design-spec` | Разбить большой design-спек |
-| `tui-design` | CLI / консольное меню |
-| `cli-toolbox` | fd/rg/bat/sd/yq/jaq/delta вместо find/grep/cat/sed |
+| Skill | Зачем | Режим |
+| ------- | -------- | ------- |
+| `karpathy-ponytail` | Думать до кода, ладдер простоты, хирургические правки | любой |
+| `cli-toolbox` | fd/rg/bat/sd/yq/jaq/delta вместо find/grep/cat/sed | любой |
+| `tdd` | Точечная регрессия на критическом узле | Code |
+| `react-best-practices` | Perf React + Vite SPA (без Next и SSR) | Code |
+| `vercel-composition-patterns` | Раздутые boolean-пропсы | Code |
+| `web-design-guidelines` | Чеклист UI/a11y по коду | Code |
+| `webapp-testing` | Проверка UI в браузере | Code |
+| `tui-design` | CLI / консольное меню | Code |
+| `brainstorming` | Вопросы, варианты и дизайн-док до кода | Architect |
+| `split-design-spec` | Разбить большой design-спек | Architect |
+
+Security-пак (18 скиллов) в автопоиске отключён: `~/.agents/skill-packs/<name>/SKILL.md`.
 
 ## MCP и локальная обёртка
 

@@ -1,6 +1,15 @@
 {
   "version": 1,
   "skills": {
+    "brainstorming": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "skillPath": ".cursor/skills/brainstorming/SKILL.md",
+      "upstreamCommit": "22f0b463e7a5e579904dd6211a520321035526f7",
+      "upstreamHash": "2c9ca71f94886f9ca9f4aef055f7cafb3e1a9bdf3aeebf8f4cb547c69405d207",
+      "computedHash": "fef36ae93c760376182f4a0080bedc1fa89c3e31f874792e23e401a4642a3a5b",
+      "note": "vendored with builder-check-prompt.md, visual-companion.md and scripts/; writing-plans step replaced by AGENTS.md plan flow"
+    },
     "karpathy-ponytail": {
       "source": "AbdullahHameedKhan/karpathy-ponytail-skills",
       "sourceType": "github",
@@ -13,7 +22,49 @@
       "sourceType": "github",
       "skillPath": ".cursor/skills/tui-design/SKILL.md",
       "computedHash": "8f26d4897417a5e582786cf9f190fce95d26d7dd6423b3a5c7e319be897183d8",
-      "note": "vendored into project .cursor/skills"
+      "note": "vendored into project .cursor/skills; ecosystem references removed (no TUI framework in this project)"
+    },
+    "react-best-practices": {
+      "source": "vercel",
+      "sourceType": "vendor",
+      "skillPath": ".cursor/skills/react-best-practices/SKILL.md",
+      "note": "vendored from Vercel engineering rules (author in frontmatter); server/RSC rules removed for Vite SPA, compiled AGENTS.md removed"
+    },
+    "vercel-composition-patterns": {
+      "source": "vercel",
+      "sourceType": "vendor",
+      "skillPath": ".cursor/skills/vercel-composition-patterns/SKILL.md",
+      "note": "vendored from Vercel engineering rules (author in frontmatter); compiled AGENTS.md removed"
+    },
+    "web-design-guidelines": {
+      "source": "vercel-labs/web-interface-guidelines",
+      "sourceType": "vendor",
+      "skillPath": ".cursor/skills/web-design-guidelines/SKILL.md",
+      "note": "checklist inlined into SKILL.md; remote WebFetch dependency removed"
+    },
+    "webapp-testing": {
+      "source": "unknown",
+      "sourceType": "vendor",
+      "skillPath": ".cursor/skills/webapp-testing/SKILL.md",
+      "note": "vendored with LICENSE.txt; original repository not recorded in the project"
+    },
+    "tdd": {
+      "source": "project",
+      "sourceType": "local",
+      "skillPath": ".cursor/skills/tdd/SKILL.md",
+      "note": "project-specific workflow; test policy lives in AGENTS.md"
+    },
+    "split-design-spec": {
+      "source": "project",
+      "sourceType": "local",
+      "skillPath": ".cursor/skills/split-design-spec/SKILL.md",
+      "note": "project-specific workflow for docs/superpowers/specs"
+    },
+    "cli-toolbox": {
+      "source": "project",
+      "sourceType": "local",
+      "skillPath": ".cursor/skills/cli-toolbox/SKILL.md",
+      "note": "project-specific server tool inventory"
     }
   }
 }

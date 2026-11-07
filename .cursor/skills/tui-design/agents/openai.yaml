@@ -1,4 +1,0 @@
-interface:
-  display_name: "TUI Design"
-  short_description: "Design and review polished terminal interfaces"
-  default_prompt: "Use $tui-design to design or review a polished terminal interface."

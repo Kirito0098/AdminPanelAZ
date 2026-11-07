@@ -3,6 +3,7 @@
 A deep dive into how users interact with TUIs — keybinding philosophy, focus management, navigation patterns, mouse support, and discoverability. The top-level `SKILL.md` covers the principles; this file goes deeper into the *why* and the trade-offs.
 
 **Contents:**
+
 - [Keybinding philosophies](#keybinding-philosophies)
 - [Cross-app keybinding conventions](#cross-app-keybinding-conventions)
 - [Reserved keys — never bind these](#reserved-keys--never-bind-these)
@@ -31,11 +32,13 @@ There are four major schools. Most apps blend them.
 **Examples:** vim, neovim, helix, kakoune, k9s (ex-mode), aerc, weechat (command mode).
 
 **Strengths:**
+
 - Densely expressive — `5dw` ("delete five words") is two operators applied to a count.
 - Hands stay on home row; minimal modifier-key gymnastics.
 - Power users get fast.
 
 **Weaknesses:**
+
 - Steep learning curve.
 - "What mode am I in?" confusion if mode indicator is weak.
 - Modal text input fights conventional editing (Ctrl+A, Ctrl+E, etc.).
@@ -49,11 +52,13 @@ There are four major schools. Most apps blend them.
 **Examples:** emacs (the originator), readline-based shells, weechat (default), some bash bindings.
 
 **Strengths:**
+
 - No modes; what you press is what you get.
 - Rich modifier space (`C-`, `M-`, `S-`, combinations).
 - Discoverable with which-key.
 
 **Weaknesses:**
+
 - Modifier strain ("Emacs pinky").
 - Conflicts with terminal-reserved keys.
 - Less efficient than modal for repetitive editing.
@@ -67,11 +72,13 @@ There are four major schools. Most apps blend them.
 **Examples:** btop, htop (somewhat), fzf, gum, Posting, Harlequin, most modern Textual apps.
 
 **Strengths:**
+
 - Zero learning curve.
 - Inclusive — works for users who've never touched vim.
 - Pairs naturally with mouse support.
 
 **Weaknesses:**
+
 - Slower for power users.
 - Less expressive — fewer keys means fewer commands.
 - Modifier keys (Ctrl/Alt) for less-common actions.
@@ -85,11 +92,13 @@ There are four major schools. Most apps blend them.
 **Examples:** lazygit, k9s, yazi, gh dash, most modern TUIs.
 
 **Strengths:**
+
 - Best of both worlds — onboarding via arrows, speed via hjkl.
 - Inclusive without sacrificing power.
 - Familiar to users from many backgrounds.
 
 **Weaknesses:**
+
 - Slightly more code (handle both).
 - Risk of inconsistency between which keys do what.
 
@@ -102,7 +111,7 @@ There are four major schools. Most apps blend them.
 These have crystallized across the ecosystem. Use them unless you have a strong reason not to:
 
 | Key | Action |
-|---|---|
+| --- | --- |
 | `q` | quit |
 | `?` | help |
 | `/` | search / filter |
@@ -133,7 +142,7 @@ These have crystallized across the ecosystem. Use them unless you have a strong 
 These belong to the terminal or shell:
 
 | Key | Why |
-|---|---|
+| --- | --- |
 | **Ctrl+C** | SIGINT — should always quit cleanly |
 | **Ctrl+Z** | SIGTSTP — suspend; you must restore terminal state on resume |
 | **Ctrl+\\** | SIGQUIT — abort with core dump |
@@ -156,11 +165,13 @@ For a full-screen app, keep the 3–5 most-useful shortcuts visible at the botto
 For a complex full-screen app, this is usually the strongest discoverability tool. Most users will not begin in the docs; they read what is visible in context.
 
 Examples:
+
 - htop's F1–F10 strip.
 - lazygit's per-pane hints (`space stage  ↵ commit  p push  P pull  r refresh  ?`).
 - helix's status line.
 
 Auto-generation is a force multiplier:
+
 - **Bubble Tea**: `bubbles/help` reads from `key.KeyMap`.
 - **Textual**: `Footer` widget renders `BINDINGS`.
 - **Ratatui**: not auto-generated; build a helper that reads from your keybinding map.
@@ -179,6 +190,7 @@ Format: `key  action  context`. Group by mode/panel/category.
 ### Layer 3: Leader-key / which-key
 
 After pressing a leader (Space, `,`, `\`), show a popup with available follow-up keys. The user can:
+
 - Read the list and pick.
 - Type the key to dismiss the popup and trigger the action.
 - Press Esc to cancel.
@@ -194,12 +206,14 @@ When to add: when your keymap exceeds ~20 distinct actions. Below that, `?` help
 Add a palette when the action set is large, spans multiple contexts, or benefits from search; a small app can stop at footer hints plus `?`. **Once a palette exists, every action that has a keybinding should also be a palette command.** The keybinding is the shortcut; the palette is the long-form name + searchable description.
 
 Examples:
+
 - Textual's built-in command palette (`Ctrl+P` by default since v0.77; it originally shipped on `Ctrl+\`, which collides with SIGQUIT).
 - VS Code's Ctrl+Shift+P (the conceptual ancestor for many TUIs).
 - helix's `:` (ex-style command, not strictly a palette but similar role).
 - k9s's `:` (resource-typing, but adopts the same "type to filter actions" model).
 
 Format each command:
+
 ```
 Action name              keybinding
 Description / context
@@ -216,11 +230,13 @@ Show the keybinding next to the command name — the palette doubles as keybindi
 You're in a mode (NORMAL, INSERT, etc.). Keystrokes interpreted differently per mode.
 
 **Requires:**
+
 - Persistent mode indicator (status bar color or label).
 - Distinct cursor shapes per mode (block in NORMAL, bar in INSERT, underline in REPLACE).
 - A way to learn modes — usually a tutorial or readme.
 
 **Trade-offs:**
+
 - Pro: dense keybindings (no Ctrl/Alt needed for most operations).
 - Pro: composable operators (`d` + motion = delete-by-motion).
 - Con: confusion if mode is weakly indicated.
@@ -231,10 +247,12 @@ You're in a mode (NORMAL, INSERT, etc.). Keystrokes interpreted differently per 
 What you press is what you get. State changes happen via widget focus.
 
 **Requires:**
+
 - Clear focus indication (border color, reverse video on selection).
 - Modifier-key bindings for less-common actions.
 
 **Trade-offs:**
+
 - Pro: zero learning curve.
 - Pro: no mode confusion.
 - Con: less expressive — limited by Ctrl/Alt combinations.
@@ -253,6 +271,7 @@ This is **context-sensitive modeless** — works well if you have rich, panel-sp
 ## Focus management
 
 In a multi-panel TUI, **which panel has focus** determines:
+
 - Which keystrokes the panel responds to.
 - Which footer hints show.
 - The visual highlight (border color, reverse video on selection).
@@ -270,7 +289,7 @@ Combine 2–3 of these for unambiguous indication.
 ### Focus navigation
 
 | Method | Best for |
-|---|---|
+| --- | --- |
 | **Tab / Shift+Tab** cycle | Linear panel order; small number of panels |
 | **Numeric keys** (`1`–`9`) | Direct jumps; many panels (lazygit `1`–`5`, yazi `1`–`9`) |
 | **Directional** (`Ctrl+w h/j/k/l` like vim) | Spatial navigation; arbitrary panel arrangement |
@@ -314,6 +333,7 @@ Bound to `/` (when search isn't needed) or another key. Filters the list to matc
 Universal pattern: **Space toggles** the row's marked state. Marked rows show a `*` prefix or accent background.
 
 Variants:
+
 - **Visual mode** (`v`): yazi and vim — extend selection with motion keys.
 - **Range select** (Shift+Click or Shift+arrow): from current to clicked.
 - **Select all** (`Ctrl+A`): mark everything — with the caveat that `Ctrl+A` is GNU screen's prefix (and a common tmux rebinding) and readline's start-of-line, so keep an alternative binding.
@@ -345,12 +365,14 @@ The fight between camps:
 **Mouse augments keyboard, never replaces required actions.** Every mouse-reachable target needs a keyboard equivalent.
 
 Implement mouse for:
+
 - Clicking a panel to focus it.
 - Clicking a tab to switch.
 - Scrolling lists / viewports.
 - Clicking buttons in forms.
 
 Don't require mouse for:
+
 - Anything in the critical path.
 - Power-user actions.
 - Anything that should work over a serial console or restricted SSH.
@@ -496,15 +518,18 @@ The pattern:
 6. **Optional preview pane** (right side) showing detail of hovered result.
 
 Implementation rules:
+
 - **Sub-100ms updates** as the user types.
 - **Match count visible** — `123/45678`.
 - **Highlight matched substring** within each result.
 - **Smart-case** by default (lowercase = case-insensitive).
 - **Sensible result ranking** — exact matches first, then prefix, then substring.
 
-For Go: `sahilm/fuzzy` or `lithammer/fuzzysearch`. For Rust: `nucleo` (used by helix) or `skim`'s matcher. For Python: `rapidfuzz`. For TS/JS: `fuse.js` or `fzy.js`.
+For shell scripts: use `fzf` (installed on the server) instead of hand-rolling fuzzy
+matching. For a real implementation in another language, `nucleo` (Rust) and `rapidfuzz`
+(Python) are the reference matchers.
 
-**Case study:** `references/exemplar-apps.md` → *fzf*.
+**Case study:** *fzf* — inspect the binary itself.
 
 ---
 
@@ -513,6 +538,7 @@ For Go: `sahilm/fuzzy` or `lithammer/fuzzysearch`. For Rust: `nucleo` (used by h
 Used by: lazygit, lazydocker (and inspired by mc / Norton Commander).
 
 **Recipe:**
+
 1. 5+ persistent panels in fixed positions.
 2. `1`–`9` keys jump directly to numbered panels.
 3. `Tab` cycles in order.
@@ -523,7 +549,7 @@ Used by: lazygit, lazydocker (and inspired by mc / Norton Commander).
 
 **The trade-off:** higher cognitive load — `c` does N different things. The footer hint bar is what makes it work.
 
-**Case study:** `references/exemplar-apps.md` → *lazygit*.
+**Case study:** *lazygit* — inspect the binary itself.
 
 ---
 
@@ -532,6 +558,7 @@ Used by: lazygit, lazydocker (and inspired by mc / Norton Commander).
 Used by: k9s, helix (`:` ex-commands), weechat (`/` slash-commands), aerc.
 
 **Recipe:**
+
 1. Press `:` to enter command mode.
 2. Type a resource type or command name (`pods`, `nodes`, `svc`, `ingress`).
 3. Tab-completion narrows.
@@ -544,7 +571,7 @@ Used by: k9s, helix (`:` ex-commands), weechat (`/` slash-commands), aerc.
 
 **When to use:** when there are many resource types or actions, and users will repeat them often.
 
-**Case study:** `references/exemplar-apps.md` → *k9s*.
+**Case study:** *k9s* — inspect the binary itself.
 
 ---
 
@@ -553,13 +580,14 @@ Used by: k9s, helix (`:` ex-commands), weechat (`/` slash-commands), aerc.
 Helix's bet against vim: select first, then act. `wd` selects-word-then-deletes (vs vim's `dw` "delete-word"). Multi-cursor is core. Tree-sitter integration. `Space` opens which-key.
 
 **Why it matters for general TUI design:**
+
 - **Selection-then-act** has visual feedback before the destructive action — users see what they're about to delete.
 - **Multi-cursor** as primary scales beautifully for batch edits.
 - **Which-key for leader keys** is a discoverability pattern any modal app should consider.
 
 You probably won't build a modal editor, but the *visual-feedback-before-action* principle is widely applicable: highlight the rows you're about to delete, the field about to be cleared, the URL about to be visited.
 
-**Case study:** `references/exemplar-apps.md` → *helix*.
+**Case study:** *helix* — inspect the binary itself.
 
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: cli-toolbox
-description: "Быстрые CLI-инструменты сервера AdminPanelAZ: fd вместо find, rg вместо grep, bat вместо cat, sd вместо sed, yq/jaq вместо ручного разбора YAML/JSON, delta для diff, ruff/uv для Python, biome для JSON и ad-hoc TS. Use whenever searching files, grepping code, viewing a file range, doing in-place replacement or parsing a config from the terminal — before reaching for find/grep/cat/sed/python -c."
+description: "Терминал: поиск, диапазон строк, замена, YAML/JSON, diff через fd/rg/bat/sd/yq."
 ---
 
 # CLI-инструменты сервера

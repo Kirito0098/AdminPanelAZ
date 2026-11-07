@@ -1,6 +1,6 @@
 ---
 name: tdd
-description: "AdminPanelAZ project TDD. Use only when the user explicitly asks for TDD, a failing test, or a regression test, OR when the bug has an obvious cheap local test target on a critical path. Skip when the test path is unclear, expensive, integration-heavy, outside critical nodes, or not requested. Do not apply full TDD discipline to every change by default."
+description: "Регрессионный тест на критическом узле перед фиксом бага."
 disable-model-invocation: true
 ---
 

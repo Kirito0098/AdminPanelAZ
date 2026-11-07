@@ -112,6 +112,8 @@ Thumbs.db
 !.agents/AGENTS.md
 !.agents/skills/
 !.agents/skills/**
+!.agents/skills-*/
+!.agents/skills-*/**
 !.agents/skills-lock.json
 !.agents/mcp_config.json.example
 .agents/bin/
