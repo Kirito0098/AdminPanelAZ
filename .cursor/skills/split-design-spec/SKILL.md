@@ -68,7 +68,7 @@ Status meanings:
 2. **Status legend** — the four statuses above.
 3. **Parts** — table: file | stage | status | one-line purpose.
 4. **Delivery stages** — from the design, with which files belong to each stage.
-5. **How to plan next** — «pick one stage folder/file → writing-plans»; do not implement from README alone.
+5. **How to plan next** — «pick one stage folder/file → write the plan»; do not implement from README alone.
 
 ## ALREADY-SHIPPED.md
 
@@ -131,7 +131,7 @@ For each part file, set `status` after checking code:
 
 - Specs live under `docs/superpowers/` (gitignored). Do not commit them to `origin`.
 - Register nothing in GitHub CI. After creating this skill itself, add a row to `.cursor/rules/use-skills.mdc` if missing.
-- Do not start `writing-plans` or implementation until the user picks a stage.
+- Do not start planning or implementation until the user picks a stage.
 
 ## Done when
 

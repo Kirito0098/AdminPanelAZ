@@ -1,6 +1,6 @@
 # Участие в разработке AdminPanelAZ
 
-Гайд для тех, кто помогает с панелью: какие MCP и skills использует мейнтейнер, **зачем** каждый из них, и договорённости по коду. Работают два клиента — **Zoo Code** (DSH-профиль) и **Cursor**: правила и каталог скиллов лежат в репозитории и читаются как обычные файлы, а MCP-серверы каждый клиент подключает по-своему (профиль DSH или локальный `.cursor/mcp.json`).
+Гайд для тех, кто помогает с панелью: какие MCP и skills использует мейнтейнер, **зачем** каждый из них, и договорённости по коду. Работают два клиента — **Zoo Code** (DSH-профиль) и **Cursor**: правила и каталог скиллов лежат в репозитории и читаются как обычные файлы, а MCP-серверы каждый клиент подключает по-своему (настройки MCP клиента или локальный `.cursor/mcp.json`).
 
 Пользовательские инструкции (для админов VPN): [`docs/README.md`](docs/README.md).
 Карта кода: [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md).
@@ -27,17 +27,13 @@
 
 ---
 
-## Профиль DSH и Cursor
-
-**Zoo Code** берёт MCP из профиля DSH — `~/.dsh/profiles/<id>/cordis.patch.yml` на машине оператора, не в репозитории. В нём:
-
-- воркспейс `remote-ssh` с кодом на сервере (`/opt/AdminPanelAZ`);
-- записи `@deepseek-ai/dsh-mcp-client` — по одной на MCP-сервер;
-- модель, локаль, настройки клиента.
-
-Если в Zoo Code MCP не виден в сессии — смотреть надо профиль, а не `.cursor/mcp.json`. Новые плагины в патч добавляются только через `insert:` — запись с одним `id` считается переопределением существующей и молча пропускается.
+## MCP в двух клиентах
 
 **Cursor** берёт MCP из локального `.cursor/mcp.json` (шаблон — `.cursor/mcp.json.example`), правила — из `.cursor/rules/`, скиллы — из `.cursor/skills/`.
+
+**Zoo Code** подключает те же серверы в своих настройках MCP; файл `.cursor/mcp.json` там не читается, если не настроен явно.
+
+Ни то, ни другое в репозиторий не попадает: пути команд, ключи и токены — только локально. Формат — `{"mcpServers": {...}}`, как в шаблоне.
 
 Личная синхронизация с Gitea (адрес, pre-push хук, снимок агентских каталогов) настраивается только на сервере: правило `.cursor/rules/gitea-agent-sync.mdc` не коммитится и в GitHub не попадает.
 
@@ -118,40 +114,21 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 
 | Где | Что |
 | ----- | ----- |
-| `~/.dsh/skills/<name>/` | глобальные скиллы DSH: процесс, инженерные приёмы, тексты, фронт. Подхватываются без настройки |
-| `.cursor/skills/<name>/` | проектные скиллы из этого репозитория: `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design` |
-| `~/.dsh/skills-extra/security/` | security-пак, **не подключён** (см. ниже) |
+| `.cursor/skills/<name>/` | скиллы этого репозитория: `karpathy-ponytail`, `tdd`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design` |
+| `.agents/skills/` | те же каталоги относительными симлинками — для агентов, которые смотрят в `.agents/` |
 
-Скилл — это каталог с `SKILL.md` и frontmatter (`name`, `description`); описание нужно, чтобы агент выбрал скилл по ситуации, а не по названию.
+Внешних каталогов скиллов нет: если скилла нет в `.cursor/skills/`, значит его нет.
 
-**Маршрутизация «ситуация → skill»** — [`use-skills.mdc`](.cursor/rules/use-skills.mdc) (always-on правило) и каталог `~/.dsh/skills/skills-catalog/SKILL.md`; короткая таблица для агента — в [`AGENTS.md`](AGENTS.md). При расхождении верь каталогу.
+Скилл — это каталог с `SKILL.md` и frontmatter (`name`, `description`); `name` совпадает с именем каталога, иначе агент скилл не увидит.
 
-### Процессные скиллы (глобальные)
+**Маршрутизация «ситуация → skill»** — [`use-skills.mdc`](.cursor/rules/use-skills.mdc) (always-on правило), короткая таблица — в [`AGENTS.md`](AGENTS.md).
 
-| Skill | Зачем |
-| ------- | -------- |
-| **`brainstorming`** | До кода: уточнить цель и ограничения, 2–3 подхода, получить апрув дизайна |
-| **`writing-plans`** | Разбить одобренный дизайн на задачи с путями файлов и шагами проверки |
-| **`executing-plans`** | Выполнить готовый план с чекпоинтами и отчётом |
-| **`systematic-debugging`** | Баг и красный тест: сначала root cause, не «подкрутить симптом» |
-| **`verification-before-completion`** | Запрет говорить «готово» без реальных прогонов проверок |
-| **`requesting-code-review`** / **`receiving-code-review`** | Запросить ревью по плану / разобрать пришедшие замечания по существу |
-| **`karpathy-ponytail`** | Свой новый код: думать до кода, ладдер простоты, не трогать лишнее |
-| **`architect`** | Типы и границы модулей до кода |
-| **`blast-radius`** | Маленький дифф — что ещё сломается за его пределами |
-| **`interrogate`** | Сами атакуем дифф перед merge |
-| **`explain`** | «Как работает подсистема», «почему так» |
-| **`technical-writing`** / **`unslop`** | Docs, README, CHANGELOG, PR-описание; чистка AI-штампов в прозе |
-| **`typescript-best-practices`** | Frontend `.ts` / `.tsx` |
-| **`benchmark-checklist`** | Замер перфа и лимитов до публикации цифры |
-| **`recall`** / **`figure-it-out`** / **`correct`** | «Где я остановился» / нет подходящего playbook / повторяющаяся ошибка агентов в репо |
-
-### Проектные скиллы (в репозитории)
+### Скиллы в репозитории
 
 | Skill | Зачем |
 | ------- | -------- |
-| `tdd` | Точечная регрессия на критическом узле; вызывается только когда тест дешёвый и путь ясен |
-| `karpathy-ponytail` | Убрать переусложнение перед «готово» |
+| `karpathy-ponytail` | Думать до кода, ладдер простоты, хирургические правки, root cause вместо симптома |
+| `tdd` | Точечная регрессия на критическом узле; только когда тест дешёвый и путь ясен |
 | `react-best-practices` | Perf React для Vite SPA: правила `server-*` и `rendering-hydration-*` неприменимы |
 | `vercel-composition-patterns` | Компонент оброс boolean-пропсами (4+ флагов режима) |
 | `web-design-guidelines` | Чеклист UI и a11y по коду |
@@ -163,20 +140,20 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 
 ```text
 Новая фича / новый экран / эндпоинт / схема данных
-  → brainstorming → writing-plans → «да» пользователя
-  → executing-plans
-  → verification-before-completion (+ security-скилл, если дифф трогает критичное)
+  → план в чате (2–5 пунктов) → «да» пользователя
+  → реализация
+  → прогоны из раздела «Команды проверок» (+ security, если дифф трогает критичное)
   → коммит в ветку release/X.Y.Z
 
 Баг / «не работает» / красный CI
-  → systematic-debugging
+  → root cause: общий вызов через grep/граф, фикс один раз
   → дешёвый локальный тест → project tdd (если путь теста ясен)
 
 Мелочь: 1–2 файла без нового поведения (пункт меню, вкладки, подписи, вёрстка, мелкий баг)
-  → без процессных скиллов: план в чате на 2–5 пунктов → прогоны
+  → план в чате на 2–5 пунктов → прогоны
 ```
 
-`tdd` есть и в проектном pack, и среди глобальных скиллов — читаем **проектный** `.cursor/skills/tdd`: в нём список критических узлов и «prefer no new test over a bad test».
+Процессные скиллы (`brainstorming`, `writing-plans`, `systematic-debugging`, `verification-before-completion` и т. п.) в репозитории не лежат: эти шаги описаны текстом в [`AGENTS.md`](AGENTS.md) и в [`use-skills.mdc`](.cursor/rules/use-skills.mdc).
 
 ---
 
@@ -184,11 +161,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 
 Пак в [`Anthropic Cybersecurity Skills`](https://github.com/mukul975/Anthropic-Cybersecurity-Skills) — узкие playbooks с маппингом на MITRE ATT&CK, NIST CSF, ATLAS, D3FEND. Это **не** замена security-ревью диффа.
 
-Лежит в `~/.dsh/skills-extra/security/` и специально не подключён: иначе 18 описаний висят в каждом запросе. Подключить на время аудита и убрать после:
-
-```bash
-cp -r ~/.dsh/skills-extra/security/* ~/.dsh/skills/
-```
+Пак не входит в репозиторий и агентом не подключается: у контрибьютора он лежит в `~/.agents/skills/` (ставится `npx skills add`). При точечном аудите агент читает нужный `SKILL.md` файловым инструментом — описания не висят в каждом запросе.
 
 Только для **своей** панели и авторизованного тестирования. Точечный аудит поверхности: JWT → `testing-jwt-token-security`; подпись и верификация → `implementing-jwt-signing-and-verification`; CORS → `testing-cors-misconfiguration`; CSRF → `performing-csrf-attack-simulation`; WebSocket → `testing-websocket-api-security`; обход путей → `performing-directory-traversal-testing`; Host → `testing-for-host-header-injection`; XSS → `testing-for-xss-vulnerabilities`; BAC/IDOR → `testing-for-broken-access-control`; заголовки → `performing-security-headers-audit`; API auth → `testing-api-authentication-weaknesses`; OWASP API → `testing-api-security-with-owasp-top-10`; CI → `securing-github-actions-workflows`; секреты → `implementing-secret-scanning-with-gitleaks`; харденинг хоста → `hardening-linux-endpoint-with-cis-benchmark`; passkey → `implementing-passwordless-authentication-with-fido2`; лимиты → `implementing-api-rate-limiting-and-throttling`.
 
@@ -216,10 +189,9 @@ PR / CI / GitHub           → github
 UI глазами                 → playwright
 HTTPS заголовки домена     → siteaudit
 Референсы интерфейсов      → lazyweb
-Фича (план)                → brainstorming → writing-plans → «да»
-Фича (после «да»)          → executing-plans
-Баг                        → systematic-debugging (+ project tdd)
-Перед «готово»             → verification-before-completion
+Фича (план)                → план в чате 2–5 пунктов → «да»
+Баг                        → root cause, потом фикс (+ project tdd)
+Перед «готово»             → реальные прогоны, вывод в чате
 Свой новый код             → karpathy-ponytail
 Security диффа             → security-пак, точечно
 Проверить UI после правок  → webapp-testing / playwright
@@ -246,7 +218,7 @@ Security-критичные зоны (auth, middleware, public download, telegra
 
 1. Клон репозитория, Python/Node как в README / `install.sh` (или локальный venv + `frontend` npm).
 2. Открыть `/opt/AdminPanelAZ` в Zoo Code или Cursor и прочитать [`AGENTS.md`](AGENTS.md) + [`use-skills.mdc`](.cursor/rules/use-skills.mdc) — оттуда берётся выбор скилла и команды проверок.
-3. MCP: скопировать `.cursor/mcp.json.example` → `.cursor/mcp.json`, поправить пути команд под свою ОС; в профиле DSH описать те же серверы записями `dsh-mcp-client`. Один раз — `gh auth login`.
+3. MCP: скопировать `.cursor/mcp.json.example` → `.cursor/mcp.json`, поправить пути команд под свою ОС; в Zoo Code те же серверы добавить в настройках MCP. Один раз — `gh auth login`.
 4. Проверить серверы: `.agents/bin/mcp servers` (список) и `mcp tools <server>` (инструменты).
 5. Команды прогонов — в [`AGENTS.md`](AGENTS.md), раздел «Команды проверок»: ruff, точечный pytest, `npm run typecheck && npm run lint`, для UI — `npm run build:all`.
 6. PR: понятное описание, зелёный CI. Крупные изменения — отдельными reviewable коммитами, ветка — активная `release/X.Y.Z`.
