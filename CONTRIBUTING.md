@@ -1,6 +1,6 @@
 # Участие в разработке AdminPanelAZ
 
-Гайд для тех, кто помогает с панелью: какие MCP и skills использует мейнтейнер, **зачем** каждый из них, и договорённости по коду. Агент — **DSH**: правила и каталог скиллов лежат в репозитории и читаются как обычные файлы, а MCP-серверы подключает профиль DSH на машине оператора.
+Гайд для тех, кто помогает с панелью: какие MCP и skills использует мейнтейнер, **зачем** каждый из них, и договорённости по коду. Работают два клиента — **Zoo Code** (DSH-профиль) и **Cursor**: правила и каталог скиллов лежат в репозитории и читаются как обычные файлы, а MCP-серверы каждый клиент подключает по-своему (профиль DSH или локальный `.cursor/mcp.json`).
 
 Пользовательские инструкции (для админов VPN): [`docs/README.md`](docs/README.md).
 Карта кода: [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md).
@@ -13,7 +13,7 @@
 
 | Путь | Что |
 | ------ | ----- |
-| `.cursor/rules/` | `use-skills`, `lean-code`, `release-train-branching`, `gitea-agent-sync`, `telegram-release-post`. Каталог остался от Cursor, но это просто markdown-правила — DSH читает их как обычные файлы |
+| `.cursor/rules/` | `use-skills`, `lean-code`, `release-train-branching`, `telegram-release-post`. Это просто markdown-правила, их читают оба клиента — и Zoo Code, и Cursor |
 | `.cursor/skills/` | project skills: `tdd`, `ponytail-review`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design` |
 | `.agents/skills/` | те же скиллы относительными симлинками на `.cursor/skills/` |
 | `.agents/skills-lock.json` | пин стороннего скилла `tui-design` (source `gfargo/skills`) |
@@ -21,21 +21,25 @@
 | `.agents/mcp_config.json.example` | тот же шаблон для обёртки `.agents/bin/mcp` (симлинк на файл выше) |
 | `.agents/AGENTS.md` | краткая карта для агентов, которые смотрят в `.agents/` |
 
-**Не в git (локально):** `.cursor/mcp.json`, `.agents/mcp_config.json`, `.agents/bin/`, `.codebase-memory/`, `docs/plans/`, `docs/superpowers/`, `.env`, `*.db`.
+**Не в git (локально):** `.cursor/mcp.json`, `.cursor/settings.json`, `.cursor/rules/gitea-agent-sync.mdc`, `.agents/mcp_config.json`, `.agents/bin/`, `.codebase-memory/`, `docs/plans/`, `docs/superpowers/`, `.env`, `*.db`.
 
 Токены и личные MCP-конфиги в PR не кладём: пути, ключи и авторизация живут только на машине оператора.
 
 ---
 
-## Профиль DSH
+## Профиль DSH и Cursor
 
-Профиль — `~/.dsh/profiles/<id>/cordis.patch.yml`, на машине оператора, не в репозитории. В нём:
+**Zoo Code** берёт MCP из профиля DSH — `~/.dsh/profiles/<id>/cordis.patch.yml` на машине оператора, не в репозитории. В нём:
 
 - воркспейс `remote-ssh` с кодом на сервере (`/opt/AdminPanelAZ`);
 - записи `@deepseek-ai/dsh-mcp-client` — по одной на MCP-сервер;
 - модель, локаль, настройки клиента.
 
-Если MCP не виден в сессии — смотреть надо профиль, а не `.cursor/mcp.json`: агент берёт серверы из профиля. Новые плагины в патч добавляются только через `insert:` — запись с одним `id` считается переопределением существующей и молча пропускается.
+Если в Zoo Code MCP не виден в сессии — смотреть надо профиль, а не `.cursor/mcp.json`. Новые плагины в патч добавляются только через `insert:` — запись с одним `id` считается переопределением существующей и молча пропускается.
+
+**Cursor** берёт MCP из локального `.cursor/mcp.json` (шаблон — `.cursor/mcp.json.example`), правила — из `.cursor/rules/`, скиллы — из `.cursor/skills/`.
+
+Личная синхронизация с Gitea (адрес, pre-push хук, снимок агентских каталогов) настраивается только на сервере: правило `.cursor/rules/gitea-agent-sync.mdc` не коммитится и в GitHub не попадает.
 
 ---
 
@@ -241,7 +245,7 @@ Security-критичные зоны (auth, middleware, public download, telegra
 ## Быстрый старт для разработчика
 
 1. Клон репозитория, Python/Node как в README / `install.sh` (или локальный venv + `frontend` npm).
-2. Открыть `/opt/AdminPanelAZ` в DSH и прочитать [`AGENTS.md`](AGENTS.md) + [`use-skills.mdc`](.cursor/rules/use-skills.mdc) — оттуда берётся выбор скилла и команды проверок.
+2. Открыть `/opt/AdminPanelAZ` в Zoo Code или Cursor и прочитать [`AGENTS.md`](AGENTS.md) + [`use-skills.mdc`](.cursor/rules/use-skills.mdc) — оттуда берётся выбор скилла и команды проверок.
 3. MCP: скопировать `.cursor/mcp.json.example` → `.cursor/mcp.json`, поправить пути команд под свою ОС; в профиле DSH описать те же серверы записями `dsh-mcp-client`. Один раз — `gh auth login`.
 4. Проверить серверы: `.agents/bin/mcp servers` (список) и `mcp tools <server>` (инструменты).
 5. Команды прогонов — в [`AGENTS.md`](AGENTS.md), раздел «Команды проверок»: ruff, точечный pytest, `npm run typecheck && npm run lint`, для UI — `npm run build:all`.

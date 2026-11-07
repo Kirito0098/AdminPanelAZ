@@ -100,6 +100,8 @@ Thumbs.db
 !.cursor/mcp.json.example
 # Optional heavy / unused UI skill (binary) — keep local only if reinstalled
 .cursor/skills/impeccable/
+# Личная синхронизация с Gitea — только на сервере, в репозиторий не попадает
+.cursor/rules/gitea-agent-sync.mdc
 
 # --- Agents: AGENTS.md + relative skill links; local MCP/bin out ---
 .agents/*

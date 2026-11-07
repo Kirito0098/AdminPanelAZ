@@ -11,9 +11,11 @@
 | `.cursor/rules/lean-code.mdc` | проверки только на границах доверия |
 | `.cursor/rules/use-skills.mdc` | выбор skill'а, тесты только на критических узлах |
 | `.cursor/rules/release-train-branching.mdc` | ветки `release/X.Y.Z` |
-| `.cursor/rules/gitea-agent-sync.mdc` | что идёт в GitHub, что в личный Gitea |
 
 Полный каталог скиллов с маршрутизацией — `~/.dsh/skills/skills-catalog/SKILL.md`.
+
+Личная синхронизация с Gitea (адрес, pre-push хук, снимок агентских каталогов) — вне
+репозитория: правило `.cursor/rules/gitea-agent-sync.mdc` лежит только на сервере.
 
 ## Проект лежит на сервере
 

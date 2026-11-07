@@ -7,9 +7,10 @@
 1. **`.cursor/rules/use-skills.mdc`** — какой skill читать; вилка Superpowers ↔ pstack; тесты только на критических узлах.
 2. **`.cursor/rules/lean-code.mdc`** — проверки на границах, без «на всякий случай».
 3. **`.cursor/rules/release-train-branching.mdc`** — ветки `release/X.Y.Z`, не фичи в `main`.
-4. **`.cursor/rules/gitea-agent-sync.mdc`** — что в GitHub vs личный Gitea.
 
 Пост о релизе в Telegram — **`.cursor/rules/telegram-release-post.mdc`** (по запросу).
+
+Личная синхронизация с Gitea настраивается на сервере и в репозиторий не попадает.
 
 ## Project skills (в репо)
 

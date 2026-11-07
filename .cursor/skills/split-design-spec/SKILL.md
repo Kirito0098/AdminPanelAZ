@@ -129,7 +129,7 @@ For each part file, set `status` after checking code:
 
 ## Project notes (AdminPanelAZ)
 
-- Specs live under `docs/superpowers/` (gitignored in GitHub; synced to Gitea agent repo). Do not commit them to `origin`.
+- Specs live under `docs/superpowers/` (gitignored). Do not commit them to `origin`.
 - Register nothing in GitHub CI. After creating this skill itself, add a row to `.cursor/rules/use-skills.mdc` if missing.
 - Do not start `writing-plans` or implementation until the user picks a stage.
 
