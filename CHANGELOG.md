@@ -153,6 +153,7 @@
 - **Хотя бы один VPN-протокол всегда включён** — `openvpn`, `wireguard`, `amneziawg` или `awg2`. Когда остаётся один, его переключатель блокируется с подсказкой; выключить последний нельзя ни через модули, ни применением сценария (сначала включите другой).
 - **Срок конфигов админа — срок сертификата** — конфиги, созданные самим администратором, больше не бессрочные: в политику доступа записывается `access_until` = `notAfter` сертификата OpenVPN, TTL AWG2 или +3650 дней (10 лет — максимальный срок сертификата). «Автоистечение доступа» (`access_expiry`) остаётся обязательным в «Коммерческом» и закрывает только строки со сроком — то есть конфиг админа закроется вместе с сертификатом, а не с первой же проверкой (`user_subscription.py`).
 - **«Пользователи» / графики трафика грузятся отдельно** — графики в вкладке «Трафик» (`UserTrafficSection`) подключаются лениво: библиотека графиков (`recharts`, ~110 kB gzip) больше не входит в чанк страницы `/users` и не скачивается, пока вкладку не откроют. `npm run check:bundle` снова проходит; проверка чартов теперь узнаёт и чанки страниц, у которых в манифесте остаётся только имя (`UserCard.tsx`, `check-entry-chunks.mjs`).
+- **Tooling-доки под DSH, а не Cursor** — `CONTRIBUTING.md` переписан под фактический стек агента: MCP-серверы подключает `dsh-mcp-client` из профиля DSH (`codebase_memory`, `github`, `context7`, `playwright`, `siteaudit`, `lazyweb`), скиллы лежат в `~/.dsh/skills/` и `.cursor/skills/`, security-пак — в `~/.dsh/skills-extra/security/`. Убраны разделы про Marketplace-плагины `superpowers`/`pstack`, `/setup-pstack` и встроенные скиллы Cursor. В `AGENTS.md` и `.agents/AGENTS.md` описан порядок поиска MCP-конфига и локальная обёртка `.agents/bin/mcp` (ищет `$MCP_CONFIG` → `.agents/mcp_config.json` → `.cursor/mcp.json` → `.cursor/mcp.json.example`), в `docs/PROJECT_MAP.md` — «Контрибьюторы (DSH)».
 
 ### ⚠️ Важно при обновлении
 
@@ -175,6 +176,8 @@
 Откат на 2.26.5: добавленные настройки игнорируются; гранты с `*` старая версия сопоставит буквально — перед даунгрейдом перепишите их обратно без `*`, если нужен прежний prefix-доступ.
 
 ### 🐛 Fixed
+
+- **Скилл `react-best-practices` не подхватывался агентом** — во frontmatter стояло `name: vercel-react-best-practices` при каталоге `.cursor/skills/react-best-practices`, поэтому DSH скилл не видел; имя приведено к имени каталога.
 
 - **Узлы / очередь запросов к агенту** — панель сериализует HTTP-вызовы к одному `host:port` агента: раньше выдача, health, traffic, policy sync и обзор UI били в `:9100` одновременно и на слабом узле делили CPU/диск агента, а ответы доходили до таймаута 120 с и UI выглядел зависшим. Фоновые циклы (health, traffic, метрики, WG-политики, cert-sync, awg2-expire, buffer-guard) при занятом слоте узел пропускают, а не ждут; интерактивный запрос ждёт не дольше 20 с и получает ошибку `node_busy` («узел занят») вместо потока, висящего до таймаута. Долгие операции (сборка патча OpenVPN до 30 минут, бэкапы, `configs/apply`, `system/update`, warper resync) и Telegram-relay слот не занимают — иначе один такой вызов замораживал бы весь UI узла. Запись в БД вынесена из-под слота, чтобы ожидание не сталкивалось с write-транзакцией SQLite (`node_http_gate.py`, `node_adapter.py`, `node_link_errors.py`, воркеры, регрессионный тест `test_node_http_gate.py`).
 - **Липкие шапки таблиц** — у таблиц была обёртка `overflow-auto` без ограничения высоты, поэтому `position: sticky` у `thead` не включался: шапка списка «Пользователей» (вид таблицей) и истории обновлений CIDR уезжала вместе с первой строкой. Обёртка «Пользователей» теперь ограничена `70dvh` (горизонтальная прокрутка на узких экранах осталась), история CIDR получила `containerClassName="max-h-64"` вместо внешнего блока — шапки липнут к верху своей области и не требуют отступа под шапкой (`UsersTable.tsx`, `CidrPipelineTab.tsx`).
@@ -205,6 +208,7 @@
 ### 🗑️ Removed
 
 - **API профилей ресурсов** — `GET /api/feature-toggles/profiles`, `POST /api/feature-toggles/apply-profile` и `GET /api/feature-toggles/current-profile` заменены на `/presets`, `/apply-preset` и `/current-preset`.
+- **Хуки агента от Cursor** — `.cursor/hooks.json` и `.agents/hooks.json` вызывали `.cursor/skills/impeccable/scripts/impeccable`, которого в репозитории нет (каталог в `.gitignore`), то есть не делали ничего; локальный `.cursor/settings.json` с плагинами `superpowers`/`pstack` тоже убран.
 
 ### 🔒 Security
 

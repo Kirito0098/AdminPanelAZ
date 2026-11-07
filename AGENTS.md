@@ -7,7 +7,7 @@
 Этот файл — выжимка для агента. Полные тексты правил (читать перед спорной задачей):
 
 | Файл | О чём |
-|---|---|
+| --- | --- |
 | `.cursor/rules/lean-code.mdc` | проверки только на границах доверия |
 | `.cursor/rules/use-skills.mdc` | выбор skill'а, тесты только на критических узлах |
 | `.cursor/rules/release-train-branching.mdc` | ветки `release/X.Y.Z` |
@@ -75,7 +75,7 @@ nginx/firewall/systemd/install, бэкапы и миграции, node/proxy age
 ## Команды проверок
 
 | Что | Команда | Время |
-|---|---|---|
+| --- | --- | --- |
 | Линт бэкенда | `backend/.venv/bin/ruff check backend/` | 1–2 с |
 | Один тест-файл | `cd backend && .venv/bin/python -m pytest tests/<файл>` | 2–4 с |
 | Срез без тяжёлых | `cd backend && .venv/bin/python -m pytest -m "not slow"` | ~48 с |
@@ -118,7 +118,7 @@ nginx/firewall/systemd/install, бэкапы и миграции, node/proxy age
 Коротко:
 
 | Ситуация | Skill |
-|---|---|
+| --- | --- |
 | Новая фича, экран, эндпоинт, изменение в нескольких модулях | `brainstorming` → `writing-plans` → дождаться «да» |
 | Одобренный многошаговый план | `executing-plans` |
 | Баг, красный тест, «не работает» | `systematic-debugging` |
@@ -153,6 +153,10 @@ nginx/firewall/systemd/install, бэкапы и миграции, node/proxy age
 
 ## MCP
 
+Серверы подключает `dsh-mcp-client` из профиля DSH (`~/.dsh/profiles/<id>/cordis.patch.yml`),
+а не `.cursor/mcp.json` — тот остался шаблоном для `mcp.json.example` и обёртки `.agents/bin/mcp`.
+Зачем нужен каждый сервер и как проверить его из терминала — [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 Если в сессии есть инструменты `mcp__*`:
 
 - `mcp__codebase_memory__*` — граф кода (см. раздел выше);
@@ -160,8 +164,8 @@ nginx/firewall/systemd/install, бэкапы и миграции, node/proxy age
 - `mcp__context7__*` — актуальная документация библиотек;
 - `mcp__playwright__*` — браузер для проверки UI.
 
-`siteaudit` и `lazyweb` отключены в профиле — включать только на время аудита сайта и подбора
-референсов UI (иначе они висят в каждом запросе впустую).
+`siteaudit` и `lazyweb` описаны в профиле, но по умолчанию не нужны: держать их выключенными и
+включать только на время аудита сайта и подбора референсов UI — иначе висят в каждом запросе впустую.
 
 Серверы проекта запускаются на том же хосте, что и код (кроме context7 — он внешний HTTP),
 поэтому кодовая база для `codebase_memory` — серверная, а не локальное зеркало.

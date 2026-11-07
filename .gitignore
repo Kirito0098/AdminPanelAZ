@@ -107,7 +107,7 @@ Thumbs.db
 !.agents/skills/
 !.agents/skills/**
 !.agents/skills-lock.json
-!.agents/hooks.json
+!.agents/mcp_config.json.example
 .agents/bin/
 .agents/**/__pycache__/
 

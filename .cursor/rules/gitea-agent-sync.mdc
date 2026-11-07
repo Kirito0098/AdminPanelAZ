@@ -6,7 +6,7 @@ alwaysApply: true
 # Синхронизация с личным Gitea
 
 | Куда | Что |
-|---|---|
+| --- | --- |
 | `origin` — GitHub `Kirito0098/AdminPanelAZ` | код проекта **и** curated agent pack (см. ниже) |
 | `gitea` — `git.claymore-dev.com/Claymore/AdminPanelAZ` | те же ветки и теги |
 | `Claymore/AdminPanelAZ-agent` (приватный) | полный снимок: `project/.cursor`, `project/.agents`, `project/docs/superpowers`, `project/.superpowers`, `home/.agents/skills` |
@@ -17,11 +17,11 @@ alwaysApply: true
 
 - `.cursor/rules/`
 - `.cursor/skills/` (project skills; без тяжёлых бинарников вроде impeccable)
-- `.cursor/hooks.json`
 - `.cursor/mcp.json.example`
 - `.agents/AGENTS.md`
 - `.agents/skills/` — **только** относительные symlink’и на `../.cursor/skills/…`
 - `.agents/skills-lock.json` (если есть)
+- `.agents/mcp_config.json.example` — симлинк на `.cursor/mcp.json.example`
 
 ## ❌ Не коммитить в GitHub
 

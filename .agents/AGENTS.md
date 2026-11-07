@@ -16,7 +16,7 @@
 Лежат в `.cursor/skills/` (в `.agents/skills/` — относительные symlink’и на них):
 
 | Skill | Зачем |
-|-------|--------|
+| ------- | -------- |
 | `tdd` | Точечная регрессия на критическом узле (не Superpowers TDD) |
 | `ponytail-review` | Убрать переусложнение перед «готово» |
 | `react-best-practices` | Perf React (Vite SPA — без Next `server-*`) |
@@ -26,13 +26,19 @@
 | `split-design-spec` | Разбить большой design-спек |
 | `tui-design` | CLI / консольное меню |
 
-## Плагины и опциональное (не в git)
+## MCP и локальная обёртка
 
 Агент — **DSH**; правила и маршрутизация скиллов описаны в корневом [`AGENTS.md`](../AGENTS.md).
 Профиль DSH, скиллы и MCP-серверы живут на машине оператора (`~/.dsh/`) и в репозиторий не попадают.
 
+- Серверы подключает `dsh-mcp-client` из профиля DSH (`~/.dsh/profiles/<id>/cordis.patch.yml`),
+  а не `.cursor/mcp.json`.
+- `.agents/mcp_config.json.example` — шаблон в формате `mcpServers` (симлинк на
+  `.cursor/mcp.json.example`); копируется в `.agents/mcp_config.json`.
+- `.agents/bin/mcp` — локальная обёртка (не в git): список серверов, инструменты, ручной вызов.
+  Конфиг ищется по порядку: `$MCP_CONFIG`, `.agents/mcp_config.json`, `.cursor/mcp.json`,
+  `.cursor/mcp.json.example`.
 - Marketplace Cursor (`superpowers`, `pstack`, `site-architecture`, `impeccable`) больше не используется — Cursor удалён.
-- MCP: серверы подключены через `dsh-mcp-client` в профиле DSH, а не через `.cursor/mcp.json`.
 
 ## Тесты
 

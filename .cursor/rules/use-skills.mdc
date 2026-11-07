@@ -35,7 +35,6 @@ alwaysApply: true
 
 Меню / сайдбар / маршруты / «куда раздел»
   → site-architecture (если установлен); экран → web-design-guidelines
-    (+ impeccable, только если поставили сами)
 
 Готово / «исправлено» / перед коммитом
   → verification-before-completion (+ review-security на critical-диффе)
@@ -44,7 +43,7 @@ alwaysApply: true
 **Дубликаты имён:** skill `tdd` есть и в проекте, и в плагине pstack — всегда читай **проектный** `.cursor/skills/tdd` (критические узлы + «prefer no bad test»). Superpowers `test-driven-development` — **не** вызывать по умолчанию. Principles pstack (`principle-*`) не звать отдельно: они внутри poteto-mode; «готово» = `verification-before-completion`, не `principle-prove-it-works`.
 
 | Ситуация | Skill / файлы для чтения |
-|----------|-------|
+| ---------- | ------- |
 | Новая фича, новый экран или поток, новый эндпоинт/схема данных, изменение поведения в нескольких модулях | `brainstorming`, затем `writing-plans` (**дождись апрува плана!**) |
 | Небольшое изменение поведения в одном месте | без skill: план в 2–5 пунктов в чате и «да» пользователя |
 | UI-правка в 1–2 файлах без нового поведения: переставить пункт меню, сменить вкладки, перенести страницу, подписи/вёрстка карточки | **не редизайн**: без `brainstorming`/`writing-plans` — план в чате (2–5 пунктов), затем прогоны. `site-architecture` — только если меняется сама структура разделов |
@@ -53,8 +52,8 @@ alwaysApply: true
 | Баг, красный тест, CI упал, «не работает» (нет `/poteto-mode`) | `systematic-debugging` |
 | Перед словами «готово», «исправлено», «тесты проходят», перед коммитом | `verification-before-completion` |
 | Перед «готово» по любому коду, «не переусложнено ли», «что можно удалить» | `ponytail-review` (свой новый код чистишь сам, по старому — только список) |
-| UI: страницы, компоненты, Mini App, вёрстка, копирайт интерфейса | `web-design-guidelines`; если установлен **impeccable** (опционально, не в git) — он + guidelines на audit |
-| Перестройка меню / сайдбара / маршрутов / IA («куда положить раздел») | `site-architecture` (опциональный skill; см. CONTRIBUTING); экран — guidelines / impeccable если есть |
+| UI: страницы, компоненты, Mini App, вёрстка, копирайт интерфейса | `web-design-guidelines` |
+| Перестройка меню / сайдбара / маршрутов / IA («куда положить раздел») | `site-architecture` (опциональный skill; см. CONTRIBUTING); экран — `web-design-guidelines` |
 | React-код: ререндеры, бандл, тяжёлые вычисления | `react-best-practices`, кроме `server-*`, `async-api-routes`, `rendering-hydration-*` (у нас Vite SPA без Next.js и SSR) |
 | Компонент оброс boolean-пропсами (4+ флагов режима) | `vercel-composition-patterns` |
 | TypeScript (`.ts` / `.tsx`), дисциплина типов | `typescript-best-practices` (pstack) |
@@ -66,7 +65,7 @@ alwaysApply: true
 | Сами атакуем дифф перед merge (не чужие комментарии) | `interrogate` (pstack) |
 | Docs, RFC, README, описание PR, коммит-сообщение | `technical-writing` (pstack); прозу чистить `unslop`; код-комментарии — раздел в `technical-writing` |
 | Дифф трогает auth, 2FA/passkey, JWT, middleware, rate limit, публичную раздачу конфигов, webhook Telegram, node agent | `review-security` (обязательно перед «готово») |
-| Точечный security-аудит конкретной поверхности (JWT, CORS, CSRF, WebSocket, traversal, Host header, GitHub Actions) | соответствующий skill из `~/.agents/skills/` |
+| Точечный security-аудит конкретной поверхности (JWT, CORS, CSRF, WebSocket, traversal, Host header, GitHub Actions) | соответствующий skill из `~/.dsh/skills-extra/security/` — подключить копированием в `~/.dsh/skills/` на время аудита |
 | Пришло ревью / комментарии к PR | `receiving-code-review` (не `interrogate`) |
 | Независимые куски работы параллельно | `dispatching-parallel-agents`; `swarm` / `arena` — **только** явный `/swarm` `/arena` или шаг внутри poteto-mode |
 | Работа закончена, тесты зелёные — что дальше с веткой | `finishing-a-development-branch` (+ `release-train-branching`); poteto babysit/shipping — только из `/poteto-mode` |
