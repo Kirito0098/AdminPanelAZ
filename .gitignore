@@ -100,6 +100,10 @@ Thumbs.db
 # Личная синхронизация с Gitea — только на сервере, в репозиторий не попадает
 .cursor/rules/gitea-agent-sync.mdc
 
+# --- Zoo Code: локальный MCP-конфиг (пути, токены, настройки машины) ---
+.roo/mcp.json
+.roo/mcp_settings.json
+
 # --- Agents: AGENTS.md + relative skill links; local MCP/bin out ---
 .agents/*
 !.agents/AGENTS.md
