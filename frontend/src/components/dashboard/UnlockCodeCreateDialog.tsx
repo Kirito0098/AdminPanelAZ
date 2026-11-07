@@ -16,7 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useNotifications } from '@/context/NotificationContext'
-import { formatDate } from '@/lib/datetime'
+import { endOfDayIso, formatDate } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type { UnlockCodeRecord, VpnType } from '@/types'
 
@@ -43,14 +43,6 @@ function shortProtocolLabel(protocol: UnlockCodeProtocol) {
 function toUnlockProtocol(vpnType: VpnType | string): UnlockCodeProtocol | null {
   if (vpnType === 'openvpn' || vpnType === 'wireguard' || vpnType === 'amneziawg2') return vpnType
   return null
-}
-
-function toEndOfDayIso(value: string) {
-  if (!value) return null
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-  if (!match) return null
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
-  return date.toISOString()
 }
 
 function normalizeClientName(value: string) {
@@ -263,7 +255,7 @@ export default function UnlockCodeCreateDialog({
         protocols: boundUser ? protocolOptions : protocolsForCreate,
         mode: boundUser ? 'single' : mode,
         max_redemptions: boundUser ? 1 : mode === 'single' ? 1 : parsedMaxRedemptions,
-        code_expires_at: toEndOfDayIso(codeExpiresAt),
+        code_expires_at: endOfDayIso(codeExpiresAt),
         allowed_client_names: boundUser ? undefined : selectedClients,
         target_user_id: boundUser ? boundUser.id : undefined,
         send_to_user_id: sendToTelegram && targetUserId != null ? targetUserId : undefined,

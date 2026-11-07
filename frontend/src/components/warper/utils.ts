@@ -1,15 +1,11 @@
+import { nodeNameWithHost } from '@/lib/nodeLabels'
 import type { Node, WarperHealthResponse } from '@/types'
 
 export const INSTALL_CMD =
   'curl -fsSL https://raw.githubusercontent.com/Liafanx/AZ-WARP/main/install.sh | bash'
 
 export function formatNodeLabel(health: WarperHealthResponse | null, activeNode: Node | null): string {
-  const name = health?.node_name ?? activeNode?.name
-  const host = health?.node_host ?? activeNode?.host
-  if (name && host) return `${name} (${host})`
-  if (name) return name
-  if (host) return host
-  return 'активном узле панели'
+  return nodeNameWithHost(health, activeNode)
 }
 
 export function isWarperDisabled(health: WarperHealthResponse | null): boolean {

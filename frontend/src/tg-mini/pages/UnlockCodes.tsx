@@ -8,7 +8,7 @@ import { ApiError } from '@/api/client'
 import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
 import { createTgUnlockCode, getTgUnlockCodes, revokeTgUnlockCode, type UnlockCodeProtocol } from '@/tg-mini/api'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
-import { formatDateTime } from '@/lib/datetime'
+import { endOfDayIso, formatDateTime } from '@/lib/datetime'
 import {
   isUnlockCodeExhausted,
   unlockCodeRedeemedCount,
@@ -24,14 +24,6 @@ const ALL_PROTOCOLS: UnlockCodeProtocol[] = ['openvpn', 'wireguard', 'amneziawg2
 
 function protocolLabel(protocol: UnlockCodeProtocol) {
   return vpnTypeLabel(protocol)
-}
-
-function toEndOfDayIso(value: string) {
-  if (!value) return null
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-  if (!match) return null
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
-  return date.toISOString()
 }
 
 type Feedback = { tone: 'success' | 'error' | 'info'; text: string }
@@ -165,7 +157,7 @@ export default function UnlockCodes() {
         protocols: selectedProtocols,
         mode,
         max_redemptions: mode === 'single' ? 1 : parsedMaxRedemptions,
-        code_expires_at: toEndOfDayIso(codeExpiresAt),
+        code_expires_at: endOfDayIso(codeExpiresAt),
         allowed_client_names,
       })
       setCreatedCode(created)

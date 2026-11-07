@@ -47,7 +47,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
+import ToggleRow from '@/components/settings/ToggleRow'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
@@ -91,40 +91,6 @@ const ADMIN_PANEL_ALWAYS_INCLUDED = [
 
 const INTERVAL_PRESETS = [1, 3, 7, 14] as const
 const RETENTION_PRESETS = [3, 5, 10] as const
-
-function ToggleRow({
-  id,
-  label,
-  description,
-  checked,
-  disabled,
-  onCheckedChange,
-}: {
-  id: string
-  label: string
-  description?: string
-  checked: boolean
-  disabled?: boolean
-  onCheckedChange: (checked: boolean) => void
-}) {
-  return (
-    <div
-      className={cn(
-        'flex items-start justify-between gap-4 rounded-xl border bg-card/50 p-4 transition-colors',
-        checked && !disabled && 'border-primary/20 bg-primary/5',
-        disabled && 'opacity-60',
-      )}
-    >
-      <div className="min-w-0 space-y-1">
-        <Label htmlFor={id} className={cn('font-medium', !disabled && 'cursor-pointer')}>
-          {label}
-        </Label>
-        {description && <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>}
-      </div>
-      <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
-    </div>
-  )
-}
 
 function BackupScopeBlock({
   icon: Icon,

@@ -22,6 +22,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import DatePickerField from '@/components/ui/DatePickerField'
+import { endOfDayIso } from '@/lib/datetime'
 import { panelToday } from '@/lib/trafficPeriod'
 import {
   Select,
@@ -45,14 +46,6 @@ function vpnHint(type: VpnType): string {
   if (type === 'openvpn') return 'Сертификат + .ovpn'
   if (type === 'wireguard') return 'WG / AWG профиль'
   return 'AWG 2.0 peer'
-}
-
-function dateInputToIso(value: string): string | null {
-  if (!value) return null
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-  if (!match) return null
-  const next = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
-  return next.toISOString()
 }
 
 async function setTrafficLimitForProtocol(
@@ -168,7 +161,7 @@ export default function CreateClientDialog({
 
   const applyAccessUntil = async (name: string, protocol: VpnType, dateValue: string) => {
     if (!isAdmin || !dateValue) return
-    const iso = dateInputToIso(dateValue)
+    const iso = endOfDayIso(dateValue)
     if (!iso) {
       onWarning(`Клиент «${name}» создан, но дата доступа некорректна — задайте её в карточке`)
       return

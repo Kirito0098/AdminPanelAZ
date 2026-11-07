@@ -60,6 +60,13 @@ function withTz(opts?: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions {
 
 type DateInput = string | number | Date | null | undefined
 
+/** `<input type="date">` (`YYYY-MM-DD`) → ISO конца этого дня в локальной зоне. */
+export function endOfDayIso(value: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!match) return null
+  return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999).toISOString()
+}
+
 /** Full date + time, e.g. "18.06.2026, 11:45:00" in the active timezone. */
 export function formatDateTime(value: DateInput, opts?: Intl.DateTimeFormatOptions, fallback = '—'): string {
   const d = toDate(value)
