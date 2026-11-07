@@ -14,7 +14,7 @@
 | Путь | Что |
 | ------ | ----- |
 | `.cursor/rules/` | `use-skills`, `lean-code`, `release-train-branching`, `telegram-release-post`. Это просто markdown-правила, их читают оба клиента — и Zoo Code, и Cursor |
-| `.cursor/skills/` | project skills: `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design` |
+| `.cursor/skills/` | project skills: `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
 | `.agents/skills/` | те же скиллы относительными симлинками на `.cursor/skills/` |
 | `.agents/skills-lock.json` | пин стороннего скилла `tui-design` (source `gfargo/skills`) |
 | `.cursor/mcp.json.example` | шаблон MCP **без** секретов |
@@ -114,7 +114,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 
 | Где | Что |
 | ----- | ----- |
-| `.cursor/skills/<name>/` | скиллы этого репозитория: `karpathy-ponytail`, `tdd`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design` |
+| `.cursor/skills/<name>/` | скиллы этого репозитория: `karpathy-ponytail`, `tdd`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
 | `.agents/skills/` | те же каталоги относительными симлинками — для агентов, которые смотрят в `.agents/` |
 
 Внешних каталогов скиллов нет: если скилла нет в `.cursor/skills/`, значит его нет.
@@ -135,6 +135,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 | `webapp-testing` | Проверить UI в браузере через Playwright |
 | `split-design-spec` | Разбить большой design-спек по папкам |
 | `tui-design` | `install.sh`, консольное меню, CLI |
+| `cli-toolbox` | Чем заменить `find`/`grep`/`cat`/`sed`: `fd`, `rg`, `bat -r`, `sd`, `yq`/`jaq`, `delta`, `ruff`/`uv`, `biome` |
 
 ### Поток работы
 

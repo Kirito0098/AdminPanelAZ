@@ -29,6 +29,7 @@ Zoo Code и Cursor находят скиллы сами. Если скилла �
 | Компонент оброс boolean-пропсами (4+ флагов режима) | `vercel-composition-patterns` |
 | Меню/CLI в терминале: `install.sh`, консольное меню | `tui-design` |
 | Разбить большой дизайн-спек `docs/superpowers/specs/*-design.md` по папкам | `split-design-spec` |
+| Терминал: поиск файлов и кода, диапазон строк, замена, разбор YAML/JSON, diff, ad-hoc линт | `cli-toolbox` |
 | Точечный security-аудит поверхности (JWT, CORS, CSRF, WebSocket, traversal, Host header, GitHub Actions) | security-пак в `~/.agents/skills/`, если установлен; иначе — [`SECURITY.md`](../../SECURITY.md) |
 
 ## Процесс — текстом, без скиллов

@@ -26,6 +26,7 @@
 | `webapp-testing` | Проверка UI в браузере |
 | `split-design-spec` | Разбить большой design-спек |
 | `tui-design` | CLI / консольное меню |
+| `cli-toolbox` | fd/rg/bat/sd/yq/jaq/delta вместо find/grep/cat/sed |
 
 ## MCP и локальная обёртка
 

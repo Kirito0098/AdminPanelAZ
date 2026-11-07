@@ -129,6 +129,7 @@ nginx/firewall/systemd/install, бэкапы и миграции, node/proxy age
 | Компонент оброс boolean-пропсами | `vercel-composition-patterns` |
 | Меню/CLI в терминале (`install.sh`) | `tui-design` |
 | Разбить большой design-спек | `split-design-spec` |
+| Терминал: найти файлы/код, показать диапазон, заменить, разобрать YAML/JSON, посмотреть diff | `cli-toolbox` |
 
 Процесс отдельными скиллами не описан: фича — план в чате и «да» (раздел «Мелочь ≠ фича»),
 баг — сначала root cause, «готово» — прогоны из раздела «Проверки».
@@ -143,9 +144,10 @@ Security-пак (18 скиллов, `~/.agents/skills/`) в репозитори
 - сначала `mcp__codebase_memory__*`: `search_graph` (символ), `trace_path` (кто вызывает),
   `get_code_snippet` (исходник), `get_architecture` (слои и точки связности);
 - карта проекта и известный долг — [`docs/ADR-001-architecture.md`](docs/ADR-001-architecture.md);
-- `grep`/`read` — только если граф не ответил или файл вне индекса (`deploy/`,
+- `rg`/`bat -r`/`read` — только если граф не ответил или файл вне индекса (`deploy/`,
   `frontend/nginx.conf`, частично `types.ts`, `pytest.ini`, SQL-фикстуры, YAML и доки);
-- файл целиком не читать, если хватает `get_code_snippet` или диапазона строк.
+- файл целиком не читать, если хватает `get_code_snippet` или диапазона строк;
+- чем заменить `find`/`grep`/`cat`/`sed` — скилл `cli-toolbox`.
 
 ## MCP
 
