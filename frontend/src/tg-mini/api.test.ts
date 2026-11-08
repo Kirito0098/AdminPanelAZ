@@ -63,7 +63,7 @@ describe('Mini App session refresh', () => {
     const fetchMock = vi.fn(async () => json(401, { detail: 'expired' }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(api.getTgDashboard()).rejects.toMatchObject({ status: 401 })
+    await expect(api.getTgConfigs()).rejects.toMatchObject({ status: 401 })
     expect(api.getTgToken()).toBeNull()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
@@ -83,7 +83,7 @@ describe('Mini App session refresh', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const pending = Promise.all([api.getTgDashboard(), api.getTgConfigs(), api.getTgFeatureModules()])
+    const pending = Promise.all([api.getTgConfigs(), api.getTgConfigs(), api.getTgFeatureModules()])
     await vi.waitFor(() => expect(fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/auth'))).toHaveLength(1))
     releaseAuth()
     const results = await pending
@@ -129,7 +129,7 @@ describe('Mini App session refresh', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(api.getTgDashboard()).resolves.toEqual({ ok: true })
+    await expect(api.getTgConfigs()).resolves.toEqual({ ok: true })
 
     expect(fetchMock.mock.calls.map(authHeader)).toEqual(['Bearer old', 'Bearer renewed'])
   })
@@ -144,7 +144,7 @@ describe('Mini App session refresh', () => {
       ),
     )
 
-    await expect(api.getTgDashboard()).rejects.toMatchObject({ status: 401 })
+    await expect(api.getTgConfigs()).rejects.toMatchObject({ status: 401 })
     expect(api.getTgToken()).toBeNull()
   })
 })

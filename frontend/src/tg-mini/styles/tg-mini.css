@@ -1443,3 +1443,25 @@ body.tg-mini-app {
 .tg-mini-setting-row:last-child {
   border-bottom: 0;
 }
+
+/* Bottom nav badge (pending access requests) */
+.tg-mini-tab-icon-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.tg-mini-tab-badge {
+  position: absolute;
+  top: -5px;
+  right: -9px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #fff;
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: 600;
+  text-align: center;
+}

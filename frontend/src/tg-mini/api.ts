@@ -18,14 +18,10 @@ import type {
   TgMiniConfigFile,
   TgMeConfig,
   TgMeStatus,
-  TgMiniDashboard,
   TgMiniNodeActionResponse,
   TgMiniNodesResponse,
   TgMiniQrLink,
   TgMiniSettings,
-  TgMiniWarperStatus,
-  TgMiniAwg2Status,
-  TgMiniCidrStatus,
   User,
   VpnConfig,
   VpnType,
@@ -33,6 +29,12 @@ import type {
   ClientAccessPolicy,
   UnlockCodeRecord,
   ClientPoliciesResponseEntry,
+  AccessRequestResponse,
+  ApproveRequest,
+  RejectRequest,
+  PresetResponse,
+  UserProvisionedCreate,
+  UserProvisionedResponse,
 } from '@/types'
 import { apiBase } from '@/lib/panelBase'
 
@@ -149,10 +151,6 @@ export async function tgAuth(initData: string): Promise<TgMiniAuthResponse> {
     body: JSON.stringify({ init_data: initData }),
   })
   return parseApiResponse<TgMiniAuthResponse>(response)
-}
-
-export async function getTgDashboard(): Promise<TgMiniDashboard> {
-  return tgFetch<TgMiniDashboard>('/dashboard')
 }
 
 export async function getTgConfigs(): Promise<{ configs: TgMiniConfig[] }> {
@@ -295,18 +293,6 @@ export async function checkTgNodeHealth(nodeId: number): Promise<TgMiniNodeActio
 
 export async function activateTgNode(nodeId: number): Promise<TgMiniNodeActionResponse> {
   return tgFetch<TgMiniNodeActionResponse>(`/nodes/${nodeId}/activate`, { method: 'POST' })
-}
-
-export async function getTgWarperStatus(): Promise<TgMiniWarperStatus> {
-  return tgFetch<TgMiniWarperStatus>('/warper/status')
-}
-
-export async function getTgAwg2Status(): Promise<TgMiniAwg2Status> {
-  return tgFetch<TgMiniAwg2Status>('/awg2/status')
-}
-
-export async function getTgCidrStatus(): Promise<TgMiniCidrStatus> {
-  return tgFetch<TgMiniCidrStatus>('/cidr/status')
 }
 
 export async function getTgFeatureModules(): Promise<FeatureModulesResponse> {
@@ -493,5 +479,129 @@ export async function createTgUnlockCode(payload: {
 export async function revokeTgUnlockCode(codeId: number): Promise<{ ok: boolean; id: number }> {
   return panelApiFetch<{ ok: boolean; id: number }>(`/unlock-codes/${codeId}/revoke`, {
     method: 'POST',
+  })
+}
+
+/* ------------------- Админ: конфиги на активном узле ------------------- */
+
+/** Файлы профиля на активном узле (админский список конфигов). */
+export async function getTgPanelConfigFiles(
+  configId: number,
+): Promise<{ files: TgMiniConfigFile[] }> {
+  return tgFetch<{ files: TgMiniConfigFile[] }>(`/configs/${configId}/files`)
+}
+
+export async function sendTgPanelConfig(
+  configId: number,
+  data: { path?: string; destination: 'self' | 'owner'; platform?: InstallPlatform },
+): Promise<{ message: string }> {
+  return tgFetch<{ message: string }>(`/configs/${configId}/send`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function getTgPanelQrLink(configId: number, path: string): Promise<TgMiniQrLink> {
+  const params = new URLSearchParams({ config_id: String(configId), path })
+  return tgFetch<TgMiniQrLink>(`/qr-link?${params.toString()}`)
+}
+
+/* ------------------- Клиенты: аккаунты абонентов ------------------- */
+
+export async function suspendTgUser(userId: number, reason?: string | null): Promise<User> {
+  return panelApiFetch<User>(`/users/${userId}/suspend`, {
+    method: 'POST',
+    body: JSON.stringify({ reason: reason ?? null }),
+  })
+}
+
+export async function resumeTgUser(userId: number): Promise<User> {
+  return panelApiFetch<User>(`/users/${userId}/resume`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+}
+
+export async function extendTgUser(userId: number, days: number): Promise<User> {
+  return panelApiFetch<User>(`/users/${userId}/extend`, {
+    method: 'POST',
+    body: JSON.stringify({ days }),
+  })
+}
+
+export async function resetTgUserTraffic(userId: number): Promise<User> {
+  return panelApiFetch<User>(`/users/${userId}/traffic-counter/reset`, { method: 'POST' })
+}
+
+export async function setTgUserTrafficLimit(
+  userId: number,
+  bytes: number | null,
+): Promise<User> {
+  return panelApiFetch<User>(`/users/${userId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ traffic_limit_bytes: bytes }),
+  })
+}
+
+export async function deleteTgUser(userId: number): Promise<{ message: string }> {
+  return panelApiFetch<{ message: string }>(`/users/${userId}`, { method: 'DELETE' })
+}
+
+export async function createTgProvisionedUser(
+  data: UserProvisionedCreate,
+): Promise<UserProvisionedResponse> {
+  return panelApiFetch<UserProvisionedResponse>('/users/provisioned', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function listTgPresets(): Promise<PresetResponse[]> {
+  return panelApiFetch<PresetResponse[]>('/users/presets')
+}
+
+/* ------------------- Подтверждение доступа: заявки ------------------- */
+
+export async function listTgRequests(params?: {
+  status?: string
+  type?: string
+  q?: string
+  limit?: number
+  offset?: number
+}): Promise<AccessRequestResponse[]> {
+  const qs = new URLSearchParams()
+  if (params?.status) qs.set('status', params.status)
+  if (params?.type) qs.set('type', params.type)
+  if (params?.q) qs.set('q', params.q)
+  if (params?.limit) qs.set('limit', String(params.limit))
+  if (params?.offset) qs.set('offset', String(params.offset))
+  const query = qs.toString()
+  return panelApiFetch<AccessRequestResponse[]>(`/users/requests${query ? `?${query}` : ''}`)
+}
+
+export async function getTgRequestsCount(status = 'pending'): Promise<number> {
+  const data = await panelApiFetch<{ count: number }>(
+    `/users/requests/count?status=${encodeURIComponent(status)}`,
+  )
+  return data.count
+}
+
+export async function approveTgRequest(
+  requestId: number,
+  data: ApproveRequest,
+): Promise<AccessRequestResponse> {
+  return panelApiFetch<AccessRequestResponse>(`/users/requests/${requestId}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+export async function rejectTgRequest(
+  requestId: number,
+  data: RejectRequest,
+): Promise<AccessRequestResponse> {
+  return panelApiFetch<AccessRequestResponse>(`/users/requests/${requestId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify(data),
   })
 }

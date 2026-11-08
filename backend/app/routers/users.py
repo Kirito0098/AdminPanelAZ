@@ -559,6 +559,7 @@ def create_user(
     response_model=UserProvisionedResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
+@tg_mini_token_allowed
 def create_provisioned_user(
     payload: UserProvisionedCreate,
     request: Request,
@@ -695,6 +696,7 @@ def create_user_from_existing_endpoint(
 
 
 @router.get("/presets", response_model=list[PresetResponse])
+@tg_mini_token_allowed
 def list_presets_endpoint(
     db: Session = Depends(get_db),
     _admin: User = Depends(require_admin),
@@ -839,6 +841,7 @@ def _run_request_card_sync(request_id: int, text: str) -> dict[str, Any]:
 
 
 @router.get("/requests", response_model=list[AccessRequestResponse])
+@tg_mini_token_allowed
 def list_access_requests(
     status: str | None = None,
     type: str | None = Query(default=None, alias="type"),
@@ -878,6 +881,7 @@ def list_access_requests(
 
 
 @router.get("/requests/count")
+@tg_mini_token_allowed
 def count_access_requests(
     status: str | None = None,
     db: Session = Depends(get_db),
@@ -938,6 +942,7 @@ def release_requests_cooldown(
 
 
 @router.post("/requests/{request_id}/approve", response_model=AccessRequestResponse)
+@tg_mini_token_allowed
 def approve_access_request(
     request_id: int,
     payload: ApproveRequest,
@@ -1031,6 +1036,7 @@ def approve_access_request(
 
 
 @router.post("/requests/{request_id}/reject", response_model=AccessRequestResponse)
+@tg_mini_token_allowed
 def reject_access_request(
     request_id: int,
     payload: RejectRequest,
@@ -1303,6 +1309,7 @@ def user_history(
 
 
 @router.patch("/{user_id}", response_model=UserResponse)
+@tg_mini_token_allowed
 def update_user(
     user_id: int,
     payload: UserUpdate,
@@ -1526,6 +1533,7 @@ def update_user(
 
 
 @router.post("/{user_id}/suspend")
+@tg_mini_token_allowed
 def suspend_user(
     user_id: int,
     payload: UserSuspendRequest,
@@ -1561,6 +1569,7 @@ def suspend_user(
 
 
 @router.post("/{user_id}/resume")
+@tg_mini_token_allowed
 def resume_user(
     user_id: int,
     payload: UserResumeRequest,
@@ -1592,6 +1601,7 @@ def resume_user(
 
 
 @router.post("/{user_id}/extend")
+@tg_mini_token_allowed
 def extend_user_access(
     user_id: int,
     payload: UserExtendRequest,
@@ -1616,6 +1626,7 @@ def extend_user_access(
 
 
 @router.post("/{user_id}/traffic-counter/reset")
+@tg_mini_token_allowed
 def reset_user_traffic_counter_endpoint(
     user_id: int,
     request: Request,
@@ -2477,6 +2488,7 @@ def bulk_users(
 
 
 @router.delete("/{user_id}", response_model=MessageResponse)
+@tg_mini_token_allowed
 def delete_user(
     user_id: int,
     request: Request,

@@ -46,11 +46,9 @@ from .settings import (
     router as settings_router,
 )
 from .static import mini_app_asset, mini_app_page
-from .status import mini_awg2_status, mini_cidr_status, mini_warper_status, router as status_router
 
 router = APIRouter(prefix="/tg-mini", tags=["tg-mini"])
 router.include_router(nodes_router)
-router.include_router(status_router)
 router.include_router(auth_router)
 router.include_router(dashboard_router)
 router.include_router(configs_router)
@@ -84,8 +82,6 @@ __all__ = [
     "mini_activate_node",
     "mini_app_asset",
     "mini_app_page",
-    "mini_awg2_status",
-    "mini_cidr_status",
     "mini_config_files",
     "mini_configs",
     "me_configs_router",
@@ -103,7 +99,6 @@ __all__ = [
     "mini_update_admin_notify",
     "mini_update_telegram_settings",
     "mini_visible_vpn_profiles",
-    "mini_warper_status",
     "router",
     "settings",
     "tg_auth",

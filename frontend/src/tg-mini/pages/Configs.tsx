@@ -34,6 +34,7 @@ import { formatDate } from '@/lib/datetime'
 import { formatBytes } from '@/lib/trafficFormat'
 import { cn } from '@/lib/utils'
 import { copyText, openExternalLink, shareViaTelegram } from '@/tg-mini/lib/shareDownloadLink'
+import AdminConfigs from '@/tg-mini/pages/AdminConfigs'
 import type {
   ClosedAccessView,
   InstallPlatform,
@@ -61,6 +62,11 @@ function ConfigsSkeleton() {
 }
 
 export default function Configs() {
+  const { isAdmin } = useTgAuth()
+  return isAdmin ? <AdminConfigs /> : <UserConfigs />
+}
+
+function UserConfigs() {
   const { isAdmin, settings, features } = useTgAuth()
   const [configs, setConfigs] = useState<TgMeConfig[]>([])
   const [closedAccess, setClosedAccess] = useState<ClosedAccessView | null>(null)

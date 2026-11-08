@@ -1,9 +1,7 @@
 const START_PARAM_ROUTES: Record<string, string> = {
-  awg2: '/awg2',
-  warper: '/warper',
-  cidr: '/cidr',
-  nodes: '/nodes',
   configs: '/configs',
+  clients: '/clients',
+  requests: '/requests',
   settings: '/settings',
   'unlock-codes': '/unlock-codes',
 }
