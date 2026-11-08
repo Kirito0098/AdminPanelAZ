@@ -35,6 +35,9 @@ import type {
   PresetResponse,
   UserProvisionedCreate,
   UserProvisionedResponse,
+  UserHistoryEntry,
+  UserStatsResponse,
+  UserUpdatePayload,
 } from '@/types'
 import { apiBase } from '@/lib/panelBase'
 
@@ -103,6 +106,30 @@ async function panelApiFetch<T>(path: string, options: RequestInit = {}, retry =
     return panelApiFetch<T>(path, options, false)
   }
   return parseApiResponse<T>(response)
+}
+
+/** Raw panel response (blobs, images) with the Mini App token. */
+async function panelApiFetchResponse(
+  path: string,
+  options: RequestInit = {},
+  retry = true,
+): Promise<Response> {
+  const headers = new Headers(options.headers)
+  if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
+    headers.set('Content-Type', 'application/json')
+  }
+  const token = getTgToken()
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+
+  const response = await fetch(`${PANEL_API_BASE}${path}`, { ...options, headers })
+  if (response.status === 401 && retry && (await renewAfterUnauthorized(token))) {
+    return panelApiFetchResponse(path, options, false)
+  }
+  if (!response.ok) {
+    const body = await response.text()
+    throw new ApiError(parseHttpErrorBody(body, response.status), response.status)
+  }
+  return response
 }
 
 export async function refreshTgSessionFromInitData(initData: string): Promise<void> {
@@ -604,4 +631,30 @@ export async function rejectTgRequest(
     method: 'POST',
     body: JSON.stringify(data),
   })
+}
+
+/** Чек оплаты заявки (JPEG) для предпросмотра. */
+export async function getTgRequestReceipt(requestId: number): Promise<Blob> {
+  const response = await panelApiFetchResponse(`/users/requests/${requestId}/receipt`)
+  return response.blob()
+}
+
+/* ------------------- Карточка клиента: права, история, статистика ------------------- */
+
+export async function updateTgUser(userId: number, payload: UserUpdatePayload): Promise<User> {
+  return panelApiFetch<User>(`/users/${userId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function getTgUserHistory(
+  userId: number,
+  limit = 50,
+): Promise<UserHistoryEntry[]> {
+  return panelApiFetch<UserHistoryEntry[]>(`/users/${userId}/history?limit=${limit}`)
+}
+
+export async function getTgUserStats(userId: number, days = 30): Promise<UserStatsResponse> {
+  return panelApiFetch<UserStatsResponse>(`/users/${userId}/stats?days=${days}`)
 }

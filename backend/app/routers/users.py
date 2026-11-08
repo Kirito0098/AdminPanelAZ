@@ -1076,6 +1076,7 @@ def reject_access_request(
 
 
 @router.get("/requests/{request_id}/receipt")
+@tg_mini_token_allowed
 def get_request_receipt(
     request_id: int,
     admin: User = Depends(require_admin),
@@ -1281,6 +1282,7 @@ def _record_user_history(db, *, action, current_user, user, request, details=Non
 
 
 @router.get("/{user_id}/history", response_model=list[UserHistoryEntry])
+@tg_mini_token_allowed
 def user_history(
     user_id: int,
     limit: int = Query(default=50, ge=1, le=200),
@@ -2162,6 +2164,7 @@ def config_delete(
 
 
 @router.get("/{user_id}/stats", response_model=UserStatsResponse)
+@tg_mini_token_allowed
 def user_stats(
     user_id: int,
     days: int = Query(default=30, ge=1, le=365),

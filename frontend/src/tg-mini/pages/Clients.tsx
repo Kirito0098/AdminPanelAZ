@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Ban,
   CalendarPlus,
+  Clock,
   Gauge,
   Loader2,
   Play,
   Plus,
   Search,
+  Shield,
   Trash2,
   UserRound,
 } from 'lucide-react'
@@ -29,16 +31,26 @@ import {
   extendTgUser,
   getTgNodes,
   getTgPanelUsers,
+  getTgUserHistory,
+  getTgUserStats,
   listTgPresets,
   resetTgUserTraffic,
   resumeTgUser,
   setTgUserTrafficLimit,
   suspendTgUser,
+  updateTgUser,
 } from '@/tg-mini/api'
-import { formatDate } from '@/lib/datetime'
+import { formatDate, formatDateTime } from '@/lib/datetime'
 import { formatBytes } from '@/lib/trafficFormat'
 import { cn } from '@/lib/utils'
-import type { PresetResponse, TgMiniNode, User } from '@/types'
+import type {
+  PresetResponse,
+  TgMiniNode,
+  User,
+  UserHistoryEntry,
+  UserStatsResponse,
+  UserUpdatePayload,
+} from '@/types'
 
 type StatusFilter = 'all' | 'active' | 'suspended' | 'expired'
 
@@ -224,6 +236,7 @@ export default function Clients() {
         busy={busy}
         feedback={feedback}
         onClose={() => setSelected(null)}
+        onUpdated={() => void load()}
         onSuspend={(reason) =>
           selected && void run(() => suspendTgUser(selected.id, reason), 'Клиент заблокирован')
         }
@@ -268,6 +281,7 @@ interface ClientActionsDialogProps {
   busy: boolean
   feedback: string | null
   onClose: () => void
+  onUpdated: () => void
   onSuspend: (reason: string | null) => void
   onResume: () => void
   onExtend: (days: number) => void
@@ -276,11 +290,21 @@ interface ClientActionsDialogProps {
   onDelete: () => void
 }
 
+type ClientTab = 'actions' | 'history' | 'stats' | 'rights'
+
+const CLIENT_TABS: Array<{ id: ClientTab; label: string }> = [
+  { id: 'actions', label: 'Действия' },
+  { id: 'history', label: 'История' },
+  { id: 'stats', label: 'Статистика' },
+  { id: 'rights', label: 'Права' },
+]
+
 function ClientActionsDialog({
   user,
   busy,
   feedback,
   onClose,
+  onUpdated,
   onSuspend,
   onResume,
   onExtend,
@@ -288,19 +312,95 @@ function ClientActionsDialog({
   onResetTraffic,
   onDelete,
 }: ClientActionsDialogProps) {
+  const [tab, setTab] = useState<ClientTab>('actions')
   const [reason, setReason] = useState('Заблокирован администратором')
   const [limitGb, setLimitGb] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const [history, setHistory] = useState<UserHistoryEntry[]>([])
+  const [stats, setStats] = useState<UserStatsResponse | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const [rightsBusy, setRightsBusy] = useState(false)
+  const [rightsError, setRightsError] = useState<string | null>(null)
+  const [canCreate, setCanCreate] = useState(false)
+  const [canManage, setCanManage] = useState(false)
+  const [panelLogin, setPanelLogin] = useState(false)
+  const [quota, setQuota] = useState('')
+  const [visibility, setVisibility] = useState<string[]>([])
 
   useEffect(() => {
+    setTab('actions')
     setReason('Заблокирован администратором')
     setConfirmDelete(false)
     setLimitGb(
       user?.traffic_limit_bytes ? String(Math.round(user.traffic_limit_bytes / 1024 ** 3)) : '',
     )
+    setHistory([])
+    setStats(null)
+    setDetailError(null)
+    setRightsError(null)
+    setCanCreate(Boolean(user?.can_create_configs))
+    setCanManage(Boolean(user?.can_manage_configs))
+    setPanelLogin(Boolean(user?.panel_login_enabled))
+    setQuota(user?.config_quota != null ? String(user.config_quota) : '')
+    setVisibility(user?.visible_vpn_profiles?.protocols ?? [])
   }, [user])
 
+  const loadHistory = (userId: number) => {
+    setDetailLoading(true)
+    setDetailError(null)
+    void getTgUserHistory(userId)
+      .then(setHistory)
+      .catch((err) => setDetailError(err instanceof ApiError ? err.message : 'Ошибка загрузки'))
+      .finally(() => setDetailLoading(false))
+  }
+
+  const loadStats = (userId: number) => {
+    setDetailLoading(true)
+    setDetailError(null)
+    void getTgUserStats(userId, 30)
+      .then(setStats)
+      .catch((err) => setDetailError(err instanceof ApiError ? err.message : 'Ошибка загрузки'))
+      .finally(() => setDetailLoading(false))
+  }
+
+  const openTab = (next: ClientTab) => {
+    setTab(next)
+    if (!user) return
+    if (next === 'history' && history.length === 0) loadHistory(user.id)
+    if (next === 'stats' && stats == null) loadStats(user.id)
+  }
+
+  const saveRights = async () => {
+    if (!user) return
+    setRightsBusy(true)
+    setRightsError(null)
+    try {
+      const payload: UserUpdatePayload = {
+        can_create_configs: canCreate,
+        can_manage_configs: canManage,
+        panel_login_enabled: panelLogin,
+      }
+      const parsedQuota = Number.parseInt(quota, 10)
+      if (Number.isFinite(parsedQuota)) payload.config_quota = parsedQuota
+      if (user.visible_vpn_profiles) {
+        payload.visible_vpn_profiles = {
+          ...user.visible_vpn_profiles,
+          protocols: visibility,
+        }
+      }
+      await updateTgUser(user.id, payload)
+      onUpdated()
+      onClose()
+    } catch (err) {
+      setRightsError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
+    } finally {
+      setRightsBusy(false)
+    }
+  }
+
   const suspended = Boolean(user?.suspended_at)
+  const canEditVisibility = Boolean(user?.visible_vpn_profiles)
 
   return (
     <Dialog open={Boolean(user)} onOpenChange={(open) => !open && onClose()}>
@@ -310,109 +410,277 @@ function ClientActionsDialog({
           {user ? `${user.client_base_name ?? '—'} · ${accessLabel(user)}` : ''}
         </DialogDescription>
 
-        <div className="space-y-3 pt-2">
-          {feedback && <p className="text-sm text-muted-foreground">{feedback}</p>}
-
-          {suspended ? (
-            <Button
+        <div className="tg-mini-segmented pt-2" role="tablist" aria-label="Разделы клиента">
+          {CLIENT_TABS.map((item) => (
+            <button
+              key={item.id}
               type="button"
-              className="w-full gap-2"
-              disabled={busy}
-              onClick={onResume}
+              role="tab"
+              aria-selected={tab === item.id}
+              className={cn('tg-mini-segment', tab === item.id && 'is-active')}
+              onClick={() => openTab(item.id)}
             >
-              {busy ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
-              Разблокировать
-            </Button>
-          ) : (
-            <div className="space-y-1.5">
-              <Label htmlFor="suspend-reason">Причина блокировки</Label>
-              <Input
-                id="suspend-reason"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-              />
-              <Button
-                type="button"
-                variant="destructive"
-                className="w-full gap-2"
-                disabled={busy}
-                onClick={() => onSuspend(reason.trim() || null)}
-              >
-                {busy ? <Loader2 size={16} className="animate-spin" /> : <Ban size={16} />}
-                Заблокировать все конфиги
-              </Button>
-            </div>
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="space-y-3 pt-2">
+          {feedback && tab === 'actions' && (
+            <p className="text-sm text-muted-foreground">{feedback}</p>
           )}
 
-          <div className="flex gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              className="flex-1 gap-1.5"
-              disabled={busy}
-              onClick={() => onExtend(30)}
-            >
-              <CalendarPlus size={15} /> +30 дн.
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              className="flex-1 gap-1.5"
-              disabled={busy}
-              onClick={() => onExtend(60)}
-            >
-              <CalendarPlus size={15} /> +60 дн.
-            </Button>
-          </div>
+          {tab === 'actions' && (
+            <>
+              {suspended ? (
+                <Button type="button" className="w-full gap-2" disabled={busy} onClick={onResume}>
+                  {busy ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+                  Разблокировать
+                </Button>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label htmlFor="suspend-reason">Причина блокировки</Label>
+                  <Input
+                    id="suspend-reason"
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="w-full gap-2"
+                    disabled={busy}
+                    onClick={() => onSuspend(reason.trim() || null)}
+                  >
+                    {busy ? <Loader2 size={16} className="animate-spin" /> : <Ban size={16} />}
+                    Заблокировать все конфиги
+                  </Button>
+                </div>
+              )}
 
-          <div className="space-y-1.5">
-            <Label htmlFor="traffic-limit">Лимит трафика, ГБ</Label>
-            <div className="flex gap-2">
-              <Input
-                id="traffic-limit"
-                inputMode="numeric"
-                value={limitGb}
-                onChange={(e) => setLimitGb(e.target.value)}
-                placeholder="без лимита"
-              />
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 gap-1.5"
+                  disabled={busy}
+                  onClick={() => onExtend(30)}
+                >
+                  <CalendarPlus size={15} /> +30 дн.
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 gap-1.5"
+                  disabled={busy}
+                  onClick={() => onExtend(60)}
+                >
+                  <CalendarPlus size={15} /> +60 дн.
+                </Button>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="traffic-limit">Лимит трафика, ГБ</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="traffic-limit"
+                    inputMode="numeric"
+                    value={limitGb}
+                    onChange={(e) => setLimitGb(e.target.value)}
+                    placeholder="без лимита"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => {
+                      const gb = Number.parseInt(limitGb, 10)
+                      onLimit(Number.isFinite(gb) && gb > 0 ? gb * 1024 ** 3 : null)
+                    }}
+                  >
+                    <Gauge size={15} /> ОК
+                  </Button>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={onResetTraffic}
+                >
+                  Сбросить счётчик трафика
+                </Button>
+              </div>
+
               <Button
                 type="button"
                 variant="outline"
+                className="w-full gap-2 text-destructive"
                 disabled={busy}
                 onClick={() => {
-                  const gb = Number.parseInt(limitGb, 10)
-                  onLimit(Number.isFinite(gb) && gb > 0 ? gb * 1024 ** 3 : null)
+                  if (!confirmDelete) {
+                    setConfirmDelete(true)
+                    return
+                  }
+                  onDelete()
                 }}
               >
-                <Gauge size={15} /> ОК
+                <Trash2 size={15} /> {confirmDelete ? 'Точно удалить?' : 'Удалить клиента'}
+              </Button>
+            </>
+          )}
+
+          {tab === 'history' && (
+            <div className="space-y-2">
+              {detailLoading && <p className="text-sm text-muted-foreground">Загрузка…</p>}
+              {detailError && <p className="text-sm text-destructive">{detailError}</p>}
+              {!detailLoading && history.length === 0 && !detailError && (
+                <p className="text-sm text-muted-foreground">Записей нет</p>
+              )}
+              {history.map((entry) => (
+                <div key={entry.id} className="rounded-md border border-border/70 p-2">
+                  <div className="flex items-center gap-1.5 text-sm font-medium">
+                    <Clock size={14} className="text-muted-foreground" aria-hidden />
+                    {entry.action}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {entry.actor_username ?? 'система'} · {formatDateTime(entry.created_at)}
+                  </p>
+                  {entry.details && (
+                    <p className="mt-1 text-xs text-muted-foreground">{entry.details}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === 'stats' && (
+            <div className="space-y-2">
+              {detailLoading && <p className="text-sm text-muted-foreground">Загрузка…</p>}
+              {detailError && <p className="text-sm text-destructive">{detailError}</p>}
+              {stats && (
+                <>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="rounded-md border border-border/70 p-2">
+                      <p className="text-xs text-muted-foreground">Всего</p>
+                      <p className="font-medium">{formatBytes(stats.totals.bytes)}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 p-2">
+                      <p className="text-xs text-muted-foreground">Сессий</p>
+                      <p className="font-medium">{stats.totals.sessions}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 p-2">
+                      <p className="text-xs text-muted-foreground">Получено</p>
+                      <p className="font-medium">{formatBytes(stats.totals.received)}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 p-2">
+                      <p className="text-xs text-muted-foreground">Отправлено</p>
+                      <p className="font-medium">{formatBytes(stats.totals.sent)}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Период: {stats.period_days} дн.</p>
+                  {stats.rows.map((row) => (
+                    <div
+                      key={`${row.node_id}-${row.client_name}-${row.vpn_type}`}
+                      className="rounded-md border border-border/70 p-2 text-xs"
+                    >
+                      <p className="font-medium">
+                        {row.client_name} · {row.vpn_type}
+                      </p>
+                      <p className="text-muted-foreground">
+                        {formatBytes(row.total_bytes)} · сессий: {row.total_sessions} · узел {row.node_id}
+                      </p>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+
+          {tab === 'rights' && (
+            <div className="space-y-3">
+              <label className="flex items-center justify-between gap-2 text-sm">
+                Создавать конфиги
+                <input
+                  type="checkbox"
+                  checked={canCreate}
+                  onChange={(e) => setCanCreate(e.target.checked)}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2 text-sm">
+                Управлять конфигами
+                <input
+                  type="checkbox"
+                  checked={canManage}
+                  onChange={(e) => setCanManage(e.target.checked)}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2 text-sm">
+                Вход в панель
+                <input
+                  type="checkbox"
+                  checked={panelLogin}
+                  onChange={(e) => setPanelLogin(e.target.checked)}
+                />
+              </label>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="rights-quota">Квота конфигов</Label>
+                <Input
+                  id="rights-quota"
+                  inputMode="numeric"
+                  value={quota}
+                  onChange={(e) => setQuota(e.target.value)}
+                  placeholder="без изменений"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Видимые протоколы</Label>
+                {canEditVisibility ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {['openvpn', 'wireguard', 'amneziawg2'].map((protocol) => (
+                      <button
+                        key={protocol}
+                        type="button"
+                        className={cn(
+                          'rounded-md border px-2 py-1 text-xs',
+                          visibility.includes(protocol)
+                            ? 'border-primary bg-primary/10'
+                            : 'border-border',
+                        )}
+                        onClick={() =>
+                          setVisibility((prev) =>
+                            prev.includes(protocol)
+                              ? prev.filter((item) => item !== protocol)
+                              : [...prev, protocol],
+                          )
+                        }
+                      >
+                        {protocol}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Наследует общие настройки панели — меняется в веб-панели.
+                  </p>
+                )}
+              </div>
+
+              {rightsError && <p className="text-sm text-destructive">{rightsError}</p>}
+
+              <Button
+                type="button"
+                className="w-full gap-2"
+                disabled={rightsBusy}
+                onClick={() => void saveRights()}
+              >
+                {rightsBusy ? <Loader2 size={16} className="animate-spin" /> : <Shield size={16} />}
+                Сохранить права
               </Button>
             </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              disabled={busy}
-              onClick={onResetTraffic}
-            >
-              Сбросить счётчик трафика
-            </Button>
-          </div>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full gap-2 text-destructive"
-            disabled={busy}
-            onClick={() => {
-              if (!confirmDelete) {
-                setConfirmDelete(true)
-                return
-              }
-              onDelete()
-            }}
-          >
-            <Trash2 size={15} /> {confirmDelete ? 'Точно удалить?' : 'Удалить клиента'}
-          </Button>
+          )}
         </div>
       </DialogContent>
     </Dialog>

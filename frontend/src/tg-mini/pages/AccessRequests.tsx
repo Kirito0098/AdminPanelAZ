@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Check, Loader2, MessageSquare, X } from 'lucide-react'
+import { Check, Loader2, MessageSquare, ReceiptText, X } from 'lucide-react'
 import { ApiError } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -16,6 +16,7 @@ import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
 import {
   approveTgRequest,
   getTgNodes,
+  getTgRequestReceipt,
   getTgRequestsCount,
   listTgPresets,
   listTgRequests,
@@ -48,6 +49,9 @@ export default function AccessRequests() {
   const [busyId, setBusyId] = useState<number | null>(null)
   const [approveTarget, setApproveTarget] = useState<AccessRequestResponse | null>(null)
   const [rejectTarget, setRejectTarget] = useState<AccessRequestResponse | null>(null)
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null)
+  const [receiptLoading, setReceiptLoading] = useState(false)
+  const [receiptError, setReceiptError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -96,6 +100,31 @@ export default function AccessRequests() {
     } finally {
       setBusyId(null)
     }
+  }
+
+  const openReceipt = async (request: AccessRequestResponse) => {
+    setReceiptLoading(true)
+    setReceiptError(null)
+    setReceiptUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
+    try {
+      const blob = await getTgRequestReceipt(request.id)
+      setReceiptUrl(URL.createObjectURL(blob))
+    } catch (err) {
+      setReceiptError(err instanceof ApiError ? err.message : 'Не удалось загрузить чек')
+    } finally {
+      setReceiptLoading(false)
+    }
+  }
+
+  const closeReceipt = () => {
+    setReceiptUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev)
+      return null
+    })
+    setReceiptError(null)
   }
 
   const approveOneTap = (request: AccessRequestResponse) => {
@@ -148,6 +177,24 @@ export default function AccessRequests() {
                   </Badge>
                 </div>
 
+                {request.receipt_file_id && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="w-full gap-1.5"
+                    disabled={receiptLoading}
+                    onClick={() => void openReceipt(request)}
+                  >
+                    {receiptLoading ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : (
+                      <ReceiptText size={14} />
+                    )}
+                    Посмотреть чек
+                  </Button>
+                )}
+
                 <div className="flex gap-2">
                   <Button
                     type="button"
@@ -193,6 +240,24 @@ export default function AccessRequests() {
         onClose={() => setRejectTarget(null)}
         onSubmit={(reason) => rejectTarget && void runReject(rejectTarget, reason)}
       />
+
+      <Dialog
+        open={Boolean(receiptUrl) || receiptLoading || Boolean(receiptError)}
+        onOpenChange={(open) => !open && closeReceipt()}
+      >
+        <DialogContent className="max-w-md">
+          <DialogTitle>Чек оплаты</DialogTitle>
+          {receiptLoading && <p className="text-sm text-muted-foreground">Загрузка…</p>}
+          {receiptError && <p className="text-sm text-destructive">{receiptError}</p>}
+          {receiptUrl && (
+            <img
+              src={receiptUrl}
+              alt="Чек оплаты заявки"
+              className="max-h-[70vh] w-full rounded-md object-contain"
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
