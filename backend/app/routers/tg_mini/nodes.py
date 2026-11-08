@@ -17,6 +17,7 @@ from app.services.node_manager import (
     sync_local_node,
     update_node_from_health,
 )
+from app.services.node_sync.groups import require_ha_primary_for_node_activation
 
 from .helpers import _get_tg_node_or_404, _serialize_tg_node
 
@@ -32,7 +33,7 @@ def mini_list_nodes(db: Session = Depends(get_db), _: User = Depends(require_tg_
     nodes = db.query(Node).order_by(Node.is_local.desc(), Node.name).all()
     return {
         "active_node_id": active_id,
-        "nodes": [_serialize_tg_node(node, active_id=active_id) for node in nodes],
+        "nodes": [_serialize_tg_node(node, active_id=active_id, db=db) for node in nodes],
     }
 
 
@@ -41,7 +42,7 @@ def mini_get_node(node_id: int, db: Session = Depends(get_db), _: User = Depends
     sync_local_node(db)
     node = _get_tg_node_or_404(node_id, db)
     active_id = get_active_node_id(db)
-    return _serialize_tg_node(node, active_id=active_id)
+    return _serialize_tg_node(node, active_id=active_id, db=db)
 
 
 @router.post("/nodes/{node_id}/health")
@@ -57,7 +58,7 @@ def mini_node_health(
     db.refresh(node)
     active_id = get_active_node_id(db)
     return {
-        "node": _serialize_tg_node(node, active_id=active_id),
+        "node": _serialize_tg_node(node, active_id=active_id, db=db),
         "health": health,
     }
 
@@ -69,6 +70,7 @@ def mini_activate_node(
     admin: User = Depends(require_tg_mini_admin),
 ):
     node = _get_tg_node_or_404(node_id, db)
+    require_ha_primary_for_node_activation(db, node=node)
     set_active_node_id(db, node.id)
     db.commit()
     health = check_node_health(node)
@@ -86,6 +88,6 @@ def mini_activate_node(
         )
     active_id = get_active_node_id(db)
     return {
-        "node": _serialize_tg_node(node, active_id=active_id),
+        "node": _serialize_tg_node(node, active_id=active_id, db=db),
         "health": health,
     }

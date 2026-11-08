@@ -939,6 +939,10 @@ export interface TgMiniSettings {
 
 export interface TgMiniNode extends Node {
   is_active: boolean
+  /** HA role when the node belongs to a sync group: primary or replica. */
+  ha_role?: 'primary' | 'replica' | null
+  /** Primary node name for a replica. */
+  ha_primary_name?: string | null
 }
 
 export interface TgMiniNodesResponse {

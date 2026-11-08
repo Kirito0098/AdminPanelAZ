@@ -157,7 +157,7 @@ function MiniNodeCard({ node, isActive, busy, flash, onHealth, onActivate }: Min
   const isBusy = busy?.id === node.id
   const healthBusy = isBusy && busy?.kind === 'health'
   const activateBusy = isBusy && busy?.kind === 'activate'
-  const canActivate = !isActive && !isProxyNode(node)
+  const canActivate = !isActive && !isProxyNode(node) && node.ha_role !== 'replica'
 
   return (
     <Card
@@ -179,8 +179,23 @@ function MiniNodeCard({ node, isActive, busy, flash, onHealth, onActivate }: Min
                   активный
                 </Badge>
               )}
+              {node.ha_role === 'primary' && (
+                <Badge variant="outline" className="text-[10px] font-normal">
+                  Основной (HA)
+                </Badge>
+              )}
+              {node.ha_role === 'replica' && (
+                <Badge variant="secondary" className="text-[10px] font-normal">
+                  Реплика (HA)
+                </Badge>
+              )}
             </div>
             <p className="mono text-xs text-muted-foreground">{nodeAddress(node)}</p>
+            {node.ha_role === 'replica' && node.ha_primary_name && (
+              <p className="text-xs text-muted-foreground">
+                Основной: {node.ha_primary_name}
+              </p>
+            )}
           </div>
           <NodeStatusBadge status={node.status} />
         </div>

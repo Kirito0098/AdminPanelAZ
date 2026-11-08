@@ -259,6 +259,15 @@ def require_ha_primary_for_config_ops(db: Session, *, node: Node | None = None) 
     )
 
 
+def require_ha_primary_for_node_activation(db: Session, *, node: Node) -> None:
+    """Reject making an HA replica the active VPN node."""
+    _raise_ha_replica_forbidden(
+        db,
+        node_id=node.id,
+        operation_hint="Переключайте активный узел",
+    )
+
+
 AUTO_HEAL_SUSPENDED_PREFIX = "Автолечение приостановлено"
 
 
