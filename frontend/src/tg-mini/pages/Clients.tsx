@@ -25,6 +25,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
+import MiniPlanFields from '@/tg-mini/components/MiniPlanFields'
 import {
   createTgProvisionedUser,
   deleteTgUser,
@@ -42,6 +43,7 @@ import {
 } from '@/tg-mini/api'
 import { formatDate, formatDateTime } from '@/lib/datetime'
 import { formatBytes } from '@/lib/trafficFormat'
+import { selectablePlanNodes } from '@/tg-mini/lib/planNodes'
 import { cn } from '@/lib/utils'
 import type {
   PresetResponse,
@@ -718,9 +720,7 @@ function CreateClientDialog({ open, onOpenChange, onCreated }: CreateClientDialo
     void listTgPresets().then(setPresets).catch(() => setPresets([]))
     void getTgNodes()
       .then((data) => {
-        const available = data.nodes.filter(
-          (node) => node.ha_role !== 'replica' && (node.node_kind || 'vpn') !== 'proxy',
-        )
+        const available = selectablePlanNodes(data.nodes)
         setNodes(available)
         setNodeIds(available.filter((node) => node.is_active).map((node) => node.id))
       })
@@ -734,10 +734,6 @@ function CreateClientDialog({ open, onOpenChange, onCreated }: CreateClientDialo
     setProtocols(preset.protocols)
     setCount(String(preset.config_count))
   }, [presetId, presets])
-
-  const toggle = (list: string[], value: string, setter: (next: string[]) => void) => {
-    setter(list.includes(value) ? list.filter((item) => item !== value) : [...list, value])
-  }
 
   const submit = async () => {
     const name = username.trim()
@@ -823,53 +819,16 @@ function CreateClientDialog({ open, onOpenChange, onCreated }: CreateClientDialo
             />
           </div>
 
-          <div className="space-y-1.5">
-            <Label>Узлы</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {nodes.map((node) => (
-                <button
-                  key={node.id}
-                  type="button"
-                  className={cn(
-                    'rounded-md border px-2 py-1 text-xs',
-                    nodeIds.includes(node.id) ? 'border-primary bg-primary/10' : 'border-border',
-                  )}
-                  onClick={() => toggle(nodeIds.map(String), String(node.id), (next) => setNodeIds(next.map(Number)))}
-                >
-                  {node.name}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>Протоколы</Label>
-            <div className="flex flex-wrap gap-1.5">
-              {['openvpn', 'wireguard', 'amneziawg2'].map((protocol) => (
-                <button
-                  key={protocol}
-                  type="button"
-                  className={cn(
-                    'rounded-md border px-2 py-1 text-xs',
-                    protocols.includes(protocol) ? 'border-primary bg-primary/10' : 'border-border',
-                  )}
-                  onClick={() => toggle(protocols, protocol, setProtocols)}
-                >
-                  {protocol}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="client-count">Имён конфигов</Label>
-            <Input
-              id="client-count"
-              inputMode="numeric"
-              value={count}
-              onChange={(e) => setCount(e.target.value)}
-            />
-          </div>
+          <MiniPlanFields
+            idPrefix="client"
+            nodes={nodes}
+            nodeIds={nodeIds}
+            onNodeIdsChange={setNodeIds}
+            protocols={protocols}
+            onProtocolsChange={setProtocols}
+            count={count}
+            onCountChange={setCount}
+          />
 
           <label className="flex items-center gap-2 text-sm">
             <input

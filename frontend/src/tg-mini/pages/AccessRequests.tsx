@@ -13,6 +13,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
+import MiniPlanFields from '@/tg-mini/components/MiniPlanFields'
 import {
   approveTgRequest,
   getTgNodes,
@@ -23,7 +24,7 @@ import {
   rejectTgRequest,
 } from '@/tg-mini/api'
 import { formatDateTime } from '@/lib/datetime'
-import { cn } from '@/lib/utils'
+import { selectablePlanNodes } from '@/tg-mini/lib/planNodes'
 import type { AccessRequestResponse, PresetResponse, TgMiniNode } from '@/types'
 
 const TYPE_LABELS: Record<string, string> = {
@@ -287,9 +288,7 @@ function ApproveNewUserDialog({
     void listTgPresets().then(setPresets).catch(() => setPresets([]))
     void getTgNodes()
       .then((data) => {
-        const available = data.nodes.filter(
-          (node) => node.ha_role !== 'replica' && (node.node_kind || 'vpn') !== 'proxy',
-        )
+        const available = selectablePlanNodes(data.nodes)
         setNodes(available)
         setNodeIds(available.filter((node) => node.is_active).map((node) => node.id))
       })
@@ -357,67 +356,16 @@ function ApproveNewUserDialog({
           )}
 
           {!preset && (
-            <>
-              <div className="space-y-1.5">
-                <Label>Узлы</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {nodes.map((node) => (
-                    <button
-                      key={node.id}
-                      type="button"
-                      className={cn(
-                        'rounded-md border px-2 py-1 text-xs',
-                        nodeIds.includes(node.id) ? 'border-primary bg-primary/10' : 'border-border',
-                      )}
-                      onClick={() =>
-                        setNodeIds((prev) =>
-                          prev.includes(node.id)
-                            ? prev.filter((id) => id !== node.id)
-                            : [...prev, node.id],
-                        )
-                      }
-                    >
-                      {node.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Протоколы</Label>
-                <div className="flex flex-wrap gap-1.5">
-                  {['openvpn', 'wireguard', 'amneziawg2'].map((protocol) => (
-                    <button
-                      key={protocol}
-                      type="button"
-                      className={cn(
-                        'rounded-md border px-2 py-1 text-xs',
-                        protocols.includes(protocol) ? 'border-primary bg-primary/10' : 'border-border',
-                      )}
-                      onClick={() =>
-                        setProtocols((prev) =>
-                          prev.includes(protocol)
-                            ? prev.filter((item) => item !== protocol)
-                            : [...prev, protocol],
-                        )
-                      }
-                    >
-                      {protocol}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="approve-count">Имён конфигов</Label>
-                <Input
-                  id="approve-count"
-                  inputMode="numeric"
-                  value={count}
-                  onChange={(e) => setCount(e.target.value)}
-                />
-              </div>
-            </>
+            <MiniPlanFields
+              idPrefix="approve"
+              nodes={nodes}
+              nodeIds={nodeIds}
+              onNodeIdsChange={setNodeIds}
+              protocols={protocols}
+              onProtocolsChange={setProtocols}
+              count={count}
+              onCountChange={setCount}
+            />
           )}
 
           {error && <p className="text-sm text-destructive">{error}</p>}
