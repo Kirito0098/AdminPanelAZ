@@ -107,6 +107,7 @@ export default function Clients() {
     try {
       const data = await getTgPanelUsers()
       setUsers(data)
+      setSelected((prev) => (prev ? data.find((item) => item.id === prev.id) ?? prev : prev))
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Ошибка загрузки')
     } finally {
