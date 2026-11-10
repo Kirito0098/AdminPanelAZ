@@ -14,6 +14,7 @@ from app.models import (
     WgAccessPolicy,
 )
 from app.services.access_policy import AccessPolicyService, is_node_default_policy_client
+from app.services.protocols import normalize_protocol
 from app.services.admin_notify import admin_notify_service
 from app.services.traffic_limit import (
     TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED,
@@ -27,7 +28,6 @@ _POLICY_MODELS = (
     ("wg", WgAccessPolicy),
     ("awg2", AmneziaWg2AccessPolicy),
 )
-_TARGET_TYPES = {"openvpn": "openvpn", "wg": "wireguard", "awg2": "amneziawg2"}
 
 
 def _state_client_name(protocol_scope: str, client_name: str | None) -> str:
@@ -118,7 +118,7 @@ class TrafficLimitNotifyService:
             state.get("traffic_limit_exceeded")
             and state.get("block_mode") == "traffic_limit"
         )
-        target_type = _TARGET_TYPES[protocol_scope]
+        target_type = normalize_protocol(protocol_scope)
         prev_blocked = bool(row is not None and row.traffic_blocked)
         if row is None:
             row = TrafficLimitNotifyState(node_id=node.id, protocol=protocol_scope, client_name=name)

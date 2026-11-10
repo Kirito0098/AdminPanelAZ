@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 from fastapi import HTTPException, status
 
+from app.services.client_names import CLIENT_NAME_RE
 from app.services.ip_geo import is_local_geoip_loaded, parse_client_endpoint
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,6 @@ AWG2_UPDATE_CMD = (
     "bash <(curl -fsSL https://raw.githubusercontent.com/blindtechnique/az-awg2/main/install.sh) --update"
 )
 
-_CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 _TTL_RE = re.compile(r"^(?P<value>[1-9]\d*)\s*(?P<unit>[smhdSMHD])$")
 
 
@@ -776,7 +776,7 @@ class Awg2Service:
 
     def validate_client_name(self, name: str) -> str:
         value = (name or "").strip()
-        if not _CLIENT_NAME_RE.match(value):
+        if not CLIENT_NAME_RE.match(value):
             raise ValueError("Некорректное имя клиента")
         return value
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Callable, Literal
 
+from app.services.protocols import normalize_protocol
+
 InstallPlatform = Literal["ios", "mac", "windows", "android", "linux"]
 
 PLATFORM_LABELS: dict[str, str] = {
@@ -14,22 +16,6 @@ PLATFORM_LABELS: dict[str, str] = {
     "linux": "Linux",
 }
 
-_PROTOCOL_ALIASES = {
-    "openvpn": "openvpn",
-    "ovpn": "openvpn",
-    "wireguard": "wireguard",
-    "wg": "wireguard",
-    "amneziawg": "amneziawg",
-    "awg": "amneziawg",
-    "amneziawg2": "amneziawg2",
-    "awg2": "amneziawg2",
-    "awg 2.0": "amneziawg2",
-}
-
-
-def normalize_protocol(protocol: str) -> str:
-    key = (protocol or "").strip().lower()
-    return _PROTOCOL_ALIASES.get(key, key)
 
 
 def _openvpn_ios(client_name: str) -> str:

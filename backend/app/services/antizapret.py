@@ -18,6 +18,7 @@ from app.config import get_settings
 from app.models import VpnType
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.services.antizapret_backup import AntizapretBackupService
+from app.services.client_names import CLIENT_NAME_RE
 from app.services.file_editor import EDITABLE_FILES, KRESD_CUSTOM_UNITS
 from app.services.openvpn_management import openvpn_management_service
 from app.services.path_stash import stashed
@@ -25,7 +26,6 @@ from app.services.profile_files import iter_client_profile_paths, profile_filena
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
-CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 WIREGUARD_SERVER_INTERFACES = frozenset({"antizapret", "vpn"})
 WIREGUARD_SERVER_CONFIG_DIR = Path("/etc/wireguard")
 WIREGUARD_TEMPLATES_DIR = Path("/etc/wireguard/templates")

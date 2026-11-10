@@ -22,6 +22,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import DatePickerField from '@/components/ui/DatePickerField'
+import { CLIENT_NAME_HINT, isValidClientName } from '@/lib/clientName'
 import { endOfDayIso } from '@/lib/datetime'
 import { panelToday } from '@/lib/trafficPeriod'
 import {
@@ -214,8 +215,8 @@ export default function CreateClientDialog({
       onError('Укажите имя клиента')
       return
     }
-    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(trimmedName)) {
-      onError('Имя: латиница, цифры, _ и -, до 32 символов')
+    if (!isValidClientName(trimmedName)) {
+      onError(CLIENT_NAME_HINT)
       return
     }
     if (selectedProtocols.length === 0) {

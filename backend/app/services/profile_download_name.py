@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import PurePosixPath
 
-CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+from app.services.client_names import CLIENT_NAME_RE
 AZ_PROFILE_DIR = re.compile(r"/(?:(?:openvpn|wireguard|amneziawg)/antizapret|clients/antizapret)(?:[-/]|$)")
 
 

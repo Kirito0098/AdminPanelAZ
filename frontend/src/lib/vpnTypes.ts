@@ -1,6 +1,7 @@
 const VPN_TYPE_LABELS: Record<string, string> = {
   wireguard: 'WireGuard',
   openvpn: 'OpenVPN',
+  amneziawg: 'AmneziaWG',
   amneziawg2: 'AmneziaWG 2.0',
 }
 

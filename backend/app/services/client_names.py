@@ -10,6 +10,9 @@ from app.models import User, VpnConfig
 
 RESERVED_CLIENT_NAME_PREFIXES = ("vpn-", "antizapret-")
 
+# Same rule in frontend/src/lib/clientName.ts — change both together.
+CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+
 _TRAILING_INDEX_RE = re.compile(r"-\d+$")
 _BASE_N_RE = re.compile(r"^(.+)-(\d+)$")
 

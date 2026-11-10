@@ -26,6 +26,7 @@ from app.services.admin_notify_settings_text import (
 )
 from app.services.feature_guards import get_feature_service
 from app.services.notify_time import format_notify_when, resolve_notify_timezone
+from app.services.protocols import PROTOCOL_LABELS, normalize_protocol, protocol_label
 from app.services.notify_backends import dispatch_admin_notify, register_notify_backend
 from app.services.telegram import send_tg_message
 from app.services.telegram_recipients import filter_notify_recipients
@@ -248,16 +249,7 @@ _PREF_KEY_MAP = {
 
 
 def _mini_protocol_label(raw_value: str | None) -> str:
-    value = (raw_value or "").strip().lower()
-    if value in {"openvpn", "ovpn"}:
-        return "OpenVPN"
-    if value in {"wireguard", "wg"}:
-        return "WireGuard"
-    if value in {"amneziawg", "amnezia"}:
-        return "AmneziaWG"
-    if value in {"amneziawg2", "awg2"}:
-        return "AmneziaWG 2.0"
-    return "неизвестно"
+    return protocol_label(raw_value)
 
 
 def _fmt_code(value: str | None) -> str:
@@ -266,11 +258,9 @@ def _fmt_code(value: str | None) -> str:
 
 
 def _fmt_protocol(target_type: str | None) -> str:
-    kind = str(target_type or "").strip().lower()
-    if kind in {"wireguard", "wg", "amneziawg", "amnezia"}:
-        if kind in {"wireguard", "wg"}:
-            return _mini_protocol_label("wg")
-        return _mini_protocol_label("amneziawg")
+    kind = normalize_protocol(target_type)
+    if kind in {"wireguard", "amneziawg"}:
+        return PROTOCOL_LABELS[kind]
     label = _mini_protocol_label(kind)
     if label != "неизвестно":
         return label
@@ -278,12 +268,12 @@ def _fmt_protocol(target_type: str | None) -> str:
 
 
 def _protocol_emoji(target_type: str | None) -> str:
-    kind = str(target_type or "").strip().lower()
-    if kind in {"openvpn", "ovpn"}:
+    kind = normalize_protocol(target_type)
+    if kind == "openvpn":
         return "🔐"
-    if kind in {"wireguard", "wg"}:
+    if kind == "wireguard":
         return "🛡️"
-    if kind in {"amneziawg", "amnezia", "amneziawg2", "awg2"}:
+    if kind in {"amneziawg", "amneziawg2"}:
         return "🌀"
     return "📄"
 

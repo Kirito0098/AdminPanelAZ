@@ -20,6 +20,7 @@ from fastapi import HTTPException
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from app.config import DEFAULT_BACKEND_PORT
 from app.database import SessionLocal
 from app.models import BackgroundTask
 from app.services.expected_node import forget_confirmed_node
@@ -669,7 +670,7 @@ class BackgroundTaskService:
             raise RuntimeError(f"Неизвестный режим публикации: {mode}")
 
         uvicorn_modes = {"uvicorn_le", "uvicorn_selfsigned", "uvicorn_custom"}
-        backend_port = int(payload.get("backend_port") or 8000)
+        backend_port = int(payload.get("backend_port") or DEFAULT_BACKEND_PORT)
         domain = str(payload.get("domain") or "").strip()
         ssl_cert = str(payload.get("ssl_cert") or "").strip()
         ssl_key = str(payload.get("ssl_key") or "").strip()
@@ -823,7 +824,7 @@ class BackgroundTaskService:
         env_path = APP_ROOT / ".env"
         env = EnvFileService(env_path)
         mode = str(payload.get("publish_mode") or env.get_env_value("PUBLISH_MODE", "") or "").strip()
-        backend_port = str(payload.get("backend_port") or env.get_env_value("BACKEND_PORT", "8000") or "8000")
+        backend_port = str(payload.get("backend_port") or env.get_env_value("BACKEND_PORT", str(DEFAULT_BACKEND_PORT)) or DEFAULT_BACKEND_PORT)
         domain = str(payload.get("domain") or env.get_env_value("DOMAIN", "") or "").strip().split(":")[0]
         ssl_cert = str(payload.get("ssl_cert") or env.get_env_value("SSL_CERT", "") or "").strip()
         ssl_key = str(payload.get("ssl_key") or env.get_env_value("SSL_KEY", "") or "").strip()

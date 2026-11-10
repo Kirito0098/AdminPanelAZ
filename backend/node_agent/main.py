@@ -51,9 +51,10 @@ from app.services.awg2 import (
     Awg2Service,
     is_awg2_profile_path,
 )
+from app.config import DEFAULT_NODE_AGENT_KEY
 from app.services.openvpn_buffer_guard import fetch_unit_journal, normalize_watch_unit
 
-NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", "change-me-node-agent-key")
+NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", DEFAULT_NODE_AGENT_KEY)
 ANTIZAPRET_PATH = Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret"))
 NODE_AGENT_PORT = int(os.environ.get("NODE_AGENT_PORT", "9100"))
 NODE_AGENT_MODE = os.environ.get("NODE_AGENT_MODE", "prod").strip().lower()

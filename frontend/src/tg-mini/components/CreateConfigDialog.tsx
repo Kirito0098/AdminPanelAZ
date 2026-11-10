@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { CLIENT_NAME_HINT, isValidClientName } from '@/lib/clientName'
 import { endOfDayIso } from '@/lib/datetime'
 import {
   createTgPanelConfig,
@@ -148,8 +149,8 @@ export default function CreateConfigDialog({
 
   const validateClientName = (trimmedName: string): string | null => {
     if (!trimmedName) return 'Укажите имя конфига'
-    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(trimmedName)) {
-      return 'Имя: латиница, цифры, _ и -, до 32 символов'
+    if (!isValidClientName(trimmedName)) {
+      return CLIENT_NAME_HINT
     }
     return null
   }

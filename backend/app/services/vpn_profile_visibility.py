@@ -14,12 +14,13 @@ from app.constants.public_routes import (
 )
 from app.models import AppSetting, User, UserRole, VpnType
 from app.services.app_setting_store import _get_setting
+from app.services.protocols import CANONICAL_PROTOCOLS
 from app.services.telegram_profile_ui import is_az_profile
 
 SETTING_VISIBLE_VPN_PROFILES_DEFAULT = "user_visible_vpn_profiles_default"
 
 ROUTES = frozenset({"az", "vpn"})
-PROTOCOLS = frozenset({"openvpn", "wireguard", "amneziawg", "amneziawg2"})
+PROTOCOLS = CANONICAL_PROTOCOLS
 OPENVPN_GROUPS = frozenset({"udp_tcp", "udp", "tcp"})
 
 # Policy openvpn_groups key ↔ stored GROUP_* preference key

@@ -1,6 +1,7 @@
 import type { ClientAccessPolicy, ClientPoliciesResponseEntry, OpenVpnClient, VpnConfig, WireGuardPeer } from '@/types'
 import { formatDate } from '@/lib/datetime'
 import { getProfileDownloadFilename } from '@/lib/profileDownloadName'
+import { vpnTypeLabel } from '@/lib/vpnTypes'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
 
 export type ProtocolTab = 'openvpn' | 'wireguard' | 'amneziawg' | 'amneziawg2'
@@ -69,10 +70,7 @@ export function pickVpnFile(config: VpnConfig, tab?: ProtocolTab): ProfileFile |
 }
 
 export function protocolLabel(tab: ProtocolTab): string {
-  if (tab === 'openvpn') return 'OpenVPN'
-  if (tab === 'amneziawg') return 'AmneziaWG'
-  if (tab === 'amneziawg2') return 'AmneziaWG 2.0'
-  return 'WireGuard'
+  return vpnTypeLabel(tab)
 }
 
 function hasProtocolProfiles(

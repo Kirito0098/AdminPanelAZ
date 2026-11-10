@@ -4,7 +4,11 @@ from pathlib import Path
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_DEFAULT_SECRET_KEY = "change-me-in-production-use-long-random-string"
+DEFAULT_SECRET_KEY = "change-me-in-production-use-long-random-string"
+DEFAULT_NODE_AGENT_KEY = "change-me-node-agent-key"
+
+# Порт, который слушает uvicorn и на который смотрит nginx, если BACKEND_PORT не задан.
+DEFAULT_BACKEND_PORT = 8000
 
 
 class Settings(BaseSettings):
@@ -12,7 +16,7 @@ class Settings(BaseSettings):
 
     app_name: str = "AdminPanel AntiZapret"
     app_env: str = "development"
-    secret_key: str = _DEFAULT_SECRET_KEY
+    secret_key: str = DEFAULT_SECRET_KEY
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7

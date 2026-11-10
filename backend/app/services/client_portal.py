@@ -16,7 +16,7 @@ import httpx
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
+from app.config import DEFAULT_BACKEND_PORT, get_settings
 from app.models import (
     AmneziaWg2AccessPolicy,
     AppSetting,
@@ -208,7 +208,7 @@ def resolve_portal_base_url(db: Session) -> str | None:
     behind = (env.get_env_value("BEHIND_NGINX", "") or "").lower() in {"1", "true", "yes"}
     use_https = (env.get_env_value("USE_HTTPS", "") or "").lower() in {"1", "true", "yes"}
     backend_host = env.get_env_value("BACKEND_HOST", "127.0.0.1") or "127.0.0.1"
-    backend_port = env.get_env_value("BACKEND_PORT", "8000") or "8000"
+    backend_port = env.get_env_value("BACKEND_PORT", str(DEFAULT_BACKEND_PORT)) or str(DEFAULT_BACKEND_PORT)
     https_port_raw = env.get_env_value("HTTPS_PUBLIC_PORT", "") or str(settings.https_public_port)
     try:
         https_public_port = int(https_port_raw)
