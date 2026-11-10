@@ -13,6 +13,8 @@ export LANG="${LANG:-C.UTF-8}"
 
 ROOT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 INSTALL_DIR="${INSTALL_DIR:-$ROOT_DIR}"
+# shellcheck source=scripts/env-file.sh
+source "$ROOT_DIR/scripts/env-file.sh"
 SERVICE_NAME="${SERVICE_NAME:-adminpanelaz}"
 VENV_PATH="${VENV_PATH:-$ROOT_DIR/backend/.venv}"
 UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
@@ -210,15 +212,7 @@ _menu_python() {
 
 # Значение из backend/.env: последнее присваивание (как читает панель), без кавычек; пусто — нет файла или ключа.
 _menu_env_get() {
-  local file="$INSTALL_DIR/backend/.env" line val
-  [[ -r "$file" ]] || return 0
-  line="$(grep -E "^$1=" "$file" 2>/dev/null | tail -1)" || true
-  val="${line#*=}"
-  val="${val%$'\r'}"
-  if [[ "${#val}" -ge 2 && ( "$val" == \"*\" || "$val" == \'*\' ) ]]; then
-    val="${val:1:-1}"
-  fi
-  printf '%s' "$val"
+  env_file_get "$INSTALL_DIR/backend/.env" "$1"
 }
 
 _menu_env_true() {

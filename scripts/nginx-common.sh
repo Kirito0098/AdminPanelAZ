@@ -4,6 +4,8 @@
 nginx_common_init() {
   : "${ROOT_DIR:?ROOT_DIR не задан}"
   : "${ENV_FILE:?ENV_FILE не задан}"
+  # shellcheck source=scripts/env-file.sh
+  source "${ROOT_DIR}/scripts/env-file.sh"
   NGINX_TEMPLATE_DIR="${ROOT_DIR}/deploy/nginx"
   NGINX_SELF_SIGNED_CERT="/etc/ssl/certs/adminpanelaz.crt"
   NGINX_SELF_SIGNED_KEY="/etc/ssl/private/adminpanelaz.key"
@@ -127,8 +129,7 @@ nginx_assert_domain_not_az_vpn_host() {
 }
 
 nginx_env_get() {
-  local key="$1"
-  grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true
+  env_file_get "$ENV_FILE" "$1"
 }
 
 # Первый IPv4 сервера (для CN самоподписанного cert, если домен не задан).
@@ -212,24 +213,12 @@ nginx_is_safe_file_path() {
 }
 
 nginx_env_set() {
-  local key="$1"
-  local value="$2"
-  local escaped
-  [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || nginx_die "${key}: перевод строки в значении недопустим"
-  mkdir -p "$(dirname "$ENV_FILE")"
-  touch "$ENV_FILE"
-  escaped=$(printf '%s' "$value" | sed 's/[\\&|]/\\&/g')
-  if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "$ENV_FILE"
-  else
-    printf '%s=%s\n' "$key" "$value" >>"$ENV_FILE"
-  fi
+  [[ "$2" != *$'\n'* && "$2" != *$'\r'* ]] || nginx_die "$1: перевод строки в значении недопустим"
+  env_file_set "$ENV_FILE" "$1" "$2"
 }
 
 nginx_env_unset() {
-  local key="$1"
-  [ -f "$ENV_FILE" ] || return 0
-  sed -i "/^${key}=/d" "$ENV_FILE"
+  env_file_unset "$ENV_FILE" "$1"
 }
 
 nginx_conf_basename() {

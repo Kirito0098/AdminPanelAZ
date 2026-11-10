@@ -116,6 +116,9 @@ ENV_EXAMPLE="$BACKEND_DIR/.env.example"
 NODE_ENV_FILE="$BACKEND_DIR/node_agent.env"
 NODE_ENV_EXAMPLE="$BACKEND_DIR/node_agent.env.example"
 PROXY_ENV_FILE="$BACKEND_DIR/proxy_agent.env"
+
+# shellcheck source=scripts/env-file.sh
+source "$ROOT_DIR/scripts/env-file.sh"
 PROXY_ENV_EXAMPLE="$BACKEND_DIR/proxy_agent.env.example"
 
 WITH_DAEMON=false
@@ -1003,28 +1006,8 @@ ensure_executable_scripts() {
 }
 
 env_get() {
-  local key="$1"
-  if [[ ! -f "$ENV_FILE" ]]; then
-    return 1
-  fi
-  grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true
-}
-
-env_escape_for_sed() {
-  printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
-}
-
-env_file_set() {
-  local file="$1"
-  local key="$2"
-  local value="$3"
-  local escaped
-  escaped="$(env_escape_for_sed "$value")"
-  if grep -qE "^${key}=" "$file" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "$file"
-  else
-    printf '%s=%s\n' "$key" "$value" >>"$file"
-  fi
+  [[ -f "$ENV_FILE" ]] || return 1
+  env_file_get "$ENV_FILE" "$1"
 }
 
 env_set() {
@@ -1040,9 +1023,7 @@ proxy_env_set() {
 }
 
 agent_env_value() {
-  local file="$1" key="$2"
-  [[ -f "$file" ]] || return 0
-  sed -n "s/^${key}=//p" "$file" | tail -1
+  env_file_get "$1" "$2"
 }
 
 # Сертификат агента не истёк, подписан этим CA и соответствует ключу.

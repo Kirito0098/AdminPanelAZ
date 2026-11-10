@@ -2,6 +2,9 @@
 # Настройка firewall при установке AdminPanelAZ (вызывается из install.sh)
 set -euo pipefail
 
+# shellcheck source=scripts/env-file.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/env-file.sh"
+
 firewall_log() {
   echo "[firewall] $*"
 }
@@ -459,21 +462,12 @@ firewall_apply_rules() {
 }
 
 firewall_env_get() {
-  local env_file="$1"
-  local key="$2"
-  local default="${3:-}"
-
-  if [[ ! -f "$env_file" ]]; then
-    printf '%s' "$default"
-    return 0
-  fi
-
   local value
-  value="$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ' || true)"
+  value="$(env_file_get "$1" "$2")"
   if [[ -n "$value" ]]; then
     printf '%s' "$value"
   else
-    printf '%s' "$default"
+    printf '%s' "${3:-}"
   fi
 }
 

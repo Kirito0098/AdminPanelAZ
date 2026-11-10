@@ -2,6 +2,9 @@
 # Подключается install-node-systemd.sh и install-proxy-systemd.sh.
 # API-ключ агента хранится только в env-файле с правами 600: unit-файлы и `systemctl show` читает любой пользователь.
 
+# shellcheck source=scripts/env-file.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/env-file.sh"
+
 # Те же плейсхолдеры, что is_placeholder_secret в install.sh.
 _agent_key_is_placeholder() {
   case "$1" in
@@ -20,7 +23,7 @@ persist_agent_api_key() {
   if _agent_key_is_placeholder "$value"; then
     return 0
   fi
-  current="$(sed -n "s/^${key}=//p" "$file" | head -1)"
+  current="$(env_file_get "$file" "$key")"
   if ! _agent_key_is_placeholder "$current"; then
     return 0
   fi

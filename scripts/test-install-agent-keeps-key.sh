@@ -15,7 +15,7 @@ extract() {
   done
 }
 
-INSTALL_FNS="$(extract "$ROOT_DIR/install.sh" env_escape_for_sed env_file_set node_env_set proxy_env_set is_placeholder_secret \
+INSTALL_FNS="$(extract "$ROOT_DIR/install.sh" node_env_set proxy_env_set is_placeholder_secret \
   agent_env_value agent_mtls_bundle_valid agent_env_preserve setup_node_env setup_proxy_env)"
 INSTALL_FNS+=$'\n'"$(extract "$ROOT_DIR/scripts/node-agent-mtls-check.sh" node_agent_mtls_warning)"
 
@@ -50,13 +50,14 @@ printf 'PROXY_AGENT_API_KEY=change-me-proxy-agent-key\nPROXY_AGENT_PORT=9101\n' 
 run_setup() {
   NODE_ENV_FILE="$NODE_ENV_FILE" PROXY_ENV_FILE="$PROXY_ENV_FILE" \
     NODE_ENV_EXAMPLE="$TMP_DIR/node.example" PROXY_ENV_EXAMPLE="$TMP_DIR/proxy.example" \
-    ROOT_DIR="$TMP_DIR" bash -c '
+    ENV_FILE_LIB="$ROOT_DIR/scripts/env-file.sh" ROOT_DIR="$TMP_DIR" bash -c '
     set -euo pipefail
     log() { :; }
     warn() { echo "WARN $*" >>"'"$TMP_DIR"'/warn.log"; }
     install_node_selected() { return 0; }
     install_proxy_selected() { return 0; }
     random_hex() { echo "generated-0123456789abcdef0123456789abcdef"; }
+    source "$ENV_FILE_LIB"
     eval "$1"
     shift
     "$@"
@@ -121,7 +122,8 @@ echo "  OK"
 WIZARD_FNS="$(extract "$ROOT_DIR/scripts/install-wizard.sh" wizard_ask_node_agent wizard_ask_proxy_agent)"
 run_wizard() {
   local fn="$1" answers="$2"
-  NODE_ENV_FILE="$NODE_ENV_FILE" PROXY_ENV_FILE="$PROXY_ENV_FILE" ANSWERS="$answers" bash -c '
+  NODE_ENV_FILE="$NODE_ENV_FILE" PROXY_ENV_FILE="$PROXY_ENV_FILE" ANSWERS="$answers" \
+    ENV_FILE_LIB="$ROOT_DIR/scripts/env-file.sh" bash -c '
     set -euo pipefail
     wiz_step() { :; }
     ui_info_box() { :; }
@@ -135,6 +137,7 @@ run_wizard() {
     WIZ_NODE_AGENT_PORT=9100
     WIZ_PROXY_AGENT_PORT=9101
     WIZ_INSTALL_TYPE="$3"
+    source "$ENV_FILE_LIB"
     eval "$1"
     "$2"
     echo "${WIZ_NODE_AGENT_API_KEY:-}${WIZ_PROXY_AGENT_API_KEY:-}"
