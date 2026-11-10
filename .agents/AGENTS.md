@@ -29,7 +29,8 @@
 | `brainstorming` | Вопросы, варианты и дизайн-док до кода | Architect |
 | `split-design-spec` | Разбить большой design-спек | Architect |
 
-Security-пак (18 скиллов) в автопоиске отключён: `~/.agents/skill-packs/<name>/SKILL.md`.
+Паки в `~/.agents/skill-packs/` в автопоиске отключены и читаются вручную:
+security-пак (18 скиллов) и `systematic-debugging` для тяжёлых багов.
 
 ## MCP и локальная обёртка
 

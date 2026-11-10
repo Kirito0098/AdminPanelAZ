@@ -7,8 +7,9 @@ license: MIT
 # Brainstorming
 
 > Адаптация для AdminPanelAZ (upstream: `obra/superpowers`, commit `22f0b46`).
-> Заменено только одно: шаг «invoke superpowers:writing-plans» — этого скилла в проекте нет,
-> вместо него план в чате по [`AGENTS.md`](../../../AGENTS.md) (раздел «Мелочь ≠ фича»).
+> Заменено два места: шаг «invoke superpowers:writing-plans» — этого скилла в проекте нет,
+> вместо него план в чате по [`AGENTS.md`](../../../AGENTS.md) (раздел «Мелочь ≠ фича»);
+> добавлен «второй проход» перед планом (приём из `mattpocock/skills` → grill-me).
 > Дизайн-доки пишутся в `docs/superpowers/specs/` — каталог gitignored, в upstream коммитится.
 > Остальной текст — upstream без изменений.
 
@@ -273,6 +274,20 @@ calls you made so they can check those while reading. That's the only
 round of questions the check produces. Without a subagent tool, read the
 document as that builder yourself.
 
+## The Second Pass Before the Plan
+
+Brainstorming settles what they want and how it gets built; it does not
+settle whether the design still has holes. Before the plan, list the
+branches nobody decided: the ones you filled in yourself, the ones the
+doc leaves to the builder, the ones where a wrong guess would quietly
+change what gets built. Send them in one message, one question each, and
+put your recommended answer next to every question, with the reason.
+
+Wait for their answers. A recommendation is a proposal, not a decision;
+answering your own questions and building on the result is exactly the
+failure this pass prevents. If nothing is open, say so in one line and
+go straight to the plan.
+
 <HARD-GATE>
 Nothing gets built until your human partner approves the design doc:
 the short one for a small change, the full one for a project.
@@ -285,8 +300,8 @@ and the gate goes with it. A spike they said yes to may be built; it
 stays labeled throwaway, and keeping what it produced is a new request
 that comes back through this gate.
 
-After the design doc is approved, the next step is the plan: write it in chat per
-`AGENTS.md` («Мелочь ≠ фича»), without invoking other skills.
+After the design doc is approved, do the second pass above, then write the plan
+in chat per `AGENTS.md` («Мелочь ≠ фича»), without invoking other skills.
 </HARD-GATE>
 
 ## Red Flags
@@ -299,6 +314,7 @@ After the design doc is approved, the next step is the plan: write it in chat pe
 | "I should explain the process first"                   | Ask your question. The process shows itself.                                                                                              |
 | "They said 'sounds good' to the idea"                  | Approval covers what you showed them. A design doc you haven't written isn't approved.                                                    |
 | "The spike works, I'll keep building on it"            | Keeping it is a new request. Back through the gate.                                                                                       |
+| "The design is approved, so the plan is next"          | Run the second pass: otherwise the plan inherits every branch you guessed at.                                                             |
 
 ## Visual Companion
 

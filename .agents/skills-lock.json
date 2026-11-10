@@ -7,8 +7,8 @@
       "skillPath": ".cursor/skills/brainstorming/SKILL.md",
       "upstreamCommit": "22f0b463e7a5e579904dd6211a520321035526f7",
       "upstreamHash": "2c9ca71f94886f9ca9f4aef055f7cafb3e1a9bdf3aeebf8f4cb547c69405d207",
-      "computedHash": "fef36ae93c760376182f4a0080bedc1fa89c3e31f874792e23e401a4642a3a5b",
-      "note": "vendored with builder-check-prompt.md, visual-companion.md and scripts/; writing-plans step replaced by AGENTS.md plan flow"
+      "computedHash": "b01fb48b8f9799e0634b28210b493e2397aa14c8e38d7d96e62306dfb114cd9f",
+      "note": "vendored with builder-check-prompt.md, visual-companion.md and scripts/; writing-plans step replaced by AGENTS.md plan flow; second pass before the plan (grill-me technique) added locally"
     },
     "karpathy-ponytail": {
       "source": "AbdullahHameedKhan/karpathy-ponytail-skills",

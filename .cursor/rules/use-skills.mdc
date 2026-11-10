@@ -28,6 +28,7 @@ alwaysApply: true
 | Новая фича, экран или поток: «что именно нужно» до кода | `brainstorming` | `.agents/skills-architect/` |
 | Разбить большой дизайн-спек `docs/superpowers/specs/*-design.md` по папкам | `split-design-spec` | `.agents/skills-architect/` |
 | Точечный security-аудит поверхности (JWT, CORS, CSRF, WebSocket, traversal, Host header) | пак в автопоиске отключён | `~/.agents/skill-packs/<name>/SKILL.md` |
+| Тяжёлый баг: воспроизводится, но причина не видна; 2–3 фикса уже не помогли | `systematic-debugging` (пак, вручную) | `~/.agents/skill-packs/systematic-debugging/SKILL.md` |
 
 ## Процесс, тесты, «готово»
 
