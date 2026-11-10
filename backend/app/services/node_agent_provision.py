@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from app.config import get_settings
 from app.services.atomic_file import atomic_write_text
 from app.services.node_agent_env import node_agent_env_targets
 from app.services.node_update import resolve_repo_root, schedule_agent_restart
@@ -25,13 +26,20 @@ _KEY_MARKER_PAIRS = (
 
 
 def _mtls_paths() -> dict[str, Path]:
+    settings = get_settings()
     return {
-        "ca_cert": Path(os.environ.get("NODE_AGENT_MTLS_CA_CERT", "/etc/adminpanelaz/mtls/ca.crt")),
+        "ca_cert": Path(
+            os.environ.get("NODE_AGENT_MTLS_CA_CERT", settings.node_agent_mtls_ca_cert)
+        ),
         "server_cert": Path(
-            os.environ.get("NODE_AGENT_MTLS_SERVER_CERT", "/etc/adminpanelaz/mtls/agent.crt")
+            os.environ.get(
+                "NODE_AGENT_MTLS_SERVER_CERT", settings.node_agent_mtls_dir / "agent.crt"
+            )
         ),
         "server_key": Path(
-            os.environ.get("NODE_AGENT_MTLS_SERVER_KEY", "/etc/adminpanelaz/mtls/agent.key")
+            os.environ.get(
+                "NODE_AGENT_MTLS_SERVER_KEY", settings.node_agent_mtls_dir / "agent.key"
+            )
         ),
     }
 

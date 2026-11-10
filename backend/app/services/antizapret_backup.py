@@ -11,6 +11,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+from app.config import get_settings
 from app.services import wg_runtime
 from app.services.path_stash import stashed
 from app.services.node_sync.fingerprints import collect_antizapret_fingerprints, collect_config_file_fingerprints, CONFIG_FINGERPRINT_EXCLUDE
@@ -22,9 +23,9 @@ _HA_OVPN_PROFILE_DIR = "openvpn"
 _HA_WG_PROFILE_DIRS = ("wireguard", "amneziawg")
 
 
-def ha_vpn_crypto_paths(*, install_dir: str | Path = "/root/antizapret") -> list[Path]:
+def ha_vpn_crypto_paths(*, install_dir: str | Path | None = None) -> list[Path]:
     """VPN/crypto paths a replica replaces from the primary on HA Push full (config/ is not touched)."""
-    base = Path(install_dir or "/root/antizapret").resolve()
+    base = Path(install_dir or get_settings().antizapret_path).resolve()
     return [
         _HA_EASYRSA3_ROOT,
         *wg_runtime.WG_CONFIG_FILES.values(),
@@ -54,8 +55,10 @@ class AntizapretBackupService:
         re.IGNORECASE,
     )
 
-    def __init__(self, *, install_dir: str | Path = "/root/antizapret", timeout_seconds: int = 600):
-        self.install_dir = Path(install_dir or "/root/antizapret").resolve()
+    def __init__(
+        self, *, install_dir: str | Path | None = None, timeout_seconds: int = 600
+    ):
+        self.install_dir = Path(install_dir or get_settings().antizapret_path).resolve()
         self.timeout_seconds = max(30, int(timeout_seconds or 600))
 
     def create_backup(self) -> dict[str, str]:

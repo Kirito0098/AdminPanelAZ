@@ -25,6 +25,7 @@ if TYPE_CHECKING:
 
 from fastapi import HTTPException, status
 
+from app.config import get_settings
 from app.services.client_names import CLIENT_NAME_RE
 from app.services.ip_geo import is_local_geoip_loaded, parse_client_endpoint
 
@@ -264,7 +265,7 @@ def build_install_argv(
 
 
 def base_installed() -> bool:
-    base_root = Path("/root/antizapret")
+    base_root = get_settings().antizapret_path
     return any((base_root / name).is_file() for name in ("client.sh", "up.sh"))
 
 

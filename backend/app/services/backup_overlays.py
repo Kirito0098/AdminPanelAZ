@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
+from app.config import get_settings
 from app.services.awg2 import Awg2NotInstalledError, Awg2Service
 from app.services.backup_manager import BackupManager
 from app.services.node_manager import get_active_adapter
@@ -31,7 +32,9 @@ def apply_backup_overlays(
 
 
 def _apply_local(payload: dict, *, config_root: Path | None) -> None:
-    root = config_root or (Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret")) / "config")
+    root = config_root or (
+        Path(os.environ.get("ANTIZAPRET_PATH") or get_settings().antizapret_path) / "config"
+    )
     configs = payload.get("configs") or {}
     try:
         root.mkdir(parents=True, exist_ok=True)
