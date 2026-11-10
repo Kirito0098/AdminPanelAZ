@@ -32,7 +32,7 @@ import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import DocsLink from '@/components/shared/DocsLink'
-import { parseTimestamp } from '@/lib/datetime'
+import { formatDateTime } from '@/lib/datetime'
 import { DOCS } from '@/lib/docsUrls'
 import {
   DropdownMenu,
@@ -98,10 +98,8 @@ const AUTO_SYNC_OPERATIONS = [
   'Политика узла по умолчанию (редактирование только на основном узле)',
 ] as const
 
-function formatTimestamp(value?: string | null): string | null {
-  const date = parseTimestamp(value)
-  if (!date) return null
-  return date.toLocaleString()
+function formatTimestamp(value?: string | null): string {
+  return formatDateTime(value, undefined, '')
 }
 
 type ReadinessBadge = { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }

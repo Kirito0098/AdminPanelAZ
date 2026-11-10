@@ -1,4 +1,5 @@
-import { formatDateTime } from '@/lib/datetime'
+import { formatDateTime, formatRelative } from '@/lib/datetime'
+import { pluralRu } from '@/lib/plural'
 
 export function formatDt(value?: string | null) {
   if (!value) return '—'
@@ -132,28 +133,12 @@ export function formatCompactCount(value: number): string {
 
 /** «1 провайдер», «2 провайдера», «5 провайдеров» */
 export function pluralProviders(count: number): string {
-  const abs = Math.abs(count)
-  const mod100 = abs % 100
-  const mod10 = abs % 10
-  let word = 'провайдеров'
-  if (mod100 < 11 || mod100 > 14) {
-    if (mod10 === 1) word = 'провайдер'
-    else if (mod10 >= 2 && mod10 <= 4) word = 'провайдера'
-  }
-  return `${count} ${word}`
+  return `${count} ${pluralRu(count, ['провайдер', 'провайдера', 'провайдеров'])}`
 }
 
 /** «1 файл», «2 файла», «5 файлов» */
 export function pluralFiles(count: number): string {
-  const abs = Math.abs(count)
-  const mod100 = abs % 100
-  const mod10 = abs % 10
-  let word = 'файлов'
-  if (mod100 < 11 || mod100 > 14) {
-    if (mod10 === 1) word = 'файл'
-    else if (mod10 >= 2 && mod10 <= 4) word = 'файла'
-  }
-  return `${count} ${word}`
+  return `${count} ${pluralRu(count, ['файл', 'файла', 'файлов'])}`
 }
 
 const BACKUP_STAMP_RE = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/
@@ -183,13 +168,7 @@ export function formatBackupLabel(stamp: string, mtime?: number): string {
 
 export function formatBackupRelative(stamp: string, mtime?: number): string {
   const date = parseBackupDate(stamp, mtime)
-  if (!date) return ''
-  const diffMin = Math.floor((Date.now() - date.getTime()) / 60_000)
-  if (diffMin < 1) return 'только что'
-  if (diffMin < 60) return `${diffMin} мин. назад`
-  const diffH = Math.floor(diffMin / 60)
-  if (diffH < 24) return `${diffH} ч. назад`
-  return `${Math.floor(diffH / 24)} дн. назад`
+  return date ? formatRelative(date) : ''
 }
 
 export function providerStatusTone(status?: string | null): 'ok' | 'warn' | 'error' | 'muted' {

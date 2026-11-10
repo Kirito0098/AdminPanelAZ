@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label'
 import { useNotificationCenter } from '@/context/NotificationCenterContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
+import { formatDate, formatDateTime } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type { AccessRequestResponse, User } from '@/types'
 
@@ -170,7 +171,7 @@ export default function AccessRequestsDialog({
     setApprovingId(requestId)
     try {
       await approveRequest(requestId, { access_until: target.toISOString() })
-      success(`Доступ продлён до ${target.toLocaleDateString('ru-RU')}`)
+      success(`Доступ продлён до ${formatDate(target)}`)
       setExtendTarget(null)
       await finishApprove(requests.find((r) => r.id === requestId)?.telegram_id)
     } catch (err) {
@@ -290,7 +291,7 @@ export default function AccessRequestsDialog({
                 const metaParts = [
                   r.telegram_username ? `@${r.telegram_username}` : null,
                   `TG ${r.telegram_id}`,
-                  new Date(r.created_at).toLocaleString('ru-RU'),
+                  formatDateTime(r.created_at),
                 ].filter(Boolean)
                 return (
                   <div

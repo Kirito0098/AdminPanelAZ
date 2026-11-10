@@ -3,27 +3,15 @@
 from __future__ import annotations
 
 from app.config import get_settings
-from app.services.rate_limit.backends import create_rate_limit_backend
-from app.services.rate_limit.sliding_window import SlidingWindowLimiter
+from app.services.rate_limit.sliding_window import LazyRateLimiter
 
 _AUTH_DETAIL = "Слишком много попыток входа. Повторите позже."
 
 
-class AuthRateLimitService:
-    def __init__(self) -> None:
-        self._limiter: SlidingWindowLimiter | None = None
-
-    def _get_limiter(self) -> SlidingWindowLimiter:
-        if self._limiter is None:
-            settings = get_settings()
-            backend = create_rate_limit_backend(
-                backend=settings.auth_rate_limit_backend,
-                redis_url=settings.redis_url,
-                prefix="auth_rate:",
-                label="Auth",
-            )
-            self._limiter = SlidingWindowLimiter(backend)
-        return self._limiter
+class AuthRateLimitService(LazyRateLimiter):
+    _prefix = "auth_rate:"
+    _label = "Auth"
+    _backend_setting = "auth_rate_limit_backend"
 
     def check(self, client_ip: str, *, detail: str = _AUTH_DETAIL) -> None:
         settings = get_settings()

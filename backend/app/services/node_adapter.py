@@ -1333,7 +1333,7 @@ class RemoteNodeAdapter(NodeAdapter):
                 CODE_BUSY, "Узел занят другой операцией — повторите через несколько секунд"
             )
 
-    def _request(self, method: str, path: str, **kwargs) -> Any:
+    def _request(self, method: str, path: str, *, raw: bool = False, **kwargs) -> Any:
         from app.services.node_link_errors import (
             classify_http_status,
             classify_request_error,
@@ -1374,6 +1374,8 @@ class RemoteNodeAdapter(NodeAdapter):
                 )
                 raise_link_error(code, message, upstream_status=response.status_code)
 
+            if raw:
+                return response.content
             if response.status_code == 204 or not response.content:
                 return None
             return response.json()
@@ -1409,45 +1411,7 @@ class RemoteNodeAdapter(NodeAdapter):
         return self._request("GET", "/telegram/oidc/jwks", timeout=_TELEGRAM_OIDC_RELAY_TIMEOUT)
 
     def _request_bytes(self, method: str, path: str, **kwargs) -> bytes:
-        from app.services.node_link_errors import (
-            classify_http_status,
-            classify_request_error,
-            raise_link_error,
-        )
-
-        url = f"{self.base_url}{path}"
-        timeout = _effective_timeout(kwargs.pop("timeout", HTTP_TIMEOUT))
-        with self._node_slot(timeout):
-            try:
-                client = self._get_http_client()
-                response = client.request(
-                    method,
-                    url,
-                    headers=self._headers(),
-                    timeout=timeout,
-                    **kwargs,
-                )
-            except httpx.RequestError as exc:
-                code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
-                raise_link_error(code, message)
-
-            if response.status_code >= 400:
-                detail = response.text
-                from_agent = False
-                try:
-                    data = response.json()
-                    detail = data.get("detail", detail)
-                    from_agent = True
-                except Exception:
-                    pass
-                code, message = classify_http_status(
-                    response.status_code,
-                    detail,
-                    mtls_enabled=self._mtls_enabled,
-                    from_agent=from_agent,
-                )
-                raise_link_error(code, message, upstream_status=response.status_code)
-            return response.content
+        return self._request(method, path, raw=True, **kwargs)
 
     def health_check(self) -> dict[str, Any]:
         return self._request("GET", "/health", timeout=10.0)

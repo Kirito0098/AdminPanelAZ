@@ -331,12 +331,7 @@ export default function DashboardPage() {
       const blob = await response.blob()
       const disposition = response.headers.get('content-disposition') || ''
       const filename = parseContentDispositionFilename(disposition) || 'vpn-configs.csv'
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = filename
-      link.click()
-      URL.revokeObjectURL(url)
+      triggerFileDownload(blob, filename)
       success('CSV экспортирован')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка экспорта CSV')

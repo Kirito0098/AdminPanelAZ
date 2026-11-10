@@ -77,42 +77,12 @@ async function parseApiResponse<T>(response: Response): Promise<T> {
   return response.json()
 }
 
-async function tgFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
-  const headers = new Headers(options.headers)
-  if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
-    headers.set('Content-Type', 'application/json')
-  }
-  const token = getTgToken()
-  if (token) headers.set('Authorization', `Bearer ${token}`)
+type RequestTarget = { base?: string; retry?: boolean }
 
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers })
-  if (response.status === 401 && retry && path !== '/auth' && (await renewAfterUnauthorized(token))) {
-    return tgFetch<T>(path, options, false)
-  }
-  return parseApiResponse<T>(response)
-}
-
-/** Mini App token is accepted only by backend endpoints marked `@tg_mini_token_allowed` (401 otherwise). */
-async function panelApiFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
-  const headers = new Headers(options.headers)
-  if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
-    headers.set('Content-Type', 'application/json')
-  }
-  const token = getTgToken()
-  if (token) headers.set('Authorization', `Bearer ${token}`)
-
-  const response = await fetch(`${PANEL_API_BASE}${path}`, { ...options, headers })
-  if (response.status === 401 && retry && (await renewAfterUnauthorized(token))) {
-    return panelApiFetch<T>(path, options, false)
-  }
-  return parseApiResponse<T>(response)
-}
-
-/** Raw panel response (blobs, images) with the Mini App token. */
-async function panelApiFetchResponse(
+async function request(
   path: string,
   options: RequestInit = {},
-  retry = true,
+  { base = PANEL_API_BASE, retry = true }: RequestTarget = {},
 ): Promise<Response> {
   const headers = new Headers(options.headers)
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
@@ -121,10 +91,37 @@ async function panelApiFetchResponse(
   const token = getTgToken()
   if (token) headers.set('Authorization', `Bearer ${token}`)
 
-  const response = await fetch(`${PANEL_API_BASE}${path}`, { ...options, headers })
+  const response = await fetch(`${base}${path}`, { ...options, headers })
   if (response.status === 401 && retry && (await renewAfterUnauthorized(token))) {
-    return panelApiFetchResponse(path, options, false)
+    return request(path, options, { base, retry: false })
   }
+  return response
+}
+
+async function requestJson<T>(
+  path: string,
+  options: RequestInit = {},
+  target: RequestTarget = {},
+): Promise<T> {
+  return parseApiResponse<T>(await request(path, options, target))
+}
+
+async function tgFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
+  return requestJson<T>(path, options, { base: API_BASE, retry: retry && path !== '/auth' })
+}
+
+/** Mini App token is accepted only by backend endpoints marked `@tg_mini_token_allowed` (401 otherwise). */
+async function panelApiFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
+  return requestJson<T>(path, options, { retry })
+}
+
+/** Raw panel response (blobs, images) with the Mini App token. */
+async function panelApiFetchResponse(
+  path: string,
+  options: RequestInit = {},
+  retry = true,
+): Promise<Response> {
+  const response = await request(path, options, { retry })
   if (!response.ok) {
     const body = await response.text()
     throw new ApiError(parseHttpErrorBody(body, response.status), response.status)

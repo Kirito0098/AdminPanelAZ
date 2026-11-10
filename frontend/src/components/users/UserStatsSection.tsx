@@ -7,7 +7,7 @@ import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatBytes } from '@/lib/trafficFormat'
-import { formatDateTime } from '@/lib/datetime'
+import { formatDateTime, parseTimestamp } from '@/lib/datetime'
 import UserMetric from './UserMetric'
 import UserSection from './UserSection'
 
@@ -65,7 +65,8 @@ export default function UserStatsSection({ userId }: UserStatsSectionProps) {
 
   const lastSeen = rows.reduce<Date | null>((best, row) => {
     if (!row.last_seen_at) return best
-    const d = new Date(row.last_seen_at)
+    const d = parseTimestamp(row.last_seen_at)
+    if (!d) return best
     if (best == null || d > best) return d
     return best
   }, null)

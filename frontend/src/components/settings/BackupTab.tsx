@@ -53,6 +53,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useProgress } from '@/context/ProgressContext'
 import { formatDateTime } from '@/lib/datetime'
+import { triggerFileDownload } from '@/lib/triggerFileDownload'
 import { pluralRu } from '@/lib/plural'
 import { cn } from '@/lib/utils'
 import type { BackupEntry, BackupSettings, PreRestoreSnapshot } from '@/types'
@@ -801,11 +802,7 @@ export default function BackupTab() {
                         onClick={async () => {
                           try {
                             const res = await downloadBackup(b.file_name)
-                            const blob = await res.blob()
-                            const a = document.createElement('a')
-                            a.href = URL.createObjectURL(blob)
-                            a.download = b.file_name
-                            a.click()
+                            triggerFileDownload(await res.blob(), b.file_name)
                           } catch (err) {
                             notifyError(err instanceof ApiError ? err.message : 'Ошибка скачивания')
                           }

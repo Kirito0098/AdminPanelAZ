@@ -3,27 +3,14 @@
 from __future__ import annotations
 
 from app.config import get_settings
-from app.services.rate_limit.backends import create_rate_limit_backend
-from app.services.rate_limit.sliding_window import SlidingWindowLimiter
+from app.services.rate_limit.sliding_window import LazyRateLimiter
 
 _API_DETAIL = "Слишком много запросов. Повторите позже."
 
 
-class ApiRateLimitService:
-    def __init__(self) -> None:
-        self._limiter: SlidingWindowLimiter | None = None
-
-    def _get_limiter(self) -> SlidingWindowLimiter:
-        if self._limiter is None:
-            settings = get_settings()
-            backend = create_rate_limit_backend(
-                backend=settings.api_rate_limit_backend,
-                redis_url=settings.redis_url,
-                prefix="api_rate:",
-                label="API",
-            )
-            self._limiter = SlidingWindowLimiter(backend)
-        return self._limiter
+class ApiRateLimitService(LazyRateLimiter):
+    _prefix = "api_rate:"
+    _label = "API"
 
     def consume(self, client_ip: str) -> None:
         settings = get_settings()

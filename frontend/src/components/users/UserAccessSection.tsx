@@ -17,6 +17,7 @@ import UserSection from './UserSection'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { parseTimestamp } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 
@@ -151,9 +152,9 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
 
   const hasPlan = user.client_base_name != null && user.client_base_name.length > 0
   // План заблокирован, пока срок доступа истёк (Stage 1) — изменения и применение недоступны.
+  const accessUntilMs = parseTimestamp(user.access_until)?.getTime()
   const expired =
-    Boolean(card.plan?.blocked) ||
-    Boolean(user.access_until && new Date(user.access_until) < new Date())
+    Boolean(card.plan?.blocked) || (accessUntilMs != null && accessUntilMs < Date.now())
   const canSave =
     provisioningOn &&
     !expired &&

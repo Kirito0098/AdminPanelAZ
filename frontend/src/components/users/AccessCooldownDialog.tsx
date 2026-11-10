@@ -12,6 +12,7 @@ import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useNotifications } from '@/context/NotificationContext'
+import { formatDateTime } from '@/lib/datetime'
 
 /** Настройка кулдауна после отказа и список тех, с кого его можно снять. */
 export default function AccessCooldownDialog({
@@ -156,7 +157,7 @@ export default function AccessCooldownDialog({
                     <div className="min-w-0">
                       <p className="break-words font-medium">{item.name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {item.request_type} · до {new Date(item.until).toLocaleString('ru-RU')}
+                        {item.request_type} · до {formatDateTime(item.until)}
                       </p>
                     </div>
                     <Button

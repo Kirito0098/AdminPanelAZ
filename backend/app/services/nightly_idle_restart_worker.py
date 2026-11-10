@@ -11,22 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import SessionLocal
-from app.models import AppSetting
-from app.services.app_setting_store import _get_setting
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.active_web_session import active_web_session_service
 from app.services.background_gate import run_background_step
 from app.services.cron_schedule import cron_matches_now
 
 logger = logging.getLogger(__name__)
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
-    db.commit()
 
 
 def _already_ran_this_minute(db: Session, now: datetime) -> bool:
@@ -76,12 +66,12 @@ def run_nightly_idle_restart_once() -> dict:
         active_count = active_web_session_service.count_active_sessions(db)
         if active_count > 0:
             logger.info("Nightly idle restart skipped: active sessions=%s", active_count)
-            _set_setting(db, "nightly_idle_restart_last_run", now.isoformat())
+            _set_setting(db, "nightly_idle_restart_last_run", now.isoformat(), commit=True)
             return {"status": "skipped", "reason": "active_sessions", "active_count": active_count}
 
         service_name = settings.admin_panel_az_service_name.strip() or "adminpanelaz.service"
         # The restart kills this process: anything after it never runs.
-        _set_setting(db, "nightly_idle_restart_last_run", now.isoformat())
+        _set_setting(db, "nightly_idle_restart_last_run", now.isoformat(), commit=True)
         subprocess.run(
             ["systemctl", "restart", service_name],
             capture_output=True,

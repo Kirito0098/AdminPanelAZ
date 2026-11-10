@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import (
     AlertRule,
-    AppSetting,
     CidrDbRefreshLog,
     ConnectionCountSample,
     Node,
@@ -27,7 +26,7 @@ from app.models import (
     UserTrafficSample,
     WgAccessPolicy,
 )
-from app.services.app_setting_store import _get_setting
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.shared_helpers import as_utc as _as_utc
 from app.services.feature_guards import get_feature_service
 from app.services.feature_toggles import is_awg2_enabled
@@ -45,15 +44,6 @@ DAILY_REPORT_DAYS = 1
 DAILY_TOP_CLIENTS_LIMIT = 3
 WEEKLY_TOP_CLIENTS_LIMIT = 5
 _CIDR_OK_STATUSES = frozenset({"ok", "success"})
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
-    db.commit()
 
 
 def _wg_profile(profile: str | None) -> bool:

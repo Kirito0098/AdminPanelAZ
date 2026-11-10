@@ -12,9 +12,11 @@ def _get_setting(db: Session, key: str, default: str = "") -> str:
     return row.value if row else default
 
 
-def _set_setting(db: Session, key: str, value: str) -> None:
+def _set_setting(db: Session, key: str, value: str, *, commit: bool = False) -> None:
     row = db.query(AppSetting).filter(AppSetting.key == key).first()
     if row:
         row.value = value
     else:
         db.add(AppSetting(key=key, value=value))
+    if commit:
+        db.commit()

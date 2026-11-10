@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
+import { triggerFileDownload } from '@/lib/triggerFileDownload'
 
 export default function BackupTab() {
   const { success, error: notifyError } = useNotifications()
@@ -22,12 +23,7 @@ export default function BackupTab() {
         const filename =
           parseContentDispositionFilename(response.headers.get('Content-Disposition')) ||
           'az-awg2-backup.tar.gz'
-        const url = URL.createObjectURL(blob)
-        const link = document.createElement('a')
-        link.href = url
-        link.download = filename
-        link.click()
-        URL.revokeObjectURL(url)
+        triggerFileDownload(blob, filename)
       }, 'Скачивание AWG2 бэкапа...')
       success('Бэкап AZ-AWG2 скачан')
     } catch (err) {

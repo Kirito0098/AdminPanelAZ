@@ -17,6 +17,7 @@ import {
   rotateUserPortalLink,
   updateUser,
 } from '@/api/client'
+import { isoToDateInput } from '@/lib/accessUntil'
 import { userPortalActionConfirm } from '@/lib/userPortalConfirm'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
@@ -29,7 +30,7 @@ import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialo
 import UserSection from './UserSection'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
-import { formatDate } from '@/lib/datetime'
+import { formatDate, parseTimestamp } from '@/lib/datetime'
 import type { UserProvisioningCard, UserProvisionSummary } from '@/types'
 import SuspendUserDialog, { type SuspendUserPayload } from './SuspendUserDialog'
 
@@ -62,18 +63,17 @@ function AccessLifecycleCard({
   const [resumeNotify, setResumeNotify] = useState(true)
   const [customDays, setCustomDays] = useState('')
   // Дата окончания (включительно) — из API приходит ISO, input[type=date] ждёт YYYY-MM-DD.
-  const [customDate, setCustomDate] = useState(
-    user.access_until ? user.access_until.slice(0, 10) : '',
-  )
+  const [customDate, setCustomDate] = useState(isoToDateInput(user.access_until))
   // Продление кнопками меняет срок — подтягиваем новую дату в календарь.
   useEffect(() => {
-    setCustomDate(user.access_until ? user.access_until.slice(0, 10) : '')
+    setCustomDate(isoToDateInput(user.access_until))
   }, [user.access_until])
 
   const suspended = Boolean(user.suspended_at)
   // Администраторов приостановить нельзя (API отклоняет) — прячем действие.
   const canSuspend = user.role !== 'admin'
-  const accessExpired = Boolean(user.access_until && new Date(user.access_until) < new Date())
+  const accessUntilMs = parseTimestamp(user.access_until)?.getTime()
+  const accessExpired = accessUntilMs != null && accessUntilMs < Date.now()
 
   const handleCustomExtend = () => {
     const days = Number.parseInt(customDays, 10)

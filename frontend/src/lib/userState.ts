@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react'
 import { AlertTriangle, Ban, CheckCircle2, Loader2, PauseCircle, Shield, Trash2 } from 'lucide-react'
-import { formatDate } from '@/lib/datetime'
+import { formatDate, parseTimestamp } from '@/lib/datetime'
 import type { User } from '@/types'
 
 export type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'
@@ -14,7 +14,8 @@ export function accessParts(user: User): {
   cardTone: CardTone | null
 } {
   if (!user.access_until) return { text: 'не задан', tone: 'default', cardTone: null }
-  const d = new Date(user.access_until)
+  const d = parseTimestamp(user.access_until)
+  if (!d) return { text: formatDate(user.access_until), tone: 'default', cardTone: null }
   const now = new Date()
   if (d < now) {
     return { text: `истёк ${formatDate(user.access_until)}`, tone: 'danger', cardTone: 'expired' }

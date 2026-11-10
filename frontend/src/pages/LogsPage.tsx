@@ -31,6 +31,8 @@ import {
 import { NodeBadge } from '@/components/NodeSelector'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
+import { triggerFileDownload } from '@/lib/triggerFileDownload'
 import EmptyState from '@/components/ui/EmptyState'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import { DOCS } from '@/lib/docsUrls'
@@ -108,13 +110,7 @@ const levelLineStyles: Record<'error' | 'warn' | 'info', string> = {
 }
 
 function downloadText(filename: string, text: string) {
-  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  triggerFileDownload(text, filename)
 }
 
 async function copyText(text: string) {
@@ -812,14 +808,10 @@ export default function LogsPage() {
     try {
       const res = await downloadActionLogsExport()
       const blob = await res.blob()
-      const disposition = res.headers.get('Content-Disposition') ?? ''
-      const match = disposition.match(/filename="([^"]+)"/)
-      const filename = match?.[1] ?? `action-logs-${new Date().toISOString().slice(0, 10)}.csv`
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = filename
-      a.click()
-      URL.revokeObjectURL(a.href)
+      const filename =
+        parseContentDispositionFilename(res.headers.get('Content-Disposition')) ??
+        `action-logs-${new Date().toISOString().slice(0, 10)}.csv`
+      triggerFileDownload(blob, filename)
       success('Журнал действий экспортирован')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка экспорта журнала')

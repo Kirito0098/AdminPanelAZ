@@ -10,7 +10,7 @@ import {
   StickyNote,
   UserCog,
 } from 'lucide-react'
-import { formatDate } from '@/lib/datetime'
+import { formatDate, parseTimestamp } from '@/lib/datetime'
 import { formatBytes } from '@/lib/trafficFormat'
 import type { UserUpdatePayload, UserProvisioningCard, UserProvisionSummary } from '@/types'
 import { Badge } from '@/components/ui/badge'
@@ -104,7 +104,7 @@ export default function UserCard({ card, onSave, onDelete, onRefresh }: UserCard
   const stateMeta = STATE_LABEL[user.provision_state ?? 'unmanaged']
 
   const now = new Date()
-  const accessUntil = user.access_until ? new Date(user.access_until) : null
+  const accessUntil = parseTimestamp(user.access_until)
   const accessExpired = accessUntil != null && accessUntil.getTime() < now.getTime()
   const accessExpiring =
     accessUntil != null && !accessExpired && accessUntil.getTime() <= now.getTime() + 7 * 86400000
