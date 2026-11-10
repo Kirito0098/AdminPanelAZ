@@ -6,9 +6,7 @@ import type {
   BulkNodesRequest,
   BulkUsersRequest,
   BulkUsersResult,
-  PresetCreate,
   PresetResponse,
-  PresetUpdate,
   RejectRequest,
   TelegramLinkCodeResponse,
   User,
@@ -17,7 +15,6 @@ import type {
   UserHistoryEntry,
   UserProvisionedCreate,
   UserProvisionedResponse,
-  UserProvisioningApply,
   UserProvisioningCard,
   UserProvisioningUpdate,
   UserStatsResponse,
@@ -62,14 +59,6 @@ export async function getProvisioning(userId: number) {
 export async function updateProvisioning(userId: number, data: UserProvisioningUpdate) {
   return apiFetch<UserProvisionedResponse>(`/users/${userId}/provisioning`, {
     method: 'PUT',
-    body: JSON.stringify(data),
-  })
-}
-
-/** POST /users/{id}/provisioning/apply — применить/повторить план. */
-export async function applyProvisioning(userId: number, data: UserProvisioningApply) {
-  return apiFetch<{ task_id: string }>(`/users/${userId}/provisioning/apply`, {
-    method: 'POST',
     body: JSON.stringify(data),
   })
 }
@@ -219,40 +208,9 @@ export async function deleteProvisionedUser(userId: number) {
 
 /* ------------------------- пресеты предоставления доступа ------------------------- */
 
-export interface PresetSummary {
-  id: number
-  name: string
-  node_ids: number[]
-  protocols: string[]
-  config_count: number
-  config_quota: number | null
-  traffic_limit_bytes: number | null
-  access_days: number | null
-  is_default: boolean
-  created_at: string
-}
-
 /** GET /users/presets — список шаблонов (только если модуль включён). */
 export async function listPresets() {
   return apiFetch<PresetResponse[]>('/users/presets')
-}
-
-/** POST /users/presets — создать шаблон. */
-export async function createPreset(data: PresetCreate) {
-  return apiFetch<PresetResponse>('/users/presets', { method: 'POST', body: JSON.stringify(data) })
-}
-
-/** PUT /users/presets/{id} — обновить шаблон. */
-export async function updatePreset(presetId: number, data: PresetUpdate) {
-  return apiFetch<PresetResponse>(`/users/presets/${presetId}`, {
-    method: 'PUT',
-    body: JSON.stringify(data),
-  })
-}
-
-/** DELETE /users/presets/{id} — удалить шаблон. */
-export async function deletePreset(presetId: number) {
-  return apiFetch<{ message: string }>(`/users/presets/${presetId}`, { method: 'DELETE' })
 }
 
 /* ------------------------- заявки на доступ ------------------------- */

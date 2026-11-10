@@ -39,9 +39,7 @@ def _read_positive_int_env(name, default):
 
 
 def _read_env_file_value(key):
-    from app.services.cidr.pipeline.facade_compat import get_attr
-
-    env_path = get_attr("ENV_FILE_PATH")
+    env_path = ENV_FILE_PATH
     if not os.path.exists(env_path):
         return None
     try:

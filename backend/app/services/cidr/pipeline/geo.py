@@ -6,7 +6,7 @@ from app.services.cidr.pipeline.constants import (
     RU_COUNTRY_CIDR_SOURCE_URL,
     _RU_COUNTRY_CIDR_CACHE,
 )
-from app.services.cidr.pipeline.facade_compat import call as _facade_call
+from app.services.cidr.pipeline.download import _download_text
 from app.services.cidr.pipeline.parsers import _normalize_cidrs
 from app.services.cidr.pipeline.provider_sources import (
     REGION_SCOPES,
@@ -283,7 +283,7 @@ def _matches_strict_scope_value(region_or_scope, region_scopes):
     return bool(buckets & allowed_buckets)
 
 def _download_ru_country_cidrs(timeout=30):
-    text_data = _facade_call("_download_text", RU_COUNTRY_CIDR_SOURCE_URL, timeout=timeout)
+    text_data = _download_text(RU_COUNTRY_CIDR_SOURCE_URL, timeout=timeout)
     cidr_candidates = []
     for line in (text_data or "").splitlines():
         value = str(line or "").strip()
@@ -320,7 +320,7 @@ def _exclude_ru_country_cidrs(cidrs):
     if not cidrs:
         return cidrs, None
 
-    ru_index, error_text = _facade_call("_get_ru_cidr_index")
+    ru_index, error_text = _get_ru_cidr_index()
     if ru_index is None:
         if error_text:
             return cidrs, {

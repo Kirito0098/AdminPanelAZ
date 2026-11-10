@@ -1,5 +1,5 @@
 /** Склонение «N узел/узла/узлов» для русского UI. */
-export function formatHaNodeCount(count: number): string {
+function formatHaNodeCount(count: number): string {
   const n = Math.abs(count) % 100
   const n1 = n % 10
   if (n > 10 && n < 20) return `${count} узлов`

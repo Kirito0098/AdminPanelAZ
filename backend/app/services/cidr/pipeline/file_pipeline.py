@@ -5,13 +5,13 @@ from datetime import datetime, timezone
 
 from app.services.cidr.constants import IP_FILES
 from app.services.cidr.pipeline.constants import RUNTIME_BACKUP_RETENTION_SECONDS
-from app.services.cidr.pipeline.facade_compat import get_attr as _cfg
+from app.services.cidr.pipeline import constants
 
 def _snapshot_baseline_if_missing():
-    os.makedirs(_cfg("BASELINE_DIR"), exist_ok=True)
+    os.makedirs(constants.BASELINE_DIR, exist_ok=True)
     for file_name in IP_FILES.keys():
-        source_path = os.path.join(_cfg("LIST_DIR"), file_name)
-        target_path = os.path.join(_cfg("BASELINE_DIR"), file_name)
+        source_path = os.path.join(constants.LIST_DIR, file_name)
+        target_path = os.path.join(constants.BASELINE_DIR, file_name)
         if os.path.exists(target_path):
             continue
         if os.path.exists(source_path):
@@ -21,12 +21,12 @@ def _make_runtime_backup(files):
     _prune_runtime_backups()
 
     backup_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    backup_dir = os.path.join(_cfg("RUNTIME_BACKUP_ROOT"), backup_stamp)
+    backup_dir = os.path.join(constants.RUNTIME_BACKUP_ROOT, backup_stamp)
     os.makedirs(backup_dir, exist_ok=True)
 
     copied = []
     for file_name in files:
-        source_path = os.path.join(_cfg("LIST_DIR"), file_name)
+        source_path = os.path.join(constants.LIST_DIR, file_name)
         if not os.path.exists(source_path):
             continue
         shutil.copyfile(source_path, os.path.join(backup_dir, file_name))
@@ -38,14 +38,14 @@ def _prune_runtime_backups(now_ts=None, retention_seconds=RUNTIME_BACKUP_RETENTI
     if retention_seconds <= 0:
         return []
 
-    os.makedirs(_cfg("RUNTIME_BACKUP_ROOT"), exist_ok=True)
+    os.makedirs(constants.RUNTIME_BACKUP_ROOT, exist_ok=True)
 
     current_ts = float(now_ts) if now_ts is not None else datetime.now(timezone.utc).timestamp()
     cutoff_ts = current_ts - float(retention_seconds)
     removed_dirs = []
 
-    for entry_name in os.listdir(_cfg("RUNTIME_BACKUP_ROOT")):
-        entry_path = os.path.join(_cfg("RUNTIME_BACKUP_ROOT"), entry_name)
+    for entry_name in os.listdir(constants.RUNTIME_BACKUP_ROOT):
+        entry_path = os.path.join(constants.RUNTIME_BACKUP_ROOT, entry_name)
         if not os.path.isdir(entry_path):
             continue
 
@@ -72,7 +72,7 @@ def _emit_progress(progress_callback, percent, stage):
 
 def list_runtime_backups() -> list[dict]:
     """List available runtime backup stamps (newest first)."""
-    root = _cfg("RUNTIME_BACKUP_ROOT")
+    root = constants.RUNTIME_BACKUP_ROOT
     if not os.path.isdir(root):
         return []
 
@@ -123,7 +123,7 @@ def rollback_from_runtime_backup(
         }
 
     safe_stamp = os.path.basename(str(backup_stamp).strip())
-    backup_dir = os.path.join(_cfg("RUNTIME_BACKUP_ROOT"), safe_stamp)
+    backup_dir = os.path.join(constants.RUNTIME_BACKUP_ROOT, safe_stamp)
     if not os.path.isdir(backup_dir):
         _emit_progress(progress_callback, 100, "Откат завершен")
         return {
@@ -162,7 +162,7 @@ def rollback_from_runtime_backup(
         _emit_progress(progress_callback, progress_start, f"Восстановление {file_name}")
 
         source_path = os.path.join(backup_dir, file_name)
-        target_path = os.path.join(_cfg("LIST_DIR"), file_name)
+        target_path = os.path.join(constants.LIST_DIR, file_name)
         if not os.path.isfile(source_path):
             missing.append(file_name)
             continue

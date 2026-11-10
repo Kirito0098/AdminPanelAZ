@@ -6,7 +6,8 @@ from app.services.cidr.pipeline.antifilter import (
     _cidr_overlaps_index,
     _load_antifilter_index,
 )
-from app.services.cidr.pipeline.facade_compat import call as _facade_call, get_attr as _cfg
+from app.services.cidr.pipeline import constants
+from app.services.cidr.pipeline.constants import _get_openvpn_route_total_cidr_limit
 from app.services.cidr.pipeline.geo import (
     _exclude_ru_country_cidrs,
     _is_strict_geo_country_set,
@@ -255,7 +256,7 @@ def _update_cidr_files_from_db_impl(
         progress_done = 10 + int((index / max(total_files, 1)) * 82)
         _emit_progress(progress_callback, progress_done, f"Файл {file_name}: {len(cidrs)} CIDR из БД")
 
-    effective_limit = int(total_cidr_limit) if total_cidr_limit and int(total_cidr_limit) > 0 else _facade_call("_get_openvpn_route_total_cidr_limit")
+    effective_limit = int(total_cidr_limit) if total_cidr_limit and int(total_cidr_limit) > 0 else _get_openvpn_route_total_cidr_limit()
     planned_updates, global_route_optimization_meta = _apply_total_route_limit(
         planned_updates,
         effective_limit,
@@ -264,7 +265,7 @@ def _update_cidr_files_from_db_impl(
         dpi_priority_min_budget=dpi_priority_min_budget,
     )
 
-    os.makedirs(_cfg("LIST_DIR"), exist_ok=True)
+    os.makedirs(constants.LIST_DIR, exist_ok=True)
     updated = []
     final_counts_by_file = {}
 
@@ -274,7 +275,7 @@ def _update_cidr_files_from_db_impl(
         source_name = item.get("source") or "db"
         final_counts_by_file[file_name] = len(cidrs)
 
-        out_path = os.path.join(_cfg("LIST_DIR"), file_name)
+        out_path = os.path.join(constants.LIST_DIR, file_name)
         content = _render_file_content(file_name, cidrs, source_name)
         with open(out_path, "w", encoding="utf-8") as handle:
             handle.write(content)
@@ -423,7 +424,7 @@ def _estimate_cidr_matches_from_db_impl(
     _report_progress(3, "Подготовка оценки CIDR из БД...")
 
     def _apply_total_route_limit_counts(counts_by_file):
-        route_limit = int(total_cidr_limit) if total_cidr_limit and int(total_cidr_limit) > 0 else _facade_call("_get_openvpn_route_total_cidr_limit")
+        route_limit = int(total_cidr_limit) if total_cidr_limit and int(total_cidr_limit) > 0 else _get_openvpn_route_total_cidr_limit()
         if route_limit is None or int(route_limit) <= 0:
             return dict(counts_by_file), None
 
@@ -846,7 +847,7 @@ def _estimate_cidr_matches_from_db_impl(
         file_quality["status"] = "planned"
         quality_by_file[file_name] = file_quality
 
-    effective_limit = int(total_cidr_limit) if total_cidr_limit and int(total_cidr_limit) > 0 else _facade_call("_get_openvpn_route_total_cidr_limit")
+    effective_limit = int(total_cidr_limit) if total_cidr_limit and int(total_cidr_limit) > 0 else _get_openvpn_route_total_cidr_limit()
     pre_limit_counts_by_file = {
         item["file"]: len(item.get("cidrs") or [])
         for item in planned_estimated

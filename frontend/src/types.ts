@@ -2673,10 +2673,6 @@ export interface UserProvisioningUpdate {
   confirm_deletions: boolean
 }
 
-export interface UserProvisioningApply {
-  confirm_deletions: boolean
-}
-
 export interface UserProvisionSummary {
   id: number
   username: string
@@ -2761,19 +2757,6 @@ export interface PresetBase {
   traffic_limit_bytes: number | null
   access_days: number | null
   is_default: boolean
-}
-
-export type PresetCreate = PresetBase
-
-export interface PresetUpdate {
-  name?: string
-  node_ids?: number[]
-  protocols?: string[]
-  config_count?: number
-  config_quota?: number | null
-  traffic_limit_bytes?: number | null
-  access_days?: number | null
-  is_default?: boolean
 }
 
 export interface PresetResponse extends PresetBase {

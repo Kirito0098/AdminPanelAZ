@@ -3,52 +3,9 @@ import ipaddress
 import logging
 
 from app.services.cidr.constants import IP_FILES
-from app.services.cidr.pipeline.constants import (
-    SOURCE_FORMATS_WITH_GEO,
-)
-from app.services.cidr.pipeline.facade_compat import call as _facade_call
 from app.services.cidr.pipeline.parsers import _normalize_cidrs
 
 logger = logging.getLogger(__name__)
-
-
-def _collect_cidrs_from_sources(sources, effective_scopes, strict_geo_filter=False):
-    merged_cidrs = set()
-    source_names = []
-    errors = []
-    has_non_geo_results = False
-
-    for source in sources:
-        source_format = source.get("format")
-        if "all" in effective_scopes and has_non_geo_results and source_format in SOURCE_FORMATS_WITH_GEO:
-            continue
-
-        try:
-            text_data = _facade_call("_download_text", source["url"])
-            cidrs = _facade_call(
-                "_extract_cidrs",
-                text_data,
-                source_format,
-                effective_scopes,
-                strict_geo_filter=strict_geo_filter,
-            )
-            if not cidrs:
-                if "all" not in effective_scopes:
-                    joined_scopes = ",".join(effective_scopes)
-                    raise ValueError(f"empty cidr payload for region scopes {joined_scopes}")
-                raise ValueError("empty cidr payload")
-
-            merged_cidrs.update(cidrs)
-            source_names.append(source["name"])
-            if source_format not in SOURCE_FORMATS_WITH_GEO:
-                has_non_geo_results = True
-        except Exception as exc:  # noqa: BLE001
-            errors.append(str(exc))
-
-    if merged_cidrs:
-        return sorted(merged_cidrs), ", ".join(source_names), None
-
-    return [], "", (errors[-1] if errors else "unknown error")
 
 
 def _compress_cidrs_to_limit(cidrs, limit):

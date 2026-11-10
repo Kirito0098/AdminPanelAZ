@@ -77,15 +77,6 @@ export async function fetchNotificationPreferences(): Promise<NotificationPrefer
   return apiFetch<NotificationPreferences>('/notifications/preferences')
 }
 
-export async function saveNotificationPreferences(
-  prefs: NotificationPreferences,
-): Promise<NotificationPreferences> {
-  return apiFetch<NotificationPreferences>('/notifications/preferences', {
-    method: 'PUT',
-    body: JSON.stringify(prefs),
-  })
-}
-
 export interface NotificationFilters {
   category?: NotificationCategory
   level?: NotificationLevel

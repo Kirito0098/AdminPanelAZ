@@ -112,17 +112,11 @@ CIDR_FALLBACK_MIN_CANDIDATE = _read_positive_int_env(
 )
 
 
-def _download_text_impl(url, timeout=45):
-    return _download_cidr_text(url, timeout=timeout, user_agent="AdminAntizapret-CIDR-DB/1.0")
+_CIDR_DB_USER_AGENT = "AdminAntizapret-CIDR-DB/1.0"
 
 
 def _download_text(url, timeout=45):
-    from app.services.cidr import pipeline_facade as facade
-
-    hook = facade._download_text
-    if hook is not _download_text:
-        return hook(url, timeout=timeout)
-    return _download_text_impl(url, timeout=timeout)
+    return _download_cidr_text(url, timeout=timeout, user_agent=_CIDR_DB_USER_AGENT)
 
 
 # ──────────────────────────────────────────────────────────────────────
