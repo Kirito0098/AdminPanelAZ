@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { getWarperDoctor } from '@/api/client'
 import StatusPanel from '@/components/noc/StatusPanel'
+import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -152,7 +153,7 @@ export default function DoctorSection({ health, activeNode, embedded = false, hi
       {hasRun && !running && (
         <div className="mt-4 space-y-4">
           {items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Нет данных диагностики.</p>
+            <EmptyState icon={Stethoscope} title="Нет данных диагностики" className="py-8" />
           ) : (
             <>
               <div

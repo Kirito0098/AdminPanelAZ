@@ -54,7 +54,7 @@ const ACCESS_LABELS = {
 function CommandTable({ title, rows }: { title: string; rows: CommandRow[] }) {
   return (
     <div className="space-y-2">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
+      <p className="text-sm font-semibold">{title}</p>
       <div className="overflow-hidden rounded-lg border">
         <table className="w-full text-sm">
           <thead>
@@ -128,7 +128,7 @@ export default function TelegramBotCommandsGuide() {
       description="Как включить команды, подключить webhook и что умеет бот в личных сообщениях."
     >
       <div className="space-y-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Подключение</p>
+        <p className="text-sm font-semibold">Подключение</p>
         <GuideStep step={1} title="Сохраните токен бота">
           На вкладке <strong>Бот и авторизация</strong> укажите токен и username из @BotFather.
         </GuideStep>

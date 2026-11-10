@@ -53,6 +53,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useProgress } from '@/context/ProgressContext'
 import { formatDateTime } from '@/lib/datetime'
+import { pluralRu } from '@/lib/plural'
 import { cn } from '@/lib/utils'
 import type { BackupEntry, BackupSettings, PreRestoreSnapshot } from '@/types'
 
@@ -698,7 +699,7 @@ export default function BackupTab() {
               <Button variant="outline" className="gap-1.5" onClick={() => void handleSendTelegram()}>
                 <Send size={16} />
                 {includeAntizapretBackup
-                  ? `Отправить в Telegram (${telegramDeliveryPlan.length} файла)`
+                  ? `Отправить в Telegram (${telegramDeliveryPlan.length} ${pluralRu(telegramDeliveryPlan.length, ['файл', 'файла', 'файлов'])})`
                   : 'Отправить в Telegram (1 файл)'}
               </Button>
               <Button onClick={() => void handleCreate()} className="gap-1.5">

@@ -473,9 +473,11 @@ export default function ProvidersTab({
           </p>
 
           {filtered.length === 0 ? (
-            <div className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-              Нет провайдеров по выбранным фильтрам
-            </div>
+            <EmptyState
+              icon={Search}
+              title="Нет провайдеров по выбранным фильтрам"
+              className="py-10"
+            />
           ) : (
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {filtered.map((p) => (

@@ -32,7 +32,7 @@ import {
 } from '@/api/users'
 import { useAuth } from '@/context/AuthContext'
 import AppDialog from '@/components/shared/AppDialog'
-import DocsLink from '@/components/shared/DocsLink'
+import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import ToolbarButton from '@/components/shared/ToolbarButton'
 import MetricCard from '@/components/noc/MetricCard'
 import EmptyState from '@/components/ui/EmptyState'
@@ -572,28 +572,21 @@ export default function UsersPage() {
           </span>
         </button>
       )}
-      <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-gradient-to-br from-primary/5 via-card to-card p-5 shadow-sm">
-        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
-        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary shadow-sm">
-              <Users size={26} strokeWidth={2} />
-            </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">Пользователи</h2>
-                <DocsLink href={DOCS.users} />
-              </div>
-              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                Учётные записи панели и привязка к VPN-клиентам на узлах.
-                {provisioningOn
-                  ? ' Предоставление конфигов включено.'
-                  : ' Модуль выключен в Настройках → Разделы.'}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex w-full flex-wrap gap-2 lg:max-w-2xl lg:justify-end">
+      <PageSectionHeader
+        card
+        icon={Users}
+        title="Пользователи"
+        docsHref={DOCS.users}
+        description={
+          <>
+            Учётные записи панели и привязка к VPN-клиентам на узлах.
+            {provisioningOn
+              ? ' Предоставление конфигов включено.'
+              : ' Модуль выключен в Настройках → Разделы.'}
+          </>
+        }
+        actions={
+          <>
             {provisioningOn && (
               <ToolbarButton
                 variant="outline"
@@ -631,9 +624,9 @@ export default function UsersPage() {
               onClick={() => setCreateOpen(true)}
               disabled={!provisioningOn}
             />
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <MetricCard

@@ -61,7 +61,7 @@ export default function TelegramBotAuthGuide({
       description="Токен и username бота — основа для входа, команд, Mini App и уведомлений в Telegram."
     >
       <div className="space-y-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">С чего начать</p>
+        <p className="text-sm font-semibold">С чего начать</p>
         <GuideStep step={1} title="Создайте бота в @BotFather">
           Команда <code>/newbot</code> → сохраните <strong>токен</strong> и <strong>username</strong> (латиницей, без
           @). Эти же данные вставьте в форму ниже.

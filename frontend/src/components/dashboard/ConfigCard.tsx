@@ -215,7 +215,7 @@ function buildCompactMeta(
   localIp?: string | null,
 ): MetaRow[] {
   const rows: MetaRow[] = [
-    metaRow('created', Calendar, 'Создан', formatCreatedAt(config.created_at)),
+    metaRow('created', Calendar, 'Создан', formatCreatedAt(config.created_at), 'default', true),
   ]
 
   if (config.vpn_type === 'openvpn') {
@@ -226,6 +226,7 @@ function buildCompactMeta(
         'Сертификат',
         formatCertExpiry(config),
         tone === 'expired' ? 'danger' : tone === 'expiring' ? 'warning' : 'default',
+        true,
       ),
     )
   }

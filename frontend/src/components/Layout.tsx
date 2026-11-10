@@ -87,7 +87,7 @@ function SidebarNavLink({
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { user, logout } = useAuth()
-  const { isEnabled } = useFeatureModules()
+  const { isEnabled, loading: featuresLoading, features } = useFeatureModules()
   const { theme, toggleTheme } = useTheme()
   // Живой счётчик из общего SSE-потока: не застывает до перезагрузки страницы.
   const { pendingRequestsCount } = useNotificationCenter()
@@ -123,7 +123,12 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     adminOnly: false,
     featureKey: null,
   }
-  let visibleGroups = getVisibleSidebarNavGroups(user?.role, isEnabled)
+  // Без кэша до загрузки модулей фильтруем пункты как выключенные: иначе на секунду
+  // мигают отключённые разделы и вытесняют остальные за границу сайдбара.
+  const hasCachedFeatures = Object.keys(features).length > 0
+  const navFeatureEnabled = (key: string) =>
+    featuresLoading && !hasCachedFeatures ? false : isEnabled(key)
+  let visibleGroups = getVisibleSidebarNavGroups(user?.role, navFeatureEnabled)
 
   visibleGroups = visibleGroups.map((group) => ({
     ...group,

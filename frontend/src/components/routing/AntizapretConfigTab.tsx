@@ -10,7 +10,7 @@ import { firstNonEmptyRemoteHost } from "@/components/proxy/RemoteHostsCard";
 import OpenVpnPanelTab from "@/components/routing/OpenVpnPanelTab";
 import SettingsAlert from "@/components/settings/SettingsAlert";
 import ConfirmDialog, { ConfirmDialogHost } from "@/components/shared/ConfirmDialog";
-import DocsLink from "@/components/shared/DocsLink";
+import PageSectionHeader from "@/components/shared/PageSectionHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -1095,25 +1095,15 @@ export default function AntizapretConfigTab() {
             />
           ) : (
             <>
-              <div className="relative overflow-hidden rounded-xl border bg-gradient-to-br from-card via-card to-muted/30 p-5 shadow-sm">
-                <div className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-primary/5" />
-                <div className="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                  <div className="flex min-w-0 items-start gap-4">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                      <Globe className="h-6 w-6" />
-                    </div>
-                    <div className="min-w-0">
-                      <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">
-                        Конфиг AntiZapret
-                      </h2>
-                      <p className="mt-1 text-sm text-muted-foreground">
-                        Параметры файла{" "}
-                        <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
-                          setup
-                        </span>{" "}
-                        на активном узле
-                      </p>
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
+              <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-gradient-to-br from-primary/5 via-card to-card p-5 shadow-sm">
+                <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
+                <div className="relative">
+                  <PageSectionHeader
+                    card={false}
+                    icon={Globe}
+                    title="Конфиг AntiZapret"
+                    titleAddon={
+                      <>
                         {nodeName && (
                           <Badge variant="outline" className="gap-1.5">
                             <Server className="h-3 w-3" />
@@ -1138,83 +1128,93 @@ export default function AntizapretConfigTab() {
                             ждёт doall.sh
                           </Badge>
                         )}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex w-full shrink-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap lg:justify-end">
-                    <DocsLink href={DOCS.antizapretConfig} variant="button" />
-                    <div className="grid w-full grid-cols-2 gap-2 sm:contents">
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        className="w-full sm:w-auto"
-                        onClick={() => void load()}
-                        disabled={controlsDisabled}
-                      >
-                        <RefreshCw className="mr-1.5 h-4 w-4" />
-                        Обновить
-                      </Button>
-                      {dirty && (
+                      </>
+                    }
+                    description={
+                      <>
+                        Параметры файла{" "}
+                        <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+                          setup
+                        </span>{" "}
+                        на активном узле
+                      </>
+                    }
+                    docsHref={DOCS.antizapretConfig}
+                    actions={
+                      <>
+                        <div className="grid w-full grid-cols-2 gap-2 sm:contents">
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            className="w-full sm:w-auto"
+                            onClick={() => void load()}
+                            disabled={controlsDisabled}
+                          >
+                            <RefreshCw className="mr-1.5 h-4 w-4" />
+                            Обновить
+                          </Button>
+                          {dirty && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="w-full sm:w-auto"
+                              onClick={resetDraft}
+                              disabled={controlsDisabled}
+                            >
+                              Сбросить
+                            </Button>
+                          )}
+                        </div>
                         <Button
                           type="button"
-                          variant="ghost"
                           size="sm"
                           className="w-full sm:w-auto"
-                          onClick={resetDraft}
-                          disabled={controlsDisabled}
+                          onClick={() => void save()}
+                          disabled={!dirty || controlsDisabled}
                         >
-                          Сбросить
+                          <Save className="mr-1.5 h-4 w-4" />
+                          Сохранить
                         </Button>
-                      )}
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      className="w-full sm:w-auto"
-                      onClick={() => void save()}
-                      disabled={!dirty || controlsDisabled}
-                    >
-                      <Save className="mr-1.5 h-4 w-4" />
-                      Сохранить
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="default"
-                      className="w-full sm:w-auto"
-                      onClick={() => setApplyOpen(true)}
-                      disabled={controlsDisabled || dirty}
-                    >
-                      <Play className="mr-1.5 h-4 w-4" />
-                      Применить
-                    </Button>
-                  </div>
-                </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="default"
+                          className="w-full sm:w-auto"
+                          onClick={() => setApplyOpen(true)}
+                          disabled={controlsDisabled || dirty}
+                        >
+                          <Play className="mr-1.5 h-4 w-4" />
+                          Применить
+                        </Button>
+                      </>
+                    }
+                  />
 
-                <div className="relative mt-5 flex flex-wrap items-center gap-2 border-t pt-4">
-                  <span className="mr-1 text-xs text-muted-foreground">Шаги:</span>
-                  <WorkflowStep
-                    step={1}
-                    label="Изменить"
-                    active={step1Active}
-                    done={step1Done}
-                  />
-                  <ArrowRight className="hidden h-3.5 w-3.5 text-muted-foreground/50 sm:block" />
-                  <WorkflowStep
-                    step={2}
-                    label="Сохранить"
-                    active={step2Active}
-                    done={step2Done}
-                  />
-                  <ArrowRight className="hidden h-3.5 w-3.5 text-muted-foreground/50 sm:block" />
-                  <WorkflowStep
-                    step={3}
-                    label="doall.sh"
-                    active={step3Active}
-                    done={step3Done}
-                  />
+                  <div className="mt-5 flex flex-wrap items-center gap-2 border-t pt-4">
+                    <span className="mr-1 text-xs text-muted-foreground">Шаги:</span>
+                    <WorkflowStep
+                      step={1}
+                      label="Изменить"
+                      active={step1Active}
+                      done={step1Done}
+                    />
+                    <ArrowRight className="hidden h-3.5 w-3.5 text-muted-foreground/50 sm:block" />
+                    <WorkflowStep
+                      step={2}
+                      label="Сохранить"
+                      active={step2Active}
+                      done={step2Done}
+                    />
+                    <ArrowRight className="hidden h-3.5 w-3.5 text-muted-foreground/50 sm:block" />
+                    <WorkflowStep
+                      step={3}
+                      label="doall.sh"
+                      active={step3Active}
+                      done={step3Done}
+                    />
+                  </div>
                 </div>
               </div>
 

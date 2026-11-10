@@ -23,7 +23,9 @@ import {
 } from '@/components/ui/dialog'
 import EmptyState from '@/components/ui/EmptyState'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
+import { pluralRu } from '@/lib/plural'
 import { triggerFileDownload } from '@/lib/triggerFileDownload'
+import { vpnTypeLabel } from '@/lib/vpnTypes'
 import UserSection from './UserSection'
 import UserAccessSection from './UserAccessSection'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
@@ -268,6 +270,8 @@ export default function UserConfigsSection({
     }
   }
 
+  const nodesTotal = card.configs.reduce((total, group) => total + group.nodes.length, 0)
+
   return (
     <div className="space-y-4">
       <div
@@ -316,8 +320,8 @@ export default function UserConfigsSection({
           description="По имени и узлу. Действия выполняются на узле конфига."
           actions={
             <Badge variant="secondary">
-              {card.configs.length} имён ·{' '}
-              {card.configs.reduce((total, group) => total + group.nodes.length, 0)} узлов
+              {card.configs.length} {pluralRu(card.configs.length, ['имя', 'имени', 'имён'])} ·{' '}
+              {nodesTotal} {pluralRu(nodesTotal, ['узел', 'узла', 'узлов'])}
             </Badge>
           }
         >
@@ -378,7 +382,7 @@ export default function UserConfigsSection({
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-sm font-medium">{entry.node_label}</span>
                                   <Badge variant="outline" className="text-[10px]">
-                                    {entry.vpn_type}
+                                    {vpnTypeLabel(entry.vpn_type)}
                                   </Badge>
                                 </div>
                                 <p className="mt-0.5 text-[11px] text-muted-foreground">

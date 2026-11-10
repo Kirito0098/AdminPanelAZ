@@ -103,7 +103,7 @@ export default function TelegramOverviewCards({ tg, loading = false, onNavigate 
           >
             <CardContent className="p-4">
               <div className="flex items-start justify-between gap-2">
-                <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <span className="text-sm font-semibold leading-tight">
                   {card.title}
                 </span>
                 <div className="rounded-md bg-muted p-1.5 text-muted-foreground group-hover:text-primary">

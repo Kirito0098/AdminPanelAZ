@@ -31,6 +31,7 @@ import {
 } from '@/tg-mini/api'
 import { closedAccessCopy } from '@/lib/closedAccess'
 import { formatDate } from '@/lib/datetime'
+import { pluralRu } from '@/lib/plural'
 import { formatBytes } from '@/lib/trafficFormat'
 import { cn } from '@/lib/utils'
 import { copyText, openExternalLink, shareViaTelegram } from '@/tg-mini/lib/shareDownloadLink'
@@ -588,7 +589,7 @@ function UserConfigs() {
                     <div className="min-w-0">
                       <span className="font-medium truncate">{group.name}</span>
                       <p className="text-xs text-muted-foreground">
-                        {visibleNodes.length} узел{visibleNodes.length !== 1 ? 'а' : ''}
+                        {visibleNodes.length} {pluralRu(visibleNodes.length, ['узел', 'узла', 'узлов'])}
                       </p>
                     </div>
                   </div>

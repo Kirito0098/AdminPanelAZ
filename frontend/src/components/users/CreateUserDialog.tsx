@@ -13,7 +13,9 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { formatDate } from '@/lib/datetime'
+import { pluralRu } from '@/lib/plural'
 import { cn } from '@/lib/utils'
+import { vpnTypeLabel } from '@/lib/vpnTypes'
 
 type Step = 'who' | 'access' | 'summary'
 type CreateMode = 'provision' | 'from_existing'
@@ -27,16 +29,6 @@ type ConfigOption = {
   owner_id: number | null
   owner_username?: string | null
   owner_is_admin: boolean
-}
-
-const VPN_TYPE_LABEL: Record<string, string> = {
-  wireguard: 'WireGuard',
-  openvpn: 'OpenVPN',
-  amneziawg2: 'AmneziaWG 2.0',
-}
-
-function vpnTypeLabel(vpnType: string): string {
-  return VPN_TYPE_LABEL[vpnType] ?? vpnType
 }
 
 function configOptionSubtitle(cfg: ConfigOption): string {
@@ -846,9 +838,11 @@ export default function CreateUserDialog({
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">
-                {totalFiles} файл{totalFiles === 1 ? '' : 'а'} на {selectedNodeIds.length} узел{
-                  selectedNodeIds.length !== 1 ? 'ах' : ''
-                } × {selectedProtocols.length} протокол{selectedProtocols.length === 1 ? '' : 'а'}
+                {totalFiles} {pluralRu(totalFiles, ['файл', 'файла', 'файлов'])} на{' '}
+                {selectedNodeIds.length}{' '}
+                {pluralRu(selectedNodeIds.length, ['узле', 'узлах', 'узлах'])} ×{' '}
+                {selectedProtocols.length}{' '}
+                {pluralRu(selectedProtocols.length, ['протокол', 'протокола', 'протоколов'])}
               </p>
             </div>
 
@@ -953,7 +947,9 @@ export default function CreateUserDialog({
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="font-medium">Протоколы:</span>
-                  <span className="text-[11px]">{selectedProtocols.join(', ') || '—'}</span>
+                  <span className="text-[11px]">
+                    {selectedProtocols.map(vpnTypeLabel).join(', ') || '—'}
+                  </span>
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="font-medium">Файлов всего:</span>
@@ -975,11 +971,12 @@ export default function CreateUserDialog({
               <div className="rounded-lg border border-amber-500/25 bg-amber-500/8 p-3 text-xs text-amber-950 dark:text-amber-100">
                 <p className="font-medium">Лимит считается по именам, не по файлам.</p>
                 <p className="mt-1">
-                  {planNames.length} конфиг{planNames.length === 1 ? '' : 'а'} ×{' '}
-                  {selectedProtocols.length} протокола × {selectedNodeIds.length} узел{
-                    selectedNodeIds.length !== 1 ? 'а' : ''
-                  } = {totalFiles} файл{totalFiles === 1 ? '' : 'а'}. Трафик со всех серверов считается в один
-                  общий лимит.
+                  {planNames.length} {pluralRu(planNames.length, ['конфиг', 'конфига', 'конфигов'])} ×{' '}
+                  {selectedProtocols.length}{' '}
+                  {pluralRu(selectedProtocols.length, ['протокол', 'протокола', 'протоколов'])} ×{' '}
+                  {selectedNodeIds.length} {pluralRu(selectedNodeIds.length, ['узел', 'узла', 'узлов'])} ={' '}
+                  {totalFiles} {pluralRu(totalFiles, ['файл', 'файла', 'файлов'])}. Трафик со всех серверов
+                  считается в один общий лимит.
                 </p>
               </div>
             </div>

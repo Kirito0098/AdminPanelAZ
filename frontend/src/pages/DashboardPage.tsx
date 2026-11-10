@@ -28,7 +28,7 @@ import {
   syncConfigs,
 } from '@/api/client'
 import { buildDashboardSummary } from '@/lib/dashboardSummary'
-import DocsLink from '@/components/shared/DocsLink'
+import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import { DOCS } from '@/lib/docsUrls'
 import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
 import CreateClientDialog from '@/components/dashboard/CreateClientDialog'
@@ -375,29 +375,22 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-gradient-to-br from-primary/5 via-card to-card p-5 shadow-sm">
-        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
-        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary shadow-sm">
-              <Shield size={26} strokeWidth={2} />
-            </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">Клиенты</h2>
-                <NodeBadge name={activeNode?.name} status={activeNode?.status} />
-              </div>
-              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                VPN-клиенты на узле{' '}
-                <strong className="font-medium text-foreground">{activeNode?.name ?? summary?.node_name ?? 'не выбран'}</strong>
-                {activeNode?.is_local ? ' (локальный controller)' : activeNode ? ' (удалённый node agent)' : ''}.
-                OpenVPN и WireGuard / AmneziaWG.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex w-full flex-wrap gap-2 lg:max-w-xl lg:justify-end">
-            <DocsLink href={DOCS.configurations} variant="button" />
+      <PageSectionHeader
+        card
+        icon={Shield}
+        title="Клиенты"
+        titleAddon={<NodeBadge name={activeNode?.name} status={activeNode?.status} />}
+        description={
+          <>
+            VPN-клиенты на узле{' '}
+            <strong className="font-medium text-foreground">{activeNode?.name ?? summary?.node_name ?? 'не выбран'}</strong>
+            {activeNode?.is_local ? ' (локальный controller)' : activeNode ? ' (удалённый node agent)' : ''}.
+            OpenVPN и WireGuard / AmneziaWG.
+          </>
+        }
+        docsHref={DOCS.configurations}
+        actions={
+          <>
             {user?.role === 'admin' && (
               <>
                 <ToolbarButton
@@ -457,9 +450,9 @@ export default function DashboardPage() {
                 disabled={quotaReached || haReplicaReadonly}
               />
             )}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <HaReplicaBanner />
 

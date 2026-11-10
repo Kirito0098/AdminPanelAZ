@@ -26,7 +26,7 @@ import {
 } from 'recharts'
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import ResourceHistoryCharts from '@/components/monitoring/ResourceHistoryCharts'
-import DocsLink from '@/components/shared/DocsLink'
+import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import { DOCS } from '@/lib/docsUrls'
 import { Navigate } from 'react-router-dom'
 import {
@@ -454,41 +454,40 @@ export default function ServerMonitorPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Cpu size={22} />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-2xl font-bold tracking-tight">Сервер</h2>
-              <NodeBadge name={activeNode?.name ?? metrics?.node_name} status={activeNode?.status} />
-              {wsConnected ? (
-                <Badge variant="success" className="gap-1 text-[10px]">
-                  <Wifi size={10} />
-                  Live
-                </Badge>
-              ) : (
-                <Badge variant="secondary" className="gap-1 text-[10px]">
-                  <WifiOff size={10} />
-                  WS
-                </Badge>
-              )}
-            </div>
-            <p className="text-sm text-muted-foreground">
-              CPU, RAM, диск и трафик vnStat · Live RX/TX через WebSocket
-              {metrics?.hostname ? ` · ${metrics.hostname}` : ''}
-            </p>
-          </div>
-        </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-          <DocsLink href={DOCS.serverMonitor} variant="button" />
+      <PageSectionHeader
+        card
+        icon={Cpu}
+        title="Сервер"
+        titleAddon={
+          <>
+            <NodeBadge name={activeNode?.name ?? metrics?.node_name} status={activeNode?.status} />
+            {wsConnected ? (
+              <Badge variant="success" className="gap-1 text-[10px]">
+                <Wifi size={10} />
+                Live
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="gap-1 text-[10px]">
+                <WifiOff size={10} />
+                WS
+              </Badge>
+            )}
+          </>
+        }
+        description={
+          <>
+            CPU, RAM, диск и трафик vnStat · Live RX/TX через WebSocket
+            {metrics?.hostname ? ` · ${metrics.hostname}` : ''}
+          </>
+        }
+        docsHref={DOCS.serverMonitor}
+        actions={
           <Button variant="outline" className="w-full sm:w-auto" onClick={handleRefresh} disabled={refreshing}>
             <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
             Обновить
           </Button>
-        </div>
-      </div>
+        }
+      />
 
       <SettingsAlert variant="info" title="Данные активного узла">
         Метрики собираются с <strong>{activeNode?.name ?? metrics?.node_name ?? 'активного узла'}</strong>

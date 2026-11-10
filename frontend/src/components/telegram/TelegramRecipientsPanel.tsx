@@ -73,7 +73,7 @@ export default function TelegramRecipientsPanel({
       <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
         <div className="flex items-center gap-2">
           <Users size={16} className="text-muted-foreground" />
-          <p className="text-sm font-medium">Получатели</p>
+          <p className="text-sm font-semibold">Получатели</p>
         </div>
         <SettingsAlert variant="warning" title="Нет администраторов с Telegram ID">
           Укажите Telegram ID в{' '}
@@ -96,7 +96,7 @@ export default function TelegramRecipientsPanel({
         <div className="space-y-1">
           <div className="flex items-center gap-2">
             <Users size={16} className="text-muted-foreground" />
-            <p className="text-sm font-medium">Получатели</p>
+            <p className="text-sm font-semibold">Получатели</p>
           </div>
           <p className="text-xs text-muted-foreground">
             Отметьте, кто получает алерты и архивы бэкапов. Можно выбрать нескольких.

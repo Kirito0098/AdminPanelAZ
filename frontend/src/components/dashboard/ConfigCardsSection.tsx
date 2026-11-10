@@ -530,7 +530,7 @@ export default function ConfigCardsSection({
         <CardContent className="space-y-4 p-4 sm:p-5">
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ProtocolTab)}>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <TabsList className="h-auto w-full min-w-0 flex-wrap justify-start gap-1 bg-muted/40 p-1 sm:w-auto">
+              <TabsList className="h-auto w-full min-w-0 flex-wrap justify-start gap-1 bg-muted/50 p-1 sm:w-auto">
                 {visibleTabs.includes('openvpn') && (
                   <TabsTrigger value="openvpn" className="gap-1.5 data-[state=active]:shadow-sm">
                     OpenVPN

@@ -102,7 +102,7 @@ export default function TelegramMiniAppGuide({
       )}
 
       <div className="space-y-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Подключение</p>
+        <p className="text-sm font-semibold">Подключение</p>
         <GuideStep step={1} title="Сохраните токен бота">
           На вкладке <strong>Бот и авторизация</strong> укажите токен и username из @BotFather. URL приложения
           формируется автоматически: <code>{miniAppUrl || 'https://ваш-домен/panel/api/tg-mini'}</code>.

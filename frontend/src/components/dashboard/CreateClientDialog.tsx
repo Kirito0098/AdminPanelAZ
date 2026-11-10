@@ -369,7 +369,7 @@ export default function CreateClientDialog({
                 className={fieldClass}
                 value={clientName}
                 onChange={(e) => setClientName(e.target.value)}
-                placeholder="my-client"
+                placeholder="ivan"
                 autoFocus
                 disabled={submitting}
               />

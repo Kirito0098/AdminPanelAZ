@@ -14,6 +14,8 @@ interface PageSectionHeaderProps {
   /** GitHub docs URL — shows «Инструкция» next to actions. */
   docsHref?: string
   docsLabel?: string
+  /** Wrap the header in the standard gradient hero card (off inside a custom card). */
+  card?: boolean
   className?: string
   iconClassName?: string
 }
@@ -30,6 +32,7 @@ export default function PageSectionHeader({
   actions,
   docsHref,
   docsLabel,
+  card = true,
   className,
   iconClassName,
 }: PageSectionHeaderProps) {
@@ -37,7 +40,7 @@ export default function PageSectionHeader({
     <DocsLink href={docsHref} label={docsLabel} variant="button" />
   ) : null
 
-  return (
+  const content = (
     <div
       className={cn(
         'flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between',
@@ -67,6 +70,15 @@ export default function PageSectionHeader({
           {actions}
         </div>
       ) : null}
+    </div>
+  )
+
+  if (!card) return content
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-gradient-to-br from-primary/5 via-card to-card p-5 shadow-sm">
+      <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
+      <div className="relative">{content}</div>
     </div>
   )
 }

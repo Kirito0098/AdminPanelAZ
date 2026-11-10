@@ -43,7 +43,7 @@ export default function TelegramLinkedAccountsPanel({
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <Users size={16} className="text-muted-foreground" />
-              <p className="text-sm font-medium">Привязанные аккаунты</p>
+              <p className="text-sm font-semibold">Привязанные аккаунты</p>
             </div>
             <p className="text-xs text-muted-foreground">
               Пользователи панели, у которых указан Telegram ID — через бота они получают команды и конфиги.
