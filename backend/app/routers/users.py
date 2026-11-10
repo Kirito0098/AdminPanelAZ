@@ -1310,6 +1310,33 @@ def user_history(
     ]
 
 
+_ADMIN_ONLY_FIELD_RULES: tuple[tuple[str, bool, str], ...] = (
+    ("traffic_limit_bytes", True, "лимит трафика"),
+    ("role", False, "роль"),
+    ("is_active", False, "статус"),
+    ("panel_login_enabled", True, "вход в панель"),
+    ("access_until", True, "срок доступа"),
+    ("config_quota", False, "квоту"),
+    ("can_create_configs", False, "право создания конфигов"),
+    ("can_manage_configs", False, "право управления конфигами"),
+    ("visible_vpn_profiles", True, "видимость VPN-профилей"),
+    ("note", True, "заметку"),
+)
+
+
+def _reject_non_admin_field_changes(payload: UserUpdate, *, is_admin: bool) -> None:
+    """403 on admin-only fields; predicates match how each block below decides it was sent."""
+    if is_admin:
+        return
+    for field, by_presence, label in _ADMIN_ONLY_FIELD_RULES:
+        changed = field in payload.model_fields_set if by_presence else getattr(payload, field) is not None
+        if changed:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Только администратор может менять {label}",
+            )
+
+
 @router.patch("/{user_id}", response_model=UserResponse)
 @tg_mini_token_allowed
 def update_user(
@@ -1332,17 +1359,14 @@ def update_user(
             detail="Свой пароль меняется в настройках профиля с вводом текущего пароля",
         )
 
+    _reject_non_admin_field_changes(payload, is_admin=is_admin)
+
     old_telegram_id = user.telegram_id
     access_until_updated = False
     pending_access_until = None
     traffic_limit_requested = "traffic_limit_bytes" in payload.model_fields_set
 
     if traffic_limit_requested:
-        if not is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Только администратор может менять лимит трафика",
-            )
         if payload.traffic_limit_bytes is not None and not get_feature_service().is_enabled(
             "traffic_sync"
         ):
@@ -1355,8 +1379,6 @@ def update_user(
             )
 
     if payload.role is not None:
-        if not is_admin:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять роль")
         if user.role == UserRole.admin and payload.role != UserRole.admin:
             other_admins = (
                 db.query(User)
@@ -1380,18 +1402,11 @@ def update_user(
     if payload.theme is not None:
         user.theme = payload.theme
     if payload.is_active is not None:
-        if not is_admin:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять статус")
         if user.is_active and not payload.is_active:
             invalidate_user_sessions(db, user, reason="disabled", commit=False)
             active_web_session_service.revoke_user_sessions(db, user.username, commit=False)
         user.is_active = payload.is_active
     if "panel_login_enabled" in payload.model_fields_set:
-        if not is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Только администратор может менять вход в панель",
-            )
         if payload.panel_login_enabled is False and user.panel_login_enabled:
             # Existing access/refresh sessions stop working: token_version bumps all JWTs,
             # revoke_user_sessions ends the active web sessions.
@@ -1399,11 +1414,6 @@ def update_user(
             active_web_session_service.revoke_user_sessions(db, user.username, commit=False)
         user.panel_login_enabled = payload.panel_login_enabled
     if "access_until" in payload.model_fields_set:
-        if not is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Только администратор может менять срок доступа",
-            )
         access_until_updated = True
         pending_access_until = payload.access_until
     if payload.password:
@@ -1450,40 +1460,18 @@ def update_user(
                 details=f"target={user.username}",
             )
     if payload.config_quota is not None:
-        if not is_admin:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Только администратор может менять квоту")
         user.config_quota = payload.config_quota
     if payload.can_create_configs is not None:
-        if not is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Только администратор может менять право создания конфигов",
-            )
         user.can_create_configs = payload.can_create_configs
     if payload.can_manage_configs is not None:
-        if not is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Только администратор может менять право управления конфигами",
-            )
         user.can_manage_configs = payload.can_manage_configs
     if "visible_vpn_profiles" in payload.model_fields_set:
-        if not is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Только администратор может менять видимость VPN-профилей",
-            )
         if payload.visible_vpn_profiles is None:
             user.visible_vpn_profiles = None
         else:
             normalized = normalize_policy(payload.visible_vpn_profiles, strict=True)
             user.visible_vpn_profiles = policy_to_json(normalized)
     if "note" in payload.model_fields_set:
-        if not is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Только администратор может менять заметку",
-            )
         user.note = (payload.note or "").strip() or None
 
     cascade_warning: str | None = None
