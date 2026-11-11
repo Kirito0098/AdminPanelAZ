@@ -143,6 +143,11 @@ class DnsServersPayload(BaseModel):
     vpn: int = Field(ge=1, le=2)
 
 
+class ClientSubnetsPayload(BaseModel):
+    alternative_client_ip: bool
+    alternative_fake_ip: bool
+
+
 class OpenVpnTuningPayload(BaseModel):
     duplicate: bool
     logs: bool
@@ -601,6 +606,14 @@ def get_dns_servers(_: None = Depends(verify_api_key)):
 @app.put("/configs/dns-servers")
 def apply_dns_servers(payload: DnsServersPayload, _: None = Depends(verify_api_key)):
     return service.apply_dns_servers(antizapret=payload.antizapret, vpn=payload.vpn)
+
+
+@app.put("/configs/client-subnets")
+def apply_client_subnets(payload: ClientSubnetsPayload, _: None = Depends(verify_api_key)):
+    return service.apply_client_subnets(
+        alternative_client_ip=payload.alternative_client_ip,
+        alternative_fake_ip=payload.alternative_fake_ip,
+    )
 
 
 @app.get("/openvpn/tuning")

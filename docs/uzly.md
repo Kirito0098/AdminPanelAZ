@@ -186,7 +186,7 @@ PROXY_AGENT_ALLOWED_IPS=203.0.113.10/32
 
 **Агент 1.17.0** (панель 2.26.6): эндпоинты `PUT /openvpn/mtu`, `PUT /openvpn/dco`, `PUT /openvpn/protocols` и `POST /openvpn/patch` — правка MTU в OpenVPN/WireGuard-шаблонах, включение DCO, включение/выключение протоколов (`systemctl enable/disable --now`) и сборка патча антицензуры через `patch-openvpn.sh` (до 30 минут). На агенте 1.16.0 и старше эти кнопки отвечают «Обновите node agent панели на узле».
 
-**Агент 1.18.0**: запись в `setup` новых ключей `WARP_ENDPOINT` (свой endpoint встроенного Cloudflare WARP, `host:port`) и `CLEAR_DNS_CACHE` (очистка кеша Knot Resolver при обновлении списков и ночью). На агенте 1.17.0 и старше панель после сохранения покажет предупреждение, что значение не записано.
+**Агент 1.18.0**: запись в `setup` новых ключей `WARP_ENDPOINT` (свой endpoint встроенного Cloudflare WARP, `host:port`) и `CLEAR_DNS_CACHE` (очистка кеша Knot Resolver при обновлении списков и ночью), а также эндпоинт `PUT /configs/client-subnets` — правка подсетей клиентов в `kresd.conf`, `--fake-cidr` в `proxy.py` и `services.env` AZ-AWG2 при смене `ALTERNATIVE_CLIENT_IP` / `ALTERNATIVE_FAKE_IP`. На агенте 1.17.0 и старше панель после сохранения покажет предупреждение, что значение или подсети не применены.
 
 ### SSH-туннель (модуль `node_ssh_transport`, по умолчанию выкл.)
 

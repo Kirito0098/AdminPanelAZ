@@ -11,10 +11,22 @@ from __future__ import annotations
 
 import re
 
+from fastapi import HTTPException, status
+
 CLIENT_PREFIX_ALTERNATIVE = "172"  # ALTERNATIVE_CLIENT_IP=y
 CLIENT_PREFIX_DEFAULT = "10"  # ALTERNATIVE_CLIENT_IP=n
 FAKE_PREFIX_ALTERNATIVE = "198.18"  # ALTERNATIVE_FAKE_IP=y
 FAKE_PREFIX_DEFAULT = "10.30"  # ALTERNATIVE_FAKE_IP=n (IP.30)
+
+
+class ClientSubnetsUnsupportedError(HTTPException):
+    """The node agent on the node predates the client-subnets endpoint."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Обновите node agent панели на узле — смена подсетей клиентов поддерживается с node agent 1.18.0",
+        )
 
 # x.29.* — AntiZapret VPN, x.28.* — полный VPN; третья группа — второй октет.
 _CLIENT_SUBNET_RE = re.compile(r"\b(?:172|10)\.(29|28)\.(\d+)\b")

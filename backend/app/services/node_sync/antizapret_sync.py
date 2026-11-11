@@ -41,13 +41,51 @@ def replicate_antizapret_settings(
         )
         return result
 
-    has_verified_keys = any(p["type"] in VERIFIED_WRITE_TYPES and p["key"] in filtered for p in ANTIZAPRET_PARAMS)
+    has_verified_keys = any(
+        (p["type"] in VERIFIED_WRITE_TYPES or p.get("verify_write")) and p["key"] in filtered
+        for p in ANTIZAPRET_PARAMS
+    )
     restart_replica = needs_antizapret_restart(filtered)
+    subnets_changed = bool({"alternative_client_ip", "alternative_fake_ip"} & set(filtered))
     for replica_node in get_replica_nodes(db, group):
         try:
             adapter = get_adapter_for_node(replica_node)
+            previous_subnets: dict[str, str] = {}
+            if subnets_changed:
+                try:
+                    before = adapter.get_antizapret_settings()
+                except Exception as exc:  # noqa: BLE001 — откат подсетей best-effort
+                    logger.warning("HA antizapret sync: cannot read subnets on %s: %s", replica_node.name, exc)
+                    before = {}
+                previous_subnets = {
+                    key: before[key]
+                    for key in ("alternative_client_ip", "alternative_fake_ip")
+                    if key in before
+                }
             written = adapter.update_antizapret_settings(filtered)
-            if restart_replica and written.get("changes"):
+            changed = bool(written.get("changes"))
+            if subnets_changed:
+                # kresd.conf/proxy.py/services.env setup.sh и update.sh не переписывают:
+                # сначала патчим файлы, иначе рестарт поднимет proxy.py со старым fake-пулом.
+                try:
+                    current = adapter.get_antizapret_settings()
+                    outcome = adapter.apply_client_subnets(
+                        alternative_client_ip=current.get("alternative_client_ip", "y") == "y",
+                        alternative_fake_ip=current.get("alternative_fake_ip", "y") == "y",
+                    )
+                except Exception:
+                    if previous_subnets:
+                        try:
+                            adapter.update_antizapret_settings(previous_subnets)
+                        except Exception as exc:  # noqa: BLE001 — откат best-effort
+                            logger.warning(
+                                "HA antizapret sync: subnet rollback failed on %s: %s",
+                                replica_node.name,
+                                exc,
+                            )
+                    raise
+                changed = changed or bool(outcome.get("changed"))
+            if restart_replica and changed:
                 # up.sh применяет firewall/WARP-ключи только при старте службы antizapret.
                 adapter.restart_service("antizapret")
             if has_verified_keys:

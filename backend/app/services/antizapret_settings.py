@@ -207,6 +207,8 @@ def build_schema() -> list[dict[str, Any]]:
             "title": p.get("title", ""),
             "description": p.get("description", ""),
         }
+        if p.get("verify_write"):
+            item["verify_write"] = True
         if p["type"] == "choice":
             item["options"] = [dict(opt) for opt in p.get("options", [])]
         elif p["type"] == "number":

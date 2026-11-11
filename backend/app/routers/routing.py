@@ -195,6 +195,82 @@ def get_antizapret_settings(_: User = Depends(require_admin), db: Session = Depe
     )
 
 
+def apply_antizapret_runtime_changes(
+    adapter: Any,
+    filtered: dict[str, Any],
+    result: dict[str, Any],
+    *,
+    previous_subnets: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Применить файлы, которые setup.sh/update.sh не переписывают, и один раз перезапустить antizapret.
+
+    Порядок важен: ``antizapret.service`` запускает ``/root/antizapret/proxy.py``. Сначала
+    патчим ``proxy.py`` (``--fake-cidr``), потом перезапускаем службу — иначе новый fake-пул
+    заработает только при следующем перезапуске, а up.sh уже поднимет правила под новые
+    подсети. Один рестарт на всю пачку изменений.
+    """
+    subnets_requested = bool({"alternative_client_ip", "alternative_fake_ip"} & set(filtered))
+    subnets_changed = False
+    subnets_failed = False
+    if subnets_requested:
+        try:
+            current = adapter.get_antizapret_settings()
+            outcome = adapter.apply_client_subnets(
+                alternative_client_ip=current.get("alternative_client_ip", "y") == "y",
+                alternative_fake_ip=current.get("alternative_fake_ip", "y") == "y",
+            )
+            result["warnings"].extend(outcome.get("warnings") or [])
+            result["restarted"] = [*(result.get("restarted") or []), *(outcome.get("restarted") or [])]
+            subnets_changed = bool(outcome.get("changed"))
+        except NotImplementedError:
+            subnets_failed = True
+            result["warnings"].append(
+                "Подсети клиентов переключаются только на VPN-узле: обновите node agent на этом узле"
+            )
+        except Exception as exc:  # noqa: BLE001 — setup уже сохранён, файлы правим best-effort
+            subnets_failed = True
+            detail = getattr(exc, "detail", str(exc))
+            logger.warning("client subnet change failed: %s", detail)
+            result["warnings"].append(f"Подсети клиентов не применены к kresd.conf / proxy.py: {detail}")
+
+    # up.sh читает firewall/WARP-ключи только при старте службы: без рестарта правила не меняются.
+    rolled_back = False
+    if subnets_failed and previous_subnets:
+        try:
+            adapter.update_antizapret_settings(previous_subnets)
+            rolled_back = True
+            if set(filtered) <= {"alternative_client_ip", "alternative_fake_ip"}:
+                result["changes"] = 0
+                result["needs_apply"] = False
+            result["warnings"].append(
+                "Настройки подсетей в setup возвращены как были — после обновления node agent "
+                "переключите их снова"
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort откат
+            logger.warning("client subnet rollback failed: %s", exc)
+            result["warnings"].append(
+                f"Не удалось вернуть прежние подсети в setup: {getattr(exc, 'detail', exc)}"
+            )
+
+    if subnets_failed and not rolled_back:
+        result["warnings"].append(
+            "Служба antizapret не перезапущена, чтобы правила не разошлись с proxy.py: "
+            "обновите node agent на узле и сохраните настройки ещё раз"
+        )
+    elif needs_antizapret_restart(filtered) and (result.get("changes") or subnets_changed):
+        try:
+            adapter.restart_service("antizapret")
+            result["antizapret_restarted"] = True
+        except Exception as exc:  # noqa: BLE001 — настройки уже сохранены, отдаём предупреждение
+            detail = getattr(exc, "detail", str(exc))
+            logger.warning("antizapret restart failed after settings save: %s", detail)
+            result["warnings"].append(
+                f"Служба antizapret не перезапустилась, правила остались прежними: {detail}. "
+                "На удалённом узле нужен node agent 1.15.0 или новее (Узлы → Обновить)."
+            )
+    return result
+
+
 @router.put("/antizapret-settings", response_model=AntizapretSettingsUpdateResponse)
 def put_antizapret_settings(
     payload: dict[str, Any],
@@ -212,6 +288,18 @@ def put_antizapret_settings(
     if host_conflict:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=host_conflict)
     adapter = get_active_adapter(db)
+    previous_subnets: dict[str, str] = {}
+    if {"alternative_client_ip", "alternative_fake_ip"} & set(filtered):
+        try:
+            current = adapter.get_antizapret_settings()
+        except Exception as exc:  # noqa: BLE001 — откат подсетей best-effort
+            logger.warning("cannot read current subnets before save: %s", exc)
+            current = {}
+        previous_subnets = {
+            key: current[key]
+            for key in ("alternative_client_ip", "alternative_fake_ip")
+            if key in current
+        }
     try:
         result = adapter.update_antizapret_settings(filtered)
     except PermissionError as exc:
@@ -221,7 +309,10 @@ def put_antizapret_settings(
 
     https_public_port = env.get_env_value("HTTPS_PUBLIC_PORT", "443") or "443"
     warnings = list(result.get("warnings") or [])
-    if any(field["type"] in VERIFIED_WRITE_TYPES and field["key"] in filtered for field in build_schema()):
+    if any(
+        (field["type"] in VERIFIED_WRITE_TYPES or field.get("verify_write")) and field["key"] in filtered
+        for field in build_schema()
+    ):
         try:
             warnings.extend(setting_write_mismatch_warnings(filtered, adapter.get_antizapret_settings()))
         except Exception as exc:  # noqa: BLE001 — best-effort verification
@@ -231,43 +322,7 @@ def put_antizapret_settings(
             warnings.append(warning)
     result["warnings"] = warnings
 
-    # up.sh читает firewall/WARP-ключи только при старте службы: без рестарта правила не меняются.
-    if needs_antizapret_restart(filtered) and result.get("changes"):
-        try:
-            adapter.restart_service("antizapret")
-            result["antizapret_restarted"] = True
-        except Exception as exc:  # noqa: BLE001 — настройки уже сохранены, отдаём предупреждение
-            detail = getattr(exc, "detail", str(exc))
-            logger.warning("antizapret restart failed after settings save: %s", detail)
-            result["warnings"].append(
-                f"Служба antizapret не перезапустилась, правила остались прежними: {detail}. "
-                "На удалённом узле нужен node agent 1.15.0 или новее (Узлы → Обновить)."
-            )
-
-    # Подсети клиентов и fake-IP: setup.sh и update.sh эти файлы не переписывают из setup,
-    # поэтому панель правит kresd.conf / proxy.py / services.env сама (только локальный узел).
-    if {"alternative_client_ip", "alternative_fake_ip"} & set(filtered) and result.get("changes"):
-        apply_subnets = getattr(adapter, "apply_client_subnets", None)
-        if apply_subnets is None:
-            result["warnings"].append(
-                "Подсети клиентов переключаются только на узле с локальным кодом панели: "
-                "обновите node agent на этом узле"
-            )
-        else:
-            try:
-                current = adapter.get_antizapret_settings()
-                outcome = apply_subnets(
-                    alternative_client_ip=current.get("alternative_client_ip", "y") == "y",
-                    alternative_fake_ip=current.get("alternative_fake_ip", "y") == "y",
-                )
-                result["warnings"].extend(outcome.get("warnings") or [])
-                result["restarted"] = [*(result.get("restarted") or []), *(outcome.get("restarted") or [])]
-            except Exception as exc:  # noqa: BLE001 — setup уже сохранён, файлы правим best-effort
-                detail = getattr(exc, "detail", str(exc))
-                logger.warning("client subnet change failed: %s", detail)
-                result["warnings"].append(
-                    f"Подсети клиентов не применены к kresd.conf / proxy.py: {detail}"
-                )
+    result = apply_antizapret_runtime_changes(adapter, filtered, result, previous_subnets=previous_subnets)
 
     active_node = get_active_node(db)
     group = find_sync_group_for_primary(db, active_node.id)

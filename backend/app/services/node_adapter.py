@@ -30,6 +30,7 @@ from app.services.antizapret_settings import (
 from app.services.cidr.service import CidrRoutingService
 from app.services.file_editor import AGENT_GATED_FILES, KRESD_CUSTOM_UNITS, ConfigFileUnsupportedError
 from app.services.kresd_dns_choice import DnsServersUnsupportedError
+from app.services.kresd_subnets import ClientSubnetsUnsupportedError
 from app.services.openvpn_tuning import OpenVpnTuningUnsupportedError
 from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
@@ -232,6 +233,12 @@ class NodeAdapter(ABC):
 
     def apply_dns_servers(self, *, antizapret: int, vpn: int) -> dict[str, Any]:
         raise NotImplementedError("выбор DNS-серверов доступен только на VPN-узле")
+
+    def apply_client_subnets(
+        self, *, alternative_client_ip: bool, alternative_fake_ip: bool
+    ) -> dict[str, Any]:
+        """Подсети клиентов в kresd.conf, fake-IP в proxy.py и services.env AZ-AWG2."""
+        raise NotImplementedError("подсети клиентов доступны только на VPN-узле")
 
     def get_openvpn_tuning(self) -> dict[str, Any]:
         """Состояние server conf OpenVPN: дубликаты, логи, MTU, DCO, патч."""
@@ -865,6 +872,14 @@ class LocalNodeAdapter(NodeAdapter):
 
     def apply_dns_servers(self, *, antizapret: int, vpn: int) -> dict[str, Any]:
         return self._service.apply_dns_servers(antizapret=antizapret, vpn=vpn)
+
+    def apply_client_subnets(
+        self, *, alternative_client_ip: bool, alternative_fake_ip: bool
+    ) -> dict[str, Any]:
+        return self._service.apply_client_subnets(
+            alternative_client_ip=alternative_client_ip,
+            alternative_fake_ip=alternative_fake_ip,
+        )
 
     def get_openvpn_tuning(self) -> dict[str, Any]:
         return self._service.get_openvpn_tuning()
@@ -1676,6 +1691,21 @@ class RemoteNodeAdapter(NodeAdapter):
 
     def apply_dns_servers(self, *, antizapret: int, vpn: int) -> dict[str, Any]:
         return self._dns_servers_request("PUT", {"antizapret": antizapret, "vpn": vpn})
+
+    def apply_client_subnets(
+        self, *, alternative_client_ip: bool, alternative_fake_ip: bool
+    ) -> dict[str, Any]:
+        payload = {
+            "alternative_client_ip": alternative_client_ip,
+            "alternative_fake_ip": alternative_fake_ip,
+        }
+        try:
+            # Три резолвера и два awg-quick: перезапуск может занять до минуты.
+            return self._request("PUT", "/configs/client-subnets", json=payload, timeout=240.0)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                raise ClientSubnetsUnsupportedError() from exc
+            raise
 
     def _openvpn_request(
         self, method: str, path: str, payload: dict[str, Any] | None = None, *, timeout: float = 60.0

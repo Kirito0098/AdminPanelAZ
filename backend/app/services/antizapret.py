@@ -755,12 +755,14 @@ class AntiZapretService:
 
         warnings: list[str] = []
         restarted: list[str] = []
+        changed = False
         units = ("kresd@1", "kresd@2", "kresd@3")
         conf_path = self.knot_resolver_dir / "kresd.conf"
         if conf_path.is_file():
             previous = conf_path.read_text(encoding="utf-8")
             updated = with_client_subnets(previous, alternative=alternative_client_ip)
             if updated != previous:
+                changed = True
                 conf_path.write_text(updated, encoding="utf-8")
                 failed: str | None = None
                 for unit in units:
@@ -785,6 +787,7 @@ class AntiZapretService:
             before = proxy_path.read_text(encoding="utf-8")
             after = with_fake_cidr(before, alternative=alternative_fake_ip)
             if after != before:
+                changed = True
                 proxy_path.write_text(after, encoding="utf-8")
                 warnings.append(
                     "proxy.py: --fake-cidr обновлён под новый fake-пул. Обновление AntiZapret "
@@ -797,6 +800,7 @@ class AntiZapretService:
             before = awg_env.read_text(encoding="utf-8")
             after = with_awg_services_env(before, alternative=alternative_client_ip)
             if after != before:
+                changed = True
                 awg_env.write_text(after, encoding="utf-8")
                 for iface in ("antizapret-awg", "vpn-awg"):
                     error = self._systemctl_restart(f"awg-quick@{iface}")
@@ -813,7 +817,7 @@ class AntiZapretService:
             "Если в /root/antizapret/custom-up.sh есть правила для 172.29/198.18 — поправьте их под новый режим"
         )
         warnings.append("В AZ-WARP после смены подсетей нажмите «Запустить resync»")
-        return {"warnings": warnings, "restarted": restarted}
+        return {"warnings": warnings, "restarted": restarted, "changed": changed}
 
     @staticmethod
     def _systemctl_restart(unit: str) -> str | None:
