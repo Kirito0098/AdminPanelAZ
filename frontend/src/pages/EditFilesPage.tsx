@@ -132,8 +132,8 @@ const FILE_META: Record<string, FileMeta> = {
     group: 'ips',
   },
   drop_ips: {
-    description: 'Заблокировать исходящие подключения на эти адреса',
-    hint: 'Трафик на эти IP не уйдёт с сервера',
+    description: 'Запретить форвардинг на эти адреса через AntiZapret и полный VPN',
+    hint: 'Трафик к этим IP не пойдёт через VPN — например, подсети Max, VK, Telegram',
     placeholder: '0.0.0.0/0\n\nОдин адрес или диапазон — одна строка',
     icon: ShieldBan,
     group: 'ips',
@@ -147,7 +147,7 @@ const FILE_META: Record<string, FileMeta> = {
   },
   deny_ips: {
     description: 'Запретить входящие подключения с этих адресов',
-    hint: 'Защита от нежелательных клиентов',
+    hint: 'Сканеры и нежелательные клиенты не смогут подключиться',
     placeholder: '198.51.100.0/24\n\nОдин адрес или диапазон — одна строка',
     icon: Ban,
     group: 'ips',
