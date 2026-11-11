@@ -1229,6 +1229,27 @@ class AntiZapretService:
         state = self.get_openvpn_tuning()
         state["applied"] = applied
         state["warnings"] = [*(state.get("warnings") or []), *warnings]
+
+        # Мониторинг и авто-перезапуск читают протоколы из setup, а не из systemd:
+        # выключенный протокол иначе считался бы упавшим, включённый — отсутствующим.
+        from app.services.antizapret_settings import write_protocol_enable_flags
+
+        groups = {
+            "OPENVPN_UDP_ENABLE": ("openvpn-server@antizapret-udp", "openvpn-server@vpn-udp"),
+            "OPENVPN_TCP_ENABLE": ("openvpn-server@antizapret-tcp", "openvpn-server@vpn-tcp"),
+            "WIREGUARD_ENABLE": ("wg-quick@antizapret", "wg-quick@vpn"),
+        }
+        flags: dict[str, str] = {}
+        for env_name, units in groups.items():
+            states = [self._unit_enabled(unit) for unit in units]
+            if any(value is True for value in states):
+                flags[env_name] = "y"
+            elif all(value is False for value in states):
+                flags[env_name] = "n"
+        try:
+            write_protocol_enable_flags(self.base_path / "setup", flags)
+        except OSError as exc:
+            state["warnings"].append(f"setup: не удалось сохранить флаги протоколов: {exc}")
         return state
 
     def apply_openvpn_patch(self, algorithm: int) -> dict[str, Any]:

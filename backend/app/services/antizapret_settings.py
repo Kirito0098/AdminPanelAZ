@@ -278,6 +278,45 @@ def read_protocol_enable_flags(setup_path: Path) -> dict[str, str]:
     return flags
 
 
+_PROTOCOL_FLAG_LINE = re.compile(
+    rf"^({'|'.join(_PROTOCOL_ENABLE_ENVS)})=.*$", re.MULTILINE
+)
+
+
+def write_protocol_enable_flags(setup_path: Path, flags: Mapping[str, str]) -> None:
+    """Persist OPENVPN_UDP/TCP_ENABLE / WIREGUARD_ENABLE after the protocol card toggles units.
+
+    ``setup.sh`` не читает эти ключи при обновлении, но панель читает их для мониторинга и
+    авто-перезапуска OpenVPN: без записи выключенный протокол считался бы упавшим, а включённый
+    на реплике — отсутствующим.
+    """
+    wanted = {
+        key: "y" if normalize_flag(value) == "y" else "n"
+        for key, value in flags.items()
+        if key in _PROTOCOL_ENABLE_ENVS
+    }
+    if not wanted:
+        return
+    try:
+        content = setup_path.read_text(encoding="utf-8")
+    except OSError:
+        content = ""
+
+    def _replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        return f"{key}={wanted[key]}" if key in wanted else match.group(0)
+
+    updated = _PROTOCOL_FLAG_LINE.sub(_replace, content)
+    for key, value in wanted.items():
+        if not re.search(rf"^{key}=", updated, re.MULTILINE):
+            if updated and not updated.endswith("\n"):
+                updated += "\n"
+            updated += f"{key}={value}\n"
+    if updated != content:
+        setup_path.parent.mkdir(parents=True, exist_ok=True)
+        setup_path.write_text(updated, encoding="utf-8")
+
+
 def read_antizapret_settings(setup_path: Path) -> dict[str, str]:
     """Read setup file and return {key: value} for all ANTIZAPRET_PARAMS."""
     try:
