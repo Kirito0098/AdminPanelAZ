@@ -621,8 +621,10 @@ class AntiZapretService:
         """Выбор DNS-резолверов: kresd.conf — что применено, setup — что выбрано в установщике."""
         from app.services.antizapret_settings import read_setup_env_value
         from app.services.kresd_dns_choice import (
-            ANTIZAPRET_DNS_OPTIONS,
             VPN_DNS_OPTIONS,
+            allowed_antizapret_dns,
+            allowed_dns_hint,
+            antizapret_dns_options,
             read_dns_choice,
             vpn_option_for_choice,
             with_dns_choice,
@@ -631,6 +633,8 @@ class AntiZapretService:
         conf_path = self._kresd_conf_path()
         content = conf_path.read_text(encoding="utf-8", errors="replace") if conf_path.is_file() else ""
         applied = read_dns_choice(content)
+        options = antizapret_dns_options(content)
+        allowed = allowed_antizapret_dns(content)
         warnings: list[str] = []
         if applied is not None:
             antizapret, vpn = applied[0], vpn_option_for_choice(applied[0], applied[1])
@@ -640,11 +644,17 @@ class AntiZapretService:
         setup_path = self.base_path / "setup"
         raw_antizapret = read_setup_env_value(setup_path, "ANTIZAPRET_DNS", "")
         raw_vpn = read_setup_env_value(setup_path, "VPN_DNS", "")
-        if raw_antizapret.isdigit() and raw_vpn.isdigit() and 1 <= int(raw_antizapret) <= 7 and int(raw_vpn) in (1, 2):
-            antizapret, vpn = int(raw_antizapret), int(raw_vpn)
-            if applied is not None and with_dns_choice(content, antizapret=antizapret, vpn=vpn) != content:
+        if raw_antizapret.isdigit() and raw_vpn.isdigit() and int(raw_vpn) in (1, 2):
+            if int(raw_antizapret) in allowed:
+                antizapret, vpn = int(raw_antizapret), int(raw_vpn)
+                if applied is not None and with_dns_choice(content, antizapret=antizapret, vpn=vpn) != content:
+                    warnings.append(
+                        "В setup выбрано другое значение, чем применяет резолвер — нажмите «Применить», чтобы совпало"
+                    )
+            elif applied is not None:
                 warnings.append(
-                    "В setup выбрано другое значение, чем применяет резолвер — нажмите «Применить», чтобы совпало"
+                    f"В setup ANTIZAPRET_DNS={raw_antizapret}, но установленный AntiZapret-VPN "
+                    f"поддерживает {allowed_dns_hint(allowed)} — выберите DNS заново"
                 )
 
         return {
@@ -653,7 +663,7 @@ class AntiZapretService:
             "vpn": str(vpn),
             "applied_antizapret": None if applied is None else str(applied[0]),
             "applied_vpn_dns": None if applied is None else str(applied[1]),
-            "antizapret_options": [{"value": value, "label": label} for value, label in ANTIZAPRET_DNS_OPTIONS],
+            "antizapret_options": [{"value": value, "label": label} for value, label in options],
             "vpn_options": [{"value": value, "label": label} for value, label in VPN_DNS_OPTIONS],
             "warnings": warnings,
         }

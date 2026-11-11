@@ -60,6 +60,66 @@ def test_setup_keys_are_rewritten_and_appended():
     assert appended == "ROUTE_ALL=n\nANTIZAPRET_DNS=7\nVPN_DNS=2\n"
 
 
+UPSTREAM_NEW = """\
+local function upstream(dns)
+	if dns == 1 then
+		return russia_dns
+	elseif dns == 2 then
+		return world_dns
+	elseif dns == 3 then
+		return yandex_dns
+	elseif dns == 4 then
+		return google_dns
+	elseif dns == 5 then
+		return adguard_dns
+	elseif dns == 6 then
+		return geohide_dns
+	else
+		panic('Invalid dns value')
+	end
+end
+"""
+
+UPSTREAM_OLD = UPSTREAM_NEW.replace(
+    "\telseif dns == 6 then\n\t\treturn geohide_dns\n",
+    "\telseif dns == 6 then\n\t\treturn comss_dns\n\telseif dns == 7 then\n\t\treturn geohide_dns\n",
+)
+
+
+def test_options_follow_installed_kresd_conf():
+    new = choice.antizapret_dns_options(KRESD_CONF + UPSTREAM_NEW)
+    assert [value for value, _label in new] == ["1", "2", "3", "4", "5", "6"]
+    assert dict(new)["6"].startswith("GeoHide")
+
+    old = choice.antizapret_dns_options(KRESD_CONF + UPSTREAM_OLD)
+    assert [value for value, _label in old] == ["1", "2", "3", "4", "5", "6", "7"]
+    assert dict(old)["6"].startswith("Comss")
+    assert dict(old)["7"].startswith("GeoHide")
+
+
+def test_new_base_rejects_removed_comss_number():
+    conf = KRESD_CONF + UPSTREAM_NEW
+    with pytest.raises(choice.KresdDnsChoiceError):
+        choice.with_dns_choice(conf, antizapret=7, vpn=2)
+    assert "local antizapret_dns = 6" in choice.with_dns_choice(conf, antizapret=6, vpn=2)
+
+
+def test_get_dns_servers_uses_installed_options(tmp_path: Path):
+    knot = tmp_path / "knot-resolver"
+    knot.mkdir()
+    (knot / "kresd.conf").write_text(KRESD_CONF + UPSTREAM_NEW, encoding="utf-8")
+    base = tmp_path / "antizapret"
+    base.mkdir()
+    (base / "setup").write_text(SETUP.replace("ANTIZAPRET_DNS=1", "ANTIZAPRET_DNS=7"), encoding="utf-8")
+    svc = AntiZapretService(base_path=base)
+    svc.knot_resolver_dir = knot
+
+    result = svc.get_dns_servers()
+
+    assert [option["value"] for option in result["antizapret_options"]] == ["1", "2", "3", "4", "5", "6"]
+    assert any("ANTIZAPRET_DNS=7" in warning for warning in result["warnings"])
+
+
 @pytest.fixture
 def service(tmp_path: Path, monkeypatch):
     knot = tmp_path / "knot-resolver"

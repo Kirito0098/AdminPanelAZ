@@ -88,6 +88,20 @@ def normalize_number(param: Mapping[str, Any], value: Any) -> str:
     return str(int(s))
 
 
+def normalize_string(param: Mapping[str, Any], value: Any) -> str:
+    """Validate a string param that has a ``pattern`` (e.g. WARP_ENDPOINT host:port)."""
+    s = "" if value is None else str(value).strip()
+    pattern = param.get("pattern")
+    if not s or not pattern:
+        return s
+    if re.fullmatch(pattern, s) is None:
+        raise ValueError(f"{param['env']}: {param.get('pattern_hint', 'недопустимое значение')}")
+    port = s.rsplit(":", 1)[-1]
+    if port.isdigit() and not 1 <= int(port) <= 65535:
+        raise ValueError(f"{param['env']}: порт должен быть от 1 до 65535")
+    return s
+
+
 def normalize_choice_settings(settings: Mapping[str, str]) -> dict[str, str]:
     """Map legacy y/n of choice params (e.g. from an old node agent) to numeric values."""
     result = dict(settings)
@@ -124,9 +138,35 @@ def setting_write_mismatch_warnings(requested: Mapping[str, Any], actual: Mappin
     actual = normalize_choice_settings(actual)
     for p in ANTIZAPRET_PARAMS:
         key = p["key"]
-        if p["type"] not in VERIFIED_WRITE_TYPES or key not in requested:
+        if p["type"] not in VERIFIED_WRITE_TYPES and not p.get("verify_write"):
+            continue
+        if key not in requested:
             continue
         env = p["env"]
+        if p["type"] == "string":
+            try:
+                wanted = normalize_string(p, requested[key])
+            except ValueError:
+                continue
+            if not wanted:
+                continue
+            got = actual.get(key)
+            if got != wanted:
+                warnings.append(
+                    f"{env}: на узле записано «{got or '—'}» вместо «{wanted}». "
+                    "Обновите node agent панели на узле и сохраните ещё раз."
+                )
+            continue
+        if p["type"] == "flag":
+            wanted = normalize_flag(requested[key])
+            got = actual.get(key)
+            # An old agent drops the unknown key entirely; that only matters when the user turns it on.
+            if got != wanted and not (got is None and wanted == "n"):
+                warnings.append(
+                    f"{env}: на узле записано «{got or 'нет'}» вместо «{wanted}». "
+                    "Обновите node agent панели на узле и сохраните ещё раз."
+                )
+            continue
         if p["type"] == "number":
             try:
                 wanted = normalize_number(p, requested[key])
@@ -173,6 +213,8 @@ def build_schema() -> list[dict[str, Any]]:
             item["min"] = p["min"]
             item["max"] = p["max"]
             item["placeholder"] = p.get("placeholder", "")
+        elif p["type"] == "string" and p.get("placeholder"):
+            item["placeholder"] = p["placeholder"]
         schema.append(item)
     return schema
 
@@ -326,7 +368,7 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
         elif p["type"] == "number":
             desired[env] = normalize_number(p, v)
         else:
-            desired[env] = str(v).strip()
+            desired[env] = normalize_string(p, v)
 
     if not desired:
         return {

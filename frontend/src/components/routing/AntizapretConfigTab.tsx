@@ -145,6 +145,7 @@ const FIELD_SECTIONS: {
       "ANTIZAPRET_WARP",
       "VPN_WARP",
       "WARP_PROTECTION",
+      "warp_endpoint",
       "WARP_MTU",
       "DNS_WARP",
       "reconnect_warp",
@@ -173,9 +174,9 @@ const FIELD_SECTIONS: {
   },
   {
     title: "Очистка списков",
-    description: "Фильтрация доменов при авто-обновлении списков маршрутизации",
+    description: "Фильтрация доменов и очистка DNS-кеша при авто-обновлении списков",
     icon: ListFilter,
-    keys: ["clear_hosts"],
+    keys: ["clear_hosts", "clear_dns_cache"],
   },
 ];
 
@@ -367,7 +368,7 @@ function StringSettingRow({
           id={id}
           value={value}
           disabled={disabled}
-          placeholder={field.env}
+          placeholder={field.placeholder || field.env}
           onChange={(e) => onChange(e.target.value)}
         />
       )}

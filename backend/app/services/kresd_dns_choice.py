@@ -18,6 +18,7 @@ import re
 from fastapi import HTTPException, status
 
 # Labels follow setup.sh prompts so the panel and the installer describe the same choice.
+# Fallback for kresd.conf without the ``upstream()`` function (very old AntiZapret-VPN).
 ANTIZAPRET_DNS_OPTIONS: tuple[tuple[str, str], ...] = (
     ("1", "MSK-IX + NSDI + BI.ZONE + TransTeleCom (по умолчанию, для РФ)"),
     ("2", "Cloudflare + Quad9 + ControlD + UltraDNS"),
@@ -33,8 +34,50 @@ VPN_DNS_OPTIONS: tuple[tuple[str, str], ...] = (
 )
 DEFAULT_VPN_DNS = 2
 
+# AntiZapret-VPN 09.11.2026 убрал Comss и сдвинул GeoHide с 7 на 6. Число вариантов
+# читаем из установленного kresd.conf: иначе панель либо запишет 7 в новую базу
+# (kresd падает в panic('Invalid dns value')), либо спрячет GeoHide на старой.
+_DNS_LABELS: dict[str, str] = {
+    "russia_dns": "MSK-IX + NSDI + BI.ZONE + TransTeleCom (по умолчанию, для РФ)",
+    "world_dns": "Cloudflare + Quad9 + ControlD + UltraDNS",
+    "yandex_dns": "Яндекс (EDNS Client Subnet)",
+    "google_dns": "Google (EDNS Client Subnet)",
+    "adguard_dns": "AdGuard (блокировка рекламы и фишинга)",
+    "comss_dns": "Comss (доп. проксирование)",
+    "geohide_dns": "GeoHide (доп. проксирование)",
+}
+_DNS_BRANCH = re.compile(r"dns\s*==\s*(\d+)\s+then\s*\n?\s*return\s+([A-Za-z_][\w.]*)")
+
 _ANTIZAPRET_LINE = re.compile(r"^(local\s+antizapret_dns\s*=\s*)(\d+)([^\n]*)$", re.MULTILINE)
 _VPN_LINE = re.compile(r"^(local\s+vpn_dns\s*=\s*)(\d+)([^\n]*)$", re.MULTILINE)
+
+
+def antizapret_dns_options(content: str | None) -> tuple[tuple[str, str], ...]:
+    """Options that the installed ``kresd.conf`` really understands.
+
+    The ``upstream()`` function maps the numbers to resolver sets; parsing it keeps the panel
+    in sync with the base instead of hardcoding the menu of one AntiZapret-VPN release.
+    """
+    branches = {
+        int(number): resolver
+        for number, resolver in _DNS_BRANCH.findall(content or "")
+    }
+    if not branches:
+        return ANTIZAPRET_DNS_OPTIONS
+    return tuple(
+        (str(number), _DNS_LABELS.get(resolver, resolver))
+        for number, resolver in sorted(branches.items())
+    )
+
+
+def allowed_antizapret_dns(content: str | None) -> tuple[int, ...]:
+    return tuple(int(value) for value, _label in antizapret_dns_options(content))
+
+
+def allowed_dns_hint(values: tuple[int, ...]) -> str:
+    if values == tuple(range(1, len(values) + 1)):
+        return f"1–{len(values)}"
+    return ", ".join(str(value) for value in values)
 
 
 class KresdDnsChoiceError(ValueError):
@@ -73,8 +116,9 @@ def effective_vpn_dns(antizapret: int, vpn: int) -> int:
 
 def with_dns_choice(content: str, *, antizapret: int, vpn: int) -> str:
     """Patch the two ``local ..._dns`` lines, leaving every other line exactly as it was."""
-    if not 1 <= antizapret <= len(ANTIZAPRET_DNS_OPTIONS):
-        raise KresdDnsChoiceError(f"ANTIZAPRET_DNS: допустимо 1–{len(ANTIZAPRET_DNS_OPTIONS)}")
+    allowed = allowed_antizapret_dns(content)
+    if antizapret not in allowed:
+        raise KresdDnsChoiceError(f"ANTIZAPRET_DNS: допустимо {allowed_dns_hint(allowed)}")
     if vpn not in (1, 2):
         raise KresdDnsChoiceError("VPN_DNS: допустимо 1–2")
     if read_dns_choice(content) is None:
