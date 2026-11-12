@@ -215,6 +215,35 @@ def test_public_download_returns_attachment(public_client):
     rl.consume.assert_called_once_with("198.51.100.1")
 
 
+def test_public_download_passes_file_id_query_param(public_client):
+    token_row = ClientPortalToken(id=1, token="tok", node_id=1, client_name="alice", revoked_at=None)
+    with (
+        patch("app.routers.public_portal.get_feature_service") as feats,
+        patch("app.routers.public_portal.assert_portal_host"),
+        patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_portal.public_download_rate_limit_service"),
+        patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
+        patch("app.routers.public_portal.read_portal_profile", return_value=("alice.ovpn", b"client\n")) as read_profile,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        ip_svc.get_client_ip.return_value = "198.51.100.1"
+        resp = public_client.get(
+            "/api/public/portal/tok/download",
+            params={"file_id": "f_abc123", "node_id": 2, "client_name": "bob"},
+            headers={"Host": "sub.example.com"},
+        )
+
+    assert resp.status_code == 200
+    read_profile.assert_called_once_with(
+        ANY,
+        token_row,
+        None,
+        file_id="f_abc123",
+        node_id=2,
+        client_name="bob",
+    )
+
+
 def test_link_response_builds_page_url():
     db = MagicMock()
     row = MagicMock()
@@ -449,6 +478,7 @@ def test_public_download_passes_user_target_query_params(public_client):
         ANY,
         user_token,
         "/tmp/bob.ovpn",
+        file_id=None,
         node_id=2,
         client_name="bob",
     )
@@ -1081,3 +1111,110 @@ def test_portal_node_info_loads_rows():
     finally:
         session.close()
         engine.dispose()
+
+
+def test_link_response_includes_expires_at():
+    db = MagicMock()
+    setting = MagicMock()
+    setting.value = "30"
+    db.query.return_value.filter.return_value.first.return_value = setting
+    created_at = datetime(2026, 1, 1, 12, 0)
+    token = ClientPortalToken(
+        token="XxYy",
+        node_id=1,
+        client_name="bob",
+        created_at=created_at,
+        revoked_at=None,
+    )
+    with patch("app.services.client_portal.portal_page_url", return_value="https://sub.example.com/p/XxYy"):
+        payload = portal.link_response(db, token)
+
+    assert payload["expires_at"] == (created_at + timedelta(days=30)).isoformat() + "Z"
+
+
+def test_link_response_expires_at_none_when_ttl_disabled():
+    db = MagicMock()
+    setting = MagicMock()
+    setting.value = "0"
+    db.query.return_value.filter.return_value.first.return_value = setting
+    token = UserPortalToken(
+        token="usr",
+        user_id=7,
+        created_at=datetime(2020, 1, 1),
+        revoked_at=None,
+    )
+    with patch("app.services.client_portal.portal_page_url", return_value="https://sub.example.com/p/usr"):
+        payload = portal.user_link_response(db, token)
+
+    assert payload["expires_at"] is None
+
+
+def test_portal_file_entries_expose_opaque_id_not_absolute_path():
+    files = portal._portal_file_entries(
+        base="https://sub.example.com",
+        token="tok",
+        files_meta=[
+            {
+                "path": "/srv/antizapret/client/openvpn/AZ-test.ovpn",
+                "label": "AZ-test",
+                "filename": "AZ-test.ovpn",
+                "vpn_type": "openvpn",
+            }
+        ],
+    )
+
+    entry = files[0]
+    assert "path" not in entry
+    assert entry["file_id"] == portal._portal_file_id("/srv/antizapret/client/openvpn/AZ-test.ovpn")
+    assert f"file_id={entry['file_id']}" in entry["download_url"]
+    assert "/srv" not in entry["download_url"]
+
+
+def _portal_files_db():
+    db = MagicMock()
+    db.query.return_value.filter.return_value.all.return_value = []
+    return db
+
+
+def test_read_client_portal_profile_downloads_by_file_id():
+    path = "/srv/antizapret/client/openvpn/AZ-test.ovpn"
+    db = _portal_files_db()
+    with (
+        patch("app.services.client_portal._list_files_for_configs", return_value=[{"path": path}]),
+        patch("app.services.client_portal._adapter_for_node_id", return_value=MagicMock()),
+        patch("app.services.client_portal.load_node_remote_hosts", return_value=[]),
+        patch(
+            "app.services.client_portal.read_profile_file_for_delivery",
+            return_value=b"client\n",
+        ) as read_file,
+    ):
+        filename, content = portal._read_client_portal_profile(
+            db,
+            node_id=1,
+            client_name="alice",
+            file_id=portal._portal_file_id(path),
+        )
+
+    assert content == b"client\n"
+    assert filename.endswith(".ovpn")
+    read_file.assert_called_once()
+    assert read_file.call_args.args[1] == path
+
+
+@pytest.mark.parametrize("file_id", ["f_deadbeefdeadbeefdeadbeef", portal._portal_file_id("/srv/other/client.conf")])
+def test_read_client_portal_profile_rejects_foreign_or_forged_file_id(file_id):
+    db = _portal_files_db()
+    with (
+        patch("app.services.client_portal._list_files_for_configs", return_value=[{"path": "/srv/own/client.conf"}]),
+        patch("app.services.client_portal.read_profile_file_for_delivery") as read_file,
+    ):
+        with pytest.raises(HTTPException) as exc:
+            portal._read_client_portal_profile(
+                db,
+                node_id=1,
+                client_name="alice",
+                file_id=file_id,
+            )
+
+    assert exc.value.status_code == 404
+    read_file.assert_not_called()

@@ -1119,6 +1119,7 @@ export interface ClientPortalLinkResponse {
   client_name: string
   url: string
   revoked: boolean
+  expires_at?: string | null
 }
 
 export interface UserPortalLinkResponse {
@@ -1127,6 +1128,7 @@ export interface UserPortalLinkResponse {
   user_id: number
   url: string
   revoked: boolean
+  expires_at?: string | null
 }
 
 export type PortalLinkResponse = ClientPortalLinkResponse | UserPortalLinkResponse
@@ -1782,6 +1784,7 @@ export interface SecuritySettings {
   public_download_enabled: boolean
   portal_domain: string
   portal_title: string
+  portal_link_ttl_days: number
 }
 
 export interface SecretRotationItem {

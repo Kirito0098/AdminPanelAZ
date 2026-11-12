@@ -11,7 +11,7 @@ def mini_app_asset(file_path: str):
 
     asset_path = (root._STATIC_DIR / "assets" / file_path).resolve()
     assets_root = (root._STATIC_DIR / "assets").resolve()
-    if not str(asset_path).startswith(str(assets_root)) or not asset_path.is_file():
+    if not asset_path.is_relative_to(assets_root) or not asset_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     return FileResponse(asset_path)
 

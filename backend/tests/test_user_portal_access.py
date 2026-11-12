@@ -62,3 +62,45 @@ def test_user_portal_payload_has_no_user_id(db):
 
     assert payload["kind"] == "user"
     assert "user_id" not in payload
+
+
+def test_expired_user_link_is_gone(db):
+    from datetime import datetime, timedelta, timezone
+
+    row = _user_link(db, active=True)
+    row.created_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=31)
+    db.commit()
+
+    with pytest.raises(HTTPException) as exc:
+        portal.get_valid_portal_token(db, "u_link")
+
+    assert exc.value.status_code == 410
+    assert exc.value.detail == "Срок действия ссылки истёк"
+
+
+def test_zero_ttl_keeps_user_link_permanent(db):
+    from datetime import datetime, timedelta, timezone
+
+    from app.models import AppSetting
+
+    row = _user_link(db, active=True)
+    row.created_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=400)
+    db.add(AppSetting(key="portal_link_ttl_days", value="0"))
+    db.commit()
+
+    resolved = portal.get_valid_portal_token(db, "u_link")
+
+    assert resolved.kind == "user"
+
+
+def test_user_link_response_includes_expires_at(db):
+    from datetime import datetime
+
+    row = _user_link(db, active=True)
+    row.created_at = datetime(2026, 1, 1, 12, 0)
+    db.commit()
+
+    with patch("app.services.client_portal.portal_page_url", return_value="https://sub.example.com/p/u_link"):
+        payload = portal.user_link_response(db, row)
+
+    assert payload["expires_at"] == "2026-01-31T12:00:00Z"

@@ -408,6 +408,12 @@ async def feature_guard_middleware(request, call_next):
 async def ip_restriction_middleware(request, call_next):
     path = request.url.path
     api = _API_PREFIX
+    # Mini App is opened from mobile networks, so the panel allowlist must not
+    # apply to it. Banned/scanner IPs are still refused; hashed assets are the
+    # only exception, otherwise every JS chunk would cost a DB round-trip.
+    tg_mini_hard_deny_only = path.startswith(f"{api}/tg-mini") and not path.startswith(
+        f"{api}/tg-mini/assets/"
+    )
     exempt = (
         path.startswith(f"{api}/public/")
         or path.startswith("/api/public/")
@@ -431,7 +437,7 @@ async def ip_restriction_middleware(request, call_next):
             with_access_path(settings, "/ip-blocked"),
         )
     )
-    if exempt:
+    if exempt and not tg_mini_hard_deny_only:
         return await call_next(request)
 
     from fastapi.responses import JSONResponse, RedirectResponse
@@ -439,7 +445,9 @@ async def ip_restriction_middleware(request, call_next):
 
     client_ip = ip_restriction_service.get_client_ip(request)
     # Runs on every non-exempt request: SQLite must not block the event loop.
-    verdict = await run_in_threadpool(_ip_restriction_verdict, client_ip, path)
+    verdict = await run_in_threadpool(
+        _ip_restriction_verdict, client_ip, path, hard_deny_only=tg_mini_hard_deny_only
+    )
     if verdict == "hard_deny":
         return JSONResponse(status_code=403, content={"detail": "Доступ заблокирован на уровне сервера"})
     if verdict == "deny":
@@ -450,14 +458,20 @@ async def ip_restriction_middleware(request, call_next):
     return await call_next(request)
 
 
-def _ip_restriction_verdict(client_ip: str, path: str) -> str | None:
-    """``hard_deny``, ``deny`` (attempt recorded) or ``None`` when the IP may pass."""
+def _ip_restriction_verdict(client_ip: str, path: str, *, hard_deny_only: bool = False) -> str | None:
+    """``hard_deny``, ``deny`` (attempt recorded) or ``None`` when the IP may pass.
+
+    ``hard_deny_only`` is used by exempt surfaces (Mini App): a banned IP is
+    refused, but the panel allowlist and denied-access bookkeeping are skipped.
+    """
     from app.database import SessionLocal
 
     db = SessionLocal()
     try:
         if ip_restriction_service.should_hard_deny(db, client_ip):
             return "hard_deny"
+        if hard_deny_only:
+            return None
         ip_settings = ip_restriction_service.get_settings(db)
         if ip_settings.get("ip_restriction_enabled") and not ip_restriction_service.is_ip_allowed(db, client_ip):
             if ip_restriction_service.should_count_denied_access(path):

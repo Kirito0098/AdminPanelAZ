@@ -48,9 +48,10 @@ def portal_meta(token: str, request: Request, db: Session = Depends(get_db)):
 @router.get("/{token}/download")
 def portal_download(
     token: str,
-    path: str,
     request: Request,
     db: Session = Depends(get_db),
+    path: str | None = None,
+    file_id: str | None = None,
     node_id: int | None = None,
     client_name: str | None = None,
 ):
@@ -59,7 +60,14 @@ def portal_download(
     client_ip = ip_restriction_service.get_client_ip(request)
     public_download_rate_limit_service.consume(client_ip)
     row = get_valid_portal_token(db, token)
-    filename, content = read_portal_profile(db, row, path, node_id=node_id, client_name=client_name)
+    filename, content = read_portal_profile(
+        db,
+        row,
+        path,
+        file_id=file_id,
+        node_id=node_id,
+        client_name=client_name,
+    )
     return attachment_response(content, filename)
 
 

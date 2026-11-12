@@ -30,7 +30,7 @@ import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialo
 import UserSection from './UserSection'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
-import { formatDate, parseTimestamp } from '@/lib/datetime'
+import { formatDate, formatDateTime, parseTimestamp } from '@/lib/datetime'
 import type { UserProvisioningCard, UserProvisionSummary } from '@/types'
 import SuspendUserDialog, { type SuspendUserPayload } from './SuspendUserDialog'
 
@@ -248,13 +248,19 @@ function ClientPortalCard({
   const { success } = useNotifications()
   const { confirm, dialogProps } = useConfirmDialog()
   const [url, setUrl] = useState<string | null>(null)
+  const [expiresAt, setExpiresAt] = useState<string | null>(null)
   const [busyKey, setBusyKey] = useState<string | null>(null)
 
-  const applyLink = async (key: string, action: () => Promise<{ url: string }>, message: string) => {
+  const applyLink = async (
+    key: string,
+    action: () => Promise<{ url: string; expires_at?: string | null }>,
+    message: string,
+  ) => {
     setBusyKey(key)
     try {
       const link = await action()
       setUrl(link.url)
+      setExpiresAt(link.expires_at ?? null)
       await navigator.clipboard.writeText(link.url)
       success(message)
     } catch (err) {
@@ -287,9 +293,16 @@ function ClientPortalCard({
       >
         <div className="space-y-3">
           {url ? (
-            <p className="break-all rounded-lg border bg-muted/20 px-3 py-2 font-mono text-xs">
-              {url}
-            </p>
+            <div className="space-y-1">
+              <p className="break-all rounded-lg border bg-muted/20 px-3 py-2 font-mono text-xs">
+                {url}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {expiresAt
+                  ? `Ссылка действует до ${formatDateTime(expiresAt)}`
+                  : 'Срок действия ссылки не ограничен'}
+              </p>
+            </div>
           ) : (
             <p className="text-xs text-muted-foreground">
               Ссылка создаётся один раз и не меняется — отправьте её абоненту в Telegram или

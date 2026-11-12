@@ -12,6 +12,7 @@ from app.services.env_file import EnvFileService
 from app.services.firewall_tools_check import cached_firewall_tools_status
 from app.services.panel_port_firewall import panel_port_firewall
 from app.services.panel_publish_info import is_whitelist_port_firewall_applicable
+from app.services.portal_link_settings import get_portal_link_ttl_days, set_portal_link_ttl_days
 from app.services.public_download_settings import is_public_download_enabled, set_public_download_enabled
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,7 @@ class SecurityService:
             "public_download_enabled": is_public_download_enabled(db),
             "portal_domain": _get(db, "portal_domain", ""),
             "portal_title": _get(db, "portal_title", ""),
+            "portal_link_ttl_days": get_portal_link_ttl_days(db),
             "whitelist_firewall": whitelist_firewall,
             "whitelist_firewall_applicable": applicable,
             "whitelist_firewall_active": False,
@@ -143,6 +145,8 @@ class SecurityService:
             set_portal_domain(db, payload.get("portal_domain"))
         if "portal_title" in payload:
             _set(db, "portal_title", (payload["portal_title"] or "").strip())
+        if "portal_link_ttl_days" in payload:
+            set_portal_link_ttl_days(db, payload["portal_link_ttl_days"])
         if "whitelist_firewall" in payload:
             requested = bool(payload["whitelist_firewall"])
             if requested and not self.is_whitelist_port_firewall_applicable():

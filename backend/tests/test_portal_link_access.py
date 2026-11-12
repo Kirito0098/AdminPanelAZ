@@ -220,3 +220,65 @@ def test_owner_without_manage_flag_keeps_portal_access(factory, monkeypatch):
         db.commit()
 
         assert _active_tokens(db) == {"c_alice"}
+
+
+def _aged_link(db, token: str, *, days_old: int) -> ClientPortalToken:
+    from datetime import datetime, timedelta, timezone
+
+    row = ClientPortalToken(
+        token=token,
+        node_id=1,
+        client_name="alice",
+        created_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days_old),
+    )
+    db.add(row)
+    db.commit()
+    return row
+
+
+def test_fresh_client_link_resolves(factory):
+    from app.services.client_portal import get_valid_portal_token
+
+    with factory() as db:
+        _aged_link(db, "c_fresh", days_old=1)
+
+        resolved = get_valid_portal_token(db, "c_fresh")
+
+    assert resolved.kind == "client"
+
+
+def test_expired_client_link_is_gone(factory):
+    from app.services.client_portal import get_valid_portal_token
+
+    with factory() as db:
+        _aged_link(db, "c_old", days_old=31)
+
+        with pytest.raises(HTTPException) as exc:
+            get_valid_portal_token(db, "c_old")
+
+    assert exc.value.status_code == 410
+    assert exc.value.detail == "Срок действия ссылки истёк"
+
+
+def test_zero_ttl_makes_client_link_permanent(factory):
+    from app.models import AppSetting
+    from app.services.client_portal import get_valid_portal_token
+
+    with factory() as db:
+        db.add(AppSetting(key="portal_link_ttl_days", value="0"))
+        db.commit()
+        _aged_link(db, "c_old", days_old=400)
+
+        resolved = get_valid_portal_token(db, "c_old")
+
+    assert resolved.kind == "client"
+
+
+def test_portal_link_ttl_normalization():
+    from app.services.portal_link_settings import normalize_portal_link_ttl_days
+
+    assert normalize_portal_link_ttl_days("45") == 45
+    assert normalize_portal_link_ttl_days(0) == 0
+    assert normalize_portal_link_ttl_days("-5") == 30
+    assert normalize_portal_link_ttl_days("garbage") == 30
+    assert normalize_portal_link_ttl_days("99999") == 3650

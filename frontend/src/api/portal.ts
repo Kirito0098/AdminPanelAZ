@@ -2,7 +2,7 @@ import { apiFetch } from './http'
 import type { ClosedAccessView, PortalLinkResponse } from '@/types'
 
 export interface PortalFileMeta {
-  path: string
+  file_id: string
   label: string
   filename: string
   vpn_type: string

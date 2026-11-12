@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import User
+from app.services.tg_mini_auth_rate_limit import tg_mini_auth_rate_limit_service
 
 from .helpers import TelegramAuthRequest
 
@@ -17,6 +18,10 @@ router = APIRouter()
 def tg_auth(payload: TelegramAuthRequest, request: Request, db: Session = Depends(get_db)):
     from app.routers import tg_mini as root
 
+    # Counted before HMAC verification and any DB lookup: every attempt with a
+    # valid signature but unknown account notifies the admins, so an
+    # unauthenticated caller must not be able to drive that at will.
+    tg_mini_auth_rate_limit_service.consume(root.ip_restriction_service.get_client_ip(request))
     token = root._get_bot_token(db)
     if not token:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Telegram bot не настроен")

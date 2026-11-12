@@ -105,6 +105,7 @@ class SecuritySettingsUpdate(BaseModel):
     public_download_enabled: bool | None = None
     portal_domain: str | None = None
     portal_title: str | None = Field(default=None, max_length=64)
+    portal_link_ttl_days: int | None = Field(default=None, ge=0, le=3650)
 
 
 class EventWebhookSettingsUpdate(BaseModel):

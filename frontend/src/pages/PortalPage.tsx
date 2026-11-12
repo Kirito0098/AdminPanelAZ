@@ -408,7 +408,7 @@ function ProfileFileList({
   return (
     <>
       {files.map((file) => (
-        <div key={file.path} className="space-y-3 rounded-xl border border-white/10 bg-black/20 p-3.5">
+        <div key={file.file_id} className="space-y-3 rounded-xl border border-white/10 bg-black/20 p-3.5">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-slate-100">{file.label}</p>
             <p className="truncate text-xs text-slate-400">{file.filename}</p>

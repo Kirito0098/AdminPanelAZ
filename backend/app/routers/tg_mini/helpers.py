@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
@@ -23,7 +23,9 @@ _STATIC_DIR = Path(__file__).resolve().parents[2] / "static" / "tg_mini"
 
 
 class TelegramAuthRequest(BaseModel):
-    init_data: str
+    # HMAC is computed over the raw string, and nginx accepts bodies up to 32 MB:
+    # cap initData at the boundary instead of hashing an arbitrary payload.
+    init_data: str = Field(min_length=1, max_length=8192)
 
 
 class SendConfigV2Request(BaseModel):

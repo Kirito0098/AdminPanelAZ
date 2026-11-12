@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import secrets
@@ -36,6 +37,7 @@ from app.services.node_manager import get_active_node, get_adapter_for_node
 from app.services.node_sync.groups import find_sync_group_containing_node
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
+from app.services.portal_link_settings import get_portal_link_ttl_days, portal_link_expires_at
 from app.services.ssh_tunnel_pool import SshTunnelError
 from app.services.traffic_limit import human_bytes
 from app.services.vpn_profile_visibility import (
@@ -653,8 +655,15 @@ def get_valid_portal_token(db: Session, token: str) -> PortalTokenResolution:
         kind, row = active[0]
     else:
         kind, row = candidates[0]
-        if row.revoked_at is not None:
-            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Ссылка отозвана")
+
+    if row.revoked_at is not None:
+        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Ссылка отозвана")
+
+    if row.created_at is not None:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        expires_at = portal_link_expires_at(row.created_at, get_portal_link_ttl_days(db))
+        if expires_at is not None and now >= expires_at:
+            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Срок действия ссылки истёк")
 
     if kind == "client":
         return PortalTokenResolution(kind="client", client_row=row)
@@ -918,15 +927,20 @@ def _portal_brand_title(db: Session) -> str:
     return _setting_value(db, "portal_title") or "Подключение"
 
 
+def _portal_file_id(path: str) -> str:
+    """Opaque public identifier for an allowed profile path (the path itself stays internal)."""
+    return "f_" + hashlib.sha256(path.encode("utf-8")).hexdigest()[:24]
+
+
 def _portal_download_url(
     *,
     base: str,
     token: str,
-    path: str,
+    file_id: str,
     node_id: int | None = None,
     client_name: str | None = None,
 ) -> str:
-    params: dict[str, str | int] = {"path": path}
+    params: dict[str, str | int] = {"file_id": file_id}
     if node_id is not None:
         params["node_id"] = node_id
     if client_name:
@@ -944,15 +958,16 @@ def _portal_file_entries(
 ) -> list[dict]:
     files = []
     for item in files_meta:
+        file_id = _portal_file_id(item["path"])
         download_url = _portal_download_url(
             base=base,
             token=token,
-            path=item["path"],
+            file_id=file_id,
             node_id=node_id,
             client_name=client_name,
         )
         entry = {
-            "path": item["path"],
+            "file_id": file_id,
             "label": item["label"],
             "filename": item["filename"],
             "vpn_type": item["vpn_type"],
@@ -1164,10 +1179,14 @@ def _read_client_portal_profile(
     *,
     node_id: int,
     client_name: str,
-    path: str,
+    path: str | None = None,
+    file_id: str | None = None,
 ) -> tuple[str, str | bytes]:
     path = (path or "").strip()
-    if not path or ".." in path:
+    file_id = (file_id or "").strip()
+    if not path and not file_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Не указан файл")
+    if path and ".." in path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный путь")
     configs = (
         db.query(VpnConfig)
@@ -1179,8 +1198,15 @@ def _read_client_portal_profile(
         .all()
     )
     with node_request_timeout_cap(PORTAL_NODE_TIMEOUT_SECONDS):
-        allowed = {item["path"] for item in _list_files_for_configs(db, configs)}
-        if path not in allowed:
+        allowed_files = _list_files_for_configs(db, configs)
+        if file_id:
+            path = next(
+                (item["path"] for item in allowed_files if _portal_file_id(item["path"]) == file_id),
+                None,
+            )
+            if path is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
+        elif path not in {item["path"] for item in allowed_files}:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
         adapter = _adapter_for_node_id(db, node_id)
         hosts = load_node_remote_hosts(db, node_id)
@@ -1192,8 +1218,9 @@ def _read_client_portal_profile(
 def read_portal_profile(
     db: Session,
     resolution: PortalTokenResolution,
-    path: str,
+    path: str | None = None,
     *,
+    file_id: str | None = None,
     node_id: int | None = None,
     client_name: str | None = None,
 ) -> tuple[str, str | bytes]:
@@ -1205,6 +1232,7 @@ def read_portal_profile(
             node_id=resolution.client_row.node_id,
             client_name=resolution.client_row.client_name,
             path=path,
+            file_id=file_id,
         )
 
     if resolution.user_row is None:
@@ -1222,6 +1250,7 @@ def read_portal_profile(
             node_id=target_node_id,
             client_name=target_client_name,
             path=path,
+            file_id=file_id,
         )
     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Клиент не найден")
 
@@ -1285,6 +1314,11 @@ def redeem_public_portal_code(db: Session, resolution: PortalTokenResolution, *,
     raise ValueError(last_retryable_error or "Профили пользователя не найдены")
 
 
+def _link_expires_at(db: Session, row: ClientPortalToken | UserPortalToken) -> str | None:
+    expires_at = portal_link_expires_at(row.created_at, get_portal_link_ttl_days(db))
+    return expires_at.isoformat() + "Z" if expires_at else None
+
+
 def link_response(db: Session, row: ClientPortalToken) -> dict:
     return {
         "kind": "client",
@@ -1293,6 +1327,7 @@ def link_response(db: Session, row: ClientPortalToken) -> dict:
         "client_name": row.client_name,
         "url": portal_page_url(db, row.token),
         "revoked": row.revoked_at is not None,
+        "expires_at": _link_expires_at(db, row),
     }
 
 
@@ -1303,4 +1338,5 @@ def user_link_response(db: Session, row: UserPortalToken) -> dict:
         "user_id": row.user_id,
         "url": portal_page_url(db, row.token),
         "revoked": row.revoked_at is not None,
+        "expires_at": _link_expires_at(db, row),
     }

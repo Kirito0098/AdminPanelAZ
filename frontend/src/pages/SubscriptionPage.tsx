@@ -4,6 +4,8 @@ import { Globe, KeyRound, Loader2, Settings2, Ticket, Trash2, Users } from 'luci
 import {
   ApiError,
   getPortalPublishStatus,
+  getSecuritySettings,
+  updateSecuritySettings,
 } from '@/api/client'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -14,6 +16,8 @@ import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
@@ -28,7 +32,12 @@ import { cn } from '@/lib/utils'
 import type { PortalPublishStatus, UnlockCodeRecord } from '@/types'
 import { getUnlockCodes, revokeUnlockCode, type UnlockCodeProtocol } from '@/api/unlockCodes'
 
-export default function SubscriptionPage() {
+type SubscriptionPageProps = {
+  /** Внутри вкладки «Портал и коды»: без своего заголовка и внешних отступов страницы. */
+  embedded?: boolean
+}
+
+export default function SubscriptionPage({ embedded = false }: SubscriptionPageProps) {
   const { success, error: notifyError } = useNotifications()
   const { confirm, dialogProps } = useConfirmDialog()
   const { isEnabled } = useFeatureModules()
@@ -44,6 +53,8 @@ export default function SubscriptionPage() {
   const [unlockCodesLoading, setUnlockCodesLoading] = useState(false)
   const [unlockCodesBusyId, setUnlockCodesBusyId] = useState<number | null>(null)
   const [unlockCreateOpen, setUnlockCreateOpen] = useState(false)
+  const [linkTtlDays, setLinkTtlDays] = useState(30)
+  const [linkTtlSaving, setLinkTtlSaving] = useState(false)
 
   useEffect(() => {
     if (!clientPortalEnabled) {
@@ -59,6 +70,13 @@ export default function SubscriptionPage() {
         notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки')
       })
       .finally(() => setLoading(false))
+  }, [clientPortalEnabled, notifyError])
+
+  useEffect(() => {
+    if (!clientPortalEnabled) return
+    void getSecuritySettings()
+      .then((settings) => setLinkTtlDays(settings.portal_link_ttl_days))
+      .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки настроек портала'))
   }, [clientPortalEnabled, notifyError])
 
   useEffect(() => {
@@ -112,20 +130,35 @@ export default function SubscriptionPage() {
     })
   }
 
+  const saveLinkTtl = async () => {
+    setLinkTtlSaving(true)
+    try {
+      const updated = await updateSecuritySettings({ portal_link_ttl_days: linkTtlDays })
+      setLinkTtlDays(updated.portal_link_ttl_days)
+      success('Срок жизни ссылки портала сохранён')
+    } catch (err) {
+      notifyError(err instanceof ApiError ? err.message : 'Не удалось сохранить срок жизни ссылки')
+    } finally {
+      setLinkTtlSaving(false)
+    }
+  }
+
   const portalModeBlocked = portalStatus?.portal_mode_supported === false
   const portalAccessUrl = portalStatus?.portal_access_url ?? ''
   if (loading && clientPortalEnabled) {
-    return <Spinner label="Загрузка…" className="py-12" />
+    return <Spinner label="Загрузка…" className={embedded ? 'py-8' : 'py-12'} />
   }
 
   return (
-    <div className="space-y-6">
-      <PageSectionHeader
-        icon={Ticket}
-        title="Подписка"
-        description="Клиентский портал и unlock-ключи продления доступа"
-        docsHref={DOCS.subscription}
-      />
+    <div className={embedded ? 'space-y-4' : 'space-y-6'}>
+      {!embedded && (
+        <PageSectionHeader
+          icon={Ticket}
+          title="Подписка"
+          description="Клиентский портал и unlock-ключи продления доступа"
+          docsHref={DOCS.subscription}
+        />
+      )}
 
       {clientPortalEnabled && (
         <Card className="shadow-sm">
@@ -188,6 +221,30 @@ export default function SubscriptionPage() {
                       {portalAccessUrl || 'не настроен'}
                     </p>
                   </div>
+                </div>
+
+                <div className="flex flex-col gap-3 rounded-xl border bg-muted/20 p-3 sm:flex-row sm:items-end sm:justify-between">
+                  <div className="max-w-xs space-y-1.5">
+                    <Label htmlFor="portal-link-ttl" className="text-xs">
+                      Срок жизни ссылки портала, дней (0 — бессрочно)
+                    </Label>
+                    <Input
+                      id="portal-link-ttl"
+                      type="number"
+                      min={0}
+                      max={3650}
+                      value={linkTtlDays}
+                      onChange={(e) => setLinkTtlDays(Number(e.target.value))}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void saveLinkTtl()}
+                    disabled={linkTtlSaving}
+                  >
+                    {linkTtlSaving ? 'Сохранение…' : 'Сохранить'}
+                  </Button>
                 </div>
 
                 {portalStatus.warnings.length > 0 ? (
