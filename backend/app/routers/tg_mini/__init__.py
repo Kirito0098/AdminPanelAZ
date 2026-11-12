@@ -16,6 +16,7 @@ from .configs import mini_config_files, mini_configs, mini_send_config, router a
 from .dashboard import mini_dashboard, router as dashboard_router
 from .me_configs import router as me_configs_router
 from .me_redeem import router as me_redeem_router
+from .messages import router as messages_router
 from .helpers import (
     SendConfigV2Request,
     TelegramAuthRequest,
@@ -52,6 +53,7 @@ router.include_router(dashboard_router)
 router.include_router(configs_router)
 router.include_router(me_configs_router)
 router.include_router(me_redeem_router)
+router.include_router(messages_router)
 router.include_router(settings_router)
 router.add_api_route("/assets/{file_path:path}", mini_app_asset, include_in_schema=False, methods=["GET"])
 router.add_api_route("", mini_app_page, methods=["GET"])
@@ -94,6 +96,7 @@ __all__ = [
     "mini_update_admin_notify",
     "mini_update_telegram_settings",
     "mini_visible_vpn_profiles",
+    "messages_router",
     "router",
     "settings",
     "tg_auth",

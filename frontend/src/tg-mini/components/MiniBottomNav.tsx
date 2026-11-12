@@ -3,13 +3,15 @@ import {
   FileKey,
   KeyRound,
   MessageSquare,
+  MessagesSquare,
   Settings,
   Users,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { getRequestsCount } from '@/api/users'
+import { getTgMeMessagesUnread, getTgMessagesUnreadTotal } from '@/tg-mini/api'
 
 interface MiniTabItem {
   to: string
@@ -19,14 +21,25 @@ interface MiniTabItem {
   end?: boolean
   featureKey?: string
   badge?: number
+  badgeLabel?: string
 }
 
-const USER_TABS: MiniTabItem[] = [
-  { to: '/', label: 'Конфиги', icon: FileKey, end: true },
-  { to: '/settings', label: 'Настройки', icon: Settings },
-]
+function userTabs(unreadMessages: number): MiniTabItem[] {
+  return [
+    { to: '/', label: 'Конфиги', icon: FileKey, end: true },
+    {
+      to: '/messages',
+      label: 'Чат',
+      icon: MessagesSquare,
+      badge: unreadMessages,
+      badgeLabel: 'непрочитанных',
+      featureKey: 'user_messaging',
+    },
+    { to: '/settings', label: 'Настройки', icon: Settings },
+  ]
+}
 
-function adminTabs(pendingRequests: number): MiniTabItem[] {
+function adminTabs(pendingRequests: number, unreadMessages: number): MiniTabItem[] {
   return [
     { to: '/', label: 'Конфиги', icon: FileKey, end: true },
     { to: '/clients', label: 'Клиенты', icon: Users },
@@ -36,6 +49,15 @@ function adminTabs(pendingRequests: number): MiniTabItem[] {
       shortLabel: 'Заявки',
       icon: MessageSquare,
       badge: pendingRequests,
+    },
+    {
+      to: '/messages',
+      label: 'Чат',
+      shortLabel: 'Чат',
+      icon: MessagesSquare,
+      badge: unreadMessages,
+      badgeLabel: 'непрочитанных',
+      featureKey: 'user_messaging',
     },
     { to: '/unlock-codes', label: 'Коды', shortLabel: 'Коды', icon: KeyRound, featureKey: 'unlock_codes' },
     { to: '/settings', label: 'Настройки', shortLabel: 'Настр.', icon: Settings },
@@ -54,9 +76,12 @@ interface MiniBottomNavProps {
 function miniTabsForRole(
   isAdmin: boolean,
   pendingRequests: number,
+  unreadMessages: number,
   features?: Record<string, boolean>,
 ): MiniTabItem[] {
-  const tabs = isAdmin ? adminTabs(pendingRequests) : USER_TABS
+  const tabs = isAdmin
+    ? adminTabs(pendingRequests, unreadMessages)
+    : userTabs(unreadMessages)
   return tabs.filter((tab) => {
     if (!tab.featureKey) return true
     return Boolean(features?.[tab.featureKey])
@@ -65,6 +90,9 @@ function miniTabsForRole(
 
 export default function MiniBottomNav({ isAdmin, features }: MiniBottomNavProps) {
   const [pendingRequests, setPendingRequests] = useState(0)
+  const [unreadMessages, setUnreadMessages] = useState(0)
+  const { pathname } = useLocation()
+  const chatEnabled = Boolean(features?.user_messaging)
 
   useEffect(() => {
     if (!isAdmin) return
@@ -84,7 +112,30 @@ export default function MiniBottomNav({ isAdmin, features }: MiniBottomNavProps)
     }
   }, [isAdmin])
 
-  const tabs = miniTabsForRole(isAdmin, pendingRequests, features)
+  useEffect(() => {
+    if (!chatEnabled) {
+      setUnreadMessages(0)
+      return
+    }
+    let alive = true
+    const load = () => {
+      const request = isAdmin ? getTgMessagesUnreadTotal() : getTgMeMessagesUnread()
+      void request
+        .then((data) => {
+          if (alive) setUnreadMessages(data.count)
+        })
+        .catch(() => {})
+    }
+    load()
+    const timer = window.setInterval(load, 30_000)
+    return () => {
+      alive = false
+      window.clearInterval(timer)
+    }
+    // pathname в зависимостях: бейдж обновляется при переходе между экранами.
+  }, [chatEnabled, isAdmin, pathname])
+
+  const tabs = miniTabsForRole(isAdmin, pendingRequests, unreadMessages, features)
   const compact = tabs.length > 3
 
   return (
@@ -105,7 +156,7 @@ export default function MiniBottomNav({ isAdmin, features }: MiniBottomNavProps)
             <span className="tg-mini-tab-icon-wrap">
               <Icon size={compact ? 20 : 22} className="tg-mini-tab-icon" aria-hidden />
               {tab.badge != null && tab.badge > 0 && (
-                <span className="tg-mini-tab-badge" aria-label={`${tab.badge} ожидает`}>
+                <span className="tg-mini-tab-badge" aria-label={`${tab.badge} ${tab.badgeLabel ?? 'ожидает'}`}>
                   {tab.badge > 99 ? '99+' : tab.badge}
                 </span>
               )}

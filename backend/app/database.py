@@ -1761,6 +1761,7 @@ def _run_db_migrations() -> None:
     _migrate_user_traffic_sample_name_norm_index()
     _migrate_config_quota_floor()
     _migrate_user_messages()
+    _migrate_user_messages_read_by_user()
     _migrate_user_message_cards()
     _migrate_telegram_widgets()
     _migrate_user_portal_banner()
@@ -2356,6 +2357,26 @@ def _migrate_user_messages() -> None:
             if "chat_mode_since" not in cols:
                 conn.execute(text("ALTER TABLE users ADD COLUMN chat_mode_since DATETIME"))
                 logger.info("DB migration: added users.chat_mode_since")
+
+
+def _migrate_user_messages_read_by_user() -> None:
+    """Отметка «абонент прочитал ответ администратора» (Mini App)."""
+    with _migration_transaction() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_messages'")
+        ).fetchone()
+        if not exists:
+            return
+        if "read_by_user_at" not in _table_columns(conn, "user_messages"):
+            conn.execute(text("ALTER TABLE user_messages ADD COLUMN read_by_user_at DATETIME"))
+            logger.info("DB migration: added user_messages.read_by_user_at")
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_user_messages_unread_for_user "
+                "ON user_messages (user_id) "
+                "WHERE direction = 'out' AND read_by_user_at IS NULL"
+            )
+        )
 
 
 def _migrate_user_message_cards() -> None:

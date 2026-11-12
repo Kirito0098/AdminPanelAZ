@@ -8,7 +8,9 @@ import type {
   AdminNotifySettings,
   ClosedAccessView,
   InstallPlatform,
+  MessageThread,
   SelfServiceLimits,
+  SendMessageResult,
   TelegramSettings,
   TgMiniAuthResponse,
   TgMiniConfig,
@@ -18,6 +20,7 @@ import type {
   TgMiniNodeActionResponse,
   TgMiniNodesResponse,
   TgMiniSettings,
+  UserMessageItem,
   VpnConfig,
 } from '@/types'
 import { apiBase } from '@/lib/panelBase'
@@ -59,6 +62,15 @@ setApiTransport({
 
 async function tgFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
   return apiFetchAtBase<T>(API_BASE, path, options, retry)
+}
+
+function queryString(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') search.set(key, String(value))
+  }
+  const suffix = search.toString()
+  return suffix ? `?${suffix}` : ''
 }
 
 export async function refreshTgSessionFromInitData(initData: string): Promise<void> {
@@ -268,3 +280,59 @@ export async function sendTgAdminConfig(
     body: JSON.stringify(data),
   })
 }
+
+/* ------------------- Чат абонент ↔ администратор ------------------- */
+
+/** Свой диалог абонента (owner scope), новые сообщения первыми. */
+export async function getTgMeMessages(
+  params: { limit?: number; beforeId?: number } = {},
+): Promise<UserMessageItem[]> {
+  return tgFetch<UserMessageItem[]>(
+    `/me/messages${queryString({ limit: params.limit, before_id: params.beforeId })}`,
+  )
+}
+
+export async function sendTgMeMessage(text: string): Promise<UserMessageItem> {
+  return tgFetch<UserMessageItem>('/me/messages', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  })
+}
+
+export async function getTgMeMessagesUnread(): Promise<{ count: number }> {
+  return tgFetch<{ count: number }>('/me/messages/unread')
+}
+
+export async function markTgMeMessagesRead(): Promise<{ marked: number }> {
+  return tgFetch<{ marked: number }>('/me/messages/read', { method: 'POST' })
+}
+
+/** Админ: список диалогов (поиск по логину, только непрочитанные). */
+export async function getTgMessageThreads(
+  params: { q?: string; unread?: boolean } = {},
+): Promise<MessageThread[]> {
+  return tgFetch<MessageThread[]>(
+    `/messages/threads${queryString({ q: params.q, unread: params.unread ? 1 : undefined })}`,
+  )
+}
+
+export async function getTgMessageThread(
+  userId: number,
+  params: { beforeId?: number; limit?: number } = {},
+): Promise<UserMessageItem[]> {
+  return tgFetch<UserMessageItem[]>(
+    `/messages/${userId}${queryString({ before_id: params.beforeId, limit: params.limit })}`,
+  )
+}
+
+export async function sendTgMessageThread(userId: number, text: string): Promise<SendMessageResult> {
+  return tgFetch<SendMessageResult>(`/messages/${userId}`, {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  })
+}
+
+export async function getTgMessagesUnreadTotal(): Promise<{ count: number }> {
+  return tgFetch<{ count: number }>('/messages/unread-count')
+}
+

@@ -1991,6 +1991,7 @@ class UserMessageOut(BaseModel):
     text: str
     created_at: datetime
     read_by_admin_at: datetime | None = None
+    read_by_user_at: datetime | None = None
     attachment_url: str | None = None
 
 

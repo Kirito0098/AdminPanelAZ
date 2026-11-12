@@ -1087,6 +1087,11 @@ class UserMessage(Base):
             sqlite_where=text("direction = 'in' AND read_by_admin_at IS NULL"),
         ),
         Index(
+            "ix_user_messages_unread_for_user",
+            "user_id",
+            sqlite_where=text("direction = 'out' AND read_by_user_at IS NULL"),
+        ),
+        Index(
             "uq_user_messages_tg",
             "user_id",
             "telegram_message_id",
@@ -1109,6 +1114,8 @@ class UserMessage(Base):
     attachment_file_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     read_by_admin_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Абонент прочитал ответ администратора в Mini App.
+    read_by_user_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class UserMessageCard(Base):

@@ -7,6 +7,7 @@ import { mapTelegramStartParam } from '@/tg-mini/lib/startParam'
 import AccessRequests from '@/tg-mini/pages/AccessRequests'
 import Clients from '@/tg-mini/pages/Clients'
 import Configs from '@/tg-mini/pages/Configs'
+import Messages from '@/tg-mini/pages/Messages'
 import Settings from '@/tg-mini/pages/Settings'
 import UnlockCodes from '@/tg-mini/pages/UnlockCodes'
 
@@ -40,6 +41,14 @@ export default function TgMiniApp() {
             <Route path="configs" element={<Configs />} />
             <Route path="clients" element={<Clients />} />
             <Route path="requests" element={<AccessRequests />} />
+            <Route
+              path="messages"
+              element={
+                <FeatureGate featureKey="user_messaging">
+                  <Messages />
+                </FeatureGate>
+              }
+            />
             <Route
               path="unlock-codes"
               element={

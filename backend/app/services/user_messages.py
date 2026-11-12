@@ -196,6 +196,35 @@ def unread_for_user(db: Session, *, user_id: int) -> int:
     return int(count or 0)
 
 
+def unread_for_user_side(db: Session, *, user_id: int) -> int:
+    """Непрочитанные самим абонентом ответы администратора."""
+    count = (
+        db.query(func.count(UserMessage.id))
+        .filter(
+            UserMessage.user_id == user_id,
+            UserMessage.direction == DIRECTION_OUT,
+            UserMessage.read_by_user_at.is_(None),
+        )
+        .scalar()
+    )
+    return int(count or 0)
+
+
+def mark_read_by_user(db: Session, *, user_id: int) -> int:
+    """Отметить ответы администратора прочитанными абонентом."""
+    updated = (
+        db.query(UserMessage)
+        .filter(
+            UserMessage.user_id == user_id,
+            UserMessage.direction == DIRECTION_OUT,
+            UserMessage.read_by_user_at.is_(None),
+        )
+        .update({UserMessage.read_by_user_at: _now()}, synchronize_session=False)
+    )
+    db.commit()
+    return int(updated or 0)
+
+
 def record_card(db: Session, *, admin_chat_id: str, message_id: int, user_id: int) -> None:
     """Запомнить карточку в Telegram, чтобы принимать ответы реплаем."""
     db.add(
