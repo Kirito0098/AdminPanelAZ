@@ -381,6 +381,7 @@ export function getDownloadFilename(config: VpnConfig, file: ProfileFile): strin
   return getProfileDownloadFilename(config.client_name, file)
 }
 
+/** Вариант бейджа в карточке клиента: AWG/AWG2 — secondary, WireGuard — outline. */
 export function getProtocolBadgeVariant(tab: ProtocolTab): 'default' | 'secondary' | 'outline' {
   if (tab === 'openvpn') return 'default'
   if (tab === 'amneziawg' || tab === 'amneziawg2') return 'secondary'

@@ -26,7 +26,6 @@ export interface WarperTrafficChartPoint {
 
 interface WarperTrafficChartProps {
   points: WarperTrafficChartPoint[]
-  embedded?: boolean
 }
 
 function chartLegend(value: string) {
@@ -37,14 +36,14 @@ function chartTooltip(value: unknown, name: unknown) {
   return [formatBytes(Number(value ?? 0)), name === 'tx' ? 'Исходящий ↑' : 'Входящий ↓']
 }
 
-export default function WarperTrafficChart({ points, embedded = false }: WarperTrafficChartProps) {
+export default function WarperTrafficChart({ points }: WarperTrafficChartProps) {
   if (points.length === 0) {
     return (
       <EmptyState
         icon={BarChart3}
         title="Нет данных для графика"
         description="Статистика накапливается по часам в traffic.json на узле. Появится после работы sing-box."
-        className={embedded ? 'py-8' : 'py-10'}
+        className="py-8"
       />
     )
   }

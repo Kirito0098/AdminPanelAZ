@@ -11,6 +11,7 @@ import {
   Unplug,
 } from 'lucide-react'
 import { formatBytes } from '@/lib/trafficFormat'
+import { protocolBadgeVariant, protocolLabel } from '@/lib/vpnTypes'
 import {
   getConnectionDisplayAddress,
   getConnectionGeoLabel,
@@ -85,12 +86,6 @@ export type MonitoringConnectionRow = {
   nodeId?: number | null
 }
 
-function protocolLabel(protocol: MonitoringConnectionProtocol) {
-  if (protocol === 'openvpn') return 'OpenVPN'
-  if (protocol === 'amneziawg2') return 'AWG 2.0'
-  return 'WireGuard'
-}
-
 /** AEAD ciphers are the only ones OpenVPN 2.7 should negotiate; others are a warning. */
 function isAeadCipher(cipher: string) {
   return /^(AES-\d+-GCM|CHACHA20-POLY1305)/i.test(cipher.trim())
@@ -140,12 +135,6 @@ function DeviceDisconnectMenu({
       </DropdownMenuContent>
     </DropdownMenu>
   )
-}
-
-function protocolBadgeVariant(protocol: MonitoringConnectionProtocol): 'default' | 'secondary' | 'outline' {
-  if (protocol === 'openvpn') return 'default'
-  if (protocol === 'amneziawg2') return 'outline'
-  return 'secondary'
 }
 
 function parseTime(value?: string | null): number {

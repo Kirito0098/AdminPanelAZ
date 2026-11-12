@@ -1143,52 +1143,29 @@ export default function AntizapretConfigTab() {
                     docsHref={DOCS.antizapretConfig}
                     actions={
                       <>
-                        <div className="grid w-full grid-cols-2 gap-2 sm:contents">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="w-full sm:w-auto"
+                          onClick={() => void load()}
+                          disabled={controlsDisabled}
+                        >
+                          <RefreshCw className="mr-1.5 h-4 w-4" />
+                          Обновить
+                        </Button>
+                        {dirty && (
                           <Button
                             type="button"
-                            variant="secondary"
+                            variant="ghost"
                             size="sm"
                             className="w-full sm:w-auto"
-                            onClick={() => void load()}
+                            onClick={resetDraft}
                             disabled={controlsDisabled}
                           >
-                            <RefreshCw className="mr-1.5 h-4 w-4" />
-                            Обновить
+                            Сбросить
                           </Button>
-                          {dirty && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="w-full sm:w-auto"
-                              onClick={resetDraft}
-                              disabled={controlsDisabled}
-                            >
-                              Сбросить
-                            </Button>
-                          )}
-                        </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          className="w-full sm:w-auto"
-                          onClick={() => void save()}
-                          disabled={!dirty || controlsDisabled}
-                        >
-                          <Save className="mr-1.5 h-4 w-4" />
-                          Сохранить
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="default"
-                          className="w-full sm:w-auto"
-                          onClick={() => setApplyOpen(true)}
-                          disabled={controlsDisabled || dirty}
-                        >
-                          <Play className="mr-1.5 h-4 w-4" />
-                          Применить
-                        </Button>
+                        )}
                       </>
                     }
                   />
@@ -1240,30 +1217,16 @@ export default function AntizapretConfigTab() {
                   </p>
                   <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
                     {dirty ? (
-                      <>
-                        <div className="grid w-full grid-cols-2 gap-2 sm:contents">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="w-full sm:w-auto"
-                            onClick={resetDraft}
-                            disabled={controlsDisabled}
-                          >
-                            Сбросить
-                          </Button>
-                        </div>
-                        <Button
-                          type="button"
-                          size="sm"
-                          className="w-full sm:w-auto"
-                          onClick={() => void save()}
-                          disabled={controlsDisabled}
-                        >
-                          <Save className="mr-1.5 h-4 w-4" />
-                          Сохранить
-                        </Button>
-                      </>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="w-full sm:w-auto"
+                        onClick={() => void save()}
+                        disabled={controlsDisabled}
+                      >
+                        <Save className="mr-1.5 h-4 w-4" />
+                        Сохранить
+                      </Button>
                     ) : (
                       <Button
                         type="button"
@@ -1278,13 +1241,6 @@ export default function AntizapretConfigTab() {
                     )}
                   </div>
                 </div>
-              )}
-
-              {needsApply && !dirty && (
-                <SettingsAlert variant="warning" title="Требуется применение">
-                  Настройки записаны на узел, но ещё не активированы. Нажмите
-                  «Применить», чтобы выполнить doall.sh.
-                </SettingsAlert>
               )}
 
               {backupTcpPortConflict && (

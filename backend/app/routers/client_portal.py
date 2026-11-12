@@ -112,17 +112,21 @@ def revoke_portal_link(
     return {"ok": True, "client_name": client_name}
 
 
+def _user_portal_link(user_id: int, db: Session, admin: User) -> dict:
+    _require_portal_enabled()
+    _require_portal_domain(db)
+    ensure_portal_user(db, user_id)
+    row = get_or_create_user_portal_token(db, user_id=user_id, creator=admin)
+    return user_link_response(db, row)
+
+
 @router.get("/users/{user_id}/link")
 def get_user_portal_link(
     user_id: int,
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    _require_portal_enabled()
-    _require_portal_domain(db)
-    ensure_portal_user(db, user_id)
-    row = get_or_create_user_portal_token(db, user_id=user_id, creator=admin)
-    return user_link_response(db, row)
+    return _user_portal_link(user_id, db, admin)
 
 
 @router.post("/users/{user_id}/link")
@@ -131,11 +135,7 @@ def create_user_portal_link(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    _require_portal_enabled()
-    _require_portal_domain(db)
-    ensure_portal_user(db, user_id)
-    row = get_or_create_user_portal_token(db, user_id=user_id, creator=admin)
-    return user_link_response(db, row)
+    return _user_portal_link(user_id, db, admin)
 
 
 @router.post("/users/{user_id}/rotate")

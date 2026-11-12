@@ -1,7 +1,4 @@
 import {
-  awg2PermanentBlock,
-  awg2TempBlock,
-  awg2Unblock,
   ApiError,
   bulkConfigOp,
   createConfigTag,
@@ -9,15 +6,8 @@ import {
   deleteConfigTag,
   getConfigTags,
   getOpenVpnGroup,
-  openvpnPermanentBlock,
-  openvpnTempBlock,
-  openvpnUnblock,
   setOpenVpnGroup,
-  wgPermanentBlock,
-  wgTempBlock,
-  wgUnblock,
 } from '@/api/client'
-import { createPortalLink } from '@/api/portal'
 import ClientActionsDialog from '@/components/dashboard/ClientActionsDialog'
 import ConfigCard from '@/components/dashboard/ConfigCard'
 import ConfigCardViewSettings from '@/components/dashboard/ConfigCardViewSettings'
@@ -47,6 +37,12 @@ import {
   type ProtocolTab,
 } from '@/lib/configCardUtils'
 import { configOwnerCandidates } from '@/lib/configOwners'
+import {
+  copyConfigPortalLink,
+  permanentBlockConfig,
+  tempBlockConfig,
+  unblockConfig,
+} from '@/lib/configAccessOps'
 import {
   DEFAULT_CONFIG_CARD_VIEW_PREFS,
   gridColsClass,
@@ -254,8 +250,7 @@ export default function ConfigCardsSection({
   const copyPortalLink = async (config: VpnConfig) => {
     setCardLoading(config.id, 'portal-copy')
     try {
-      const link = await createPortalLink(config.client_name)
-      await navigator.clipboard.writeText(link.url)
+      await copyConfigPortalLink(config.client_name)
       onNotifySuccess('Ссылка портала скопирована')
     } catch (err) {
       onNotifyError(err instanceof ApiError ? err.message : 'Ошибка ссылки портала')
@@ -303,8 +298,6 @@ export default function ConfigCardsSection({
     setCardLoading(confirmTarget.id, confirmAction)
     try {
       const name = confirmTarget.client_name
-      const isOvpn = confirmTarget.vpn_type === 'openvpn'
-      const isAwg2 = confirmTarget.vpn_type === 'amneziawg2'
 
       if (confirmAction === 'delete') {
         await deleteConfig(confirmTarget.id)
@@ -316,13 +309,7 @@ export default function ConfigCardsSection({
       }
 
       if (confirmAction === 'unblock') {
-        if (isOvpn) {
-          await openvpnUnblock(name)
-        } else if (isAwg2) {
-          await awg2Unblock(name)
-        } else {
-          await wgUnblock(name)
-        }
+        await unblockConfig(confirmTarget)
         onNotifySuccess('Блокировка снята')
         closeConfirm()
         await onRefresh()
@@ -336,14 +323,10 @@ export default function ConfigCardsSection({
           return
         }
         if (days >= 3650) {
-          if (isOvpn) await openvpnPermanentBlock(name)
-          else if (isAwg2) await awg2PermanentBlock(name)
-          else await wgPermanentBlock(name)
+          await permanentBlockConfig(confirmTarget)
           onNotifySuccess('Клиент заблокирован до ручной разблокировки')
         } else {
-          if (isOvpn) await openvpnTempBlock(name, days)
-          else if (isAwg2) await awg2TempBlock(name, days)
-          else await wgTempBlock(name, days)
+          await tempBlockConfig(confirmTarget, days)
           onNotifySuccess(`Клиент заблокирован на ${days} дн.`)
         }
         closeConfirm()

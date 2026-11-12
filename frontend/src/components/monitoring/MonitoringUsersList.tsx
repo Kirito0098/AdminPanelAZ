@@ -9,13 +9,8 @@ import { Button } from '@/components/ui/button'
 import { groupConnectionsByOwner } from '@/lib/connectionUserGroups'
 import { formatDateTime } from '@/lib/datetime'
 import { formatBytes } from '@/lib/trafficFormat'
+import { protocolLabel } from '@/lib/vpnTypes'
 import { cn } from '@/lib/utils'
-
-const PROTOCOL_LABELS: Record<string, string> = {
-  openvpn: 'OpenVPN',
-  wireguard: 'WireGuard',
-  amneziawg2: 'AWG 2.0',
-}
 
 function usersLabel(count: number) {
   const mod10 = count % 10
@@ -114,7 +109,7 @@ export default function MonitoringUsersList({
                     </Badge>
                     {group.protocols.map((protocol) => (
                       <Badge key={protocol} variant="secondary" className="text-[10px]">
-                        {PROTOCOL_LABELS[protocol] ?? protocol}
+                        {protocolLabel(protocol)}
                       </Badge>
                     ))}
                   </div>

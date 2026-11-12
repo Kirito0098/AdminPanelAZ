@@ -492,49 +492,6 @@ export default function CidrPipelineTab({
           </div>
         )}
 
-        {(cidrDb?.last_deploy?.per_node?.length ?? 0) > 0 && (
-          <div className="mb-4 rounded-md border overflow-hidden">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Узел</TableHead>
-                  <TableHead>Статус</TableHead>
-                  <TableHead className="text-right">Файлов</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {cidrDb!.last_deploy!.per_node!.map((entry) => (
-                  <TableRow key={entry.node_id}>
-                    <TableCell className="text-sm">
-                      {entry.node_name ?? `Узел #${entry.node_id}`}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          entry.status === 'success'
-                            ? 'default'
-                            : entry.status === 'failed'
-                              ? 'destructive'
-                              : 'secondary'
-                        }
-                      >
-                        {entry.status === 'success'
-                          ? 'Успех'
-                          : entry.status === 'failed'
-                            ? 'Ошибка'
-                            : 'Пропущен'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm">
-                      {entry.pushed_files?.length ?? 0}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        )}
-
         <DeployPreviewPanel preview={deployPreview} loading={deployPreviewLoading} />
 
         <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">

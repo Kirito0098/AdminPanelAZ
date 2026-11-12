@@ -1,15 +1,6 @@
 import { useMemo } from 'react'
 import { Activity, Cpu, HardDrive, MemoryStick } from 'lucide-react'
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  Tooltip,
-  YAxis,
-} from 'recharts'
+import { CartesianGrid, Line, LineChart, Tooltip, YAxis } from 'recharts'
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
@@ -19,12 +10,22 @@ import {
   CHART_COLORS,
   CHART_GRID,
   CHART_MARGIN,
+  PercentAreaChart,
   RANGE_LABELS,
   TimeXAxis,
   formatChartLabel,
+  type PercentAreaSeries,
   type ResourceChartPeriod,
 } from '@/components/monitoring/resourceChartShared'
 import type { ResourceHistory, ResourceHistoryPoint } from '@/types'
+
+const PERCENT_SERIES: PercentAreaSeries[] = [
+  { key: 'cpu', color: CHART_COLORS.cpu, name: 'cpu', gradientId: 'resCpu' },
+  { key: 'memory', color: CHART_COLORS.ram, name: 'memory', gradientId: 'resRam' },
+  { key: 'disk', color: CHART_COLORS.disk, name: 'disk', gradientId: 'resDisk' },
+]
+
+const PERCENT_LEGEND_LABELS: Record<string, string> = { cpu: 'CPU', memory: 'RAM', disk: 'Диск' }
 
 type ResourceHistoryChartsProps = {
   data: ResourceHistory | null
@@ -139,81 +140,15 @@ export default function ResourceHistoryCharts({
 
               <div>
                 <p className="mb-2 text-sm font-medium">Загрузка CPU / RAM / Диск (%)</p>
-                <ChartResponsive height={280}>
-                  {({ width, height }) => (
-                <AreaChart width={width} height={height} data={chartData} margin={CHART_MARGIN}>
-                    <defs>
-                      <linearGradient id="resCpu" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={CHART_COLORS.cpu} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={CHART_COLORS.cpu} stopOpacity={0.02} />
-                      </linearGradient>
-                      <linearGradient id="resRam" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={CHART_COLORS.ram} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={CHART_COLORS.ram} stopOpacity={0.02} />
-                      </linearGradient>
-                      <linearGradient id="resDisk" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={CHART_COLORS.disk} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={CHART_COLORS.disk} stopOpacity={0.02} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid {...CHART_GRID} />
-                    <TimeXAxis />
-                    <YAxis
-                      domain={[0, 100]}
-                      tick={{ fontSize: 11 }}
-                      tickLine={false}
-                      axisLine={false}
-                      unit="%"
-                      width={44}
-                    />
-                    <Tooltip
-                      cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }}
-                      formatter={(value, name) => {
-                        const labels: Record<string, string> = {
-                          cpu: 'CPU',
-                          memory: 'RAM',
-                          disk: 'Диск',
-                        }
-                        const key = String(name)
-                        return [`${Number(value ?? 0).toFixed(1)}%`, labels[key] ?? key]
-                      }}
-                      labelFormatter={(label) => `Время: ${label}`}
-                    />
-                    <Legend
-                      formatter={(value) =>
-                        value === 'cpu' ? 'CPU' : value === 'memory' ? 'RAM' : 'Диск'
-                      }
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="cpu"
-                      name="cpu"
-                      stroke={CHART_COLORS.cpu}
-                      fill="url(#resCpu)"
-                      strokeWidth={2}
-                      activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="memory"
-                      name="memory"
-                      stroke={CHART_COLORS.ram}
-                      fill="url(#resRam)"
-                      strokeWidth={2}
-                      activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="disk"
-                      name="disk"
-                      stroke={CHART_COLORS.disk}
-                      fill="url(#resDisk)"
-                      strokeWidth={2}
-                      activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}
-                    />
-                  </AreaChart>
-                  )}
-                </ChartResponsive>
+                <PercentAreaChart
+                  data={chartData}
+                  height={280}
+                  series={PERCENT_SERIES}
+                  unit="%"
+                  domain={[0, 100]}
+                  legendLabels={PERCENT_LEGEND_LABELS}
+                  hoverHighlight
+                />
               </div>
 
               {chartData.some((p) => p.load_1 != null) && (

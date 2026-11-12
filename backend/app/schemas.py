@@ -182,8 +182,7 @@ class NodeTransportsResponse(BaseModel):
     items: list[NodeTransportItem]
 
 
-class NodeTransportUpdate(BaseModel):
-    transport: str
+class NodeSshFields(BaseModel):
     ssh_host: str | None = Field(default=None, max_length=255)
     ssh_port: int | None = Field(default=None, ge=1, le=65535)
     ssh_username: str | None = Field(default=None, max_length=128)
@@ -193,6 +192,7 @@ class NodeTransportUpdate(BaseModel):
     ssh_remote_agent_port: int | None = Field(default=None, ge=1, le=65535)
 
     @field_validator(
+        # transport живёт в наследниках, у базовой модели такого поля нет
         "transport",
         "ssh_host",
         "ssh_username",
@@ -200,12 +200,17 @@ class NodeTransportUpdate(BaseModel):
         "ssh_passphrase",
         "ssh_remote_agent_host",
         mode="before",
+        check_fields=False,
     )
     @classmethod
-    def _strip_transport_strings(cls, value: Any) -> Any:
+    def _strip_ssh_strings(cls, value: Any) -> Any:
         if isinstance(value, str):
             return value.strip()
         return value
+
+
+class NodeTransportUpdate(NodeSshFields):
+    transport: str
 
 
 class NodeTransportPreflightResponse(BaseModel):
@@ -1008,7 +1013,7 @@ class ResourceHistoryResponse(BaseModel):
     points: list[ResourceHistoryPoint]
 
 
-class PanelResourceHistoryPoint(BaseModel):
+class _PanelHostMetrics(BaseModel):
     timestamp: datetime
     backend_cpu_percent: float
     backend_memory_mb: int
@@ -1029,6 +1034,10 @@ class PanelResourceHistoryPoint(BaseModel):
     host_memory_total_mb: int = 0
     host_disk_percent: float = 0.0
     host_load_1: float | None = None
+
+
+class PanelResourceHistoryPoint(_PanelHostMetrics):
+    pass
 
 
 class PanelResourceHistoryResponse(BaseModel):
@@ -1037,31 +1046,11 @@ class PanelResourceHistoryResponse(BaseModel):
     points: list[PanelResourceHistoryPoint]
 
 
-class PanelResourceCurrentResponse(BaseModel):
-    timestamp: datetime
-    backend_cpu_percent: float
-    backend_memory_mb: int
+class PanelResourceCurrentResponse(_PanelHostMetrics):
     backend_rss_mb: int
-    backend_workers: int
-    nginx_memory_mb: int | None = None
-    watchdog_memory_mb: int | None = None
-    frontend_dev_memory_mb: int | None = None
-    total_panel_memory_mb: int
-    local_node_memory_mb: int = 0
-    node_agent_memory_mb: int = 0
-    managed_vpn_memory_mb: int = 0
-    local_vpn_core_memory_mb: int = 0
-    legacy_antizapret_memory_mb: int = 0
-    total_stack_memory_mb: int = 0
     local_node_on_host: bool = False
     stack_note: str = ""
     frontend_note: str
-    host_cpu_percent: float = 0.0
-    host_memory_percent: float = 0.0
-    host_memory_used_mb: int = 0
-    host_memory_total_mb: int = 0
-    host_disk_percent: float = 0.0
-    host_load_1: float | None = None
     host_hostname: str = ""
     host_uptime: str = ""
 
@@ -2078,7 +2067,7 @@ class NodeBase(BaseModel):
     node_kind: str = Field(default="vpn", max_length=16)
 
 
-class NodeCreate(NodeBase):
+class NodeCreate(NodeBase, NodeSshFields):
     # Optional so proxy can default to 9101 when omitted (vpn keeps 9100).
     port: int | None = Field(default=None, ge=1, le=65535)
     api_key: str | None = Field(default=None, min_length=8)
@@ -2086,28 +2075,6 @@ class NodeCreate(NodeBase):
     linked_vpn_node_id: int | None = None
     # Connection method at create time (default HTTP). SSH needs credentials below.
     transport: str = Field(default="http", max_length=16)
-    ssh_host: str | None = Field(default=None, max_length=255)
-    ssh_port: int | None = Field(default=None, ge=1, le=65535)
-    ssh_username: str | None = Field(default=None, max_length=128)
-    ssh_private_key: str | None = None
-    ssh_passphrase: str | None = None
-    ssh_remote_agent_host: str | None = Field(default=None, max_length=255)
-    ssh_remote_agent_port: int | None = Field(default=None, ge=1, le=65535)
-
-    @field_validator(
-        "transport",
-        "ssh_host",
-        "ssh_username",
-        "ssh_private_key",
-        "ssh_passphrase",
-        "ssh_remote_agent_host",
-        mode="before",
-    )
-    @classmethod
-    def _strip_create_transport_strings(cls, value: Any) -> Any:
-        if isinstance(value, str):
-            return value.strip()
-        return value
 
 
 class NodeUpdate(BaseModel):

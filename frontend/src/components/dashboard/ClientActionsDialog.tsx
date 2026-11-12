@@ -15,28 +15,24 @@ import {
   Zap,
 } from 'lucide-react'
 import {
-  awg2PermanentBlock,
-  awg2TempBlock,
-  awg2Unblock,
   ApiError,
   createOneTimeLink,
   deleteConfig,
-  createPortalLink,
-  rotatePortalLink,
-  revokePortalLink,
   openvpnDisconnect,
-  openvpnPermanentBlock,
-  openvpnTempBlock,
-  openvpnUnblock,
   setConfigTags,
   updateConfig,
-  wgPermanentBlock,
   wgSetExpiry,
-  wgTempBlock,
-  wgUnblock,
 } from '@/api/client'
 import { setClientAccessUntil, syncClientAccessUntilFromOwner, type UnlockCodeProtocol } from '@/api/unlockCodes'
 import { isoToDateInput, parseAccessUntilConflict } from '@/lib/accessUntil'
+import {
+  copyConfigPortalLink,
+  permanentBlockConfig,
+  revokeConfigPortalLink,
+  rotateConfigPortalLink,
+  tempBlockConfig,
+  unblockConfig,
+} from '@/lib/configAccessOps'
 import { portalActionConfirm, type PortalAction } from '@/lib/portalConfirm'
 import {
   clearProfileTrafficLimits,
@@ -348,19 +344,19 @@ export default function ClientActionsDialog({
     )
   }
 
-  const applyProfileAccessUntil = async (iso: string | null) => {
+  const applyProfileAccessUntil = async (iso: string | null, override = false) => {
     const protocols = orderedProfileProtocols(profileVpnTypes)
     if (protocols.length === 0) return
     const applied: typeof protocols = []
     const failed: Array<{ protocol: (typeof protocols)[number]; message: string }> = []
     for (const protocol of protocols) {
       try {
-        await setClientAccessUntil(protocol, config.client_name, iso, false)
+        await setClientAccessUntil(protocol, config.client_name, iso, override)
         applied.push(protocol)
       } catch (err) {
         // Конфликт со сроком владельца пробрасываем как есть — handleAccessUntilSave
         // ждёт ApiError, чтобы открыть диалог подтверждения.
-        if (parseAccessUntilConflict(err)) {
+        if (!override && parseAccessUntilConflict(err)) {
           throw err
         }
         failed.push({
@@ -382,53 +378,15 @@ export default function ClientActionsDialog({
           .join('; ')}`,
       )
     }
+    const prefix = override ? 'Срок доступа принудительно' : 'Срок доступа'
     onNotifySuccess(
       applied.length > 1
         ? iso
-          ? `Срок доступа обновлён для профиля (${formatProfileProtocols(applied)})`
-          : `Срок доступа сброшен для профиля (${formatProfileProtocols(applied)})`
+          ? `${prefix} обновлён для профиля (${formatProfileProtocols(applied)})`
+          : `${prefix} сброшен для профиля (${formatProfileProtocols(applied)})`
         : iso
-          ? 'Срок доступа обновлён'
-          : 'Срок доступа сброшен',
-    )
-  }
-
-  const applyProfileAccessUntilOverride = async (iso: string | null) => {
-    const protocols = orderedProfileProtocols(profileVpnTypes)
-    const applied: typeof protocols = []
-    const failed: Array<{ protocol: (typeof protocols)[number]; message: string }> = []
-    for (const protocol of protocols) {
-      try {
-        await setClientAccessUntil(protocol, config.client_name, iso, true)
-        applied.push(protocol)
-      } catch (err) {
-        failed.push({
-          protocol,
-          message: err instanceof ApiError ? err.message : 'ошибка',
-        })
-      }
-    }
-    if (applied.length === 0) {
-      throw new Error(
-        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
-          'Не удалось обновить срок доступа',
-      )
-    }
-    if (failed.length > 0) {
-      onNotifyError(
-        `Срок доступа частично не обновлён: ${failed
-          .map((item) => `${item.protocol}: ${item.message}`)
-          .join('; ')}`,
-      )
-    }
-    onNotifySuccess(
-      applied.length > 1
-        ? iso
-          ? `Срок доступа принудительно обновлён для профиля (${formatProfileProtocols(applied)})`
-          : `Срок доступа принудительно сброшен для профиля (${formatProfileProtocols(applied)})`
-        : iso
-          ? 'Срок доступа принудительно обновлён'
-          : 'Срок доступа принудительно сброшен',
+          ? `${prefix} обновлён`
+          : `${prefix} сброшен`,
     )
   }
 
@@ -523,9 +481,7 @@ export default function ClientActionsDialog({
   const handlePortalCopy = async () => {
     setBusyAction('portal-copy')
     try {
-      const link = await createPortalLink(config.client_name)
-      setPortalUrl(link.url)
-      await navigator.clipboard.writeText(link.url)
+      setPortalUrl(await copyConfigPortalLink(config.client_name))
       onNotifySuccess('Ссылка портала скопирована')
     } catch (err) {
       onNotifyError(err instanceof ApiError ? err.message : 'Ошибка ссылки портала')
@@ -537,9 +493,7 @@ export default function ClientActionsDialog({
   const handlePortalRotate = async () => {
     setBusyAction('portal-rotate')
     try {
-      const link = await rotatePortalLink(config.client_name)
-      setPortalUrl(link.url)
-      await navigator.clipboard.writeText(link.url)
+      setPortalUrl(await rotateConfigPortalLink(config.client_name))
       onNotifySuccess('Ссылка портала перевыпущена и скопирована')
     } catch (err) {
       onNotifyError(err instanceof ApiError ? err.message : 'Ошибка перевыпуска')
@@ -551,7 +505,7 @@ export default function ClientActionsDialog({
   const handlePortalRevoke = async () => {
     setBusyAction('portal-revoke')
     try {
-      await revokePortalLink(config.client_name)
+      await revokeConfigPortalLink(config.client_name)
       setPortalUrl(null)
       onNotifySuccess('Ссылка портала отозвана')
     } catch (err) {
@@ -631,7 +585,7 @@ export default function ClientActionsDialog({
     const nextIso = endOfDayIso(accessUntilValue)
     try {
       if (confirmOverride) {
-        await applyProfileAccessUntilOverride(nextIso)
+        await applyProfileAccessUntil(nextIso, true)
         setAccessUntilConflict(null)
       } else {
         await applyProfileAccessUntil(nextIso)
@@ -717,7 +671,7 @@ export default function ClientActionsDialog({
       return
     }
     await runAction('unblock', async () => {
-      await wgUnblock(config.client_name)
+      await unblockConfig(config)
       onNotifySuccess(
         wgAccessExpired
           ? 'Блокировка снята временно; при истёкшем доступе воркер снова отключит'
@@ -739,7 +693,7 @@ export default function ClientActionsDialog({
               `Укажите срок блокировки для клиента «${config.client_name}»`,
               '7',
               async (days) => {
-                await openvpnTempBlock(config.client_name, days)
+                await tempBlockConfig(config, days)
                 onNotifySuccess('Клиент временно заблокирован')
               },
             ),
@@ -751,7 +705,7 @@ export default function ClientActionsDialog({
           hidden: !canManage || !isBlocked || haReplicaReadonly,
           onClick: () =>
             runAction('unblock', async () => {
-              await openvpnUnblock(config.client_name)
+              await unblockConfig(config)
               onNotifySuccess(
                 blockMode === 'access_expired'
                   ? 'Блокировка снята временно; при истёкшем доступе воркер снова отключит'
@@ -830,7 +784,7 @@ export default function ClientActionsDialog({
                 `Укажите срок блокировки для клиента «${config.client_name}»`,
                 '7',
                 async (days) => {
-                  await awg2TempBlock(config.client_name, days)
+                  await tempBlockConfig(config, days)
                   onNotifySuccess('Клиент временно заблокирован')
                 },
               ),
@@ -843,7 +797,7 @@ export default function ClientActionsDialog({
             hidden: !canManage || !['temp', 'permanent', 'access_expired'].includes(blockMode) || haReplicaReadonly,
             onClick: () =>
               runAction('unblock', async () => {
-                await awg2Unblock(config.client_name)
+                await unblockConfig(config)
                 onNotifySuccess(
                   blockMode === 'access_expired'
                     ? 'Блокировка снята временно; при истёкшем доступе воркер снова отключит'
@@ -898,7 +852,7 @@ export default function ClientActionsDialog({
               `Укажите срок блокировки для клиента «${config.client_name}»`,
               '7',
               async (days) => {
-                await wgTempBlock(config.client_name, days)
+                await tempBlockConfig(config, days)
                 onNotifySuccess('Клиент временно заблокирован')
               },
             ),
@@ -977,13 +931,7 @@ export default function ClientActionsDialog({
           'Бессрочная блокировка',
           `Заблокировать клиента «${config.client_name}» до ручной разблокировки?`,
           async () => {
-            if (isOpenVpn) {
-              await openvpnPermanentBlock(config.client_name)
-            } else if (isAwg2) {
-              await awg2PermanentBlock(config.client_name)
-            } else {
-              await wgPermanentBlock(config.client_name)
-            }
+            await permanentBlockConfig(config)
             onNotifySuccess('Клиент заблокирован')
           },
         ),

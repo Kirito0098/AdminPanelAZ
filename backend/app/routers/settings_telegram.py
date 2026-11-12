@@ -501,12 +501,15 @@ def test_noc_weekly_image_preview(db: Session = Depends(get_db), admin: User = D
     return MessageResponse(message=f"NOC weekly изображение отправлено ({sent} из {len(recipients)})")
 
 
-@router.post("/settings/telegram/test", response_model=MessageResponse)
-def test_telegram(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def send_test_telegram_message(
+    db: Session,
+    *,
+    missing_recipients_detail: str = "Укажите токен бота и получателей бэкапа",
+) -> MessageResponse:
     bot_token = _get_setting(db, "telegram_bot_token")
     chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
     if not bot_token or not chat_ids:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите токен бота и получателей бэкапа")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=missing_recipients_detail)
     sent = 0
     for chat_id in chat_ids:
         if send_tg_message(
@@ -519,6 +522,11 @@ def test_telegram(db: Session = Depends(get_db), _: User = Depends(require_admin
     if sent == 0:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
     return MessageResponse(message=f"Тестовое сообщение отправлено ({sent} из {len(chat_ids)})")
+
+
+@router.post("/settings/telegram/test", response_model=MessageResponse)
+def test_telegram(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return send_test_telegram_message(db)
 
 
 @router.post("/settings/telegram/webhook/register", response_model=TelegramSettingsResponse)

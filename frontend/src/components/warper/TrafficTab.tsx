@@ -1,10 +1,7 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowDown, ArrowUp, BarChart3 } from 'lucide-react'
 import { getWarperTraffic } from '@/api/client'
-import StatusPanel from '@/components/noc/StatusPanel'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useLatestRequest } from '@/hooks/useLatestRequest'
@@ -28,8 +25,6 @@ type PeriodKey = (typeof PERIODS)[number]['key']
 
 interface TrafficTabProps {
   health: WarperHealthResponse | null
-  embedded?: boolean
-  hideTitle?: boolean
 }
 
 function readTrafficNumber(value: unknown): number | null {
@@ -127,7 +122,7 @@ function readChartPoints(data: Record<string, unknown>, period: string): WarperT
   return []
 }
 
-export default function TrafficTab({ health, embedded = false, hideTitle = false }: TrafficTabProps) {
+export default function TrafficTab({ health }: TrafficTabProps) {
   const { activeNode } = useNode()
   const { error: notifyError } = useNotifications()
   const [period, setPeriod] = useState<PeriodKey>('today')
@@ -161,9 +156,9 @@ export default function TrafficTab({ health, embedded = false, hideTitle = false
   const chartPoints = useMemo(() => readChartPoints(data, period), [data, period])
   const periodLabel = PERIODS.find((item) => item.key === period)?.label ?? period
 
-  const body = (
+  return (
     <>
-      <div className={`flex flex-wrap items-center gap-2 ${embedded ? 'mb-4' : 'mb-4'}`}>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap gap-2">
           {PERIODS.map((item) => (
             <Button
@@ -183,57 +178,24 @@ export default function TrafficTab({ health, embedded = false, hideTitle = false
       </div>
 
       {loading ? (
-        <div className={`flex justify-center ${embedded ? 'py-8' : 'py-10'}`}>
+        <div className="flex justify-center py-8">
           <Spinner />
         </div>
       ) : !health?.installed ? (
         <p className="text-sm text-muted-foreground">Трафик доступен после установки AZ-WARP на узле.</p>
       ) : (
         <div className="space-y-4">
-          {embedded ? (
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              <WarperStatTile
-                label="Исходящий ↑"
-                value={tx == null ? '—' : formatBytes(tx)}
-              />
-              <WarperStatTile
-                label="Входящий ↓"
-                value={rx == null ? '—' : formatBytes(rx)}
-              />
-              {uptime && <WarperStatTile label="Аптайм sing-box" value={uptime} />}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Исходящий ↑</CardTitle>
-                  <ArrowUp className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">{tx == null ? '—' : formatBytes(tx)}</div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between pb-2">
-                  <CardTitle className="text-sm font-medium text-muted-foreground">Входящий ↓</CardTitle>
-                  <ArrowDown className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-3xl font-bold">{rx == null ? '—' : formatBytes(rx)}</div>
-                </CardContent>
-              </Card>
-              {uptime && (
-                <Card className="sm:col-span-2 lg:col-span-2">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-medium text-muted-foreground">Аптайм sing-box</CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-lg font-semibold">{uptime}</div>
-                  </CardContent>
-                </Card>
-              )}
-            </div>
-          )}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <WarperStatTile
+              label="Исходящий ↑"
+              value={tx == null ? '—' : formatBytes(tx)}
+            />
+            <WarperStatTile
+              label="Входящий ↓"
+              value={rx == null ? '—' : formatBytes(rx)}
+            />
+            {uptime && <WarperStatTile label="Аптайм sing-box" value={uptime} />}
+          </div>
 
           <div className="rounded-lg border bg-muted/10 p-3 sm:p-4">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
@@ -245,7 +207,7 @@ export default function TrafficTab({ health, embedded = false, hideTitle = false
               </div>
             </div>
             <Suspense fallback={<Spinner />}>
-              <WarperTrafficChart points={chartPoints} embedded={embedded} />
+              <WarperTrafficChart points={chartPoints} />
             </Suspense>
           </div>
 
@@ -255,15 +217,5 @@ export default function TrafficTab({ health, embedded = false, hideTitle = false
         </div>
       )}
     </>
-  )
-
-  if (embedded) {
-    return <div>{!hideTitle && <h3 className="mb-3 text-sm font-semibold">Трафик WARP</h3>}{body}</div>
-  }
-
-  return (
-    <StatusPanel title="Трафик WARP" icon={BarChart3}>
-      {body}
-    </StatusPanel>
   )
 }

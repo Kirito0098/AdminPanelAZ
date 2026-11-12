@@ -109,14 +109,6 @@ export function extractProxyLink(text: string): string {
   return PROXY_LINK_RE.exec(value)?.[0] ?? value
 }
 
-/** Outbound mode a donor link switches to: AZ-WARP 1.5.1 turns vless:// and hy2:// from the Slave field into their modes. */
-export function donorLinkMode(link: string): Extract<WarperOutboundMode, 'slave' | 'vless' | 'hy2'> | null {
-  if (link.startsWith('ss://')) return 'slave'
-  if (link.startsWith('vless://')) return 'vless'
-  if (link.startsWith('hy2://') || link.startsWith('hysteria2://')) return 'hy2'
-  return null
-}
-
 export const WARP_KEY_SOURCES = [
   { value: 'auto', label: 'Автовыбор', description: 'WARP сам выберет доступный ключ' },
   { value: 'system', label: 'AntiZapret', description: 'Ключи встроенного WARP AntiZapret (warp-antizapret / warp-vpn)' },

@@ -2,11 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Loader2, Plus } from 'lucide-react'
 import {
   ApiError,
-  awg2SetTrafficLimit,
   createConfig,
-  openvpnSetTrafficLimit,
   setClientAccessUntil,
-  wgSetTrafficLimit,
 } from '@/api/client'
 import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
@@ -24,6 +21,7 @@ import { Label } from '@/components/ui/label'
 import DatePickerField from '@/components/ui/DatePickerField'
 import { CLIENT_NAME_HINT, isValidClientName } from '@/lib/clientName'
 import { endOfDayIso } from '@/lib/datetime'
+import { setProfileTrafficLimits } from '@/lib/profileTrafficLimit'
 import { panelToday } from '@/lib/trafficPeriod'
 import {
   Select,
@@ -47,24 +45,6 @@ function vpnHint(type: VpnType): string {
   if (type === 'openvpn') return 'Сертификат + .ovpn'
   if (type === 'wireguard') return 'WG / AWG профиль'
   return 'AWG 2.0 peer'
-}
-
-async function setTrafficLimitForProtocol(
-  protocol: VpnType,
-  clientName: string,
-  value: number,
-  unit: string,
-  periodDays: number | null,
-) {
-  if (protocol === 'openvpn') {
-    await openvpnSetTrafficLimit(clientName, value, unit, periodDays)
-    return
-  }
-  if (protocol === 'amneziawg2') {
-    await awg2SetTrafficLimit(clientName, value, unit, periodDays)
-    return
-  }
-  await wgSetTrafficLimit(clientName, value, unit, periodDays)
 }
 
 interface CreateClientDialogProps {
@@ -188,21 +168,19 @@ export default function CreateClientDialog({
     if (period != null && ![1, 7, 30].includes(period)) {
       return 'период лимита: 1, 7 или 30 дней'
     }
-    const failed: string[] = []
-    for (const protocol of created) {
-      try {
-        await setTrafficLimitForProtocol(protocol, name, value, limitUnit, period)
-      } catch (err) {
-        failed.push(
-          `${vpnLabel(protocol)}: ${err instanceof ApiError ? err.message : 'ошибка'}`,
-        )
-      }
+    const { applied, failed } = await setProfileTrafficLimits(
+      name,
+      created,
+      value,
+      limitUnit,
+      period,
+    )
+    const failures = failed.map((item) => `${vpnLabel(item.protocol)}: ${item.message}`)
+    if (applied.length === 0) {
+      return `лимит трафика не применён (${failures.join('; ')})`
     }
-    if (failed.length === created.length) {
-      return `лимит трафика не применён (${failed.join('; ')})`
-    }
-    if (failed.length > 0) {
-      return `лимит частично не применён (${failed.join('; ')})`
+    if (failures.length > 0) {
+      return `лимит частично не применён (${failures.join('; ')})`
     }
     return null
   }

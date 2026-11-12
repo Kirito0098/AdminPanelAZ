@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
-import { FileText, RefreshCw } from 'lucide-react'
+import { RefreshCw } from 'lucide-react'
 import { getWarperLogs } from '@/api/client'
-import StatusPanel from '@/components/noc/StatusPanel'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,11 +12,9 @@ import type { WarperHealthResponse } from '@/types'
 
 interface LogsTabProps {
   health: WarperHealthResponse | null
-  embedded?: boolean
-  hideTitle?: boolean
 }
 
-export default function LogsTab({ health, embedded = false, hideTitle = false }: LogsTabProps) {
+export default function LogsTab({ health }: LogsTabProps) {
   const { activeNode } = useNode()
   const { error: notifyError } = useNotifications()
   const [lines, setLines] = useState<string[]>([])
@@ -53,9 +50,9 @@ export default function LogsTab({ health, embedded = false, hideTitle = false }:
     ? lines.filter((line) => line.toLowerCase().includes(filter.trim().toLowerCase()))
     : lines
 
-  const body = (
+  return (
     <>
-      <div className={`flex flex-col gap-2 sm:flex-row sm:flex-wrap ${embedded ? 'mb-3' : 'mb-4'}`}>
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
         <Input
           className="w-full sm:w-28"
           type="number"
@@ -78,30 +75,16 @@ export default function LogsTab({ health, embedded = false, hideTitle = false }:
       </div>
 
       {loading ? (
-        <div className={`flex justify-center ${embedded ? 'py-6' : 'py-10'}`}>
+        <div className="flex justify-center py-6">
           <Spinner />
         </div>
       ) : !health?.installed ? (
         <p className="text-sm text-muted-foreground">Логи доступны после установки AZ-WARP.</p>
       ) : (
-        <pre
-          className={`overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed ${
-            embedded ? 'max-h-56' : 'max-h-[28rem]'
-          }`}
-        >
+        <pre className="max-h-56 overflow-auto rounded-lg border bg-muted/40 p-3 font-mono text-xs leading-relaxed">
           {filtered.length > 0 ? filtered.join('\n') : 'Нет строк логов.'}
         </pre>
       )}
     </>
-  )
-
-  if (embedded) {
-    return <div>{!hideTitle && <h3 className="mb-3 text-sm font-semibold">Логи sing-box</h3>}{body}</div>
-  }
-
-  return (
-    <StatusPanel title="Логи sing-box" icon={FileText}>
-      {body}
-    </StatusPanel>
   )
 }

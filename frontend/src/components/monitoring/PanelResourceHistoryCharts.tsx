@@ -23,12 +23,30 @@ import {
   CHART_COLORS,
   CHART_GRID,
   CHART_MARGIN,
+  PercentAreaChart,
   RANGE_LABELS,
   TimeXAxis,
   formatChartLabel,
+  type PercentAreaSeries,
   type ResourceChartPeriod,
 } from '@/components/monitoring/resourceChartShared'
 import type { PanelResourceCurrent, PanelResourceHistory, PanelResourceHistoryPoint } from '@/types'
+
+const HOST_PERCENT_SERIES: PercentAreaSeries[] = [
+  { key: 'hostCpu', color: CHART_COLORS.cpu, name: 'hostCpu', gradientId: 'panelHostCpu' },
+  { key: 'hostMemory', color: CHART_COLORS.ram, name: 'hostMemory', gradientId: 'panelHostRam' },
+  { key: 'hostDisk', color: CHART_COLORS.disk, name: 'hostDisk', gradientId: 'panelHostDisk' },
+]
+
+const HOST_LEGEND_LABELS: Record<string, string> = {
+  hostCpu: 'CPU',
+  hostMemory: 'RAM',
+  hostDisk: 'Диск',
+}
+
+const BACKEND_CPU_SERIES: PercentAreaSeries[] = [
+  { key: 'cpu', color: CHART_COLORS.cpu, name: 'CPU', gradientId: 'panelCpu' },
+]
 
 type PanelResourceHistoryChartsProps = {
   period: ResourceChartPeriod
@@ -357,109 +375,25 @@ export default function PanelResourceHistoryCharts({
                   {showHostCharts && (
                     <div>
                       <p className="mb-2 text-sm font-medium">Хост контроллера: CPU / RAM / Диск (%)</p>
-                      <ChartResponsive height={240}>
-                        {({ width, height }) => (
-                        <AreaChart width={width} height={height} data={chartData} margin={CHART_MARGIN}>
-                          <defs>
-                            <linearGradient id="panelHostCpu" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={CHART_COLORS.cpu} stopOpacity={0.3} />
-                              <stop offset="95%" stopColor={CHART_COLORS.cpu} stopOpacity={0.02} />
-                            </linearGradient>
-                            <linearGradient id="panelHostRam" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={CHART_COLORS.ram} stopOpacity={0.3} />
-                              <stop offset="95%" stopColor={CHART_COLORS.ram} stopOpacity={0.02} />
-                            </linearGradient>
-                            <linearGradient id="panelHostDisk" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={CHART_COLORS.disk} stopOpacity={0.3} />
-                              <stop offset="95%" stopColor={CHART_COLORS.disk} stopOpacity={0.02} />
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid {...CHART_GRID} />
-                          <TimeXAxis />
-                          <YAxis
-                            domain={[0, 100]}
-                            tick={{ fontSize: 11 }}
-                            tickLine={false}
-                            axisLine={false}
-                            unit="%"
-                            width={44}
-                          />
-                          <Tooltip
-                            formatter={(value, name) => {
-                              const labels: Record<string, string> = {
-                                hostCpu: 'CPU',
-                                hostMemory: 'RAM',
-                                hostDisk: 'Диск',
-                              }
-                              const key = String(name)
-                              return [`${Number(value ?? 0).toFixed(1)}%`, labels[key] ?? key]
-                            }}
-                            labelFormatter={(label) => `Время: ${label}`}
-                          />
-                          <Legend
-                            formatter={(value) =>
-                              value === 'hostCpu' ? 'CPU' : value === 'hostMemory' ? 'RAM' : 'Диск'
-                            }
-                          />
-                          <Area
-                            type="monotone"
-                            dataKey="hostCpu"
-                            name="hostCpu"
-                            stroke={CHART_COLORS.cpu}
-                            fill="url(#panelHostCpu)"
-                            strokeWidth={2}
-                          />
-                          <Area
-                            type="monotone"
-                            dataKey="hostMemory"
-                            name="hostMemory"
-                            stroke={CHART_COLORS.ram}
-                            fill="url(#panelHostRam)"
-                            strokeWidth={2}
-                          />
-                          <Area
-                            type="monotone"
-                            dataKey="hostDisk"
-                            name="hostDisk"
-                            stroke={CHART_COLORS.disk}
-                            fill="url(#panelHostDisk)"
-                            strokeWidth={2}
-                          />
-                        </AreaChart>
-                        )}
-                      </ChartResponsive>
+                      <PercentAreaChart
+                        data={chartData}
+                        height={240}
+                        series={HOST_PERCENT_SERIES}
+                        unit="%"
+                        domain={[0, 100]}
+                        legendLabels={HOST_LEGEND_LABELS}
+                      />
                     </div>
                   )}
 
                   <div>
                     <p className="mb-2 text-sm font-medium">Backend CPU (%)</p>
-                    <ChartResponsive height={220}>
-                      {({ width, height }) => (
-                    <AreaChart width={width} height={height} data={chartData} margin={CHART_MARGIN}>
-                        <defs>
-                          <linearGradient id="panelCpu" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor={CHART_COLORS.cpu} stopOpacity={0.3} />
-                            <stop offset="95%" stopColor={CHART_COLORS.cpu} stopOpacity={0.02} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid {...CHART_GRID} />
-                        <TimeXAxis />
-                        <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="%" width={44} />
-                        <Tooltip
-                          formatter={(value) => [`${Number(value ?? 0).toFixed(1)}%`, 'CPU']}
-                          labelFormatter={(label) => `Время: ${label}`}
-                        />
-                        <Area
-                          type="monotone"
-                          dataKey="cpu"
-                          name="cpu"
-                          stroke={CHART_COLORS.cpu}
-                          fill="url(#panelCpu)"
-                          strokeWidth={2}
-                        />
-                      </AreaChart>
-                      )}
-                    </ChartResponsive>
+                    <PercentAreaChart
+                      data={chartData}
+                      height={220}
+                      series={BACKEND_CPU_SERIES}
+                      unit="%"
+                    />
                   </div>
 
                   <div>

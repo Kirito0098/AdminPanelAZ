@@ -16,6 +16,7 @@ from app.routers.settings_telegram import (
     _admin_notify_settings_response,
     _send_test_message_to_recipients,
     _telegram_settings_response,
+    send_test_telegram_message,
     update_telegram_settings,
 )
 from app.schemas import (
@@ -246,26 +247,10 @@ def mini_update_self_service_limits(
 
 @router.post("/telegram-settings/test", response_model=MessageResponse)
 def mini_test_telegram(db: Session = Depends(get_db), _: User = Depends(require_tg_mini_admin)):
-    from app.routers import tg_mini as root
-    from app.services.telegram import send_tg_message
-    from app.services.telegram_recipients import get_setting_chat_ids
-
-    bot_token = root._get_bot_token(db)
-    chat_ids = get_setting_chat_ids(lambda key, default="": root._get_setting(db, key, default))
-    if not bot_token or not chat_ids:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите токен бота и получателей бэкапов")
-    sent = 0
-    for chat_id in chat_ids:
-        if send_tg_message(
-            bot_token,
-            chat_id,
-            "✅ <b>AdminPanelAZ</b>: тестовое уведомление Telegram",
-            run_async=False,
-        ):
-            sent += 1
-    if sent == 0:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
-    return MessageResponse(message=f"Тестовое сообщение отправлено ({sent} из {len(chat_ids)})")
+    return send_test_telegram_message(
+        db,
+        missing_recipients_detail="Укажите токен бота и получателей бэкапов",
+    )
 
 
 @router.post("/check-bot-delivery")

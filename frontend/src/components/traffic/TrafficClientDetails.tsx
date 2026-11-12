@@ -23,7 +23,8 @@ import {
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import { MONITORING_PROTOCOL_COLORS } from '@/components/monitoring/monitoringChartTheme'
 import { getTrafficClientSessions } from '@/api/client'
-import { formatBytes, protocolBadgeVariant, protocolLabel } from '@/lib/trafficFormat'
+import { formatBytes } from '@/lib/trafficFormat'
+import { protocolBadgeVariant, protocolLabel } from '@/lib/vpnTypes'
 import TrafficPeriodControls, {
   CHART_PERIOD_PRESETS,
   type TrafficPeriodPreset,
@@ -47,8 +48,8 @@ import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { COL_VPN_IP } from '@/lib/uiLabels'
 import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficClientSessions } from '@/types'
 
-const CHART_VPN = 'hsl(187, 72%, 45%)'
-const CHART_ANTIZAPRET = 'hsl(38, 92%, 50%)'
+const CHART_VPN = MONITORING_PROTOCOL_COLORS.openvpn
+const CHART_ANTIZAPRET = MONITORING_PROTOCOL_COLORS.amneziawg2
 
 const RANGE_LABELS: Record<TrafficPeriodPreset, string> = {
   '1h': '1 час',
@@ -66,6 +67,12 @@ function formatTrafficChartLabel(ts: string | undefined, fallback: string, bucke
     return formatDate(ts, { day: '2-digit', month: '2-digit' })
   }
   return formatDate(ts, { year: 'numeric', month: '2-digit' })
+}
+
+function seriesLabel(key: string) {
+  if (key === 'vpn') return 'VPN'
+  if (key === 'antizapret') return 'AntiZapret'
+  return protocolLabel(key)
 }
 
 type SourceSortKey = 'sessions' | 'last_seen'
@@ -299,14 +306,6 @@ export default function TrafficClientDetails({
   }, [chartData])
 
   const showProtocolSeries = showAwg2
-
-  const SERIES_LABELS: Record<string, string> = {
-    vpn: 'VPN',
-    antizapret: 'AntiZapret',
-    openvpn: 'OpenVPN',
-    wireguard: 'WireGuard',
-    amneziawg2: 'AWG 2.0',
-  }
 
   const limitPercent =
     policy?.traffic_limit_bytes && policy.traffic_limit_bytes > 0
@@ -658,11 +657,11 @@ export default function TrafficClientDetails({
                   <Tooltip
                     formatter={(v, name) => {
                       const key = String(name)
-                      return [formatBytes(Number(v ?? 0)), SERIES_LABELS[key] ?? key]
+                      return [formatBytes(Number(v ?? 0)), seriesLabel(key)]
                     }}
                     labelFormatter={(label) => `Период: ${label}`}
                   />
-                  <Legend formatter={(value) => SERIES_LABELS[value] ?? value} />
+                  <Legend formatter={(value) => seriesLabel(String(value))} />
                   {showProtocolSeries ? (
                     <>
                       {/* Unstacked: stacked areas put the top series stroke at the total

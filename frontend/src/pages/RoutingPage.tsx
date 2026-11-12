@@ -18,7 +18,6 @@ import ProvidersTab from '@/components/routing/ProvidersTab'
 import RoutingOverviewTab from '@/components/routing/RoutingOverviewTab'
 import RoutingPageHeader from '@/components/routing/RoutingPageHeader'
 import RoutingPageSkeleton from '@/components/routing/RoutingPageSkeleton'
-import RoutingSectionCards from '@/components/routing/RoutingSectionCards'
 import RoutingSettingsTab from '@/components/routing/RoutingSettingsTab'
 import RoutingWorkflowGuide from '@/components/routing/RoutingWorkflowGuide'
 import { ROUTING_TAB_UPDATE, WORKFLOW_CHAIN } from '@/components/routing/routingLabels'
@@ -213,13 +212,6 @@ export default function RoutingPage() {
         onNavigate={navigateTab}
       />
 
-      <RoutingSectionCards
-        workflow={workflow}
-        isAdmin={isAdmin}
-        activeTab={tab}
-        onNavigate={navigateTab}
-      />
-
       <PipelineTaskProgress task={pipelineTask} />
 
       <Tabs value={tab} onValueChange={(value) => navigateTab(value as RoutingTab)} className="space-y-4">
@@ -240,7 +232,7 @@ export default function RoutingPage() {
 
         <TabsContent value="overview" className="space-y-5 mt-0">
           <PipelineStatusBar cidrDb={cidrDb} antifilter={antifilter} />
-          <RoutingOverviewTab data={data} cidrDb={cidrDb} antifilter={antifilter} workflow={workflow} />
+          <RoutingOverviewTab data={data} antifilter={antifilter} workflow={workflow} />
         </TabsContent>
 
         <TabsContent value="analysis" className="mt-0">
