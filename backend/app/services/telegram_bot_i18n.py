@@ -104,6 +104,7 @@ BTN_MENU_MORE = "⋯ Ещё"
 BTN_MENU_TRAFFIC = "📈 Трафик"
 BTN_MENU_HELP = BTN_HELP
 BTN_MENU_HOME = "🏠 Главная"
+BTN_MENU_HUB = "🧭 Меню"
 BTN_MENU_SETTINGS = "⚙️ Настройки"
 BTN_MENU_NODES = "🖥 Узлы"
 BTN_MENU_CIDR = "🗂 CIDR"
@@ -126,6 +127,7 @@ MENU_ACTIONS: dict[str, str] = {
     BTN_CHAT_STOP: "chat_stop",
     BTN_PAY: "pay_request",
     BTN_MENU_HOME: "home",
+    BTN_MENU_HUB: "home",
     BTN_MENU_SETTINGS: "settings",
     BTN_MENU_NODES: "nodes",
     BTN_MENU_CIDR: "cidr",
@@ -160,6 +162,18 @@ RECEIPT_NOT_PHOTO = "Пришлите чек фотографией (не фай
 REQUEST_ALREADY_DECIDED = "Заявка уже обработана"
 REQUEST_E1 = "Заявка не может быть принята, напишите администратору"
 REQUEST_SUBMITTED = "Заявка отправлена администратору. Ожидайте решения."
+
+# Карточка-виджет статуса заявки (Bot API 10.4). Тексты в HTML шаблона статичны,
+# здесь — заголовок и caption, который видят клиенты без поддержки виджетов.
+WIDGET_ACCESS_TITLE = "🔐 Доступ к панели"
+WIDGET_ACCESS_PENDING = "⏳ Заявка ожидает решения администратора"
+WIDGET_ACCESS_APPROVED = "✅ Доступ выдан"
+WIDGET_ACCESS_REJECTED = "❌ Заявка отклонена"
+WIDGET_ACCESS_UNKNOWN = "❔ Заявка не найдена"
+
+# Hub-виджет: главное меню, статус, трафик и заявки в одном сообщении.
+WIDGET_HUB_TITLE = "🧭 Меню панели"
+WIDGET_HUB_CAPTION = "🧭 Меню панели — нажмите кнопку в сообщении"
 REQUEST_MORE_SUBMITTED = "Заявка на ещё один конфиг отправлена администратору. Ожидайте решения."
 REQUEST_RECEIPT_OK = "Чек принят. Администратор проверит оплату."
 REQUEST_LINK_HINT = "Привязка: отправьте боту <code>/link &lt;код&gt;</code>. Код — в панели: «Мой профиль» → Telegram."

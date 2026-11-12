@@ -267,6 +267,15 @@ class TelegramBotService:
             await self._handle_my_chat_member(snap.bot_token, my_chat_member)
             return
 
+        widget_query = update.get("widget_query")
+        if widget_query:
+            from app.services.telegram_widgets import handle_widget_query
+
+            await handle_widget_query(
+                db, widget_query, bot_token=snap.bot_token, mini_app_url=mini_app_url
+            )
+            return
+
         callback = update.get("callback_query")
         if callback:
             await self._handle_callback(db, callback, mini_app_url=mini_app_url, settings=snap)

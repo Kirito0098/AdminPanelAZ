@@ -14,7 +14,7 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.pool import SingletonThreadPool, StaticPool
 
 from app.config import get_settings
-from app.paths import BACKEND_ROOT
+from app.paths import resolve_sqlite_db_path
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -45,13 +45,7 @@ class Base(DeclarativeBase):
 
 
 def resolve_main_db_path() -> Path:
-    db_url = get_settings().database_url
-    if db_url.startswith("sqlite:///"):
-        db_path = Path(db_url.replace("sqlite:///", ""))
-        if not db_path.is_absolute():
-            db_path = BACKEND_ROOT / db_path
-        return db_path.resolve()
-    return (BACKEND_ROOT / "data" / "adminpanel.db").resolve()
+    return resolve_sqlite_db_path(get_settings().database_url, default_relative="data/adminpanel.db")
 
 
 @contextmanager
@@ -1768,6 +1762,7 @@ def _run_db_migrations() -> None:
     _migrate_config_quota_floor()
     _migrate_user_messages()
     _migrate_user_message_cards()
+    _migrate_telegram_widgets()
     _migrate_user_portal_banner()
     _migrate_revoke_unmanaged_client_portal_links()
     _seed_client_templates_for_nodes()
@@ -2395,6 +2390,44 @@ def _migrate_user_message_cards() -> None:
             )
         )
         logger.info("DB migration: created user_message_cards table")
+
+
+def _migrate_telegram_widgets() -> None:
+    """Bot API 10.4: сообщения-виджеты и их владелец."""
+    inspector = inspect(engine)
+    if "telegram_widgets" in set(inspector.get_table_names()):
+        return
+    with _migration_transaction() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE telegram_widgets (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    chat_id VARCHAR(32) NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    telegram_id VARCHAR(32) NOT NULL,
+                    kind VARCHAR(32) NOT NULL,
+                    ref_id INTEGER,
+                    last_state VARCHAR(1024),
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_telegram_widgets_message "
+                "ON telegram_widgets (chat_id, message_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_telegram_widgets_tg_kind "
+                "ON telegram_widgets (telegram_id, kind)"
+            )
+        )
+        logger.info("DB migration: created telegram_widgets table")
 
 
 def _migrate_user_config_access_table() -> None:

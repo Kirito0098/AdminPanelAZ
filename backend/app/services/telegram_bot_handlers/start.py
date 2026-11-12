@@ -32,6 +32,16 @@ async def handle_start(ctx: BotContext, *, payload: str | None = None) -> None:
         from app.services.user_messages import leave_chat_mode
 
         leave_chat_mode(ctx.db, ctx.user)
+    from app.services.telegram_widgets import send_hub
+
+    if await send_hub(
+        ctx.db,
+        bot_token=ctx.bot_token,
+        chat_id=ctx.chat_id,
+        telegram_id=ctx.telegram_user_id,
+        reply_markup=build_reply_keyboard(ctx),
+    ):
+        return
     if ctx.user is None:
         template = (
             i18n.START_UNLINKED_WITH_REQUESTS

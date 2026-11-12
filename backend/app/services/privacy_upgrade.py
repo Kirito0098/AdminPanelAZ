@@ -18,6 +18,8 @@ from app.services.telegram_api import get_webhook_info_sync, set_webhook_sync
 logger = logging.getLogger(__name__)
 
 WEBHOOK_PRIVACY_UPGRADED = "telegram_webhook_privacy_upgraded"
+WEBHOOK_UPDATES_VERSION = "telegram_webhook_updates_version"
+WEBHOOK_UPDATES_VERSION_CURRENT = "2"
 NGINX_PRIVACY_APPLIED = "nginx_privacy_log_applied"
 _WEBHOOK_PATH_MARKER = "/api/telegram/webhook/"
 
@@ -156,6 +158,51 @@ def upgrade_telegram_webhook(db: Session) -> str:
     return "ok"
 
 
+def _mark_webhook_updates_current(db: Session) -> None:
+    _set_setting(db, WEBHOOK_UPDATES_VERSION, WEBHOOK_UPDATES_VERSION_CURRENT)
+    db.commit()
+
+
+def upgrade_webhook_allowed_updates(db: Session) -> str:
+    """Re-register webhook once so Telegram starts sending ``widget_query``.
+
+    Old ``WEBHOOK_PRIVACY_UPGRADED=1`` blocks re-registering, so widget updates need
+    their own version key. Returns ``skipped`` | ``ok`` | ``failed`` | ``deferred``.
+    """
+    if (_get_setting(db, WEBHOOK_UPDATES_VERSION, "") or "") == WEBHOOK_UPDATES_VERSION_CURRENT:
+        return "skipped"
+
+    from app.services.telegram_transport import RELAY_NODES_SETTING
+
+    bot_token = (_get_setting(db, "telegram_bot_token") or "").strip()
+    interactive = _get_setting(db, "telegram_bot_interactive_enabled", "false") == "true"
+    webhook_set_at = (_get_setting(db, "telegram_webhook_set_at") or "").strip()
+    relay = (_get_setting(db, RELAY_NODES_SETTING) or "").strip()
+
+    # Polling / relay / bot off — Telegram updates come without a panel webhook.
+    if not bot_token or not interactive or relay or not webhook_set_at:
+        _mark_webhook_updates_current(db)
+        return "skipped"
+
+    secret = _ensure_webhook_secret(db)
+    url = _webhook_url_for_upgrade(db, bot_token, secret)
+    if not url:
+        logger.warning(
+            "Webhook updates upgrade: cannot resolve webhook URL; retry on next start"
+        )
+        return "deferred"
+
+    ok, error = set_webhook_sync(bot_token, url, secret_token=secret)
+    if not ok:
+        logger.warning("Webhook updates upgrade: setWebhook failed (%s)", error)
+        return "failed"
+
+    _set_setting(db, "telegram_webhook_secret_required", "true")
+    _mark_webhook_updates_current(db)
+    logger.info("Webhook re-registered: allowed_updates now include widget_query")
+    return "ok"
+
+
 def warn_backup_groups_if_needed(db: Session) -> bool:
     """D1 upgrade: bell when group chat ids exist without backup password."""
     from app.services.backup_telegram_privacy import warn_if_group_recipients_without_password
@@ -247,6 +294,7 @@ def run_privacy_upgrade(db: Session) -> dict[str, Any]:
         "grants_changed": 0,
         "pin_migrated": False,
         "webhook": "skipped",
+        "webhook_updates": "skipped",
         "backup_group_warned": False,
         "nginx": "skipped",
     }
@@ -265,6 +313,17 @@ def run_privacy_upgrade(db: Session) -> dict[str, Any]:
     except Exception:
         logger.exception("Privacy upgrade: webhook re-register failed")
         result["webhook"] = "failed"
+
+    try:
+        if result["webhook"] == "ok":
+            # Только что перерегистрировали с текущим ALLOWED_UPDATES.
+            _mark_webhook_updates_current(db)
+            result["webhook_updates"] = "skipped"
+        else:
+            result["webhook_updates"] = upgrade_webhook_allowed_updates(db)
+    except Exception:
+        logger.exception("Privacy upgrade: webhook allowed_updates upgrade failed")
+        result["webhook_updates"] = "failed"
 
     try:
         result["backup_group_warned"] = warn_backup_groups_if_needed(db)

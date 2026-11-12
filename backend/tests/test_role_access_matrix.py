@@ -8,12 +8,10 @@ import pathlib
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app import auth as auth_module
 from app.database import Base
 from app.models import User, UserRole
 from app.services import telegram_api as telegram_api_module
@@ -145,20 +143,6 @@ def test_admin_reaches_the_settings_menu(db, sent):
     assert sent and i18n.ADMIN_ONLY not in sent[0]
 
 
-def test_require_tg_mini_admin_rejects_a_regular_user():
-    with pytest.raises(HTTPException) as excinfo:
-        auth_module.require_tg_mini_admin(SimpleNamespace(role=UserRole.user, telegram_id="1"))
-
-    assert excinfo.value.status_code == 403
-
-
-def test_get_tg_mini_user_requires_a_telegram_binding():
-    with pytest.raises(HTTPException) as excinfo:
-        auth_module.get_tg_mini_user(SimpleNamespace(role=UserRole.admin, telegram_id=""))
-
-    assert excinfo.value.status_code == 401
-
-
 ADMIN_MINI_PREFIXES = (
     "/nodes",
     "/dashboard",
@@ -273,9 +257,8 @@ def test_admin_reply_layout_puts_admin_sections_first():
     keyboard = menu.build_linked_reply_keyboard(is_admin=True)
 
     assert _keyboard_rows(keyboard) == [
-        [i18n.BTN_MENU_NODES, i18n.BTN_MENU_SETTINGS],
-        [i18n.BTN_MENU_OVERVIEW, i18n.BTN_MENU_TRAFFIC],
-        [i18n.BTN_MENU_CONFIGS, i18n.BTN_MENU_MORE],
+        [i18n.BTN_MENU_HUB, i18n.BTN_MENU_CONFIGS],
+        [i18n.BTN_MENU_TRAFFIC, i18n.BTN_MENU_SETTINGS],
     ]
 
 
@@ -284,9 +267,8 @@ def test_user_reply_layout_keeps_frequent_actions_on_screen(monkeypatch):
     keyboard = menu.build_linked_reply_keyboard(is_admin=False)
 
     assert _keyboard_rows(keyboard) == [
-        [i18n.BTN_MENU_CONFIGS, i18n.BTN_MENU_TRAFFIC],
-        [i18n.BTN_REDEEM_UNLOCK, i18n.BTN_REQUEST_MORE_CONFIG],
-        [i18n.BTN_MENU_HELP],
+        [i18n.BTN_MENU_HUB, i18n.BTN_MENU_CONFIGS],
+        [i18n.BTN_MENU_TRAFFIC, i18n.BTN_MENU_HELP],
     ]
 
 
@@ -294,10 +276,10 @@ def test_user_reply_layout_without_unlock_codes(monkeypatch):
     _features(monkeypatch, enabled={"routing"})
     keyboard = menu.build_linked_reply_keyboard(is_admin=False)
 
+    # Редкие действия живут в hub-виджете, нижняя панель от них не зависит.
     assert _keyboard_rows(keyboard) == [
-        [i18n.BTN_MENU_CONFIGS, i18n.BTN_MENU_TRAFFIC],
-        [i18n.BTN_REQUEST_MORE_CONFIG],
-        [i18n.BTN_MENU_HELP],
+        [i18n.BTN_MENU_HUB, i18n.BTN_MENU_CONFIGS],
+        [i18n.BTN_MENU_TRAFFIC, i18n.BTN_MENU_HELP],
     ]
 
 

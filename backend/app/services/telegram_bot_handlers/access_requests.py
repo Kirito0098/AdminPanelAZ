@@ -88,7 +88,7 @@ def _linked_keyboard(ctx: BotContext) -> dict | None:
 async def handle_request_access(ctx: BotContext) -> None:
     """«Запросить доступ» — новая заявка new_user (только если приём включён)."""
     try:
-        submit_access_request(
+        request = submit_access_request(
             ctx.db,
             request_type="new_user",
             telegram_id=ctx.telegram_user_id,
@@ -123,6 +123,15 @@ async def handle_request_access(ctx: BotContext) -> None:
             ctx.chat_id,
             "Этот Telegram уже привязан к аккаунту в панели. Войдите в панель или напишите администратору.",
         )
+        return
+    from app.services.telegram_widgets import send_access_request_card
+
+    if await send_access_request_card(
+        ctx.db,
+        bot_token=ctx.bot_token,
+        chat_id=ctx.chat_id,
+        request=request,
+    ):
         return
     await send_message(ctx.bot_token, ctx.chat_id, i18n.REQUEST_SUBMITTED)
 
@@ -400,5 +409,11 @@ async def handle_admin_request_callback(
         else i18n.ADMIN_REQUEST_REJECTED.format(admin=admin.username)
     )
     await sync_admin_request_messages(db, request, text=text)
+    try:
+        from app.services.telegram_widgets import refresh_access_request_cards
+
+        await refresh_access_request_cards(request_id)
+    except Exception:  # noqa: BLE001 — карточка не должна ломать решение
+        logger.warning("widget card refresh failed for request %s", request_id, exc_info=True)
     await answer_callback_query(ctx.bot_token, callback_id)
     return True

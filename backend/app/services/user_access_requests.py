@@ -515,6 +515,11 @@ def _run_async(coro) -> Any:
             box["value"] = asyncio.run(coro)
         except BaseException as exc:  # нет права падать при уведомлении
             box["exc"] = exc
+        finally:
+            # Клиент создан внутри временного цикла потока; после его закрытия
+            # он не должен остаться глобальным — иначе следующий вызов на
+            # bot-loop упадёт с «Event loop is closed» (виджет терял message_id).
+            telegram_api.reset_bot_api_client_for_tests()
 
     thread = threading.Thread(target=_target, daemon=True)
     thread.start()

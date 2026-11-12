@@ -99,46 +99,33 @@ def _user_messaging_enabled() -> bool:
 def build_linked_reply_keyboard(
     *, is_admin: bool = False, in_chat: bool = False, show_pay: bool = False
 ) -> dict:
-    """Reply-клавиатура привязанного аккаунта — раскладка зависит от роли.
+    """Компактная reply-клавиатура: частые действия внизу, остальное — в hub-виджете.
 
-    У абонента меню без «Ещё»: частые действия (Конфиги, Трафик), оплата/чат с
-    админом и остальное — прямо на нижней панели. У админа редкие разделы
-    (CIDR/WARP/AWG2/коды) остаются в «Ещё». Используется и после одобрения
-    заявки, чтобы устаревшая кнопка «Запросить доступ» пропала.
+    Убранные кнопки (оплата, чат, коды, «Ещё») живут в меню-виджете, поэтому
+    нижняя панель занимает две строки вместо четырёх. Используется и после
+    одобрения заявки, чтобы устаревшая кнопка «Запросить доступ» пропала.
     """
+    del show_pay  # оплата теперь в hub-виджете
     if is_admin:
         rows = [
-            [reply_button(i18n.BTN_MENU_NODES), reply_button(i18n.BTN_MENU_SETTINGS)],
-            [reply_button(i18n.BTN_MENU_OVERVIEW), reply_button(i18n.BTN_MENU_TRAFFIC)],
-            [reply_button(i18n.BTN_MENU_CONFIGS), reply_button(i18n.BTN_MENU_MORE)],
+            [reply_button(i18n.BTN_MENU_HUB), reply_button(i18n.BTN_MENU_CONFIGS)],
+            [reply_button(i18n.BTN_MENU_TRAFFIC), reply_button(i18n.BTN_MENU_SETTINGS)],
         ]
     else:
-        rows = [[reply_button(i18n.BTN_MENU_CONFIGS), reply_button(i18n.BTN_MENU_TRAFFIC)]]
-        actions_row = []
-        if _unlock_codes_enabled():
-            actions_row.append(reply_button(i18n.BTN_REDEEM_UNLOCK))
-        actions_row.append(reply_button(i18n.BTN_REQUEST_MORE_CONFIG))
-        rows.append(actions_row)
-        contact_row = []
-        if show_pay:
-            contact_row.append(reply_button(i18n.BTN_PAY))
-        if _user_messaging_enabled():
-            contact_row.append(reply_button(i18n.BTN_MENU_ADMIN))
-        if contact_row:
-            rows.append(contact_row)
+        rows = [
+            [reply_button(i18n.BTN_MENU_HUB), reply_button(i18n.BTN_MENU_CONFIGS)],
+            [reply_button(i18n.BTN_MENU_TRAFFIC), reply_button(i18n.BTN_MENU_HELP)],
+        ]
         if in_chat:
             rows.append([reply_button(i18n.BTN_CHAT_STOP)])
-        rows.append([reply_button(i18n.BTN_MENU_HELP)])
     return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
 
 
 def build_reply_keyboard(ctx: BotContext) -> dict:
     if not _linked_user_menu_visible(ctx):
-        rows = []
+        rows = [[reply_button(i18n.BTN_MENU_HUB), reply_button(i18n.BTN_LINK_CODE)]]
         if _accept_requests(ctx.db):
             rows.append([reply_button(i18n.BTN_REQUEST_ACCESS)])
-        rows.append([reply_button(i18n.BTN_LINK_CODE)])
-        rows.append([reply_button(i18n.BTN_MENU_HELP)])
         return reply_keyboard(rows, placeholder=i18n.MENU_KEYBOARD_PLACEHOLDER)
 
     return build_linked_reply_keyboard(

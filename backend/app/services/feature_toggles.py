@@ -252,6 +252,24 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         frontend_paths=("/telegram",),
     ),
     FeatureToggleDefinition(
+        key="telegram_widgets",
+        env_key="FEATURE_TELEGRAM_WIDGETS_ENABLED",
+        label="Telegram-виджеты",
+        description=(
+            "Интерактивные карточки в сообщениях бота (Bot API 10.4): живой статус "
+            "заявки на доступ обновляется без новых сообщений."
+        ),
+        icon="🧩",
+        disable_hint=(
+            "Новые карточки не отправляются — бот вернётся к текстовым сообщениям. "
+            "Уже отправленные карточки продолжают отвечать на нажатия."
+        ),
+        resource_impact_level="low",
+        resource_savings="Меньше сообщений в чате; запросы widget_query и правки состояния виджета.",
+        default=False,
+        group="app_module",
+    ),
+    FeatureToggleDefinition(
         key="proxy_nodes",
         env_key="FEATURE_PROXY_NODES_ENABLED",
         label="Прокси-узлы",

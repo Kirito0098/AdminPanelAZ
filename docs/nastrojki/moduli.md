@@ -40,6 +40,8 @@ sudo systemctl restart adminpanelaz
 ```
 
 Модуль **Telegram** после install включён (`FEATURE_TELEGRAM_ENABLED=true`) — раздел виден в меню; bot token задаётся на странице Telegram, не в установщике.
+
+Рядом — **Telegram-виджеты** (`FEATURE_TELEGRAM_WIDGETS_ENABLED`, по умолчанию `false`): интерактивные карточки в сообщениях бота (Bot API 10.4). Выключение не ломает уже отправленные карточки — перестают приходить только новые, бот возвращается к тексту.
 ---
 
 ## Пошаговые сценарии

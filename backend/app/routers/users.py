@@ -1032,6 +1032,9 @@ def approve_access_request(
             details=f"request_id={request_id}, type={row.request_type}",
         )
     _sync_request_messages_after_decide(decided, admin_username=admin.username, approved=True)
+    from app.services.telegram_widgets import refresh_access_request_cards_sync
+
+    refresh_access_request_cards_sync(decided.id)
     return AccessRequestResponse.model_validate(decided)
 
 
@@ -1072,6 +1075,9 @@ def reject_access_request(
             details=f"request_id={request_id}, ban={payload.ban}",
         )
     _sync_request_messages_after_decide(decided, admin_username=admin.username, approved=False)
+    from app.services.telegram_widgets import refresh_access_request_cards_sync
+
+    refresh_access_request_cards_sync(decided.id)
     return AccessRequestResponse.model_validate(decided)
 
 

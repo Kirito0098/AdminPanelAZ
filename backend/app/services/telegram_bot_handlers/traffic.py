@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from html import escape
 
+from sqlalchemy.orm import Session
+
 from app.config import get_settings
+from app.models import User
 from app.services.node_manager import get_active_node
 from app.services.config_access import accessible_client_names
 from app.services.telegram_api import send_message
@@ -43,39 +46,37 @@ def _aggregate_clients(rows) -> list[dict]:
     return list(by_key.values())
 
 
-def _format_top_lines(clients: list[dict], *, limit: int = _TOP_LIMIT) -> str:
-    ranked = sorted(clients, key=lambda item: item["traffic_1d"], reverse=True)[:limit]
-    if not ranked or all(item["traffic_1d"] <= 0 for item in ranked):
+def _format_top_lines(top: list[dict], *, limit: int = _TOP_LIMIT) -> str:
+    ranked = top[:limit]
+    if not ranked:
         return i18n.TRAFFIC_TOP_EMPTY
 
     lines: list[str] = []
     for index, item in enumerate(ranked):
-        if item["traffic_1d"] <= 0:
-            break
         medal = _MEDALS[index] if index < len(_MEDALS) else f"{index + 1}."
-        status = "🟢" if item["is_active"] else "⚪"
-        traffic = human_bytes(item["traffic_1d"]) or "0 B"
+        status = "🟢" if item["active"] else "⚪"
         lines.append(
             i18n.TRAFFIC_TOP_LINE.format(
                 medal=medal,
                 status=status,
                 name=escape(str(item["name"])),
-                traffic=traffic,
+                traffic=item["traffic"],
             )
         )
     return "\n".join(lines) if lines else i18n.TRAFFIC_TOP_EMPTY
 
 
-async def handle_traffic(ctx: BotContext, *, page: int = 0, message_id: int | None = None) -> None:
-    del page  # legacy pagination callbacks are ignored
+def traffic_snapshot(
+    db: Session,
+    user: User,
+    *,
+    top_limit: int = _TOP_LIMIT,
+) -> tuple[dict | None, str]:
+    """Сводка трафика для экрана и виджета. ``reason``: ``none`` | ``nostats``."""
 
-    if ctx.user is None:
-        await send_message(ctx.bot_token, ctx.chat_id, unlinked_message())
-        return
-
-    node = get_active_node(ctx.db)
-    collector = TrafficCollectorService(ctx.db, node.id)
-    active_names = live_active_names_for_node(ctx.db, node)
+    node = get_active_node(db)
+    collector = TrafficCollectorService(db, node.id)
+    active_names = live_active_names_for_node(db, node)
     window = resolve_traffic_period(
         period="1d",
         from_s=None,
@@ -87,16 +88,15 @@ async def handle_traffic(ctx: BotContext, *, page: int = 0, message_id: int | No
         active_names, settings.traffic_db_stale_seconds, period_window=window
     )
 
-    if is_admin(ctx.user):
+    if is_admin(user):
         clients = _aggregate_clients(rows)
         title = i18n.TRAFFIC_FLEET_TITLE
         scope_hint = ""
     else:
-        allowed = accessible_client_names(ctx.db, ctx.user, node_id=node.id) or set()
+        allowed = accessible_client_names(db, user, node_id=node.id) or set()
         owned_lower = {name.lower() for name in allowed}
         if not owned_lower:
-            await send_message(ctx.bot_token, ctx.chat_id, i18n.TRAFFIC_NONE)
-            return
+            return None, "none"
         clients = _aggregate_clients(
             [row for row in rows if (row.common_name or "").lower() in owned_lower],
         )
@@ -104,22 +104,58 @@ async def handle_traffic(ctx: BotContext, *, page: int = 0, message_id: int | No
         scope_hint = i18n.TRAFFIC_USER_SCOPE
 
     if not clients:
-        await send_message(ctx.bot_token, ctx.chat_id, i18n.TRAFFIC_NO_STATS)
+        return None, "nostats"
+
+    ranked = [
+        {
+            "name": str(item["name"]),
+            "traffic": human_bytes(item["traffic_1d"]) or "0 B",
+            "active": bool(item["is_active"]),
+        }
+        for item in sorted(clients, key=lambda item: item["traffic_1d"], reverse=True)
+        if item["traffic_1d"] > 0
+    ][:top_limit]
+
+    return (
+        {
+            "title": title,
+            "scope_hint": scope_hint,
+            "node": str(node.name or ""),
+            "count": len(clients),
+            "active": sum(1 for item in clients if item["is_active"]),
+            "traffic_1d": human_bytes(sum(item["traffic_1d"] for item in clients)) or "0 B",
+            "total_all": human_bytes(sum(item["total_bytes"] for item in clients)) or "0 B",
+            "top": ranked,
+        },
+        "",
+    )
+
+
+async def handle_traffic(ctx: BotContext, *, page: int = 0, message_id: int | None = None) -> None:
+    del page  # legacy pagination callbacks are ignored
+
+    if ctx.user is None:
+        await send_message(ctx.bot_token, ctx.chat_id, unlinked_message())
         return
 
-    total_1d = sum(item["traffic_1d"] for item in clients)
-    total_all = sum(item["total_bytes"] for item in clients)
-    active_count = sum(1 for item in clients if item["is_active"])
+    snapshot, reason = traffic_snapshot(ctx.db, ctx.user)
+    if snapshot is None:
+        await send_message(
+            ctx.bot_token,
+            ctx.chat_id,
+            i18n.TRAFFIC_NONE if reason == "none" else i18n.TRAFFIC_NO_STATS,
+        )
+        return
 
     text = i18n.TRAFFIC_SUMMARY.format(
-        title=title,
-        node_name=escape(node.name or ""),
-        scope_hint=scope_hint,
-        count=len(clients),
-        active=active_count,
-        traffic_1d=human_bytes(total_1d) or "0 B",
-        total_all=human_bytes(total_all) or "0 B",
-        top_lines=_format_top_lines(clients),
+        title=snapshot["title"],
+        node_name=escape(snapshot["node"]),
+        scope_hint=snapshot["scope_hint"],
+        count=snapshot["count"],
+        active=snapshot["active"],
+        traffic_1d=snapshot["traffic_1d"],
+        total_all=snapshot["total_all"],
+        top_lines=_format_top_lines(snapshot["top"]),
     )
 
     markup = nav_footer_keyboard(refresh="nav:traffic")

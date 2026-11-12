@@ -28,6 +28,8 @@ ALLOWED_UPDATES = [
     "inline_query",
     "chosen_inline_result",
     "my_chat_member",
+    "widget_query",
+    "shared_widget_query",
 ]
 
 
@@ -261,6 +263,78 @@ async def send_message(
     return result is not None
 
 
+async def send_widget(
+    bot_token: str,
+    chat_id: str | int,
+    *,
+    html: str,
+    caption: str,
+    chat_data: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    allow_queries: bool = True,
+    reply_markup: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Bot API 10.4: сообщение с интерактивным HTML-виджетом (только личка в проде)."""
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "html": html,
+        "caption": caption,
+        "parse_mode": "HTML",
+        "allow_queries": allow_queries,
+    }
+    if chat_data is not None:
+        payload["chat_data"] = chat_data
+    if width is not None:
+        payload["width"] = int(width)
+    if height is not None:
+        payload["height"] = int(height)
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    return await call_bot_api(bot_token, "sendWidget", payload=payload)
+
+
+async def edit_widget_data(
+    bot_token: str,
+    chat_id: str | int,
+    message_id: int,
+    *,
+    chat_data: str,
+) -> bool:
+    """Обновить состояние виджета; ``message is not modified`` — не ошибка."""
+    res = await call_bot_api_result(
+        bot_token,
+        "editMessageWidgetData",
+        payload={"chat_id": chat_id, "message_id": message_id, "chat_data": chat_data},
+        operation="обновить виджет",
+    )
+    if res.ok:
+        return True
+    return "not modified" in (res.error or "").lower()
+
+
+async def edit_message_caption(
+    bot_token: str,
+    chat_id: str | int,
+    message_id: int,
+    *,
+    caption: str,
+    parse_mode: str = "HTML",
+) -> bool:
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "caption": caption,
+        "parse_mode": parse_mode,
+    }
+    return (await call_bot_api(bot_token, "editMessageCaption", payload=payload)) is not None
+
+
+async def delete_message(bot_token: str, chat_id: str | int, message_id: int) -> bool:
+    payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id}
+    return (await call_bot_api(bot_token, "deleteMessage", payload=payload)) is not None
+
+
 async def send_photo(
     bot_token: str,
     chat_id: str | int,
@@ -375,6 +449,19 @@ async def answer_callback_query(
         payload["text"] = text
         payload["show_alert"] = show_alert
     return (await call_bot_api(bot_token, "answerCallbackQuery", payload=payload)) is not None
+
+
+async def answer_widget_query(
+    bot_token: str,
+    widget_query_id: str,
+    *,
+    data: str | None = None,
+) -> bool:
+    """Ответить на запрос виджета (обязательно в пределах 15 секунд)."""
+    payload: dict[str, Any] = {"widget_query_id": widget_query_id}
+    if data is not None:
+        payload["data"] = data[:1024]
+    return (await call_bot_api(bot_token, "answerWidgetQuery", payload=payload)) is not None
 
 
 def _ok_or_error(data: dict[str, Any], method: str, operation: str) -> tuple[bool, str]:

@@ -1159,6 +1159,33 @@ class UserMessageCard(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class TelegramWidget(Base):
+    """Сообщение-виджет Telegram (Bot API 10.4) и его владелец.
+
+    ``kind`` — тип карточки (``access_request``), ``ref_id`` — id связанной заявки.
+    ``last_state`` — последнее записанное состояние, чтобы не редактировать
+    неизменённое сообщение (Telegram отвечает ``message is not modified``).
+    """
+
+    __tablename__ = "telegram_widgets"
+    __table_args__ = (
+        Index("uq_telegram_widgets_message", "chat_id", "message_id", unique=True),
+        Index("ix_telegram_widgets_tg_kind", "telegram_id", "kind"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[str] = mapped_column(String(32))
+    message_id: Mapped[int] = mapped_column(BigInteger)
+    telegram_id: Mapped[str] = mapped_column(String(32))
+    kind: Mapped[str] = mapped_column(String(32))
+    ref_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_state: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
 class TelegramRequestBan(Base):
     __tablename__ = "telegram_request_bans"
 

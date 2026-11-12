@@ -125,3 +125,24 @@ async def run_on_bot_loop(coro: Coroutine[Any, Any, T]) -> T:
     finally:
         _end_call()
 
+
+def submit_on_bot_loop(coro: Coroutine[Any, Any, Any], *, label: str = "") -> None:
+    """Fire-and-forget на bot-loop: ошибки логируются, вызывающий не ждёт.
+
+    Нужен синхронным endpoint'ам: Bot API остаётся на одном цикле и не трогает
+    общий ``httpx.AsyncClient`` через ``asyncio.run``.
+    """
+
+    async def _guarded() -> None:
+        try:
+            await coro
+        except Exception:  # noqa: BLE001 — фоновая задача не должна терять traceback
+            logger.exception(
+                "bot-loop task %s failed", label or getattr(coro, "__qualname__", "task")
+            )
+
+    try:
+        asyncio.run_coroutine_threadsafe(_guarded(), _bot_loop())
+    except Exception:  # noqa: BLE001 — не ломаем основной запрос
+        logger.exception("cannot schedule bot-loop task %s", label or "task")
+
