@@ -8,7 +8,6 @@ from app.database import get_db
 from app.models import AppSetting, User
 from app.services.action_log import log_action
 from app.services.ip_restriction import ip_restriction_service
-from app.services.public_download_settings import is_public_download_enabled, set_public_download_enabled
 from app.schemas import (
     ActiveWebSessionResponse,
     BackgroundTaskResponse,
@@ -103,16 +102,9 @@ class SecuritySettingsUpdate(BaseModel):
     scanner_window_seconds: int | None = Field(default=None, ge=10, le=3600)
     block_ip_blocked_dwell: bool | None = None
     ip_blocked_dwell_seconds: int | None = Field(default=None, ge=30, le=3600)
-    qr_download_ttl_seconds: int | None = Field(default=None, ge=60, le=86400)
-    qr_download_max_downloads: int | None = None
-    qr_download_pin: str | None = None
     public_download_enabled: bool | None = None
     portal_domain: str | None = None
     portal_title: str | None = Field(default=None, max_length=64)
-
-
-class PublicDownloadToggle(BaseModel):
-    enabled: bool | None = None
 
 
 class EventWebhookSettingsUpdate(BaseModel):
@@ -455,31 +447,6 @@ def remove_temp_whitelist(
             details=f"ip={ip.strip()}",
         )
     return result
-
-
-@router.post("/public-download")
-def toggle_public_download(
-    payload: PublicDownloadToggle,
-    request: Request,
-    db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
-):
-    current = is_public_download_enabled(db)
-    next_state = payload.enabled if payload.enabled is not None else not current
-    set_public_download_enabled(db, next_state)
-    if settings.audit_log_enabled:
-        log_action(
-            db,
-            action="settings_public_download_toggle",
-            user_id=admin.id,
-            username=admin.username,
-            remote_addr=ip_restriction_service.get_client_ip(request),
-            details=f"{'вкл' if current else 'выкл'} → {'вкл' if next_state else 'выкл'}",
-        )
-    return {
-        "enabled": next_state,
-        "message": "Публичный доступ к файлам включен." if next_state else "Публичный доступ к файлам выключен.",
-    }
 
 
 @router.get("/event-webhooks")

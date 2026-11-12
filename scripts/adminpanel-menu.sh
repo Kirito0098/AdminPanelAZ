@@ -442,14 +442,26 @@ frontend_build_stale() {
   return 1
 }
 
+# panel_build_frontend [reuse-deps] — npm ci, затем build:all. reuse-deps: без npm ci, если node_modules уже есть.
+# shellcheck disable=SC2120 # reuse-deps передаёт install.sh, меню вызывает без аргумента.
 panel_build_frontend() {
+  local ci_mode="${1:-always}"
   local frontend_dir="$INSTALL_DIR/frontend"
   if ! command -v npm >/dev/null 2>&1; then
     ui_fail "npm не найден — интерфейс не пересобран"
     return 1
   fi
-  ui_info "Сборка интерфейса (npm ci, npm run build:all)…"
-  if (cd "$frontend_dir" && npm ci && npm run build:all); then
+  local ok=true
+  if [[ "$ci_mode" == "reuse-deps" && -d "$frontend_dir/node_modules" ]]; then
+    ui_info "node_modules уже существует, npm ci пропущен (удалите node_modules для полной переустановки)"
+  else
+    ui_info "Сборка интерфейса (npm ci, npm run build:all)…"
+    (cd "$frontend_dir" && npm ci) || ok=false
+  fi
+  if [[ "$ok" == true ]] && ! (cd "$frontend_dir" && npm run build:all); then
+    ok=false
+  fi
+  if [[ "$ok" == true ]]; then
     ui_ok "Интерфейс пересобран"
     return 0
   fi

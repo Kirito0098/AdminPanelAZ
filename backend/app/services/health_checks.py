@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import Node, NodeStatus, UserTrafficSample
+from app.paths import resolve_sqlite_db_path
 
 settings = get_settings()
 
@@ -60,13 +61,6 @@ def _sqlite_ok(engine, label: str) -> dict[str, Any]:
         return {"status": "error", "label": label, "error": str(exc)}
 
 
-def _db_path_from_url(db_url: str, app_root: Path) -> Path:
-    db_path = Path(db_url.replace("sqlite:///", ""))
-    if not db_path.is_absolute():
-        db_path = app_root / db_path
-    return db_path
-
-
 def build_deep_health(db: Session, *, app_root: Path) -> dict[str, Any]:
     payload: dict[str, Any] = {
         **build_light_health(),
@@ -81,7 +75,7 @@ def build_deep_health(db: Session, *, app_root: Path) -> dict[str, Any]:
     main_db = _sqlite_ok(db.get_bind(), "main_db")
     checks["main_db"] = main_db
 
-    cidr_path = _db_path_from_url(settings.cidr_database_url, app_root)
+    cidr_path = resolve_sqlite_db_path(settings.cidr_database_url, default_relative="data/cidr/cidr.db")
     cidr_check: dict[str, Any] = {"status": "ok", "label": "cidr_db", "path": str(cidr_path)}
     if not cidr_path.is_file():
         cidr_check["status"] = "error"

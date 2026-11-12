@@ -151,7 +151,6 @@ ADMIN_MINI_PREFIXES = (
     "/cidr/status",
     "/telegram-settings",
     "/self-service",
-    "/check-bot-delivery",
 )
 
 

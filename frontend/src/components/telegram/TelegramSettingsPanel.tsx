@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CheckCircle2, ChevronDown, Circle, Copy, ExternalLink, LogIn, Send, Smartphone, Bot, Bell, BarChart3, ImageIcon, Users, BellRing, Settings2, Cpu, Network, Database, Route } from 'lucide-react'
+import { ChevronDown, Copy, LogIn, Send, Smartphone, Bot, Bell, BarChart3, ImageIcon, Users, BellRing, Settings2, Cpu, Network, Database, Route } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import TelegramBotAuthGuide from '@/components/telegram/TelegramBotAuthGuide'
@@ -20,7 +20,6 @@ import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import { applyGroupToggle, enabledCount, isIndeterminate } from './notifyGroups'
-import TelegramLinkCodeForm from './TelegramLinkCodeForm'
 import type { AdminNotifyEventItem } from '@/types'
 import type { TelegramSection, TelegramSettingsHook } from './useTelegramSettings'
 
@@ -28,45 +27,6 @@ interface TelegramSettingsPanelProps {
   tg: TelegramSettingsHook
   activeTab: TelegramSection
   onNavigate?: (tab: TelegramSection) => void
-}
-
-function StepCard({
-  done,
-  step,
-  title,
-  children,
-  action,
-}: {
-  done: boolean
-  step: number
-  title: string
-  children: React.ReactNode
-  action?: React.ReactNode
-}) {
-  return (
-    <div
-      className={cn(
-        'flex gap-4 rounded-lg border p-4 transition-colors',
-        done ? 'border-emerald-500/30 bg-emerald-500/5' : 'bg-muted/20',
-      )}
-    >
-      <div className="flex shrink-0 flex-col items-center gap-1 pt-0.5">
-        {done ? (
-          <CheckCircle2 className="h-6 w-6 text-emerald-500" />
-        ) : (
-          <Circle className="h-6 w-6 text-muted-foreground/50" />
-        )}
-        <span className="text-[10px] font-medium uppercase text-muted-foreground">Шаг {step}</span>
-      </div>
-      <div className="min-w-0 flex-1 space-y-2">
-        <p className="font-medium leading-snug">{title}</p>
-        <div className="text-sm text-muted-foreground [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_strong]:text-foreground">
-          {children}
-        </div>
-        {action && <div className="pt-2">{action}</div>}
-      </div>
-    </div>
-  )
 }
 
 function ToggleRow({
@@ -360,99 +320,6 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
 
   return (
     <div className="space-y-4">
-      {activeTab === 'setup' && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <LogIn size={18} />
-              Как подключить вход через Telegram
-            </CardTitle>
-            <CardDescription>
-              {tg.loginConfigured
-                ? 'Бот настроен — на странице входа должна появиться кнопка «Войти через Telegram»'
-                : 'Выполните шаги по порядку. Зелёная галочка появится, когда шаг выполнен'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <StepCard done={tg.loginConfigured} step={1} title="Создайте бота в Telegram">
-              Откройте @BotFather, отправьте команду <code>/newbot</code> и следуйте подсказкам. Сохраните{' '}
-              <strong>токен</strong> (длинная строка с цифрами) и <strong>имя бота</strong> (латиницей, без @).
-              <Button variant="link" size="sm" className="h-auto p-0" asChild>
-                <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">
-                  Открыть BotFather <ExternalLink className="ml-1 h-3 w-3" />
-                </a>
-              </Button>
-            </StepCard>
-
-            <StepCard done={tg.loginConfigured} step={2} title="Привяжите адрес панели к боту">
-              В BotFather отправьте <code>/setdomain</code>, выберите своего бота и укажите адрес{' '}
-              <code>{panelDomain}</code> — только домен, без <code>https://</code>.
-              <Button type="button" variant="secondary" size="sm" className="mt-2" onClick={() => void copyDomain()}>
-                <Copy className="mr-1.5 h-3.5 w-3.5" />
-                Скопировать адрес
-              </Button>
-            </StepCard>
-
-            <StepCard
-              done={tg.loginConfigured}
-              step={3}
-              title="Вставьте токен и имя бота в панель"
-              action={
-                !tg.loginConfigured && onNavigate ? (
-                  <Button type="button" size="sm" variant="secondary" onClick={() => onNavigate('bot')}>
-                    Перейти к настройке бота
-                  </Button>
-                ) : undefined
-              }
-            >
-              На вкладке «Бот и авторизация» сохраните токен, username и выберите способ входа.
-            </StepCard>
-
-            <StepCard
-              done={Boolean(tg.telegramId)}
-              step={4}
-              title="Привяжите свой Telegram к аккаунту"
-              action={
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" size="sm" variant="secondary" asChild>
-                    <Link to="/settings/users">Настройки → Пользователи</Link>
-                  </Button>
-                  {onNavigate && (
-                    <Button type="button" size="sm" variant="outline" onClick={() => onNavigate('interactive')}>
-                      Привязать через бота
-                    </Button>
-                  )}
-                </div>
-              }
-            >
-              Узнайте свой числовой ID у @userinfobot или привяжите аккаунт командой <code>/link</code> в чате с
-              ботом.
-            </StepCard>
-
-            <StepCard done={tg.loginConfigured && Boolean(tg.telegramId)} step={5} title="Проверьте вход">
-              Откройте страницу входа и нажмите «Войти через Telegram». Панель должна работать по защищённому
-              соединению (HTTPS).
-              {tg.loginConfigured && (
-                <Button type="button" variant="link" size="sm" className="h-auto p-0" asChild>
-                  <Link to="/login">Открыть страницу входа →</Link>
-                </Button>
-              )}
-            </StepCard>
-
-            {!tg.loginConfigured && (
-              <SettingsAlert variant="info" title="Кнопка входа не появляется?">
-                Проверьте: токен и способ входа на вкладке <strong>Бот и авторизация</strong>, адрес{' '}
-                <code>{panelDomain}</code> в BotFather (для legacy), модуль Telegram в{' '}
-                <Link to="/settings/modules" className="font-medium text-primary underline-offset-4 hover:underline">
-                  Настройки → Модули
-                </Link>{' '}
-                и привязку вашего Telegram ID.
-              </SettingsAlert>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
       {activeTab === 'bot' && (
         <Card>
           <CardHeader>
@@ -754,7 +621,7 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               Команды бота
             </CardTitle>
             <CardDescription>
-              Интерактивный бот в личных сообщениях: команды, меню, привязка аккаунта и inline-поиск конфигов
+              Интерактивный бот в личных сообщениях: команды, меню, заявки на доступ и inline-поиск конфигов
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -885,37 +752,6 @@ export default function TelegramSettingsPanel({ tg, activeTab, onNavigate }: Tel
               unlinkingUserId={tg.unlinkingUserId}
               onUnlink={tg.handleUnlinkTelegram}
             />
-
-            <div className="space-y-3 border-t pt-4">
-              <div>
-                <Label>Привязать Telegram к аккаунту</Label>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Введите свой текущий пароль, получите одноразовый код и отправьте боту в личные сообщения. Код действует ограниченное время.
-                </p>
-              </div>
-              {tg.linkCode ? (
-                <div className="rounded-lg border border-dashed bg-muted/30 p-4">
-                  <p className="text-xs text-muted-foreground">Отправьте боту в Telegram</p>
-                  <p className="mt-1 font-mono text-lg font-semibold tracking-wide">/link {tg.linkCode}</p>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="sm"
-                    className="mt-3"
-                    onClick={() => void tg.handleCopyLinkCode()}
-                  >
-                    <Copy size={14} className="mr-1.5" />
-                    Скопировать команду
-                  </Button>
-                </div>
-              ) : (
-                <TelegramLinkCodeForm
-                  idPrefix="telegram-settings"
-                  disabled={!tg.settings?.bot_token_set}
-                  onRequest={tg.handleGetLinkCode}
-                />
-              )}
-            </div>
           </CardContent>
         </Card>
       )}

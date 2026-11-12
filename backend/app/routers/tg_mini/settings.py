@@ -251,20 +251,3 @@ def mini_test_telegram(db: Session = Depends(get_db), _: User = Depends(require_
         db,
         missing_recipients_detail="Укажите токен бота и получателей бэкапов",
     )
-
-
-@router.post("/check-bot-delivery")
-def check_bot_delivery(db: Session = Depends(get_db), _: User = Depends(require_tg_mini_admin)):
-    from app.routers import tg_mini as root
-    from app.services.telegram_transport import bot_api_post_sync
-
-    token = root._get_bot_token(db)
-    if not token:
-        return {"success": False, "message": "Бот не настроен"}
-    try:
-        data = bot_api_post_sync(token, "getMe", timeout=10)
-        if data.get("ok"):
-            return {"success": True, "message": f"Бот @{data['result'].get('username', '')} доступен"}
-        return {"success": False, "message": data.get("description", "Ошибка API")}
-    except Exception as exc:
-        return {"success": False, "message": str(exc)}

@@ -1,9 +1,4 @@
-import {
-  apiFetch,
-  apiFetchResponse,
-  parseQrResponse,
-  type QrBlobResult,
-} from './http'
+import { apiFetch, apiFetchResponse } from './http'
 import type {
   VpnConfig,
   SelfServiceQuota,
@@ -15,7 +10,6 @@ import type {
   VpnType,
   ConfigTag,
   ConfigCsvImportResponse,
-  OneTimeLinkResponse,
 } from '../types'
 
 export async function getConfigs(includeFiles = false, tagIds?: number[]) {
@@ -165,10 +159,6 @@ export async function bulkConfigOp(data: {
   })
 }
 
-export function downloadProfile(configId: number, path: string) {
-  return apiFetchResponse(`/configs/${configId}/download?path=${encodeURIComponent(path)}`)
-}
-
 export function downloadConfigsExport() {
   return apiFetchResponse('/configs/export')
 }
@@ -180,18 +170,4 @@ export async function importConfigsCsv(file: File) {
     method: 'POST',
     body: form,
   })
-}
-
-export async function createOneTimeLink(configId: number, path: string) {
-  const params = new URLSearchParams({ path })
-  return apiFetch<OneTimeLinkResponse>(
-    `/configs/${configId}/one-time-link?${params}`,
-    { method: 'POST' },
-  )
-}
-
-export async function fetchQrBlob(configId: number, path: string): Promise<QrBlobResult> {
-  const params = new URLSearchParams({ path })
-  const response = await apiFetchResponse(`/configs/${configId}/qr?${params}`)
-  return parseQrResponse(response)
 }

@@ -7,7 +7,6 @@ import {
   Gauge,
   Link2,
   Loader2,
-  QrCode,
   RefreshCw,
   Shield,
   Trash2,
@@ -16,7 +15,6 @@ import {
 } from 'lucide-react'
 import {
   ApiError,
-  createOneTimeLink,
   deleteConfig,
   openvpnDisconnect,
   setConfigTags,
@@ -97,11 +95,9 @@ interface ClientActionsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onRefresh: () => Promise<void>
-  onQr: (config: VpnConfig, path: string, filename: string) => Promise<void>
   onDownload: (config: VpnConfig, path: string, filename: string) => Promise<void>
   onNotifySuccess: (msg: string) => void
   onNotifyError: (msg: string) => void
-  showQrDownloads?: boolean
 }
 
 type PromptMode = 'number' | 'confirm' | 'renew' | 'expired-wg' | 'traffic-limit' | null
@@ -223,11 +219,9 @@ export default function ClientActionsDialog({
   open,
   onOpenChange,
   onRefresh,
-  onQr,
   onDownload,
   onNotifySuccess,
   onNotifyError,
-  showQrDownloads = true,
 }: ClientActionsDialogProps) {
   const { activeNode } = useNode()
   const { isEnabled } = useFeatureModules()
@@ -465,19 +459,6 @@ export default function ClientActionsDialog({
     setPromptMode('confirm')
   }
 
-  const handleOneTime = async (key: string, path: string) => {
-    setBusyAction(key)
-    try {
-      const link = await createOneTimeLink(config.id, path)
-      await navigator.clipboard.writeText(link.url)
-      onNotifySuccess('Одноразовая ссылка скопирована в буфер')
-    } catch (err) {
-      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка формирования ссылки')
-    } finally {
-      setBusyAction(null)
-    }
-  }
-
   const handlePortalCopy = async () => {
     setBusyAction('portal-copy')
     try {
@@ -529,17 +510,6 @@ export default function ClientActionsDialog({
       await onDownload(config, path, filename)
     } catch (err) {
       onNotifyError(err instanceof ApiError ? err.message : 'Ошибка скачивания')
-    } finally {
-      setBusyAction(null)
-    }
-  }
-
-  const handleFileQr = async (key: string, path: string, filename: string) => {
-    setBusyAction(key)
-    try {
-      await onQr(config, path, filename)
-    } catch (err) {
-      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка QR-кода')
     } finally {
       setBusyAction(null)
     }
@@ -1294,8 +1264,8 @@ export default function ClientActionsDialog({
               </ProfileSection>
             )}
 
-            {fileRows.length > 0 && showQrDownloads && (
-              <ProfileSection title="Файлы и доступ" description="Скачивание, QR и одноразовые ссылки.">
+            {fileRows.length > 0 && (
+              <ProfileSection title="Файлы профиля" description="Скачивание готовых файлов конфигурации.">
                 <div className="space-y-2">
                   {fileRows.map((row) => (
                     <div
@@ -1320,36 +1290,6 @@ export default function ClientActionsDialog({
                             <Loader2 size={14} className="animate-spin" />
                           ) : (
                             <Download size={14} />
-                          )}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8"
-                          title="QR-код"
-                          disabled={busyAction !== null}
-                          onClick={() => void handleFileQr(`qr-${row.key}`, row.path, row.filename)}
-                        >
-                          {busyAction === `qr-${row.key}` ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : (
-                            <QrCode size={14} />
-                          )}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8"
-                          title="Одноразовая ссылка"
-                          disabled={busyAction !== null}
-                          onClick={() => void handleOneTime(`link-${row.key}`, row.path)}
-                        >
-                          {busyAction === `link-${row.key}` ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : (
-                            <Link2 size={14} />
                           )}
                         </Button>
                       </div>

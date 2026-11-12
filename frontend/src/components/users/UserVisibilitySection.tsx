@@ -87,7 +87,7 @@ export default function UserVisibilitySection({ user, onRefresh }: UserVisibilit
     <UserSection
       icon={EyeOff}
       title="Видимость VPN-профилей"
-      description="Исключение полностью заменяет глобальное умолчание из Настроек → Пользователи."
+      description="Исключение полностью заменяет глобальное умолчание из раздела «Пользователи» → «Правила для абонентов»."
       actions={
         <Badge variant={hadOverride ? 'default' : 'secondary'} className="text-[10px]">
           {hadOverride ? 'Своя политика' : 'Как умолчание'}

@@ -955,14 +955,6 @@ export interface TgMiniNodeActionResponse {
   health: Record<string, unknown>
 }
 
-export interface TgMiniQrLink {
-  url: string
-  token: string
-  expires_at: string
-  max_downloads: number
-  pin_required: boolean
-}
-
 export interface TgMiniWarperStatus {
   node_id: number
   node_name: string
@@ -1787,9 +1779,6 @@ export interface SecuritySettings {
   block_ip_blocked_dwell: boolean
   ip_blocked_dwell_seconds: number
   temp_whitelist: Array<{ ip: string; expires_at: string; hours: number }>
-  qr_download_ttl_seconds: number
-  qr_download_max_downloads: number
-  qr_download_pin_set: boolean
   public_download_enabled: boolean
   portal_domain: string
   portal_title: string
@@ -1971,15 +1960,6 @@ export interface ActionLogEntry {
   created_at: string
 }
 
-export interface QrDownloadAuditEntry {
-  id: number
-  event_type: string
-  actor_username?: string | null
-  remote_addr?: string | null
-  details?: string | null
-  created_at: string
-}
-
 export interface OpenVpnSocketStatus {
   profile: string
   socket_path: string
@@ -1998,14 +1978,6 @@ export interface RoutingProviderContent {
   filename: string
   content: string
   cidr_count: number
-}
-
-export interface OneTimeLinkResponse {
-  url: string
-  token: string
-  expires_at: string
-  max_downloads: number
-  pin_required: boolean
 }
 
 export interface TrafficChartData {

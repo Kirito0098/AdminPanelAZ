@@ -9,7 +9,7 @@ import {
 import type { LucideIcon } from 'lucide-react'
 import { NavLink } from 'react-router-dom'
 import { cn } from '@/lib/utils'
-import { getTgRequestsCount } from '@/tg-mini/api'
+import { getRequestsCount } from '@/api/users'
 
 interface MiniTabItem {
   to: string
@@ -70,7 +70,7 @@ export default function MiniBottomNav({ isAdmin, features }: MiniBottomNavProps)
     if (!isAdmin) return
     let alive = true
     const load = () => {
-      void getTgRequestsCount('pending')
+      void getRequestsCount('pending')
         .then((count) => {
           if (alive) setPendingRequests(count)
         })

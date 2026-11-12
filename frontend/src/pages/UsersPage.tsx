@@ -82,6 +82,7 @@ import SuspendUserDialog, { type SuspendUserPayload } from '@/components/users/S
 import AccessRequestsDialog from '@/components/users/AccessRequestsDialog'
 import UsersBulkBar from '@/components/users/UsersBulkBar'
 import SubscriberCard from '@/components/users/SubscriberCard'
+import SubscriberRulesPanel from '@/components/users/SubscriberRulesPanel'
 import UserCard from '@/components/users/UserCard'
 
 type SortKey = UsersSortKey
@@ -659,6 +660,8 @@ export default function UsersPage() {
           accent={listMetrics.suspended > 0 ? 'red' : 'default'}
         />
       </div>
+
+      {authUser?.role === 'admin' ? <SubscriberRulesPanel /> : null}
 
       <div className="overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm">
         <div className="h-1 bg-gradient-to-r from-primary/80 via-primary/40 to-transparent" />

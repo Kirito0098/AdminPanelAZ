@@ -272,9 +272,7 @@ export async function applySecretsRotation(payload: {
   })
 }
 
-export async function updateSecuritySettings(
-  data: Partial<SecuritySettings & { qr_download_pin?: string }>,
-) {
+export async function updateSecuritySettings(data: Partial<SecuritySettings>) {
   return apiFetch<SecuritySettings>('/security', {
     method: 'PATCH',
     body: JSON.stringify(data),
@@ -283,37 +281,6 @@ export async function updateSecuritySettings(
 
 export async function getPortalPublishStatus() {
   return apiFetch<PortalPublishStatus>('/security/portal-publish-status')
-}
-
-export async function publishPortalDomain(data: {
-  portal_domain: string
-  email?: string | null
-  save_domain?: boolean
-}) {
-  return apiFetch<BackgroundTaskAcceptedResponse>('/security/portal-publish', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
-}
-
-export async function checkPortalReadiness(data: {
-  portal_domain: string
-  save_domain?: boolean
-}) {
-  return apiFetch<BackgroundTaskAcceptedResponse>('/security/portal-readiness-check', {
-    method: 'POST',
-    body: JSON.stringify({ save_domain: false, ...data }),
-  })
-}
-
-export async function preparePortalReadiness(data: {
-  portal_domain: string
-  save_domain?: boolean
-}) {
-  return apiFetch<BackgroundTaskAcceptedResponse>('/security/portal-readiness-prepare', {
-    method: 'POST',
-    body: JSON.stringify({ save_domain: true, ...data }),
-  })
 }
 
 export async function addTempWhitelist(ip: string, hours: number) {

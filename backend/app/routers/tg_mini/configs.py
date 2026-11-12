@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session, joinedload
 
 from app.auth import get_tg_mini_user
@@ -10,7 +10,7 @@ from app.database import get_db
 from app.models import User, UserRole, VpnConfig
 from app.schemas import MessageResponse
 from app.services.node_manager import get_active_adapter, get_active_node
-from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
+from app.services.profile_download_name import enrich_profile_files
 from app.services.vpn_profile_visibility import (
     EMPTY_CATALOG_MESSAGE,
     can_create_vpn_type,
@@ -19,7 +19,7 @@ from app.services.vpn_profile_visibility import (
     resolve_effective_visible_vpn_profiles,
 )
 
-from .helpers import SendConfigV2Request, _get_accessible_config, _qr_download_service, _send_config_file
+from .helpers import SendConfigV2Request, _get_accessible_config, _send_config_file
 
 router = APIRouter()
 
@@ -101,36 +101,4 @@ def mini_send_config(
         path=payload.path,
         destination=payload.destination,
         install_platform=payload.platform,
-    )
-
-
-@router.get("/qr-link")
-def mini_qr_link(
-    request: Request,
-    config_id: int = Query(...),
-    path: str = Query(...),
-    current_user: User = Depends(get_tg_mini_user),
-    db: Session = Depends(get_db),
-):
-    config = _get_accessible_config(db, config_id, current_user)
-    adapter = get_active_adapter(db)
-    files = adapter.get_profile_files(config.client_name, config.vpn_type)
-    match = next((item for item in files if item.get("path") == path), None)
-    policy = resolve_effective_visible_vpn_profiles(db, current_user)
-    if match is None or not profile_file_allowed(
-        policy,
-        protocol=match.get("protocol", ""),
-        variant=match.get("variant", ""),
-        path=match.get("path", ""),
-        kind=match.get("kind", ""),
-    ):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
-    return _qr_download_service(db, request).create_token(
-        file_path=path,
-        config_type=config.vpn_type.value,
-        config_name=build_profile_download_filename(config.client_name, path=path),
-        node_id=config.node_id,
-        creator_id=current_user.id,
-        creator_username=current_user.username,
-        remote_addr=request.client.host if request.client else None,
     )

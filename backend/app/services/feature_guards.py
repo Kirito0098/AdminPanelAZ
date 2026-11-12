@@ -61,7 +61,7 @@ ALWAYS_ALLOWED_PREFIXES = (
 )
 
 WG_ACCESS_PREFIX = "/api/client-access/wireguard"
-CONFIGS_QR_PATH_MARKERS = ("/download", "/qr", "/one-time-link")
+CONFIGS_DOWNLOAD_PATH_MARKERS = ("/download",)
 
 # §8.1: user_provisioning has no broad api_prefixes (user_management owns /api/users).
 # Provisioning routes are gated by explicit path checks only:
@@ -109,23 +109,11 @@ def module_disabled_message(module_key: str) -> str:
     return f'Раздел «{_module_label(module_key)}» отключён администратором.'
 
 
-def _configs_qr_modules(path: str) -> tuple[str, ...] | None:
+def _configs_download_modules(path: str) -> tuple[str, ...] | None:
     if not path.startswith("/api/configs/"):
         return None
-    if any(marker in path for marker in CONFIGS_QR_PATH_MARKERS):
+    if any(marker in path for marker in CONFIGS_DOWNLOAD_PATH_MARKERS):
         return ("qr_downloads",)
-    return None
-
-
-def _public_qr_modules(path: str) -> tuple[str, ...] | None:
-    if path.startswith("/api/public/qr-download"):
-        return ("qr_downloads",)
-    return None
-
-
-def _security_public_download_modules(path: str) -> tuple[str, ...] | None:
-    if path == "/api/security/public-download":
-        return ("security",)
     return None
 
 
@@ -155,10 +143,8 @@ def _user_provisioning_modules(path: str) -> tuple[str, ...] | None:
 def _modules_for_path(path: str) -> tuple[str, ...] | None:
     for resolver in (
         _user_provisioning_modules,
-        _public_qr_modules,
-        _security_public_download_modules,
         _openvpn_group_modules,
-        _configs_qr_modules,
+        _configs_download_modules,
         _wg_access_modules,
     ):
         modules = resolver(path)

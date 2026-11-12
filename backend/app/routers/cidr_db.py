@@ -319,15 +319,6 @@ def cidr_db_status_summary(_: User = Depends(require_admin), db: Session = Depen
     }
 
 
-@router.get("/deploy/status")
-def cidr_deploy_status(_: User = Depends(require_admin)):
-    """Last completed CIDR deploy with per-node results."""
-    summary = _summarize_last_deploy()
-    if not summary:
-        return {"success": True, "last_deploy": None}
-    return {"success": True, "last_deploy": summary}
-
-
 @router.get("/tasks/{task_id}")
 def cidr_task_status(task_id: str, _: User = Depends(require_admin)):
     task = get_cidr_task(task_id)

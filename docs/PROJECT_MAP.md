@@ -215,7 +215,7 @@
 | `logs` | Action logs |
 | `feature_toggles` | Включение/выключение модулей (`/feature-toggles`, `/feature-modules`) |
 | `tg_mini`, `telegram_webhook` | Telegram Mini App + бот |
-| `public_download` | Публичная выдача конфигов по QR |
+| `public_download` | Публичная выдача маршрутных файлов (Keenetic / MikroTik / TP-Link) |
 | `tasks` | Фоновые задачи (CIDR pipeline и др.) |
 | `site_diagnostics` | Диагностика «Проверка работы» (`/site-diagnostics`) |
 | `ip_blocked` | Страница блокировки IP (без `/api`) |
@@ -238,7 +238,7 @@
 - `openvpn_multihome.py` — `apply_multihome_to_conf` (директива `multihome` в OpenVPN server conf; restore через панель)
 - `wireguard_endpoint.py` — `apply_wireguard_endpoint_host` (патч `Endpoint` → `WIREGUARD_HOST` при выдаче WG/AWG)
 - `profile_delivery.py` — `read_profile_file_for_delivery` (`.ovpn` multi-remote; WG/AWG Endpoint из setup `WIREGUARD_HOST`, не из OpenVPN-списка); `patch_openvpn_profiles_on_node` (после успешного `recreate_profiles` / `client.sh 7` из панели — multi-remote на диск)
-- `profile_files.py`, `qr_generator.py` — конфиги и QR
+- `profile_files.py` — конфиги
 
 ### Мониторинг и трафик
 - `monitoring_overview.py`, `ip_geo.py`, `geoip_local.py` — NOC-сводка, GeoIP ([`GeoIP.md`](GeoIP.md))

@@ -3,7 +3,6 @@ import {
   ApiError,
   deleteTelegramWebhook,
   getAdminNotifySettings,
-  getTelegramLinkCode,
   getTelegramSettings,
   getUsers,
   registerTelegramWebhook,
@@ -21,7 +20,7 @@ import type { AdminNotifySettings, TelegramSettings, User } from '@/types'
 
 export type TelegramAuthMethod = 'oidc' | 'legacy'
 
-export type TelegramSection = 'setup' | 'bot' | 'miniapp' | 'interactive' | 'relay' | 'notify'
+export type TelegramSection = 'bot' | 'miniapp' | 'interactive' | 'relay' | 'notify'
 
 export function useTelegramSettings() {
   const { success, error: notifyError } = useNotifications()
@@ -54,7 +53,6 @@ export function useTelegramSettings() {
   const [testingNocReport, setTestingNocReport] = useState<'daily' | 'weekly' | 'image' | null>(null)
   const [registeringWebhook, setRegisteringWebhook] = useState(false)
   const [deletingWebhook, setDeletingWebhook] = useState(false)
-  const [linkCode, setLinkCode] = useState<string | null>(null)
   const [linkedAdmins, setLinkedAdmins] = useState<User[]>([])
   const [linkedAccounts, setLinkedAccounts] = useState<User[]>([])
   const [unlinkingUserId, setUnlinkingUserId] = useState<number | null>(null)
@@ -274,34 +272,6 @@ export function useTelegramSettings() {
     }
   }
 
-  const handleGetLinkCode = async (currentPassword: string) => {
-    try {
-      const result = await getTelegramLinkCode(currentPassword)
-      setLinkCode(result.code)
-      const command = `/link ${result.code}`
-      try {
-        await navigator.clipboard.writeText(command)
-        success(`Код скопирован (действует ${result.expires_in_seconds} сек)`)
-      } catch {
-        success(`Код привязки создан (действует ${result.expires_in_seconds} сек)`)
-      }
-      return true
-    } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка получения кода')
-      return false
-    }
-  }
-
-  const handleCopyLinkCode = async () => {
-    if (!linkCode) return
-    try {
-      await navigator.clipboard.writeText(`/link ${linkCode}`)
-      success('Команда /link скопирована')
-    } catch {
-      notifyError('Не удалось скопировать')
-    }
-  }
-
   const handleUnlinkTelegram = async (user: User) => {
     setUnlinkingUserId(user.id)
     try {
@@ -402,8 +372,6 @@ export function useTelegramSettings() {
     setOidcClientSecret,
     chatIds,
     setChatIds,
-    telegramId,
-    setTelegramId,
     notifyRecipientIds,
     setNotifyRecipientIds,
     hasNotifyRecipients,
@@ -427,7 +395,6 @@ export function useTelegramSettings() {
     testingNocReport,
     registeringWebhook,
     deletingWebhook,
-    linkCode,
     linkedAdmins,
     linkedAccounts,
     unlinkingUserId,
@@ -455,8 +422,6 @@ export function useTelegramSettings() {
     handleSaveInteractive,
     handleRegisterWebhook,
     handleDeleteWebhook,
-    handleGetLinkCode,
-    handleCopyLinkCode,
     handleUnlinkTelegram,
     handleTest,
     handleTestAdminNotify,

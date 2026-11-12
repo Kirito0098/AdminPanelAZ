@@ -20,12 +20,11 @@ import {
   protocolFiltersForPolicy,
 } from '@/tg-mini/lib/vpnVisibility'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
+import { getConfigQuota } from '@/api/configs'
 import {
   createTgMePlanConfig,
   getTgConfigFiles,
-  getTgConfigQuota,
   getTgMeConfigs,
-  getTgQrLink,
   redeemTgMeCode,
   sendTgConfig,
 } from '@/tg-mini/api'
@@ -34,7 +33,7 @@ import { formatDate } from '@/lib/datetime'
 import { pluralRu } from '@/lib/plural'
 import { formatBytes } from '@/lib/trafficFormat'
 import { cn } from '@/lib/utils'
-import { copyText, openExternalLink, shareViaTelegram } from '@/tg-mini/lib/shareDownloadLink'
+import { openExternalLink } from '@/tg-mini/lib/shareDownloadLink'
 import AdminConfigs from '@/tg-mini/pages/AdminConfigs'
 import type {
   ClosedAccessView,
@@ -44,11 +43,8 @@ import type {
   TgMeConfigNode,
   TgMeStatus,
   TgMiniConfigFile,
-  TgMiniQrLink,
 } from '@/types'
 import { Badge } from '@/components/ui/badge'
-
-const canShareInTelegram = typeof window.Telegram?.WebApp?.shareUrl === 'function'
 
 function ConfigsSkeleton() {
   return (
@@ -85,7 +81,6 @@ function UserConfigs() {
   const [sheetLoading, setSheetLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [feedback, setFeedback] = useState<ConfigFeedback | null>(null)
-  const [downloadLink, setDownloadLink] = useState<TgMiniQrLink | null>(null)
   const [platform, setPlatform] = useState<InstallPlatform>(() => guessInstallPlatform())
   const [planAdding, setPlanAdding] = useState(false)
   const [redeemCode, setRedeemCode] = useState('')
@@ -100,7 +95,7 @@ function UserConfigs() {
     }
     setError(null)
     try {
-      const [data, quotaData] = await Promise.all([getTgMeConfigs(), getTgConfigQuota()])
+      const [data, quotaData] = await Promise.all([getTgMeConfigs(), getConfigQuota()])
       setConfigs(data.configs)
       setClosedAccess(data.closed_access ?? null)
       setStatus(data.status ?? null)
@@ -198,7 +193,6 @@ function UserConfigs() {
   const openActions = async (entry: TgMeConfigNode & { clientName: string }) => {
     setActiveConfig(entry)
     setFeedback(null)
-    setDownloadLink(null)
     setPlatform(guessInstallPlatform())
     setSheetLoading(true)
     try {
@@ -223,12 +217,10 @@ function UserConfigs() {
     setFiles([])
     setSelectedPath('')
     setFeedback(null)
-    setDownloadLink(null)
   }
 
   const handleSelectedPathChange = (path: string) => {
     setSelectedPath(path)
-    setDownloadLink(null)
     setFeedback(null)
   }
 
@@ -251,65 +243,6 @@ function UserConfigs() {
     } finally {
       setActionLoading(false)
     }
-  }
-
-  const handleCreateDownloadLink = async () => {
-    if (!activeConfig || !selectedPath) return
-    setActionLoading(true)
-    setFeedback(null)
-    setDownloadLink(null)
-    try {
-      const link = await getTgQrLink(activeConfig.config_id, selectedPath)
-      setDownloadLink(link)
-      const copied = await copyText(link.url)
-      setFeedback({
-        tone: 'success',
-        text: copied
-          ? 'Ссылка создана и скопирована — отправьте её в нужный чат'
-          : 'Ссылка создана — скопируйте или поделитесь ею',
-      })
-      window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
-    } catch (err) {
-      setFeedback({
-        tone: 'error',
-        text: err instanceof ApiError ? err.message : 'Ошибка создания ссылки',
-      })
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleCopyDownloadLink = async () => {
-    if (!downloadLink) return
-    const copied = await copyText(downloadLink.url)
-    setFeedback({
-      tone: copied ? 'success' : 'error',
-      text: copied ? 'Ссылка скопирована' : 'Не удалось скопировать — выделите ссылку вручную',
-    })
-  }
-
-  const handleShareDownloadLink = async () => {
-    if (!downloadLink) return
-    if (shareViaTelegram(downloadLink.url, `VPN-конфиг: ${activeConfig?.clientName ?? ''}`)) {
-      setFeedback({ tone: 'info', text: 'Выберите чат, куда отправить ссылку' })
-      return
-    }
-    const copied = await copyText(downloadLink.url)
-    setFeedback({
-      tone: 'info',
-      text: copied
-        ? 'Поделиться недоступно — ссылка скопирована, вставьте в чат вручную'
-        : 'Поделиться недоступно — скопируйте ссылку вручную',
-    })
-  }
-
-  const handleOpenDownloadLink = () => {
-    if (!downloadLink) return
-    openExternalLink(downloadLink.url)
-    setFeedback({
-      tone: 'info',
-      text: 'Ссылка открыта. Если она одноразовая — на другом устройстве уже не сработает',
-    })
   }
 
   const handlePlanAdd = async () => {
@@ -648,18 +581,12 @@ function UserConfigs() {
         loading={sheetLoading}
         actionLoading={actionLoading}
         feedback={feedback}
-        downloadLink={downloadLink}
-        canShareLink={canShareInTelegram}
         isForeignConfig={false}
         ownerLabel={null}
         canManage={Boolean(isAdmin || settings?.can_manage_configs)}
         isAdmin={isAdmin}
         onClose={closeSheet}
         onSend={(destination) => void handleSend(destination)}
-        onCreateDownloadLink={() => void handleCreateDownloadLink()}
-        onCopyDownloadLink={() => void handleCopyDownloadLink()}
-        onShareDownloadLink={handleShareDownloadLink}
-        onOpenDownloadLink={handleOpenDownloadLink}
         onConfigDeleted={handleConfigDeleted}
         onConfigUpdated={handleConfigUpdated}
       />

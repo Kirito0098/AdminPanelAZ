@@ -94,8 +94,8 @@ export default function TelegramBotAuthGuide({
         <GuideStep step={5} title="Привяжите Telegram ID администратора">
           Вход через Telegram сработает только если у пользователя панели указан{' '}
           <code>telegram_id</code> — через{' '}
-          <Link to="/telegram?tab=interactive" className="font-medium text-primary underline-offset-4 hover:underline">
-            /link в боте
+          <Link to="/settings/personal" className="font-medium text-primary underline-offset-4 hover:underline">
+            карточку Telegram в «Моём профиле»
           </Link>{' '}
           или в «Настройки → Пользователи».
         </GuideStep>

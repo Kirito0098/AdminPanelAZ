@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { Bot, LogIn, Route, Send, Smartphone } from 'lucide-react'
+import { Bot, Route, Send, Smartphone } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import TelegramAlerts from '@/components/telegram/TelegramAlerts'
 import TelegramDisableSection from '@/components/telegram/TelegramDisableSection'
@@ -11,7 +11,6 @@ import { useTelegramSettings, type TelegramSection } from '@/components/telegram
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 const TELEGRAM_TABS: Array<{ id: TelegramSection; icon: typeof Send }> = [
-  { id: 'setup', icon: LogIn },
   { id: 'bot', icon: Send },
   { id: 'miniapp', icon: Smartphone },
   { id: 'interactive', icon: Bot },
@@ -27,7 +26,7 @@ export default function TelegramPage() {
   const tab = useMemo(() => {
     const value = searchParams.get('tab')
     if (value === 'auth') return 'bot'
-    return value && VALID_TABS.has(value as TelegramSection) ? (value as TelegramSection) : 'setup'
+    return value && VALID_TABS.has(value as TelegramSection) ? (value as TelegramSection) : 'bot'
   }, [searchParams])
 
   const navigateTab = (next: TelegramSection) => {

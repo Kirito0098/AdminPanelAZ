@@ -75,7 +75,7 @@ TG Bot (webhook) ──┘                    │
 
 Слепые зоны графа: каталог `deploy/` (8 nginx-шаблонов) в индекс не входит — читать напрямую;
 частично разобраны `frontend/src/types.ts`, `backend/pytest.ini`, `schema_2_25_1.sql`,
-`full-update.sh` и два test-скрипта; `frontend/nginx.conf` не парсится.
+`full-update.sh` и два test-скрипта.
 
 ## Последствия
 

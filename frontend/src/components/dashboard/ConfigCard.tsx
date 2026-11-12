@@ -14,7 +14,6 @@ import {
   Loader2,
   MoreHorizontal,
   Network,
-  QrCode,
   Shield,
   Trash2,
   Unlock,
@@ -57,7 +56,7 @@ import { PercentBar } from '@/components/ui/percent-bar'
 import { cn } from '@/lib/utils'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 
-type ActionKey = 'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy'
+type ActionKey = 'download' | 'block' | 'unblock' | 'delete' | 'portal-copy'
 
 interface ConfigCardProps {
   config: VpnConfig
@@ -74,11 +73,9 @@ interface ConfigCardProps {
   onCopyName: () => void
   onCopyPortalLink?: () => void
   onDownload: (path: string, filename: string) => void
-  onQr: (path: string, filename: string) => void
   onBlock?: () => void
   onUnblock?: () => void
   onDelete?: () => void
-  showQrDownloads?: boolean
   showTrafficLink?: boolean
   isOnline?: boolean | null
   /** Live VPN IP from monitoring; falls back to config.local_ip. */
@@ -449,11 +446,9 @@ export default function ConfigCard({
   onCopyName,
   onCopyPortalLink,
   onDownload,
-  onQr,
   onBlock,
   onUnblock,
   onDelete,
-  showQrDownloads = true,
   showTrafficLink = false,
   isOnline = null,
   localIp = null,
@@ -497,8 +492,7 @@ export default function ConfigCard({
     return true
   })
   const actionBusy = loadingAction != null
-  const showDownloads = fields.downloadButtons && showQrDownloads
-  const showQr = fields.qrButtons && showQrDownloads
+  const showDownloads = fields.downloadButtons
   const showTraffic = fields.trafficLink && showTrafficLink
   const showDanger = fields.dangerActions
   const displayedTraffic = resolveDisplayedTraffic(policy, trafficGroup)
@@ -709,49 +703,6 @@ export default function ConfigCard({
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-              {primaryFile && showQr && (
-                <>
-                  {hasBothProfiles ? (
-                    <>
-                      <IconActionButton
-                        title={`QR VPN: ${getDownloadFilename(config, vpnFile!)}`}
-                        label="QR VPN"
-                        disabled={actionBusy}
-                        loading={loadingAction === 'qr'}
-                        className={(actionAccent ?? vpnDownloadAccent).className}
-                        style={(actionAccent ?? vpnDownloadAccent).style}
-                        onClick={() => runFileAction(vpnFile, onQr)}
-                      >
-                        <QrCode size={14} className="shrink-0" />
-                      </IconActionButton>
-                      <IconActionButton
-                        title={`QR AntiZapret: ${getDownloadFilename(config, azFile!)}`}
-                        label="QR AZ"
-                        disabled={actionBusy}
-                        loading={loadingAction === 'qr'}
-                        className={(actionAccent ?? azDownloadAccent).className}
-                        style={(actionAccent ?? azDownloadAccent).style}
-                        onClick={() => runFileAction(azFile, onQr)}
-                      >
-                        <QrCode size={14} className="shrink-0" />
-                      </IconActionButton>
-                    </>
-                  ) : (
-                    <IconActionButton
-                      title={`QR: ${getDownloadFilename(config, primaryFile)}`}
-                      label="QR-код"
-                      disabled={actionBusy}
-                      loading={loadingAction === 'qr'}
-                      className={(actionAccent ?? vpnDownloadAccent).className}
-                      style={(actionAccent ?? vpnDownloadAccent).style}
-                      onClick={() => runFileAction(primaryFile, onQr)}
-                    >
-                      <QrCode size={14} className="shrink-0" />
-                    </IconActionButton>
-                  )}
-                </>
-              )}
-
               {showTraffic && (
                 <IconActionLink
                   title="Статистика трафика"

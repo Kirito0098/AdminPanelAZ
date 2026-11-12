@@ -1,14 +1,12 @@
 import { useEffect, useState } from 'react'
-import { Download, KeyRound, Loader2, QrCode, Trash2 } from 'lucide-react'
+import { Download, KeyRound, Loader2, Trash2 } from 'lucide-react'
 import {
   deleteUserConfig,
   downloadUserConfigFile,
-  fetchUserConfigQrBlob,
   getUserConfigFiles,
   setUserConfigAccessOp,
   type UserConfigFile,
 } from '@/api/users'
-import type { QrContentMode } from '@/api/http'
 import { ProvisioningConfigNode, UserProvisioningCard } from '@/types'
 import { useNotifications } from '@/context/NotificationContext'
 import { Badge } from '@/components/ui/badge'
@@ -28,7 +26,6 @@ import { vpnTypeLabel } from '@/lib/vpnTypes'
 import UserSection from './UserSection'
 import UserAccessSection from './UserAccessSection'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
-import QrPreviewDialog from '@/components/shared/QrPreviewDialog'
 
 interface ConfigEntry extends ProvisioningConfigNode {
   userId: number
@@ -44,19 +41,9 @@ interface UserConfigsSectionProps {
 
 type ConfigSegment = 'issued' | 'plan'
 
-type FilePickMode = 'download' | 'qr'
-
 type FilePickState = {
   entry: ConfigEntry
-  mode: FilePickMode
   files: UserConfigFile[]
-}
-
-type QrPreviewState = {
-  url: string
-  filename: string
-  contentMode: QrContentMode
-  downloadUrl?: string
 }
 
 function fileLabel(file: UserConfigFile): string {
@@ -107,7 +94,6 @@ export default function UserConfigsSection({
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState<Set<string>>(new Set())
   const [filePick, setFilePick] = useState<FilePickState | null>(null)
-  const [qrPreview, setQrPreview] = useState<QrPreviewState | null>(null)
 
   const configKey = (entry: ConfigEntry) => String(entry.config_id ?? entry.node_id)
   const isLoading = (key: string) => actionLoading.has(key) || filesLoading.has(key)
@@ -159,35 +145,7 @@ export default function UserConfigsSection({
     }
   }
 
-  const runQr = async (entry: ConfigEntry, file: UserConfigFile) => {
-    if (!entry.config_id) return
-    const key = `qr-${configKey(entry)}`
-    setActionLoading((prev) => new Set([...prev, key]))
-    try {
-      const { blob, contentMode, downloadUrl } = await fetchUserConfigQrBlob(
-        userId,
-        entry.config_id,
-        file.path,
-      )
-      const url = URL.createObjectURL(blob)
-      setQrPreview({
-        url,
-        filename: fileDisplayName(file),
-        contentMode,
-        downloadUrl,
-      })
-    } catch (err) {
-      notifyError(err instanceof Error ? err.message : 'Ошибка QR')
-    } finally {
-      setActionLoading((prev) => {
-        const next = new Set(prev)
-        next.delete(key)
-        return next
-      })
-    }
-  }
-
-  const openFileAction = async (entry: ConfigEntry, mode: FilePickMode) => {
+  const openFileAction = async (entry: ConfigEntry) => {
     if (!entry.config_id) return
     const files = await loadFiles(entry)
     if (!files.length) {
@@ -195,25 +153,17 @@ export default function UserConfigsSection({
       return
     }
     if (files.length === 1) {
-      if (mode === 'download') {
-        await runDownload(entry, files[0])
-      } else {
-        await runQr(entry, files[0])
-      }
+      await runDownload(entry, files[0])
       return
     }
-    setFilePick({ entry, mode, files })
+    setFilePick({ entry, files })
   }
 
   const pickFile = async (file: UserConfigFile) => {
     if (!filePick) return
-    const { entry, mode } = filePick
+    const { entry } = filePick
     setFilePick(null)
-    if (mode === 'download') {
-      await runDownload(entry, file)
-    } else {
-      await runQr(entry, file)
-    }
+    await runDownload(entry, file)
   }
 
   const handleAccessToggle = async (entry: ConfigEntry, op: 'block_temp' | 'block_perm' | 'unblock') => {
@@ -386,26 +336,12 @@ export default function UserConfigsSection({
                                   size="sm"
                                   title="Скачать"
                                   disabled={!created || isLoading(loadingKey)}
-                                  onClick={() => void openFileAction(configEntry, 'download')}
+                                  onClick={() => void openFileAction(configEntry)}
                                 >
                                   {filesLoading.has(loadingKey) ? (
                                     <Loader2 size={13} className="animate-spin" />
                                   ) : (
                                     <Download size={13} />
-                                  )}
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  title="QR-код"
-                                  disabled={!created || isLoading(loadingKey)}
-                                  onClick={() => void openFileAction(configEntry, 'qr')}
-                                >
-                                  {actionLoading.has(`qr-${loadingKey}`) ||
-                                  filesLoading.has(loadingKey) ? (
-                                    <Loader2 size={13} className="animate-spin" />
-                                  ) : (
-                                    <QrCode size={13} />
                                   )}
                                 </Button>
                                 <Button
@@ -448,9 +384,7 @@ export default function UserConfigsSection({
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>
-              {filePick?.mode === 'qr' ? 'QR-код профиля' : 'Скачать профиль'}
-            </DialogTitle>
+            <DialogTitle>Скачать профиль</DialogTitle>
             <DialogDescription>
               {filePick
                 ? `${filePick.entry.clientName} · ${filePick.entry.node_label}`
@@ -475,25 +409,14 @@ export default function UserConfigsSection({
                   variant="outline"
                   onClick={() => void pickFile(file)}
                 >
-                  {filePick.mode === 'qr' ? <QrCode size={14} /> : <Download size={14} />}
-                  {filePick.mode === 'qr' ? 'QR' : 'Скачать'}
+                  <Download size={14} />
+                  Скачать
                 </Button>
               </div>
             ))}
           </div>
         </DialogContent>
       </Dialog>
-
-      <QrPreviewDialog
-        url={qrPreview?.url}
-        filename={qrPreview?.filename}
-        contentMode={qrPreview?.contentMode}
-        downloadUrl={qrPreview?.downloadUrl}
-        onClose={() => {
-          if (qrPreview) URL.revokeObjectURL(qrPreview.url)
-          setQrPreview(null)
-        }}
-      />
 
       <ConfirmDialog
         open={deleteTarget != null}

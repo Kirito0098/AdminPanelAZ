@@ -15,14 +15,14 @@ import { Label } from '@/components/ui/label'
 import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
 import MiniPlanFields from '@/tg-mini/components/MiniPlanFields'
 import {
-  approveTgRequest,
-  getTgNodes,
-  getTgRequestReceipt,
-  getTgRequestsCount,
-  listTgPresets,
-  listTgRequests,
-  rejectTgRequest,
-} from '@/tg-mini/api'
+  approveRequest,
+  getRequestReceipt,
+  getRequestsCount,
+  listPresets,
+  listRequests,
+  rejectRequest,
+} from '@/api/users'
+import { getTgNodes } from '@/tg-mini/api'
 import { formatDateTime } from '@/lib/datetime'
 import { selectablePlanNodes } from '@/tg-mini/lib/planNodes'
 import type { AccessRequestResponse, PresetResponse, TgMiniNode } from '@/types'
@@ -59,8 +59,8 @@ export default function AccessRequests() {
     setError(null)
     try {
       const [list, count] = await Promise.all([
-        listTgRequests({ status: 'pending', limit: 100 }),
-        getTgRequestsCount('pending'),
+        listRequests({ status: 'pending', limit: 100 }),
+        getRequestsCount('pending'),
       ])
       setRequests(list)
       setPendingCount(count)
@@ -75,11 +75,11 @@ export default function AccessRequests() {
     void load()
   }, [load])
 
-  const runApprove = async (request: AccessRequestResponse, data: Parameters<typeof approveTgRequest>[1]) => {
+  const runApprove = async (request: AccessRequestResponse, data: Parameters<typeof approveRequest>[1]) => {
     setBusyId(request.id)
     setError(null)
     try {
-      await approveTgRequest(request.id, data)
+      await approveRequest(request.id, data)
       setApproveTarget(null)
       await load()
     } catch (err) {
@@ -93,7 +93,7 @@ export default function AccessRequests() {
     setBusyId(request.id)
     setError(null)
     try {
-      await rejectTgRequest(request.id, { reason })
+      await rejectRequest(request.id, { reason })
       setRejectTarget(null)
       await load()
     } catch (err) {
@@ -111,7 +111,7 @@ export default function AccessRequests() {
       return null
     })
     try {
-      const blob = await getTgRequestReceipt(request.id)
+      const blob = await getRequestReceipt(request.id)
       setReceiptUrl(URL.createObjectURL(blob))
     } catch (err) {
       setReceiptError(err instanceof ApiError ? err.message : 'Не удалось загрузить чек')
@@ -285,7 +285,7 @@ function ApproveNewUserDialog({
 
   useEffect(() => {
     setUsername(request.telegram_username || `tg_${request.telegram_id}`)
-    void listTgPresets().then(setPresets).catch(() => setPresets([]))
+    void listPresets().then(setPresets).catch(() => setPresets([]))
     void getTgNodes()
       .then((data) => {
         const available = selectablePlanNodes(data.nodes)

@@ -1,15 +1,11 @@
 import {
   AlertCircle,
   CheckCircle2,
-  Copy,
-  Download,
-  ExternalLink,
   FileKey,
   Link2,
   Loader2,
   Send,
   Settings2,
-  Share2,
   UserRound,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -24,8 +20,7 @@ import MiniPlatformPicker from '@/tg-mini/components/MiniPlatformPicker'
 import MiniProfileFilePicker from '@/tg-mini/components/MiniProfileFilePicker'
 import ConfigManagePanel from '@/tg-mini/components/ConfigManagePanel'
 import { vpnTypeBadgeClass, vpnTypeLabel } from '@/tg-mini/lib/vpnLabels'
-import { formatDateTime } from '@/lib/datetime'
-import type { InstallPlatform, TgMiniConfig, TgMiniConfigFile, TgMiniQrLink } from '@/types'
+import type { InstallPlatform, TgMiniConfig, TgMiniConfigFile } from '@/types'
 import { useEffect, useState, type ReactNode } from 'react'
 
 export type ConfigFeedback = { tone: 'success' | 'error' | 'info'; text: string }
@@ -42,18 +37,12 @@ interface ConfigActionDialogProps {
   loading: boolean
   actionLoading: boolean
   feedback: ConfigFeedback | null
-  downloadLink: TgMiniQrLink | null
-  canShareLink: boolean
   isForeignConfig: boolean
   ownerLabel: string | null
   canManage: boolean
   isAdmin: boolean
   onClose: () => void
   onSend: (destination: 'self' | 'owner') => void
-  onCreateDownloadLink: () => void
-  onCopyDownloadLink: () => void
-  onShareDownloadLink: () => void
-  onOpenDownloadLink: () => void
   onConfigDeleted: () => void
   onConfigUpdated: () => void
 }
@@ -103,57 +92,6 @@ function StepCard({
   )
 }
 
-function DownloadLinkPanel({
-  link,
-  canShare,
-  isForeignConfig,
-  onCopy,
-  onShare,
-  onOpen,
-}: {
-  link: TgMiniQrLink
-  canShare: boolean
-  isForeignConfig: boolean
-  onCopy: () => void
-  onShare: () => void
-  onOpen: () => void
-}) {
-  const limit =
-    link.max_downloads === 1 ? 'одноразовая' : `до ${link.max_downloads} скачиваний`
-
-  return (
-    <StepCard step={3} title="Ссылка готова">
-      <div className="tg-mini-download-link-box">
-        <p className="tg-mini-download-link-url">{link.url}</p>
-        <p className="tg-mini-download-link-meta">
-          {isForeignConfig
-            ? 'Отправьте ссылку пользователю — откроется в браузере на его устройстве.'
-            : 'Поделитесь ссылкой или откройте на нужном устройстве.'}
-          {' '}
-          Действует до {formatDateTime(link.expires_at)} · {limit}
-          {link.pin_required ? ' · потребуется PIN' : ''}.
-        </p>
-        <div className="tg-mini-download-link-actions">
-          {canShare && (
-            <Button type="button" className="tg-mini-link-action-full gap-2" onClick={onShare}>
-              <Share2 size={16} aria-hidden />
-              Поделиться в Telegram
-            </Button>
-          )}
-          <Button type="button" variant="outline" className="gap-2" onClick={onCopy}>
-            <Copy size={16} aria-hidden />
-            Скопировать
-          </Button>
-          <Button type="button" variant="outline" className="gap-2" onClick={onOpen}>
-            <ExternalLink size={16} aria-hidden />
-            Открыть
-          </Button>
-        </div>
-      </div>
-    </StepCard>
-  )
-}
-
 export default function ConfigActionDialog({
   config,
   files,
@@ -164,18 +102,12 @@ export default function ConfigActionDialog({
   loading,
   actionLoading,
   feedback,
-  downloadLink,
-  canShareLink,
   isForeignConfig,
   ownerLabel,
   canManage,
   isAdmin,
   onClose,
   onSend,
-  onCreateDownloadLink,
-  onCopyDownloadLink,
-  onShareDownloadLink,
-  onOpenDownloadLink,
   onConfigDeleted,
   onConfigUpdated,
 }: ConfigActionDialogProps) {
@@ -287,7 +219,7 @@ export default function ConfigActionDialog({
                 />
               </StepCard>
 
-              {files.length > 0 && !downloadLink && (
+              {files.length > 0 && (
                 <StepCard step={2} title={isForeignConfig ? 'Устройство пользователя' : 'Ваше устройство'}>
                   <MiniPlatformPicker
                     value={platform}
@@ -297,17 +229,6 @@ export default function ConfigActionDialog({
                 </StepCard>
               )}
 
-              {downloadLink && (
-                <DownloadLinkPanel
-                  link={downloadLink}
-                  canShare={canShareLink}
-                  isForeignConfig={isForeignConfig}
-                  onCopy={onCopyDownloadLink}
-                  onShare={onShareDownloadLink}
-                  onOpen={onOpenDownloadLink}
-                />
-              )}
-
               {ownerBlocked && (
                 <div className="tg-mini-feedback is-error" role="alert">
                   <AlertCircle size={18} className="shrink-0" aria-hidden />
@@ -315,7 +236,7 @@ export default function ConfigActionDialog({
                 </div>
               )}
 
-              {feedback && !downloadLink && <FeedbackBanner feedback={feedback} />}
+              {feedback && <FeedbackBanner feedback={feedback} />}
             </div>
           ) : (
             canManage &&
@@ -337,36 +258,20 @@ export default function ConfigActionDialog({
                 Закрыть
               </Button>
             ) : (
-              <>
-                <Button
-                  type="button"
-                  className="w-full gap-2"
-                  size="lg"
-                  disabled={!canAct || actionLoading}
-                  onClick={() => onSend(isForeignConfig ? 'owner' : 'self')}
-                >
-                  {actionLoading ? (
-                    <Loader2 size={18} className="animate-spin" aria-hidden />
-                  ) : (
-                    <Send size={18} aria-hidden />
-                  )}
-                  {isForeignConfig ? 'Отправить пользователю' : 'Получить в Telegram'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full gap-2"
-                  disabled={!canAct || actionLoading}
-                  onClick={onCreateDownloadLink}
-                >
-                  {actionLoading ? (
-                    <Loader2 size={16} className="animate-spin" aria-hidden />
-                  ) : (
-                    <Download size={16} aria-hidden />
-                  )}
-                  {downloadLink ? 'Новая ссылка' : 'Ссылка на скачивание'}
-                </Button>
-              </>
+              <Button
+                type="button"
+                className="w-full gap-2"
+                size="lg"
+                disabled={!canAct || actionLoading}
+                onClick={() => onSend(isForeignConfig ? 'owner' : 'self')}
+              >
+                {actionLoading ? (
+                  <Loader2 size={18} className="animate-spin" aria-hidden />
+                ) : (
+                  <Send size={18} aria-hidden />
+                )}
+                {isForeignConfig ? 'Отправить пользователю' : 'Получить в Telegram'}
+              </Button>
             )}
           </footer>
         )}

@@ -1,4 +1,4 @@
-"""Mini App «Мои конфиги»: каталог владельца по всем узлам + файлы/отправка/QR с узла конфига.
+"""Mini App «Мои конфиги»: каталог владельца по всем узлам + файлы/отправка с узла конфига.
 
 В отличие от админского ``/tg-mini/configs`` (активный узел), маршруты ``/me/configs``
 показывают только собственные конфиги текущего пользователя на всех его узлах,
@@ -11,7 +11,7 @@ import math
 from collections import defaultdict
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.auth import get_tg_mini_user
@@ -19,7 +19,7 @@ from app.database import get_db
 from app.models import Node, User, VpnConfig
 from app.schemas import MessageResponse
 from app.services.node_manager import get_adapter_for_node
-from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
+from app.services.profile_download_name import enrich_profile_files
 from app.services.vpn_profile_visibility import (
     EMPTY_CATALOG_MESSAGE,
     filter_profile_files,
@@ -27,7 +27,7 @@ from app.services.vpn_profile_visibility import (
     resolve_effective_visible_vpn_profiles,
 )
 
-from .helpers import SendConfigV2Request, _qr_download_service, _send_config_file
+from .helpers import SendConfigV2Request, _send_config_file
 
 router = APIRouter()
 
@@ -179,38 +179,4 @@ def me_send_config(
         path=payload.path,
         destination=payload.destination,
         install_platform=payload.platform,
-    )
-
-
-@router.get("/me/qr-link")
-def me_qr_link(
-    request: Request,
-    config_id: int = Query(...),
-    path: str = Query(...),
-    current_user: User = Depends(get_tg_mini_user),
-    db: Session = Depends(get_db),
-):
-    """Одноразовая ссылка на скачивание файла с узла конфига (не активного узла)."""
-    config = _owned_primary_config_or_404(db, config_id, current_user)
-    node = _node_for_config(db, config)
-    adapter = get_adapter_for_node(node)
-    files = adapter.get_profile_files(config.client_name, config.vpn_type)
-    match = next((item for item in files if item.get("path") == path), None)
-    policy = resolve_effective_visible_vpn_profiles(db, current_user)
-    if match is None or not profile_file_allowed(
-        policy,
-        protocol=match.get("protocol", ""),
-        variant=match.get("variant", ""),
-        path=match.get("path", ""),
-        kind=match.get("kind", ""),
-    ):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
-    return _qr_download_service(db, request).create_token(
-        file_path=path,
-        config_type=config.vpn_type.value,
-        config_name=build_profile_download_filename(config.client_name, path=path),
-        node_id=config.node_id,
-        creator_id=current_user.id,
-        creator_username=current_user.username,
-        remote_addr=request.client.host if request.client else None,
     )

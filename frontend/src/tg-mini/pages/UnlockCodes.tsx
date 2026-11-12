@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ApiError } from '@/api/client'
 import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
-import { createTgUnlockCode, getTgUnlockCodes, revokeTgUnlockCode, type UnlockCodeProtocol } from '@/tg-mini/api'
+import { createUnlockCode, getUnlockCodes, revokeUnlockCode, type UnlockCodeProtocol } from '@/api/unlockCodes'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import { endOfDayIso, formatDateTime } from '@/lib/datetime'
 import {
@@ -105,7 +105,7 @@ export default function UnlockCodes() {
     }
     setError(null)
     try {
-      setCodes(await getTgUnlockCodes())
+      setCodes(await getUnlockCodes())
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Ошибка загрузки unlock-кодов')
     } finally {
@@ -152,7 +152,7 @@ export default function UnlockCodes() {
         .split(/[,;\n]+/)
         .map((item) => item.trim())
         .filter(Boolean)
-      const created = await createTgUnlockCode({
+      const created = await createUnlockCode({
         grant_days: parsedGrantDays,
         protocols: selectedProtocols,
         mode,
@@ -188,7 +188,7 @@ export default function UnlockCodes() {
     setRevokingId(code.id)
     setFeedback(null)
     try {
-      await revokeTgUnlockCode(code.id)
+      await revokeUnlockCode(code.id)
       window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
       setFeedback({ tone: 'info', text: `Код «${code.code}» отозван` })
       await load({ silent: true })

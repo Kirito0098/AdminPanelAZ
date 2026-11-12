@@ -13,7 +13,6 @@ from app.database import Base
 from app.models import AppSetting, User, UserConfigAccess, UserRole
 from app.services import privacy_upgrade
 from app.services.app_setting_store import _get_setting, _set_setting
-from app.services.qr_download import is_stored_pin_hash, verify_pin
 
 
 @pytest.fixture()
@@ -42,7 +41,6 @@ def _seed_pre_2266(db) -> User:
     db.flush()
     db.add(UserConfigAccess(user_id=user.id, config_group="ivan"))
     db.add(UserConfigAccess(user_id=user.id, config_group="fam*"))
-    _set_setting(db, "qr_download_pin", "654321")  # plain text
     _set_setting(db, "telegram_chat_id", "101,-100999")
     _set_setting(db, "telegram_bot_token", "123:ABC")
     _set_setting(db, "telegram_bot_interactive_enabled", "true")
@@ -64,8 +62,6 @@ def _snapshot(db, user_id: int) -> dict:
     return {
         "grants": _grant_groups(db, user_id),
         "prefix_marker": _get_setting(db, "config_access_explicit_prefix", ""),
-        "pin_is_hash": is_stored_pin_hash(_get_setting(db, "qr_download_pin", "")),
-        "pin_verifies": verify_pin("654321", _get_setting(db, "qr_download_pin", "")),
         "webhook_secret_required": _get_setting(db, "telegram_webhook_secret_required", ""),
         "webhook_privacy_upgraded": _get_setting(db, privacy_upgrade.WEBHOOK_PRIVACY_UPGRADED, ""),
         "group_pause_warned": _get_setting(db, "backup_group_pause_warned", ""),
@@ -108,8 +104,6 @@ def test_privacy_upgrade_twice_same_end_state(monkeypatch, db):
     assert first["grants_changed"] == 1
     assert snap1["grants"] == ["fam*", "ivan*"]
     assert snap1["prefix_marker"] == "1"
-    assert snap1["pin_is_hash"] is True
-    assert snap1["pin_verifies"] is True
     assert snap1["webhook_secret_required"] in ("1", "true")
     assert snap1["webhook_privacy_upgraded"] == "1"
     assert snap1["group_pause_warned"] == "1"
@@ -125,7 +119,6 @@ def test_privacy_upgrade_twice_same_end_state(monkeypatch, db):
 
     assert snap2 == snap1
     assert second["grants_changed"] == 0
-    assert second["pin_migrated"] is False
     assert len(webhook_calls) == 1  # no second setWebhook
     assert len(nginx_calls) == 1
 
@@ -153,9 +146,8 @@ def test_webhook_failure_does_not_require_secret_or_silence_bot(monkeypatch, db)
     assert _get_setting(db, "telegram_webhook_secret_required", "") != "true"
     assert _get_setting(db, "telegram_webhook_secret_required", "") != "1"
     assert _get_setting(db, privacy_upgrade.WEBHOOK_PRIVACY_UPGRADED, "") != "1"
-    # Grants / PIN still applied
+    # Grants still applied
     assert _get_setting(db, "config_access_explicit_prefix", "") == "1"
-    assert is_stored_pin_hash(_get_setting(db, "qr_download_pin", ""))
 
 
 def test_webhook_skipped_when_not_registered(monkeypatch, db):

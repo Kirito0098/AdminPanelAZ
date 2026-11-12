@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchResponse, parseQrResponse, type QrBlobResult } from './http'
+import { apiFetch, apiFetchResponse } from './http'
 import type {
   AccessRequestResponse,
   ApproveRequest,
@@ -102,17 +102,6 @@ export async function downloadUserConfigFile(userId: number, configId: number, p
   return apiFetchResponse(
     `/users/${userId}/configs/${configId}/download?path=${encodeURIComponent(path)}`,
   )
-}
-
-export async function fetchUserConfigQrBlob(
-  userId: number,
-  configId: number,
-  path: string,
-): Promise<QrBlobResult> {
-  const response = await apiFetchResponse(
-    `/users/${userId}/configs/${configId}/qr?path=${encodeURIComponent(path)}`,
-  )
-  return parseQrResponse(response)
 }
 
 interface ConfigAccessOp {

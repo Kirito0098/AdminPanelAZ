@@ -74,7 +74,6 @@ interface ConfigCardsSectionProps {
   connectionMap?: ClientConnectionMap | null
   filesLoading?: boolean
   onRefresh: () => Promise<void>
-  onQr: (config: VpnConfig, path: string, filename: string) => Promise<void>
   onDownload: (config: VpnConfig, path: string, filename: string) => Promise<void>
   onNotifySuccess: (msg: string) => void
   onNotifyError: (msg: string) => void
@@ -84,7 +83,7 @@ const TAB_ORDER: ProtocolTab[] = ['openvpn', 'amneziawg2', 'amneziawg', 'wiregua
 
 type ConfirmAction = 'delete' | 'block' | 'unblock' | null
 type BulkAction = 'block_temp' | 'block_perm' | 'unblock' | 'delete' | 'renew_cert' | 'change_owner' | null
-type LoadingKey = `${number}-${'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy'}` | null
+type LoadingKey = `${number}-${'download' | 'block' | 'unblock' | 'delete' | 'portal-copy'}` | null
 
 function useVisibleTabs(visibilityPolicy: VisibleVpnProfilesPolicy | null, userRole: UserRole): ProtocolTab[] {
   const { isEnabled } = useFeatureModules()
@@ -111,7 +110,6 @@ export default function ConfigCardsSection({
   connectionMap = null,
   filesLoading = false,
   onRefresh,
-  onQr,
   onDownload,
   onNotifySuccess,
   onNotifyError,
@@ -119,7 +117,6 @@ export default function ConfigCardsSection({
   const { isEnabled } = useFeatureModules()
   const haReplicaReadonly = useHaReplicaReadonly()
   const { trackBackgroundTask } = useProgress()
-  const qrDownloadsEnabled = isEnabled('qr_downloads')
   const trafficLinkEnabled = isEnabled('traffic_sync')
   const clientPortalEnabled = isEnabled('client_portal')
   const visibleTabs = useVisibleTabs(visibilityPolicy, userRole)
@@ -242,7 +239,7 @@ export default function ConfigCardsSection({
 
   const setCardLoading = (
     configId: number,
-    action: 'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy' | null,
+    action: 'download' | 'block' | 'unblock' | 'delete' | 'portal-copy' | null,
   ) => {
     setLoadingAction(action ? `${configId}-${action}` : null)
   }
@@ -265,17 +262,6 @@ export default function ConfigCardsSection({
       await onDownload(config, path, filename)
     } catch (err) {
       onNotifyError(err instanceof ApiError ? err.message : 'Ошибка скачивания')
-    } finally {
-      setCardLoading(config.id, null)
-    }
-  }
-
-  const handleCardQr = async (config: VpnConfig, path: string, filename: string) => {
-    setCardLoading(config.id, 'qr')
-    try {
-      await onQr(config, path, filename)
-    } catch (err) {
-      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка генерации QR')
     } finally {
       setCardLoading(config.id, null)
     }
@@ -342,11 +328,10 @@ export default function ConfigCardsSection({
 
   const getCardLoading = (
     configId: number,
-  ): 'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy' | null => {
+  ): 'download' | 'block' | 'unblock' | 'delete' | 'portal-copy' | null => {
     if (!loadingAction?.startsWith(`${configId}-`)) return null
     return loadingAction.split('-').slice(1).join('-') as
       | 'download'
-      | 'qr'
       | 'block'
       | 'unblock'
       | 'delete'
@@ -758,7 +743,6 @@ export default function ConfigCardsSection({
                             : undefined
                         }
                         onDownload={(path, filename) => void handleCardDownload(config, path, filename)}
-                        onQr={(path, filename) => void handleCardQr(config, path, filename)}
                         onBlock={isAdmin && !haReplicaReadonly ? () => openConfirm('block', config) : undefined}
                         onUnblock={isAdmin && !haReplicaReadonly ? () => openConfirm('unblock', config) : undefined}
                         onDelete={
@@ -771,7 +755,6 @@ export default function ConfigCardsSection({
                             ? () => openConfirm('delete', config)
                             : undefined
                         }
-                        showQrDownloads={qrDownloadsEnabled}
                         showTrafficLink={trafficLinkEnabled}
                         isOnline={isConfigConnected(
                           config.client_name,
@@ -804,11 +787,9 @@ export default function ConfigCardsSection({
         open={!!selectedConfig}
         onOpenChange={(open) => !open && setSelectedConfig(null)}
         onRefresh={onRefresh}
-        onQr={onQr}
         onDownload={onDownload}
         onNotifySuccess={onNotifySuccess}
         onNotifyError={onNotifyError}
-        showQrDownloads={qrDownloadsEnabled}
       />
 
       <ConfirmDialog

@@ -27,20 +27,19 @@ import { Label } from '@/components/ui/label'
 import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
 import MiniPlanFields from '@/tg-mini/components/MiniPlanFields'
 import {
-  createTgProvisionedUser,
-  deleteTgUser,
-  extendTgUser,
-  getTgNodes,
-  getTgPanelUsers,
-  getTgUserHistory,
-  getTgUserStats,
-  listTgPresets,
-  resetTgUserTraffic,
-  resumeTgUser,
-  setTgUserTrafficLimit,
-  suspendTgUser,
-  updateTgUser,
-} from '@/tg-mini/api'
+  createProvisionedUser,
+  deleteProvisionedUser,
+  extendUserAccess,
+  getUserHistory,
+  getUserStats,
+  listPresets,
+  resetUserTrafficCounter,
+  resumeUser,
+  setUserTrafficLimit,
+  suspendUser,
+} from '@/api/users'
+import { getUsers, updateUser } from '@/api/settings'
+import { getTgNodes } from '@/tg-mini/api'
 import { formatDate, formatDateTime } from '@/lib/datetime'
 import { formatBytes } from '@/lib/trafficFormat'
 import { selectablePlanNodes } from '@/tg-mini/lib/planNodes'
@@ -91,7 +90,7 @@ function accessLabel(user: User): string {
   return `до ${formatDate(user.access_until)}`
 }
 
-/** Admin «Клиенты» — аккаунты абонентов (паритет с веб «Пользователи», без QR/CSV). */
+/** Admin «Клиенты» — аккаунты абонентов (паритет с веб «Пользователи», без CSV). */
 export default function Clients() {
   const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
@@ -107,7 +106,7 @@ export default function Clients() {
     setLoading(true)
     setError(null)
     try {
-      const data = await getTgPanelUsers()
+      const data = await getUsers()
       setUsers(data)
       setSelected((prev) => (prev ? data.find((item) => item.id === prev.id) ?? prev : prev))
     } catch (err) {
@@ -241,27 +240,27 @@ export default function Clients() {
         onClose={() => setSelected(null)}
         onUpdated={() => void load()}
         onSuspend={(reason) =>
-          selected && void run(() => suspendTgUser(selected.id, reason), 'Клиент заблокирован')
+          selected && void run(() => suspendUser(selected.id, { reason }), 'Клиент заблокирован')
         }
-        onResume={() => selected && void run(() => resumeTgUser(selected.id), 'Клиент разблокирован')}
+        onResume={() => selected && void run(() => resumeUser(selected.id), 'Клиент разблокирован')}
         onExtend={(days) =>
           selected &&
-          void run(() => extendTgUser(selected.id, days), `Доступ продлён на ${days} дн.`)
+          void run(() => extendUserAccess(selected.id, days), `Доступ продлён на ${days} дн.`)
         }
         onLimit={(bytes) =>
           selected &&
           void run(
-            () => setTgUserTrafficLimit(selected.id, bytes),
+            () => setUserTrafficLimit(selected.id, bytes),
             bytes == null ? 'Лимит снят' : 'Лимит сохранён',
           )
         }
         onResetTraffic={() =>
-          selected && void run(() => resetTgUserTraffic(selected.id), 'Счётчик трафика сброшен')
+          selected && void run(() => resetUserTrafficCounter(selected.id), 'Счётчик трафика сброшен')
         }
         onDelete={() =>
           selected &&
           void run(async () => {
-            await deleteTgUser(selected.id)
+            await deleteProvisionedUser(selected.id)
             setSelected(null)
           }, 'Клиент удалён')
         }
@@ -352,7 +351,7 @@ function ClientActionsDialog({
   const loadHistory = (userId: number) => {
     setDetailLoading(true)
     setDetailError(null)
-    void getTgUserHistory(userId)
+    void getUserHistory(userId)
       .then(setHistory)
       .catch((err) => setDetailError(err instanceof ApiError ? err.message : 'Ошибка загрузки'))
       .finally(() => setDetailLoading(false))
@@ -361,7 +360,7 @@ function ClientActionsDialog({
   const loadStats = (userId: number) => {
     setDetailLoading(true)
     setDetailError(null)
-    void getTgUserStats(userId, 30)
+    void getUserStats(userId, 30)
       .then(setStats)
       .catch((err) => setDetailError(err instanceof ApiError ? err.message : 'Ошибка загрузки'))
       .finally(() => setDetailLoading(false))
@@ -392,7 +391,7 @@ function ClientActionsDialog({
           protocols: visibility,
         }
       }
-      await updateTgUser(user.id, payload)
+      await updateUser(user.id, payload)
       onUpdated()
       onClose()
     } catch (err) {
@@ -717,7 +716,7 @@ function CreateClientDialog({ open, onOpenChange, onCreated }: CreateClientDialo
     setCount('1')
     setPanelLogin(false)
     setError(null)
-    void listTgPresets().then(setPresets).catch(() => setPresets([]))
+    void listPresets().then(setPresets).catch(() => setPresets([]))
     void getTgNodes()
       .then((data) => {
         const available = selectablePlanNodes(data.nodes)
@@ -752,7 +751,7 @@ function CreateClientDialog({ open, onOpenChange, onCreated }: CreateClientDialo
     setBusy(true)
     setError(null)
     try {
-      await createTgProvisionedUser({
+      await createProvisionedUser({
         username: name,
         client_base_name: baseName.trim() || name,
         node_ids: nodeIds,

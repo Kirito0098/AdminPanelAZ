@@ -509,10 +509,6 @@ class UserProvisioningUpdate(BaseModel):
     confirm_deletions: bool = False
 
 
-class UserProvisioningApply(BaseModel):
-    confirm_deletions: bool = False
-
-
 class ProvisioningConfigNode(BaseModel):
     node_id: int
     node_label: str

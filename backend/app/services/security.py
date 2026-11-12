@@ -84,9 +84,6 @@ class SecurityService:
             "block_ip_blocked_dwell": _get(db, "security_block_ip_blocked_dwell", "true") == "true",
             "ip_blocked_dwell_seconds": int(_get(db, "security_ip_blocked_dwell_seconds", "120") or "120"),
             "temp_whitelist": active_temp,
-            "qr_download_ttl_seconds": int(_get(db, "qr_download_ttl_seconds", "600") or "600"),
-            "qr_download_max_downloads": int(_get(db, "qr_download_max_downloads", "1") or "1"),
-            "qr_download_pin_set": bool(_get(db, "qr_download_pin", "")),
             "public_download_enabled": is_public_download_enabled(db),
             "portal_domain": _get(db, "portal_domain", ""),
             "portal_title": _get(db, "portal_title", ""),
@@ -138,18 +135,6 @@ class SecurityService:
                 "security_ip_blocked_dwell_seconds",
                 str(max(30, min(3600, int(payload["ip_blocked_dwell_seconds"])))),
             )
-        if "qr_download_ttl_seconds" in payload:
-            _set(db, "qr_download_ttl_seconds", str(max(60, min(86400, int(payload["qr_download_ttl_seconds"])))))
-        if "qr_download_max_downloads" in payload:
-            val = int(payload["qr_download_max_downloads"])
-            _set(db, "qr_download_max_downloads", str(val if val in (1, 3, 5) else 1))
-        if "qr_download_pin" in payload:
-            from app.services.qr_download import MIN_PIN_LENGTH, hash_pin
-
-            pin = (payload["qr_download_pin"] or "").strip()
-            if pin and len(pin) < MIN_PIN_LENGTH:
-                raise ValueError(f"PIN для QR-ссылок должен быть не короче {MIN_PIN_LENGTH} символов")
-            _set(db, "qr_download_pin", hash_pin(pin) if pin else "")
         if "public_download_enabled" in payload:
             set_public_download_enabled(db, bool(payload["public_download_enabled"]))
         if "portal_domain" in payload:

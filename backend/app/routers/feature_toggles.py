@@ -11,7 +11,6 @@ from app.services.feature_toggles import (
     FRONTEND_PATH_TO_MODULE,
     SETTINGS_TAB_TO_MODULE,
     FeatureToggleService,
-    VALID_SCENARIO_PRESETS,
 )
 
 router = APIRouter(prefix="/feature-toggles", tags=["feature-toggles"])
@@ -92,19 +91,6 @@ def clear_scenario_locks(_: User = Depends(require_admin), db: Session = Depends
     db.commit()
     get_settings.cache_clear()
     return result
-
-
-@router.get("/current-preset")
-def get_current_scenario_preset(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    service = _service()
-    resolved = service.resolve_scenario_state(db)
-    return {
-        "preset": resolved["key"],
-        "last_applied": resolved["last_applied"],
-        "resolved": resolved,
-        "requires_restart": True,
-        "valid_presets": sorted(VALID_SCENARIO_PRESETS),
-    }
 
 
 @feature_modules_router.get("")

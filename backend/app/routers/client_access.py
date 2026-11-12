@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, require_admin, tg_mini_token_allowed
 from app.config import get_settings
 from app.database import get_db
-from app.models import AmneziaWg2AccessPolicy, Node, User, UserRole, VpnConfig, VpnType
+from app.models import Node, User, UserRole, VpnConfig, VpnType
 from app.services.access_policy import (
     AccessPolicyService,
 )
@@ -717,28 +717,6 @@ def wg_unblock(payload: BlockRequest, request: Request, db: Session = Depends(ge
         actor=user.username,
     )
     return result
-
-
-@router.get("/amneziawg2/status")
-def awg2_status(
-    client_name: str | None = Query(default=None),
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    svc = _service(db)
-    if client_name:
-        return svc.get_awg2_policy(client_name)
-    node_id = get_active_node(db).id
-    rows = (
-        db.query(AmneziaWg2AccessPolicy)
-        .filter_by(node_id=node_id)
-        .order_by(AmneziaWg2AccessPolicy.client_name.asc())
-        .all()
-    )
-    return {
-        row.client_name: svc.get_awg2_policy(row.client_name)
-        for row in rows
-    }
 
 
 @router.post("/amneziawg2/temp-block")

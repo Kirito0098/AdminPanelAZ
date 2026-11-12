@@ -7,7 +7,6 @@ import {
   FlaskConical,
   Globe,
   Puzzle,
-  QrCode,
   RefreshCw,
   Shield,
   User,
@@ -40,7 +39,6 @@ type SettingsTabKey =
   | 'users'
   | 'updates'
   | 'vpn_network'
-  | 'qr_downloads'
   | 'monitoring'
 
 interface SettingsNavItem {
@@ -94,7 +92,7 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
     description: 'Профили клиентов и службы',
     adminOnly: true,
     items: [
-      navItem('config_delivery', QrCode, { settingsTab: 'qr_downloads' }),
+      navItem('config_delivery', Download),
       navItem('maintenance', Wrench, { settingsTab: 'maintenance' }),
     ],
   },
@@ -131,7 +129,7 @@ function isNavItemVisible(
 ): boolean {
   if ((group.adminOnly || item.adminOnly) && !isAdmin) return false
   if (item.id === 'config_delivery') {
-    return isTabEnabled('qr_downloads') || isModuleEnabled('openvpn')
+    return isModuleEnabled('openvpn')
   }
   if (item.settingsTab && !isTabEnabled(item.settingsTab)) return false
   return true

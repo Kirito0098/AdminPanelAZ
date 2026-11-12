@@ -101,12 +101,6 @@ export async function rotateUserPortalLink(userId: number) {
   })
 }
 
-export async function revokeUserPortalLink(userId: number) {
-  return apiFetch<{ ok: boolean; user_id: number }>(`/portal/users/${userId}/revoke`, {
-    method: 'POST',
-  })
-}
-
 /** Public portal meta — called from /p/:token without auth. */
 export async function fetchPublicPortalMeta(token: string) {
   const { apiBase } = await import('../lib/panelBase')

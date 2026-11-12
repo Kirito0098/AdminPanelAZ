@@ -309,7 +309,7 @@ app.add_middleware(
         EXPECTED_NODE_HEADER,
         "Accept",
     ],
-    expose_headers=["X-Qr-Content", "X-Qr-Download-Url", "Content-Disposition"],
+    expose_headers=["Content-Disposition"],
 )
 app.add_middleware(ApiRateLimitMiddleware)
 

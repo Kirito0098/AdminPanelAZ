@@ -4,13 +4,13 @@ import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin, tg_mini_token_allowed
 from app.database import get_db
-from app.models import AppSetting, Node, User, UserRole, VpnConfig, VpnType
+from app.models import Node, User, UserRole, VpnConfig, VpnType
 from app.schemas import (
     ConfigTagResponse,
     EffectiveVisibleVpnProfilesResponse,
@@ -64,14 +64,9 @@ from app.services.openvpn_group import (
     list_openvpn_groups,
     set_user_openvpn_group,
 )
-from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
-from app.services.file_download import attachment_response
-from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
+from app.services.profile_delivery import load_node_remote_hosts
+from app.services.profile_download_name import enrich_profile_files
 from app.services.profile_files import profile_files_batch_key
-from app.services.panel_publish_info import resolve_public_base_url
-from app.services.qr_download import QrDownloadService
-from app.services.qr_generator import generate_qr_png, prefers_download_link_qr
-from app.services.security import SecurityService
 from app.services.vpn_profile_visibility import (
     POLICY_GROUP_TO_SETTING,
     allowed_openvpn_group_options,
@@ -102,21 +97,6 @@ def _local_ip_for_config(db: Session, config: VpnConfig, adapter: NodeAdapter | 
         return mapping.get(config.client_name.strip().lower())
     except Exception:
         return None
-
-
-def _qr_download_service(db: Session, request: Request) -> QrDownloadService:
-    sec = SecurityService().get_settings(db)
-    pin_row = db.query(AppSetting).filter(AppSetting.key == "qr_download_pin").first()
-    from app.services.client_portal import resolve_portal_base_url
-
-    base_url = resolve_portal_base_url(db) or resolve_public_base_url(request)
-    return QrDownloadService(
-        db,
-        base_url=base_url,
-        ttl_seconds=sec["qr_download_ttl_seconds"],
-        max_downloads=sec["qr_download_max_downloads"],
-        pin=pin_row.value if pin_row else "",
-    )
 
 
 def _active_node_id(db: Session) -> int:
@@ -775,90 +755,6 @@ def delete_config(
         owner.provision_state = "pending"
         db.commit()
     return MessageResponse(message=f"Клиент '{client_name}' удалён")
-
-
-@router.get("/{config_id}/download")
-def download_profile(
-    config_id: int,
-    path: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    config = _get_config_for_active_node(db, config_id)
-    if not config or not _can_access_config(current_user, config, db):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-
-    adapter = get_active_adapter(db)
-    _require_profile_path_allowed(db, current_user, config, path, adapter=adapter)
-    hosts = load_node_remote_hosts(db, config.node_id)
-    content = read_profile_file_for_delivery(adapter, path, hosts)
-    filename = build_profile_download_filename(config.client_name, path=path)
-    return attachment_response(content, filename)
-
-
-@router.get("/{config_id}/qr")
-def generate_qr(
-    config_id: int,
-    path: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    config = _get_config_for_active_node(db, config_id)
-    if not config or not _can_access_config(current_user, config, db):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-
-    adapter = get_active_adapter(db)
-    _require_profile_path_allowed(db, current_user, config, path, adapter=adapter)
-    hosts = load_node_remote_hosts(db, config.node_id)
-    content = read_profile_file_for_delivery(adapter, path, hosts)
-    if prefers_download_link_qr(path=path, content=content):
-        link = _qr_download_service(db, request).create_token(
-            file_path=path,
-            config_type=config.vpn_type.value,
-            config_name=build_profile_download_filename(config.client_name, path=path),
-            node_id=config.node_id,
-            creator_id=current_user.id,
-            creator_username=current_user.username,
-            remote_addr=request.client.host if request.client else None,
-        )
-        png = generate_qr_png(link["url"])
-        headers = {
-            "X-Qr-Content": "download-link",
-            "X-Qr-Download-Url": link["url"],
-            "Access-Control-Expose-Headers": "X-Qr-Content, X-Qr-Download-Url",
-        }
-        return Response(content=png, media_type="image/png", headers=headers)
-
-    png = generate_qr_png(content)
-    headers = {
-        "X-Qr-Content": "profile",
-        "Access-Control-Expose-Headers": "X-Qr-Content, X-Qr-Download-Url",
-    }
-    return Response(content=png, media_type="image/png", headers=headers)
-
-
-@router.post("/{config_id}/one-time-link")
-def create_one_time_link(
-    config_id: int,
-    path: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    config = _get_config_for_active_node(db, config_id)
-    if not config or not _can_access_config(current_user, config, db):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    _require_profile_path_allowed(db, current_user, config, path)
-    return _qr_download_service(db, request).create_token(
-        file_path=path,
-        config_type=config.vpn_type.value,
-        config_name=build_profile_download_filename(config.client_name, path=path),
-        node_id=config.node_id,
-        creator_id=current_user.id,
-        creator_username=current_user.username,
-        remote_addr=request.client.host if request.client else None,
-    )
 
 
 @router.post("/sync", response_model=MessageResponse)

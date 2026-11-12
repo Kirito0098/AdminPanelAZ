@@ -117,7 +117,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/blindtechnique/az-awg2/main/
 ### Скачать конфиг (пользователь)
 
 1. **Клиенты** → вкладка **AmneziaWG 2.0**
-2. Скачайте нужный `.conf` (или QR, если модуль QR включён)
+2. Скачайте нужный `.conf`
 
 Стоковая вкладка **AmneziaWG** эти конфиги не показывает.
 

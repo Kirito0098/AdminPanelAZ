@@ -172,7 +172,7 @@ cd /opt/AdminPanelAZ && sudo ./install.sh --proxy-only --with-systemd -y
 | Действие | Результат |
 |----------|-----------|
 | **Сохранить адреса** | Список в БД панели; непустой список best-effort пишет первый адрес в `OPENVPN_HOST` на узле |
-| **Скачать / QR / Telegram / публичная ссылка** | В `.ovpn` подставляются все `remote`; WG / стоковый AWG / **AWG 2.0** — `Endpoint` host = `WIREGUARD_HOST` (галочка «Также для AmneziaWG…»; порт из профиля) |
+| **Скачать / Telegram / публичная ссылка** | В `.ovpn` подставляются все `remote`; WG / стоковый AWG / **AWG 2.0** — `Endpoint` host = `WIREGUARD_HOST` (галочка «Также для AmneziaWG…»; порт из профиля) |
 | **Пересобрать профили** из панели | Multi-`remote` ещё и на **диске** VPN |
 | **Добавить первый адрес в allow-ips** | Первый адрес списка → `allow-ips.txt` на этом VPN (+ apply) |
 

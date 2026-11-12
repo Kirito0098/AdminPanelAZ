@@ -1,4 +1,4 @@
-import { Bot, LogIn, Send, Smartphone } from 'lucide-react'
+import { Bot, Send, Smartphone } from 'lucide-react'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn } from '@/lib/utils'
@@ -29,15 +29,6 @@ export default function TelegramOverviewCards({ tg, loading = false, onNavigate 
     accent: string
     tone?: string
   }> = [
-    {
-      key: 'setup',
-      title: 'С чего начать',
-      icon: LogIn,
-      value: tg.loginConfigured && tg.telegramId ? 'Готов' : tg.loginConfigured ? 'Почти готов' : 'Настроить',
-      sub: tg.telegramId ? `Ваш ID: ${tg.telegramId}` : 'Пошаговая инструкция',
-      accent: tg.loginConfigured && tg.telegramId ? 'border-l-emerald-500' : 'border-l-muted-foreground/30',
-      tone: tg.loginConfigured && tg.telegramId ? 'text-emerald-600 dark:text-emerald-400' : undefined,
-    },
     {
       key: 'bot',
       title: 'Бот и авторизация',
@@ -87,7 +78,7 @@ export default function TelegramOverviewCards({ tg, loading = false, onNavigate 
   ]
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       {cards.map((card) => (
         <button
           key={card.key}

@@ -62,7 +62,6 @@ from app.schemas import (
     UserFromExistingResponse,
     UserProvisionedCreate,
     UserProvisionedResponse,
-    UserProvisioningApply,
     UserProvisioningCard,
     UserProvisioningDesired,
     UserProvisioningSuggested,
@@ -127,7 +126,6 @@ from app.services.profile_delivery import load_node_remote_hosts, read_profile_f
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
 from app.services.file_download import attachment_response
 from app.services.provisioning_presets import create_preset, delete_preset, list_presets, update_preset
-from app.services.qr_generator import generate_qr_png, prefers_download_link_qr
 from app.services.telegram_link import create_link_code
 from app.services.user_identity_conflict import pending_deletion_conflict as _pending_deletion_conflict
 from app.services.user_provisioning import (
@@ -143,7 +141,7 @@ from app.services.user_provisioning import (
     user_has_plan,
     validate_plan_nodes,
 )
-from app.routers.configs import _qr_download_service, _require_profile_path_allowed
+from app.routers.configs import _require_profile_path_allowed
 from app.services.admin_bootstrap import (
     scrub_admin_bootstrap_secret_from_env,
     should_scrub_env_after_password_change,
@@ -1651,29 +1649,6 @@ def reset_user_traffic_counter_endpoint(
     return UserResponse.model_validate(user)
 
 
-@router.post("/{user_id}/grace-cleanup")
-def grace_cleanup_user(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    """Удалить все конфиги пользователя после grace; план (base/indexes) сохранить → pending."""
-    if not get_feature_service().is_enabled("user_provisioning"):
-        raise HTTPException(
-            status.HTTP_403_FORBIDDEN, detail=module_disabled_message("user_provisioning")
-        )
-    from app.services.user_grace import run_grace_cleanup
-
-    user = db.get(User, user_id)
-    if user is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
-    result = run_grace_cleanup(db, user, actor=current_user)
-    _record_user_history(
-        db, action="user_grace_cleanup", current_user=current_user, user=user, request=None
-    )
-    return {"ok": True, **result}
-
-
 def _last_provision_task(db: Session, user_id: int) -> dict | None:
     task = (
         db.query(BackgroundTask)
@@ -1876,22 +1851,6 @@ def update_provisioning(
     return UserProvisionedResponse(user=_user_summary(user, [n.id for n in nodes]), task_id=task.id)
 
 
-@router.post("/{user_id}/provisioning/apply", status_code=status.HTTP_202_ACCEPTED)
-def apply_provisioning(
-    user_id: int,
-    payload: UserProvisioningApply,
-    db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
-):
-    user = db.get(User, user_id)
-    if user is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="Пользователь не найден")
-    task = enqueue_user_provision(
-        db, user_id=user.id, actor_username=admin.username, confirm_deletions=payload.confirm_deletions
-    )
-    return {"task_id": task.id}
-
-
 @router.post("/{user_id}/provisioning/configs")
 def add_provisioning_config(
     user_id: int,
@@ -2033,48 +1992,6 @@ def config_download(
     content = read_profile_file_for_delivery(adapter, path, hosts)
     filename = build_profile_download_filename(op_config.client_name, path=path)
     return attachment_response(content, filename)
-
-
-@router.get("/{user_id}/configs/{config_id}/qr")
-def config_qr(
-    user_id: int,
-    config_id: int,
-    path: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
-):
-    """D2: QR-код профиля с узла конфига."""
-    config = _get_owned_config(db, user_id, config_id)
-    op_config, node = _resolve_op_config_and_node(db, config)
-    require_ha_primary_for_client_ops(db, node=node)
-    adapter = get_adapter_for_node(node)
-    _require_profile_path_allowed(db, current_user, op_config, path, adapter=adapter)
-    hosts = load_node_remote_hosts(db, node.id)
-    content = read_profile_file_for_delivery(adapter, path, hosts)
-    if prefers_download_link_qr(path=path, content=content):
-        link = _qr_download_service(db, request).create_token(
-            file_path=path,
-            config_type=op_config.vpn_type.value,
-            config_name=build_profile_download_filename(op_config.client_name, path=path),
-            node_id=node.id,
-            creator_id=current_user.id,
-            creator_username=current_user.username,
-            remote_addr=request.client.host if request.client else None,
-        )
-        png = generate_qr_png(link["url"])
-        headers = {
-            "X-Qr-Content": "download-link",
-            "X-Qr-Download-Url": link["url"],
-            "Access-Control-Expose-Headers": "X-Qr-Content, X-Qr-Download-Url",
-        }
-        return Response(content=png, media_type="image/png", headers=headers)
-    png = generate_qr_png(content)
-    headers = {
-        "X-Qr-Content": "profile",
-        "Access-Control-Expose-Headers": "X-Qr-Content, X-Qr-Download-Url",
-    }
-    return Response(content=png, media_type="image/png", headers=headers)
 
 
 @router.post("/{user_id}/configs/{config_id}/access")

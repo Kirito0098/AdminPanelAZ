@@ -120,6 +120,9 @@ PROXY_ENV_FILE="$BACKEND_DIR/proxy_agent.env"
 # shellcheck source=scripts/env-file.sh
 source "$ROOT_DIR/scripts/env-file.sh"
 PROXY_ENV_EXAMPLE="$BACKEND_DIR/proxy_agent.env.example"
+# Сборка интерфейса — одна реализация для установщика и консольного меню (panel_build_frontend).
+# shellcheck source=scripts/adminpanel-menu.sh
+source "$ROOT_DIR/scripts/adminpanel-menu.sh"
 
 WITH_DAEMON=false
 WITH_SYSTEMD=false
@@ -1558,16 +1561,8 @@ setup_frontend() {
   fi
 
   install_set_step "Настройка frontend (npm ci / build)"
-  ui_progress_start "Настройка frontend (npm ci)"
-  if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
-    (cd "$FRONTEND_DIR" && npm ci)
-  else
-    print_info "node_modules уже существует, npm ci пропущен (удалите node_modules для полной переустановки)"
-  fi
-  ui_progress_done "Frontend (npm ci)"
-
-  ui_progress_start "Сборка frontend (npm run build:all)"
-  (cd "$FRONTEND_DIR" && npm run build:all)
+  ui_progress_start "Сборка frontend (npm ci / npm run build:all)"
+  panel_build_frontend reuse-deps
   ui_progress_done "Frontend собран: $FRONTEND_DIR/dist + tg_mini"
 }
 
@@ -1756,6 +1751,22 @@ setup_nginx_if_selected() {
     return 0
   fi
 
+  # Режим установщика → команда nginx-setup.sh: публикация настраивается одним скриптом.
+  local flag soft=false
+  case "$mode" in
+    http_direct) flag="--http" ;;
+    uvicorn_le) flag="--uvicorn-le" soft=true ;;
+    uvicorn_custom) flag="--uvicorn-custom" ;;
+    uvicorn_selfsigned) flag="--uvicorn-selfsigned" ;;
+    le) flag="--nginx-le" soft=true ;;
+    selfsigned) flag="--nginx-selfsigned" ;;
+    nginx_custom) flag="--nginx-custom" ;;
+    *)
+      warn "Неизвестный режим публикации: $mode — пропуск"
+      return 0
+      ;;
+  esac
+
   install_set_step "Настройка публикации HTTPS ($mode)"
   log "Настройка публикации (HTTPS): $mode"
 
@@ -1763,166 +1774,35 @@ setup_nginx_if_selected() {
   source "$ROOT_DIR/scripts/nginx-common.sh"
   nginx_common_init
 
-  local backend_port="${WIZ_BACKEND_PORT:-8000}"
-  local domain="${WIZ_NGINX_DOMAIN:-}"
-  local https_port="${WIZ_HTTPS_PUBLIC_PORT:-443}"
-  local http_port="${WIZ_HTTP_ACME_PORT:-80}"
   local enforce_https="true"
-  local path_sfx="/"
   if [[ "$WIZ_APP_ENV" != "production" ]]; then
     enforce_https="false"
   fi
 
-  ACCESS_PATH="$(nginx_normalize_access_path "${WIZ_ACCESS_PATH:-}")"
-  export ACCESS_PATH
-  export NGINX_SUBPATH_INTEGRATE="${WIZ_NGINX_SUBPATH_INTEGRATE:-false}"
-  if [[ -n "$ACCESS_PATH" ]]; then
-    path_sfx="${ACCESS_PATH}/"
+  # Firewall и перезапуск панели делает установщик, поэтому в nginx-setup.sh они отключены.
+  local rc=0
+  NGINX_FAIL_SOFT="$soft" \
+  NGINX_SKIP_FIREWALL=true \
+  SKIP_PANEL_RESTART=true \
+  ENFORCE_HTTPS="$enforce_https" \
+  ENV_FILE="$ENV_FILE" \
+  DOMAIN="${WIZ_NGINX_DOMAIN:-}" \
+  EMAIL="${WIZ_NGINX_EMAIL:-}" \
+  BACKEND_PORT="${WIZ_BACKEND_PORT:-8000}" \
+  HTTPS_PUBLIC_PORT="${WIZ_HTTPS_PUBLIC_PORT:-443}" \
+  HTTP_ACME_PORT="${WIZ_HTTP_ACME_PORT:-80}" \
+  SSL_CERT="${WIZ_SSL_CERT:-}" \
+  SSL_KEY="${WIZ_SSL_KEY:-}" \
+  ACCESS_PATH="${WIZ_ACCESS_PATH:-}" \
+  NGINX_SUBPATH_INTEGRATE="${WIZ_NGINX_SUBPATH_INTEGRATE:-false}" \
+    "$ROOT_DIR/scripts/nginx-setup.sh" --non-interactive "$flag" || rc=$?
+
+  # 3 — Let's Encrypt не выдан (NGINX_FAIL_SOFT): установка продолжается без HTTPS.
+  if [[ "$rc" -eq 3 ]]; then
+    warn "Let's Encrypt не выдан (DNS/порт 80). Продолжаем без HTTPS — позже: sudo ./scripts/nginx-setup.sh $flag"
+    return 0
   fi
-
-  _install_nginx_panel_site() {
-    local site_domain="$1"
-    local site_backend="$2"
-    local site_cert="$3"
-    local site_key="$4"
-    local site_https="$5"
-    local site_http="$6"
-    local conf
-    if nginx_finalize_nginx_site "$site_domain" "$site_backend"; then
-      nginx_apply_behind_proxy_env "$site_domain" "$site_backend" "https" "$site_https" "$site_http"
-      return 0
-    fi
-    conf="$(nginx_render_template \
-      "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-      "$site_domain" "$site_backend" "$site_cert" "$site_key" "$site_https" "$site_http")" \
-      || die "Не удалось сформировать конфигурацию nginx"
-    nginx_install_site "$conf" "$site_domain"
-    nginx_apply_behind_proxy_env "$site_domain" "$site_backend" "https" "$site_https" "$site_http"
-  }
-
-  case "$mode" in
-    http_direct)
-      ACCESS_PATH=""
-      NGINX_SUBPATH_INTEGRATE="false"
-      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
-      nginx_apply_direct_http_env "$backend_port"
-      nginx_remove_site "$(nginx_env_get DOMAIN)"
-      log "HTTP без nginx: http://<IP>:${backend_port}/ (HTTPS — в панели)"
-      ;;
-    uvicorn_le)
-      ACCESS_PATH=""
-      NGINX_SUBPATH_INTEGRATE="false"
-      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
-      [[ -n "$domain" ]] || die "Для Let's Encrypt нужен домен"
-      NGINX_FAIL_SOFT=true
-      if ! nginx_obtain_letsencrypt_cert "$domain" "${WIZ_NGINX_EMAIL:-}"; then
-        unset NGINX_FAIL_SOFT
-        warn "Let's Encrypt не выдан (DNS/порт 80). Позже: sudo ./scripts/nginx-setup.sh --uvicorn-le"
-        return 0
-      fi
-      unset NGINX_FAIL_SOFT
-      nginx_remove_site "$(nginx_env_get DOMAIN)"
-      nginx_apply_direct_https_env "$domain" "$backend_port" \
-        "/etc/letsencrypt/live/${domain}/fullchain.pem" \
-        "/etc/letsencrypt/live/${domain}/privkey.pem" "$enforce_https"
-      systemctl enable --now snap.certbot.renew.timer 2>/dev/null || \
-        systemctl enable --now certbot.timer 2>/dev/null || true
-      log "HTTPS на uvicorn + Let's Encrypt: https://${domain}:${backend_port}/"
-      ;;
-    uvicorn_custom)
-      ACCESS_PATH=""
-      NGINX_SUBPATH_INTEGRATE="false"
-      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
-      [[ -n "$domain" ]] || die "Для HTTPS нужен домен"
-      [[ -n "${WIZ_SSL_CERT:-}" && -n "${WIZ_SSL_KEY:-}" ]] || die "Укажите WIZ_SSL_CERT и WIZ_SSL_KEY"
-      [[ -f "${WIZ_SSL_CERT}" && -f "${WIZ_SSL_KEY}" ]] || die "Файлы сертификата не найдены"
-      nginx_remove_site "$(nginx_env_get DOMAIN)"
-      nginx_apply_direct_https_env "$domain" "$backend_port" "${WIZ_SSL_CERT}" "${WIZ_SSL_KEY}" "$enforce_https"
-      log "HTTPS на uvicorn + собственные сертификаты: https://${domain}:${backend_port}/"
-      ;;
-    uvicorn_selfsigned)
-      ACCESS_PATH=""
-      NGINX_SUBPATH_INTEGRATE="false"
-      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
-      domain="$(nginx_resolve_selfsigned_cn "$domain")"
-      mkdir -p /etc/ssl/private
-      if [[ ! -f "$NGINX_SELF_SIGNED_CERT" ]]; then
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-          -keyout "$NGINX_SELF_SIGNED_KEY" \
-          -out "$NGINX_SELF_SIGNED_CERT" \
-          -subj "/CN=${domain}" >/dev/null 2>&1
-      fi
-      nginx_remove_site "$(nginx_env_get DOMAIN)"
-      nginx_apply_direct_https_env "$domain" "$backend_port" \
-        "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" "$enforce_https"
-      log "HTTPS на uvicorn + самоподписанный SSL: https://${domain}:${backend_port}/"
-      ;;
-    le)
-      [[ -n "$domain" ]] || die "Для Let's Encrypt нужен домен (запустите install.sh заново или ./scripts/nginx-setup.sh)"
-      nginx_ensure_nginx || die "Не удалось установить nginx"
-      NGINX_FAIL_SOFT=true
-      if ! nginx_obtain_letsencrypt_cert "$domain" "${WIZ_NGINX_EMAIL:-}"; then
-        unset NGINX_FAIL_SOFT
-        warn "Let's Encrypt не выдан (DNS/порт 80). Продолжаем без HTTPS — позже: sudo ./scripts/nginx-setup.sh"
-        return 0
-      fi
-      unset NGINX_FAIL_SOFT
-      local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
-      local key="/etc/letsencrypt/live/${domain}/privkey.pem"
-      _install_nginx_panel_site "$domain" "$backend_port" "$cert" "$key" "$https_port" "$http_port"
-      if [[ "$WIZ_APP_ENV" == "production" ]]; then
-        nginx_env_set ENFORCE_HTTPS "true"
-      fi
-      systemctl enable --now snap.certbot.renew.timer 2>/dev/null || \
-        systemctl enable --now certbot.timer 2>/dev/null || true
-      if [[ "$https_port" == "443" ]]; then
-        log "Nginx + Let's Encrypt: https://${domain}${path_sfx}"
-      else
-        log "Nginx + Let's Encrypt: https://${domain}:${https_port}${path_sfx}"
-      fi
-      ;;
-    selfsigned)
-      domain="$(nginx_resolve_selfsigned_cn "$domain")"
-      nginx_ensure_nginx || die "Не удалось установить nginx"
-      mkdir -p /etc/ssl/private
-      if [[ ! -f "$NGINX_SELF_SIGNED_CERT" ]]; then
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-          -keyout "$NGINX_SELF_SIGNED_KEY" \
-          -out "$NGINX_SELF_SIGNED_CERT" \
-          -subj "/CN=${domain}" >/dev/null 2>&1
-      fi
-      _install_nginx_panel_site "$domain" "$backend_port" \
-        "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" "$https_port" "$http_port"
-      if [[ "$WIZ_APP_ENV" == "production" ]]; then
-        nginx_env_set ENFORCE_HTTPS "true"
-      fi
-      if [[ "$https_port" == "443" ]]; then
-        log "Nginx + самоподписанный SSL: https://${domain}${path_sfx}"
-      else
-        log "Nginx + самоподписанный SSL: https://${domain}:${https_port}${path_sfx}"
-      fi
-      ;;
-    nginx_custom)
-      [[ -n "$domain" ]] || die "Для HTTPS нужен домен"
-      [[ -n "${WIZ_SSL_CERT:-}" && -n "${WIZ_SSL_KEY:-}" ]] || die "Укажите пути к сертификату и ключу"
-      [[ -f "${WIZ_SSL_CERT}" && -f "${WIZ_SSL_KEY}" ]] || die "Файлы сертификата не найдены"
-      nginx_ensure_nginx || die "Не удалось установить nginx"
-      _install_nginx_panel_site "$domain" "$backend_port" \
-        "${WIZ_SSL_CERT}" "${WIZ_SSL_KEY}" "$https_port" "$http_port"
-      if [[ "$WIZ_APP_ENV" == "production" ]]; then
-        nginx_env_set ENFORCE_HTTPS "true"
-      fi
-      if [[ "$https_port" == "443" ]]; then
-        log "Nginx + пользовательские сертификаты: https://${domain}${path_sfx}"
-      else
-        log "Nginx + пользовательские сертификаты: https://${domain}:${https_port}${path_sfx}"
-      fi
-      ;;
-    *)
-      warn "Неизвестный режим публикации: $mode — пропуск"
-      return 0
-      ;;
-  esac
+  [[ "$rc" -eq 0 ]] || die "Не удалось настроить публикацию ($mode), код $rc"
 }
 
 is_direct_public_http_mode() {

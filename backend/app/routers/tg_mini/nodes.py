@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.auth import require_tg_mini_admin
@@ -13,6 +13,7 @@ from app.services.action_log import log_action
 from app.services.node_manager import (
     check_node_health,
     get_active_node_id,
+    is_vpn_node,
     set_active_node_id,
     sync_local_node,
     update_node_from_health,
@@ -70,6 +71,11 @@ def mini_activate_node(
     admin: User = Depends(require_tg_mini_admin),
 ):
     node = _get_tg_node_or_404(node_id, db)
+    if not is_vpn_node(node):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Прокси-узел нельзя сделать активным для VPN",
+        )
     require_ha_primary_for_node_activation(db, node=node)
     set_active_node_id(db, node.id)
     db.commit()

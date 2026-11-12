@@ -127,7 +127,7 @@ Cursor режимов не знает: он видит весь `.cursor/skills`
   `get_code_snippet` (исходник), `get_architecture` (слои и точки связности);
 - карта проекта и известный долг — [`docs/ADR-001-architecture.md`](docs/ADR-001-architecture.md);
 - `rg`/`bat -r`/`read` — только если граф не ответил или файл вне индекса (`deploy/`,
-  `frontend/nginx.conf`, частично `types.ts`, `pytest.ini`, SQL-фикстуры, YAML и доки);
+  частично `types.ts`, `pytest.ini`, SQL-фикстуры, YAML и доки);
 - файл целиком не читать, если хватает `get_code_snippet` или диапазона строк;
 - чем заменить `find`/`grep`/`cat`/`sed` — скилл `cli-toolbox`.
 

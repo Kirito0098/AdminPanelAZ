@@ -1,4 +1,4 @@
-"""Mask portal / one-time download tokens in uvicorn access log lines."""
+"""Mask portal tokens in uvicorn access log lines."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import logging
 import re
 
 _TOKEN_PATH_RE = re.compile(
-    r"((?:/p(?:/u)?/|/api/public/(?:qr-download|portal)/|/api/telegram/webhook/))([^/?\s\"']+)"
+    r"((?:/p(?:/u)?/|/api/public/portal/|/api/telegram/webhook/))([^/?\s\"']+)"
 )
 
 # uvicorn.access logs '%s - "%s %s HTTP/%s" %d': client, method, full_path, http_version, status_code.

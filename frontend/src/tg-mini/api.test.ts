@@ -83,7 +83,11 @@ describe('Mini App session refresh', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const pending = Promise.all([api.getTgConfigs(), api.getTgConfigs(), api.getTgFeatureModules()])
+    const pending = Promise.all([
+      api.getTgConfigs(),
+      api.getTgConfigs(),
+      (await import('@/api/settings')).getFeatureModules(),
+    ])
     await vi.waitFor(() => expect(fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/auth'))).toHaveLength(1))
     releaseAuth()
     const results = await pending

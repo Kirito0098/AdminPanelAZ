@@ -577,7 +577,7 @@ def test_redeem_public_portal_code_user_reports_manual_block_when_no_profile_lef
     assert str(excinfo.value) == unlock_codes._REDEEM_MANUAL_BLOCK_MESSAGE
 
 
-def test_admin_user_portal_get_link_route_uses_user_id():
+def test_admin_user_portal_get_link_route_is_read_only():
     app = FastAPI()
     app.include_router(client_portal_router.router, prefix="/api")
     app.dependency_overrides[get_db] = lambda: MagicMock()
@@ -588,9 +588,10 @@ def test_admin_user_portal_get_link_route_uses_user_id():
         patch("app.routers.client_portal._require_portal_domain"),
         patch("app.routers.client_portal.ensure_portal_user"),
         patch(
-            "app.routers.client_portal.get_or_create_user_portal_token",
+            "app.routers.client_portal._active_user_token",
             return_value=UserPortalToken(id=1, token="usr", user_id=9, revoked_at=None),
-        ) as create_link,
+        ),
+        patch("app.routers.client_portal.get_or_create_user_portal_token") as create_link,
         patch(
             "app.routers.client_portal.user_link_response",
             return_value={"kind": "user", "token": "usr", "user_id": 9, "url": "https://sub.example.com/p/usr", "revoked": False},
@@ -602,7 +603,29 @@ def test_admin_user_portal_get_link_route_uses_user_id():
 
     assert resp.status_code == 200
     assert resp.json()["user_id"] == 9
-    assert create_link.call_args.kwargs["user_id"] == 9
+    create_link.assert_not_called()
+
+
+def test_admin_user_portal_get_link_returns_404_without_token():
+    app = FastAPI()
+    app.include_router(client_portal_router.router, prefix="/api")
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+    app.dependency_overrides[require_admin] = lambda: MagicMock(id=1, username="admin")
+
+    with (
+        patch("app.routers.client_portal.get_feature_service") as feats,
+        patch("app.routers.client_portal._require_portal_domain"),
+        patch("app.routers.client_portal.ensure_portal_user"),
+        patch("app.routers.client_portal._active_user_token", return_value=None),
+        patch("app.routers.client_portal.get_or_create_user_portal_token") as create_link,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        with TestClient(app) as client:
+            resp = client.get("/api/portal/users/9/link")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Ссылка портала ещё не создана"
+    create_link.assert_not_called()
 
 
 def test_admin_user_portal_revoke_route_uses_user_id():

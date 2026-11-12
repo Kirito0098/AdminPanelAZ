@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.config_access import migrate_grants_to_explicit_prefix
-from app.services.qr_download import hash_pin, is_stored_pin_hash
 from app.services.telegram_api import get_webhook_info_sync, set_webhook_sync
 
 logger = logging.getLogger(__name__)
@@ -25,17 +24,6 @@ _WEBHOOK_PATH_MARKER = "/api/telegram/webhook/"
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
-
-
-def migrate_plain_qr_download_pin(db: Session) -> bool:
-    """Hash plain-text global ``qr_download_pin`` once (B5). Returns True if migrated."""
-    raw = (_get_setting(db, "qr_download_pin", "") or "").strip()
-    if not raw or is_stored_pin_hash(raw):
-        return False
-    _set_setting(db, "qr_download_pin", hash_pin(raw))
-    db.commit()
-    logger.info("Migrated plain qr_download_pin to salted hash")
-    return True
 
 
 def _resolve_webhook_url(db: Session, secret: str) -> str | None:
@@ -292,7 +280,6 @@ def run_privacy_upgrade(db: Session) -> dict[str, Any]:
     """Run Upgrade steps 1–5. Idempotent — second call is a no-op."""
     result: dict[str, Any] = {
         "grants_changed": 0,
-        "pin_migrated": False,
         "webhook": "skipped",
         "webhook_updates": "skipped",
         "backup_group_warned": False,
@@ -302,11 +289,6 @@ def run_privacy_upgrade(db: Session) -> dict[str, Any]:
         result["grants_changed"] = migrate_grants_to_explicit_prefix(db)
     except Exception:
         logger.exception("Privacy upgrade: grants migration failed")
-
-    try:
-        result["pin_migrated"] = migrate_plain_qr_download_pin(db)
-    except Exception:
-        logger.exception("Privacy upgrade: PIN migration failed")
 
     try:
         result["webhook"] = upgrade_telegram_webhook(db)

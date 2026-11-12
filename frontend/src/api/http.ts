@@ -132,8 +132,92 @@ export async function refreshAccessToken(): Promise<string | null> {
   return refreshPromise
 }
 
-export async function apiFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
-  return apiFetchAtBase<T>(API_BASE, path, options, retry)
+export interface ApiRequestContext {
+  /** Base URL, no trailing slash. */
+  base: string
+  path: string
+  options: RequestInit
+}
+
+export interface UnauthorizedContext extends ApiRequestContext {
+  /** The token the rejected request carried; a caller may spot a renewal made by another request. */
+  sentToken: string | null
+  body: string
+  payload: unknown
+}
+
+/**
+ * Everything the panel and the Mini App do differently for one outgoing request.
+ * The request itself — headers, timeouts, error parsing, retry-once — is shared below.
+ */
+export interface ApiTransport {
+  /** Bearer token; null leaves the Authorization header out. */
+  token: () => string | null
+  /** Client-specific headers, applied before every fetch. */
+  prepareHeaders?: (headers: Headers, request: ApiRequestContext) => void
+  /** 401 hook: true — the session was renewed, retry once. May throw its own ApiError. */
+  onUnauthorized?: (request: UnauthorizedContext) => Promise<boolean>
+  /** 409 hook (panel: another tab switched the active node). */
+  onConflict?: (payload: unknown) => void
+  /** Turns a network failure into an ApiError; without it the original error is rethrown. */
+  networkError?: (error: unknown) => Error
+  credentials?: RequestCredentials
+  /** Payload exposed as `ApiError.payload`; without it the payload is not attached. */
+  errorPayload?: (payload: unknown) => unknown
+}
+
+const panelTransport: ApiTransport = {
+  token: getAccessToken,
+  prepareHeaders(headers, { base, options }) {
+    const sessionId = getWebSessionId()
+    if (sessionId) headers.set('X-Web-Session-Id', sessionId)
+    if (!headers.has('X-Client-Timezone')) {
+      const tz = getActiveTimeZone()
+      if (tz) headers.set('X-Client-Timezone', tz)
+    }
+    if (base === API_BASE) applyExpectedNodeHeader(headers, options.method)
+  },
+  async onUnauthorized({ base, path, body, payload }) {
+    if (base !== API_BASE || !refreshesSessionOn401(path)) return false
+    const detail =
+      payload && typeof payload === 'object' && payload !== null && 'detail' in payload
+        ? (payload as { detail: unknown }).detail
+        : body
+    // A node agent's own key is not the panel session: keep the cookie and the token.
+    if (isNodeAgentAuthFailureDetail(detail)) return false
+    if (await refreshAccessToken()) return true
+    clearAccessToken()
+    return false
+  },
+  onConflict(payload) {
+    if (isActiveNodeChangedPayload(payload)) notifyActiveNodeChanged()
+  },
+  networkError: () => new ApiError(SERVER_UNREACHABLE_MESSAGE, 0),
+  credentials: 'include',
+  errorPayload: unwrapErrorPayload,
+}
+
+/** Panel by default; the Mini App swaps it once at import for its own token and 401 policy. */
+let transport: ApiTransport = panelTransport
+
+export function setApiTransport(next: ApiTransport): void {
+  transport = next
+}
+
+function errorFromBody(status: number, body: string, payload: unknown): ApiError {
+  const message = parseHttpErrorBody(body, status)
+  return transport.errorPayload
+    ? new ApiError(message, status, transport.errorPayload(payload))
+    : new ApiError(message, status)
+}
+
+function parseBody(body: string): unknown {
+  if (!body) return undefined
+  try {
+    return JSON.parse(body)
+  } catch {
+    return undefined
+  }
 }
 
 async function requestAtBase(
@@ -142,66 +226,45 @@ async function requestAtBase(
   options: RequestInit,
   retry: boolean,
 ): Promise<Response> {
+  const resolvedBase = base.endsWith('/') ? base.slice(0, -1) : base
   const headers = new Headers(options.headers)
   if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
     headers.set('Content-Type', 'application/json')
   }
-  const token = getAccessToken()
+  const token = transport.token()
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  const sessionId = getWebSessionId()
-  if (sessionId) headers.set('X-Web-Session-Id', sessionId)
-  if (!headers.has('X-Client-Timezone')) {
-    const tz = getActiveTimeZone()
-    if (tz) headers.set('X-Client-Timezone', tz)
-  }
+  const request: ApiRequestContext = { base: resolvedBase, path, options }
+  transport.prepareHeaders?.(headers, request)
 
-  const normalizedBase = base.endsWith('/') ? base.slice(0, -1) : base
-  if (normalizedBase === API_BASE) applyExpectedNodeHeader(headers, options.method)
   let response: Response
   try {
-    response = await fetch(`${normalizedBase}${path}`, { ...options, headers, credentials: 'include' })
-  } catch {
-    throw new ApiError(SERVER_UNREACHABLE_MESSAGE, 0)
+    response = await fetch(`${resolvedBase}${path}`, {
+      ...options,
+      headers,
+      credentials: transport.credentials,
+    })
+  } catch (error) {
+    throw transport.networkError ? transport.networkError(error) : error
   }
-  if (response.status === 401 && retry && refreshesSessionOn401(path) && normalizedBase === API_BASE) {
+  if (response.status === 401 && retry && transport.onUnauthorized) {
     const body = await response.text()
-    let payload: unknown
-    try {
-      payload = body ? JSON.parse(body) : undefined
-    } catch {
-      payload = undefined
+    const payload = parseBody(body)
+    if (await transport.onUnauthorized({ ...request, sentToken: token, body, payload })) {
+      return requestAtBase(resolvedBase, path, options, false)
     }
-    const detail =
-      payload && typeof payload === 'object' && payload !== null && 'detail' in payload
-        ? (payload as { detail: unknown }).detail
-        : body
-    if (isNodeAgentAuthFailureDetail(detail)) {
-      const message = parseHttpErrorBody(body, 401)
-      throw new ApiError(message, 401, payload)
-    }
-    const newToken = await refreshAccessToken()
-    if (newToken) {
-      return requestAtBase(base, path, options, false)
-    }
-    clearAccessToken()
-    const message = parseHttpErrorBody(body, 401)
-    throw new ApiError(message, 401, payload)
+    throw errorFromBody(401, body, payload)
   }
   if (!response.ok) {
     const body = await response.text()
-    let payload: unknown
-    if (body) {
-      try {
-        payload = JSON.parse(body)
-      } catch {
-        payload = undefined
-      }
-    }
-    if (response.status === 409 && isActiveNodeChangedPayload(payload)) notifyActiveNodeChanged()
-    const detail = parseHttpErrorBody(body, response.status)
-    throw new ApiError(detail, response.status, unwrapErrorPayload(payload))
+    const payload = parseBody(body)
+    if (response.status === 409) transport.onConflict?.(payload)
+    throw errorFromBody(response.status, body, payload)
   }
   return response
+}
+
+export async function apiFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
+  return apiFetchAtBase<T>(API_BASE, path, options, retry)
 }
 
 export async function apiFetchAtBase<T>(
@@ -218,22 +281,6 @@ export async function apiFetchAtBase<T>(
 /** For files and other non-JSON answers: the successful Response comes back unread. */
 export function apiFetchResponse(path: string, options: RequestInit = {}): Promise<Response> {
   return requestAtBase(API_BASE, path, options, true)
-}
-
-export type QrContentMode = 'profile' | 'download-link'
-
-export type QrBlobResult = {
-  blob: Blob
-  contentMode: QrContentMode
-  downloadUrl?: string
-}
-
-/** QR endpoints answer with a PNG plus `X-Qr-Content` / `X-Qr-Download-Url` headers. */
-export async function parseQrResponse(response: Response): Promise<QrBlobResult> {
-  const contentMode: QrContentMode =
-    response.headers.get('X-Qr-Content') === 'download-link' ? 'download-link' : 'profile'
-  const downloadUrl = response.headers.get('X-Qr-Download-Url') ?? undefined
-  return { blob: await response.blob(), contentMode, downloadUrl }
 }
 
 export { API_BASE }

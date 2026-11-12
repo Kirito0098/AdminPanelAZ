@@ -1217,40 +1217,6 @@ body.tg-mini-app {
   color: hsl(var(--foreground));
 }
 
-.tg-mini-download-link-box {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  border-radius: 0.75rem;
-  border: 1px solid hsl(var(--border));
-  background: hsl(var(--muted) / 0.25);
-}
-
-.tg-mini-download-link-url {
-  word-break: break-all;
-  font-family: ui-monospace, monospace;
-  font-size: 0.6875rem;
-  line-height: 1.45;
-  color: hsl(var(--foreground));
-}
-
-.tg-mini-download-link-meta {
-  font-size: 0.6875rem;
-  color: hsl(var(--muted-foreground));
-  line-height: 1.4;
-}
-
-.tg-mini-download-link-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.5rem;
-}
-
-.tg-mini-download-link-actions .tg-mini-link-action-full {
-  grid-column: span 2;
-}
-
 /* Nodes page */
 .tg-mini-node-card {
   transition: border-color 0.15s ease, transform 0.15s ease;

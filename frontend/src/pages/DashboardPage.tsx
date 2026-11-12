@@ -13,8 +13,6 @@ import {
 import {
   ApiError,
   downloadConfigsExport,
-  downloadProfile,
-  fetchQrBlob,
   getClientPolicies,
   getConfigProfileFiles,
   getConfigQuota,
@@ -26,7 +24,7 @@ import {
   importConfigsCsv,
   syncConfigs,
 } from '@/api/client'
-import type { QrContentMode } from '@/api/http'
+import { downloadUserConfigFile } from '@/api/users'
 import { buildDashboardSummary } from '@/lib/dashboardSummary'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import { DOCS } from '@/lib/docsUrls'
@@ -41,7 +39,6 @@ import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
 import ToolbarButton from '@/components/shared/ToolbarButton'
-import QrPreviewDialog from '@/components/shared/QrPreviewDialog'
 import { NodeBadge } from '@/components/NodeSelector'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
@@ -99,12 +96,6 @@ export default function DashboardPage() {
   const [syncing, setSyncing] = useState(false)
   const [awg2Installed, setAwg2Installed] = useState(false)
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
-  const [qrPreview, setQrPreview] = useState<{
-    url: string
-    filename: string
-    contentMode: QrContentMode
-    downloadUrl?: string
-  } | null>(null)
   const [policies, setPolicies] = useState<Record<string, ClientPoliciesResponseEntry>>({})
   const [connectionMap, setConnectionMap] = useState<ClientConnectionMap | null>(null)
   const [panelUsers, setPanelUsers] = useState<User[]>([])
@@ -264,10 +255,15 @@ export default function DashboardPage() {
   }, [isAdmin])
 
   const handleDownload = async (config: VpnConfig, path: string, filename: string) => {
+    const ownerId = config.owner_id
+    if (ownerId == null) {
+      notifyError('У конфига не указан владелец — скачивание недоступно')
+      return
+    }
     try {
       let downloadName = filename
       await withInline(async () => {
-        const res = await downloadProfile(config.id, path)
+        const res = await downloadUserConfigFile(ownerId, config.id, path)
         const blob = await res.blob()
         downloadName =
           parseContentDispositionFilename(res.headers.get('Content-Disposition')) ?? filename
@@ -276,18 +272,6 @@ export default function DashboardPage() {
       success(`Файл «${downloadName}» скачан`)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка скачивания файла')
-    }
-  }
-
-  const handleQr = async (config: VpnConfig, path: string, filename: string) => {
-    try {
-      await withInline(async () => {
-        const { blob, contentMode, downloadUrl } = await fetchQrBlob(config.id, path)
-        const url = URL.createObjectURL(blob)
-        setQrPreview({ url, filename, contentMode, downloadUrl })
-      }, 'Генерация QR-кода...')
-    } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка генерации QR')
     }
   }
 
@@ -528,17 +512,6 @@ export default function DashboardPage() {
         withProgress={withInline}
       />
 
-      <QrPreviewDialog
-        url={qrPreview?.url}
-        filename={qrPreview?.filename}
-        contentMode={qrPreview?.contentMode}
-        downloadUrl={qrPreview?.downloadUrl}
-        onClose={() => {
-          if (qrPreview) URL.revokeObjectURL(qrPreview.url)
-          setQrPreview(null)
-        }}
-      />
-
       {loading ? (
         <div className="rounded-xl border bg-card p-6">
           <Spinner label="Загрузка конфигураций..." className="py-16" />
@@ -586,7 +559,6 @@ export default function DashboardPage() {
           connectionMap={connectionMap}
           filesLoading={loadingFiles}
           onRefresh={() => load({ silent: true })}
-          onQr={handleQr}
           onDownload={handleDownload}
           onNotifySuccess={success}
           onNotifyError={notifyError}

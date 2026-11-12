@@ -75,7 +75,11 @@ from app.services.geo_routing_hint import build_geo_routing_hint
 from app.services.ssh_tunnel_pool import forget_ssh_host_key, get_ssh_tunnel_pool
 from app.services.node_transport_preflight import preflight_transport_switch
 from app.services.config_apply_queue import enqueue_doall_and_replicate
-from app.services.node_sync.groups import build_ha_node_context, find_group_for_node
+from app.services.node_sync.groups import (
+    build_ha_node_context,
+    find_group_for_node,
+    require_ha_primary_for_node_activation,
+)
 from app.services.openvpn_remote_hosts import (
     RemoteHostsError,
     append_host_to_allow_ips,
@@ -1163,6 +1167,7 @@ def activate_node(
             detail="Прокси-узел нельзя сделать активным для VPN",
         )
 
+    require_ha_primary_for_node_activation(db, node=node)
     set_active_node_id(db, node.id)
     db.commit()
     health = check_node_health(node)

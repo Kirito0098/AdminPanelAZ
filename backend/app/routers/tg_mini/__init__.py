@@ -12,7 +12,7 @@ from app.services.notify_time import get_client_timezone_from_request
 
 from .auth import router as auth_router
 from .auth import tg_auth
-from .configs import mini_config_files, mini_configs, mini_qr_link, mini_send_config, router as configs_router
+from .configs import mini_config_files, mini_configs, mini_send_config, router as configs_router
 from .dashboard import mini_dashboard, router as dashboard_router
 from .me_configs import router as me_configs_router
 from .me_redeem import router as me_redeem_router
@@ -24,7 +24,6 @@ from .helpers import (
     _get_bot_token,
     _get_setting,
     _get_tg_node_or_404,
-    _qr_download_service,
     _send_config_file,
     _serialize_tg_node,
     _set_setting,
@@ -34,7 +33,6 @@ from .helpers import (
 )
 from .nodes import mini_activate_node, mini_get_node, mini_list_nodes, mini_node_health, router as nodes_router
 from .settings import (
-    check_bot_delivery,
     mini_get_admin_notify,
     mini_get_telegram_settings,
     mini_settings,
@@ -66,14 +64,12 @@ __all__ = [
     "_get_bot_token",
     "_get_setting",
     "_get_tg_node_or_404",
-    "_qr_download_service",
     "_send_config_file",
     "_serialize_tg_node",
     "_set_setting",
     "_static_index",
     "_verify_telegram_init_data",
     "admin_notify_service",
-    "check_bot_delivery",
     "create_access_token",
     "create_tg_mini_token",
     "get_client_timezone_from_request",
@@ -91,7 +87,6 @@ __all__ = [
     "mini_get_telegram_settings",
     "mini_list_nodes",
     "mini_node_health",
-    "mini_qr_link",
     "mini_send_config",
     "mini_settings",
     "mini_test_admin_notify",

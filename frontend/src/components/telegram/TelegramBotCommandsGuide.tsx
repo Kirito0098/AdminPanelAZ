@@ -15,7 +15,7 @@ const PUBLIC_COMMANDS: CommandRow[] = [
   { command: '/help', description: 'Справка по командам — список зависит от вашей роли', access: 'all' },
   {
     command: '/link <код>',
-    description: 'Привязка Telegram к аккаунту панели. Код получите ниже на этой вкладке',
+    description: 'Привязка Telegram к аккаунту панели. Код получите в «Мой профиль»',
     access: 'all',
     example: '/link a1b2c3d4',
   },
@@ -221,7 +221,7 @@ export default function TelegramBotCommandsGuide() {
             <span className="text-muted-foreground/60">•</span>
             <span>
               Команды вроде <code>/status</code> требуют привязки — сначала выполните <code>/link</code> с кодом из
-              блока ниже.
+              раздела «Мой профиль» в настройках панели.
             </span>
           </li>
           <li className="flex gap-2">

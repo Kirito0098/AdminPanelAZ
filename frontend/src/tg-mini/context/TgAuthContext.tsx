@@ -2,9 +2,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { ApiError } from '@/api/client'
 import { isDocumentHidden } from '@/hooks/useIntervalWhenVisible'
 import { applyThemeClass, normalizeTheme } from '@/lib/theme'
+import { getFeatureModules } from '@/api/settings'
 import {
   clearTgToken,
-  getTgFeatureModules,
   getTgSettings,
   getTgToken,
   refreshTgSessionFromInitData,
@@ -62,7 +62,7 @@ export function TgAuthProvider({ children }: { children: ReactNode }) {
     let scheduledRetry = false
 
     try {
-      const data = await getTgFeatureModules()
+      const data = await getFeatureModules()
       setFeatures(data.features || {})
     } catch {
       if (opts?.allowRetry !== false) {

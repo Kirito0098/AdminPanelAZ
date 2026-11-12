@@ -443,8 +443,6 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         resource_impact_level="low",
         default=True,
         group="app_module",
-        api_paths=("/api/logs/qr-downloads",),
-        settings_tabs=("qr_downloads",),
     ),
     FeatureToggleDefinition(
         key="unlock_codes",
@@ -469,7 +467,6 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         default=True,
         group="app_module",
         api_prefixes=("/api/portal", "/api/public/portal"),
-        settings_tabs=("qr_downloads",),
     ),
     FeatureToggleDefinition(
         key="vpn_network",

@@ -18,7 +18,6 @@ export interface ConfigCardFieldVisibility {
   metaBlock: boolean
   metaConnection: boolean
   downloadButtons: boolean
-  qrButtons: boolean
   trafficLink: boolean
   dangerActions: boolean
 }
@@ -46,7 +45,6 @@ export const DEFAULT_CONFIG_CARD_VIEW_PREFS: ConfigCardViewPrefs = {
     metaBlock: true,
     metaConnection: true,
     downloadButtons: true,
-    qrButtons: true,
     trafficLink: true,
     dangerActions: true,
   },
@@ -227,7 +225,6 @@ export const FIELD_LABELS: Record<keyof ConfigCardFieldVisibility, string> = {
   metaBlock: 'Блокировка',
   metaConnection: 'Онлайн / офлайн',
   downloadButtons: 'Кнопки скачивания',
-  qrButtons: 'QR-кнопки',
   trafficLink: 'Ссылка «Трафик»',
   dangerActions: 'Блок / удалить',
 }

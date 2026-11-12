@@ -13,21 +13,13 @@ import MiniListToolbar, {
 import MiniNodeSelector from '@/tg-mini/components/MiniNodeSelector'
 import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
-import {
-  getTgConfigs,
-  getTgPanelConfigFiles,
-  getTgPanelQrLink,
-  sendTgPanelConfig,
-} from '@/tg-mini/api'
+import { getTgConfigs, getTgAdminConfigFiles, sendTgAdminConfig } from '@/tg-mini/api'
 import { guessInstallPlatform } from '@/tg-mini/lib/platformMeta'
 import { splitProfileFilesByRoute } from '@/tg-mini/lib/profileFiles'
-import { copyText, openExternalLink, shareViaTelegram } from '@/tg-mini/lib/shareDownloadLink'
 import { vpnTypeBadgeClass, vpnTypeLabel } from '@/tg-mini/lib/vpnLabels'
-import type { InstallPlatform, TgMiniConfig, TgMiniConfigFile, TgMiniQrLink } from '@/types'
+import type { InstallPlatform, TgMiniConfig, TgMiniConfigFile } from '@/types'
 
-const canShareInTelegram = typeof window.Telegram?.WebApp?.shareUrl === 'function'
-
-/** Admin «Конфиги»: все конфиги на активном узле, полное управление (без QR и CSV). */
+/** Admin «Конфиги»: все конфиги на активном узле, полное управление (без CSV). */
 export default function AdminConfigs() {
   const { settings, features } = useTgAuth()
   const [configs, setConfigs] = useState<TgMiniConfig[]>([])
@@ -43,7 +35,6 @@ export default function AdminConfigs() {
   const [sheetLoading, setSheetLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [feedback, setFeedback] = useState<ConfigFeedback | null>(null)
-  const [downloadLink, setDownloadLink] = useState<TgMiniQrLink | null>(null)
   const [platform, setPlatform] = useState<InstallPlatform>(() => guessInstallPlatform())
 
   const load = useCallback(async (options?: { silent?: boolean }) => {
@@ -95,11 +86,10 @@ export default function AdminConfigs() {
   const openActions = async (config: TgMiniConfig) => {
     setActiveConfig(config)
     setFeedback(null)
-    setDownloadLink(null)
     setPlatform(guessInstallPlatform())
     setSheetLoading(true)
     try {
-      const data = await getTgPanelConfigFiles(config.id)
+      const data = await getTgAdminConfigFiles(config.id)
       setFiles(data.files)
       const { vpn, antizapret } = splitProfileFilesByRoute(data.files)
       setSelectedPath((vpn[0] ?? antizapret[0] ?? data.files[0])?.path ?? '')
@@ -119,7 +109,6 @@ export default function AdminConfigs() {
     setFiles([])
     setSelectedPath('')
     setFeedback(null)
-    setDownloadLink(null)
   }
 
   const handleSend = async (destination: 'self' | 'owner') => {
@@ -127,7 +116,7 @@ export default function AdminConfigs() {
     setActionLoading(true)
     setFeedback(null)
     try {
-      const result = await sendTgPanelConfig(activeConfig.id, {
+      const result = await sendTgAdminConfig(activeConfig.id, {
         path: selectedPath,
         destination,
         platform,
@@ -141,57 +130,6 @@ export default function AdminConfigs() {
     } finally {
       setActionLoading(false)
     }
-  }
-
-  const handleCreateDownloadLink = async () => {
-    if (!activeConfig || !selectedPath) return
-    setActionLoading(true)
-    setFeedback(null)
-    setDownloadLink(null)
-    try {
-      const link = await getTgPanelQrLink(activeConfig.id, selectedPath)
-      setDownloadLink(link)
-      const copied = await copyText(link.url)
-      setFeedback({
-        tone: 'success',
-        text: copied ? 'Ссылка создана и скопирована' : 'Ссылка создана',
-      })
-    } catch (err) {
-      setFeedback({
-        tone: 'error',
-        text: err instanceof ApiError ? err.message : 'Ошибка создания ссылки',
-      })
-    } finally {
-      setActionLoading(false)
-    }
-  }
-
-  const handleCopyDownloadLink = async () => {
-    if (!downloadLink) return
-    const copied = await copyText(downloadLink.url)
-    setFeedback({
-      tone: copied ? 'success' : 'error',
-      text: copied ? 'Ссылка скопирована' : 'Не удалось скопировать',
-    })
-  }
-
-  const handleShareDownloadLink = async () => {
-    if (!downloadLink) return
-    if (shareViaTelegram(downloadLink.url, `VPN-конфиг: ${activeConfig?.client_name ?? ''}`)) {
-      setFeedback({ tone: 'info', text: 'Выберите чат, куда отправить ссылку' })
-      return
-    }
-    const copied = await copyText(downloadLink.url)
-    setFeedback({
-      tone: 'info',
-      text: copied ? 'Поделиться недоступно — ссылка скопирована' : 'Скопируйте ссылку вручную',
-    })
-  }
-
-  const handleOpenDownloadLink = () => {
-    if (!downloadLink) return
-    openExternalLink(downloadLink.url)
-    setFeedback({ tone: 'info', text: 'Ссылка открыта (если она одноразовая — на другом устройстве не сработает)' })
   }
 
   return (
@@ -269,7 +207,6 @@ export default function AdminConfigs() {
         selectedPath={selectedPath}
         onSelectedPathChange={(path) => {
           setSelectedPath(path)
-          setDownloadLink(null)
           setFeedback(null)
         }}
         platform={platform}
@@ -277,18 +214,12 @@ export default function AdminConfigs() {
         loading={sheetLoading}
         actionLoading={actionLoading}
         feedback={feedback}
-        downloadLink={downloadLink}
-        canShareLink={canShareInTelegram}
         isForeignConfig={Boolean(activeConfig && !activeConfig.is_mine)}
         ownerLabel={activeConfig?.owner_username ?? null}
         canManage
         isAdmin
         onClose={closeSheet}
         onSend={(destination) => void handleSend(destination)}
-        onCreateDownloadLink={() => void handleCreateDownloadLink()}
-        onCopyDownloadLink={() => void handleCopyDownloadLink()}
-        onShareDownloadLink={() => void handleShareDownloadLink()}
-        onOpenDownloadLink={handleOpenDownloadLink}
         onConfigDeleted={() => {
           closeSheet()
           void load({ silent: true })

@@ -21,14 +21,14 @@ import {
 } from '@/components/ui/select'
 import { CLIENT_NAME_HINT, isValidClientName } from '@/lib/clientName'
 import { endOfDayIso } from '@/lib/datetime'
+import { createConfig } from '@/api/configs'
+import { getUsers } from '@/api/settings'
+import { setClientAccessUntil } from '@/api/unlockCodes'
 import {
-  createTgPanelConfig,
-  getTgPanelUsers,
-  setTgClientAccessUntil,
-  tgAwg2SetTrafficLimit,
-  tgOpenvpnSetTrafficLimit,
-  tgWgSetTrafficLimit,
-} from '@/tg-mini/api'
+  awg2SetTrafficLimit,
+  openvpnSetTrafficLimit,
+  wgSetTrafficLimit,
+} from '@/api/vpnAccess'
 import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
 import { cn } from '@/lib/utils'
 import type { SelfServiceQuota, User, VpnType } from '@/types'
@@ -49,14 +49,14 @@ async function setTrafficLimitForProtocol(
   periodDays: number | null,
 ) {
   if (protocol === 'openvpn') {
-    await tgOpenvpnSetTrafficLimit(clientName, value, unit, periodDays)
+    await openvpnSetTrafficLimit(clientName, value, unit, periodDays)
     return
   }
   if (protocol === 'amneziawg2') {
-    await tgAwg2SetTrafficLimit(clientName, value, unit, periodDays)
+    await awg2SetTrafficLimit(clientName, value, unit, periodDays)
     return
   }
-  await tgWgSetTrafficLimit(clientName, value, unit, periodDays)
+  await wgSetTrafficLimit(clientName, value, unit, periodDays)
 }
 
 interface CreateConfigDialogProps {
@@ -122,7 +122,7 @@ export default function CreateConfigDialog({
 
   useEffect(() => {
     if (!open || !isAdmin) return
-    void getTgPanelUsers()
+    void getUsers()
       .then(setUsers)
       .catch(() => setUsers([]))
   }, [open, isAdmin])
@@ -167,7 +167,7 @@ export default function CreateConfigDialog({
     const iso = endOfDayIso(dateValue)
     if (!iso) return 'некорректная дата доступа'
     try {
-      await setTgClientAccessUntil(protocol, name, iso)
+      await setClientAccessUntil(protocol, name, iso)
       return null
     } catch (err) {
       return err instanceof ApiError ? err.message : 'срок доступа не сохранён'
@@ -234,7 +234,7 @@ export default function CreateConfigDialog({
     try {
       for (const vpnType of ordered) {
         try {
-          await createTgPanelConfig({
+          await createConfig({
             client_name: trimmedName,
             vpn_type: vpnType,
             cert_expire_days: isAdmin && vpnType === 'openvpn' ? parsedCertDays : undefined,

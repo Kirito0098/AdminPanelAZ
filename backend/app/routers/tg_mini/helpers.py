@@ -10,16 +10,13 @@ import urllib.parse
 from pathlib import Path
 from typing import Literal
 
-from fastapi import HTTPException, Request, status
+from fastapi import HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AppSetting, User, VpnConfig
+from app.models import User, VpnConfig
 from app.services.app_setting_store import _get_setting, _set_setting
-from app.services.panel_publish_info import resolve_public_base_url
-from app.services.qr_download import QrDownloadService
-from app.services.security import SecurityService
 
 settings = get_settings()
 _STATIC_DIR = Path(__file__).resolve().parents[2] / "static" / "tg_mini"
@@ -59,21 +56,6 @@ def _get_bot_token(db: Session) -> str:
 
 def _static_index() -> Path:
     return _STATIC_DIR / "index.html"
-
-
-def _qr_download_service(db: Session, request: Request) -> QrDownloadService:
-    sec = SecurityService().get_settings(db)
-    pin_row = db.query(AppSetting).filter(AppSetting.key == "qr_download_pin").first()
-    from app.services.client_portal import resolve_portal_base_url
-
-    base_url = resolve_portal_base_url(db) or resolve_public_base_url(request)
-    return QrDownloadService(
-        db,
-        base_url=base_url,
-        ttl_seconds=sec["qr_download_ttl_seconds"],
-        max_downloads=sec["qr_download_max_downloads"],
-        pin=pin_row.value if pin_row else "",
-    )
 
 
 def _get_accessible_config(db: Session, config_id: int, current_user: User) -> VpnConfig:
