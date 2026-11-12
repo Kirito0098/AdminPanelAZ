@@ -7,7 +7,7 @@ from html import escape
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import User
+from app.models import Node, User
 from app.services.node_manager import get_active_node
 from app.services.config_access import accessible_client_names
 from app.services.telegram_api import send_message
@@ -66,13 +66,8 @@ def _format_top_lines(top: list[dict], *, limit: int = _TOP_LIMIT) -> str:
     return "\n".join(lines) if lines else i18n.TRAFFIC_TOP_EMPTY
 
 
-def traffic_snapshot(
-    db: Session,
-    user: User,
-    *,
-    top_limit: int = _TOP_LIMIT,
-) -> tuple[dict | None, str]:
-    """Сводка трафика для экрана и виджета. ``reason``: ``none`` | ``nostats``."""
+def collect_traffic(db: Session, user: User) -> tuple[list[dict], Node, str]:
+    """Агрегированные клиенты + узел. ``reason``: ``none`` | ``nostats`` | ``""``."""
 
     node = get_active_node(db)
     collector = TrafficCollectorService(db, node.id)
@@ -89,22 +84,44 @@ def traffic_snapshot(
     )
 
     if is_admin(user):
-        clients = _aggregate_clients(rows)
+        return _aggregate_clients(rows), node, ""
+
+    allowed = accessible_client_names(db, user, node_id=node.id) or set()
+    owned_lower = {name.lower() for name in allowed}
+    if not owned_lower:
+        return [], node, "none"
+    clients = _aggregate_clients(
+        [row for row in rows if (row.common_name or "").lower() in owned_lower],
+    )
+    return clients, node, ("" if clients else "nostats")
+
+
+def traffic_by_client(db: Session, user: User) -> dict[str, int]:
+    """Трафик за сутки по имени клиента (нижний регистр), для карточки конфигов."""
+    clients, _node, _reason = collect_traffic(db, user)
+    return {str(item["name"]).lower(): int(item["traffic_1d"]) for item in clients}
+
+
+def traffic_snapshot(
+    db: Session,
+    user: User,
+    *,
+    top_limit: int = _TOP_LIMIT,
+) -> tuple[dict | None, str]:
+    """Сводка трафика для экрана и виджета. ``reason``: ``none`` | ``nostats``."""
+
+    clients, node, reason = collect_traffic(db, user)
+    if reason == "none":
+        return None, "none"
+    if not clients:
+        return None, "nostats"
+
+    if is_admin(user):
         title = i18n.TRAFFIC_FLEET_TITLE
         scope_hint = ""
     else:
-        allowed = accessible_client_names(db, user, node_id=node.id) or set()
-        owned_lower = {name.lower() for name in allowed}
-        if not owned_lower:
-            return None, "none"
-        clients = _aggregate_clients(
-            [row for row in rows if (row.common_name or "").lower() in owned_lower],
-        )
         title = i18n.TRAFFIC_USER_TITLE
         scope_hint = i18n.TRAFFIC_USER_SCOPE
-
-    if not clients:
-        return None, "nostats"
 
     ranked = [
         {

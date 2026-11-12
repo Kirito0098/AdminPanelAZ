@@ -15,6 +15,7 @@ from .auth import tg_auth
 from .configs import mini_config_files, mini_configs, mini_send_config, router as configs_router
 from .dashboard import mini_dashboard, router as dashboard_router
 from .me_configs import router as me_configs_router
+from .me_portal import router as me_portal_router
 from .me_redeem import router as me_redeem_router
 from .messages import router as messages_router
 from .helpers import (
@@ -52,6 +53,7 @@ router.include_router(auth_router)
 router.include_router(dashboard_router)
 router.include_router(configs_router)
 router.include_router(me_configs_router)
+router.include_router(me_portal_router)
 router.include_router(me_redeem_router)
 router.include_router(messages_router)
 router.include_router(settings_router)

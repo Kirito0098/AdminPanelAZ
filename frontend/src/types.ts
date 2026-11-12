@@ -2889,3 +2889,13 @@ export interface SendMessageResult {
   warning: string | null
 }
 
+
+/** Собственная ссылка клиентского портала (Mini App, абонент). */
+export interface TgPortalLink {
+  exists: boolean
+  url: string | null
+  created_at: string | null
+  expires_at: string | null
+  ttl_days: number
+  expired: boolean
+}

@@ -25,6 +25,7 @@ FEATURE_BY_COMMAND: dict[str, str] = {
     "cidr": "routing",
     "warper": "warper",
     "awg2": "awg2",
+    "portal": "client_portal",
 }
 
 

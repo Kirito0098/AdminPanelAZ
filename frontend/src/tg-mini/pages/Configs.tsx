@@ -13,6 +13,7 @@ import MiniListToolbar, {
   type ProtocolFilter,
 } from '@/tg-mini/components/MiniListToolbar'
 import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
+import PortalLinkCard from '@/tg-mini/components/PortalLinkCard'
 import { guessInstallPlatform } from '@/tg-mini/lib/platformMeta'
 import { vpnTypeBadgeClass, vpnTypeLabel } from '@/tg-mini/lib/vpnLabels'
 import {
@@ -375,6 +376,8 @@ function UserConfigs() {
           </CardContent>
         </Card>
       )}
+
+      <PortalLinkCard />
 
       {accessCopy && closedAccess && (
         <div

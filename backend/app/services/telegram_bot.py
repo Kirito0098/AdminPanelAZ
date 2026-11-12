@@ -19,8 +19,6 @@ from app.services.telegram_bot_handlers.configs import (
     handle_config,
     handle_configs,
 )
-from app.services.telegram_bot_handlers.cidr_status import handle_cidr_status
-from app.services.telegram_bot_handlers.help import handle_help
 from app.services.telegram_bot_handlers.link import handle_link
 from app.services.telegram_bot_handlers.nodes import (
     handle_node_activate,
@@ -34,7 +32,11 @@ from app.services.telegram_bot_handlers.settings import (
     handle_settings_text,
 )
 from app.services.telegram_bot_handlers.start import handle_start
-from app.services.telegram_bot_handlers.menu import handle_menu_callback, handle_menu_text
+from app.services.telegram_bot_handlers.menu import (
+    _dispatch_action,
+    handle_menu_callback,
+    handle_menu_text,
+)
 from app.services.telegram_bot_handlers.unlock_codes import (
     handle_unlock_codes_callback,
     handle_unlock_codes_root,
@@ -42,8 +44,6 @@ from app.services.telegram_bot_handlers.unlock_codes import (
 )
 from app.services.telegram_bot_handlers.ui import handle_unknown_text, nav_footer_keyboard
 from app.services.telegram_bot_handlers.status import handle_status
-from app.services.telegram_bot_handlers.warper_status import handle_warper_status
-from app.services.telegram_bot_handlers.awg2_status import handle_awg2_status
 from app.services.telegram_bot_handlers.traffic import handle_traffic
 from app.services.telegram_bot_handlers.inline import handle_chosen_inline_result, handle_inline_query
 from app.services.telegram_bot_command_rate_limit import telegram_bot_command_rate_limit_service
@@ -127,7 +127,7 @@ async def _dispatch_command(ctx: BotContext, command: str, args: str) -> None:
         await handle_admin_chat(ctx)
         return
     if command == "/help":
-        await handle_help(ctx)
+        await _dispatch_action(ctx, "help")
         return
     if command == "/link":
         await handle_link(ctx, args)
@@ -148,11 +148,15 @@ async def _dispatch_command(ctx: BotContext, command: str, args: str) -> None:
         return
 
     if command == "/status":
-        await handle_status(ctx)
+        await _dispatch_action(ctx, "status")
     elif command == "/configs" or command == "/myconfigs":
-        await handle_configs(ctx)
+        await _dispatch_action(ctx, "hub_configs")
     elif command == "/traffic":
-        await handle_traffic(ctx)
+        await _dispatch_action(ctx, "hub_traffic")
+    elif command == "/portal":
+        from app.services.telegram_bot_handlers.portal import handle_portal
+
+        await handle_portal(ctx)
     elif command == "/config":
         await handle_config(ctx, args)
     elif command == "/settings":
@@ -160,13 +164,13 @@ async def _dispatch_command(ctx: BotContext, command: str, args: str) -> None:
     elif command == "/unlock":
         await handle_unlock_codes_root(ctx)
     elif command == "/cidr":
-        await handle_cidr_status(ctx)
+        await _dispatch_action(ctx, "cidr")
     elif command == "/nodes":
-        await handle_nodes_root(ctx)
+        await _dispatch_action(ctx, "hub_nodes")
     elif command == "/warper":
-        await handle_warper_status(ctx)
+        await _dispatch_action(ctx, "warper")
     elif command == "/awg2":
-        await handle_awg2_status(ctx)
+        await _dispatch_action(ctx, "awg2")
     else:
         from app.services.telegram_api import send_message
 
@@ -198,7 +202,7 @@ async def _dispatch_callback(
     if await handle_menu_callback(ctx, data, message_id=message_id):
         return
     if data == "help":
-        await handle_help(ctx, message_id=message_id)
+        await _dispatch_action(ctx, "help")
         return
     if data.startswith("configs:"):
         from app.services.telegram_bot_handlers.configs import handle_configs, parse_configs_callback

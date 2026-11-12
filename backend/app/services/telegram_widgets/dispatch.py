@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.models import TelegramWidget
 from app.services.telegram_api import answer_widget_query
-from app.services.telegram_widgets import access_request, hub
+from app.services.telegram_widgets import access_request, hub, portal
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +73,8 @@ async def handle_widget_query(
             await hub.handle_query(
                 db, row, query, bot_token=bot_token, mini_app_url=mini_app_url
             )
+        elif row.kind == portal.KIND_PORTAL:
+            await portal.handle_query(db, row, query, bot_token=bot_token)
         else:
             logger.warning("telegram widgets: unknown kind %r", row.kind)
             if bot_token:

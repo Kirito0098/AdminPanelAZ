@@ -70,7 +70,8 @@ def test_admin_menu_lists_queue_and_modules(monkeypatch):
     assert state["r"] == "admin"
     assert state["pc"] == 3
     labels = [item[1] for item in state["m"]]
-    assert "Заявки (3)" in labels
+    assert "Заявки" in labels
+    assert state["m"][2][3] == 3
     assert "Статус" in labels and "Конфиги" in labels
 
 
@@ -148,3 +149,125 @@ def test_view_switch_edits_state_without_new_message(monkeypatch):
     assert answered.await_args.kwargs["data"] == '{"ok":1}'
     edited.assert_awaited_once()
     assert "traffic" in edited.await_args.kwargs["chat_data"]
+
+
+def test_guest_cannot_open_role_views(monkeypatch):
+    monkeypatch.setattr(hub, "resolve_user", lambda db, tid: None)
+    answered, edited = _wire(monkeypatch)
+
+    asyncio.run(hub.handle_query(_FakeDb(), _row(), _query("v:nodes"), bot_token="t"))
+    asyncio.run(hub.handle_query(_FakeDb(), _row(), _query("v:configs"), bot_token="t"))
+
+    assert answered.await_args.kwargs["data"] == '{"e":"forbidden"}'
+    edited.assert_not_awaited()
+
+
+def test_user_cannot_open_admin_nodes_view(monkeypatch):
+    monkeypatch.setattr(hub, "resolve_user", lambda db, tid: _plain_user())
+    answered, edited = _wire(monkeypatch)
+
+    asyncio.run(hub.handle_query(_FakeDb(), _row(), _query("v:nodes"), bot_token="t"))
+
+    assert answered.await_args.kwargs["data"] == '{"e":"forbidden"}'
+    edited.assert_not_awaited()
+
+
+def test_user_can_open_configs_view(monkeypatch):
+    monkeypatch.setattr(hub, "resolve_user", lambda db, tid: _plain_user())
+    answered, edited = _wire(monkeypatch)
+
+    asyncio.run(hub.handle_query(_FakeDb(), _row(), _query("v:configs"), bot_token="t"))
+
+    assert answered.await_args.kwargs["data"] == '{"ok":1}'
+    edited.assert_awaited_once()
+
+
+def test_configs_view_lists_config_with_traffic(monkeypatch):
+    from datetime import datetime
+
+    monkeypatch.setattr(hub, "resolve_user", lambda db, tid: _plain_user())
+    config = SimpleNamespace(
+        id=12,
+        client_name="ivan-phone",
+        vpn_type=SimpleNamespace(value="wireguard"),
+        node_id=1,
+        expires_at=datetime(2026, 12, 31),
+        cert_expires_at=None,
+    )
+    monkeypatch.setattr(
+        "app.services.telegram_bot_data.list_user_configs", lambda db, user: [config]
+    )
+    monkeypatch.setattr(
+        "app.services.telegram_bot_data.node_labels", lambda db, ids: {1: "nl-1"}
+    )
+    monkeypatch.setattr(
+        "app.services.telegram_bot_handlers.traffic.traffic_by_client",
+        lambda db, user: {"ivan-phone": 1024},
+    )
+
+    state = hub.build_state(_FakeDb(), telegram_id="42", view="configs")
+
+    item = state["cf"]["c"][0]
+    assert item["n"] == "ivan-phone"
+    assert item["p"] == "WG"
+    assert item["nd"] == "nl-1"
+    assert item["d"] == "31.12.26"
+    assert item["t"]
+
+
+def test_nodes_view_marks_active_node(monkeypatch):
+    from app.models import NodeStatus
+
+    monkeypatch.setattr(hub, "resolve_user", lambda db, tid: _admin_user())
+    monkeypatch.setattr(hub, "_pending_count", lambda db: 0)
+    nodes = [
+        SimpleNamespace(id=1, name="nl-1", status=NodeStatus.online),
+        SimpleNamespace(id=2, name="msk-1", status=NodeStatus.offline),
+    ]
+    monkeypatch.setattr(
+        "app.services.telegram_bot_handlers.nodes._list_nodes", lambda db: nodes
+    )
+    monkeypatch.setattr("app.services.node_manager.get_active_node_id", lambda db: 1)
+
+    state = hub.build_state(_FakeDb(), telegram_id="42", view="nodes")
+
+    assert state["nl"]["c"][0] == {"i": 1, "n": "nl-1", "s": "on", "a": 1}
+    assert state["nl"]["c"][1]["s"] == "off"
+    assert state["nl"]["c"][1]["a"] == 0
+
+
+# Всё, что виджет может показать сам. Новый пункт меню обязан быть видом (v:),
+# обновлением (r) или осознанно добавленным исключением из списка ниже.
+_MESSAGE_ACTIONS = {
+    "a:configs",  # полный список с фильтрами/пагинацией
+    "a:nodes",  # полный список узлов
+    "a:settings",  # формы настроек
+    "a:unlock",  # FSM: срок и протоколы вводятся текстом
+    "a:redeem_unlock",  # FSM активации ключа
+    "a:pay_request",  # заявка + фото чека
+    "a:admin_chat",  # режим переписки
+    "a:request_more_config",  # действие-заявка, не экран
+    "a:request_access",  # отправляет карточку-виджет заявки
+    "a:portal",  # отдельная карточка-виджет ссылки портала
+}
+
+
+def _all_items(monkeypatch, role: str) -> list[list[str]]:
+    monkeypatch.setattr(hub, "_feature_on", lambda key: True)
+    monkeypatch.setattr(hub, "_accept_requests", lambda db: True)
+    user = _admin_user() if role == "admin" else _plain_user() if role == "user" else None
+    items = hub._menu_items(_FakeDb(), user, role, 0)
+    if role == "admin":
+        items = items + hub._more_items(_FakeDb())
+    items = items + hub._help_items(_FakeDb(), role)
+    return items
+
+
+def test_every_widget_target_is_a_view_or_known_message_action(monkeypatch):
+    for role in ("admin", "user", "guest"):
+        for item in _all_items(monkeypatch, role):
+            target = item[2]
+            assert target.startswith("v:") or target in ("r", "a:home") or target in _MESSAGE_ACTIONS, (
+                role,
+                item,
+            )

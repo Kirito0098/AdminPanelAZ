@@ -19,7 +19,9 @@ from app.services import telegram_bot_i18n as i18n
 from app.services.telegram_bot_handlers import settings_fsm
 from app.services.user_access_requests import _accept_requests
 
-_ADMIN_ACTIONS = frozenset({"status", "settings", "nodes", "cidr", "warper", "awg2", "unlock"})
+_ADMIN_ACTIONS = frozenset(
+    {"status", "settings", "nodes", "hub_nodes", "cidr", "warper", "awg2", "unlock"}
+)
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +154,20 @@ async def handle_more_menu(ctx: BotContext, *, message_id: int | None = None) ->
     )
 
 
+async def _open_hub_view(ctx: BotContext, view: str) -> bool:
+    """Открыть hub на нужном виде; False — тоггл выключен или sendWidget упал."""
+    from app.services.telegram_widgets import send_hub
+
+    return await send_hub(
+        ctx.db,
+        bot_token=ctx.bot_token,
+        chat_id=ctx.chat_id,
+        telegram_id=ctx.telegram_user_id,
+        reply_markup=build_reply_keyboard(ctx),
+        view=view,
+    )
+
+
 async def _dispatch_action(ctx: BotContext, action: str, *, message_id: int | None = None) -> None:
     if action in _ADMIN_ACTIONS and not is_admin(ctx.user):
         await send_message(ctx.bot_token, ctx.chat_id, i18n.ADMIN_ONLY)
@@ -178,21 +194,41 @@ async def _dispatch_action(ctx: BotContext, action: str, *, message_id: int | No
 
         await handle_pay_request(ctx)
     elif action == "status":
-        from app.services.telegram_bot_handlers.status import handle_status
+        if not await _open_hub_view(ctx, "status"):
+            from app.services.telegram_bot_handlers.status import handle_status
 
-        await handle_status(ctx, message_id=message_id)
+            await handle_status(ctx, message_id=message_id)
+    elif action == "hub_configs":
+        # Абоненту — вид «Конфиги» в hub; админу — полный список (у него все конфиги).
+        from app.services.telegram_bot_handlers.configs import handle_configs
+
+        if is_admin(ctx.user) or not await _open_hub_view(ctx, "configs"):
+            await handle_configs(ctx, message_id=message_id)
+    elif action == "hub_traffic":
+        if not await _open_hub_view(ctx, "traffic"):
+            from app.services.telegram_bot_handlers.traffic import handle_traffic
+
+            await handle_traffic(ctx, message_id=message_id)
+    elif action == "hub_nodes":
+        if not await _open_hub_view(ctx, "nodes"):
+            from app.services.telegram_bot_handlers.nodes import handle_nodes_root
+
+            await handle_nodes_root(ctx, message_id=message_id)
     elif action == "configs":
         from app.services.telegram_bot_handlers.configs import handle_configs
 
         await handle_configs(ctx, message_id=message_id)
     elif action == "traffic":
-        from app.services.telegram_bot_handlers.traffic import handle_traffic
+        # Старые callback'и nav:traffic больше не шлют текстовый экран.
+        if not await _open_hub_view(ctx, "traffic"):
+            from app.services.telegram_bot_handlers.traffic import handle_traffic
 
-        await handle_traffic(ctx, message_id=message_id)
+            await handle_traffic(ctx, message_id=message_id)
     elif action == "help":
-        from app.services.telegram_bot_handlers.help import handle_help
+        if not await _open_hub_view(ctx, "help"):
+            from app.services.telegram_bot_handlers.help import handle_help
 
-        await handle_help(ctx, message_id=message_id)
+            await handle_help(ctx, message_id=message_id)
     elif action == "home":
         from app.services.telegram_bot_handlers.start import handle_start
 
@@ -206,17 +242,20 @@ async def _dispatch_action(ctx: BotContext, action: str, *, message_id: int | No
 
         await handle_nodes_root(ctx, message_id=message_id)
     elif action == "cidr":
-        from app.services.telegram_bot_handlers.cidr_status import handle_cidr_status
+        if not await _open_hub_view(ctx, "cidr"):
+            from app.services.telegram_bot_handlers.cidr_status import handle_cidr_status
 
-        await handle_cidr_status(ctx, message_id=message_id)
+            await handle_cidr_status(ctx, message_id=message_id)
     elif action == "warper":
-        from app.services.telegram_bot_handlers.warper_status import handle_warper_status
+        if not await _open_hub_view(ctx, "warper"):
+            from app.services.telegram_bot_handlers.warper_status import handle_warper_status
 
-        await handle_warper_status(ctx, message_id=message_id)
+            await handle_warper_status(ctx, message_id=message_id)
     elif action == "awg2":
-        from app.services.telegram_bot_handlers.awg2_status import handle_awg2_status
+        if not await _open_hub_view(ctx, "awg2"):
+            from app.services.telegram_bot_handlers.awg2_status import handle_awg2_status
 
-        await handle_awg2_status(ctx, message_id=message_id)
+            await handle_awg2_status(ctx, message_id=message_id)
     elif action == "unlock":
         from app.services.telegram_bot_handlers.unlock_codes import handle_unlock_codes_root
 
@@ -241,7 +280,8 @@ async def _dispatch_action(ctx: BotContext, action: str, *, message_id: int | No
 
         await start_redeem_prompt(ctx.bot_token, str(ctx.chat_id))
     elif action == "link_code":
-        await send_message(ctx.bot_token, ctx.chat_id, i18n.REQUEST_LINK_HINT)
+        if not await _open_hub_view(ctx, "link"):
+            await send_message(ctx.bot_token, ctx.chat_id, i18n.REQUEST_LINK_HINT)
 
 
 async def handle_menu_text(ctx: BotContext, text: str) -> bool:

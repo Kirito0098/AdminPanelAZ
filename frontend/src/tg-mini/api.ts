@@ -20,6 +20,7 @@ import type {
   TgMiniNodeActionResponse,
   TgMiniNodesResponse,
   TgMiniSettings,
+  TgPortalLink,
   UserMessageItem,
   VpnConfig,
 } from '@/types'
@@ -334,5 +335,18 @@ export async function sendTgMessageThread(userId: number, text: string): Promise
 
 export async function getTgMessagesUnreadTotal(): Promise<{ count: number }> {
   return tgFetch<{ count: number }>('/messages/unread-count')
+}
+
+/** Собственная ссылка клиентского портала: получить, создать, перевыпустить. */
+export async function getTgPortalLink(): Promise<TgPortalLink> {
+  return tgFetch<TgPortalLink>('/me/portal-link')
+}
+
+export async function createTgPortalLink(): Promise<TgPortalLink> {
+  return tgFetch<TgPortalLink>('/me/portal-link', { method: 'POST' })
+}
+
+export async function rotateTgPortalLink(): Promise<TgPortalLink> {
+  return tgFetch<TgPortalLink>('/me/portal-link/rotate', { method: 'POST' })
 }
 

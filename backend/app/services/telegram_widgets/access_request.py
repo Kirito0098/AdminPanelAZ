@@ -37,25 +37,33 @@ _STATUS_CAPTION = {
 # Без внешних ресурсов и клавиатуры; кнопка «Обновить» — единственный тап.
 ACCESS_REQUEST_HTML = """<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
-#w p{margin:0}
-.ttl{font-weight:600;margin-bottom:6px}
-.row{display:flex;gap:8px;align-items:center;margin-bottom:4px}
-.meta{color:var(--tg-theme-hint-color);font-size:13px;margin-bottom:10px!important}
-#refresh{width:100%}
-.err{color:var(--tg-theme-destructive-text-color);font-size:13px;margin-top:6px!important;min-height:16px}
+body{margin:0;padding:10px 12px;font-size:15px}
+p{margin:0}
+.h{display:flex;align-items:baseline;gap:8px;margin:2px 0 8px}
+.h b{font-size:17px}
+.h span{color:var(--tg-theme-hint-color);font-size:12px;margin-left:auto}
+.card{background:var(--tg-theme-secondary-bg-color);border-radius:10px;padding:14px;margin-bottom:8px}
+.big{display:flex;align-items:center;gap:10px}
+.big .ic{font-size:26px;line-height:1}
+.big .tx{min-width:0}
+.big .st{font-size:16px;font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.big .mt{font-size:12px;color:var(--tg-theme-hint-color);display:block;margin-top:2px}
+.err{color:var(--tg-theme-destructive-text-color);font-size:13px;min-height:16px;margin-top:6px}
+#refresh{width:100%;padding:10px;border:0;border-radius:10px;background:var(--tg-theme-button-color);color:var(--tg-theme-button-text-color);font:inherit;font-weight:600}
+#refresh:active{opacity:.7}
 </style></head><body>
-<div id="w">
-<p class="ttl">🔐 Доступ к панели</p>
-<div class="row"><span id="ic"></span><span id="st"></span></div>
-<p class="meta" id="mt"></p>
+<div class="h"><b>Доступ к панели</b></div>
+<div class="card"><div class="big">
+  <span class="ic" id="ic"></span>
+  <span class="tx"><span class="st" id="st"></span><span class="mt" id="mt"></span></span>
+</div></div>
 <button id="refresh">Обновить</button>
 <p class="err" id="er"></p>
-</div>
 <script>
 (function () {
   var W = window.TelegramWidget;
   var M = {
-    pending: ["⏳", "Заявка ожидает решения администратора"],
+    pending: ["⏳", "Заявка ожидает решения"],
     approved: ["✅", "Доступ выдан"],
     rejected: ["❌", "Заявка отклонена"],
     unknown: ["❔", "Заявка не найдена"]
@@ -74,7 +82,7 @@ ACCESS_REQUEST_HTML = """<!DOCTYPE html>
     var row = M[d.s] || M.unknown;
     ic.textContent = row[0];
     st.textContent = row[1];
-    mt.textContent = d.t ? "Отправлена " + d.t : "";
+    mt.textContent = d.t ? "отправлена " + d.t : "";
     btn.style.display = d.s === "pending" ? "" : "none";
   }
   function ask(silent) {
@@ -93,8 +101,6 @@ ACCESS_REQUEST_HTML = """<!DOCTYPE html>
     });
   }
   function askOnce() {
-    // Фон — один раз на сообщение: прокрутка чата не должна спамить запросами
-    // (лимит Telegram — 5 запросов за 5 секунд на пользователя и бота).
     try {
       if (localStorage.getItem("bg")) { return; }
       localStorage.setItem("bg", "1");
@@ -102,9 +108,7 @@ ACCESS_REQUEST_HTML = """<!DOCTYPE html>
     ask(true);
   }
 
-  if (W) {
-    W.onEvent("chatDataChanged", function () { render(); });
-  }
+  if (W) { W.onEvent("chatDataChanged", function () { render(); }); }
   render();
   if (W) {
     if (W.ready) { W.ready(); }
