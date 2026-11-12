@@ -60,6 +60,7 @@ BELL_TITLES: dict[str, str] = {
     "access_request_add_config": "Заявка: новый конфиг",
     "access_request_extend_access": "Заявка: продление доступа",
     "access_request_delivery_failed": "Заявка: не удалось доставить",
+    "access_request_cap": "Заявки: очередь заполнена",
     "unlock_redeem": "Абонент активировал ключ",
 }
 
@@ -495,12 +496,22 @@ def mark_notifications_read(db: Session, admin: User, up_to_id: int) -> None:
 
 def notifications_stream_snapshot(db: Session) -> dict:
     """Снимок состояния для SSE-потока: верхнее id уведомлений, заявки, задачи."""
+    # Тик потока — только чтение: просроченные заявки отсекаем по cutoff,
+    # статус им ставит рабочий путь (список/count/cap).
+    from datetime import timedelta
+
+    from app.services.user_access_requests import PENDING_REQUEST_TTL_DAYS
+
+    pending_cutoff = datetime.utcnow() - timedelta(days=PENDING_REQUEST_TTL_DAYS)
     max_n = db.query(func.max(AdminPanelNotification.id)).scalar() or 0
     pending = [
         int(r[0])
         for r in (
             db.query(UserAccessRequest.id)
-            .filter(UserAccessRequest.status == "pending")
+            .filter(
+                UserAccessRequest.status == "pending",
+                UserAccessRequest.created_at >= pending_cutoff,
+            )
             .order_by(desc(UserAccessRequest.id))
             .limit(20)
             .all()

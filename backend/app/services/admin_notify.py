@@ -19,7 +19,7 @@ from app.services.admin_panel_notifications import (
     humanize_bell_message,
     write_admin_panel_notification,
 )
-from app.services.app_setting_store import _get_setting
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.admin_notify_settings_text import (
     parse_mini_details_kv,
     user_action_tg_action_line,
@@ -507,14 +507,97 @@ def _build_node_sync_drift_message(details: str | None, when: str) -> str:
     return _format_notify_card("🟠 <b>HA: расхождение</b>", when, detail_lines=detail_lines)
 
 
+_UNLINKED_STATE_KEY = "tg_unlinked_login_notify_state"
+
+
+def _open_notify_state_session() -> Session:
+    """Own short-lived session: the caller's request transaction is never committed here."""
+    from app.database import SessionLocal
+
+    return SessionLocal()
+
+
+def _parse_state_ts(raw: object) -> datetime | None:
+    try:
+        value = datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _trim_cooldowns(cooldowns: dict[str, datetime], max_ids: int) -> dict[str, datetime]:
+    """Bound the app_settings key: keep only the newest MAX_IDS telegram ids."""
+    if len(cooldowns) <= max_ids:
+        return cooldowns
+    newest = sorted(cooldowns.items(), key=lambda item: item[1])[-max_ids:]
+    return dict(newest)
+
+
+def _load_unlinked_state(
+    db: Session,
+    *,
+    now: datetime,
+    cooldown_ttl: timedelta,
+    max_ids: int,
+    mini_window: timedelta,
+) -> tuple[dict[str, datetime], list[datetime]]:
+    try:
+        data = json.loads(_get_setting(db, _UNLINKED_STATE_KEY, "{}"))
+    except (TypeError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    cooldowns: dict[str, datetime] = {}
+    raw_cooldowns = data.get("cooldowns")
+    if isinstance(raw_cooldowns, dict):
+        for key, value in raw_cooldowns.items():
+            ts = _parse_state_ts(value)
+            if ts is not None and (now - ts) < cooldown_ttl:
+                cooldowns[str(key)] = ts
+    cooldowns = _trim_cooldowns(cooldowns, max_ids)
+    recent: list[datetime] = []
+    raw_recent = data.get("mini")
+    if isinstance(raw_recent, list):
+        for value in raw_recent:
+            ts = _parse_state_ts(value)
+            if ts is not None and (now - ts) < mini_window:
+                recent.append(ts)
+    return cooldowns, recent
+
+
+def _save_unlinked_state(
+    db: Session,
+    cooldowns: dict[str, datetime],
+    recent: list[datetime],
+) -> None:
+    _set_setting(
+        db,
+        _UNLINKED_STATE_KEY,
+        json.dumps(
+            {
+                "cooldowns": {tg_id: ts.isoformat() for tg_id, ts in cooldowns.items()},
+                "mini": [ts.isoformat() for ts in recent],
+            }
+        ),
+        commit=True,
+    )
+
+
 class AdminNotifyService:
     # Suppress duplicate unlinked-login alerts from double Mini App /auth calls.
     _UNLINKED_NOTIFY_COOLDOWN = timedelta(seconds=60)
+    # Cooldowns live in app_settings, so a restart must not reset them. The key is
+    # bounded: entries older than the TTL are dropped, and at most MAX_IDS survive.
+    _UNLINKED_COOLDOWN_TTL = timedelta(days=1)
+    _UNLINKED_COOLDOWN_MAX_IDS = 200
+    # Global breaker: a stream of distinct accounts must not flood admins and the bell.
+    _UNLINKED_MINI_WINDOW = timedelta(minutes=10)
+    _UNLINKED_MINI_LIMIT = 5
 
     def __init__(self, *, logger_instance: logging.Logger | None = None):
         self.logger = logger_instance or logger
         self._resource_alert_cooldowns: dict[tuple[str, int | None], datetime] = {}
-        self._unlinked_login_cooldowns: dict[str, datetime] = {}
         self._monitor_lock = threading.Lock()
 
     def send_tg_login_unlinked(
@@ -529,12 +612,8 @@ class AdminNotifyService:
         tg_id = (telegram_id or "").strip()
         if not tg_id:
             return
-        now = datetime.now(timezone.utc)
-        with self._monitor_lock:
-            last = self._unlinked_login_cooldowns.get(tg_id)
-            if last is not None and (now - last) < self._UNLINKED_NOTIFY_COOLDOWN:
-                return
-            self._unlinked_login_cooldowns[tg_id] = now
+        if not self._reserve_unlinked_notify(tg_id, mini=mini):
+            return
         event_type = "tg_mini_login_unlinked" if mini else "tg_login_unlinked"
         self.send(
             db,
@@ -543,6 +622,43 @@ class AdminNotifyService:
             remote_addr=remote_addr,
             client_timezone=client_timezone,
         )
+
+    def _reserve_unlinked_notify(self, tg_id: str, *, mini: bool) -> bool:
+        """Persistently claim a notify slot; False when the alert must be suppressed."""
+        now = datetime.now(timezone.utc)
+        state_db: Session | None = None
+        try:
+            state_db = _open_notify_state_session()
+            cooldowns, recent = _load_unlinked_state(
+                state_db,
+                now=now,
+                cooldown_ttl=self._UNLINKED_COOLDOWN_TTL,
+                max_ids=self._UNLINKED_COOLDOWN_MAX_IDS,
+                mini_window=self._UNLINKED_MINI_WINDOW,
+            )
+
+            last = cooldowns.get(tg_id)
+            if last is not None and (now - last) < self._UNLINKED_NOTIFY_COOLDOWN:
+                allowed = False
+            elif mini and len(recent) >= self._UNLINKED_MINI_LIMIT:
+                allowed = False
+            else:
+                allowed = True
+                cooldowns[tg_id] = now
+                cooldowns = _trim_cooldowns(cooldowns, self._UNLINKED_COOLDOWN_MAX_IDS)
+                if mini:
+                    recent.append(now)
+
+            _save_unlinked_state(state_db, cooldowns, recent)
+            return allowed
+        except Exception as exc:
+            # Без персистентного состояния лучше промолчать, чем залить админов
+            # дублями: сам вход в панель уведомление не блокирует.
+            self.logger.warning("unlinked login notify gate error: %s", exc)
+            return False
+        finally:
+            if state_db is not None:
+                state_db.close()
 
     def send(
         self,

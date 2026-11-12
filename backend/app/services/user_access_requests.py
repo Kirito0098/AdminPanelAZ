@@ -71,6 +71,13 @@ SETTING_ACCEPT_REQUESTS = "telegram_accept_access_requests"
 SETTING_PENDING_CAP = "telegram_new_user_request_pending_cap"
 SETTING_BOT_TOKEN = "telegram_bot_token"
 
+# Pending-заявка живёт не дольше: старше — ``expired`` (данные остаются в истории),
+# иначе очередь висит вечно и глобальный cap закрывает приём навсегда.
+PENDING_REQUEST_TTL_DAYS = 7
+# Отметка последнего уведомления «очередь заполнена»: не чаще раза в час.
+CAP_NOTIFIED_AT_SETTING = "telegram_access_request_cap_notified_at"
+_CAP_NOTIFY_INTERVAL = timedelta(hours=1)
+
 COOLDOWN_HOURS = 24
 # Настройка панели: сколько часов держать кулдаун после отказа (0 — выключен).
 COOLDOWN_SETTING = "access_request_cooldown_hours"
@@ -250,6 +257,26 @@ def _pending_cap(db: Session) -> int:
         return 50
 
 
+def expire_stale_pending_requests(db: Session) -> int:
+    """Пометить pending-заявки старше TTL как ``expired``.
+
+    Тот же статус, что ставит retention; здесь — до подсчёта cap и в выборках
+    админа, чтобы старые заявки не держали очередь и не выглядели активными.
+    """
+    cutoff = datetime.utcnow() - timedelta(days=PENDING_REQUEST_TTL_DAYS)
+    changed = (
+        db.query(UserAccessRequest)
+        .filter(
+            UserAccessRequest.status == "pending",
+            UserAccessRequest.created_at < cutoff,
+        )
+        .update({UserAccessRequest.status: "expired"}, synchronize_session=False)
+    )
+    if changed:
+        db.commit()
+    return int(changed or 0)
+
+
 def _is_bound(db: Session, telegram_id: str) -> User | None:
     return (
         db.query(User)
@@ -365,7 +392,9 @@ def submit_access_request(
         )
         if ban is not None:
             raise Banned("Приём заявок временно закрыт")
-        # Глобальный лимит pending new_user заявок.
+        # Глобальный лимит pending new_user заявок. Просроченные (старше TTL)
+        # сначала переводим в ``expired`` — они не должны держать приём закрытым.
+        expire_stale_pending_requests(db)
         pending_count = (
             db.query(UserAccessRequest)
             .filter(
@@ -374,7 +403,9 @@ def submit_access_request(
             )
             .count()
         )
-        if pending_count >= _pending_cap(db):
+        cap = _pending_cap(db)
+        if pending_count >= cap:
+            _notify_admins_cap_reached(db, pending_count=pending_count, cap=cap)
             raise RequestsClosed("Приём заявок временно закрыт")
 
     # Один pending на (telegram_id, request_type) — частичный уникальный индекс.
@@ -550,6 +581,60 @@ def _admin_request_text(db: Session, request: UserAccessRequest) -> str:
     if history:
         lines.append(f"История: {escape(history, quote=False)}")
     return "\n".join(lines)
+
+
+def _notify_admins_cap_reached(db: Session, *, pending_count: int, cap: int) -> None:
+    """Сообщить админам, что очередь заявок упёрлась в cap — не чаще раза в час.
+
+    Отметку времени ставим до отправки: серия отказов в одну секунду не заспамит
+    ни колокольчик, ни Telegram.
+    """
+    now = datetime.utcnow()
+    raw = _get_setting(db, CAP_NOTIFIED_AT_SETTING, "").strip()
+    try:
+        last = datetime.fromisoformat(raw) if raw else None
+    except ValueError:
+        last = None
+    if last is not None and now - last < _CAP_NOTIFY_INTERVAL:
+        return
+    _set_setting(db, CAP_NOTIFIED_AT_SETTING, now.isoformat())
+    db.commit()
+
+    write_admin_panel_notification(
+        db,
+        event_type="access_request_cap",
+        title="Заявки на доступ: очередь заполнена",
+        message=(
+            f"Активных заявок {pending_count} из {cap}. Новые заявки не принимаются, "
+            f"пока очередь не разберут. Просроченные (старше {PENDING_REQUEST_TTL_DAYS} дн.) "
+            "больше не считаются."
+        ),
+        level="warning",
+    )
+
+    bot_token = _bot_token(db)
+    if not bot_token or not get_feature_service().is_enabled("telegram"):
+        return
+    admins = (
+        db.query(User)
+        .filter(User.role == UserRole.admin, User.is_active.is_(True), User.telegram_id.isnot(None))
+        .all()
+    )
+    admins = [admin for admin in admins if admin.has_tg_notify_event("access_request")]
+    admins = filter_notify_recipients(
+        db, admins, lambda key, default="": _get_setting(db, key, default)
+    )
+    if not admins:
+        return
+    from app.services.telegram import send_tg_message
+
+    text = (
+        "⚠️ <b>Очередь заявок заполнена</b>\n"
+        f"Активных заявок: {pending_count} из {cap}. Новые заявки не принимаются, "
+        "пока вы не разберёте очередь."
+    )
+    for admin in admins:
+        send_tg_message(bot_token, str(admin.telegram_id), text)
 
 
 def _notify_admins_new_request(db: Session, request: UserAccessRequest) -> None:

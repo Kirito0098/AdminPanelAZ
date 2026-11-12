@@ -42,6 +42,7 @@ from app.services.admin_panel_notifications import (
 )
 from app.services.feature_guards import get_feature_service
 from app.services.stream_ticket import admin_from_stream_ticket
+from app.services.user_access_requests import expire_stale_pending_requests
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,7 @@ def get_notifications(
     )
     pending = 0
     if get_feature_service().is_enabled("user_provisioning"):
+        expire_stale_pending_requests(db)
         pending = (
             db.query(UserAccessRequest)
             .filter(UserAccessRequest.status == "pending")

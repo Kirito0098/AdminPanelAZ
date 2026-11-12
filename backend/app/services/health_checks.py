@@ -48,8 +48,13 @@ def assert_health_deep_access(request) -> None:
     )
 
 
+def app_started_at() -> str:
+    """Process start time: for admins and deep health only, not the public health response."""
+    return _APP_STARTED_AT
+
+
 def build_light_health() -> dict[str, Any]:
-    return {"status": "ok", "started_at": _APP_STARTED_AT}
+    return {"status": "ok"}
 
 
 def _sqlite_ok(engine, label: str) -> dict[str, Any]:
@@ -64,6 +69,7 @@ def _sqlite_ok(engine, label: str) -> dict[str, Any]:
 def build_deep_health(db: Session, *, app_root: Path) -> dict[str, Any]:
     payload: dict[str, Any] = {
         **build_light_health(),
+        "started_at": _APP_STARTED_AT,
         "app": settings.app_name,
         "env": settings.app_env,
         "scenario_preset": settings.scenario_preset,

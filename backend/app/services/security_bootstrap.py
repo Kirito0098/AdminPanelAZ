@@ -7,10 +7,10 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-from app.config import DEFAULT_NODE_AGENT_KEY, DEFAULT_SECRET_KEY, Settings
+from app.config import DEFAULT_ADMIN_PASSWORD, DEFAULT_NODE_AGENT_KEY, DEFAULT_SECRET_KEY, Settings
 
 logger = logging.getLogger(__name__)
-_WEAK_ADMIN_PASSWORDS = frozenset({"admin", "password", "123456"})
+_WEAK_ADMIN_PASSWORDS = frozenset({"password", "123456"})
 
 
 def _fail(message: str) -> None:
@@ -45,9 +45,19 @@ def _validate_redis_rate_limit(settings: Settings) -> None:
         )
 
 
+def _validate_admin_bootstrap_password(settings: Settings) -> None:
+    """A production panel must not start with the documented default admin password."""
+    if (settings.default_admin_password or "").strip().lower() == DEFAULT_ADMIN_PASSWORD:
+        _fail(
+            "В production нельзя оставлять DEFAULT_ADMIN_PASSWORD по умолчанию (admin). "
+            "Задайте надёжный пароль в backend/.env или запустите install.sh — он сгенерирует случайный."
+        )
+
+
 def validate_panel_settings(settings: Settings) -> None:
     if settings.is_production:
         _validate_redis_rate_limit(settings)
+        _validate_admin_bootstrap_password(settings)
     if not settings.is_production or not settings.require_production_secrets:
         return
     if settings.secret_key == DEFAULT_SECRET_KEY or len(settings.secret_key) < 32:

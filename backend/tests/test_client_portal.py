@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime, timedelta, timezone
 from unittest.mock import ANY, MagicMock, patch
 
@@ -124,7 +125,8 @@ def test_get_valid_portal_token_revoked():
     db.query.side_effect = [revoked, empty]
     with pytest.raises(HTTPException) as ei:
         portal.get_valid_portal_token(db, "abc")
-    assert ei.value.status_code == 410
+    assert ei.value.status_code == 404
+    assert ei.value.detail == portal.PORTAL_LINK_INVALID_DETAIL
 
 
 def test_get_valid_portal_token_resolves_user_token():
@@ -1167,6 +1169,8 @@ def test_portal_file_entries_expose_opaque_id_not_absolute_path():
     assert "path" not in entry
     assert entry["file_id"] == portal._portal_file_id("/srv/antizapret/client/openvpn/AZ-test.ovpn")
     assert f"file_id={entry['file_id']}" in entry["download_url"]
+    assert "node_id=" not in entry["download_url"]
+    assert "client_name=" not in entry["download_url"]
     assert "/srv" not in entry["download_url"]
 
 
@@ -1218,3 +1222,234 @@ def test_read_client_portal_profile_rejects_foreign_or_forged_file_id(file_id):
 
     assert exc.value.status_code == 404
     read_file.assert_not_called()
+
+
+# --- G2: downloads resolve strictly inside the token scope -------------------
+
+
+_PORTAL_DOWNLOAD_PATHS = {
+    1: "/srv/antizapret/client/alice.conf",
+    2: "/srv/antizapret/client/bob.conf",
+    3: "/srv/antizapret/client/eve.conf",
+}
+
+
+def _portal_download_db():
+    """Real session: alice@1 and bob@2 belong to owner, eve@3 to a stranger."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.database import Base
+    from app.models import User, UserRole
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    owner = User(username="owner", password_hash="x", role=UserRole.user, is_active=True)
+    stranger = User(username="stranger", password_hash="x", role=UserRole.user, is_active=True)
+    db.add_all([owner, stranger])
+    db.commit()
+    db.add_all(
+        [
+            VpnConfig(node_id=1, client_name="alice", vpn_type=VpnType.wireguard, owner_id=owner.id),
+            VpnConfig(node_id=2, client_name="bob", vpn_type=VpnType.wireguard, owner_id=owner.id),
+            VpnConfig(node_id=3, client_name="eve", vpn_type=VpnType.wireguard, owner_id=stranger.id),
+        ]
+    )
+    db.commit()
+    return db, owner
+
+
+@pytest.fixture()
+def portal_download_db():
+    db, owner = _portal_download_db()
+    try:
+        yield db, owner
+    finally:
+        db.close()
+
+
+@contextlib.contextmanager
+def _portal_download_patches():
+    def fake_list(_db, configs):
+        return [{"path": _PORTAL_DOWNLOAD_PATHS[configs[0].node_id]}]
+
+    def fake_read(_adapter, path, _hosts):
+        return f"content:{path}".encode()
+
+    with (
+        patch("app.services.client_portal._list_files_for_configs", side_effect=fake_list),
+        patch("app.services.client_portal._adapter_for_node_id", return_value=MagicMock()),
+        patch("app.services.client_portal.load_node_remote_hosts", return_value=[]),
+        patch("app.services.client_portal.read_profile_file_for_delivery", side_effect=fake_read) as read_file,
+    ):
+        yield read_file
+
+
+def _user_resolution(user_id: int) -> portal.PortalTokenResolution:
+    return portal.PortalTokenResolution(
+        kind="user",
+        user_row=UserPortalToken(id=1, token="usr", user_id=user_id, revoked_at=None),
+    )
+
+
+def _client_resolution() -> portal.PortalTokenResolution:
+    return portal.PortalTokenResolution(
+        kind="client",
+        client_row=ClientPortalToken(id=1, token="c_tok", node_id=1, client_name="alice", revoked_at=None),
+    )
+
+
+def test_user_portal_download_resolves_file_id_without_client_hints(portal_download_db):
+    db, owner = portal_download_db
+    path = _PORTAL_DOWNLOAD_PATHS[2]
+
+    with _portal_download_patches() as read_file:
+        filename, content = portal.read_portal_profile(
+            db,
+            _user_resolution(owner.id),
+            file_id=portal._portal_file_id(path),
+        )
+
+    assert content == f"content:{path}".encode()
+    assert filename
+    read_file.assert_called_once()
+    assert read_file.call_args.args[1] == path
+
+
+def test_user_portal_download_refuses_file_of_foreign_client(portal_download_db):
+    db, owner = portal_download_db
+
+    with _portal_download_patches() as read_file:
+        with pytest.raises(HTTPException) as exc:
+            portal.read_portal_profile(
+                db,
+                _user_resolution(owner.id),
+                file_id=portal._portal_file_id(_PORTAL_DOWNLOAD_PATHS[3]),
+            )
+        with pytest.raises(HTTPException) as hinted:
+            portal.read_portal_profile(
+                db,
+                _user_resolution(owner.id),
+                file_id=portal._portal_file_id(_PORTAL_DOWNLOAD_PATHS[3]),
+                node_id=3,
+                client_name="eve",
+            )
+
+    assert exc.value.status_code == hinted.value.status_code == 404
+    read_file.assert_not_called()
+
+
+def test_client_portal_download_ignores_query_node_and_client(portal_download_db):
+    db, _owner = portal_download_db
+    own_path = _PORTAL_DOWNLOAD_PATHS[1]
+
+    with _portal_download_patches():
+        _filename, content = portal.read_portal_profile(
+            db,
+            _client_resolution(),
+            file_id=portal._portal_file_id(own_path),
+            node_id=2,
+            client_name="bob",
+        )
+
+    assert content == f"content:{own_path}".encode()
+
+
+def test_client_portal_download_refuses_other_clients_file_with_hints(portal_download_db):
+    db, _owner = portal_download_db
+
+    with _portal_download_patches() as read_file:
+        with pytest.raises(HTTPException) as exc:
+            portal.read_portal_profile(
+                db,
+                _client_resolution(),
+                file_id=portal._portal_file_id(_PORTAL_DOWNLOAD_PATHS[2]),
+                node_id=2,
+                client_name="bob",
+            )
+
+    assert exc.value.status_code == 404
+    read_file.assert_not_called()
+
+
+# --- G3: same-origin guard on public portal writes --------------------------
+
+_CROSS_SITE_WRITE_HEADERS = [
+    {"Origin": "https://evil.example.com"},
+    {"Origin": "null"},
+    {"Sec-Fetch-Site": "cross-site"},
+    {"Sec-Fetch-Site": "same-site"},
+]
+
+_SAME_ORIGIN_WRITE_HEADERS = [
+    {},
+    {"Origin": "https://sub.example.com"},
+    {"Origin": "https://sub.example.com:443", "Sec-Fetch-Site": "same-origin"},
+]
+
+
+@pytest.mark.parametrize("headers", _CROSS_SITE_WRITE_HEADERS)
+def test_public_portal_writes_reject_cross_site_browser(public_client, headers):
+    token_row = portal.PortalTokenResolution(
+        kind="user",
+        user_row=UserPortalToken(id=1, token="tok", user_id=7, revoked_at=None),
+    )
+    with (
+        patch("app.routers.public_portal.get_feature_service"),
+        patch("app.routers.public_portal.assert_portal_host"),
+        patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_portal.public_download_rate_limit_service"),
+        patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row) as get_token,
+        patch("app.routers.public_portal.redeem_public_portal_code") as redeem,
+    ):
+        ip_svc.get_client_ip.return_value = "198.51.100.1"
+        redeem_resp = public_client.post(
+            "/api/public/portal/tok/redeem",
+            json={"code": "ABCD-EFGH-IJKL"},
+            headers={"Host": "sub.example.com", **headers},
+        )
+        dismiss_resp = public_client.post(
+            "/api/public/portal/tok/banner/dismiss",
+            headers={"Host": "sub.example.com", **headers},
+        )
+
+    assert redeem_resp.status_code == 403
+    assert dismiss_resp.status_code == 403
+    get_token.assert_not_called()
+    redeem.assert_not_called()
+
+
+@pytest.mark.parametrize("headers", _SAME_ORIGIN_WRITE_HEADERS)
+def test_public_portal_writes_allow_same_origin_and_direct_clients(public_client, headers):
+    token_row = portal.PortalTokenResolution(
+        kind="user",
+        user_row=UserPortalToken(id=1, token="tok", user_id=7, revoked_at=None),
+    )
+    with (
+        patch("app.routers.public_portal.get_feature_service") as feats,
+        patch("app.routers.public_portal.assert_portal_host"),
+        patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_portal.public_download_rate_limit_service"),
+        patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
+        patch(
+            "app.routers.public_portal.redeem_public_portal_code",
+            return_value={"grant_days": 7, "protocols_applied": [], "access_until": None},
+        ),
+        patch("app.routers.public_portal.clear_portal_banner"),
+    ):
+        feats.return_value.is_enabled.return_value = True
+        ip_svc.get_client_ip.return_value = "198.51.100.1"
+        redeem_resp = public_client.post(
+            "/api/public/portal/tok/redeem",
+            json={"code": "ABCD-EFGH-IJKL"},
+            headers={"Host": "sub.example.com", **headers},
+        )
+        dismiss_resp = public_client.post(
+            "/api/public/portal/tok/banner/dismiss",
+            headers={"Host": "sub.example.com", **headers},
+        )
+
+    assert redeem_resp.status_code == 200
+    assert dismiss_resp.status_code == 204

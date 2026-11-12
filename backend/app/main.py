@@ -511,10 +511,16 @@ _register_openapi_docs_routes()
 
 
 @app.get(f"{_API_PREFIX}/health")
-def health():
-    from app.services.health_checks import build_light_health
+def health(request: Request):
+    from app.services.health_checks import app_started_at, build_light_health
+    from app.services.openapi_docs_gate import has_admin_bearer
 
-    return build_light_health()
+    payload = build_light_health()
+    # Public callers see only the status; the settings UI needs the process start time
+    # to dismiss its "restart the panel" banner.
+    if has_admin_bearer(request):
+        payload["started_at"] = app_started_at()
+    return payload
 
 
 @app.get(f"{_API_PREFIX}/health/deep")
@@ -593,7 +599,7 @@ def _mount_frontend(app: FastAPI) -> None:
     async def api_route_not_found(rest: str):
         from fastapi import HTTPException
 
-        raise HTTPException(status_code=404, detail="API endpoint not found — перезапустите панель после обновления")
+        raise HTTPException(status_code=404, detail="Not found")
 
     spa_route = f"{spa_prefix}/{{full_path:path}}" if spa_prefix else "/{full_path:path}"
 

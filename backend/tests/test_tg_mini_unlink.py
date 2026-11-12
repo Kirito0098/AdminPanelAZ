@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 from app.auth import get_tg_mini_user, require_tg_mini_admin
 from app.models import UserRole
@@ -78,7 +78,7 @@ def test_tg_auth_does_not_auto_relink_tg_username(monkeypatch):
     payload = TelegramAuthRequest(init_data="user=%7B%22id%22%3A424242%7D&hash=x")
 
     with pytest.raises(HTTPException) as exc:
-        tg_auth(payload=payload, request=request, db=db)
+        tg_auth(payload=payload, request=request, response=Response(), db=db)
 
     assert exc.value.status_code == 401
     assert "не привязан" in exc.value.detail

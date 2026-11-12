@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -236,6 +237,10 @@ def _aged_link(db, token: str, *, days_old: int) -> ClientPortalToken:
     return row
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def test_fresh_client_link_resolves(factory):
     from app.services.client_portal import get_valid_portal_token
 
@@ -247,7 +252,7 @@ def test_fresh_client_link_resolves(factory):
     assert resolved.kind == "client"
 
 
-def test_expired_client_link_is_gone(factory):
+def test_expired_client_link_is_indistinguishable_from_unknown(factory):
     from app.services.client_portal import get_valid_portal_token
 
     with factory() as db:
@@ -255,9 +260,28 @@ def test_expired_client_link_is_gone(factory):
 
         with pytest.raises(HTTPException) as exc:
             get_valid_portal_token(db, "c_old")
+        with pytest.raises(HTTPException) as unknown:
+            get_valid_portal_token(db, "c_missing")
 
-    assert exc.value.status_code == 410
-    assert exc.value.detail == "Срок действия ссылки истёк"
+    assert exc.value.status_code == 404
+    assert unknown.value.status_code == 404
+    assert exc.value.detail == unknown.value.detail == "Ссылка недействительна"
+
+
+def test_revoked_client_link_is_indistinguishable_from_unknown(factory):
+    from app.services.client_portal import get_valid_portal_token
+
+    with factory() as db:
+        _aged_link(db, "c_revoked", days_old=1).revoked_at = _utc_now()
+        db.commit()
+
+        with pytest.raises(HTTPException) as revoked:
+            get_valid_portal_token(db, "c_revoked")
+        with pytest.raises(HTTPException) as unknown:
+            get_valid_portal_token(db, "c_missing")
+
+    assert revoked.value.status_code == unknown.value.status_code == 404
+    assert revoked.value.detail == unknown.value.detail == "Ссылка недействительна"
 
 
 def test_zero_ttl_makes_client_link_permanent(factory):

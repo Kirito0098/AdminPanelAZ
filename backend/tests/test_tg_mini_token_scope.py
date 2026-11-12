@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import jwt
 import pytest
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Response
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -206,7 +206,7 @@ def test_tg_auth_issues_scoped_mini_app_token(monkeypatch, db_factory):
     _patch_tg_auth(monkeypatch, {"id": 555})
     db = db_factory()
     try:
-        result = tg_auth(payload=TelegramAuthRequest(init_data="x"), request=MagicMock(), db=db)
+        result = tg_auth(payload=TelegramAuthRequest(init_data="x"), request=MagicMock(), response=Response(), db=db)
     finally:
         db.close()
     settings = get_settings()
@@ -220,7 +220,7 @@ def test_tg_auth_rejects_init_data_without_user_id(monkeypatch):
     notify = _patch_tg_auth(monkeypatch, {})
     db = MagicMock()
     with pytest.raises(HTTPException) as exc:
-        tg_auth(payload=TelegramAuthRequest(init_data="x"), request=MagicMock(), db=db)
+        tg_auth(payload=TelegramAuthRequest(init_data="x"), request=MagicMock(), response=Response(), db=db)
     assert exc.value.status_code == 401
     db.query.assert_not_called()
     notify.assert_not_called()
@@ -233,7 +233,7 @@ def test_tg_auth_rejects_inactive_user(monkeypatch, db_factory):
         db.query(User).filter(User.username == "bob").update({"is_active": False})
         db.commit()
         with pytest.raises(HTTPException) as exc:
-            tg_auth(payload=TelegramAuthRequest(init_data="x"), request=MagicMock(), db=db)
+            tg_auth(payload=TelegramAuthRequest(init_data="x"), request=MagicMock(), response=Response(), db=db)
     finally:
         db.close()
     assert exc.value.status_code == 401

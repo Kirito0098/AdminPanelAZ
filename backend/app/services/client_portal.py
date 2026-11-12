@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, NamedTuple
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.config import DEFAULT_BACKEND_PORT, get_settings
@@ -64,6 +64,10 @@ PORTAL_RESTORE_HINT = (
 )
 CLIENT_PORTAL_TOKEN_PREFIX = "c_"
 USER_PORTAL_TOKEN_PREFIX = "u_"
+
+# One answer for every unusable link: a holder must not learn whether a token
+# exists, was revoked, expired or belongs to a disabled user.
+PORTAL_LINK_INVALID_DETAIL = "Ссылка недействительна"
 
 
 @dataclass(frozen=True)
@@ -281,6 +285,42 @@ def assert_portal_host(db: Session, request_host: str | None) -> None:
     got = _request_host(request_host)
     if got != expected.lower():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+
+def _origin_host(origin: str) -> str:
+    """Host of an ``Origin`` header, lowercase; empty for opaque/unknown origins."""
+    try:
+        parts = urlsplit(origin)
+    except ValueError:
+        return ""
+    if parts.scheme not in {"http", "https"}:
+        return ""
+    return (parts.netloc or "").strip().lower()
+
+
+def assert_portal_action_origin(request: Request) -> None:
+    """Reject cross-site browser writes on the public portal (CSRF guard).
+
+    Browsers attach ``Sec-Fetch-Site``/``Origin`` and pages cannot forge them,
+    so a cross-site form post is refused while the portal page itself passes.
+    Requests without fetch metadata (curl, older clients) are let through:
+    CSRF is a browser attack, and a direct client must know the token anyway.
+
+    Call it after :func:`assert_portal_host` — the expected origin is the Host
+    that check has already pinned to ``portal_domain``.
+    """
+    fetch_site = (request.headers.get("sec-fetch-site") or "").strip().lower()
+    if fetch_site in {"cross-site", "same-site"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Запрос отклонён")
+
+    origin = (request.headers.get("origin") or "").strip()
+    if not origin:
+        return
+
+    expected = _request_host(request.headers.get("host"))
+    got = _origin_host(origin)
+    if not expected or not got or got.split(":")[0] != expected:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Запрос отклонён")
 
 
 def _portal_node_id(db: Session) -> int:
@@ -637,6 +677,10 @@ def revoke_user_portal_token(db: Session, *, user_id: int) -> None:
     db.commit()
 
 
+def _invalid_portal_link() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=PORTAL_LINK_INVALID_DETAIL)
+
+
 def get_valid_portal_token(db: Session, token: str) -> PortalTokenResolution:
     client_row = db.query(ClientPortalToken).filter(ClientPortalToken.token == token).first()
     user_row = db.query(UserPortalToken).filter(UserPortalToken.token == token).first()
@@ -646,30 +690,30 @@ def get_valid_portal_token(db: Session, token: str) -> PortalTokenResolution:
     if user_row is not None:
         candidates.append(("user", user_row))
     if not candidates:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ссылка недействительна")
+        raise _invalid_portal_link()
 
     active = [(kind, row) for kind, row in candidates if row.revoked_at is None]
     if len(active) > 1:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ссылка недействительна")
+        raise _invalid_portal_link()
     if active:
         kind, row = active[0]
     else:
         kind, row = candidates[0]
 
     if row.revoked_at is not None:
-        raise HTTPException(status_code=status.HTTP_410_GONE, detail="Ссылка отозвана")
+        raise _invalid_portal_link()
 
     if row.created_at is not None:
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         expires_at = portal_link_expires_at(row.created_at, get_portal_link_ttl_days(db))
         if expires_at is not None and now >= expires_at:
-            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Срок действия ссылки истёк")
+            raise _invalid_portal_link()
 
     if kind == "client":
         return PortalTokenResolution(kind="client", client_row=row)
     owner = db.get(User, row.user_id)
     if owner is None or not owner.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Портал пользователя отключён")
+        raise _invalid_portal_link()
     return PortalTokenResolution(kind="user", user_row=row)
 
 
@@ -932,40 +976,17 @@ def _portal_file_id(path: str) -> str:
     return "f_" + hashlib.sha256(path.encode("utf-8")).hexdigest()[:24]
 
 
-def _portal_download_url(
-    *,
-    base: str,
-    token: str,
-    file_id: str,
-    node_id: int | None = None,
-    client_name: str | None = None,
-) -> str:
-    params: dict[str, str | int] = {"file_id": file_id}
-    if node_id is not None:
-        params["node_id"] = node_id
-    if client_name:
-        params["client_name"] = client_name
+def _portal_download_url(*, base: str, token: str, file_id: str) -> str:
+    """Public download URL: only the opaque file id travels in the query."""
+    params: dict[str, str] = {"file_id": file_id}
     return f"{base}/api/public/portal/{token}/download?{urlencode(params, quote_via=quote)}"
 
 
-def _portal_file_entries(
-    *,
-    base: str,
-    token: str,
-    files_meta: list[dict],
-    node_id: int | None = None,
-    client_name: str | None = None,
-) -> list[dict]:
+def _portal_file_entries(*, base: str, token: str, files_meta: list[dict]) -> list[dict]:
     files = []
     for item in files_meta:
         file_id = _portal_file_id(item["path"])
-        download_url = _portal_download_url(
-            base=base,
-            token=token,
-            file_id=file_id,
-            node_id=node_id,
-            client_name=client_name,
-        )
+        download_url = _portal_download_url(base=base, token=token, file_id=file_id)
         entry = {
             "file_id": file_id,
             "label": item["label"],
@@ -1011,8 +1032,6 @@ def _build_client_portal_entry(
     node_id: int,
     client_name: str,
     base: str,
-    download_node_id: int | None = None,
-    download_client_name: str | None = None,
 ) -> dict:
     configs = (
         db.query(VpnConfig)
@@ -1028,8 +1047,6 @@ def _build_client_portal_entry(
         base=base,
         token=token,
         files_meta=files_meta,
-        node_id=download_node_id,
-        client_name=download_client_name,
     )
     return {
         "node_id": node_id,
@@ -1125,8 +1142,6 @@ def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
                     node_id=node_id,
                     client_name=client_name,
                     base=base,
-                    download_node_id=node_id,
-                    download_client_name=client_name,
                 )
             except Exception as exc:
                 failed_nodes.add(node_id)
@@ -1224,6 +1239,12 @@ def read_portal_profile(
     node_id: int | None = None,
     client_name: str | None = None,
 ) -> tuple[str, str | bytes]:
+    """Read one allowed profile strictly inside the scope of the token.
+
+    ``node_id``/``client_name`` from the query string are legacy hints kept for
+    links cached by older builds: a client token always uses its own client, and
+    a user token may only pick among the profiles this user owns.
+    """
     if resolution.kind == "client":
         if resolution.client_row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -1237,22 +1258,31 @@ def read_portal_profile(
 
     if resolution.user_row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    key = (client_name or "").strip().lower()
-    if node_id is None or not key:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Не указан клиент")
-    for target_node_id, target_client_name in _owned_portal_targets(db, user_id=resolution.user_row.user_id):
-        if target_node_id != node_id:
-            continue
-        if target_client_name.strip().lower() != key:
-            continue
-        return _read_client_portal_profile(
-            db,
-            node_id=target_node_id,
-            client_name=target_client_name,
-            path=path,
-            file_id=file_id,
-        )
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Клиент не найден")
+    if not ((path or "").strip() or (file_id or "").strip()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Не указан файл")
+
+    targets = _owned_portal_targets(db, user_id=resolution.user_row.user_id)
+    hint_name = (client_name or "").strip().lower()
+
+    def hint_misses(target: tuple[int, str]) -> tuple[int, int]:
+        target_node_id, target_client_name = target
+        node_miss = int(node_id is not None and target_node_id != node_id)
+        name_miss = int(bool(hint_name) and target_client_name.strip().lower() != hint_name)
+        return (node_miss, name_miss)
+
+    for target_node_id, target_client_name in sorted(targets, key=hint_misses):
+        try:
+            return _read_client_portal_profile(
+                db,
+                node_id=target_node_id,
+                client_name=target_client_name,
+                path=path,
+                file_id=file_id,
+            )
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_404_NOT_FOUND:
+                raise
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
 
 
 def redeem_public_portal_code(db: Session, resolution: PortalTokenResolution, *, code: str) -> dict:

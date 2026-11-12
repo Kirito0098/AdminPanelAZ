@@ -31,7 +31,7 @@
 |------------|--------------|----------|
 | `APP_ENV` | `development` | `production` включает проверку секретов и усиленную политику паролей |
 | `SECRET_KEY` | *(слабый)* | JWT и шифрование API-ключей узлов; **обязателен** в production (≥32 символа) |
-| `REQUIRE_PRODUCTION_SECRETS` | `true` | Отказ запуска при слабых секретах в production |
+| `REQUIRE_PRODUCTION_SECRETS` | `true` | Отказ запуска при слабых секретах в production; дефолтный пароль администратора `admin` блокируется независимо от флага |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `30` | TTL access JWT (короткий) |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | TTL refresh-токена (httpOnly cookie) |
 | `REFRESH_TOKEN_COOKIE_SECURE` | `false` | Cookie только по HTTPS (включите в production) |

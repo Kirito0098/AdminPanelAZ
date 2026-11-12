@@ -120,9 +120,11 @@ export default defineConfig(({ mode }) => {
         input: isTgMini ? 'tg-mini.html' : 'index.html',
         output: isTgMini
           ? {
-              format: 'iife',
-              inlineDynamicImports: true,
+              // ES modules, not a single IIFE: admin screens ship as lazy chunks that the
+              // backend serves only after Mini App sign-in (app/routers/tg_mini/static.py).
+              format: 'es',
               entryFileNames: 'assets/tg-mini-[hash].js',
+              chunkFileNames: 'assets/tg-mini-[hash].js',
               assetFileNames: 'assets/tg-mini-[hash][extname]',
             }
           : {

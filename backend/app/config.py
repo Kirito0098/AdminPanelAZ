@@ -6,6 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_SECRET_KEY = "change-me-in-production-use-long-random-string"
 DEFAULT_NODE_AGENT_KEY = "change-me-node-agent-key"
+DEFAULT_ADMIN_PASSWORD = "admin"
 
 # Порт, который слушает uvicorn и на который смотрит nginx, если BACKEND_PORT не задан.
 DEFAULT_BACKEND_PORT = 8000
@@ -60,7 +61,7 @@ class Settings(BaseSettings):
     antizapret_path: Path = Path("/root/antizapret")
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
     default_admin_username: str = "admin"
-    default_admin_password: str = "admin"
+    default_admin_password: str = DEFAULT_ADMIN_PASSWORD
     default_admin_must_change_password: bool = True
     allow_internal_nodes: bool = False
     local_antizapret_enabled: bool = True

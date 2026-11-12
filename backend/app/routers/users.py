@@ -108,6 +108,7 @@ from app.services.user_access_requests import (
     approve_request,
     backfill_missing_request_profiles,
     delete_user_write_archive,
+    expire_stale_pending_requests,
     reject_request,
     sync_admin_request_messages,
 )
@@ -851,6 +852,8 @@ def list_access_requests(
 ):
     """Список заявок на предоставление доступа: фильтры, поиск и страницы."""
     _require_provisioning()
+    # Просроченные pending не должны выглядеть активными — сначала помечаем expired.
+    expire_stale_pending_requests(db)
     query = db.query(UserAccessRequest)
     if status:
         query = query.filter(UserAccessRequest.status == status)
@@ -886,6 +889,7 @@ def count_access_requests(
     _admin: User = Depends(require_admin),
 ):
     """Сколько заявок с таким статусом — для бейджа и подписи кнопки."""
+    expire_stale_pending_requests(db)
     query = db.query(func.count(UserAccessRequest.id))
     if status:
         query = query.filter(UserAccessRequest.status == status)

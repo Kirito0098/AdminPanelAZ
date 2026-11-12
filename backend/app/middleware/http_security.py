@@ -96,12 +96,7 @@ def get_panel_branding(environ: Mapping[str, str] | None = None) -> dict[str, An
 def build_security_txt(branding: Mapping[str, Any] | None = None) -> str:
     info = dict(branding or get_panel_branding())
     panel_url = info.get("panel_base_url") or "https://localhost"
-    return (
-        f"Contact: {panel_url}\n"
-        "Preferred-Languages: ru, en\n"
-        f"Canonical: {panel_url}\n"
-        "Policy: Private administration panel. Authorized access only. Not a bank or email login.\n"
-    )
+    return f"Contact: {panel_url}\n"
 
 
 def is_tg_mini_path(path: str) -> bool:

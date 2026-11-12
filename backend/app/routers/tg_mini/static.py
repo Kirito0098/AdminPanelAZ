@@ -1,25 +1,55 @@
-"""Static UI handlers for Telegram Mini App."""
+"""Static UI handlers for Telegram Mini App.
+
+The entry bundle (shell, navigation, configs screen) is public: the Mini App has to
+render before it can sign in with Telegram. Everything else — admin and extra screens
+shipped as lazy chunks — is served only to a browser that already signed in, so an
+anonymous visitor cannot read those screens out of the bundle. CSS stays public:
+Tailwind classes are not a secret and the shell renders before sign-in.
+"""
 
 from __future__ import annotations
 
 from fastapi import HTTPException, Request, status
 from fastapi.responses import FileResponse
 
+from app.config import get_settings
+from app.services.frontend_assets import index_public_asset_names
+from app.services.tg_mini_asset_marker import TG_MINI_ASSET_COOKIE, tg_mini_asset_marker_valid
 
-def mini_app_asset(file_path: str):
+_NOT_FOUND_HEADERS = {"Cache-Control": "no-store"}
+
+
+def _public_js_names() -> frozenset[str]:
+    """Chunks reachable from index.html by static imports; empty when index.html is missing."""
     from app.routers import tg_mini as root
 
-    asset_path = (root._STATIC_DIR / "assets" / file_path).resolve()
+    return index_public_asset_names(root._STATIC_DIR)
+
+
+def mini_app_asset(file_path: str, request: Request):
+    from app.routers import tg_mini as root
+
     assets_root = (root._STATIC_DIR / "assets").resolve()
+    asset_path = (assets_root / file_path).resolve()
     if not asset_path.is_relative_to(assets_root) or not asset_path.is_file():
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    return FileResponse(asset_path)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, headers=_NOT_FOUND_HEADERS)
+
+    name = asset_path.relative_to(assets_root).as_posix()
+    if asset_path.suffix != ".js" or name in _public_js_names():
+        return FileResponse(asset_path)
+
+    marker = request.cookies.get(TG_MINI_ASSET_COOKIE)
+    if not tg_mini_asset_marker_valid(get_settings().secret_key, marker):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, headers=_NOT_FOUND_HEADERS)
+    response = FileResponse(asset_path)
+    response.headers["Cache-Control"] = "private, no-cache"
+    response.headers["Vary"] = "Cookie"
+    return response
 
 
 def mini_app_page(request: Request):
     from fastapi.responses import HTMLResponse
 
-    from app.config import get_settings
     from app.routers import tg_mini as root
     from app.services.html_csp import get_request_csp_nonce, inject_csp_nonce
     from app.services.panel_paths import panel_access_path_script

@@ -39,7 +39,9 @@ BUFFER_GUARD_EVENT_RETENTION_DAYS = 30
 NOTIFICATION_RETENTION_DAYS = 30
 RECEIPT_CLEAR_DAYS = 30
 ARCHIVE_RETENTION_DAYS = 365
-PENDING_REQUEST_EXPIRE_DAYS = 14
+# Должен совпадать с PENDING_REQUEST_TTL_DAYS в user_access_requests: рабочий путь
+# помечает такие заявки expired до подсчёта cap, retention — добивает остатки.
+PENDING_REQUEST_EXPIRE_DAYS = 7
 
 
 def _purge_where(db: Session, model, *criteria, batch_size: int) -> int:

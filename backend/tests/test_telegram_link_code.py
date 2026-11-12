@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -10,6 +13,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.auth import create_user_access_token, get_password_hash
+from app.config import get_settings
 from app.database import Base, get_db
 from app.models import User, UserRole
 from app.routers import telegram_webhook
@@ -185,3 +189,129 @@ def test_saving_same_telegram_id_sends_nothing(db_factory, monkeypatch):
         db.close()
 
     assert sent == []
+
+
+# --- H1: коды хранятся HMAC-хэшем, legacy-плейнтекст ещё принимается ---
+
+
+def _stored_codes(db) -> dict:
+    import json
+
+    from app.services.app_setting_store import _get_setting
+
+    return json.loads(_get_setting(db, "telegram_link_codes", "{}"))
+
+
+def test_new_code_is_stored_as_sha256_hash(db_factory):
+    db = db_factory()
+    try:
+        carol = db.query(User).filter(User.username == "carol").one()
+        code, _ttl = create_link_code(db, carol)
+
+        stored = _stored_codes(db)
+        expected = hmac.new(
+            get_settings().secret_key.encode(), code.encode(), hashlib.sha256
+        ).hexdigest()
+        assert list(stored) == [f"sha256:{expected}"]
+        key = next(iter(stored))
+        assert key.startswith("sha256:")
+        assert len(key) == len("sha256:") + 64
+        assert all(char in "0123456789abcdef" for char in key[len("sha256:") :])
+        assert code not in stored
+    finally:
+        db.close()
+
+
+def test_legacy_plaintext_code_is_still_accepted(db_factory):
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    db = db_factory()
+    try:
+        carol = db.query(User).filter(User.username == "carol").one()
+        legacy = "abc123def456"
+        _set_setting(
+            db,
+            "telegram_link_codes",
+            json.dumps(
+                {
+                    legacy: {
+                        "user_id": carol.id,
+                        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
+                    }
+                }
+            ),
+        )
+        db.commit()
+
+        ok, message, user = redeem_link_code(db, legacy, "777")
+
+        assert ok is True, message
+        assert user is not None and user.id == carol.id
+        assert _stored_codes(db) == {}
+    finally:
+        db.close()
+
+
+def test_wrong_code_does_not_link(db_factory):
+    db = db_factory()
+    try:
+        ok, _message, user = redeem_link_code(db, "deadbeefcafe", "777")
+
+        assert (ok, user) == (False, None)
+        assert db.query(User).filter(User.telegram_id == "777").first() is None
+    finally:
+        db.close()
+
+
+def test_expired_hashed_code_is_rejected(db_factory):
+    import json
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.telegram_link import _code_hash
+
+    db = db_factory()
+    try:
+        carol = db.query(User).filter(User.username == "carol").one()
+        code = "0badc0de1234"
+        _set_setting(
+            db,
+            "telegram_link_codes",
+            json.dumps(
+                {
+                    _code_hash(code): {
+                        "user_id": carol.id,
+                        "expires_at": (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat(),
+                    }
+                }
+            ),
+        )
+        db.commit()
+
+        ok, message, _user = redeem_link_code(db, code, "777")
+
+        assert ok is False
+        assert "истёк" in message
+        assert _stored_codes(db) == {}
+    finally:
+        db.close()
+
+
+def test_one_active_code_per_user_survives_hashing(db_factory):
+    db = db_factory()
+    try:
+        carol = db.query(User).filter(User.username == "carol").one()
+        first, _ = create_link_code(db, carol)
+        second, _ = create_link_code(db, carol)
+
+        stored = _stored_codes(db)
+        assert len(stored) == 1
+        assert int(next(iter(stored.values()))["user_id"]) == carol.id
+
+        ok_old, _message, _user = redeem_link_code(db, first, "777")
+        assert ok_old is False
+
+        ok_new, message, _user = redeem_link_code(db, second, "777")
+        assert ok_new is True, message
+    finally:
+        db.close()

@@ -202,6 +202,12 @@ REQUEST_NEED_PRESET = (
 )
 REQUEST_EXTEND_CUSTOM_TEXT = "Задайте срок доступа в веб-панели по заявке."
 
+BOT_COMMANDS_PUBLIC: tuple[tuple[str, str], ...] = (
+    ("start", "Главное меню"),
+    ("link", "Привязка аккаунта"),
+    ("help", "Справка по командам"),
+)
+
 BOT_COMMANDS_USER: tuple[tuple[str, str], ...] = (
     ("start", "Главное меню"),
     ("myconfigs", "Мои VPN-конфиги"),

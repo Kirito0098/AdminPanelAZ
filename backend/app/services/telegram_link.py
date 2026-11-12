@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -9,13 +11,15 @@ from html import escape
 
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.models import User
 
 _LINK_CODES_KEY = "telegram_link_codes"
 _CODE_TTL_SECONDS = 600
-# 12 hex-символов (48 бит) вместо прежних 8: старые коды остаются валидными,
-# они ищутся по точному совпадению в том же словаре.
+# 12 hex-символов (48 бит) вместо прежних 8.
 _CODE_LENGTH = 12
+# Коды хранятся HMAC-хэшем: утечка ``app_settings`` не даёт привязать чужой Telegram.
+_HASH_PREFIX = "sha256:"
 
 LINK_CODE_HINT = (
     "Пришлите код привязки: <code>/link КОД</code>. "
@@ -32,6 +36,13 @@ def _load_codes(db: Session) -> dict[str, dict[str, str | int]]:
         return data if isinstance(data, dict) else {}
     except json.JSONDecodeError:
         return {}
+
+
+def _code_hash(code: str) -> str:
+    digest = hmac.new(
+        get_settings().secret_key.encode(), code.encode(), hashlib.sha256
+    ).hexdigest()
+    return f"{_HASH_PREFIX}{digest}"
 
 
 def _save_codes(db: Session, codes: dict[str, dict[str, str | int]]) -> None:
@@ -66,7 +77,7 @@ def create_link_code(db: Session, user: User) -> tuple[str, int]:
     }
     code = secrets.token_hex(_CODE_LENGTH // 2)
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=_CODE_TTL_SECONDS)
-    codes[code] = {
+    codes[_code_hash(code)] = {
         "user_id": user.id,
         "expires_at": expires_at.isoformat(),
     }
@@ -102,7 +113,11 @@ def redeem_link_code(db: Session, code: str, telegram_id: str) -> tuple[bool, st
         return False, LINK_CODE_HINT, None
 
     codes = _purge_expired(_load_codes(db))
-    meta = codes.pop(normalized, None)
+    meta = codes.pop(_code_hash(normalized), None)
+    if meta is None:
+        # Legacy: плейнтекст-код, выданный до перехода на хэши. Живёт 10 минут,
+        # поэтому после деплоя такие записи истекают сами.
+        meta = codes.pop(normalized, None)
     _save_codes(db, codes)
 
     if not meta:

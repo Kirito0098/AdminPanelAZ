@@ -69,6 +69,24 @@ def _run_text(db, text: str) -> None:
     )
 
 
+def _run_callback(db, data: str) -> None:
+    update = {
+        "callback_query": {
+            "id": "cb-1",
+            "data": data,
+            "from": {"id": 42},
+            "message": {
+                "_did": "m1",
+                "message_id": 10,
+                "chat": {"id": 42, "type": "private"},
+            },
+        }
+    }
+    asyncio.run(
+        bot_module.TelegramBotService().handle_update(db, update, mini_app_url="https://p/api/tg-mini")
+    )
+
+
 def _context(db) -> BotContext:
     return BotContext(
         db=db,
@@ -136,6 +154,31 @@ def test_guest_home_is_allowed(db, sent, monkeypatch):
 
     menu_text.assert_awaited_once()
     assert sent == []
+
+
+def test_guest_inline_home_callback_is_allowed(db, sent, monkeypatch):
+    monkeypatch.setattr(bot_module, "answer_callback_query", AsyncMock())
+    start = AsyncMock()
+    monkeypatch.setattr("app.services.telegram_bot_handlers.start.handle_start", start)
+
+    _run_callback(db, "nav:home")
+
+    start.assert_awaited_once()
+    assert i18n.UNLINKED not in _texts(sent)
+
+
+def test_guest_inline_admin_callback_still_gets_unlinked(db, sent, monkeypatch):
+    monkeypatch.setattr(bot_module, "answer_callback_query", AsyncMock())
+    api_send = AsyncMock()
+    monkeypatch.setattr("app.services.telegram_api.send_message", api_send)
+    settings_callback = AsyncMock()
+    monkeypatch.setattr(bot_module, "handle_settings_callback", settings_callback)
+
+    _run_callback(db, "nav:settings")
+
+    settings_callback.assert_not_awaited()
+    api_send.assert_awaited_once()
+    assert api_send.await_args.args[2] == i18n.UNLINKED
 
 
 def test_guest_request_access_requires_enabled_requests(db, sent, monkeypatch):

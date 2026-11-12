@@ -27,6 +27,7 @@ from app.services.telegram_widgets.access_request import (
     refresh_access_request_cards,
     widgets_enabled,
 )
+from app.services.user_access_requests import expire_stale_pending_requests
 
 logger = logging.getLogger(__name__)
 
@@ -335,6 +336,7 @@ def _fmt_until(value: datetime | None) -> str:
 
 
 def _pending_count(db: Session) -> int:
+    expire_stale_pending_requests(db)
     return (
         db.query(UserAccessRequest)
         .filter(UserAccessRequest.status == "pending")
@@ -353,6 +355,7 @@ def _guest_status(db: Session, telegram_id: str) -> str:
 
 
 def _queue_snapshot(db: Session) -> list[dict]:
+    expire_stale_pending_requests(db)
     rows = (
         db.query(UserAccessRequest)
         .filter(UserAccessRequest.status == "pending")

@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models import User
 from app.services.bulk_user_nodes_notify import clear_portal_banner
 from app.services.client_portal import (
+    assert_portal_action_origin,
     assert_portal_host,
     build_public_portal_payload,
     get_valid_portal_token,
@@ -79,6 +80,7 @@ def portal_banner_dismiss(
 ):
     """Скрыть баннер портала (уведомление о массовой операции с серверами)."""
     assert_portal_host(db, request.headers.get("host"))
+    assert_portal_action_origin(request)
     client_ip = ip_restriction_service.get_client_ip(request)
     public_download_rate_limit_service.consume(client_ip)
     row = get_valid_portal_token(db, token)
@@ -99,6 +101,7 @@ def portal_redeem(
     db: Session = Depends(get_db),
 ):
     assert_portal_host(db, request.headers.get("host"))
+    assert_portal_action_origin(request)
     client_ip = ip_restriction_service.get_client_ip(request)
     public_download_rate_limit_service.consume(client_ip)
     _require_portal_enabled()

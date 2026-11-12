@@ -55,6 +55,10 @@ logger = logging.getLogger(__name__)
 
 _PUBLIC_COMMANDS = frozenset({"/start", "/help", "/link"})
 
+# Гостю в inline-футере доступна только «Главная» и «Помощь»: остальные callback'и
+# (настройки, конфиги, заявки) отвечают приглашением привязать аккаунт.
+_GUEST_CALLBACK_ACTIONS = frozenset({"home", "help"})
+
 # Префиксы callback'ов, которые не должны выполняться у обычного пользователя.
 # Fail-closed сеть: даже если хендлер забудет свою проверку, dispatch не пустит.
 _ADMIN_CALLBACK_PREFIXES = ("st:", "uc:", "nodes:", "nd:", "ndh:", "nda:", "ar:")
@@ -71,6 +75,12 @@ def _is_shared_chat(chat: dict[str, Any]) -> bool:
     """Group/supergroup/channel: replies (configs, QR, links) would be visible to other members."""
     chat_type = chat.get("type")
     return chat_type is not None and chat_type != "private"
+
+
+def _guest_callback_allowed(data: str) -> bool:
+    """Callback'ы, которые гость может нажать: только навигация «Главная» и «Помощь»."""
+    action = data[len("nav:") :] if data.startswith("nav:") else data
+    return action in _GUEST_CALLBACK_ACTIONS
 
 
 def _parse_command(text: str) -> tuple[str, str]:
@@ -419,7 +429,7 @@ class TelegramBotService:
             telegram_username=tg_username,
             telegram_name=tg_name,
         )
-        if ctx.user is None and not (data == "help" or data.startswith("nav:help")):
+        if ctx.user is None and not _guest_callback_allowed(data):
             from app.services.telegram_api import send_message
             from app.services.telegram_bot_handlers.base import unlinked_message
 

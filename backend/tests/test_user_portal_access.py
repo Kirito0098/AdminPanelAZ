@@ -45,13 +45,16 @@ def test_link_of_active_user_resolves(db):
     assert resolved.kind == "user" and resolved.user_row.id == row.id
 
 
-def test_link_of_deactivated_user_is_refused(db):
+def test_link_of_deactivated_user_is_indistinguishable_from_unknown(db):
     _user_link(db, active=False)
 
     with pytest.raises(HTTPException) as exc:
         portal.get_valid_portal_token(db, "u_link")
+    with pytest.raises(HTTPException) as unknown:
+        portal.get_valid_portal_token(db, "u_missing")
 
-    assert exc.value.status_code == 403
+    assert exc.value.status_code == unknown.value.status_code == 404
+    assert exc.value.detail == unknown.value.detail == "Ссылка недействительна"
 
 
 def test_user_portal_payload_has_no_user_id(db):
@@ -64,7 +67,7 @@ def test_user_portal_payload_has_no_user_id(db):
     assert "user_id" not in payload
 
 
-def test_expired_user_link_is_gone(db):
+def test_expired_user_link_is_indistinguishable_from_unknown(db):
     from datetime import datetime, timedelta, timezone
 
     row = _user_link(db, active=True)
@@ -73,9 +76,11 @@ def test_expired_user_link_is_gone(db):
 
     with pytest.raises(HTTPException) as exc:
         portal.get_valid_portal_token(db, "u_link")
+    with pytest.raises(HTTPException) as unknown:
+        portal.get_valid_portal_token(db, "u_missing")
 
-    assert exc.value.status_code == 410
-    assert exc.value.detail == "Срок действия ссылки истёк"
+    assert exc.value.status_code == unknown.value.status_code == 404
+    assert exc.value.detail == unknown.value.detail == "Ссылка недействительна"
 
 
 def test_zero_ttl_keeps_user_link_permanent(db):

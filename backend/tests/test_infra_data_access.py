@@ -15,10 +15,11 @@ from sqlalchemy.pool import StaticPool
 import app.database as database_module
 from app.auth import create_access_token
 from app.database import Base
+from app.middleware.http_security import build_security_txt
 from app.models import Node, NodeStatus, User, UserRole
 from app.routers import nodes as nodes_router
 from app.services import openapi_docs_gate
-from app.services.health_checks import assert_health_deep_access
+from app.services.health_checks import assert_health_deep_access, build_light_health
 
 
 @pytest.fixture
@@ -53,6 +54,16 @@ def _request(client_host: str, *, token: str | None = None, forwarded_for: str |
 @pytest.mark.parametrize("host", ["127.0.0.1", "::1"])
 def test_deep_health_allows_loopback(session_factory, host):
     assert_health_deep_access(_request(host))
+
+
+def test_light_health_does_not_publish_start_time():
+    assert build_light_health() == {"status": "ok"}
+
+
+def test_security_txt_does_not_publish_panel_origin_twice():
+    assert build_security_txt({"panel_base_url": "https://panel.example.com"}) == (
+        "Contact: https://panel.example.com\n"
+    )
 
 
 def test_deep_health_rejects_external_client(session_factory):

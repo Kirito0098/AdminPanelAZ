@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database import get_db
 from app.models import User
+from app.services.tg_mini_asset_marker import set_tg_mini_asset_marker_cookie
 from app.services.tg_mini_auth_rate_limit import tg_mini_auth_rate_limit_service
 
 from .helpers import TelegramAuthRequest
@@ -15,7 +17,12 @@ router = APIRouter()
 
 
 @router.post("/auth")
-def tg_auth(payload: TelegramAuthRequest, request: Request, db: Session = Depends(get_db)):
+def tg_auth(
+    payload: TelegramAuthRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
     from app.routers import tg_mini as root
 
     # Counted before HMAC verification and any DB lookup: every attempt with a
@@ -50,4 +57,6 @@ def tg_auth(payload: TelegramAuthRequest, request: Request, db: Session = Depend
             detail="Этот Telegram аккаунт не привязан ни к одному пользователю панели",
         )
     access_token = root.create_tg_mini_token(user.username, tg_id, token_version=user.token_version or 0)
+    # Admin screens are separate chunks; without the marker the backend hides them.
+    set_tg_mini_asset_marker_cookie(response, get_settings(), tg_id, request)
     return {"access_token": access_token, "token_type": "bearer", "telegram_id": tg_id}

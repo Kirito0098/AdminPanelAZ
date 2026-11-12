@@ -1,8 +1,9 @@
 """Per-role Telegram command lists.
 
 Telegram has no role scopes: the default list serves everyone (users and
-unlinked), and each linked admin additionally gets a ``chat`` scope with the
-admin commands. Re-synced whenever the bot settings are saved.
+unlinked), so it holds only public commands; each linked admin additionally gets
+a ``chat`` scope with the admin commands. Re-synced whenever the bot settings
+are saved.
 """
 
 from __future__ import annotations
@@ -49,9 +50,14 @@ def build_commands(entries: tuple[tuple[str, str], ...]) -> list[dict[str, str]]
 
 
 def sync_bot_commands(db: Session, bot_token: str) -> dict[str, Any]:
-    """Default list for everyone, then a per-chat admin list for linked admins."""
+    """Public list for everyone, then a per-chat admin list for linked admins.
+
+    Дефолтный список видят и непривязанные гости, поэтому в нём только публичные
+    команды: абонентские (``/myconfigs``, ``/traffic``) без привязки отвечают
+    «привяжите аккаунт». Привязанные вводят команды вручную — они работают.
+    """
     result: dict[str, Any] = {"default": False, "admins": {}, "errors": []}
-    ok, error = set_my_commands_sync(bot_token, build_commands(i18n.BOT_COMMANDS_USER))
+    ok, error = set_my_commands_sync(bot_token, build_commands(i18n.BOT_COMMANDS_PUBLIC))
     result["default"] = ok
     if not ok and error:
         result["errors"].append(error)

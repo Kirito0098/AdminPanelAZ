@@ -1,16 +1,22 @@
 import { useEffect, useRef } from 'react'
 import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import LazyPage from '@/components/LazyPage'
+import { lazyWithRetry } from '@/lib/lazyWithRetry'
 import AdminGate from '@/tg-mini/AdminGate'
 import FeatureGate from '@/tg-mini/FeatureGate'
 import { TgAuthProvider, useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import MiniShell from '@/tg-mini/layout/MiniShell'
 import { mapTelegramStartParam } from '@/tg-mini/lib/startParam'
-import AccessRequests from '@/tg-mini/pages/AccessRequests'
-import Clients from '@/tg-mini/pages/Clients'
 import Configs from '@/tg-mini/pages/Configs'
-import Messages from '@/tg-mini/pages/Messages'
-import Settings from '@/tg-mini/pages/Settings'
-import UnlockCodes from '@/tg-mini/pages/UnlockCodes'
+
+// Only the shell, navigation and the configs screen belong to the entry bundle.
+// The backend serves these chunks only to a Mini App that already signed in
+// (backend/app/routers/tg_mini/static.py), so every admin/extra screen is lazy.
+const AccessRequests = lazyWithRetry(() => import('@/tg-mini/pages/AccessRequests'))
+const Clients = lazyWithRetry(() => import('@/tg-mini/pages/Clients'))
+const Messages = lazyWithRetry(() => import('@/tg-mini/pages/Messages'))
+const Settings = lazyWithRetry(() => import('@/tg-mini/pages/Settings'))
+const UnlockCodes = lazyWithRetry(() => import('@/tg-mini/pages/UnlockCodes'))
 
 function StartParamRedirect() {
   const { status } = useTgAuth()
@@ -44,7 +50,9 @@ export default function TgMiniApp() {
               path="clients"
               element={
                 <AdminGate>
-                  <Clients />
+                  <LazyPage>
+                    <Clients />
+                  </LazyPage>
                 </AdminGate>
               }
             />
@@ -52,7 +60,9 @@ export default function TgMiniApp() {
               path="requests"
               element={
                 <AdminGate>
-                  <AccessRequests />
+                  <LazyPage>
+                    <AccessRequests />
+                  </LazyPage>
                 </AdminGate>
               }
             />
@@ -60,7 +70,9 @@ export default function TgMiniApp() {
               path="messages"
               element={
                 <FeatureGate featureKey="user_messaging">
-                  <Messages />
+                  <LazyPage>
+                    <Messages />
+                  </LazyPage>
                 </FeatureGate>
               }
             />
@@ -69,12 +81,21 @@ export default function TgMiniApp() {
               element={
                 <FeatureGate featureKey="unlock_codes">
                   <AdminGate>
-                    <UnlockCodes />
+                    <LazyPage>
+                      <UnlockCodes />
+                    </LazyPage>
                   </AdminGate>
                 </FeatureGate>
               }
             />
-            <Route path="settings" element={<Settings />} />
+            <Route
+              path="settings"
+              element={
+                <LazyPage>
+                  <Settings />
+                </LazyPage>
+              }
+            />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Route>
         </Routes>
