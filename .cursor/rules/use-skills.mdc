@@ -23,6 +23,8 @@ alwaysApply: true
 | Терминал: поиск файлов и кода, диапазон строк, замена, YAML/JSON, diff | `cli-toolbox` | `.agents/skills/` |
 | Багфикс с дешёвым локальным тестом на критическом узле | `tdd` | `.agents/skills-code/` |
 | UI: страницы, компоненты, Mini App, вёрстка, a11y | `web-design-guidelines` | `.agents/skills-code/` |
+| Веб-меню, сайдбар, хедер, иерархия разделов, адаптивная навигация | `ui-ux-pro-max` (поиск: `python3 .cursor/skills/ui-ux-pro-max/scripts/search.py "<query>" --domain ux`) | `.agents/skills-code/` |
+| Визуальное направление нового экрана: палитра, типографика, тексты | `frontend-design` | `.agents/skills-code/` |
 | Проверить UI в браузере после правок фронта | `webapp-testing` | `.agents/skills-code/` |
 | React: ререндеры, бандл, тяжёлые вычисления | `react-best-practices` | `.agents/skills-code/` |
 | Компонент оброс boolean-пропсами (4+ флагов режима) | `vercel-composition-patterns` | `.agents/skills-code/` |

@@ -9,7 +9,6 @@ import DnsServersCard from '@/components/routing/DnsServersCard'
 import OpenVpnTuningCard from '@/components/routing/OpenVpnTuningCard'
 import OpenVpnBufferGuardCard from '@/components/routing/OpenVpnBufferGuardCard'
 import SettingsAlert from '@/components/settings/SettingsAlert'
-import { SettingsToolbar } from '@/components/settings/SettingsChrome'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -17,7 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useNotifications } from '@/context/NotificationContext'
 import { cn } from '@/lib/utils'
-import { Cable, RefreshCw, Server } from 'lucide-react'
+import { Cable, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 function SectionHeading({ title, hint }: { title: string; hint: string }) {
@@ -209,100 +208,71 @@ type OpenVpnPanelTabProps = {
   activeNodeId: number | null
   nodeName?: string | null
   disabled?: boolean
-  remotesEpoch: number
-  remoteHostsDirty: boolean
-  onSavedHostsChange: (hosts: string[], applyToWireguard?: boolean) => void
-  onDirtyChange: (dirty: boolean) => void
-  onHostsPersisted: (hosts: string[], applyToWireguard?: boolean) => void
+  onDirtyChange?: (dirty: boolean) => void
 }
 
-/** Доработки панели: список remote OpenVPN и multihome (не из AntiZapret setup). */
+/** Доработки панели: список remote OpenVPN, multihome, DNS и установка (не из AntiZapret setup). */
 export default function OpenVpnPanelTab({
   activeNodeId,
   nodeName,
   disabled = false,
-  remotesEpoch,
-  remoteHostsDirty,
-  onSavedHostsChange,
   onDirtyChange,
-  onHostsPersisted,
 }: OpenVpnPanelTabProps) {
   return (
     <div className="space-y-6">
-      <SettingsToolbar
-        title="OpenVPN (панель)"
-        meta={
-          <span className="flex flex-wrap items-center gap-2">
-            {nodeName && (
-              <Badge variant="outline" className="gap-1.5">
-                <Server className="h-3 w-3" />
-                {nodeName}
-              </Badge>
-            )}
-            <span>Адреса в профилях, multihome, DNS и состояние установки — то, чего нет в файле setup.</span>
-          </span>
-        }
-        actions={
-          remoteHostsDirty ? (
-            <Badge variant="outline" className="border-amber-500/50 text-amber-700 dark:text-amber-300">
-              адреса не сохранены
-            </Badge>
-          ) : undefined
-        }
-      />
-
       <section className="space-y-3">
-        <SectionHeading title="Подключение" hint="Что клиент видит в профилях: адреса входа и multihome" />
+        <SectionHeading
+          title="Подключение"
+          hint="Что клиент видит в профилях: адреса входа и multihome"
+        />
         <div className="grid gap-4 xl:grid-cols-3">
           <div className="min-w-0 xl:col-span-2">
+            <Card className="overflow-hidden">
+              <CardHeader className="pb-3">
+                <div className="flex gap-3">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <Cable className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0">
+                    <CardTitle className="text-base">Список remote OpenVPN</CardTitle>
+                    <CardDescription className="mt-1">
+                      Упорядоченный список адресов в клиентских .ovpn. Хранится в БД панели на
+                      активном узле. Первый адрес — слот входа (прокси, если он есть): при
+                      сохранении пишется в OPENVPN_HOST.
+                    </CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className="border-t px-4 py-4 sm:px-5">
+                <RemoteHostsCard
+                  key={`remotes-${activeNodeId ?? 'none'}`}
+                  nodeId={activeNodeId}
+                  disabled={disabled}
+                  variant="embedded"
+                  onDirtyChange={onDirtyChange}
+                />
+              </CardContent>
+            </Card>
+          </div>
 
-      <Card className="overflow-hidden">
-        <CardHeader className="pb-3">
-          <div className="flex gap-3">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Cable className="h-4 w-4" />
-            </div>
-            <div className="min-w-0">
-              <CardTitle className="text-base">Список remote OpenVPN</CardTitle>
+          <Card className="overflow-hidden">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">OpenVPN multihome</CardTitle>
               <CardDescription className="mt-1">
-                Упорядоченный список адресов в клиентских .ovpn. Хранится в БД панели на активном
-                узле. Первый адрес — слот входа (прокси, если он есть): при сохранении пишется в
-                OPENVPN_HOST.
+                Директива <code>multihome</code> в server conf: сервер отвечает клиенту с того же
+                IP, к которому тот подключился, поэтому несколько публичных адресов работают без
+                «прыжков» соединения. Флаг хранится в панели — после setup.sh конфиги становятся
+                стоковыми, и панель возвращает директиву с этой страницы.
               </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="border-t px-4 py-4 sm:px-5">
-          <RemoteHostsCard
-            key={`remotes-${activeNodeId ?? 'none'}-${remotesEpoch}`}
-            nodeId={activeNodeId}
-            disabled={disabled}
-            variant="embedded"
-            onSavedHostsChange={onSavedHostsChange}
-            onDirtyChange={onDirtyChange}
-            onHostsPersisted={onHostsPersisted}
-          />
-        </CardContent>
-      </Card>
-          </div>
-
-      <Card className="overflow-hidden">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">OpenVPN multihome</CardTitle>
-          <CardDescription className="mt-1">
-            Директива <code>multihome</code> в server conf: сервер отвечает клиенту с того же IP, к которому тот
-            подключился, поэтому несколько публичных адресов работают без «прыжков» соединения. Флаг хранится в
-            панели — после setup.sh конфиги становятся стоковыми, и панель возвращает директиву с этой страницы.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="border-t px-4 py-4 sm:px-5">
-          <OpenVpnMultihomeToggle
-            key={`multihome-${activeNodeId ?? 'none'}`}
-            nodeId={activeNodeId}
-            disabled={disabled}
-          />
-        </CardContent>
-      </Card>
+            </CardHeader>
+            <CardContent className="border-t px-4 py-4 sm:px-5">
+              <OpenVpnMultihomeToggle
+                key={`multihome-${activeNodeId ?? 'none'}`}
+                nodeId={activeNodeId}
+                disabled={disabled}
+              />
+            </CardContent>
+          </Card>
         </div>
       </section>
 

@@ -14,7 +14,7 @@
 | Путь | Что |
 | ------ | ----- |
 | `.cursor/rules/` | `use-skills`, `lean-code`, `release-train-branching`, `telegram-release-post`. Это просто markdown-правила, их читают оба клиента — и Zoo Code, и Cursor |
-| `.cursor/skills/` | project skills: `brainstorming`, `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
+| `.cursor/skills/` | project skills: `brainstorming`, `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
 | `.agents/skills/` | симлинки на `.cursor/skills/` для скиллов, нужных в любом режиме Zoo Code |
 | `.agents/skills-code/` | те же симлинки, активны только в Code: React, UI, tui, tdd, браузерные проверки |
 | `.agents/skills-architect/` | симлинк `split-design-spec`, активен только в Architect |
@@ -116,7 +116,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 
 | Где | Что |
 | ----- | ----- |
-| `.cursor/skills/<name>/` | скиллы этого репозитория: `karpathy-ponytail`, `tdd`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
+| `.cursor/skills/<name>/` | скиллы этого репозитория: `karpathy-ponytail`, `tdd`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
 | `.agents/skills*/` | относительные симлинки на `.cursor/skills/`, разложенные по режимам Zoo Code |
 
 Внешних каталогов скиллов нет: если скилла нет в `.cursor/skills/`, значит его нет.
@@ -134,6 +134,8 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 | `react-best-practices` | Perf React для Vite SPA: правила `server-*` и `rendering-hydration-*` неприменимы |
 | `vercel-composition-patterns` | Компонент оброс boolean-пропсами (4+ флагов режима) |
 | `web-design-guidelines` | Чеклист UI и a11y по коду |
+| `ui-ux-pro-max` | Навигация, сайдбар, иерархия разделов, адаптив: 120 UX-правил локальным поиском |
+| `frontend-design` | Визуальное направление нового экрана: палитра, типографика, тексты |
 | `webapp-testing` | Проверить UI в браузере через Playwright |
 | `split-design-spec` | Разбить большой design-спек по папкам |
 | `tui-design` | `install.sh`, консольное меню, CLI |

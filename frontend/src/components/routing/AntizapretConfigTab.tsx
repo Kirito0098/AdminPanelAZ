@@ -2,12 +2,12 @@ import {
   ApiError,
   applyRouting,
   getAntizapretSettings,
+  getNodeRemoteHosts,
   getVpnNetworkSettings,
   updateAntizapretSettings,
 } from "@/api/client";
 import HaReplicaBanner from "@/components/dashboard/HaReplicaBanner";
 import { firstNonEmptyRemoteHost } from "@/components/proxy/RemoteHostsCard";
-import OpenVpnPanelTab from "@/components/routing/OpenVpnPanelTab";
 import SettingsAlert from "@/components/settings/SettingsAlert";
 import ConfirmDialog, { ConfirmDialogHost } from "@/components/shared/ConfirmDialog";
 import PageSectionHeader from "@/components/shared/PageSectionHeader";
@@ -33,7 +33,6 @@ import {
 } from "@/components/ui/select";
 import Spinner from "@/components/ui/Spinner";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNode } from "@/context/NodeContext";
 import { useNotifications } from "@/context/NotificationContext";
 import { useProgress } from "@/context/ProgressContext";
@@ -60,9 +59,7 @@ import {
   Shield,
 } from "lucide-react";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
-
-type AntizapretPageTab = "setup" | "openvpn-panel";
+import { Link } from "react-router-dom";
 
 type FieldLayout = "list" | "grid";
 
@@ -167,7 +164,7 @@ const FIELD_SECTIONS: {
   {
     title: "Адреса подключения",
     description:
-      "Домены OPENVPN_HOST / WIREGUARD_HOST из setup. Список remote и multihome — на вкладке «OpenVPN (панель)».",
+      "Домены OPENVPN_HOST / WIREGUARD_HOST из setup. Список remote и multihome — на странице OpenVPN.",
     icon: Cable,
     fieldLayout: "grid",
     keys: ["openvpn_host", "wireguard_host"],
@@ -482,7 +479,7 @@ function ConfigSectionCard({
               )}
               {section.title === "Cloudflare WARP" && (
                 <Link
-                  to="/warper"
+                  to="/protocols/warper"
                   className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary underline-offset-4 hover:underline"
                 >
                   Управление AZ-WARP
@@ -551,7 +548,6 @@ function ConnectionAddressesCard({
   onDraftChange,
   savedRemoteHosts,
   applyFirstRemoteToWireguard,
-  onOpenPanelTab,
 }: {
   section: GroupedSection;
   draft: Record<string, string>;
@@ -560,7 +556,6 @@ function ConnectionAddressesCard({
   onDraftChange: (key: string, value: string) => void;
   savedRemoteHosts: string[];
   applyFirstRemoteToWireguard: boolean;
-  onOpenPanelTab: () => void;
 }) {
   const SectionIcon = section.icon;
   const openvpnField = section.fields.find((field) => field.key === "openvpn_host");
@@ -639,15 +634,13 @@ function ConnectionAddressesCard({
                 onChange={(e) => onDraftChange("openvpn_host", e.target.value)}
               />
               <p className="text-xs text-muted-foreground">
-                Несколько remote — на вкладке{" "}
-                <button
-                  type="button"
+                Несколько remote — на странице{" "}
+                <Link
+                  to="/protocols/openvpn"
                   className="font-medium text-primary underline-offset-4 hover:underline"
-                  onClick={onOpenPanelTab}
                 >
-                  OpenVPN (панель)
-                </button>
-                .
+                  OpenVPN (панель) →
+                </Link>
               </p>
             </div>
           )}
@@ -700,8 +693,8 @@ function ConnectionAddressesCard({
               />
               <p className="text-xs text-muted-foreground">
                 {wireguardSynced
-                  ? "Галочка «Также для AmneziaWG / WireGuard» на вкладке OpenVPN (панель)."
-                  : "Несколько адресов пока только для OpenVPN. Для прокси GubernievS включите галочку на вкладке OpenVPN (панель)."}
+                  ? "Галочка «Также для AmneziaWG / WireGuard» на странице OpenVPN."
+                  : "Несколько адресов пока только для OpenVPN. Для прокси GubernievS включите галочку на странице OpenVPN."}
               </p>
             </div>
           )}
@@ -753,38 +746,15 @@ export default function AntizapretConfigTab() {
   const { trackBackgroundTask } = useProgress();
   const haReplicaReadonly = useHaReplicaReadonly();
   const { confirm, dialogProps } = useConfirmDialog();
-  const [searchParams, setSearchParams] = useSearchParams();
-
-  const pageTab: AntizapretPageTab =
-    searchParams.get("tab") === "openvpn-panel" ? "openvpn-panel" : "setup";
-
-  const setPageTab = useCallback(
-    (next: AntizapretPageTab) => {
-      setSearchParams(
-        (prev) => {
-          const params = new URLSearchParams(prev);
-          if (next === "setup") {
-            params.delete("tab");
-          } else {
-            params.set("tab", next);
-          }
-          return params;
-        },
-        { replace: true },
-      );
-    },
-    [setSearchParams],
-  );
 
   const [schema, setSchema] = useState<AntizapretSettingField[]>([]);
   const [saved, setSaved] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [nodeName, setNodeName] = useState<string | null>(null);
   const [httpsPublicPort, setHttpsPublicPort] = useState("443");
+  // Список remote читается только для подсказки «из списка»: правится он на странице OpenVPN.
   const [savedRemoteHosts, setSavedRemoteHosts] = useState<string[]>([]);
   const [applyFirstRemoteToWireguard, setApplyFirstRemoteToWireguard] = useState(false);
-  const [remoteHostsDirty, setRemoteHostsDirty] = useState(false);
-  const [remotesEpoch, setRemotesEpoch] = useState(0);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -801,10 +771,12 @@ export default function AntizapretConfigTab() {
   const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
+    const nodeId = activeNode?.id ?? null;
     try {
-      const [data, vpn] = await Promise.all([
+      const [data, vpn, remotes] = await Promise.all([
         getAntizapretSettings(),
         getVpnNetworkSettings().catch(() => null),
+        nodeId != null ? getNodeRemoteHosts(nodeId).catch(() => null) : null,
       ]);
       setSchema(data.schema);
       setSaved(data.settings);
@@ -816,7 +788,8 @@ export default function AntizapretConfigTab() {
       } else {
         setHttpsPublicPort("443");
       }
-      setRemotesEpoch((n) => n + 1);
+      setSavedRemoteHosts(remotes?.hosts ?? []);
+      setApplyFirstRemoteToWireguard(Boolean(remotes?.apply_to_wireguard));
     } catch (err) {
       const message =
         err instanceof ApiError
@@ -827,44 +800,12 @@ export default function AntizapretConfigTab() {
     } finally {
       setLoading(false);
     }
-  }, [activeNode?.name, notifyError]);
+  }, [activeNode?.id, activeNode?.name, notifyError]);
 
   useEffect(() => {
     if (nodeLoading) return;
     void load();
   }, [load, nodeLoading, activeNode?.id]);
-
-  const handleSavedHostsChange = useCallback(
-    (hosts: string[], applyToWireguard?: boolean) => {
-      setSavedRemoteHosts(hosts);
-      if (applyToWireguard != null) {
-        setApplyFirstRemoteToWireguard(applyToWireguard);
-      }
-    },
-    [],
-  );
-
-  const handleHostsPersisted = useCallback(
-    (hosts: string[], applyToWireguard?: boolean) => {
-      const first = firstNonEmptyRemoteHost(hosts);
-      if (first != null) {
-        setDraft((prev) => ({
-          ...prev,
-          openvpn_host: first,
-          ...(applyToWireguard ? { wireguard_host: first } : {}),
-        }));
-        setSaved((prev) => ({
-          ...prev,
-          openvpn_host: first,
-          ...(applyToWireguard ? { wireguard_host: first } : {}),
-        }));
-      }
-      if (applyToWireguard != null) {
-        setApplyFirstRemoteToWireguard(applyToWireguard);
-      }
-    },
-    [],
-  );
 
   const sections = useMemo(() => groupSchema(schema), [schema]);
   const sectionsByTitle = useMemo(() => indexSectionsByTitle(sections), [sections]);
@@ -934,7 +875,6 @@ export default function AntizapretConfigTab() {
           onDraftChange={handleDraftChange}
           savedRemoteHosts={savedRemoteHosts}
           applyFirstRemoteToWireguard={applyFirstRemoteToWireguard}
-          onOpenPanelTab={() => setPageTab("openvpn-panel")}
         />
       );
     }
@@ -1014,19 +954,6 @@ export default function AntizapretConfigTab() {
   const step3Active = pendingApply;
   const step3Done = false;
 
-  const panelTab = (
-    <OpenVpnPanelTab
-      activeNodeId={activeNode?.id ?? null}
-      nodeName={nodeName ?? activeNode?.name ?? null}
-      disabled={controlsDisabled}
-      remotesEpoch={remotesEpoch}
-      remoteHostsDirty={remoteHostsDirty}
-      onSavedHostsChange={handleSavedHostsChange}
-      onDirtyChange={setRemoteHostsDirty}
-      onHostsPersisted={handleHostsPersisted}
-    />
-  );
-
   if (loading) {
     return (
       <div className="space-y-6">
@@ -1042,262 +969,216 @@ export default function AntizapretConfigTab() {
       <InlineProgressBar active={saving} label="Сохранение настроек..." />
       <InlineProgressBar active={applying} label="Применение doall.sh..." />
 
-      <Tabs
-        value={pageTab}
-        onValueChange={(value) => setPageTab(value as AntizapretPageTab)}
-        className="space-y-4"
-      >
-        <TabsList className="flex h-auto w-full snap-x snap-mandatory gap-1 overflow-x-auto bg-muted/50 p-1 [-ms-overflow-style:none] [scrollbar-width:none] sm:inline-flex sm:w-auto sm:overflow-visible sm:snap-none [&::-webkit-scrollbar]:hidden">
-          <TabsTrigger
-            value="setup"
-            className="shrink-0 snap-start gap-1.5 data-[state=active]:shadow-sm"
-          >
-            <Settings2 className="h-4 w-4" />
-            <span className="sm:hidden">setup</span>
-            <span className="hidden sm:inline">Параметры setup</span>
-          </TabsTrigger>
-          <TabsTrigger
-            value="openvpn-panel"
-            className="shrink-0 snap-start gap-1.5 data-[state=active]:shadow-sm"
-          >
-            <Cable className="h-4 w-4" />
-            <span className="sm:hidden">OpenVPN</span>
-            <span className="hidden sm:inline">OpenVPN (панель)</span>
-            {remoteHostsDirty && (
-              <Badge
-                variant="outline"
-                className="ml-0.5 border-amber-500/40 px-1.5 py-0 text-[10px] text-amber-700 dark:text-amber-300"
-              >
-                •
-              </Badge>
-            )}
-          </TabsTrigger>
-        </TabsList>
+      {loadError ? (
+        <div className="space-y-4">
+          <SettingsAlert variant="danger" title="Ошибка загрузки">
+            {loadError}
+          </SettingsAlert>
+          <Button type="button" variant="secondary" onClick={() => void load()}>
+            <RefreshCw className="mr-1.5 h-4 w-4" />
+            Повторить
+          </Button>
+        </div>
+      ) : schema.length === 0 ? (
+        <EmptyState
+          icon={Settings2}
+          title="Нет параметров конфигурации"
+          description="API не вернул схему настроек AntiZapret."
+        />
+      ) : (
+        <>
+          <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-gradient-to-br from-primary/5 via-card to-card p-5 shadow-sm">
+            <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
+            <div className="relative">
+              <PageSectionHeader
+                card={false}
+                icon={Globe}
+                title="AntiZapret"
+                titleAddon={
+                  <>
+                    {nodeName && (
+                      <Badge variant="outline" className="gap-1.5">
+                        <Server className="h-3 w-3" />
+                        {nodeName}
+                      </Badge>
+                    )}
+                    <Badge variant="secondary">{schema.length} параметров</Badge>
+                    <Badge variant="default">{enabledFlags} вкл.</Badge>
+                    {dirty && (
+                      <Badge
+                        variant="outline"
+                        className="border-amber-500/50 text-amber-700 dark:text-amber-300"
+                      >
+                        {dirtyKeys.length} несохранённых
+                      </Badge>
+                    )}
+                    {needsApply && !dirty && (
+                      <Badge
+                        variant="outline"
+                        className="border-amber-500/50 text-amber-700 dark:text-amber-300"
+                      >
+                        ждёт doall.sh
+                      </Badge>
+                    )}
+                  </>
+                }
+                description={
+                  <>
+                    Параметры файла{" "}
+                    <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+                      setup
+                    </span>{" "}
+                    на активном узле
+                  </>
+                }
+                docsHref={DOCS.antizapretConfig}
+                actions={
+                  <>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="w-full sm:w-auto"
+                      onClick={() => void load()}
+                      disabled={controlsDisabled}
+                    >
+                      <RefreshCw className="mr-1.5 h-4 w-4" />
+                      Обновить
+                    </Button>
+                    {dirty && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="w-full sm:w-auto"
+                        onClick={resetDraft}
+                        disabled={controlsDisabled}
+                      >
+                        Сбросить
+                      </Button>
+                    )}
+                  </>
+                }
+              />
 
-        <TabsContent
-          value="setup"
-          className="mt-0 space-y-6 focus-visible:outline-none"
-        >
-          {loadError ? (
-            <div className="space-y-4">
-              <SettingsAlert variant="danger" title="Ошибка загрузки">
-                {loadError}
-              </SettingsAlert>
-              <Button type="button" variant="secondary" onClick={() => void load()}>
-                <RefreshCw className="mr-1.5 h-4 w-4" />
-                Повторить
-              </Button>
+              <div className="mt-5 flex flex-wrap items-center gap-2 border-t pt-4">
+                <span className="mr-1 text-xs text-muted-foreground">Шаги:</span>
+                <WorkflowStep
+                  step={1}
+                  label="Изменить"
+                  active={step1Active}
+                  done={step1Done}
+                />
+                <ArrowRight className="hidden h-3.5 w-3.5 text-muted-foreground/50 sm:block" />
+                <WorkflowStep
+                  step={2}
+                  label="Сохранить"
+                  active={step2Active}
+                  done={step2Done}
+                />
+                <ArrowRight className="hidden h-3.5 w-3.5 text-muted-foreground/50 sm:block" />
+                <WorkflowStep
+                  step={3}
+                  label="doall.sh"
+                  active={step3Active}
+                  done={step3Done}
+                />
+              </div>
             </div>
-          ) : schema.length === 0 ? (
-            <EmptyState
-              icon={Settings2}
-              title="Нет параметров конфигурации"
-              description="API не вернул схему настроек AntiZapret."
-            />
-          ) : (
-            <>
-              <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-gradient-to-br from-primary/5 via-card to-card p-5 shadow-sm">
-                <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
-                <div className="relative">
-                  <PageSectionHeader
-                    card={false}
-                    icon={Globe}
-                    title="Конфиг AntiZapret"
-                    titleAddon={
-                      <>
-                        {nodeName && (
-                          <Badge variant="outline" className="gap-1.5">
-                            <Server className="h-3 w-3" />
-                            {nodeName}
-                          </Badge>
-                        )}
-                        <Badge variant="secondary">{schema.length} параметров</Badge>
-                        <Badge variant="default">{enabledFlags} вкл.</Badge>
-                        {dirty && (
-                          <Badge
-                            variant="outline"
-                            className="border-amber-500/50 text-amber-700 dark:text-amber-300"
-                          >
-                            {dirtyKeys.length} несохранённых
-                          </Badge>
-                        )}
-                        {needsApply && !dirty && (
-                          <Badge
-                            variant="outline"
-                            className="border-amber-500/50 text-amber-700 dark:text-amber-300"
-                          >
-                            ждёт doall.sh
-                          </Badge>
-                        )}
-                      </>
-                    }
-                    description={
-                      <>
-                        Параметры файла{" "}
-                        <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
-                          setup
-                        </span>{" "}
-                        на активном узле
-                      </>
-                    }
-                    docsHref={DOCS.antizapretConfig}
-                    actions={
-                      <>
-                        <Button
-                          type="button"
-                          variant="secondary"
-                          size="sm"
-                          className="w-full sm:w-auto"
-                          onClick={() => void load()}
-                          disabled={controlsDisabled}
-                        >
-                          <RefreshCw className="mr-1.5 h-4 w-4" />
-                          Обновить
-                        </Button>
-                        {dirty && (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="w-full sm:w-auto"
-                            onClick={resetDraft}
-                            disabled={controlsDisabled}
-                          >
-                            Сбросить
-                          </Button>
-                        )}
-                      </>
-                    }
-                  />
+          </div>
 
-                  <div className="mt-5 flex flex-wrap items-center gap-2 border-t pt-4">
-                    <span className="mr-1 text-xs text-muted-foreground">Шаги:</span>
-                    <WorkflowStep
-                      step={1}
-                      label="Изменить"
-                      active={step1Active}
-                      done={step1Done}
-                    />
-                    <ArrowRight className="hidden h-3.5 w-3.5 text-muted-foreground/50 sm:block" />
-                    <WorkflowStep
-                      step={2}
-                      label="Сохранить"
-                      active={step2Active}
-                      done={step2Done}
-                    />
-                    <ArrowRight className="hidden h-3.5 w-3.5 text-muted-foreground/50 sm:block" />
-                    <WorkflowStep
-                      step={3}
-                      label="doall.sh"
-                      active={step3Active}
-                      done={step3Done}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {(dirty || needsApply) && (
-                <div
-                  className={cn(
-                    "sticky top-14 z-30 flex flex-col gap-3 rounded-lg border px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/90 sm:flex-row sm:items-center sm:justify-between",
-                    dirty
-                      ? "border-amber-500/30 bg-amber-500/5"
-                      : "border-amber-500/30 bg-background/95",
-                  )}
-                >
-                  <p className="w-full text-sm sm:min-w-0 sm:flex-1">
-                    {dirty ? (
-                      <>
-                        Есть несохранённые изменения ({dirtyKeys.length}). Сохраните
-                        перед применением.
-                      </>
-                    ) : (
-                      <>Настройки сохранены — осталось выполнить doall.sh на узле.</>
-                    )}
-                  </p>
-                  <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
-                    {dirty ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="w-full sm:w-auto"
-                        onClick={() => void save()}
-                        disabled={controlsDisabled}
-                      >
-                        <Save className="mr-1.5 h-4 w-4" />
-                        Сохранить
-                      </Button>
-                    ) : (
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="w-full sm:w-auto"
-                        onClick={() => setApplyOpen(true)}
-                        disabled={controlsDisabled}
-                      >
-                        <Play className="mr-1.5 h-4 w-4" />
-                        Применить doall.sh
-                      </Button>
-                    )}
-                  </div>
-                </div>
+          {(dirty || needsApply) && (
+            <div
+              className={cn(
+                "sticky top-14 z-30 flex flex-col gap-3 rounded-lg border px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-background/90 sm:flex-row sm:items-center sm:justify-between",
+                dirty
+                  ? "border-amber-500/30 bg-amber-500/5"
+                  : "border-amber-500/30 bg-background/95",
               )}
-
-              {backupTcpPortConflict && (
-                <SettingsAlert
-                  variant="warning"
-                  title="Конфликт OPENVPN_BACKUP_TCP с портом 443"
-                >
-                  Резервные TCP-порты OpenVPN включают <strong>443</strong>, а панель
-                  публикует HTTPS на этом же порту. Смените «Публичный порт HTTPS» в{" "}
-                  <Link
-                    to="/settings/vpn_network"
-                    className="font-medium text-primary underline-offset-4 hover:underline"
-                  >
-                    Настройки → Адрес сайта и HTTPS
-                  </Link>{" "}
-                  перед применением doall.sh, иначе панель станет недоступна.
-                </SettingsAlert>
-              )}
-
-              <div className="grid gap-5 lg:grid-cols-2 lg:items-stretch">
-                {LAYOUT_ROWS.map((row, index) => (
-                  <Fragment key={`layout-row-${index}`}>
-                    <div className="min-w-0">
-                      {row.left ? renderSection(row.left) : null}
-                    </div>
-                    <div className="min-w-0">
-                      {row.right ? renderSection(row.right) : null}
-                    </div>
-                  </Fragment>
-                ))}
-              </div>
-
-              <div className="mt-5 space-y-5">
-                {LAYOUT_BOTTOM.map((title) => renderSection(title))}
-                {extraSections.map((section) => (
-                  <ConfigSectionCard
-                    key={section.title}
-                    section={section}
-                    draft={draft}
-                    dirtySet={dirtySet}
+            >
+              <p className="w-full text-sm sm:min-w-0 sm:flex-1">
+                {dirty ? (
+                  <>
+                    Есть несохранённые изменения ({dirtyKeys.length}). Сохраните
+                    перед применением.
+                  </>
+                ) : (
+                  <>Настройки сохранены — осталось выполнить doall.sh на узле.</>
+                )}
+              </p>
+              <div className="flex w-full min-w-0 flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap">
+                {dirty ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="w-full sm:w-auto"
+                    onClick={() => void save()}
                     disabled={controlsDisabled}
-                    onDraftChange={handleDraftChange}
-                  />
-                ))}
+                  >
+                    <Save className="mr-1.5 h-4 w-4" />
+                    Сохранить
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="w-full sm:w-auto"
+                    onClick={() => setApplyOpen(true)}
+                    disabled={controlsDisabled}
+                  >
+                    <Play className="mr-1.5 h-4 w-4" />
+                    Применить doall.sh
+                  </Button>
+                )}
               </div>
-            </>
+            </div>
           )}
-        </TabsContent>
 
-        <TabsContent
-          value="openvpn-panel"
-          forceMount
-          className="mt-0 focus-visible:outline-none data-[state=inactive]:hidden"
-        >
-          {panelTab}
-        </TabsContent>
-      </Tabs>
+          {backupTcpPortConflict && (
+            <SettingsAlert
+              variant="warning"
+              title="Конфликт OPENVPN_BACKUP_TCP с портом 443"
+            >
+              Резервные TCP-порты OpenVPN включают <strong>443</strong>, а панель
+              публикует HTTPS на этом же порту. Смените «Публичный порт HTTPS» в{" "}
+              <Link
+                to="/settings/vpn_network"
+                className="font-medium text-primary underline-offset-4 hover:underline"
+              >
+                Настройки → Адрес сайта и HTTPS
+              </Link>{" "}
+              перед применением doall.sh, иначе панель станет недоступна.
+            </SettingsAlert>
+          )}
+
+          <div className="grid gap-5 lg:grid-cols-2 lg:items-stretch">
+            {LAYOUT_ROWS.map((row, index) => (
+              <Fragment key={`layout-row-${index}`}>
+                <div className="min-w-0">
+                  {row.left ? renderSection(row.left) : null}
+                </div>
+                <div className="min-w-0">
+                  {row.right ? renderSection(row.right) : null}
+                </div>
+              </Fragment>
+            ))}
+          </div>
+
+          <div className="mt-5 space-y-5">
+            {LAYOUT_BOTTOM.map((title) => renderSection(title))}
+            {extraSections.map((section) => (
+              <ConfigSectionCard
+                key={section.title}
+                section={section}
+                draft={draft}
+                dirtySet={dirtySet}
+                disabled={controlsDisabled}
+                onDraftChange={handleDraftChange}
+              />
+            ))}
+          </div>
+        </>
+      )}
 
       <ConfirmDialogHost dialogProps={dialogProps} />
       <ConfirmDialog

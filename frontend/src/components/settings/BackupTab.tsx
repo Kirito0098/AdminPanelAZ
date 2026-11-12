@@ -576,7 +576,7 @@ export default function BackupTab() {
                   <IncludedItemsList items={ADMIN_PANEL_ALWAYS_INCLUDED} />
                   <p className="text-xs text-muted-foreground">
                     Nginx/TLS портала в архив не входят. После restore откройте{' '}
-                    <Link to="/subscription" className="font-medium text-foreground underline-offset-2 hover:underline">
+                    <Link to="/users?tab=portal" className="font-medium text-foreground underline-offset-2 hover:underline">
                       Подписка
                     </Link>{' '}
                     → «Настроить под текущую публикацию».

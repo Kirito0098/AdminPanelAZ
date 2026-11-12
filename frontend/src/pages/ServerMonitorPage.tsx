@@ -236,8 +236,14 @@ function LiveMetricCard({ label, value, icon: Icon, direction }: LiveMetricProps
   )
 }
 
-export default function ServerMonitorPage() {
+type ServerMonitorPageProps = {
+  /** Внутри «Наблюдения» (чип «Хост»): без своего заголовка, права проверяет родитель. */
+  embedded?: boolean
+}
+
+export default function ServerMonitorPage({ embedded = false }: ServerMonitorPageProps) {
   const { user } = useAuth()
+  const canLoad = embedded || user?.role === 'admin'
   const { activeNode, loading: nodeLoading } = useNode()
   const { error: notifyError, success } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
@@ -315,27 +321,27 @@ export default function ServerMonitorPage() {
   )
 
   useEffect(() => {
-    if (user?.role !== 'admin' || nodeLoading) return
+    if (!canLoad || nodeLoading) return
     startGlobal()
     loadMetrics()
       .finally(() => {
         setLoading(false)
         doneGlobal()
       })
-  }, [user?.role, nodeLoading, loadMetrics, activeNode?.id, startGlobal, doneGlobal])
+  }, [canLoad, nodeLoading, loadMetrics, activeNode?.id, startGlobal, doneGlobal])
 
   useEffect(() => {
-    if (user?.role !== 'admin' || !iface) return
+    if (!canLoad || !iface) return
     loadBandwidth(iface, range)
-  }, [user?.role, iface, range, loadBandwidth, activeNode?.id])
+  }, [canLoad, iface, range, loadBandwidth, activeNode?.id])
 
   useEffect(() => {
-    if (user?.role !== 'admin' || nodeLoading) return
+    if (!canLoad || nodeLoading) return
     loadResourceHistory(resourcePeriod)
-  }, [user?.role, nodeLoading, loadResourceHistory, resourcePeriod, activeNode?.id])
+  }, [canLoad, nodeLoading, loadResourceHistory, resourcePeriod, activeNode?.id])
 
   useEffect(() => {
-    if (user?.role !== 'admin' || !iface) return
+    if (!canLoad || !iface) return
 
     let ws: WebSocket | null = null
     let attempt = 0
@@ -413,12 +419,12 @@ export default function ServerMonitorPage() {
     }
   }
 
-  if (user?.role !== 'admin') {
+  if (!embedded && user?.role !== 'admin') {
     return <Navigate to="/" replace />
   }
 
   if (loading) {
-    return <Spinner label="Загрузка метрик сервера..." className="py-16" />
+    return <Spinner label="Загрузка метрик сервера..." className={embedded ? 'py-8' : 'py-16'} />
   }
 
   const nodeOffline = activeNode?.status === 'offline'
@@ -453,41 +459,50 @@ export default function ServerMonitorPage() {
   const selectedGroups = getInterfaceGroups(iface, interfaceGroups)
 
   return (
-    <div className="space-y-6">
-      <PageSectionHeader
-        card
-        icon={Cpu}
-        title="Сервер"
-        titleAddon={
-          <>
-            <NodeBadge name={activeNode?.name ?? metrics?.node_name} status={activeNode?.status} />
-            {wsConnected ? (
-              <Badge variant="success" className="gap-1 text-[10px]">
-                <Wifi size={10} />
-                Live
-              </Badge>
-            ) : (
-              <Badge variant="secondary" className="gap-1 text-[10px]">
-                <WifiOff size={10} />
-                WS
-              </Badge>
-            )}
-          </>
-        }
-        description={
-          <>
-            CPU, RAM, диск и трафик vnStat · Live RX/TX через WebSocket
-            {metrics?.hostname ? ` · ${metrics.hostname}` : ''}
-          </>
-        }
-        docsHref={DOCS.serverMonitor}
-        actions={
-          <Button variant="outline" className="w-full sm:w-auto" onClick={handleRefresh} disabled={refreshing}>
+    <div className={embedded ? 'space-y-4' : 'space-y-6'}>
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
             <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
             Обновить
           </Button>
-        }
-      />
+        </div>
+      ) : (
+        <PageSectionHeader
+          card
+          icon={Cpu}
+          title="Сервер"
+          titleAddon={
+            <>
+              <NodeBadge name={activeNode?.name ?? metrics?.node_name} status={activeNode?.status} />
+              {wsConnected ? (
+                <Badge variant="success" className="gap-1 text-[10px]">
+                  <Wifi size={10} />
+                  Live
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="gap-1 text-[10px]">
+                  <WifiOff size={10} />
+                  WS
+                </Badge>
+              )}
+            </>
+          }
+          description={
+            <>
+              CPU, RAM, диск и трафик vnStat · Live RX/TX через WebSocket
+              {metrics?.hostname ? ` · ${metrics.hostname}` : ''}
+            </>
+          }
+          docsHref={DOCS.serverMonitor}
+          actions={
+            <Button variant="outline" className="w-full sm:w-auto" onClick={handleRefresh} disabled={refreshing}>
+              <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+              Обновить
+            </Button>
+          }
+        />
+      )}
 
       <SettingsAlert variant="info" title="Данные активного узла">
         Метрики собираются с <strong>{activeNode?.name ?? metrics?.node_name ?? 'активного узла'}</strong>

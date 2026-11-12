@@ -48,7 +48,7 @@ const QUICK_LINKS = [
     icon: Server,
   },
   {
-    to: `/antizapret#${ANTIZAPRET_REMOTES_HASH}`,
+    to: `/protocols/antizapret#${ANTIZAPRET_REMOTES_HASH}`,
     label: 'Конфиг AntiZapret',
     description: 'Адреса подключения и параметры setup',
     icon: Settings2,

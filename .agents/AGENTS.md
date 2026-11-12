@@ -24,6 +24,8 @@
 | `react-best-practices` | Perf React + Vite SPA (без Next и SSR) | Code |
 | `vercel-composition-patterns` | Раздутые boolean-пропсы | Code |
 | `web-design-guidelines` | Чеклист UI/a11y по коду | Code |
+| `ui-ux-pro-max` | Меню, навигация, иерархия экранов, адаптив, a11y | Code |
+| `frontend-design` | Визуальное направление нового экрана | Code |
 | `webapp-testing` | Проверка UI в браузере | Code |
 | `surgical-edits` | Доработка — правкой на месте, без второй кнопки/эндпоинта/пайплайна | Code |
 | `code-simplifier` | Упростить только текущий дифф, не меняя поведение | Code |

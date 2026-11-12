@@ -19,23 +19,23 @@
 
 | Раздел в панели | Инструкция | Для кого |
 |-----------------|------------|----------|
-| Конфигурации | [konfiguracii.md](konfiguracii.md) | Все (создание — админ) |
-| NOC Мониторинг | [noc-monitoring.md](noc-monitoring.md) | Только админ |
-| Мониторинг трафика | [traffic-monitoring.md](traffic-monitoring.md) | Все |
-| Маршрутизация / CIDR | [routing-cidr.md](routing-cidr.md) | Только админ |
-| Конфиг AntiZapret | [antizapret-config.md](antizapret-config.md) | Только админ |
-| Прокси | [proxy-nodes.md](proxy-nodes.md) | Только админ (меню **Конфигурация → Прокси**, модуль `proxy_nodes`) |
-| AZ-WARP | [warper.md](warper.md) | Только админ |
-| AZ-AWG2 | [awg2.md](awg2.md) | Админ (страница); пользователи — свои конфиги на Конфигурациях |
-| Telegram | [Telegram.md](Telegram.md) | Только админ |
-| Редактор файлов | [edit-files.md](edit-files.md) | Только админ |
-| Журналы | [logs.md](logs.md) | Только админ |
-| Сервер | [server-monitor.md](server-monitor.md) | Только админ |
-| Узлы | [uzly.md](uzly.md) | Только админ |
+| Клиенты (конфигурации) | [konfiguracii.md](konfiguracii.md) | Все (создание — админ) |
+| Абоненты (вкладки «Абоненты» / «Портал и коды») | [podpiska.md](podpiska.md) | Только админ (модуль `user_provisioning`; вкладка — `client_portal` / `unlock_codes`) |
+| Наблюдение | [noc-monitoring.md](noc-monitoring.md), [traffic-monitoring.md](traffic-monitoring.md), [logs.md](logs.md), [server-monitor.md](server-monitor.md) | Только админ; вкладка «Трафик» — все |
+| Сеть → Узлы | [uzly.md](uzly.md) | Только админ |
+| Сеть → Прокси | [proxy-nodes.md](proxy-nodes.md) | Только админ (модуль `proxy_nodes`) |
+| Сеть → Маршрутизация | [routing-cidr.md](routing-cidr.md) | Только админ |
+| Протоколы → AntiZapret | [antizapret-config.md](antizapret-config.md) | Только админ |
+| Протоколы → OpenVPN | [antizapret-config.md](antizapret-config.md#openvpn-профили-логи-и-состояние-установки) | Только админ |
+| Протоколы → AZ-WARP | [warper.md](warper.md) | Только админ |
+| Протоколы → AZ-AWG2 | [awg2.md](awg2.md) | Админ (страница); пользователи — свои конфиги на Клиентах |
+| Система → Telegram | [Telegram.md](Telegram.md) | Только админ |
+| Система → Редактор файлов | [edit-files.md](edit-files.md) | Только админ |
 | SSH-транспорт узлов | [node-ssh-transport.md](node-ssh-transport.md) | Только админ (модуль `node_ssh_transport`) |
 | proxy_agent (установка на RU) | [proxy-agent.md](proxy-agent.md) | Только админ |
-| Подписка | [podpiska.md](podpiska.md) | Только админ: срок на пользователе, портал (`c_`/`u_`), unlock (модули `client_portal` / `unlock_codes`) |
 | Настройки | [nastrojki/README.md](nastrojki/README.md) | Все (часть — только админ) |
+
+Старые адреса **Мониторинга трафика**, **Журналов** и **Сервера** открываются редиректом на вкладки **Наблюдения**; **Подписка** стала вкладкой **«Портал и коды»** в **Абонентах**.
 
 ---
 
@@ -43,20 +43,21 @@
 
 Полный список: [nastrojki/README.md](nastrojki/README.md)
 
-| Раздел | Файл |
-|--------|------|
-| Мой профиль | [profil.md](nastrojki/profil.md) |
-| Пользователи | [polzovateli.md](nastrojki/polzovateli.md) |
-| Защита входа | [bezopasnost.md](nastrojki/bezopasnost.md) |
-| Выдача VPN-профилей | [razdacha-konfigov.md](nastrojki/razdacha-konfigov.md) |
-| Обслуживание VPN | [obsluzhivanie.md](nastrojki/obsluzhivanie.md) |
-| Адрес сайта и HTTPS | [set-i-publikaciya.md](nastrojki/set-i-publikaciya.md) |
-| Резервные копии | [rezervnye-kopii.md](nastrojki/rezervnye-kopii.md) |
-| Нагрузка и уведомления | [monitoring-i-alerty.md](nastrojki/monitoring-i-alerty.md) |
-| Разделы панели | [moduli.md](nastrojki/moduli.md) |
-| Обновление панели | [obnovleniya.md](nastrojki/obnovleniya.md) |
-| Перезапуск и пересборка | [perezapusk-i-peresborka.md](nastrojki/perezapusk-i-peresborka.md) |
-| Проверка работы | [diagnostika.md](nastrojki/diagnostika.md) |
+| Группа | Раздел | Файл |
+|--------|--------|------|
+| Личное | Мой профиль | [profil.md](nastrojki/profil.md) |
+| Доступ | Пользователи панели | [polzovateli.md](nastrojki/polzovateli.md) |
+| Доступ | Защита входа | [bezopasnost.md](nastrojki/bezopasnost.md) |
+| VPN | Выдача VPN-профилей | [razdacha-konfigov.md](nastrojki/razdacha-konfigov.md) |
+| VPN | Обслуживание VPN | [obsluzhivanie.md](nastrojki/obsluzhivanie.md) |
+| Сервер | Адрес сайта и HTTPS | [set-i-publikaciya.md](nastrojki/set-i-publikaciya.md) |
+| Сервер | Резервные копии | [rezervnye-kopii.md](nastrojki/rezervnye-kopii.md) |
+| Сервер | Нагрузка и уведомления | [monitoring-i-alerty.md](nastrojki/monitoring-i-alerty.md) |
+| Панель | Уведомления в панели | [monitoring-i-alerty.md](nastrojki/monitoring-i-alerty.md) |
+| Панель | Разделы панели | [moduli.md](nastrojki/moduli.md) |
+| Панель | Обновление панели | [obnovleniya.md](nastrojki/obnovleniya.md) |
+| Панель | Перезапуск и пересборка | [perezapusk-i-peresborka.md](nastrojki/perezapusk-i-peresborka.md) |
+| Панель | Проверка работы | [diagnostika.md](nastrojki/diagnostika.md) |
 
 ---
 

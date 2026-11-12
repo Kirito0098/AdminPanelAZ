@@ -10,11 +10,11 @@ import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import DocsLink from '@/components/shared/DocsLink'
 import { DOCS } from '@/lib/docsUrls'
 import BackupTab from '@/components/settings/BackupTab'
+import BellNotifyMatrix from '@/components/settings/BellNotifyMatrix'
 import ConfigDeliveryTab from '@/components/settings/ConfigDeliveryTab'
 import FeatureTogglesTab from '@/components/settings/FeatureTogglesTab'
 import MaintenanceTab from '@/components/settings/MaintenanceTab'
 import MonitoringTab from '@/components/settings/MonitoringTab'
-import NotificationsSection from '@/components/settings/NotificationsSection'
 import PersonalTab from '@/components/settings/PersonalTab'
 import SecurityTab from '@/components/settings/SecurityTab'
 import {
@@ -181,6 +181,11 @@ export default function SettingsPage() {
     return <Navigate to="/settings/vpn_network?tab=cloudflare" replace />
   }
 
+  // Уведомления разделились: Telegram — на /telegram, матрица колокольчика — panel_notify.
+  if (sectionParam === 'notifications') {
+    return <Navigate to="/settings/panel_notify" replace />
+  }
+
   if (sectionParam && !activeSection) {
     return <Navigate to="/settings" replace />
   }
@@ -247,8 +252,8 @@ export default function SettingsPage() {
         return <BackupTab />
       case 'monitoring':
         return <MonitoringTab />
-      case 'notifications':
-        return <NotificationsSection />
+      case 'panel_notify':
+        return <BellNotifyMatrix />
       case 'modules':
         return <FeatureTogglesTab />
       case 'updates':

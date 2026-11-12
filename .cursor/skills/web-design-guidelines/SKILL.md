@@ -35,6 +35,16 @@ changes, update this file deliberately.
 - `Esc` closes overlays; `Enter` submits the primary form action.
 - Nested Radix menus/portals: check real clicks, not simulated ones.
 
+## Navigation
+
+- The current page or section is marked in markup (`aria-current="page"`), not only by color.
+- URL reflects state: tabs, filters, pagination, open panel — back returns to the previous state.
+- Navigation is `<a href>`/`<Link>` (Cmd/Ctrl+click, middle-click); `<button>` is for actions.
+- Nav-heavy pages have a "skip to content" link; the sidebar is `<nav>` with a label when there is more than one.
+- Mobile drawer: focus moves into it, `Esc` closes, focus returns to the trigger, body scroll is locked.
+- Breadcrumbs only for 3+ levels; flat sections do not need them.
+- Unsaved changes warn before navigation (`beforeunload` or router guard).
+
 ## Forms and errors
 
 - Error text is tied to the field (`aria-describedby`), not only colored red.

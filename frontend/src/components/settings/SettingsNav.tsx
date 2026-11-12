@@ -24,7 +24,7 @@ export type SettingsSection =
   | 'maintenance'
   | 'backup'
   | 'monitoring'
-  | 'notifications'
+  | 'panel_notify'
   | 'vpn_network'
   | 'modules'
   | 'updates'
@@ -80,8 +80,8 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
     items: [navItem('personal', User)],
   },
   {
-    label: 'Кто может войти',
-    description: 'Учётные записи и защита',
+    label: 'Доступ',
+    description: 'Учётные записи и защита входа',
     adminOnly: true,
     items: [
       navItem('users', Users, { settingsTab: 'users' }),
@@ -99,20 +99,20 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
   },
   {
     label: 'Сервер',
-    description: 'Сайт, копии и уведомления',
+    description: 'Сайт, копии и нагрузка',
     adminOnly: true,
     items: [
       navItem('vpn_network', Globe, { settingsTab: 'vpn_network' }),
       navItem('backup', Archive, { settingsTab: 'backup' }),
       navItem('monitoring', Activity, { settingsTab: 'monitoring' }),
-      navItem('notifications', Bell),
     ],
   },
   {
     label: 'Панель',
-    description: 'Функции и обновления',
+    description: 'Уведомления, функции и обновления',
     adminOnly: true,
     items: [
+      navItem('panel_notify', Bell),
       navItem('modules', Puzzle),
       navItem('updates', Download, { settingsTab: 'updates' }),
       navItem('panel_ops', RefreshCw, { settingsTab: 'panel_ops' }),

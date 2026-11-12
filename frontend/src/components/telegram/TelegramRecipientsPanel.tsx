@@ -78,7 +78,7 @@ export default function TelegramRecipientsPanel({
         <SettingsAlert variant="warning" title="Нет администраторов с Telegram ID">
           Укажите Telegram ID в{' '}
           <Link to="/settings/users" className="font-medium text-primary underline-offset-4 hover:underline">
-            Настройки → Пользователи
+            Настройки → Пользователи панели
           </Link>{' '}
           для нужных администраторов.
         </SettingsAlert>

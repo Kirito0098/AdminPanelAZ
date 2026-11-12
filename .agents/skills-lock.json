@@ -40,7 +40,7 @@
       "source": "vercel-labs/web-interface-guidelines",
       "sourceType": "vendor",
       "skillPath": ".cursor/skills/web-design-guidelines/SKILL.md",
-      "note": "checklist inlined into SKILL.md; remote WebFetch dependency removed"
+      "note": "checklist inlined into SKILL.md; remote WebFetch dependency removed; Navigation block (aria-current, URL state, drawer focus, skip link) added locally from vercel-labs/web-interface-guidelines command.md"
     },
     "webapp-testing": {
       "source": "unknown",
@@ -98,6 +98,26 @@
       ],
       "computedHash": "26f47f1e20d2e2c0fe87aae89b013709d38dba851a54dcebdcba6435e593c726",
       "note": "in-place refactoring / anti-additive rules synthesized from both collections: invariants (#6), comment rules (#12-13), dead code deletion, call-site updates in one commit, refactor separated from feature work; additive-bias checklist is local"
+    },
+    "ui-ux-pro-max": {
+      "source": "nextlevelbuilder/ui-ux-pro-max-skill",
+      "sourceType": "github",
+      "skillPath": ".cursor/skills/ui-ux-pro-max/SKILL.md",
+      "upstreamPath": ".claude/skills/ui-ux-pro-max",
+      "upstreamCommit": "6ae86f61f520d6ca229d2f40e070410638c908c5",
+      "upstreamHash": "14f43337edfbf7822e091428e4ae0c6f92f86e3353deda6a30f6613121e2cf2d",
+      "computedHash": "cbca7f455dcea388ba1bbae223b356bf1369e6ffdf99b6d01a397ffdb6af0c04",
+      "note": "whole skill vendored untrimmed (data/, references/, scripts/, MIT LICENSE): 120 UX rules, styles, palettes, font pairs, 22 stacks; description shortened to one trigger line; real .cursor path added to the search-tool section; styles/palettes stay upstream material — the panel has its own design"
+    },
+    "frontend-design": {
+      "source": "anthropics/claude-plugins-official",
+      "sourceType": "github",
+      "skillPath": ".cursor/skills/frontend-design/SKILL.md",
+      "upstreamPath": "plugins/frontend-design/skills/frontend-design/SKILL.md",
+      "upstreamCommit": "e0ab6e51219eef74e417a0e1d89e5d53e5e763d4",
+      "upstreamHash": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3",
+      "computedHash": "bbefce353c8d6df74026af560b3971506b0ec82d3c08fa14a81e93b01d537a43",
+      "note": "vendored with Apache-2.0 LICENSE and LICENSE.txt; description shortened to one trigger line; body unchanged (aesthetic direction, typography, copy; no remote calls)"
     }
   }
 }

@@ -97,7 +97,7 @@ export default function TelegramBotAuthGuide({
           <Link to="/settings/personal" className="font-medium text-primary underline-offset-4 hover:underline">
             карточку Telegram в «Моём профиле»
           </Link>{' '}
-          или в «Настройки → Пользователи».
+          или в «Настройки → Пользователи панели».
         </GuideStep>
         <GuideStep step={6} title="Проверьте вход">
           Откройте <Link to="/login">страницу входа</Link> → «Войти через Telegram». Нужен HTTPS.

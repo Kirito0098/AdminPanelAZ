@@ -1,6 +1,5 @@
-import { useMemo } from 'react'
-import { Bot, Route, Send, Smartphone } from 'lucide-react'
-import { useSearchParams } from 'react-router-dom'
+import { Bell, Bot, Route, Send, Smartphone } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import TelegramAlerts from '@/components/telegram/TelegramAlerts'
 import TelegramDisableSection from '@/components/telegram/TelegramDisableSection'
 import TelegramHero from '@/components/telegram/TelegramHero'
@@ -9,29 +8,22 @@ import TelegramSettingsPanel from '@/components/telegram/TelegramSettingsPanel'
 import { TELEGRAM_TAB_META } from '@/components/telegram/telegramLabels'
 import { useTelegramSettings, type TelegramSection } from '@/components/telegram/useTelegramSettings'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { usePageTab } from '@/hooks/usePageTab'
 
-const TELEGRAM_TABS: Array<{ id: TelegramSection; icon: typeof Send }> = [
+const TELEGRAM_TABS: Array<{ id: TelegramSection; icon: LucideIcon }> = [
   { id: 'bot', icon: Send },
   { id: 'miniapp', icon: Smartphone },
   { id: 'interactive', icon: Bot },
   { id: 'relay', icon: Route },
+  { id: 'notify', icon: Bell },
 ]
 
-const VALID_TABS = new Set(TELEGRAM_TABS.map((t) => t.id))
+const TAB_IDS = TELEGRAM_TABS.map((item) => item.id)
 
 export default function TelegramPage() {
-  const [searchParams, setSearchParams] = useSearchParams()
+  // Неизвестное значение (в том числе старый алиас `?tab=auth`) даёт `bot`.
+  const [tab, navigateTab] = usePageTab<TelegramSection>({ tabs: TAB_IDS, fallback: 'bot' })
   const tg = useTelegramSettings()
-
-  const tab = useMemo(() => {
-    const value = searchParams.get('tab')
-    if (value === 'auth') return 'bot'
-    return value && VALID_TABS.has(value as TelegramSection) ? (value as TelegramSection) : 'bot'
-  }, [searchParams])
-
-  const navigateTab = (next: TelegramSection) => {
-    setSearchParams({ tab: next }, { replace: true })
-  }
 
   const activeTabMeta = TELEGRAM_TAB_META[tab]
 

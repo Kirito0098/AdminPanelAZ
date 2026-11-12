@@ -54,7 +54,7 @@ export default function ConfigDeliveryTab() {
       <p className="text-sm text-muted-foreground">
         Готовые файлы маршрутов для Keenetic, MikroTik и TP-Link. Портал и unlock-ключи — в разделе{' '}
         <Link
-          to="/subscription"
+          to="/users?tab=portal"
           className="font-medium text-foreground underline underline-offset-4 transition-colors hover:text-primary"
         >
           Подписка

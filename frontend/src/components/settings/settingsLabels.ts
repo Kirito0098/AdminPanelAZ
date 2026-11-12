@@ -18,9 +18,9 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     docsHref: DOCS.profile,
   },
   users: {
-    title: 'Пользователи',
-    description: 'Кто может входить в панель и что ему разрешено делать',
-    hint: 'Здесь только учётные записи панели: логин, роль и вход в панель.',
+    title: 'Пользователи панели',
+    description: 'Кто входит в панель, с какой ролью и что ему разрешено',
+    hint: 'Это доступ в саму панель, а не абоненты VPN: логин, роль администратора и вход.',
     docsHref: DOCS.users,
   },
   security: {
@@ -47,10 +47,10 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     hint: 'Перед крупными изменениями рекомендуется сделать копию — так проще откатиться при ошибке.',
     docsHref: DOCS.backup,
   },
-  notifications: {
-    title: 'Уведомления',
-    description: 'Кому из админов что приходит: Telegram и колокольчик панели',
-    hint: 'Для Telegram — получатели и типы событий; для панели — категории в колокольчике у каждого админа.',
+  panel_notify: {
+    title: 'Уведомления в панели',
+    description: 'Колокольчик: какие события и какому админу показывать',
+    hint: 'Настраивает только колокольчик и ленту в панели. Сообщения бота — на странице Telegram, вкладка «Уведомления».',
     docsHref: DOCS.monitoringAlerts,
   },
   monitoring: {

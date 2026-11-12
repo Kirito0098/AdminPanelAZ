@@ -1,9 +1,11 @@
 import type { Node, NodeHaContext, NodeSyncGroup } from '@/types'
 
 const HA_GROUP_SCOPE_PREFIXES = [
+  '/monitoring',
   '/traffic',
   '/routing',
   '/antizapret',
+  '/protocols',
   '/proxy',
   '/edit-files',
   '/settings',

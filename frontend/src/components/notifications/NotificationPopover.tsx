@@ -58,7 +58,7 @@ export default function NotificationPopover({
 
       <div className="flex items-center justify-between border-t border-border/60 px-3 py-2">
         <NavLink
-          to="/logs?tab=notifications"
+          to="/monitoring?tab=logs&log=notifications"
           className="text-xs text-primary underline-offset-4 hover:underline"
           onClick={() => onOpenChange(false)}
         >

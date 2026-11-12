@@ -27,6 +27,6 @@ export const TELEGRAM_TAB_META: Record<
   notify: {
     label: 'Уведомления',
     shortLabel: 'Увед.',
-    description: 'Получатели, переключатели, типы событий и NOC-сводки',
+    description: 'Telegram: получатели, типы событий и NOC-сводки',
   },
 }

@@ -1,4 +1,4 @@
-import { Bot, Send, Smartphone, UserRound } from 'lucide-react'
+import { Bell, Bot, Send, Smartphone, UserRound } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { Card, CardContent } from '@/components/ui/card'
@@ -106,6 +106,23 @@ export default function TelegramOverviewCards({ tg, loading = false, onNavigate 
           : 'border-l-muted-foreground/30',
       tone: tg.commandsReady ? 'text-emerald-600 dark:text-emerald-400' : undefined,
     },
+    {
+      tab: 'notify',
+      title: 'Уведомления',
+      icon: Bell,
+      value: !tg.notifyEnabled ? 'Выключено' : tg.hasNotifyRecipients ? 'Включено' : 'Нет получателей',
+      sub: `Событий: ${tg.notifyEventsEnabled} из ${tg.adminNotify?.events.length ?? 0}`,
+      accent:
+        tg.notifyEnabled && tg.hasNotifyRecipients
+          ? 'border-l-emerald-500'
+          : tg.notifyEnabled
+            ? 'border-l-amber-500'
+            : 'border-l-muted-foreground/30',
+      tone:
+        tg.notifyEnabled && tg.hasNotifyRecipients
+          ? 'text-emerald-600 dark:text-emerald-400'
+          : undefined,
+    },
   ]
 
   const profileCard: OverviewCard = {
@@ -121,7 +138,7 @@ export default function TelegramOverviewCards({ tg, loading = false, onNavigate 
     'group text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
       {tabCards.map((card) => (
         <button
           key={card.tab}

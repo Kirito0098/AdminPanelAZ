@@ -104,7 +104,7 @@ nginx/firewall/systemd/install, бэкапы и миграции, node/proxy age
 | Каталог Zoo | Когда активен | Что внутри |
 | --- | --- | --- |
 | `.agents/skills/` | любой режим | `karpathy-ponytail`, `cli-toolbox` |
-| `.agents/skills-code/` | Code | `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `tdd`, `tui-design`, `surgical-edits`, `code-simplifier` |
+| `.agents/skills-code/` | Code | `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `tdd`, `tui-design`, `surgical-edits`, `code-simplifier` |
 | `.agents/skills-architect/` | Architect | `brainstorming`, `split-design-spec` |
 
 Cursor режимов не знает: он видит весь `.cursor/skills`. Поэтому описания в frontmatter короткие

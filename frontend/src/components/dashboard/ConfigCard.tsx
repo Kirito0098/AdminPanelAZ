@@ -707,7 +707,7 @@ export default function ConfigCard({
                 <IconActionLink
                   title="Статистика трафика"
                   label="Трафик"
-                  to={`/traffic?client=${encodeURIComponent(config.client_name)}`}
+                  to={`/monitoring?tab=traffic&client=${encodeURIComponent(config.client_name)}`}
                   className={actionAccent?.className}
                   style={actionAccent?.style}
                 >

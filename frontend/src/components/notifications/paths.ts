@@ -15,7 +15,7 @@ export function pathForNotification(item: NotificationItem): string | null {
     }
     return '/users?requests=1'
   }
-  if (item.category === 'security') return '/logs'
+  if (item.category === 'security') return '/monitoring?tab=logs'
   if (item.category === 'nodes') return '/nodes'
   if (item.category === 'services') return '/monitoring'
   if (typeof userId === 'number' && Number.isFinite(userId)) return '/users'

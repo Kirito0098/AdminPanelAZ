@@ -311,7 +311,7 @@ export default function UsersTab({
             to="/users"
             className="font-medium text-foreground underline underline-offset-4 transition-colors hover:text-primary"
           >
-            Пользователи
+            Абоненты
           </Link>
           .
         </SettingsAlert>

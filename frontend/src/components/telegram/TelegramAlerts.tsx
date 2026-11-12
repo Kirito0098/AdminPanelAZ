@@ -44,7 +44,7 @@ export default function TelegramAlerts({ tg }: TelegramAlertsProps) {
           Уведомления включены, но некуда отправлять — выберите администраторов на вкладке{' '}
           <strong>Уведомления</strong> или привяжите Telegram в{' '}
           <Link to="/settings/users" className="font-medium text-primary underline-offset-4 hover:underline">
-            Настройки → Пользователи
+            Настройки → Пользователи панели
           </Link>
           .
         </SettingsAlert>

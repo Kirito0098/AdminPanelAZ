@@ -190,7 +190,7 @@ export default function TelegramMiniAppGuide({
             <span>
               Проверьте привязку: код из «Моего профиля» через <code>/link</code> или Telegram ID в{' '}
               <Link to="/settings/users" className="font-medium text-primary underline-offset-4 hover:underline">
-                Настройки → Пользователи
+                Настройки → Пользователи панели
               </Link>
               .
             </span>

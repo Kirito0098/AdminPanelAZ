@@ -297,7 +297,12 @@ function DeletedTrafficCard({ row, onDelete, disabled }: DeletedTrafficCardProps
   )
 }
 
-export default function TrafficPage() {
+type TrafficPageProps = {
+  /** Внутри «Наблюдения»: без своего заголовка и отступов страницы. */
+  embedded?: boolean
+}
+
+export default function TrafficPage({ embedded = false }: TrafficPageProps) {
   const { activeNode, loading: nodeLoading } = useNode()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
@@ -973,7 +978,7 @@ export default function TrafficPage() {
   )
 
   if (loading && !data) {
-    return <Spinner label="Загрузка статистики трафика..." className="py-16" />
+    return <Spinner label="Загрузка статистики трафика..." className={embedded ? 'py-8' : 'py-16'} />
   }
 
   const hasRows = (data?.rows?.length ?? 0) > 0
@@ -985,67 +990,73 @@ export default function TrafficPage() {
     appliedTo,
   )
 
-  return (
-    <div className="space-y-6">
-      <PageSectionHeader
-        icon={Network}
-        title="Мониторинг трафика"
-        docsHref={DOCS.traffic}
-        titleAddon={
-          <>
-            <NodeBadge name={activeNode?.name ?? data?.node_name} status={activeNode?.status} />
-            {liveLoading && (
-              <Badge variant="secondary" className="gap-1 text-[10px]">
-                <Loader2 size={10} className="animate-spin" />
-                Live-статус
-              </Badge>
-            )}
-            {summary?.db_is_stale && (
-              <Badge variant="warning" className="gap-1 text-[10px]">
-                <Database size={10} />
-                БД устарела ({summary.db_age_seconds}с)
-              </Badge>
-            )}
-          </>
-        }
-        description={
-          <>
-            Накопленная статистика RX/TX по клиентам VPN и AntiZapret
-            {data?.timestamp && <> · обновлено {formatDateTime(data.timestamp)}</>}
-          </>
-        }
-        actions={
-          <>
-            <AutoRefreshControl
-              enabled={autoRefresh}
-              onToggle={() => setAutoRefresh((v) => !v)}
-              countdown={countdown}
-              intervalSec={REFRESH_INTERVAL}
-              refreshing={refreshing}
-              onManualRefresh={handleRefresh}
-            />
-            {isAdmin && (
-              <>
-                <Select value={resetScope} onValueChange={(v) => setResetScope(v as typeof resetScope)}>
-                  <SelectTrigger className="h-9 w-full text-xs sm:w-[160px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Сброс: всё</SelectItem>
-                    <SelectItem value="openvpn">Сброс: OpenVPN</SelectItem>
-                    <SelectItem value="wireguard">Сброс: WG/AWG</SelectItem>
-                    {awg2Enabled && <SelectItem value="amneziawg2">Сброс: AWG 2.0</SelectItem>}
-                  </SelectContent>
-                </Select>
-                <Button variant="outline" size="sm" onClick={handleReset} disabled={resetting}>
-                  {resetting ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                  Сбросить
-                </Button>
-              </>
-            )}
-          </>
-        }
+  const headerActions = (
+    <>
+      <AutoRefreshControl
+        enabled={autoRefresh}
+        onToggle={() => setAutoRefresh((v) => !v)}
+        countdown={countdown}
+        intervalSec={REFRESH_INTERVAL}
+        refreshing={refreshing}
+        onManualRefresh={handleRefresh}
       />
+      {isAdmin && (
+        <>
+          <Select value={resetScope} onValueChange={(v) => setResetScope(v as typeof resetScope)}>
+            <SelectTrigger className="h-9 w-full text-xs sm:w-[160px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Сброс: всё</SelectItem>
+              <SelectItem value="openvpn">Сброс: OpenVPN</SelectItem>
+              <SelectItem value="wireguard">Сброс: WG/AWG</SelectItem>
+              {awg2Enabled && <SelectItem value="amneziawg2">Сброс: AWG 2.0</SelectItem>}
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" onClick={handleReset} disabled={resetting}>
+            {resetting ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+            Сбросить
+          </Button>
+        </>
+      )}
+    </>
+  )
+
+  return (
+    <div className={embedded ? 'space-y-4' : 'space-y-6'}>
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">{headerActions}</div>
+      ) : (
+        <PageSectionHeader
+          icon={Network}
+          title="Мониторинг трафика"
+          docsHref={DOCS.traffic}
+          titleAddon={
+            <>
+              <NodeBadge name={activeNode?.name ?? data?.node_name} status={activeNode?.status} />
+              {liveLoading && (
+                <Badge variant="secondary" className="gap-1 text-[10px]">
+                  <Loader2 size={10} className="animate-spin" />
+                  Live-статус
+                </Badge>
+              )}
+              {summary?.db_is_stale && (
+                <Badge variant="warning" className="gap-1 text-[10px]">
+                  <Database size={10} />
+                  БД устарела ({summary.db_age_seconds}с)
+                </Badge>
+              )}
+            </>
+          }
+          description={
+            <>
+              Накопленная статистика RX/TX по клиентам VPN и AntiZapret
+              {data?.timestamp && <> · обновлено {formatDateTime(data.timestamp)}</>}
+            </>
+          }
+          actions={headerActions}
+        />
+      )}
 
       {data?.ha_context ? (
         <SettingsAlert variant="info" title="Суммарный трафик HA-группы">

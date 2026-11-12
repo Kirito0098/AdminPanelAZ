@@ -166,7 +166,7 @@ export default function RoutingPage() {
   }
 
   if (searchParams.get('tab') === 'antizapret-config') {
-    return <Navigate to="/antizapret" replace />
+    return <Navigate to="/protocols/antizapret" replace />
   }
 
   if (searchParams.get('tab') === 'files') {

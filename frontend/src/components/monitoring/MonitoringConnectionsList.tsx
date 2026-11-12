@@ -383,7 +383,7 @@ function ConnectionCard({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
           <Link
-            to={`/traffic?client=${encodeURIComponent(row.clientName)}`}
+            to={`/monitoring?tab=traffic&client=${encodeURIComponent(row.clientName)}`}
             className="truncate text-base font-semibold text-primary hover:underline"
           >
             {row.clientName}
@@ -667,7 +667,7 @@ export default function MonitoringConnectionsList({
                   <TableCell>
                     <div className="space-y-1">
                       <Link
-                        to={`/traffic?client=${encodeURIComponent(row.clientName)}`}
+                        to={`/monitoring?tab=traffic&client=${encodeURIComponent(row.clientName)}`}
                         className="text-sm font-semibold text-primary hover:underline"
                       >
                         {row.clientName}

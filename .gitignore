@@ -99,6 +99,7 @@ Thumbs.db
 !.cursor/rules/**
 !.cursor/skills/
 !.cursor/skills/**
+.cursor/skills/**/__pycache__/
 !.cursor/mcp.json.example
 # Личная синхронизация с Gitea — только на сервере, в репозиторий не попадает
 .cursor/rules/gitea-agent-sync.mdc

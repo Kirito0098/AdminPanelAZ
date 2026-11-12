@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Navigate, Link, useSearchParams } from 'react-router-dom'
+import { Navigate, Link } from 'react-router-dom'
 import {
   Activity,
   ArrowDownToLine,
@@ -56,6 +56,7 @@ import NotificationsFeed from '@/components/notifications/NotificationsFeed'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
+import { usePageTab } from '@/hooks/usePageTab'
 import { formatDateTime } from '@/lib/datetime'
 import { actionLogDetailsLabel } from '@/lib/actionLogDetails'
 import { actionLogLabel } from '@/lib/actionLogLabels'
@@ -490,7 +491,17 @@ function ActionLogGroupTableRows({ group, expanded, onToggle }: ActionLogGroupTa
   )
 }
 
-export default function LogsPage() {
+type LogTab = 'openvpn-events' | 'actions' | 'openvpn-sockets' | 'notifications'
+
+type LogsPageProps = {
+  /**
+   * Внутри «Наблюдения»: без своего заголовка и отступов страницы, вкладки живут
+   * в `?log=`, права проверяет MonitoringPage.
+   */
+  embedded?: boolean
+}
+
+export default function LogsPage({ embedded = false }: LogsPageProps) {
   const { user } = useAuth()
   const { isEnabled } = useFeatureModules()
   const logsDashboardEnabled = isEnabled('logs_dashboard')
@@ -512,39 +523,29 @@ export default function LogsPage() {
   const [expandedActionGroups, setExpandedActionGroups] = useState<Set<string>>(() => new Set())
   const [exportingActions, setExportingActions] = useState(false)
   const actionsLoadedRef = useRef(false)
-  const activeTabRef = useRef<string>('openvpn-events')
 
-  const defaultLogTab = logsDashboardEnabled ? 'openvpn-events' : 'actions'
   const showEventsTab = logsDashboardEnabled
   const showActionTab = user?.role === 'admin' && actionLogsEnabled
   const showSocketsTab = user?.role === 'admin' && logsDashboardEnabled
   const showNotificationsTab = user?.role === 'admin'
   const { counts: notificationCounts } = useNotificationCenter()
 
-  const [searchParams] = useSearchParams()
-  const initialLogTab = useMemo(() => {
-    const tab = searchParams.get('tab')
-    if (tab === 'notifications' && showNotificationsTab) return tab
-    if (tab === 'openvpn-sockets' && showSocketsTab) return tab
-    if (tab === 'actions' && showActionTab) return tab
-    if (tab === 'openvpn-events' && showEventsTab) return tab
-    return defaultLogTab
-  }, [
-    searchParams,
-    showNotificationsTab,
-    showSocketsTab,
-    showActionTab,
-    showEventsTab,
-    defaultLogTab,
-  ])
+  const availableLogTabs = useMemo<LogTab[]>(() => {
+    const tabs: LogTab[] = []
+    if (showEventsTab) tabs.push('openvpn-events')
+    if (showActionTab) tabs.push('actions')
+    if (showSocketsTab) tabs.push('openvpn-sockets')
+    if (showNotificationsTab) tabs.push('notifications')
+    return tabs
+  }, [showEventsTab, showActionTab, showSocketsTab, showNotificationsTab])
 
-  const [activeTab, setActiveTab] = useState(initialLogTab)
+  const [activeTab, setActiveTab] = usePageTab<LogTab>({
+    tabs: availableLogTabs,
+    param: embedded ? 'log' : 'tab',
+    fallback: showEventsTab ? 'openvpn-events' : 'actions',
+  })
+  const activeTabRef = useRef<LogTab>(activeTab)
   activeTabRef.current = activeTab
-
-  useEffect(() => {
-    setActiveTab(initialLogTab)
-    activeTabRef.current = initialLogTab
-  }, [initialLogTab])
 
   const load = useCallback(
     async (manual = false, initial = false, tabOverride?: string) => {
@@ -596,12 +597,12 @@ export default function LogsPage() {
   )
 
   useEffect(() => {
-    // Node switch (and URL deep-link): reload for the tab the user is viewing, not only initialLogTab.
-    // activeTabRef stays in sync on each render; URL changes also setActiveTab(initialLogTab) above.
+    // Node switch: reload for the tab the user is viewing. Tab deep-links are handled
+    // by the activeTab effect below, which soft-loads the newly opened tab.
     if (nodeLoading) return
     load(false, true, activeTabRef.current)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- remount on node / tab deep-link only
-  }, [nodeLoading, activeNode?.id, initialLogTab])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- remount on node switch only
+  }, [nodeLoading, activeNode?.id])
 
   useIntervalWhenVisible(
     () => {
@@ -704,70 +705,86 @@ export default function LogsPage() {
     }
   }
 
-  if (user?.role !== 'admin') {
+  if (!embedded && user?.role !== 'admin') {
     return <Navigate to="/" replace />
   }
 
+  if (availableLogTabs.length === 0) {
+    return (
+      <EmptyState
+        icon={ScrollText}
+        title="Журналы недоступны"
+        description="Модули журналов отключены в настройках панели."
+        className="py-8"
+      />
+    )
+  }
+
   if (loading && events.length === 0 && actions.length === 0) {
-    return <Spinner label="Загрузка логов..." className="py-16" />
+    return <Spinner label="Загрузка логов..." className={embedded ? 'py-8' : 'py-16'} />
   }
 
   return (
-    <div className="space-y-6">
-      {activeTab === 'notifications' ? (
-        <PageSectionHeader
-          icon={Bell}
-          title="Уведомления"
-          description={
-            <>
-              События панели по всем узлам: заявки, безопасность, серверы и сеть, задачи. Колокол в
-              шапке показывает только непрочитанные.
-            </>
-          }
-        />
-      ) : (
-        <>
+    <div className={embedded ? 'space-y-4' : 'space-y-6'}>
+      {!embedded &&
+        (activeTab === 'notifications' ? (
           <PageSectionHeader
-            icon={ScrollText}
-            title="Журналы"
-            docsHref={DOCS.logs}
-            titleAddon={<NodeBadge name={activeNode?.name} status={activeNode?.status} />}
-            description="События OpenVPN и действия администраторов"
-            actions={
-              <AutoRefreshControl
-                enabled={autoRefresh}
-                onToggle={() => setAutoRefresh((v) => !v)}
-                countdown={countdown}
-                intervalSec={REFRESH_INTERVAL}
-                refreshing={refreshing}
-                onManualRefresh={handleRefresh}
-              />
+            icon={Bell}
+            title="Уведомления"
+            description={
+              <>
+                События панели по всем узлам: заявки, безопасность, серверы и сеть, задачи. Колокол в
+                шапке показывает только непрочитанные.
+              </>
             }
           />
+        ) : (
+          <>
+            <PageSectionHeader
+              icon={ScrollText}
+              title="Журналы"
+              docsHref={DOCS.logs}
+              titleAddon={<NodeBadge name={activeNode?.name} status={activeNode?.status} />}
+              description="События OpenVPN и действия администраторов"
+              actions={
+                <AutoRefreshControl
+                  enabled={autoRefresh}
+                  onToggle={() => setAutoRefresh((v) => !v)}
+                  countdown={countdown}
+                  intervalSec={REFRESH_INTERVAL}
+                  refreshing={refreshing}
+                  onManualRefresh={handleRefresh}
+                />
+              }
+            />
 
-          <SettingsAlert variant="info" title="Данные активного узла">
-            Логи собираются с <strong>{activeNode?.name ?? 'активного узла'}</strong>
-            {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
-            Переключите узел в шапке или на странице «Узлы», чтобы смотреть другой сервер.
-          </SettingsAlert>
+            <SettingsAlert variant="info" title="Данные активного узла">
+              Логи собираются с <strong>{activeNode?.name ?? 'активного узла'}</strong>
+              {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
+              Переключите узел в шапке или на странице «Узлы», чтобы смотреть другой сервер.
+            </SettingsAlert>
 
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-            <Link
-              to="/monitoring"
-              className="inline-flex items-center gap-1.5 font-medium text-primary underline-offset-4 hover:underline"
-            >
-              <Activity size={13} aria-hidden />
-              Живые подключения — в NOC-мониторинге
-            </Link>
-            <Link
-              to="/settings/config_delivery"
-              className="inline-flex items-center gap-1.5 font-medium text-primary underline-offset-4 hover:underline"
-            >
-              <Download size={13} aria-hidden />
-              Выдача профилей — в настройках
-            </Link>
-          </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <Link
+                to="/monitoring"
+                className="inline-flex items-center gap-1.5 font-medium text-primary underline-offset-4 hover:underline"
+              >
+                <Activity size={13} aria-hidden />
+                Живые подключения — в NOC-мониторинге
+              </Link>
+              <Link
+                to="/settings/config_delivery"
+                className="inline-flex items-center gap-1.5 font-medium text-primary underline-offset-4 hover:underline"
+              >
+                <Download size={13} aria-hidden />
+                Выдача профилей — в настройках
+              </Link>
+            </div>
+          </>
+        ))}
 
+      {activeTab !== 'notifications' && (
+        <>
           {nodeOffline && (
             <SettingsAlert variant="warning" title="Узел офлайн">
               Активный узел недоступен. Логи событий могут быть устаревшими или отсутствовать.
@@ -801,7 +818,7 @@ export default function LogsPage() {
           </CardContent>
         </Card>
       ) : (
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as LogTab)}>
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
             {showEventsTab && (
             <TabsTrigger value="openvpn-events" className="gap-1.5">

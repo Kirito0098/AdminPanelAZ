@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Activity,
@@ -41,11 +41,13 @@ import { Button } from '@/components/ui/button'
 import { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useUsersList } from '@/hooks/useUsersList'
+import { usePageTab } from '@/hooks/usePageTab'
 import { DOCS } from '@/lib/docsUrls'
 import { gridColsClass } from '@/lib/configCardViewPrefs'
 import { nodeLabelMap, userNodeLabels } from '@/lib/nodeLabels'
@@ -86,6 +88,11 @@ import SubscriberRulesPanel from '@/components/users/SubscriberRulesPanel'
 import UserCard from '@/components/users/UserCard'
 
 type SortKey = UsersSortKey
+
+type UsersTab = 'users' | 'portal'
+
+/** Портал грузится отдельным чанком: вкладка нужна не всем, кто открывает абонентов. */
+const SubscriptionPage = lazy(() => import('@/pages/SubscriptionPage'))
 
 const SORT_OPTIONS: { value: SortKey; label: string }[] = [
   { value: 'username', label: 'Имя' },
@@ -168,6 +175,15 @@ export default function UsersPage() {
   const [suspendTarget, setSuspendTarget] = useState<User | null>(null)
 
   const provisioningOn = isEnabled('user_provisioning')
+
+  // «Портал и коды» — прежняя /subscription внутри «Абонентов». Вкладка видна,
+  // если включён портал или unlock-коды; при единственной вкладке панель не рисуем.
+  const portalTabAvailable = isEnabled('client_portal') || isEnabled('unlock_codes')
+  const availableTabs = useMemo<UsersTab[]>(
+    () => (portalTabAvailable ? ['users', 'portal'] : ['users']),
+    [portalTabAvailable],
+  )
+  const [tab, setTab] = usePageTab<UsersTab>({ tabs: availableTabs, fallback: 'users' })
   const availableRequestProtocols = useMemo(
     () =>
       REQUEST_PROTOCOLS.filter((p) => p.featureKeys.some((key) => isEnabled(key))),
@@ -552,7 +568,7 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-4">
-      {provisioningOn && requestsCount > 0 && (
+      {tab === 'users' && provisioningOn && requestsCount > 0 && (
         <button
           type="button"
           onClick={() => setRequestsOpen(true)}
@@ -570,7 +586,7 @@ export default function UsersPage() {
       <PageSectionHeader
         card
         icon={Users}
-        title="Пользователи"
+        title="Абоненты"
         docsHref={DOCS.users}
         description={
           <>
@@ -581,368 +597,395 @@ export default function UsersPage() {
           </>
         }
         actions={
-          <>
-            {provisioningOn && (
-              <ToolbarButton
-                variant="outline"
-                className="relative bg-card/80"
-                icon={<Ticket size={16} />}
-                label={requestsCount > 0 ? `Заявки (${requestsCount})` : 'Заявки'}
-                shortLabel="Заявки"
-                onClick={() => setRequestsOpen(true)}
-              />
-            )}
-            {provisioningOn && (
+          tab === 'users' ? (
+            <>
+              {provisioningOn && (
+                <ToolbarButton
+                  variant="outline"
+                  className="relative bg-card/80"
+                  icon={<Ticket size={16} />}
+                  label={requestsCount > 0 ? `Заявки (${requestsCount})` : 'Заявки'}
+                  shortLabel="Заявки"
+                  onClick={() => setRequestsOpen(true)}
+                />
+              )}
+              {provisioningOn && (
+                <ToolbarButton
+                  variant="outline"
+                  className="bg-card/80"
+                  icon={<CalendarClock size={16} />}
+                  label="Кулдаун"
+                  shortLabel="Кулдаун"
+                  onClick={() => setCooldownOpen(true)}
+                />
+              )}
               <ToolbarButton
                 variant="outline"
                 className="bg-card/80"
-                icon={<CalendarClock size={16} />}
-                label="Кулдаун"
-                shortLabel="Кулдаун"
-                onClick={() => setCooldownOpen(true)}
+                icon={<Download size={16} />}
+                label="Экспорт CSV"
+                shortLabel="CSV"
+                onClick={handleExportCsv}
               />
-            )}
-            <ToolbarButton
-              variant="outline"
-              className="bg-card/80"
-              icon={<Download size={16} />}
-              label="Экспорт CSV"
-              shortLabel="CSV"
-              onClick={handleExportCsv}
-            />
-            <ToolbarButton
-              size="lg"
-              variant="default"
-              icon={<UserPlus size={18} />}
-              label="Создать пользователя"
-              shortLabel="Создать"
-              onClick={() => setCreateOpen(true)}
-              disabled={!provisioningOn}
-            />
-          </>
+              <ToolbarButton
+                size="lg"
+                variant="default"
+                icon={<UserPlus size={18} />}
+                label="Создать пользователя"
+                shortLabel="Создать"
+                onClick={() => setCreateOpen(true)}
+                disabled={!provisioningOn}
+              />
+            </>
+          ) : undefined
         }
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricCard
-          label="Всего"
-          value={String(listMetrics.total)}
-          sub={`${filteredUsers.length} на экране`}
-          icon={Users}
-          accent="cyan"
-        />
-        <MetricCard
-          label="Активны"
-          value={String(listMetrics.active24h)}
-          sub="заходили за 24 часа"
-          icon={Activity}
-          accent="green"
-        />
-        <MetricCard
-          label="С тарифом"
-          value={String(listMetrics.withPlan)}
-          sub="план конфигов на узлах"
-          icon={Ticket}
-          accent="green"
-        />
-        <MetricCard
-          label="Срок / истекли"
-          value={String(listMetrics.expiringOrExpired)}
-          sub="истекают в 7 дней или уже истекли"
-          icon={listMetrics.expiringOrExpired > 0 ? AlertTriangle : CalendarClock}
-          accent={listMetrics.expiringOrExpired > 0 ? 'amber' : 'default'}
-        />
-        <MetricCard
-          label="На паузе"
-          value={String(listMetrics.suspended)}
-          sub="приостановленный доступ"
-          icon={PauseCircle}
-          accent={listMetrics.suspended > 0 ? 'red' : 'default'}
-        />
-      </div>
+      <Tabs value={tab} onValueChange={(next) => setTab(next as UsersTab)} className="space-y-4">
+        {availableTabs.length > 1 && (
+          <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
+            <TabsTrigger value="users" className="gap-1.5">
+              <Users size={14} />
+              Абоненты
+            </TabsTrigger>
+            <TabsTrigger value="portal" className="gap-1.5">
+              <Ticket size={14} />
+              Портал и коды
+            </TabsTrigger>
+          </TabsList>
+        )}
 
-      {authUser?.role === 'admin' ? <SubscriberRulesPanel /> : null}
-
-      <div className="overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm">
-        <div className="h-1 bg-gradient-to-r from-primary/80 via-primary/40 to-transparent" />
-        <CardHeader className="border-b border-border/60 bg-muted/15 pb-4">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Users size={18} />
-                Список пользователей
-              </CardTitle>
-              <CardDescription className="mt-1">
-                {filteredUsers.length > 0
-                  ? `${users.length} пользовател${users.length === 1 ? 'ь' : users.length < 5 ? 'я' : 'ей'} · ${filteredUsers.length} на экране`
-                  : 'Пользователи не найдены'}
-              </CardDescription>
-            </div>
-            <div className="flex w-full items-center gap-2 lg:max-w-md">
-              <div className="relative min-w-0 flex-1">
-                <Search
-                  className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-                  aria-hidden
-                />
-                <Input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Поиск по логину, TG, заметке…"
-                  className="h-10 bg-background pl-9 pr-9"
-                  aria-label="Поиск пользователей"
-                />
-                {search.trim() !== '' ? (
-                  <button
-                    type="button"
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                    onClick={() => setSearch('')}
-                    title="Очистить поиск"
-                  >
-                    <X size={14} />
-                  </button>
-                ) : null}
-              </div>
-              <select
-                value={sortKey}
-                onChange={(e) => setSortKey(e.target.value as SortKey)}
-                className="h-10 shrink-0 rounded-md border border-input bg-background px-2 text-sm"
-                aria-label="Сортировка"
-                title="Сортировка"
-              >
-                {SORT_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="h-10 w-10 shrink-0"
-                onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
-                aria-label={sortDir === 'asc' ? 'По возрастанию' : 'По убыванию'}
-                title={sortDir === 'asc' ? 'По возрастанию' : 'По убыванию'}
-              >
-                {sortDir === 'asc' ? '↑' : '↓'}
-              </Button>
-              <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  variant={viewMode === 'cards' ? 'secondary' : 'ghost'}
-                  size="icon"
-                  className="h-10 w-10"
-                  aria-pressed={viewMode === 'cards'}
-                  aria-label="Вид карточками"
-                  onClick={() => setViewMode('cards')}
-                >
-                  <LayoutGrid size={16} />
-                </Button>
-                <Button
-                  type="button"
-                  variant={viewMode === 'table' ? 'secondary' : 'ghost'}
-                  size="icon"
-                  className="h-10 w-10"
-                  aria-pressed={viewMode === 'table'}
-                  aria-label="Вид таблицей"
-                  onClick={() => setViewMode('table')}
-                >
-                  <Table2 size={16} />
-                </Button>
-                {viewMode === 'cards' ? (
-                  <UsersCardViewSettings prefs={viewPrefs} onChange={handleChangeViewPrefs} />
-                ) : null}
-              </div>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4 p-4 sm:p-5">
-          <div className="space-y-3 rounded-xl border border-dashed bg-muted/15 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                  <Filter size={13} />
-                  Статус
-                </span>
-                <UsersFilters
-                  filter={filter}
-                  onFilterChange={setFilter}
-                  stale={stale}
-                  onStaleChange={setStale}
-                />
-              </div>
-              {provisioningOn && filter !== 'deleting' && pagedUserIds.length > 0 ? (
-                <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
-                  <Checkbox
-                    checked={allPageSelected ? true : somePageSelected ? 'indeterminate' : false}
-                    onCheckedChange={(checked) => {
-                      const ids = new Set(pagedUserIds)
-                      if (checked === true) {
-                        setSelectedIds((prev) => {
-                          const next = new Set(prev)
-                          for (const id of ids) next.add(id)
-                          return [...next]
-                        })
-                      } else {
-                        setSelectedIds((prev) => prev.filter((id) => !ids.has(id)))
-                      }
-                    }}
-                    aria-label="Выбрать всех на странице"
-                  />
-                  Выбрать всех на странице ({pagedUserIds.length})
-                </label>
-              ) : null}
-            </div>
-          </div>
-
-          {provisioningOn && filter !== 'deleting' && (
-            <UsersBulkBar
-              selectedCount={selectedIds.length}
-              busy={
-                backgroundTask?.task_type === 'bulk_user_nodes' &&
-                ['queued', 'running'].includes(backgroundTask.status)
-              }
-              task={backgroundTask?.task_type === 'bulk_user_nodes' ? backgroundTask : null}
-              onAction={(action) => setBulkDialog({ open: true, action })}
-              onDownloadReport={(taskId) => void handleDownloadReport(taskId)}
-              onBulkAction={() => setBulkActionOpen(true)}
-              onNotify={() => setNotifyOpen(true)}
-              notifyTaskId={notifyTaskId}
-              onDownloadNotifyReport={(id) => void handleDownloadNotifyReport(id)}
-            />
-          )}
-
-          {filteredUsers.length === 0 ? (
-            <EmptyState
+        <TabsContent value="users" className="space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+            <MetricCard
+              label="Всего"
+              value={String(listMetrics.total)}
+              sub={`${filteredUsers.length} на экране`}
               icon={Users}
-              title={
-                filter === 'deleting' || (!search && filter === 'all' && stale == null)
-                  ? 'Пока нет пользователей'
-                  : 'Ничего не найдено'
-              }
-              description={
-                filter === 'deleting'
-                  ? 'Нет абонентов, ожидающих удаления.'
-                  : search || filter !== 'all' || stale != null
-                    ? 'Измените фильтр или поисковый запрос'
-                    : provisioningOn
-                      ? 'Создайте первого абонента — панель сама выпустит конфиги на выбранных серверах.'
-                      : 'Включите модуль «Пользователи (абоненты)» в настройках разделов, чтобы управлять абонентами VPN.'
-              }
-              className="py-10"
-              action={
-                provisioningOn && !search && filter === 'all' && stale == null ? (
+              accent="cyan"
+            />
+            <MetricCard
+              label="Активны"
+              value={String(listMetrics.active24h)}
+              sub="заходили за 24 часа"
+              icon={Activity}
+              accent="green"
+            />
+            <MetricCard
+              label="С тарифом"
+              value={String(listMetrics.withPlan)}
+              sub="план конфигов на узлах"
+              icon={Ticket}
+              accent="green"
+            />
+            <MetricCard
+              label="Срок / истекли"
+              value={String(listMetrics.expiringOrExpired)}
+              sub="истекают в 7 дней или уже истекли"
+              icon={listMetrics.expiringOrExpired > 0 ? AlertTriangle : CalendarClock}
+              accent={listMetrics.expiringOrExpired > 0 ? 'amber' : 'default'}
+            />
+            <MetricCard
+              label="На паузе"
+              value={String(listMetrics.suspended)}
+              sub="приостановленный доступ"
+              icon={PauseCircle}
+              accent={listMetrics.suspended > 0 ? 'red' : 'default'}
+            />
+          </div>
+
+          {authUser?.role === 'admin' ? <SubscriberRulesPanel /> : null}
+
+          <div className="overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm">
+            <div className="h-1 bg-gradient-to-r from-primary/80 via-primary/40 to-transparent" />
+            <CardHeader className="border-b border-border/60 bg-muted/15 pb-4">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Users size={18} />
+                    Список абонентов
+                  </CardTitle>
+                  <CardDescription className="mt-1">
+                    {filteredUsers.length > 0
+                      ? `${users.length} пользовател${users.length === 1 ? 'ь' : users.length < 5 ? 'я' : 'ей'} · ${filteredUsers.length} на экране`
+                      : 'Абоненты не найдены'}
+                  </CardDescription>
+                </div>
+                <div className="flex w-full items-center gap-2 lg:max-w-md">
+                  <div className="relative min-w-0 flex-1">
+                    <Search
+                      className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+                      aria-hidden
+                    />
+                    <Input
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                      placeholder="Поиск по логину, TG, заметке…"
+                      className="h-10 bg-background pl-9 pr-9"
+                      aria-label="Поиск абонентов"
+                    />
+                    {search.trim() !== '' ? (
+                      <button
+                        type="button"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                        onClick={() => setSearch('')}
+                        title="Очистить поиск"
+                      >
+                        <X size={14} />
+                      </button>
+                    ) : null}
+                  </div>
+                  <select
+                    value={sortKey}
+                    onChange={(e) => setSortKey(e.target.value as SortKey)}
+                    className="h-10 shrink-0 rounded-md border border-input bg-background px-2 text-sm"
+                    aria-label="Сортировка"
+                    title="Сортировка"
+                  >
+                    {SORT_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
                   <Button
                     type="button"
-                    onClick={() => setCreateOpen(true)}
-                    aria-label="Создать первого пользователя"
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 shrink-0"
+                    onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                    aria-label={sortDir === 'asc' ? 'По возрастанию' : 'По убыванию'}
+                    title={sortDir === 'asc' ? 'По возрастанию' : 'По убыванию'}
                   >
-                    <UserPlus size={15} />
-                    Создать пользователя
+                    {sortDir === 'asc' ? '↑' : '↓'}
                   </Button>
-                ) : null
-              }
-            />
-          ) : viewMode === 'table' ? (
-            <UsersTable
-              users={pagedUsers}
-              selectedIds={selectedIds}
-              onSelectChange={handleSelectOne}
-              onOpen={(user) => openDetail(user.id)}
-              onExtend={handleExtend}
-              onResetTraffic={(user) => void handleResetTraffic(user)}
-              onSuspend={(user) => setSuspendTarget(user)}
-              onResume={(user) => void handleResume(user)}
-              onDelete={(user) => void handleDeleteUser(user)}
-              onRetryDelete={(user) => void handleRetryDelete(user)}
-              onCreateKey={isEnabled('unlock_codes') ? (user) => setUnlockDialogUser(user) : undefined}
-              sortKey={sortKey}
-              sortDir={sortDir}
-              onSortChange={handleSortChange}
-              actionBusyId={cardBusyId}
-            />
-          ) : (
-            <div className={cn('grid gap-3', gridColsClass(viewPrefs.gridCols))}>
-              {pagedUsers.map((u) => (
-                <SubscriberCard
-                  key={u.id}
-                  user={u}
-                  selected={selectedIds.includes(u.id)}
-                  showSelect={provisioningOn}
-                  viewPrefs={viewPrefs}
-                  actionBusy={cardBusyId === u.id}
-                  onSuspend={() => setSuspendTarget(u)}
-                  onResume={() => void handleResume(u)}
-                  onDelete={() => void handleDeleteUser(u)}
-                  onSelectChange={(checked) =>
-                    setSelectedIds((prev) =>
-                      checked ? [...prev, u.id] : prev.filter((id) => id !== u.id),
-                    )
+                  <div className="flex items-center gap-1">
+                    <Button
+                      type="button"
+                      variant={viewMode === 'cards' ? 'secondary' : 'ghost'}
+                      size="icon"
+                      className="h-10 w-10"
+                      aria-pressed={viewMode === 'cards'}
+                      aria-label="Вид карточками"
+                      onClick={() => setViewMode('cards')}
+                    >
+                      <LayoutGrid size={16} />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={viewMode === 'table' ? 'secondary' : 'ghost'}
+                      size="icon"
+                      className="h-10 w-10"
+                      aria-pressed={viewMode === 'table'}
+                      aria-label="Вид таблицей"
+                      onClick={() => setViewMode('table')}
+                    >
+                      <Table2 size={16} />
+                    </Button>
+                    {viewMode === 'cards' ? (
+                      <UsersCardViewSettings prefs={viewPrefs} onChange={handleChangeViewPrefs} />
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 p-4 sm:p-5">
+              <div className="space-y-3 rounded-xl border border-dashed bg-muted/15 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                      <Filter size={13} />
+                      Статус
+                    </span>
+                    <UsersFilters
+                      filter={filter}
+                      onFilterChange={setFilter}
+                      stale={stale}
+                      onStaleChange={setStale}
+                    />
+                  </div>
+                  {provisioningOn && filter !== 'deleting' && pagedUserIds.length > 0 ? (
+                    <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                      <Checkbox
+                        checked={allPageSelected ? true : somePageSelected ? 'indeterminate' : false}
+                        onCheckedChange={(checked) => {
+                          const ids = new Set(pagedUserIds)
+                          if (checked === true) {
+                            setSelectedIds((prev) => {
+                              const next = new Set(prev)
+                              for (const id of ids) next.add(id)
+                              return [...next]
+                            })
+                          } else {
+                            setSelectedIds((prev) => prev.filter((id) => !ids.has(id)))
+                          }
+                        }}
+                        aria-label="Выбрать всех на странице"
+                      />
+                      Выбрать всех на странице ({pagedUserIds.length})
+                    </label>
+                  ) : null}
+                </div>
+              </div>
+
+              {provisioningOn && filter !== 'deleting' && (
+                <UsersBulkBar
+                  selectedCount={selectedIds.length}
+                  busy={
+                    backgroundTask?.task_type === 'bulk_user_nodes' &&
+                    ['queued', 'running'].includes(backgroundTask.status)
                   }
-                  onOpen={() => openDetail(u.id)}
-                  onResetTraffic={
-                    u.traffic_limit_bytes && u.traffic_limit_bytes > 0
-                      ? () => void handleResetTraffic(u)
-                      : undefined
+                  task={backgroundTask?.task_type === 'bulk_user_nodes' ? backgroundTask : null}
+                  onAction={(action) => setBulkDialog({ open: true, action })}
+                  onDownloadReport={(taskId) => void handleDownloadReport(taskId)}
+                  onBulkAction={() => setBulkActionOpen(true)}
+                  onNotify={() => setNotifyOpen(true)}
+                  notifyTaskId={notifyTaskId}
+                  onDownloadNotifyReport={(id) => void handleDownloadNotifyReport(id)}
+                />
+              )}
+
+              {filteredUsers.length === 0 ? (
+                <EmptyState
+                  icon={Users}
+                  title={
+                    filter === 'deleting' || (!search && filter === 'all' && stale == null)
+                      ? 'Пока нет абонентов'
+                      : 'Ничего не найдено'
                   }
-                  onCreateKey={
-                    isEnabled('unlock_codes') ? () => setUnlockDialogUser(u) : undefined
+                  description={
+                    filter === 'deleting'
+                      ? 'Нет абонентов, ожидающих удаления.'
+                      : search || filter !== 'all' || stale != null
+                        ? 'Измените фильтр или поисковый запрос'
+                        : provisioningOn
+                          ? 'Создайте первого абонента — панель сама выпустит конфиги на выбранных серверах.'
+                          : 'Включите модуль «Абоненты» в настройках разделов, чтобы управлять абонентами VPN.'
                   }
-                  onRetryDelete={
-                    u.provision_state === 'pending_deletion'
-                      ? () => void handleRetryDelete(u)
-                      : undefined
+                  className="py-10"
+                  action={
+                    provisioningOn && !search && filter === 'all' && stale == null ? (
+                      <Button
+                        type="button"
+                        onClick={() => setCreateOpen(true)}
+                        aria-label="Создать первого пользователя"
+                      >
+                        <UserPlus size={15} />
+                        Создать пользователя
+                      </Button>
+                    ) : null
                   }
                 />
-              ))}
-            </div>
-          )}
-          {filteredUsers.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <span>На странице</span>
-                <select
-                  value={pageSize}
-                  onChange={(e) => setPageSize(Number.parseInt(e.target.value, 10))}
-                  className="h-8 rounded-md border border-input bg-background px-2 text-sm"
-                  aria-label="Размер страницы"
-                >
-                  {PAGE_SIZE_OPTIONS.map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
+              ) : viewMode === 'table' ? (
+                <UsersTable
+                  users={pagedUsers}
+                  selectedIds={selectedIds}
+                  onSelectChange={handleSelectOne}
+                  onOpen={(user) => openDetail(user.id)}
+                  onExtend={handleExtend}
+                  onResetTraffic={(user) => void handleResetTraffic(user)}
+                  onSuspend={(user) => setSuspendTarget(user)}
+                  onResume={(user) => void handleResume(user)}
+                  onDelete={(user) => void handleDeleteUser(user)}
+                  onRetryDelete={(user) => void handleRetryDelete(user)}
+                  onCreateKey={isEnabled('unlock_codes') ? (user) => setUnlockDialogUser(user) : undefined}
+                  sortKey={sortKey}
+                  sortDir={sortDir}
+                  onSortChange={handleSortChange}
+                  actionBusyId={cardBusyId}
+                />
+              ) : (
+                <div className={cn('grid gap-3', gridColsClass(viewPrefs.gridCols))}>
+                  {pagedUsers.map((u) => (
+                    <SubscriberCard
+                      key={u.id}
+                      user={u}
+                      selected={selectedIds.includes(u.id)}
+                      showSelect={provisioningOn}
+                      viewPrefs={viewPrefs}
+                      actionBusy={cardBusyId === u.id}
+                      onSuspend={() => setSuspendTarget(u)}
+                      onResume={() => void handleResume(u)}
+                      onDelete={() => void handleDeleteUser(u)}
+                      onSelectChange={(checked) =>
+                        setSelectedIds((prev) =>
+                          checked ? [...prev, u.id] : prev.filter((id) => id !== u.id),
+                        )
+                      }
+                      onOpen={() => openDetail(u.id)}
+                      onResetTraffic={
+                        u.traffic_limit_bytes && u.traffic_limit_bytes > 0
+                          ? () => void handleResetTraffic(u)
+                          : undefined
+                      }
+                      onCreateKey={
+                        isEnabled('unlock_codes') ? () => setUnlockDialogUser(u) : undefined
+                      }
+                      onRetryDelete={
+                        u.provision_state === 'pending_deletion'
+                          ? () => void handleRetryDelete(u)
+                          : undefined
+                      }
+                    />
                   ))}
-                </select>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8"
-                  onClick={() => setPage((p) => Math.max(0, p - 1))}
-                  disabled={safePage <= 0}
-                >
-                  ‹
-                </Button>
-                <span>
-                  {safePage + 1} / {totalPages}
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8"
-                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                  disabled={safePage >= totalPages - 1}
-                >
-                  ›
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </div>
+                </div>
+              )}
+              {filteredUsers.length > 0 && (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-2">
+                    <span>На странице</span>
+                    <select
+                      value={pageSize}
+                      onChange={(e) => setPageSize(Number.parseInt(e.target.value, 10))}
+                      className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+                      aria-label="Размер страницы"
+                    >
+                      {PAGE_SIZE_OPTIONS.map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      onClick={() => setPage((p) => Math.max(0, p - 1))}
+                      disabled={safePage <= 0}
+                    >
+                      ‹
+                    </Button>
+                    <span>
+                      {safePage + 1} / {totalPages}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                      disabled={safePage >= totalPages - 1}
+                    >
+                      ›
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </div>
+        </TabsContent>
+
+        {portalTabAvailable && (
+          <TabsContent value="portal" className="space-y-4">
+            <Suspense fallback={<Spinner label="Загрузка портала…" className="py-8" />}>
+              <SubscriptionPage embedded />
+            </Suspense>
+          </TabsContent>
+        )}
+      </Tabs>
 
       <AppDialog
         open={detailId != null}
