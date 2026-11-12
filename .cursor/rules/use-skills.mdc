@@ -18,6 +18,8 @@ alwaysApply: true
 | Ситуация | Skill | Где лежит |
 | --- | --- | --- |
 | Свой новый код: «не переусложнено ли», «что можно удалить» | `karpathy-ponytail` | `.agents/skills/` |
+| Доработка существующей фичи/кнопки/эндпоинта: править на месте, а не добавлять рядом | `surgical-edits` | `.agents/skills-code/` |
+| После кода: «что упростить и удалить в текущем диффе» | `code-simplifier` | `.agents/skills-code/` |
 | Терминал: поиск файлов и кода, диапазон строк, замена, YAML/JSON, diff | `cli-toolbox` | `.agents/skills/` |
 | Багфикс с дешёвым локальным тестом на критическом узле | `tdd` | `.agents/skills-code/` |
 | UI: страницы, компоненты, Mini App, вёрстка, a11y | `web-design-guidelines` | `.agents/skills-code/` |

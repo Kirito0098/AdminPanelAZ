@@ -65,6 +65,39 @@
       "sourceType": "local",
       "skillPath": ".cursor/skills/cli-toolbox/SKILL.md",
       "note": "project-specific server tool inventory"
+    },
+    "code-simplifier": {
+      "source": "anthropics/claude-plugins-official",
+      "sourceType": "github",
+      "skillPath": ".cursor/skills/code-simplifier/SKILL.md",
+      "upstreamPath": "plugins/code-simplifier/agents/code-simplifier.md",
+      "upstreamCommit": "e0ab6e51219eef74e417a0e1d89e5d53e5e763d4",
+      "upstreamHash": "2a51e8d210580d9f66ac2ed1226c41f9374565fc275da30d7bb95f65c2cc87bb",
+      "computedHash": "9e6b4d2b5d4fe970b9db2d83896f50a113d2741b9d315f1b996edfc1583026f6",
+      "note": "Apache-2.0 agent prompt adapted to a project skill: scope limited to the session diff, project standards from AGENTS.md/lean-code, no mixing with new features"
+    },
+    "surgical-edits": {
+      "source": "PatrickJS/awesome-cursorrules + rohitg00/awesome-claude-code-toolkit",
+      "sourceType": "github",
+      "skillPath": ".cursor/skills/surgical-edits/SKILL.md",
+      "upstreamSources": [
+        {
+          "repo": "PatrickJS/awesome-cursorrules",
+          "path": "rules/anti-sycophancy-code-discipline-cursorrules-prompt-file.mdc",
+          "commit": "b044f956f021b6e8877f16781bcfc466a6a120e9",
+          "hash": "17fb2f719ddd7873e84a7f97a1c26825349f32dbd3b4cd4a1630611284322eb7",
+          "license": "CC0-1.0"
+        },
+        {
+          "repo": "rohitg00/awesome-claude-code-toolkit",
+          "path": "agents/developer-experience/refactoring-specialist.md",
+          "commit": "ebdf1d596d2cde5c5cceb32177e8d1cf4829e7d9",
+          "hash": "51950e514a1521b1330bde90c188ba386236699bfa57664e0d00b18971ded8ba",
+          "license": "Apache-2.0"
+        }
+      ],
+      "computedHash": "26f47f1e20d2e2c0fe87aae89b013709d38dba851a54dcebdcba6435e593c726",
+      "note": "in-place refactoring / anti-additive rules synthesized from both collections: invariants (#6), comment rules (#12-13), dead code deletion, call-site updates in one commit, refactor separated from feature work; additive-bias checklist is local"
     }
   }
 }

@@ -32,6 +32,10 @@
   схема данных/эндпоинт, изменение поведения в нескольких модулях, новая фича.
   Перед планом — скилл `brainstorming`: вопросы, 2–3 варианта, дизайн-док.
 - Задача выросла по ходу — вернуться к плану в чате, не раздувать его.
+- **Доработка — правка на месте.** Существующую кнопку, эндпоинт, обработчик или ветку
+  переписываем, а не добавляем рядом вторую; заменённое удаляем в том же диффе, вызовы обновляем
+  сразу. Второй путь данных допустим только для миграции/внешнего потребителя — и это названо
+  в плане. Скилл — `surgical-edits`, после кода — `code-simplifier`.
 - План ≤5 шагов — максимум страница; полный код только для неочевидного (схема, миграция,
   правила доступа, парсинг). Вёрстку кодом не расписывать.
 
@@ -100,7 +104,7 @@ nginx/firewall/systemd/install, бэкапы и миграции, node/proxy age
 | Каталог Zoo | Когда активен | Что внутри |
 | --- | --- | --- |
 | `.agents/skills/` | любой режим | `karpathy-ponytail`, `cli-toolbox` |
-| `.agents/skills-code/` | Code | `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `tdd`, `tui-design` |
+| `.agents/skills-code/` | Code | `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `webapp-testing`, `tdd`, `tui-design`, `surgical-edits`, `code-simplifier` |
 | `.agents/skills-architect/` | Architect | `brainstorming`, `split-design-spec` |
 
 Cursor режимов не знает: он видит весь `.cursor/skills`. Поэтому описания в frontmatter короткие

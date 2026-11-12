@@ -25,6 +25,8 @@
 | `vercel-composition-patterns` | Раздутые boolean-пропсы | Code |
 | `web-design-guidelines` | Чеклист UI/a11y по коду | Code |
 | `webapp-testing` | Проверка UI в браузере | Code |
+| `surgical-edits` | Доработка — правкой на месте, без второй кнопки/эндпоинта/пайплайна | Code |
+| `code-simplifier` | Упростить только текущий дифф, не меняя поведение | Code |
 | `tui-design` | CLI / консольное меню | Code |
 | `brainstorming` | Вопросы, варианты и дизайн-док до кода | Architect |
 | `split-design-spec` | Разбить большой design-спек | Architect |
