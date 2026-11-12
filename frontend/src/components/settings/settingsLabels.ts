@@ -20,7 +20,7 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   users: {
     title: 'Пользователи',
     description: 'Кто может входить в панель и что ему разрешено делать',
-    hint: 'Здесь только учётные записи панели: логин, роль и доступ к панели. Конфиги, квоты и правила абонентов — в разделе «Пользователи».',
+    hint: 'Здесь только учётные записи панели: логин, роль и вход в панель.',
     docsHref: DOCS.users,
   },
   security: {
@@ -31,8 +31,8 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   },
   config_delivery: {
     title: 'Выдача VPN-профилей',
-    description: 'Готовые файлы для роутеров',
-    hint: 'Файлы маршрутов Keenetic, MikroTik и TP-Link можно открыть клиенту без входа в панель — если вы это включите. Портал и unlock-ключи — в разделе «Подписка».',
+    description: 'Скачивание файлов маршрутов',
+    hint: 'Публичная ссылка открывает файлы всем, у кого она есть, — включайте осознанно.',
     docsHref: DOCS.configDelivery,
   },
   maintenance: {
@@ -102,7 +102,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 
 export const ROLE_HINTS: Record<UserRole, string> = {
   admin: 'Полный доступ ко всем настройкам и VPN',
-  user: 'Доступ к панели с ограниченными правами. Абонентские конфиги, квоты и правила — в разделе «Пользователи».',
+  user: 'Доступ к панели с ограниченными правами.',
 }
 
 const VPN_SERVICE_LABELS: Record<string, string> = {

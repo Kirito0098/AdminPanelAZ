@@ -226,8 +226,8 @@ export default function TelegramBotAuthGuide({
           <li className="flex gap-2">
             <span className="text-muted-foreground/60">•</span>
             <span>
-              <Link to="/telegram?tab=notify" className="font-medium text-primary underline-offset-4 hover:underline">
-                Уведомления
+              <Link to="/settings/notifications" className="font-medium text-primary underline-offset-4 hover:underline">
+                Настройки → Уведомления
               </Link>{' '}
               — алерты и бэкапы в Telegram.
             </span>

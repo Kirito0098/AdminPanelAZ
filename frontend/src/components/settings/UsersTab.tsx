@@ -264,15 +264,6 @@ export default function UsersTab({
 
   return (
     <div className="space-y-4">
-      {provisioningOn && (
-        <SettingsAlert variant="info">
-          Абоненты VPN перенесены в раздел{' '}
-          <Link to="/users" className="underline underline-offset-4 hover:text-primary transition-colors">
-            Пользователи
-          </Link>
-          .
-        </SettingsAlert>
-      )}
       <SettingsToolbar
         title="Учётные записи"
         count={stats.total}
@@ -312,6 +303,19 @@ export default function UsersTab({
           </>
         }
       />
+
+      {provisioningOn && (
+        <SettingsAlert variant="info">
+          Абоненты VPN, их конфиги и квоты — в разделе{' '}
+          <Link
+            to="/users"
+            className="font-medium text-foreground underline underline-offset-4 transition-colors hover:text-primary"
+          >
+            Пользователи
+          </Link>
+          .
+        </SettingsAlert>
+      )}
 
       {createOpen ? (
         <Card className="border-primary/25 shadow-sm">

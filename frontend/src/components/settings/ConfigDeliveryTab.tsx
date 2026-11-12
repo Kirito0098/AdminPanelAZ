@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom'
 import { ApiError, getSecuritySettings, updateSecuritySettings } from '@/api/client'
 import RouteResultsPanel from '@/components/settings/RouteResultsPanel'
 import SettingsAlert from '@/components/settings/SettingsAlert'
-import { SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import Spinner from '@/components/ui/Spinner'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
@@ -52,23 +51,12 @@ export default function ConfigDeliveryTab() {
     <div className="space-y-4">
       <InlineProgressBar active={saving} label="Сохранение настроек..." />
 
-      <SettingsToolbar
-        title="Выдача VPN-профилей"
-        meta={
-          <SettingsMetaLine
-            items={[
-              {
-                label: 'роутеры',
-                value: settings.public_download_enabled ? 'без входа' : 'только из панели',
-              },
-            ]}
-          />
-        }
-      />
-
-      <p className="text-xs text-muted-foreground">
-        Готовые конфиги маршрутизации для домашних роутеров. Портал и unlock-ключи — в разделе{' '}
-        <Link to="/subscription" className="font-medium text-foreground underline-offset-2 hover:underline">
+      <p className="text-sm text-muted-foreground">
+        Готовые файлы маршрутов для Keenetic, MikroTik и TP-Link. Портал и unlock-ключи — в разделе{' '}
+        <Link
+          to="/subscription"
+          className="font-medium text-foreground underline underline-offset-4 transition-colors hover:text-primary"
+        >
           Подписка
         </Link>
         .
@@ -81,7 +69,7 @@ export default function ConfigDeliveryTab() {
             Скачивание маршрутов
           </CardTitle>
           <CardDescription>
-            Keenetic, MikroTik и TP-Link — после настройки маршрутизации
+            Файлы активного узла — после настройки маршрутизации
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

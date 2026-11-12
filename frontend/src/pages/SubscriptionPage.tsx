@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, Globe, KeyRound, Loader2, Ticket, Trash2 } from 'lucide-react'
+import { Globe, KeyRound, Loader2, Settings2, Ticket, Trash2, Users } from 'lucide-react'
 import {
   ApiError,
   getPortalPublishStatus,
 } from '@/api/client'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
+import SettingsAlert from '@/components/settings/SettingsAlert'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { DOCS } from '@/lib/docsUrls'
@@ -112,6 +113,7 @@ export default function SubscriptionPage() {
   }
 
   const portalModeBlocked = portalStatus?.portal_mode_supported === false
+  const portalAccessUrl = portalStatus?.portal_access_url ?? ''
   if (loading && clientPortalEnabled) {
     return <Spinner label="Загрузка…" className="py-12" />
   }
@@ -127,69 +129,102 @@ export default function SubscriptionPage() {
 
       {clientPortalEnabled && (
         <Card className="shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Globe size={18} />
-              Клиентский портал
-            </CardTitle>
-            <CardDescription>
-              Домен и публикация портала настраиваются в «Настройки → Адрес сайта и HTTPS».
-              Постоянные ссылки пользователей — в карточке пользователя.
-            </CardDescription>
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
+            <div className="min-w-0">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Globe size={18} />
+                Клиентский портал
+              </CardTitle>
+              <CardDescription className="mt-1.5">
+                Домен и публикация портала настраиваются в «Настройки → Адрес сайта и HTTPS».
+              </CardDescription>
+            </div>
+            {portalStatus ? (
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <Badge variant={portalStatus.portal_ready ? 'success' : 'warning'}>
+                  {portalStatus.portal_ready ? 'Готов' : 'Нужна настройка'}
+                </Badge>
+                {portalStatus.active_publish_mode ? (
+                  <Badge variant="outline">{portalStatus.active_publish_mode}</Badge>
+                ) : null}
+              </div>
+            ) : null}
           </CardHeader>
           <CardContent className="space-y-4">
             {portalModeBlocked ? (
-              <div className="flex gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200">
-                <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden />
-                <div className="space-y-2">
-                  <p>
-                    {portalStatus?.portal_mode_block_reason ||
-                      'Клиентский портал доступен только при публикации через Nginx.'}
-                  </p>
-                  <p>
-                    <Link
-                      to="/settings/vpn_network"
-                      className="font-medium text-primary underline-offset-4 hover:underline"
-                    >
-                      Открыть «Адрес сайта и HTTPS»
-                    </Link>{' '}
-                    и выберите стек «Через Nginx».
-                  </p>
-                </div>
-              </div>
+              <SettingsAlert variant="warning" title="Портал недоступен в текущем режиме">
+                <p>
+                  {portalStatus?.portal_mode_block_reason ||
+                    'Клиентский портал доступен только при публикации через Nginx.'}
+                </p>
+                <p className="mt-1.5">
+                  <Link
+                    to="/settings/vpn_network"
+                    className="font-medium text-primary underline-offset-4 hover:underline"
+                  >
+                    Открыть «Адрес сайта и HTTPS»
+                  </Link>{' '}
+                  и выберите стек «Через Nginx».
+                </p>
+              </SettingsAlert>
             ) : null}
 
-            {portalStatus && (
-              <div className="space-y-2 rounded-xl border bg-muted/20 p-3 text-sm">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-muted-foreground">Статус:</span>
-                  {portalStatus.portal_ready ? (
-                    <Badge variant="success">Готов</Badge>
-                  ) : (
-                    <Badge variant="warning">Нужна настройка</Badge>
-                  )}
-                  {portalStatus.active_publish_mode ? (
-                    <Badge variant="outline">{portalStatus.active_publish_mode}</Badge>
+            {portalStatus ? (
+              <>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-xl border bg-muted/20 px-3 py-2.5">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Домен
+                    </p>
+                    <p className="mt-1 break-all font-mono text-sm">
+                      {portalStatus.portal_domain || 'не задан'}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border bg-muted/20 px-3 py-2.5">
+                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Корень портала
+                    </p>
+                    <p className="mt-1 break-all font-mono text-sm">
+                      {portalAccessUrl || 'не настроен'}
+                    </p>
+                  </div>
+                </div>
+
+                {portalStatus.warnings.length > 0 ? (
+                  <div className="space-y-1">
+                    {portalStatus.warnings.map((w) => (
+                      <p key={w} className="text-xs text-amber-700 dark:text-amber-400">
+                        {w}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="flex flex-wrap gap-2">
+                  <Button asChild variant="outline" size="sm" className="gap-1.5">
+                    <Link to="/settings/vpn_network">
+                      <Settings2 size={14} />
+                      Настроить домен
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline" size="sm" className="gap-1.5">
+                    <Link to="/users">
+                      <Users size={14} />
+                      Ссылки пользователей
+                    </Link>
+                  </Button>
+                </div>
+
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">
+                    Персональные ссылки открывают портал — они в карточке абонента.
+                  </p>
+                  {portalStatus.dns_hint ? (
+                    <p className="text-xs text-muted-foreground">{portalStatus.dns_hint}</p>
                   ) : null}
                 </div>
-                {portalStatus.dns_hint ? (
-                  <p className="text-xs text-muted-foreground">{portalStatus.dns_hint}</p>
-                ) : null}
-                {portalStatus.warnings.map((w) => (
-                  <p key={w} className="text-xs text-amber-700 dark:text-amber-400">
-                    {w}
-                  </p>
-                ))}
-                {portalStatus.portal_access_url ? (
-                  <p className="text-xs text-muted-foreground">
-                    URL:{' '}
-                    <code className="rounded bg-muted px-1 py-0.5">
-                      {portalStatus.portal_access_url}p/…
-                    </code>
-                  </p>
-                ) : null}
-              </div>
-            )}
+              </>
+            ) : null}
           </CardContent>
         </Card>
       )}

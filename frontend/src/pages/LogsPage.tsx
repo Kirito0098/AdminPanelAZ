@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Navigate, useSearchParams } from 'react-router-dom'
+import { Navigate, Link, useSearchParams } from 'react-router-dom'
 import {
+  Activity,
   ArrowDownToLine,
   ChevronDown,
   ChevronRight,
@@ -749,6 +750,23 @@ export default function LogsPage() {
             {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
             Переключите узел в шапке или на странице «Узлы», чтобы смотреть другой сервер.
           </SettingsAlert>
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            <Link
+              to="/monitoring"
+              className="inline-flex items-center gap-1.5 font-medium text-primary underline-offset-4 hover:underline"
+            >
+              <Activity size={13} aria-hidden />
+              Живые подключения — в NOC-мониторинге
+            </Link>
+            <Link
+              to="/settings/config_delivery"
+              className="inline-flex items-center gap-1.5 font-medium text-primary underline-offset-4 hover:underline"
+            >
+              <Download size={13} aria-hidden />
+              Выдача профилей — в настройках
+            </Link>
+          </div>
 
           {nodeOffline && (
             <SettingsAlert variant="warning" title="Узел офлайн">

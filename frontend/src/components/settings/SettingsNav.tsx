@@ -8,6 +8,7 @@ import {
   Globe,
   Puzzle,
   RefreshCw,
+  Router,
   Shield,
   User,
   Users,
@@ -92,7 +93,7 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
     description: 'Профили клиентов и службы',
     adminOnly: true,
     items: [
-      navItem('config_delivery', Download),
+      navItem('config_delivery', Router),
       navItem('maintenance', Wrench, { settingsTab: 'maintenance' }),
     ],
   },

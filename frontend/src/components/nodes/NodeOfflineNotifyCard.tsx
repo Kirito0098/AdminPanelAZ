@@ -5,6 +5,7 @@ import { ApiError, getAdminNotifySettings } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { useNotifications } from '@/context/NotificationContext'
 
@@ -58,21 +59,20 @@ export default function NodeOfflineNotifyCard() {
                 <div className="min-w-0">
                   <p className="text-sm font-semibold tracking-tight">Telegram · offline</p>
                   <p className="text-xs text-muted-foreground">
-                    Алерт после порога {graceMinutes} мин · настраивается в Telegram → Уведомления
+                    Алерт после порога {graceMinutes} мин · настраивается в Настройках → Уведомления
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                 <Badge variant={active ? 'success' : 'secondary'}>
                   {active ? 'Включены' : 'Выключены'}
                 </Badge>
-                <Link
-                  to="/telegram?tab=notify"
-                  className="inline-flex items-center gap-0.5 text-xs font-medium text-primary underline-offset-4 hover:underline"
-                >
-                  Настроить
-                  <ChevronRight size={14} aria-hidden />
-                </Link>
+                <Button variant="outline" size="sm" asChild>
+                  <Link to="/settings/notifications">
+                    Настроить
+                    <ChevronRight size={14} aria-hidden />
+                  </Link>
+                </Button>
               </div>
             </div>
 
