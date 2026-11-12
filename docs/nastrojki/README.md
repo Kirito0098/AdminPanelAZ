@@ -30,7 +30,7 @@
 | **Мой профиль** | Тема, пароль, 2FA, passkey | [profil.md](profil.md) |
 | **Пользователи** | Учётные записи, роли, срок доступа | [polzovateli.md](polzovateli.md) |
 | **Защита входа** | IP, баны, web-сессии, секреты | [bezopasnost.md](bezopasnost.md) |
-| **Выдача VPN-профилей** | QR-ссылки, файлы для роутеров | [razdacha-konfigov.md](razdacha-konfigov.md) |
+| **Выдача VPN-профилей** | Файлы для роутеров и публичная ссылка на них | [razdacha-konfigov.md](razdacha-konfigov.md) |
 | **Обслуживание VPN** | VPN-службы, хранение данных, GeoIP | [obsluzhivanie.md](obsluzhivanie.md) |
 | **Адрес сайта и HTTPS** | HTTPS, домен, Cloudflare, StatusOpenVPN | [set-i-publikaciya.md](set-i-publikaciya.md) |
 | **Резервные копии** | Бэкапы, расписание, копии перед восстановлением | [rezervnye-kopii.md](rezervnye-kopii.md) |

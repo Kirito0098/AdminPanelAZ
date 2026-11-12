@@ -18,7 +18,7 @@ settings = get_settings()
 
 @router.get("/route-download/{router}")
 def public_route_download(router: str, request: Request, db: Session = Depends(get_db)):
-    """Public download of Keenetic / MikroTik / TP-Link route files (not QR one-time links)."""
+    """Public download of Keenetic / MikroTik / TP-Link route files."""
     require_openvpn_and_security()
     if not is_public_download_enabled(db):
         raise HTTPException(status_code=404, detail="Not found")

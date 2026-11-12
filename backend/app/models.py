@@ -568,25 +568,6 @@ class UnlockCodeRedemption(Base):
     node: Mapped["Node"] = relationship()
 
 
-class QrDownloadToken(Base):
-    __tablename__ = "qr_download_tokens"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
-    config_type: Mapped[str] = mapped_column(String(16))
-    config_name: Mapped[str] = mapped_column(String(255))
-    file_path: Mapped[str] = mapped_column(String(512))
-    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime)
-    max_downloads: Mapped[int] = mapped_column(Integer, default=1)
-    download_count: Mapped[int] = mapped_column(Integer, default=0)
-    pin_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    node_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    pin_failures: Mapped[int] = mapped_column(Integer, default=0)
-    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-
-
 class ClientPortalToken(Base):
     """Permanent shareable client portal link (Remnawave-style), keyed by node + client_name."""
 
@@ -632,19 +613,6 @@ class UserPortalToken(Base):
     created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-
-
-class QrDownloadAuditLog(Base):
-    __tablename__ = "qr_download_audit_logs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    token_id: Mapped[int | None] = mapped_column(ForeignKey("qr_download_tokens.id"), nullable=True)
-    event_type: Mapped[str] = mapped_column(String(32))
-    actor_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
-    actor_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    remote_addr: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    details: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class UserConfigAccess(Base):

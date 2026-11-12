@@ -34,8 +34,6 @@ from app.models import (
     Node,
     NodeStatus,
     NodeSyncGroup,
-    QrDownloadAuditLog,
-    QrDownloadToken,
     RefreshToken,
     TelegramRequestBan,
     UnlockCode,
@@ -576,14 +574,6 @@ def purge_user_before_delete(db: Session, user: User, successor: User) -> None:
     )
     db.query(VpnConfig).filter(VpnConfig.owner_id == user.id).update(
         {VpnConfig.owner_id: successor.id},
-        synchronize_session=False,
-    )
-    db.query(QrDownloadToken).filter(QrDownloadToken.created_by_user_id == user.id).update(
-        {QrDownloadToken.created_by_user_id: None},
-        synchronize_session=False,
-    )
-    db.query(QrDownloadAuditLog).filter(QrDownloadAuditLog.actor_user_id == user.id).update(
-        {QrDownloadAuditLog.actor_user_id: None},
         synchronize_session=False,
     )
     db.query(UserActionLog).filter(UserActionLog.user_id == user.id).update(

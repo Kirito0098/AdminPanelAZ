@@ -434,12 +434,13 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
         settings_tabs=("updates",),
     ),
     FeatureToggleDefinition(
+        # Ключ исторический: прежнее имя функции, менять нельзя — слетит состояние тогглов и env.
         key="qr_downloads",
         env_key="FEATURE_QR_DOWNLOADS_ENABLED",
-        label="Скачивание и QR",
-        description="Скачивание конфигов, QR-коды и одноразовые ссылки.",
+        label="Выдача VPN-профилей",
+        description="Скачивание файлов конфигов и выдача профилей.",
         icon="📲",
-        disable_hint="Кнопки скачивания/QR и одноразовые ссылки станут недоступны.",
+        disable_hint="Скачивание файлов конфигов и выдача профилей станут недоступны.",
         resource_impact_level="low",
         default=True,
         group="app_module",

@@ -299,9 +299,8 @@
 | `ProviderMeta` | Мета CIDR-провайдеров |
 | `AppSetting` | key-value настройки |
 | `UserActionLog` | Аудит действий |
-| `QrDownloadToken` | Публичные ссылки на конфиги |
 
-Всего в `models.py` 43 модели; в таблице — основные.
+Всего в `models.py` 52 модели; в таблице — основные.
 
 **Отдельная БД:** `ProviderCidr` в `cidr_models.py` → `cidr.db`.
 

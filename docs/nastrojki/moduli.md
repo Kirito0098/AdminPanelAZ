@@ -84,6 +84,7 @@ sudo systemctl restart adminpanelaz
 | server_monitor | Страница «Сервер» |
 | action_logs | Журнал действий администраторов |
 | proxy_nodes | Прокси-узлы на странице **Узлы** (**default off**); см. [proxy-nodes](../proxy-nodes.md), [uzly](../uzly.md), [proxy-agent](../proxy-agent.md) |
+| qr_downloads | **Выдача VPN-профилей**: скачивание файлов конфигов и выдача профилей (ключ исторический) |
 
 ---
 

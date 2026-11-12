@@ -41,6 +41,7 @@ ensure_env_defaults() {
     _ensure_env_default "FEATURE_USER_MANAGEMENT_ENABLED" "true"
     _ensure_env_default "FEATURE_ACTION_LOGS_ENABLED" "true"
     _ensure_env_default "FEATURE_SYSTEM_UPDATES_ENABLED" "true"
+    # Ключ исторический: управляет выдачей VPN-профилей (скачивание конфигов), не QR
     _ensure_env_default "FEATURE_QR_DOWNLOADS_ENABLED" "true"
     _ensure_env_default "FEATURE_VPN_NETWORK_ENABLED" "true"
     _ensure_env_default "ACTIVE_WEB_SESSION_TRACKING_ENABLED" "true"
