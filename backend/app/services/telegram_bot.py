@@ -34,8 +34,10 @@ from app.services.telegram_bot_handlers.settings import (
 from app.services.telegram_bot_handlers.start import handle_start
 from app.services.telegram_bot_handlers.menu import (
     _dispatch_action,
+    guest_text_allowed,
     handle_menu_callback,
     handle_menu_text,
+    send_guest_unlinked,
 )
 from app.services.telegram_bot_handlers.unlock_codes import (
     handle_unlock_codes_callback,
@@ -118,26 +120,26 @@ def _profile_from_user(from_user: dict[str, Any]) -> tuple[str, str]:
 
 
 async def _dispatch_command(ctx: BotContext, command: str, args: str) -> None:
-    if command == "/start":
-        await handle_start(ctx, payload=args.strip() or None)
+    if command in _PUBLIC_COMMANDS:
+        # Публичные команды тоже лимитируем: каждый /start пересоздаёт hub-виджет
+        # и пишет в БД, а /help — дешёвый спам-вектор. Перебор — молча, без ответа.
+        if telegram_bot_command_rate_limit_service.consume(ctx.db, ctx.telegram_user_id):
+            return
+        if command == "/start":
+            await handle_start(ctx, payload=args.strip() or None)
+        elif command == "/help":
+            await _dispatch_action(ctx, "help")
+        else:
+            await handle_link(ctx, args)
         return
     if command == "/admin":
         from app.services.telegram_bot_handlers.chat import handle_admin_chat
 
         await handle_admin_chat(ctx)
         return
-    if command == "/help":
-        await _dispatch_action(ctx, "help")
-        return
-    if command == "/link":
-        await handle_link(ctx, args)
-        return
 
-    if ctx.user is None and command not in _PUBLIC_COMMANDS:
-        from app.services.telegram_api import send_message
-        from app.services.telegram_bot_handlers.base import unlinked_message
-
-        await send_message(ctx.bot_token, ctx.chat_id, unlinked_message())
+    if ctx.user is None:
+        await send_guest_unlinked(ctx)
         return
 
     rate_error = telegram_bot_command_rate_limit_service.consume(ctx.db, ctx.telegram_user_id)
@@ -324,6 +326,15 @@ class TelegramBotService:
             telegram_name=tg_name,
         )
         if not command:
+            if text.strip() and ctx.user is None:
+                # Гость: текстом доступны только безопасные пункты меню. Всё прочее —
+                # тот же ответ, что у непубличной команды, и никакого FSM продления.
+                from app.services.telegram_bot_handlers.user_renew import cancel_redeem_prompt
+
+                cancel_redeem_prompt(telegram_user_id)
+                if not guest_text_allowed(ctx, text):
+                    await send_guest_unlinked(ctx)
+                    return
             if text.strip():
                 from app.services.telegram_bot_handlers.chat import handle_admin_card_reply
 

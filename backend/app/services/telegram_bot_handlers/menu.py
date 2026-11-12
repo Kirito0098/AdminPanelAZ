@@ -23,6 +23,9 @@ _ADMIN_ACTIONS = frozenset(
     {"status", "settings", "nodes", "hub_nodes", "cidr", "warper", "awg2", "unlock"}
 )
 
+# Что гостю (Telegram без привязки) разрешено текстом/кнопкой: навигация, /link и заявка.
+_GUEST_ACTIONS = frozenset({"home", "help", "link_code", "request_access"})
+
 logger = logging.getLogger(__name__)
 
 
@@ -137,6 +140,29 @@ def build_reply_keyboard(ctx: BotContext) -> dict:
     )
 
 
+def guest_action_allowed(ctx: BotContext, action: str) -> bool:
+    """Гость (без привязки) может только навигацию, /link и заявку на доступ."""
+    if action not in _GUEST_ACTIONS:
+        return False
+    return action != "request_access" or _accept_requests(ctx.db)
+
+
+def guest_text_allowed(ctx: BotContext, text: str) -> bool:
+    """Подпись пункта меню из безопасного набора гостя."""
+    action = i18n.MENU_ACTIONS.get((text or "").strip())
+    return bool(action) and guest_action_allowed(ctx, action)
+
+
+async def send_guest_unlinked(ctx: BotContext) -> None:
+    """Единый ответ гостю на всё недоступное: приглашение привязать аккаунт."""
+    await send_message(
+        ctx.bot_token,
+        ctx.chat_id,
+        i18n.UNLINKED,
+        reply_markup=build_reply_keyboard(ctx),
+    )
+
+
 def build_more_inline_menu(ctx: BotContext) -> dict:
     rows = [
         [inline_button(_menu_button_label(action), callback_data=f"nav:{action}") for action in spec_row]
@@ -169,6 +195,9 @@ async def _open_hub_view(ctx: BotContext, view: str) -> bool:
 
 
 async def _dispatch_action(ctx: BotContext, action: str, *, message_id: int | None = None) -> None:
+    if ctx.user is None and not guest_action_allowed(ctx, action):
+        await send_guest_unlinked(ctx)
+        return
     if action in _ADMIN_ACTIONS and not is_admin(ctx.user):
         await send_message(ctx.bot_token, ctx.chat_id, i18n.ADMIN_ONLY)
         return

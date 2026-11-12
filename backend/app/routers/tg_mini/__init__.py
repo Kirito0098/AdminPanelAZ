@@ -13,7 +13,6 @@ from app.services.notify_time import get_client_timezone_from_request
 from .auth import router as auth_router
 from .auth import tg_auth
 from .configs import mini_config_files, mini_configs, mini_send_config, router as configs_router
-from .dashboard import mini_dashboard, router as dashboard_router
 from .me_configs import router as me_configs_router
 from .me_portal import router as me_portal_router
 from .me_redeem import router as me_redeem_router
@@ -33,7 +32,8 @@ from .helpers import (
     _verify_telegram_init_data,
     settings,
 )
-from .nodes import mini_activate_node, mini_get_node, mini_list_nodes, mini_node_health, router as nodes_router
+from .nodes import mini_activate_node, mini_list_nodes, router as nodes_router
+from .public import mini_public_config, router as public_router
 from .settings import (
     mini_get_admin_notify,
     mini_get_telegram_settings,
@@ -42,7 +42,6 @@ from .settings import (
     mini_test_telegram,
     mini_update_admin_notify,
     mini_update_telegram_settings,
-    mini_visible_vpn_profiles,
     router as settings_router,
 )
 from .static import mini_app_asset, mini_app_page
@@ -50,13 +49,13 @@ from .static import mini_app_asset, mini_app_page
 router = APIRouter(prefix="/tg-mini", tags=["tg-mini"])
 router.include_router(nodes_router)
 router.include_router(auth_router)
-router.include_router(dashboard_router)
 router.include_router(configs_router)
 router.include_router(me_configs_router)
 router.include_router(me_portal_router)
 router.include_router(me_redeem_router)
 router.include_router(messages_router)
 router.include_router(settings_router)
+router.include_router(public_router)
 router.add_api_route("/assets/{file_path:path}", mini_app_asset, include_in_schema=False, methods=["GET"])
 router.add_api_route("", mini_app_page, methods=["GET"])
 
@@ -85,19 +84,16 @@ __all__ = [
     "mini_config_files",
     "mini_configs",
     "me_configs_router",
-    "mini_dashboard",
     "mini_get_admin_notify",
-    "mini_get_node",
     "mini_get_telegram_settings",
     "mini_list_nodes",
-    "mini_node_health",
+    "mini_public_config",
     "mini_send_config",
     "mini_settings",
     "mini_test_admin_notify",
     "mini_test_telegram",
     "mini_update_admin_notify",
     "mini_update_telegram_settings",
-    "mini_visible_vpn_profiles",
     "messages_router",
     "router",
     "settings",

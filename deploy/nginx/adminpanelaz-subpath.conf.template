@@ -25,6 +25,7 @@ location ^~ __ACCESS_PATH__/api/telegram/webhook/ {
 
 # Telegram Mini App — без X-Frame-Options (WebView Telegram блокируется SAMEORIGIN)
 location ^~ __ACCESS_PATH__/api/tg-mini {
+    client_max_body_size 32k;
     include snippets/cloudflare-realip.conf;
     include snippets/cloudflare-origin-lock.conf;
     proxy_pass http://127.0.0.1:__BACKEND_PORT__;

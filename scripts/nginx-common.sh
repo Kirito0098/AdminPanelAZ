@@ -1019,6 +1019,7 @@ $(nginx_origin_lock_include_line)
 
     # Telegram Mini App — без X-Frame-Options (WebView Telegram блокируется SAMEORIGIN)
     location ^~ /api/tg-mini {
+        client_max_body_size 32k;
 $(nginx_realip_include_line)
 $(nginx_origin_lock_include_line)
         proxy_pass http://127.0.0.1:${backend_port};

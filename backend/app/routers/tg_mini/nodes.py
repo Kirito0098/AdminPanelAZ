@@ -38,32 +38,6 @@ def mini_list_nodes(db: Session = Depends(get_db), _: User = Depends(require_tg_
     }
 
 
-@router.get("/nodes/{node_id}")
-def mini_get_node(node_id: int, db: Session = Depends(get_db), _: User = Depends(require_tg_mini_admin)):
-    sync_local_node(db)
-    node = _get_tg_node_or_404(node_id, db)
-    active_id = get_active_node_id(db)
-    return _serialize_tg_node(node, active_id=active_id, db=db)
-
-
-@router.post("/nodes/{node_id}/health")
-def mini_node_health(
-    node_id: int,
-    db: Session = Depends(get_db),
-    admin: User = Depends(require_tg_mini_admin),
-):
-    node = _get_tg_node_or_404(node_id, db)
-    health = check_node_health(node)
-    update_node_from_health(node, health, db)
-    db.commit()
-    db.refresh(node)
-    active_id = get_active_node_id(db)
-    return {
-        "node": _serialize_tg_node(node, active_id=active_id, db=db),
-        "health": health,
-    }
-
-
 @router.post("/nodes/{node_id}/activate")
 def mini_activate_node(
     node_id: int,

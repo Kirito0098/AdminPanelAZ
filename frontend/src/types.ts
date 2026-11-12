@@ -878,21 +878,9 @@ export interface TgMiniAuthResponse {
   telegram_id: string
 }
 
-export interface TgMiniDashboard {
-  total_configs: number
-  connected_openvpn: number
-  connected_wireguard: number
-  total_wireguard_peers: number
-  server_ip: string | null
-  openvpn_clients: Array<{ common_name?: string; [key: string]: unknown }>
-  wireguard_peers: Array<{
-    client_name: string | null
-    public_key: string
-    transfer_rx: number
-    transfer_tx: number
-    latest_handshake?: string | null
-  }>
-  timestamp: string
+export interface TgMiniPublicConfig {
+  bot_username: string | null
+  bot_configured: boolean
 }
 
 export type InstallPlatform = 'ios' | 'mac' | 'windows' | 'android' | 'linux'

@@ -24,13 +24,11 @@ from app.schemas import (
     AdminNotifyGroupInfo,
     AdminNotifySettingsResponse,
     AdminNotifySettingsUpdate,
-    EffectiveVisibleVpnProfilesResponse,
     MessageResponse,
     SelfServiceLimitsResponse,
     SelfServiceLimitsUpdate,
     TelegramSettingsResponse,
     TelegramSettingsUpdate,
-    VisibleVpnProfilesPolicy,
 )
 from app.services.admin_notify import (
     PERSONAL_OWNER_NOTIFY_KEY_ORDER,
@@ -105,18 +103,6 @@ def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(ge
             else bool(getattr(current_user, "can_manage_configs", False))
         ),
     }
-
-
-@router.get("/visible-vpn-profiles", response_model=EffectiveVisibleVpnProfilesResponse)
-def mini_visible_vpn_profiles(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_tg_mini_user),
-):
-    policy = resolve_effective_visible_vpn_profiles(db, current_user)
-    return EffectiveVisibleVpnProfilesResponse(
-        policy=VisibleVpnProfilesPolicy(**policy),
-        inherited=True,
-    )
 
 
 @router.get("/admin-notify", response_model=AdminNotifySettingsResponse)

@@ -1,4 +1,4 @@
-"""Rate limit for Telegram bot commands (linked users)."""
+"""Rate limit for Telegram bot commands (any Telegram user id)."""
 
 from __future__ import annotations
 

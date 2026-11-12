@@ -8,12 +8,17 @@ from app.models import UserRole
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_commands import sync_admin_chat_commands
 from app.services.telegram_bot_handlers.base import BotContext
-from app.services.telegram_link import redeem_link_code
+from app.services.telegram_link import LINK_CODE_HINT, redeem_link_code
 
 _LINK_LOCKED = "Слишком много попыток привязки. Повторите позже."
 
 
 async def handle_link(ctx: BotContext, code: str) -> None:
+    if not (code or "").strip():
+        # Пустой /link — подсказка формата, а не неудачная попытка ввода:
+        # счётчик блокировки не трогаем.
+        await send_message(ctx.bot_token, ctx.chat_id, LINK_CODE_HINT)
+        return
     key = f"telegram_link:{ctx.telegram_user_id}"
     try:
         auth_rate_limit_service.check(key, detail=_LINK_LOCKED)

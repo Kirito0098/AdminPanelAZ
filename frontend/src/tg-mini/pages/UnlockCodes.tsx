@@ -18,7 +18,6 @@ import { cn } from '@/lib/utils'
 import { vpnTypeBadgeClass, vpnTypeLabel } from '@/tg-mini/lib/vpnLabels'
 import type { UnlockCodeRecord } from '@/types'
 import { Ban, CalendarClock, Copy, KeyRound, Loader2, RefreshCw, ShieldCheck, Trash2, Users } from 'lucide-react'
-import { Navigate } from 'react-router-dom'
 
 const ALL_PROTOCOLS: UnlockCodeProtocol[] = ['openvpn', 'wireguard', 'amneziawg2']
 
@@ -62,7 +61,7 @@ function ProtocolPill({ protocol }: { protocol: UnlockCodeProtocol }) {
 }
 
 export default function UnlockCodes() {
-  const { isAdmin, features } = useTgAuth()
+  const { features } = useTgAuth()
   const [codes, setCodes] = useState<UnlockCodeRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -115,9 +114,8 @@ export default function UnlockCodes() {
   }, [])
 
   useEffect(() => {
-    if (!isAdmin) return
     void load()
-  }, [isAdmin, load])
+  }, [load])
 
   const toggleProtocol = (protocol: UnlockCodeProtocol) => {
     setSelectedProtocols((prev) => {
@@ -197,10 +195,6 @@ export default function UnlockCodes() {
     } finally {
       setRevokingId(null)
     }
-  }
-
-  if (!isAdmin) {
-    return <Navigate to="/" replace />
   }
 
   if (loading) {

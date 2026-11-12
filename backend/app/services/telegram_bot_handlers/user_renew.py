@@ -22,6 +22,11 @@ async def start_redeem_prompt(bot_token: str, chat_id: str) -> None:
     )
 
 
+def cancel_redeem_prompt(telegram_id: str) -> None:
+    """Сбросить ожидание ключа (гость, /start, выход из сценария)."""
+    _awaiting_code.discard(str(telegram_id))
+
+
 async def try_handle_code_message(
     db: Session, bot_token: str, *, telegram_id: str, text: str
 ) -> bool:

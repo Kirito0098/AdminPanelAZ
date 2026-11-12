@@ -88,7 +88,9 @@ def test_link_code_issued_with_password(client, db_factory):
         "/api/telegram/link-code", json={"current_password": PASSWORD}, headers=_auth(db_factory, "carol")
     )
     assert response.status_code == 200
-    assert len(response.json()["code"]) == 8
+    code = response.json()["code"]
+    assert len(code) == 12
+    assert all(char in "0123456789abcdef" for char in code)
 
 
 def test_link_code_get_is_gone(client, db_factory):

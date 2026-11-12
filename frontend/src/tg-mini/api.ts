@@ -19,6 +19,7 @@ import type {
   TgMeStatus,
   TgMiniNodeActionResponse,
   TgMiniNodesResponse,
+  TgMiniPublicConfig,
   TgMiniSettings,
   TgPortalLink,
   UserMessageItem,
@@ -250,12 +251,13 @@ export async function getTgNodes(): Promise<TgMiniNodesResponse> {
   return tgFetch<TgMiniNodesResponse>('/nodes')
 }
 
-export async function checkTgNodeHealth(nodeId: number): Promise<TgMiniNodeActionResponse> {
-  return tgFetch<TgMiniNodeActionResponse>(`/nodes/${nodeId}/health`, { method: 'POST' })
-}
-
 export async function activateTgNode(nodeId: number): Promise<TgMiniNodeActionResponse> {
   return tgFetch<TgMiniNodeActionResponse>(`/nodes/${nodeId}/activate`, { method: 'POST' })
+}
+
+/** Публичный конфиг Mini App: без токена, только имя бота для ссылки на вход. */
+export async function getTgMiniPublicConfig(): Promise<TgMiniPublicConfig> {
+  return tgFetch<TgMiniPublicConfig>('/config', {}, false)
 }
 
 /** Одна панельная конфигурация по id: в `@/api/configs` нет геттера без списка. */

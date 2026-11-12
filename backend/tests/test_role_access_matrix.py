@@ -145,7 +145,6 @@ def test_admin_reaches_the_settings_menu(db, sent):
 
 ADMIN_MINI_PREFIXES = (
     "/nodes",
-    "/dashboard",
     "/warper/status",
     "/awg2/status",
     "/cidr/status",
@@ -202,7 +201,7 @@ def test_mini_user_endpoints_require_a_telegram_binding():
     violations = [
         (file, path, node.name)
         for file, path, node in _mini_routes()
-        if path.startswith(("/me/", "/configs", "/settings", "/visible-vpn-profiles"))
+        if path.startswith(("/me/", "/configs", "/settings"))
         and "get_tg_mini_user" not in _dependency_names(node)
     ]
 

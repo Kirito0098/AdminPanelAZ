@@ -13,7 +13,14 @@ from app.models import User
 
 _LINK_CODES_KEY = "telegram_link_codes"
 _CODE_TTL_SECONDS = 600
-_CODE_LENGTH = 8
+# 12 hex-символов (48 бит) вместо прежних 8: старые коды остаются валидными,
+# они ищутся по точному совпадению в том же словаре.
+_CODE_LENGTH = 12
+
+LINK_CODE_HINT = (
+    "Пришлите код привязки: <code>/link КОД</code>. "
+    "Код — в панели: «Мой профиль» → Telegram."
+)
 
 
 def _load_codes(db: Session) -> dict[str, dict[str, str | int]]:
@@ -92,10 +99,7 @@ def release_telegram_of_pending_deletion(
 def redeem_link_code(db: Session, code: str, telegram_id: str) -> tuple[bool, str, User | None]:
     normalized = (code or "").strip().lower()
     if not normalized:
-        return False, (
-            "Пришлите код привязки: <code>/link КОД</code>. "
-            "Код — в панели: «Мой профиль» → Telegram."
-        ), None
+        return False, LINK_CODE_HINT, None
 
     codes = _purge_expired(_load_codes(db))
     meta = codes.pop(normalized, None)

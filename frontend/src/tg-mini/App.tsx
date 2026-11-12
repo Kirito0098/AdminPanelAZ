@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { HashRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import AdminGate from '@/tg-mini/AdminGate'
 import FeatureGate from '@/tg-mini/FeatureGate'
 import { TgAuthProvider, useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import MiniShell from '@/tg-mini/layout/MiniShell'
@@ -39,8 +40,22 @@ export default function TgMiniApp() {
           <Route element={<MiniShell />}>
             <Route index element={<Configs />} />
             <Route path="configs" element={<Configs />} />
-            <Route path="clients" element={<Clients />} />
-            <Route path="requests" element={<AccessRequests />} />
+            <Route
+              path="clients"
+              element={
+                <AdminGate>
+                  <Clients />
+                </AdminGate>
+              }
+            />
+            <Route
+              path="requests"
+              element={
+                <AdminGate>
+                  <AccessRequests />
+                </AdminGate>
+              }
+            />
             <Route
               path="messages"
               element={
@@ -53,7 +68,9 @@ export default function TgMiniApp() {
               path="unlock-codes"
               element={
                 <FeatureGate featureKey="unlock_codes">
-                  <UnlockCodes />
+                  <AdminGate>
+                    <UnlockCodes />
+                  </AdminGate>
                 </FeatureGate>
               }
             />

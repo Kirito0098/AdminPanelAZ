@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.models import UserRole
 from app.services.auth_rate_limit import AuthRateLimitService
 from app.services.telegram_bot_handlers import link, start
+from app.services.telegram_link import LINK_CODE_HINT
 
 MAX_ATTEMPTS = 3
 LOCKED_MESSAGE = "Слишком много попыток привязки. Повторите позже."
@@ -106,3 +107,16 @@ def test_user_link_keeps_the_default_command_menu(bot):
     _link(GOOD_CODE, telegram_user_id="100")
 
     assert bot.admin_menu == []
+
+
+def test_empty_link_argument_only_shows_the_format_hint(bot):
+    for _ in range(MAX_ATTEMPTS + 1):
+        _link("")
+        _link("   ")
+
+    _link(GOOD_CODE)
+
+    assert bot.sent[-1] == "linked"
+    assert bot.redeemed == [(GOOD_CODE, "100")]
+    assert bot.sent[0].startswith("Пришлите код привязки")
+    assert bot.sent[0] == LINK_CODE_HINT
