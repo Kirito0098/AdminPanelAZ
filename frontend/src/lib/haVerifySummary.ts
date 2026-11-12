@@ -2,7 +2,7 @@ import type { NodeSyncMismatch, NodeSyncVerifyResult, OpenVpnProfileCertIssue } 
 
 export type HaVerifyResultVariant = 'success' | 'warning'
 
-export interface HaVerifyFileEntry {
+interface HaVerifyFileEntry {
   filename: string
   title?: string
 }
@@ -12,14 +12,14 @@ export interface HaVerifyFileGroup {
   files: HaVerifyFileEntry[]
 }
 
-export interface HaVerifyMismatchView {
+interface HaVerifyMismatchView {
   title: string
   details: string[]
   fileGroups?: HaVerifyFileGroup[]
   hint?: string
 }
 
-export interface HaVerifyReplicaView {
+interface HaVerifyReplicaView {
   nodeName: string
   online: boolean
   ok: boolean

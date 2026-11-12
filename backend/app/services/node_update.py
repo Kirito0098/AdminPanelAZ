@@ -277,7 +277,7 @@ def _restart_log_path(repo_root: Path) -> Path:
     return repo_root / ".runtime" / "node" / "logs" / "update-restart.log"
 
 
-def _append_restart_log(log_path: Path, message: str) -> None:
+def append_restart_log(log_path: Path, message: str) -> None:
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
@@ -287,7 +287,7 @@ def _append_restart_log(log_path: Path, message: str) -> None:
         pass
 
 
-def _systemd_unit_installed(unit: str = SYSTEMD_UNIT) -> bool:
+def systemd_unit_installed(unit: str) -> bool:
     try:
         result = subprocess.run(
             ["systemctl", "cat", unit],
@@ -301,18 +301,16 @@ def _systemd_unit_installed(unit: str = SYSTEMD_UNIT) -> bool:
         return False
 
 
-def restart_node_agent(repo_root: Path) -> dict[str, Any]:
-    """Restart node agent after git pull via systemd."""
-    log_path = _restart_log_path(repo_root)
-
-    if not _systemd_unit_installed():
-        message = f"Unit {SYSTEMD_UNIT} не установлен — systemctl restart недоступен"
-        _append_restart_log(log_path, message)
+def systemd_restart(unit: str, log_path: Path) -> dict[str, Any]:
+    """Restart a systemd unit, report the result and append it to ``log_path``."""
+    if not systemd_unit_installed(unit):
+        message = f"Unit {unit} не установлен — systemctl restart недоступен"
+        append_restart_log(log_path, message)
         return {"method": "none", "success": False, "output": "", "error": message}
 
     try:
         result = subprocess.run(
-            ["systemctl", "restart", SYSTEMD_UNIT],
+            ["systemctl", "restart", unit],
             capture_output=True,
             text=True,
             timeout=180.0,
@@ -320,29 +318,38 @@ def restart_node_agent(repo_root: Path) -> dict[str, Any]:
         )
         output = ((result.stdout or "") + (result.stderr or "")).strip()
         success = result.returncode == 0
-        _append_restart_log(
+        append_restart_log(
             log_path,
-            f"systemctl restart {SYSTEMD_UNIT}: rc={result.returncode}"
+            f"systemctl restart {unit}: rc={result.returncode}"
             + (f" — {output}" if output else ""),
         )
         return {
             "method": "systemd",
             "success": success,
             "output": output,
-            "error": None if success else output or f"systemctl restart {SYSTEMD_UNIT} failed",
+            "error": None if success else output or f"systemctl restart {unit} failed",
         }
     except (subprocess.TimeoutExpired, OSError) as exc:
-        _append_restart_log(log_path, f"systemctl restart {SYSTEMD_UNIT}: {exc}")
+        append_restart_log(log_path, f"systemctl restart {unit}: {exc}")
         return {"method": "systemd", "success": False, "output": "", "error": str(exc)}
 
 
-def schedule_agent_restart(repo_root: Path, *, delay_seconds: float = 1.5) -> None:
+def schedule_restart(unit: str, log_path: Path, delay_seconds: float) -> None:
     def _restart() -> None:
-        restart_node_agent(repo_root)
+        systemd_restart(unit, log_path)
 
     timer = threading.Timer(delay_seconds, _restart)
     timer.daemon = True
     timer.start()
+
+
+def restart_node_agent(repo_root: Path) -> dict[str, Any]:
+    """Restart node agent after git pull via systemd."""
+    return systemd_restart(SYSTEMD_UNIT, _restart_log_path(repo_root))
+
+
+def schedule_agent_restart(repo_root: Path, *, delay_seconds: float = 1.5) -> None:
+    schedule_restart(SYSTEMD_UNIT, _restart_log_path(repo_root), delay_seconds)
 
 
 def check_agent_updates(*, repo_root: Path | None = None) -> dict[str, Any]:

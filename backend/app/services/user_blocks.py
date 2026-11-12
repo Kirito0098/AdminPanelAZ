@@ -13,14 +13,12 @@ Stacked-reasons contract (one block_reason per policy row):
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
 from app.models import Node, NodeStatus, User, VpnConfig, VpnType
-from app.services.access_policy import USER_LEVEL_BLOCK_REASONS, AccessPolicyService
-from app.services.node_manager import get_adapter_for_node, is_vpn_node, node_metadata_dict
+from app.services.access_policy import USER_LEVEL_BLOCK_REASONS, AccessPolicyService, policy_service_for_node
+from app.services.node_manager import get_adapter_for_node, is_vpn_node
 from app.services.node_sync.policy_sync import maybe_replicate_policy_op
 
 logger = logging.getLogger(__name__)
@@ -33,15 +31,7 @@ _VPN_PROTOCOLS = {
 
 
 def _policy_service(db: Session, node: Node) -> AccessPolicyService:
-    meta = node_metadata_dict(node)
-    path = Path(str(meta.get("antizapret_path") or get_settings().antizapret_path))
-    return AccessPolicyService(
-        db,
-        antizapret_path=path,
-        node_id=node.id,
-        node_name=node.name,
-        adapter=get_adapter_for_node(node),
-    )
+    return policy_service_for_node(db, node, adapter=get_adapter_for_node(node))
 
 
 def _owned_primary_configs(db: Session, user_id: int) -> list[VpnConfig]:

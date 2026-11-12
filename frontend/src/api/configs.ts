@@ -1,6 +1,8 @@
 import {
   apiFetch,
   apiFetchResponse,
+  parseQrResponse,
+  type QrBlobResult,
 } from './http'
 import type {
   VpnConfig,
@@ -25,7 +27,7 @@ export async function getConfigs(includeFiles = false, tagIds?: number[]) {
 }
 
 /** Admin: primary configs on all nodes (create-user «привязать существующие»). */
-export type AssignableConfig = {
+type AssignableConfig = {
   id: number
   client_name: string
   vpn_type: string
@@ -188,19 +190,8 @@ export async function createOneTimeLink(configId: number, path: string) {
   )
 }
 
-export type QrContentMode = 'profile' | 'download-link'
-
-type QrBlobResult = {
-  blob: Blob
-  contentMode: QrContentMode
-  downloadUrl?: string
-}
-
 export async function fetchQrBlob(configId: number, path: string): Promise<QrBlobResult> {
   const params = new URLSearchParams({ path })
   const response = await apiFetchResponse(`/configs/${configId}/qr?${params}`)
-  const contentMode: QrContentMode =
-    response.headers.get('X-Qr-Content') === 'download-link' ? 'download-link' : 'profile'
-  const downloadUrl = response.headers.get('X-Qr-Download-Url') ?? undefined
-  return { blob: await response.blob(), contentMode, downloadUrl }
+  return parseQrResponse(response)
 }

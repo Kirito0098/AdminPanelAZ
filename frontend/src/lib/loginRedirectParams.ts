@@ -1,4 +1,4 @@
-export const TG_ERROR_MAX_LENGTH = 300
+const TG_ERROR_MAX_LENGTH = 300
 
 const WEB_SESSION_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
 

@@ -36,7 +36,7 @@ type SidebarNavGroup = {
   items: SidebarNavItem[]
 }
 
-export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
+const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   {
     label: 'Клиенты и доступ',
     items: [
@@ -111,7 +111,7 @@ export const SIDEBAR_NAV_GROUPS: SidebarNavGroup[] = [
   },
 ]
 
-export function isSidebarNavItemVisible(
+function isSidebarNavItemVisible(
   item: SidebarNavItem,
   userRole: string | undefined,
   isEnabled: (key: string) => boolean,

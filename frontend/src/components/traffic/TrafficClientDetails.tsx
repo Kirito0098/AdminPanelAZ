@@ -23,7 +23,7 @@ import {
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import { MONITORING_PROTOCOL_COLORS } from '@/components/monitoring/monitoringChartTheme'
 import { getTrafficClientSessions } from '@/api/client'
-import { formatBytes } from '@/lib/trafficFormat'
+import { formatBytes, protocolBadgeVariant, protocolLabel } from '@/lib/trafficFormat'
 import TrafficPeriodControls, {
   CHART_PERIOD_PRESETS,
   type TrafficPeriodPreset,
@@ -55,27 +55,6 @@ const RANGE_LABELS: Record<TrafficPeriodPreset, string> = {
   '1d': '24 часа',
   '7d': '7 дней',
   '30d': '30 дней',
-}
-
-function getProtocolLabel(protocol: string) {
-  const p = protocol.toLowerCase()
-  if (p === 'wireguard') return 'WireGuard'
-  if (p === 'openvpn') return 'OpenVPN'
-  if (p === 'amneziawg2') return 'AWG 2.0'
-  return protocol
-}
-
-function getProtocolVariant(protocol: string): 'default' | 'secondary' | 'outline' {
-  const p = protocol.toLowerCase()
-  if (p === 'openvpn') return 'default'
-  if (p === 'wireguard') return 'secondary'
-  if (p === 'amneziawg2') return 'outline'
-  return 'outline'
-}
-
-function formatLastSeen(value?: string | null) {
-  if (!value) return '—'
-  return formatDateTime(value)
 }
 
 function formatTrafficChartLabel(ts: string | undefined, fallback: string, bucket: string) {
@@ -293,7 +272,7 @@ export default function TrafficClientDetails({
         </TableCell>
         <TableCell className="text-right font-mono text-xs">{formatBytes(source.total_bytes)}</TableCell>
         <TableCell className="font-mono text-xs">{source.virtual_addresses.join(', ') || '—'}</TableCell>
-        <TableCell className="text-xs text-muted-foreground">{formatLastSeen(source.last_seen_at)}</TableCell>
+        <TableCell className="text-xs text-muted-foreground">{formatDateTime(source.last_seen_at)}</TableCell>
         <TableCell>
           <Badge variant={source.is_active ? 'success' : 'secondary'} className="text-[10px]">
             {source.is_active ? 'Сейчас' : 'Был'}
@@ -347,7 +326,7 @@ export default function TrafficClientDetails({
           <UserRound size={16} />
           Мониторинг клиента
         </p>
-        <Badge variant={getProtocolVariant(row.protocol_type)}>{getProtocolLabel(row.protocol_type)}</Badge>
+        <Badge variant={protocolBadgeVariant(row.protocol_type)}>{protocolLabel(row.protocol_type)}</Badge>
         <Badge variant={row.is_active ? 'success' : 'secondary'}>
           {row.is_active ? 'Онлайн' : 'Офлайн'}
         </Badge>
@@ -444,11 +423,11 @@ export default function TrafficClientDetails({
             </span>
             <span className="inline-flex items-center gap-1">
               <Clock size={12} />
-              Последний раз: <strong className="text-foreground">{formatLastSeen(row.last_seen_at)}</strong>
+              Последний раз: <strong className="text-foreground">{formatDateTime(row.last_seen_at)}</strong>
             </span>
             {row.first_seen_at && (
               <span className="col-span-2">
-                Первое появление: <strong className="text-foreground">{formatLastSeen(row.first_seen_at)}</strong>
+                Первое появление: <strong className="text-foreground">{formatDateTime(row.first_seen_at)}</strong>
               </span>
             )}
             {sessionHint && (

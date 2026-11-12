@@ -21,13 +21,11 @@ log() {
 UNIT_ROOT="${ADMINPANELAZ_UNIT_ROOT:-$ROOT_DIR}"
 STATE_DIR="${ADMINPANELAZ_STATE_DIR:-/var/lib/adminpanelaz}"
 
+# shellcheck source=scripts/systemd-unit-lib.sh
+source "$ROOT_DIR/scripts/systemd-unit-lib.sh"
+
 render_unit() {
-  sed \
-    -e "s|/opt/AdminPanelAZ|$UNIT_ROOT|g" \
-    -e "s|/var/lib/adminpanelaz|$STATE_DIR|g" \
-    -e "s|^User=root|User=$INSTALL_USER|" \
-    -e "s|^Group=root|Group=$INSTALL_GROUP|" \
-    "$UNIT_SRC"
+  systemd_unit_render "$UNIT_SRC" /var/lib/adminpanelaz "$STATE_DIR"
 }
 
 # Unit на пробу (предпросмотр полного обновления): только stdout, без root и записей.

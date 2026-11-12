@@ -35,6 +35,7 @@ from app.services.user_agent_format import format_user_agent_label, is_mobile_us
 from app.services.traffic_limit import (
     format_traffic_limit_period_label,
     format_traffic_limit_unblock_at,
+    human_bytes,
 )
 
 logger = logging.getLogger(__name__)
@@ -400,13 +401,7 @@ def _human_bytes_from_details(raw_value: str | None) -> str:
         size = float(raw_value or 0)
     except (TypeError, ValueError):
         return "0 B"
-    units = ["B", "KB", "MB", "GB", "TB"]
-    idx = 0
-    while size >= 1024 and idx < len(units) - 1:
-        size /= 1024
-        idx += 1
-    precision = 0 if idx == 0 else (2 if size < 10 else 1)
-    return f"{size:.{precision}f} {units[idx]}"
+    return human_bytes(size, small_digits=2) or "0 B"
 
 
 def _build_traffic_limit_message(

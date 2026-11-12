@@ -4,7 +4,7 @@ import tempfile
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
@@ -138,6 +138,91 @@ def _timeout_seconds(timeout: float | httpx.Timeout | None) -> float:
         return float(timeout or 0)
     parts = (timeout.connect, timeout.read, timeout.write, timeout.pool)
     return max((float(p) for p in parts if p is not None), default=0.0)
+
+
+@contextmanager
+def node_request_slot(gate_key: str, timeout: float | httpx.Timeout | None) -> Iterator[None]:
+    # Long admin requests bypass the slot; a full interactive wait becomes node_busy.
+    from app.services.node_http_gate import (
+        NodeHttpTimeout,
+        hold_node_http,
+        node_http_gate_bypass,
+    )
+    from app.services.node_link_errors import CODE_BUSY, raise_link_error
+
+    try:
+        if _timeout_seconds(timeout) >= LONG_REQUEST_TIMEOUT_SECONDS:
+            with node_http_gate_bypass():
+                yield
+            return
+        with hold_node_http(gate_key):
+            yield
+    except NodeHttpTimeout:
+        raise_link_error(CODE_BUSY, "Узел занят другой операцией — повторите через несколько секунд")
+
+
+def node_agent_request(
+    method: str,
+    url: str,
+    *,
+    client: httpx.Client,
+    headers: dict[str, str],
+    timeout: float | httpx.Timeout | None,
+    mtls_enabled: bool,
+    gate_key: str | None = None,
+    raw: bool = False,
+    agent_label: str | None = None,
+    **kwargs: Any,
+) -> Any:
+    """One agent HTTP call with link-error classification.
+
+    ``gate_key`` enables the per-node concurrency slot, ``raw`` returns bytes and
+    ``agent_label`` rewrites «агенту узла» in error texts (proxy_agent).
+    """
+    from app.services.node_link_errors import (
+        classify_http_status,
+        classify_request_error,
+        raise_link_error,
+    )
+
+    slot = node_request_slot(gate_key, timeout) if gate_key is not None else nullcontext()
+    with slot:
+        try:
+            response = client.request(
+                method,
+                url,
+                headers=headers,
+                timeout=timeout,
+                **kwargs,
+            )
+        except httpx.RequestError as exc:
+            code, message = classify_request_error(exc, mtls_enabled=mtls_enabled)
+            if agent_label:
+                message = message.replace("агенту узла", agent_label).replace("агента узла", agent_label)
+            raise_link_error(code, message)
+
+        if response.status_code >= 400:
+            detail = response.text
+            from_agent = False
+            try:
+                data = response.json()
+                detail = data.get("detail", detail)
+                from_agent = True
+            except Exception:
+                pass
+            code, message = classify_http_status(
+                response.status_code,
+                detail,
+                mtls_enabled=mtls_enabled,
+                from_agent=from_agent,
+            )
+            raise_link_error(code, message, upstream_status=response.status_code)
+
+        if raw:
+            return response.content
+        if response.status_code == 204 or not response.content:
+            return None
+        return response.json()
 
 
 class NodeAdapter(ABC):
@@ -1320,80 +1405,19 @@ class RemoteNodeAdapter(NodeAdapter):
             kwargs["verify"] = self._verify
         return kwargs
 
-    def _format_connection_error(self, exc: httpx.RequestError) -> str:
-        from app.services.node_link_errors import classify_request_error
-
-        _code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
-        return message
-
-    @contextmanager
-    def _node_slot(self, timeout: float | httpx.Timeout | None) -> Iterator[None]:
-        # Long admin requests bypass the slot; a full interactive wait becomes node_busy.
-        from app.services.node_http_gate import (
-            NodeHttpTimeout,
-            hold_node_http,
-            node_http_gate_bypass,
-        )
-        from app.services.node_link_errors import CODE_BUSY, raise_link_error
-
-        try:
-            if _timeout_seconds(timeout) >= LONG_REQUEST_TIMEOUT_SECONDS:
-                with node_http_gate_bypass():
-                    yield
-                return
-            with hold_node_http(self._http_gate_key):
-                yield
-        except NodeHttpTimeout:
-            raise_link_error(
-                CODE_BUSY, "Узел занят другой операцией — повторите через несколько секунд"
-            )
-
     def _request(self, method: str, path: str, *, raw: bool = False, **kwargs) -> Any:
-        from app.services.node_link_errors import (
-            classify_http_status,
-            classify_request_error,
-            raise_link_error,
-        )
-
-        url = f"{self.base_url}{path}"
         timeout = _effective_timeout(kwargs.pop("timeout", HTTP_TIMEOUT))
-        headers = {**self._headers(), **kwargs.pop("headers", {})}
-        with self._node_slot(timeout):
-            try:
-                client = self._get_http_client()
-                response = client.request(
-                    method,
-                    url,
-                    headers=headers,
-                    timeout=timeout,
-                    **kwargs,
-                )
-            except httpx.RequestError as exc:
-                code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
-                raise_link_error(code, message)
-
-            if response.status_code >= 400:
-                detail = response.text
-                from_agent = False
-                try:
-                    data = response.json()
-                    detail = data.get("detail", detail)
-                    from_agent = True
-                except Exception:
-                    pass
-                code, message = classify_http_status(
-                    response.status_code,
-                    detail,
-                    mtls_enabled=self._mtls_enabled,
-                    from_agent=from_agent,
-                )
-                raise_link_error(code, message, upstream_status=response.status_code)
-
-            if raw:
-                return response.content
-            if response.status_code == 204 or not response.content:
-                return None
-            return response.json()
+        return node_agent_request(
+            method,
+            f"{self.base_url}{path}",
+            client=self._get_http_client(),
+            headers={**self._headers(), **kwargs.pop("headers", {})},
+            timeout=timeout,
+            mtls_enabled=self._mtls_enabled,
+            gate_key=self._http_gate_key,
+            raw=raw,
+            **kwargs,
+        )
 
     def telegram_bot_api(
         self, token: str, method: str, body: bytes, content_type: str, *, timeout: httpx.Timeout

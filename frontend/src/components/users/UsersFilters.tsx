@@ -11,7 +11,7 @@ import {
 
 export type StaleFilter = 7 | 30 | 90 | 'never' | null
 
-export interface UsersFiltersProps {
+interface UsersFiltersProps {
   filter: string
   onFilterChange: (value: string) => void
   stale: StaleFilter

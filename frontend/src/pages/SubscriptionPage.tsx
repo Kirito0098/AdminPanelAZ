@@ -40,7 +40,7 @@ import {
   unlockCodeStatusLabel,
 } from '@/lib/unlockCodeStatus'
 import { unlockCodeRevokeConfirm } from '@/lib/unlockCodeConfirm'
-import { userPortalActionConfirm, type UserPortalAction } from '@/lib/userPortalConfirm'
+import { portalActionConfirm, type PortalAction } from '@/lib/portalConfirm'
 import { cn } from '@/lib/utils'
 import type { PortalPublishStatus, UnlockCodeRecord, User } from '@/types'
 import { getUnlockCodes, revokeUnlockCode, type UnlockCodeProtocol } from '@/api/unlockCodes'
@@ -388,9 +388,9 @@ export default function SubscriptionPage() {
     }
   }
 
-  const confirmUserPortalAction = (action: UserPortalAction, user: User) => {
+  const confirmUserPortalAction = (action: PortalAction, user: User) => {
     confirm({
-      ...userPortalActionConfirm(action, user.username),
+      ...portalActionConfirm(action, user.username, 'пользователю'),
       destructive: true,
       onConfirm: () => (action === 'rotate' ? handleUserPortalRotate(user) : handleUserPortalRevoke(user)),
     })

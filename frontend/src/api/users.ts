@@ -1,4 +1,4 @@
-import { apiFetch, apiFetchResponse } from './http'
+import { apiFetch, apiFetchResponse, parseQrResponse, type QrBlobResult } from './http'
 import type {
   AccessRequestResponse,
   ApproveRequest,
@@ -104,25 +104,18 @@ export async function downloadUserConfigFile(userId: number, configId: number, p
   )
 }
 
-export async function qrUserConfigFile(userId: number, configId: number, path: string) {
-  return apiFetchResponse(`/users/${userId}/configs/${configId}/qr?path=${encodeURIComponent(path)}`)
-}
-
-export type UserQrContentMode = 'profile' | 'download-link'
-
 export async function fetchUserConfigQrBlob(
   userId: number,
   configId: number,
   path: string,
-): Promise<{ blob: Blob; contentMode: UserQrContentMode; downloadUrl?: string }> {
-  const response = await qrUserConfigFile(userId, configId, path)
-  const contentMode: UserQrContentMode =
-    response.headers.get('X-Qr-Content') === 'download-link' ? 'download-link' : 'profile'
-  const downloadUrl = response.headers.get('X-Qr-Download-Url') ?? undefined
-  return { blob: await response.blob(), contentMode, downloadUrl }
+): Promise<QrBlobResult> {
+  const response = await apiFetchResponse(
+    `/users/${userId}/configs/${configId}/qr?path=${encodeURIComponent(path)}`,
+  )
+  return parseQrResponse(response)
 }
 
-export interface ConfigAccessOp {
+interface ConfigAccessOp {
   op: 'block_temp' | 'block_perm' | 'unblock'
   days?: number
 }
@@ -301,7 +294,7 @@ export async function getUserHistory(userId: number, limit = 50) {
 
 /* ------------------- Массовое уведомление в Telegram (D5) ------------------- */
 
-export interface BulkNotifyPayload {
+interface BulkNotifyPayload {
   user_ids: number[]
   text: string
 }

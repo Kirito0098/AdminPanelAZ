@@ -18,7 +18,7 @@ import {
   updateUser,
 } from '@/api/client'
 import { isoToDateInput } from '@/lib/accessUntil'
-import { userPortalActionConfirm } from '@/lib/userPortalConfirm'
+import { portalActionConfirm } from '@/lib/portalConfirm'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { extendUserAccess, resumeUser, suspendUser } from '@/api/users'
@@ -329,7 +329,7 @@ function ClientPortalCard({
               disabled={url == null || busyKey !== null}
               onClick={() =>
                 confirm({
-                  ...userPortalActionConfirm('rotate', user.username),
+                  ...portalActionConfirm('rotate', user.username, 'пользователю'),
                   destructive: true,
                   onConfirm: rotateLink,
                 })

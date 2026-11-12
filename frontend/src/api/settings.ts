@@ -54,10 +54,6 @@ export async function createUser(data: {
   })
 }
 
-export async function deleteUser(id: number) {
-  return apiFetch(`/users/${id}`, { method: 'DELETE' })
-}
-
 export async function getUserConfigAccess(userId: number) {
   return apiFetch<{ user_id: number; config_groups: string[] }>(`/users/${userId}/config-access`)
 }

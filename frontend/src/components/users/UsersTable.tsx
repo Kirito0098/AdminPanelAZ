@@ -36,7 +36,7 @@ const COLUMNS: { key: UsersSortKey | null; label: string; className?: string }[]
   { key: null, label: 'Действия', className: 'text-right' },
 ]
 
-export interface UsersTableProps {
+interface UsersTableProps {
   users: User[]
   selectedIds: number[]
   onSelectChange: (id: number, checked: boolean) => void

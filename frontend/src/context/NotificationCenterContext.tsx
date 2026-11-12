@@ -15,7 +15,7 @@ import { useNotifications } from '@/context/NotificationContext'
 
 export type NotificationTabKey = 'all' | NotificationCategory
 
-export interface NotificationQuery {
+interface NotificationQuery {
   category: NotificationTabKey
   level: NotificationLevel | 'all'
   unreadOnly: boolean
@@ -23,7 +23,7 @@ export interface NotificationQuery {
   hiddenOnly: boolean
 }
 
-export const DEFAULT_NOTIFICATION_QUERY: NotificationQuery = {
+const DEFAULT_NOTIFICATION_QUERY: NotificationQuery = {
   category: 'all',
   level: 'all',
   unreadOnly: false,
@@ -31,7 +31,7 @@ export const DEFAULT_NOTIFICATION_QUERY: NotificationQuery = {
   hiddenOnly: false,
 }
 
-export const EMPTY_NOTIFICATION_COUNTS: NotificationCounts = {
+const EMPTY_NOTIFICATION_COUNTS: NotificationCounts = {
   unread: 0,
   attention: 0,
   snoozed: 0,

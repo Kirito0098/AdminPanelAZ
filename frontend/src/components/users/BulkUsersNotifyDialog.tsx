@@ -8,7 +8,7 @@ import type { User } from '@/types'
 
 const MAX_LEN = 1000
 
-export interface BulkUsersNotifyDialogProps {
+interface BulkUsersNotifyDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   users: User[]

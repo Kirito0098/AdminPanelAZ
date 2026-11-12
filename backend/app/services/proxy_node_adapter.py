@@ -1,7 +1,7 @@
 """HTTP client for panel ↔ proxy_agent (port 9101 by default).
 
-Clones the RemoteNodeAdapter request/mTLS helpers; does not implement NodeAdapter
-(VPN ops). Use ``get_proxy_adapter(node)`` from node_manager.
+Uses the shared ``node_agent_request`` transport from ``node_adapter``; does not
+implement NodeAdapter (VPN ops). Use ``get_proxy_adapter(node)`` from node_manager.
 """
 
 from __future__ import annotations
@@ -51,55 +51,20 @@ class ProxyNodeAdapter:
     def _headers(self) -> dict[str, str]:
         return {"X-Node-Key": self.api_key}
 
-    def _format_connection_error(self, exc: httpx.RequestError) -> str:
-        from app.services.node_link_errors import classify_request_error
-
-        _code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
-        return message.replace("агенту узла", "proxy_agent").replace("агента узла", "proxy_agent")
-
     def _request(self, method: str, path: str, **kwargs) -> Any:
-        from app.services.node_link_errors import (
-            classify_http_status,
-            classify_request_error,
-            raise_link_error,
-        )
+        from app.services.node_adapter import node_agent_request
 
-        url = f"{self.base_url}{path}"
         timeout = kwargs.pop("timeout", HTTP_TIMEOUT)
-        try:
-            client = self._get_http_client()
-            response = client.request(
-                method,
-                url,
-                headers=self._headers(),
-                timeout=timeout,
-                **kwargs,
-            )
-        except httpx.RequestError as exc:
-            code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
-            raise_link_error(code, message)
-
-        if response.status_code >= 400:
-            detail = response.text
-            from_agent = False
-            try:
-                data = response.json()
-                detail = data.get("detail", detail)
-                from_agent = True
-            except Exception:
-                pass
-            code, message = classify_http_status(
-                response.status_code,
-                detail,
-                mtls_enabled=self._mtls_enabled,
-                from_agent=from_agent,
-            )
-            raise_link_error(code, message, upstream_status=response.status_code)
-
-        if response.status_code == 204 or not response.content:
-            return None
-        return response.json()
-
+        return node_agent_request(
+            method,
+            f"{self.base_url}{path}",
+            client=self._get_http_client(),
+            headers=self._headers(),
+            timeout=timeout,
+            mtls_enabled=self._mtls_enabled,
+            agent_label="proxy_agent",
+            **kwargs,
+        )
 
     def health(self) -> dict[str, Any]:
         """GET /health → { ok, version }."""

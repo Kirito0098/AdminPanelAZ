@@ -5,7 +5,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '
 import type { NotificationCounts, NotificationItem } from '@/api/notifications'
 import NotificationCard from './NotificationCard'
 
-export interface NotificationPopoverProps {
+interface NotificationPopoverProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   sheet?: boolean

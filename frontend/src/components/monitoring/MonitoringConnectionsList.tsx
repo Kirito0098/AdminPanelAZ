@@ -38,7 +38,6 @@ import {
 import { formatDateTime, parseTimestamp } from '@/lib/datetime'
 import { formatBitrate, formatDurationShort, sessionDurationSeconds } from '@/lib/formatTraffic'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
-import { formatProxyViaBadgeLabel } from '@/lib/proxyViaBadgeLabel'
 import { COL_CONNECTED_SINCE, COL_HANDSHAKE, COL_VPN_IP } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import type { HaNodePresence, OpenVpnClient, VpnConfigHaInfo, WireGuardPeer } from '@/types'
@@ -323,7 +322,7 @@ function AddressBlock({
                 : 'Сессия через прокси-узел; домашний IP не восстановлен'
             }
           >
-            {formatProxyViaBadgeLabel(proxyResolved)}
+            {proxyResolved ? 'через прокси' : 'через прокси · IP не восстановлен'}
           </Badge>
         )}
       </div>

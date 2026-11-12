@@ -7,7 +7,6 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${ENV_FILE:-$ROOT_DIR/backend/.env}"
 SERVICE_NAME="${SERVICE_NAME:-adminpanelaz}"
 NON_INTERACTIVE="${NON_INTERACTIVE:-false}"
-SKIP_PANEL_RESTART="${SKIP_PANEL_RESTART:-false}"
 DOMAIN_OVERRIDE="${DOMAIN:-}"
 
 # shellcheck source=scripts/nginx-common.sh
@@ -37,28 +36,10 @@ usage() {
 EOF
 }
 
-validate_domain() {
-  local value="$1"
-  [[ "$value" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] || nginx_die "Неверный формат домена: $value"
-}
-
 warn_if_domain_is_az_vpn_host() {
   local msg=""
   if ! msg="$(nginx_az_vpn_host_conflict_message "${1:-}")"; then
     nginx_warn "$msg"
-  fi
-}
-
-restart_panel_if_needed() {
-  if [[ "$SKIP_PANEL_RESTART" == "true" || "$SKIP_PANEL_RESTART" == "1" ]]; then
-    nginx_log "Перезапуск панели пропущен (SKIP_PANEL_RESTART)"
-    return 0
-  fi
-  if systemctl is-enabled "$SERVICE_NAME" >/dev/null 2>&1 \
-    || systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
-    systemctl restart "$SERVICE_NAME" 2>/dev/null || nginx_warn "Не удалось перезапустить $SERVICE_NAME"
-  else
-    nginx_warn "Перезапустите панель вручную: systemctl restart $SERVICE_NAME"
   fi
 }
 
@@ -86,7 +67,7 @@ load_panel_publish_settings() {
 
 prompt_domain_if_needed() {
   if [[ -n "$DOMAIN" ]]; then
-    validate_domain "$DOMAIN"
+    nginx_validate_domain "$DOMAIN"
     # Уже сохранённый DOMAIN: только предупреждение — иначе repair не сможет починить доступ.
     warn_if_domain_is_az_vpn_host "$DOMAIN"
     return 0
@@ -97,7 +78,7 @@ prompt_domain_if_needed() {
   while true; do
     local conflict_msg=""
     read -r -p "Домен панели (например, panel.example.com): " DOMAIN
-    if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+    if ! nginx_is_valid_domain "$DOMAIN"; then
       echo "Неверный формат домена."
       continue
     fi
@@ -200,10 +181,10 @@ nginx_log "Настройки: ${ENV_FILE}"
 
 load_panel_publish_settings
 prompt_domain_if_needed
-validate_domain "$DOMAIN"
+nginx_validate_domain "$DOMAIN"
 
 repair_nginx_for_panel "$DOMAIN"
-restart_panel_if_needed
+nginx_restart_panel_if_needed
 verify_panel_health
 
 nginx_log "Готово. Бэкапы старых конфигов: /etc/nginx/backups/"

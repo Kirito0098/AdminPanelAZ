@@ -168,7 +168,7 @@ async function renewAfterUnauthorized(sentToken: string | null): Promise<boolean
   return refreshTgSession()
 }
 
-export async function tgAuth(initData: string): Promise<TgMiniAuthResponse> {
+async function tgAuth(initData: string): Promise<TgMiniAuthResponse> {
   const response = await fetch(`${API_BASE}/auth`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

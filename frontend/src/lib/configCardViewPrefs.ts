@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react'
+import { createStorage } from './safeStorage'
 
 export type CardGridCols = 'auto' | '1' | '2' | '3' | '4'
 export type CardButtonAccent = 'default' | 'cyan' | 'amber' | 'emerald' | 'red' | 'custom'
@@ -52,6 +53,7 @@ export const DEFAULT_CONFIG_CARD_VIEW_PREFS: ConfigCardViewPrefs = {
 }
 
 const STORAGE_PREFIX = 'dashboard-config-cards'
+const storage = createStorage(STORAGE_PREFIX)
 const GRID_COLS_ALLOWED: readonly CardGridCols[] = ['auto', '1', '2', '3', '4']
 const ACCENT_ALLOWED: readonly CardButtonAccent[] = ['default', 'cyan', 'amber', 'emerald', 'red', 'custom']
 
@@ -59,38 +61,10 @@ const FIELD_KEYS = Object.keys(
   DEFAULT_CONFIG_CARD_VIEW_PREFS.fields,
 ) as (keyof ConfigCardFieldVisibility)[]
 
-function readStoredString(key: string): string | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return window.localStorage.getItem(`${STORAGE_PREFIX}:${key}`)
-  } catch {
-    return null
-  }
-}
-
-function readStored<T extends string>(key: string, allowed: readonly T[]): T | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const value = window.localStorage.getItem(`${STORAGE_PREFIX}:${key}`)
-    return value && (allowed as readonly string[]).includes(value) ? (value as T) : null
-  } catch {
-    return null
-  }
-}
-
-function writeStored(key: string, value: string) {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(`${STORAGE_PREFIX}:${key}`, value)
-  } catch {
-    /* ignore quota / privacy mode */
-  }
-}
-
 function readFields(): ConfigCardFieldVisibility {
   const fields = { ...DEFAULT_CONFIG_CARD_VIEW_PREFS.fields }
   for (const key of FIELD_KEYS) {
-    const stored = readStored(`field:${key}`, ['true', 'false'] as const)
+    const stored = storage.readChoice(`field:${key}`, ['true', 'false'] as const)
     if (stored !== null) {
       fields[key] = stored === 'true'
     }
@@ -100,7 +74,7 @@ function readFields(): ConfigCardFieldVisibility {
 
 function writeFields(fields: ConfigCardFieldVisibility) {
   for (const key of FIELD_KEYS) {
-    writeStored(`field:${key}`, String(fields[key]))
+    storage.write(`field:${key}`, String(fields[key]))
   }
 }
 
@@ -132,23 +106,23 @@ export function isValidHexColor(value: string): boolean {
 }
 
 export function loadConfigCardViewPrefs(): ConfigCardViewPrefs {
-  const storedCustomColor = readStoredString('customButtonColor')
+  const storedCustomColor = storage.read('customButtonColor')
   const customButtonColor = storedCustomColor && isValidHexColor(storedCustomColor)
     ? normalizeHexColor(storedCustomColor)!
     : DEFAULT_CONFIG_CARD_VIEW_PREFS.customButtonColor
 
   return {
-    gridCols: readStored('gridCols', GRID_COLS_ALLOWED) ?? DEFAULT_CONFIG_CARD_VIEW_PREFS.gridCols,
-    buttonAccent: readStored('buttonAccent', ACCENT_ALLOWED) ?? DEFAULT_CONFIG_CARD_VIEW_PREFS.buttonAccent,
+    gridCols: storage.readChoice('gridCols', GRID_COLS_ALLOWED) ?? DEFAULT_CONFIG_CARD_VIEW_PREFS.gridCols,
+    buttonAccent: storage.readChoice('buttonAccent', ACCENT_ALLOWED) ?? DEFAULT_CONFIG_CARD_VIEW_PREFS.buttonAccent,
     customButtonColor,
     fields: readFields(),
   }
 }
 
 export function saveConfigCardViewPrefs(prefs: ConfigCardViewPrefs) {
-  writeStored('gridCols', prefs.gridCols)
-  writeStored('buttonAccent', prefs.buttonAccent)
-  writeStored('customButtonColor', normalizeHexColor(prefs.customButtonColor) ?? DEFAULT_CUSTOM_BUTTON_COLOR)
+  storage.write('gridCols', prefs.gridCols)
+  storage.write('buttonAccent', prefs.buttonAccent)
+  storage.write('customButtonColor', normalizeHexColor(prefs.customButtonColor) ?? DEFAULT_CUSTOM_BUTTON_COLOR)
   writeFields(prefs.fields)
 }
 

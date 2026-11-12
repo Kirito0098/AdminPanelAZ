@@ -10,6 +10,7 @@ from app.models import User, UserReminderLog, VpnConfig
 from app.services.admin_notify import admin_notify_service
 from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.config_provisioning import deprovision_config
+from app.services.shared_helpers import as_utc as _as_utc
 
 SETTING_GRACE_MONTHS = "inactive_user_grace_period_months"
 ALLOWED_MONTHS = frozenset({0, 1, 2, 3, 6, 12})
@@ -30,14 +31,6 @@ def set_grace_months(db: Session, months: int) -> int:
     _set_setting(db, SETTING_GRACE_MONTHS, str(months))
     db.flush()
     return months
-
-
-def _as_utc(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
 
 
 def scan_grace_period_alerts(db: Session) -> dict:

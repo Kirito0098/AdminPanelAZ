@@ -1,6 +1,6 @@
 import { API_BASE, apiFetch } from './http'
 
-export type StreamName =
+type StreamName =
   | 'monitoring'
   | 'warper_update'
   | 'awg2_install'

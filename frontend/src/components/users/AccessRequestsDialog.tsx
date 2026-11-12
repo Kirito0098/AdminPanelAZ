@@ -29,7 +29,7 @@ function defaultExtendDate(days = 30): string {
   return `${date.getFullYear()}-${mm}-${dd}`
 }
 
-export interface AccessRequestsDialogProps {
+interface AccessRequestsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   focusRequestId: number | null

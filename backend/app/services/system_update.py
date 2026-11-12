@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import os
 import subprocess
-import threading
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from app.services.node_update import git_pull, resolve_repo_root
+from app.services.node_update import (
+    git_pull,
+    resolve_repo_root,
+    schedule_restart,
+    systemd_restart,
+    systemd_unit_installed,
+)
 from app.services.systemd_refresh import refresh_installed_systemd_units
 
 SYSTEMD_UNIT = "adminpanelaz"
@@ -112,72 +116,17 @@ def _restart_log_path(repo_root: Path) -> Path:
     return repo_root / ".runtime" / "logs" / "update-restart.log"
 
 
-def _append_restart_log(log_path: Path, message: str) -> None:
-    try:
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-        with log_path.open("a", encoding="utf-8") as handle:
-            handle.write(f"[{stamp}] {message}\n")
-    except OSError:
-        pass
-
-
 def _systemd_unit_installed(unit: str = SYSTEMD_UNIT) -> bool:
-    try:
-        result = subprocess.run(
-            ["systemctl", "cat", unit],
-            capture_output=True,
-            text=True,
-            timeout=10.0,
-            check=False,
-        )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, OSError):
-        return False
+    return systemd_unit_installed(unit)
 
 
 def restart_controller(repo_root: Path) -> dict[str, Any]:
     """Restart controller after update via systemd."""
-    log_path = _restart_log_path(repo_root)
-
-    if not _systemd_unit_installed():
-        message = f"Unit {SYSTEMD_UNIT} не установлен — systemctl restart недоступен"
-        _append_restart_log(log_path, message)
-        return {"method": "none", "success": False, "output": "", "error": message}
-
-    try:
-        result = subprocess.run(
-            ["systemctl", "restart", SYSTEMD_UNIT],
-            capture_output=True,
-            text=True,
-            timeout=180.0,
-            check=False,
-        )
-        output = ((result.stdout or "") + (result.stderr or "")).strip()
-        success = result.returncode == 0
-        _append_restart_log(
-            log_path,
-            f"systemctl restart {SYSTEMD_UNIT}: rc={result.returncode}"
-            + (f" — {output}" if output else ""),
-        )
-        return {
-            "method": "systemd",
-            "success": success,
-            "output": output,
-            "error": None if success else output or f"systemctl restart {SYSTEMD_UNIT} failed",
-        }
-    except (subprocess.TimeoutExpired, OSError) as exc:
-        _append_restart_log(log_path, f"systemctl restart {SYSTEMD_UNIT}: {exc}")
-        return {"method": "systemd", "success": False, "output": "", "error": str(exc)}
+    return systemd_restart(SYSTEMD_UNIT, _restart_log_path(repo_root))
 
 
 def schedule_controller_restart(repo_root: Path, *, delay_seconds: float = RESTART_DELAY_SECONDS) -> None:
-    def _restart() -> None:
-        restart_controller(repo_root)
-
-    timer = threading.Timer(delay_seconds, _restart)
-    timer.daemon = True
-    timer.start()
+    schedule_restart(SYSTEMD_UNIT, _restart_log_path(repo_root), delay_seconds)
 
 
 def _require_step(

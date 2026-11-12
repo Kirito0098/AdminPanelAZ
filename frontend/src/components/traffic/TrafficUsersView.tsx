@@ -1,8 +1,8 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react'
 import { ChevronDown, Clock, User } from 'lucide-react'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
+import ShareBar from '@/components/shared/ShareBar'
 import { Badge } from '@/components/ui/badge'
-import { PercentBar } from '@/components/ui/percent-bar'
 import {
   Table,
   TableBody,
@@ -26,21 +26,6 @@ type TrafficUsersViewProps = {
   selectedProtocol: string
   onToggleClient: (clientName: string, protocol: string) => void
   renderDetails: (row: TrafficClientRow) => ReactNode
-}
-
-function formatLastSeen(value?: string | null) {
-  return value ? formatDateTime(value) : '—'
-}
-
-function ShareBar({ value, max }: { value: number; max: number }) {
-  return (
-    <div className="flex min-w-0 items-center gap-2">
-      <PercentBar value={value} max={max} className="h-1.5 min-w-0 flex-1" />
-      <span className="mono w-10 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
-        {max > 0 ? Math.min((value / max) * 100, 100).toFixed(0) : '0'}%
-      </span>
-    </div>
-  )
 }
 
 function UserSummary({ group, open }: { group: TrafficUserGroup; open: boolean }) {
@@ -67,7 +52,7 @@ function UserSummary({ group, open }: { group: TrafficUserGroup; open: boolean }
           </div>
           <p className="inline-flex items-center gap-1 text-xs text-muted-foreground">
             <Clock size={11} className="shrink-0" />
-            {formatLastSeen(group.lastSeenAt)}
+            {formatDateTime(group.lastSeenAt)}
           </p>
         </div>
       </div>
@@ -294,7 +279,7 @@ function UserGroupRows({
         <TableCell className="text-xs text-muted-foreground">
           <span className="inline-flex items-center gap-1">
             <Clock size={12} className="shrink-0" />
-            {formatLastSeen(group.lastSeenAt)}
+            {formatDateTime(group.lastSeenAt)}
           </span>
         </TableCell>
         <TableCell>
@@ -345,7 +330,7 @@ function UserGroupRows({
                 <TableCell className="text-xs text-muted-foreground">
                   <span className="inline-flex items-center gap-1">
                     <Clock size={12} className="shrink-0" />
-                    {formatLastSeen(row.last_seen_at)}
+                    {formatDateTime(row.last_seen_at)}
                   </span>
                 </TableCell>
                 <TableCell>

@@ -1,7 +1,14 @@
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { metricBarClass } from '@/lib/metricColors'
 import { cn } from '@/lib/utils'
+
+/** Цвет полосы по порогу нагрузки: 75% — внимание, 90% — критично. */
+function metricBarClass(value?: number | null): string {
+  if (value == null || Number.isNaN(value)) return 'fill-muted-foreground/40'
+  if (value >= 90) return 'fill-red-500'
+  if (value >= 75) return 'fill-amber-500'
+  return 'fill-emerald-500'
+}
 
 function healthBadgeVariant(level?: string): 'success' | 'warning' | 'destructive' | 'outline' {
   if (level === 'critical') return 'destructive'

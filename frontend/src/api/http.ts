@@ -220,4 +220,20 @@ export function apiFetchResponse(path: string, options: RequestInit = {}): Promi
   return requestAtBase(API_BASE, path, options, true)
 }
 
+export type QrContentMode = 'profile' | 'download-link'
+
+export type QrBlobResult = {
+  blob: Blob
+  contentMode: QrContentMode
+  downloadUrl?: string
+}
+
+/** QR endpoints answer with a PNG plus `X-Qr-Content` / `X-Qr-Download-Url` headers. */
+export async function parseQrResponse(response: Response): Promise<QrBlobResult> {
+  const contentMode: QrContentMode =
+    response.headers.get('X-Qr-Content') === 'download-link' ? 'download-link' : 'profile'
+  const downloadUrl = response.headers.get('X-Qr-Download-Url') ?? undefined
+  return { blob: await response.blob(), contentMode, downloadUrl }
+}
+
 export { API_BASE }

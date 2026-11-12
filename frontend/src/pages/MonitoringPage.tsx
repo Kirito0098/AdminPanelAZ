@@ -98,6 +98,7 @@ import { formatDateTime } from '@/lib/datetime'
 import { groupConnectionsByOwner } from '@/lib/connectionUserGroups'
 import { cn } from '@/lib/utils'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
+import { createStorage } from '@/lib/safeStorage'
 import type {
   ConnectionHistoryResponse,
   MonitoringNodeSummary,
@@ -111,30 +112,12 @@ const REFRESH_INTERVAL = 10
 /** Incidents rebuild probes nodes; refresh far less often than SSE overview. */
 const INCIDENTS_REFRESH_INTERVAL_MS = 60_000
 const STORAGE_PREFIX = 'noc-monitoring'
+const storage = createStorage(STORAGE_PREFIX)
 
 type MonitoringScope = 'node' | 'all'
 type ProtocolFilter = 'all' | 'openvpn' | 'wireguard' | 'amneziawg2'
 type ConnectionsViewMode = 'configs' | 'users'
 const PROTOCOL_FILTER_VALUES = ['all', 'openvpn', 'wireguard', 'amneziawg2'] as const
-
-function readStored<T extends string>(key: string, allowed: readonly T[]): T | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const value = window.localStorage.getItem(`${STORAGE_PREFIX}:${key}`)
-    return value && (allowed as readonly string[]).includes(value) ? (value as T) : null
-  } catch {
-    return null
-  }
-}
-
-function writeStored(key: string, value: string) {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(`${STORAGE_PREFIX}:${key}`, value)
-  } catch {
-    /* ignore quota / privacy mode */
-  }
-}
 
 type SummaryCardProps = {
   label: string
@@ -214,10 +197,10 @@ export default function MonitoringPage() {
   const { success, error: notifyError } = useNotifications()
   const { confirm, dialogProps } = useConfirmDialog()
   const { startGlobal, doneGlobal } = useProgress()
-  const [scope, setScope] = useState<MonitoringScope>(() => readStored('scope', ['node', 'all'] as const) ?? 'node')
-  const [scopeInitialized, setScopeInitialized] = useState(() => readStored('scope', ['node', 'all'] as const) != null)
+  const [scope, setScope] = useState<MonitoringScope>(() => storage.readChoice('scope', ['node', 'all'] as const) ?? 'node')
+  const [scopeInitialized, setScopeInitialized] = useState(() => storage.readChoice('scope', ['node', 'all'] as const) != null)
   const [haMode, setHaMode] = useState<'dedupe' | 'raw'>(
-    () => readStored('haMode', ['dedupe', 'raw'] as const) ?? 'dedupe',
+    () => storage.readChoice('haMode', ['dedupe', 'raw'] as const) ?? 'dedupe',
   )
   const [data, setData] = useState<MonitoringOverview | null>(null)
   const [incidents, setIncidents] = useState<NocIncidentItem[]>([])
@@ -231,41 +214,23 @@ export default function MonitoringPage() {
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL)
   const [search, setSearch] = useState('')
   const [connectionsView, setConnectionsView] = useState<ConnectionsViewMode>(
-    () => readStored('connectionsView', ['configs', 'users'] as const) ?? 'configs',
+    () => storage.readChoice('connectionsView', ['configs', 'users'] as const) ?? 'configs',
   )
-  const [onlineOnly, setOnlineOnly] = useState(() => readStored('onlineOnly', ['true', 'false'] as const) !== 'false')
+  const [onlineOnly, setOnlineOnly] = useState(() => storage.readChoice('onlineOnly', ['true', 'false'] as const) !== 'false')
   const [protocolFilter, setProtocolFilter] = useState<ProtocolFilter>(
-    () => readStored('protocol', PROTOCOL_FILTER_VALUES) ?? 'all',
+    () => storage.readChoice('protocol', PROTOCOL_FILTER_VALUES) ?? 'all',
   )
-  const [filterNode, setFilterNode] = useState(() => {
-    try {
-      return window.localStorage.getItem(`${STORAGE_PREFIX}:filterNode`) || ''
-    } catch {
-      return ''
-    }
-  })
-  const [filterCity, setFilterCity] = useState(() => {
-    try {
-      return window.localStorage.getItem(`${STORAGE_PREFIX}:filterCity`) || ''
-    } catch {
-      return ''
-    }
-  })
-  const [filterIsp, setFilterIsp] = useState(() => {
-    try {
-      return window.localStorage.getItem(`${STORAGE_PREFIX}:filterIsp`) || ''
-    } catch {
-      return ''
-    }
-  })
+  const [filterNode, setFilterNode] = useState(() => storage.read('filterNode') || '')
+  const [filterCity, setFilterCity] = useState(() => storage.read('filterCity') || '')
+  const [filterIsp, setFilterIsp] = useState(() => storage.read('filterIsp') || '')
   const [minDuration, setMinDuration] = useState<MinDurationFilter>(
-    () => readStored('minDuration', ['any', '15m', '1h', '4h'] as const) ?? 'any',
+    () => storage.readChoice('minDuration', ['any', '15m', '1h', '4h'] as const) ?? 'any',
   )
   const [sortKey, setSortKey] = useState<NocSortKey>(
-    () => readStored('sortKey', ['client', 'traffic', 'time', 'rate', 'duration'] as const) ?? 'traffic',
+    () => storage.readChoice('sortKey', ['client', 'traffic', 'time', 'rate', 'duration'] as const) ?? 'traffic',
   )
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>(
-    () => readStored('sortDir', ['asc', 'desc'] as const) ?? 'desc',
+    () => storage.readChoice('sortDir', ['asc', 'desc'] as const) ?? 'desc',
   )
   const [restartingService, setRestartingService] = useState<string | null>(null)
   const [resourcePeriod, setResourcePeriod] = useState<'1d' | '7d' | '30d'>('1d')
@@ -355,15 +320,15 @@ export default function MonitoringPage() {
   }, [nodesLoading, nodes.length, scopeInitialized])
 
   useEffect(() => {
-    if (scopeInitialized) writeStored('scope', scope)
+    if (scopeInitialized) storage.write('scope', scope)
   }, [scope, scopeInitialized])
 
   useEffect(() => {
-    writeStored('onlineOnly', String(onlineOnly))
+    storage.write('onlineOnly', String(onlineOnly))
   }, [onlineOnly])
 
   useEffect(() => {
-    writeStored('protocol', protocolFilter)
+    storage.write('protocol', protocolFilter)
   }, [protocolFilter])
 
   useEffect(() => {
@@ -373,31 +338,31 @@ export default function MonitoringPage() {
   }, [awg2Enabled, protocolFilter])
 
   useEffect(() => {
-    writeStored('haMode', haMode)
+    storage.write('haMode', haMode)
   }, [haMode])
 
   useEffect(() => {
-    writeStored('filterNode', filterNode)
+    storage.write('filterNode', filterNode)
   }, [filterNode])
 
   useEffect(() => {
-    writeStored('filterCity', filterCity)
+    storage.write('filterCity', filterCity)
   }, [filterCity])
 
   useEffect(() => {
-    writeStored('filterIsp', filterIsp)
+    storage.write('filterIsp', filterIsp)
   }, [filterIsp])
 
   useEffect(() => {
-    writeStored('minDuration', minDuration)
+    storage.write('minDuration', minDuration)
   }, [minDuration])
 
   useEffect(() => {
-    writeStored('sortKey', sortKey)
+    storage.write('sortKey', sortKey)
   }, [sortKey])
 
   useEffect(() => {
-    writeStored('sortDir', sortDir)
+    storage.write('sortDir', sortDir)
   }, [sortDir])
 
   const loadResourceHistory = useCallback(
@@ -504,7 +469,7 @@ export default function MonitoringPage() {
   const searchQuery = search.trim().toLowerCase()
 
   useEffect(() => {
-    writeStored('connectionsView', connectionsView)
+    storage.write('connectionsView', connectionsView)
   }, [connectionsView])
 
   const matchesWgPeerSearch = useCallback(

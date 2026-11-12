@@ -3,7 +3,7 @@ import type { TrafficClientRow, VpnConfigHaInfo } from '@/types'
 export const UNOWNED_USER_KEY = 'unowned'
 
 /** Stable group id: `user:<id>` for a known owner, `unowned` otherwise. */
-export type UserGroupKey = string
+type UserGroupKey = string
 
 export interface TrafficUserGroup {
   key: UserGroupKey
@@ -22,7 +22,7 @@ export interface TrafficUserGroup {
   ha: VpnConfigHaInfo | null
 }
 
-export function userGroupKey(ownerId?: number | null): UserGroupKey {
+function userGroupKey(ownerId?: number | null): UserGroupKey {
   return ownerId == null ? UNOWNED_USER_KEY : `user:${ownerId}`
 }
 

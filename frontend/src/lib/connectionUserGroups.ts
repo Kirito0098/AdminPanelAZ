@@ -1,7 +1,7 @@
 import { UNOWNED_USER_KEY, userGroupLabel } from './userGrouping'
 
 /** Minimal shape the NOC connection list needs for per-user grouping. */
-export interface OwnerGroupableConnection {
+interface OwnerGroupableConnection {
   ownerId?: number | null
   ownerName?: string | null
   protocol: string
@@ -13,7 +13,7 @@ export interface OwnerGroupableConnection {
   sortTime: number
 }
 
-export interface ConnectionOwnerGroup<T extends OwnerGroupableConnection> {
+interface ConnectionOwnerGroup<T extends OwnerGroupableConnection> {
   key: string
   ownerId: number | null
   ownerName: string
@@ -27,7 +27,7 @@ export interface ConnectionOwnerGroup<T extends OwnerGroupableConnection> {
   lastActivity: number
 }
 
-export function connectionOwnerGroupKey(ownerId?: number | null): string {
+function connectionOwnerGroupKey(ownerId?: number | null): string {
   return ownerId == null ? UNOWNED_USER_KEY : `user:${ownerId}`
 }
 

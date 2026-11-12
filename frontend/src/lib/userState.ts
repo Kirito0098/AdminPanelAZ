@@ -4,7 +4,7 @@ import { formatDate, parseTimestamp } from '@/lib/datetime'
 import type { User } from '@/types'
 
 export type BadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'
-export type CardTone = 'active' | 'expiring' | 'expired' | 'suspended' | 'attention' | 'neutral'
+type CardTone = 'active' | 'expiring' | 'expired' | 'suspended' | 'attention' | 'neutral'
 export type MetaTone = 'default' | 'warning' | 'danger' | 'success'
 
 /** Срок доступа: текст, тон строки и тон карточки. */

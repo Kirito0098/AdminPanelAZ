@@ -1,4 +1,5 @@
 import type { CardGridCols } from './configCardViewPrefs'
+import { createStorage } from './safeStorage'
 
 export type UsersCardFieldKey =
   | 'access'
@@ -10,7 +11,7 @@ export type UsersCardFieldKey =
   | 'task'
   | 'note'
 
-export type UsersCardFieldVisibility = Record<UsersCardFieldKey, boolean>
+type UsersCardFieldVisibility = Record<UsersCardFieldKey, boolean>
 
 export interface UsersCardViewPrefs {
   gridCols: CardGridCols
@@ -46,30 +47,13 @@ export const DEFAULT_USERS_CARD_VIEW_PREFS: UsersCardViewPrefs = {
 }
 
 const STORAGE_PREFIX = 'users-cards'
-
-function readStored(key: string): string | null {
-  if (typeof window === 'undefined') return null
-  try {
-    return window.localStorage.getItem(`${STORAGE_PREFIX}:${key}`)
-  } catch {
-    return null
-  }
-}
-
-function writeStored(key: string, value: string) {
-  if (typeof window === 'undefined') return
-  try {
-    window.localStorage.setItem(`${STORAGE_PREFIX}:${key}`, value)
-  } catch {
-    /* ignore quota / private mode */
-  }
-}
+const storage = createStorage(STORAGE_PREFIX)
 
 export function loadUsersCardViewPrefs(): UsersCardViewPrefs {
-  const gridCols = readStored('gridCols')
+  const gridCols = storage.read('gridCols')
   const fields = { ...DEFAULT_USERS_CARD_VIEW_PREFS.fields }
   for (const key of FIELD_KEYS) {
-    const stored = readStored(`field:${key}`)
+    const stored = storage.read(`field:${key}`)
     if (stored === 'true' || stored === 'false') fields[key] = stored === 'true'
   }
   return {
@@ -79,6 +63,6 @@ export function loadUsersCardViewPrefs(): UsersCardViewPrefs {
 }
 
 export function saveUsersCardViewPrefs(prefs: UsersCardViewPrefs) {
-  writeStored('gridCols', prefs.gridCols)
-  for (const key of FIELD_KEYS) writeStored(`field:${key}`, String(prefs.fields[key]))
+  storage.write('gridCols', prefs.gridCols)
+  for (const key of FIELD_KEYS) storage.write(`field:${key}`, String(prefs.fields[key]))
 }

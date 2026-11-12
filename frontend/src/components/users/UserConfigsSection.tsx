@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Copy, Download, FileKey, KeyRound, Loader2, QrCode, Trash2 } from 'lucide-react'
+import { Download, KeyRound, Loader2, QrCode, Trash2 } from 'lucide-react'
 import {
   deleteUserConfig,
   downloadUserConfigFile,
@@ -7,8 +7,8 @@ import {
   getUserConfigFiles,
   setUserConfigAccessOp,
   type UserConfigFile,
-  type UserQrContentMode,
 } from '@/api/users'
+import type { QrContentMode } from '@/api/http'
 import { ProvisioningConfigNode, UserProvisioningCard } from '@/types'
 import { useNotifications } from '@/context/NotificationContext'
 import { Badge } from '@/components/ui/badge'
@@ -17,7 +17,6 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
@@ -29,6 +28,7 @@ import { vpnTypeLabel } from '@/lib/vpnTypes'
 import UserSection from './UserSection'
 import UserAccessSection from './UserAccessSection'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
+import QrPreviewDialog from '@/components/shared/QrPreviewDialog'
 
 interface ConfigEntry extends ProvisioningConfigNode {
   userId: number
@@ -55,7 +55,7 @@ type FilePickState = {
 type QrPreviewState = {
   url: string
   filename: string
-  contentMode: UserQrContentMode
+  contentMode: QrContentMode
   downloadUrl?: string
 }
 
@@ -213,16 +213,6 @@ export default function UserConfigsSection({
       await runDownload(entry, file)
     } else {
       await runQr(entry, file)
-    }
-  }
-
-  const copyQrDownloadUrl = async () => {
-    if (!qrPreview?.downloadUrl) return
-    try {
-      await navigator.clipboard.writeText(qrPreview.downloadUrl)
-      success('Ссылка скопирована в буфер')
-    } catch {
-      notifyError('Не удалось скопировать ссылку')
     }
   }
 
@@ -494,53 +484,16 @@ export default function UserConfigsSection({
         </DialogContent>
       </Dialog>
 
-      <Dialog
-        open={qrPreview != null}
-        onOpenChange={(open) => {
-          if (!open && qrPreview) {
-            URL.revokeObjectURL(qrPreview.url)
-            setQrPreview(null)
-          }
+      <QrPreviewDialog
+        url={qrPreview?.url}
+        filename={qrPreview?.filename}
+        contentMode={qrPreview?.contentMode}
+        downloadUrl={qrPreview?.downloadUrl}
+        onClose={() => {
+          if (qrPreview) URL.revokeObjectURL(qrPreview.url)
+          setQrPreview(null)
         }}
-      >
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileKey size={18} />
-              {qrPreview?.contentMode === 'download-link'
-                ? 'QR: ссылка для скачивания'
-                : 'QR-код профиля'}
-            </DialogTitle>
-            <DialogDescription>
-              {qrPreview?.filename}
-              {qrPreview?.contentMode === 'download-link' ? (
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  Профиль не помещается в один QR (типично для AntiZapret WG/AWG и OpenVPN).
-                  Отсканируйте камерой телефона — откроется ссылка для скачивания файла, не импорт
-                  в VPN-приложение.
-                </span>
-              ) : (
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  Отсканируйте VPN-приложением для импорта профиля.
-                </span>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          {qrPreview && (
-            <div className="flex justify-center rounded-lg border bg-muted/30 p-6">
-              <img src={qrPreview.url} alt="QR-код конфигурации" className="max-h-72 rounded-md" />
-            </div>
-          )}
-          {qrPreview?.downloadUrl && (
-            <DialogFooter className="sm:justify-center">
-              <Button type="button" variant="outline" onClick={() => void copyQrDownloadUrl()}>
-                <Copy size={14} />
-                Скопировать ссылку
-              </Button>
-            </DialogFooter>
-          )}
-        </DialogContent>
-      </Dialog>
+      />
 
       <ConfirmDialog
         open={deleteTarget != null}

@@ -1,9 +1,9 @@
 import type { ClosedAccessView } from '@/types'
 import { parseTimestamp } from '@/lib/datetime'
 
-export type ClosedAccessTone = 'danger' | 'warning'
+type ClosedAccessTone = 'danger' | 'warning'
 
-export interface ClosedAccessCopy {
+interface ClosedAccessCopy {
   tone: ClosedAccessTone
   /** Заголовок баннера. */
   title: string
@@ -22,7 +22,7 @@ export interface ClosedAccessCopy {
 }
 
 /** Дата в формате DD.MM (спека 7.4). */
-export function shortDayMonth(value: string | null | undefined): string {
+function shortDayMonth(value: string | null | undefined): string {
   const date = parseTimestamp(value)
   if (!date) return ''
   try {

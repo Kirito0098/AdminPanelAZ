@@ -1,5 +1,5 @@
 import type { ClientAccessPolicy, ClientPoliciesResponseEntry, OpenVpnClient, VpnConfig, WireGuardPeer } from '@/types'
-import { formatDate } from '@/lib/datetime'
+import { formatDate, parseTimestamp } from '@/lib/datetime'
 import { getProfileDownloadFilename } from '@/lib/profileDownloadName'
 import { vpnTypeLabel } from '@/lib/vpnTypes'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
@@ -92,21 +92,8 @@ export function configMatchesTab(config: VpnConfig, tab: ProtocolTab): boolean {
   return hasProtocolProfiles(config, 'wireguard')
 }
 
-function parseAccessExpiresAt(value?: string | null): Date | null {
-  if (!value) return null
-  const raw = value.trim()
-  if (!raw) return null
-  const normalized = raw.endsWith(' UTC')
-    ? `${raw.slice(0, -4).replace(' ', 'T')}Z`
-    : raw.includes('T')
-      ? raw
-      : `${raw.replace(' ', 'T')}Z`
-  const parsed = Date.parse(normalized)
-  return Number.isNaN(parsed) ? null : new Date(parsed)
-}
-
 function formatAccessRemaining(accessExpiresAt?: string | null): string | null {
-  const expiresAt = parseAccessExpiresAt(accessExpiresAt)
+  const expiresAt = parseTimestamp(accessExpiresAt)
   if (!expiresAt) return null
 
   const totalSeconds = Math.floor((expiresAt.getTime() - Date.now()) / 1000)
@@ -125,7 +112,7 @@ function formatAccessRemaining(accessExpiresAt?: string | null): string | null {
 
 function formatDateShort(value?: string | null): string {
   if (!value) return 'не ограничено'
-  const d = parseAccessExpiresAt(value)
+  const d = parseTimestamp(value)
   if (!d) return value.split(' ')[0] || value
   return formatDate(d, undefined, value.split(' ')[0] || value)
 }
@@ -137,19 +124,9 @@ export function formatAccessExpiryBadge(accessExpiresAt?: string | null): string
   return remaining === 'срок истёк' ? 'истёк' : `истекает ${remaining}`
 }
 
-/** Backend sends naive UTC timestamps; without a zone suffix Date.parse would read them as local. */
-export function parseCertExpiresAt(value?: string | null): Date | null {
-  if (!value) return null
-  const raw = value.trim()
-  if (!raw) return null
-  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw)
-  const parsed = Date.parse(`${raw.replace(' ', 'T')}${hasZone ? '' : 'Z'}`)
-  return Number.isNaN(parsed) ? null : new Date(parsed)
-}
-
 /** Days left on the real certificate, or null while the node has not been read yet. */
-export function certDaysLeft(config: VpnConfig): number | null {
-  const expiresAt = parseCertExpiresAt(config.cert_expires_at)
+function certDaysLeft(config: VpnConfig): number | null {
+  const expiresAt = parseTimestamp(config.cert_expires_at)
   if (!expiresAt) return config.cert_days_left ?? null
   const ms = expiresAt.getTime() - Date.now()
   return ms <= 0 ? 0 : Math.floor(ms / 86400000)
@@ -160,7 +137,7 @@ export function formatCertExpiry(config: VpnConfig): string {
   if (daysLeft == null) {
     return config.cert_expire_days != null ? `выпущен на ${config.cert_expire_days} дн.` : '—'
   }
-  const expiresAt = parseCertExpiresAt(config.cert_expires_at)
+  const expiresAt = parseTimestamp(config.cert_expires_at)
   const until = expiresAt ? formatDate(expiresAt, undefined, '') : ''
   if (daysLeft <= 0) return until ? `истёк ${until}` : 'истёк'
   return until ? `${daysLeft} дн. (до ${until})` : `${daysLeft} дн.`
@@ -290,7 +267,7 @@ export function buildAccessMeta(
   } else if (policy?.access_days_left != null && policy.access_days_left <= 30) {
     tone = 'expiring'
   } else if (accessExpiresAt) {
-    const expiresAt = parseAccessExpiresAt(accessExpiresAt)
+    const expiresAt = parseTimestamp(accessExpiresAt)
     if (formatAccessRemaining(accessExpiresAt) === 'срок истёк') {
       tone = 'expired'
     } else if (expiresAt) {
@@ -410,7 +387,7 @@ export function getProtocolBadgeVariant(tab: ProtocolTab): 'default' | 'secondar
   return 'outline'
 }
 
-export type ClientConnectionEntry = {
+type ClientConnectionEntry = {
   openvpn: boolean
   openvpnUdp: boolean
   openvpnTcp: boolean
@@ -424,7 +401,7 @@ export type ClientConnectionEntry = {
 export type ClientConnectionMap = Record<string, ClientConnectionEntry>
 
 /** Derive OpenVPN transport from a live status profile (e.g. antizapret-udp). */
-export function openvpnTransportFromProfile(profile?: string | null): 'udp' | 'tcp' | null {
+function openvpnTransportFromProfile(profile?: string | null): 'udp' | 'tcp' | null {
   const name = (profile || '').trim().toLowerCase()
   if (name.endsWith('-udp')) return 'udp'
   if (name.endsWith('-tcp')) return 'tcp'

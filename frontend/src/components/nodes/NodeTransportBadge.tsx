@@ -1,10 +1,11 @@
 import { Badge } from '@/components/ui/badge'
 import type { Node } from '@/types'
+import { nodeTransportId } from './nodeHelpers'
 
 function transportState(node: Node): { label: string; secure: boolean } {
-  const raw = (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase()
-  if (raw === 'mtls') return { label: 'mTLS', secure: true }
-  if (raw === 'ssh') return { label: 'SSH', secure: true }
+  const transport = nodeTransportId(node)
+  if (transport === 'mtls') return { label: 'mTLS', secure: true }
+  if (transport === 'ssh') return { label: 'SSH', secure: true }
   return { label: 'HTTP', secure: false }
 }
 

@@ -4,13 +4,13 @@ import { openTicketEventSource, type StreamHandle } from './streamTicket'
 export type NotificationCategory = 'requests' | 'security' | 'nodes' | 'services' | 'tasks'
 export type NotificationLevel = 'info' | 'warning' | 'error'
 
-export interface NotificationState {
+interface NotificationState {
   read: boolean
   hidden: boolean
   snoozed_until: string | null
 }
 
-export interface NotificationDetailsEntry {
+interface NotificationDetailsEntry {
   label: string
   value: string
 }
@@ -28,7 +28,7 @@ export interface NotificationItem {
   state: NotificationState
 }
 
-export interface NotificationCategoryCount {
+interface NotificationCategoryCount {
   total: number
   unread: number
 }
@@ -41,14 +41,14 @@ export interface NotificationCounts {
   by_category: Record<string, NotificationCategoryCount>
 }
 
-export interface NotificationsResponse {
+interface NotificationsResponse {
   items: NotificationItem[]
   unread_count: number
   pending_requests_count: number
   counts: NotificationCounts
 }
 
-export interface NotificationPreferences {
+interface NotificationPreferences {
   categories: Record<NotificationCategory, boolean>
 }
 
@@ -77,7 +77,7 @@ export async function fetchNotificationPreferences(): Promise<NotificationPrefer
   return apiFetch<NotificationPreferences>('/notifications/preferences')
 }
 
-export interface NotificationFilters {
+interface NotificationFilters {
   category?: NotificationCategory
   level?: NotificationLevel
   unread_only?: boolean

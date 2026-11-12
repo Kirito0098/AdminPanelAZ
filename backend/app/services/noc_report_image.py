@@ -10,6 +10,7 @@ from typing import Any
 from PIL import Image, ImageDraw, ImageFont
 
 from app.services.image_fonts import load_image_font, load_mono_font
+from app.services.shared_helpers import format_avg_peak
 from app.services.traffic_limit import human_bytes
 
 
@@ -44,11 +45,7 @@ def _load_font(size: int, *, bold: bool = False) -> ImageFont.FreeTypeFont | Ima
 
 
 def _format_resource_avg_peak(avg: float | None, peak: float | None, *, suffix: str = "%") -> str | None:
-    if avg is None and peak is None:
-        return None
-    avg_label = "-" if avg is None else f"{avg:g}{suffix}"
-    peak_label = "-" if peak is None else f"{peak:g}{suffix}"
-    return f"{avg_label} / {peak_label}"
+    return format_avg_peak(avg, peak, suffix=suffix, empty="-")
 
 
 def _fmt_dt(value: datetime | None) -> str:

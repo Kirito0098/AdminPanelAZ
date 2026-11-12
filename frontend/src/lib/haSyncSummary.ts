@@ -73,7 +73,7 @@ interface HaSyncResultItem {
   details?: string[]
 }
 
-export interface HaSyncResultSection {
+interface HaSyncResultSection {
   title: string
   description?: string
   items: HaSyncResultItem[]

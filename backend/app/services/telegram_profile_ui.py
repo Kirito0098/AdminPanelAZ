@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.services.profile_download_name import AZ_PROFILE_DIR, enrich_profile_files
+from app.services.profile_download_name import enrich_profile_files, is_az_profile
 
 GROUP_ORDER = ("ovpn", "wg", "awg")
 GROUP_META: dict[str, tuple[str, str]] = {
@@ -87,12 +87,6 @@ def protocol_group_key(protocol: str) -> str:
     if value == "amneziawg":
         return "awg"
     return "other"
-
-
-def is_az_profile(*, variant: str, path: str) -> bool:
-    if "antizapret" in (variant or ""):
-        return True
-    return bool(AZ_PROFILE_DIR.search((path or "").replace("\\", "/")))
 
 
 def file_route_label(*, variant: str, path: str) -> str:

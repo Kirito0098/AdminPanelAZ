@@ -9,18 +9,13 @@ import {
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import type { Node, NodeTransportId, NodeTransportOption } from '@/types'
+import { nodeTransportId } from './nodeHelpers'
 
 const DEFAULT_ITEMS: NodeTransportOption[] = [
   { id: 'http', label: 'HTTP', available: true },
   { id: 'mtls', label: 'HTTPS + mTLS', available: true },
   { id: 'ssh', label: 'SSH tunnel', available: false },
 ]
-
-function resolveTransport(node: Node): NodeTransportId {
-  const raw = (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase()
-  if (raw === 'mtls' || raw === 'ssh') return raw
-  return 'http'
-}
 
 type NodeTransportSelectProps = {
   node: Node
@@ -36,7 +31,7 @@ export default function NodeTransportSelect({
   onChange,
 }: NodeTransportSelectProps) {
   const [items, setItems] = useState<NodeTransportOption[]>(DEFAULT_ITEMS)
-  const current = resolveTransport(node)
+  const current = nodeTransportId(node)
   const currentFallback = DEFAULT_ITEMS.find((item) => item.id === current)
   const allItems = items.some((item) => item.id === current) || !currentFallback ? items : [...items, currentFallback]
   const visibleItems = allItems.filter((item) => item.available || item.id === current)

@@ -17,19 +17,12 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 
 from app.models import User
+from app.services.shared_helpers import as_utc as _as_utc
 
 # Окно предупреждения об истечении (amber-баннер «Доступ до DD.MM»).
 EXPIRING_WINDOW_DAYS = 7
 # Месяц в grace-периоде считается как 30 дней (тот же ориентир, что в user_grace).
 MONTH_DAYS = 30
-
-
-def _as_utc(value: datetime | None) -> datetime | None:
-    if value is None:
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
 
 
 def _now() -> datetime:

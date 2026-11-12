@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Copy,
   Download,
   FileKey,
   Loader2,
@@ -27,6 +26,7 @@ import {
   importConfigsCsv,
   syncConfigs,
 } from '@/api/client'
+import type { QrContentMode } from '@/api/http'
 import { buildDashboardSummary } from '@/lib/dashboardSummary'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import { DOCS } from '@/lib/docsUrls'
@@ -41,14 +41,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
 import ToolbarButton from '@/components/shared/ToolbarButton'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
+import QrPreviewDialog from '@/components/shared/QrPreviewDialog'
 import { NodeBadge } from '@/components/NodeSelector'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
@@ -109,7 +102,7 @@ export default function DashboardPage() {
   const [qrPreview, setQrPreview] = useState<{
     url: string
     filename: string
-    contentMode: import('../api/client').QrContentMode
+    contentMode: QrContentMode
     downloadUrl?: string
   } | null>(null)
   const [policies, setPolicies] = useState<Record<string, ClientPoliciesResponseEntry>>({})
@@ -295,16 +288,6 @@ export default function DashboardPage() {
       }, 'Генерация QR-кода...')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка генерации QR')
-    }
-  }
-
-  const copyQrDownloadUrl = async () => {
-    if (!qrPreview?.downloadUrl) return
-    try {
-      await navigator.clipboard.writeText(qrPreview.downloadUrl)
-      success('Ссылка скопирована в буфер')
-    } catch {
-      notifyError('Не удалось скопировать ссылку')
     }
   }
 
@@ -545,50 +528,16 @@ export default function DashboardPage() {
         withProgress={withInline}
       />
 
-      <Dialog
-        open={!!qrPreview}
-        onOpenChange={(open) => {
-          if (!open && qrPreview) {
-            URL.revokeObjectURL(qrPreview.url)
-            setQrPreview(null)
-          }
+      <QrPreviewDialog
+        url={qrPreview?.url}
+        filename={qrPreview?.filename}
+        contentMode={qrPreview?.contentMode}
+        downloadUrl={qrPreview?.downloadUrl}
+        onClose={() => {
+          if (qrPreview) URL.revokeObjectURL(qrPreview.url)
+          setQrPreview(null)
         }}
-      >
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileKey size={18} />
-              {qrPreview?.contentMode === 'download-link' ? 'QR: ссылка для скачивания' : 'QR-код профиля'}
-            </DialogTitle>
-            <DialogDescription>
-              {qrPreview?.filename}
-              {qrPreview?.contentMode === 'download-link' ? (
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  Профиль не помещается в один QR (типично для AntiZapret WG/AWG и OpenVPN). Отсканируйте
-                  камерой телефона — откроется ссылка для скачивания файла, не импорт в VPN-приложение.
-                </span>
-              ) : (
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  Отсканируйте VPN-приложением для импорта профиля.
-                </span>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          {qrPreview && (
-            <div className="flex justify-center rounded-lg border bg-muted/30 p-6">
-              <img src={qrPreview.url} alt="QR-код конфигурации" className="max-h-72 rounded-md" />
-            </div>
-          )}
-          {qrPreview?.downloadUrl && (
-            <DialogFooter className="sm:justify-center">
-              <Button type="button" variant="outline" onClick={() => void copyQrDownloadUrl()}>
-                <Copy size={14} />
-                Скопировать ссылку
-              </Button>
-            </DialogFooter>
-          )}
-        </DialogContent>
-      </Dialog>
+      />
 
       {loading ? (
         <div className="rounded-xl border bg-card p-6">

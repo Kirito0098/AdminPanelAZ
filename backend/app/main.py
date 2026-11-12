@@ -24,7 +24,14 @@ from app.services.security_bootstrap import (
     restrict_sensitive_file_permissions,
     validate_panel_settings,
 )
-from app.database import Base, SessionLocal, engine, migrations_lock, run_db_migrations
+from app.database import (
+    Base,
+    SessionLocal,
+    engine,
+    migrations_lock,
+    resolve_main_db_path,
+    run_db_migrations,
+)
 from app.cidr_database import run_cidr_db_migrations
 from app.models import User, UserRole, VpnConfig, VpnType
 from app.routers import (
@@ -130,36 +137,25 @@ def _seed_database():
                 raise ValueError("admin user not found")
             adapter = get_active_adapter(db)
             node_id = get_active_node(db).id
-            ovpn_clients = adapter.list_openvpn_clients()
-            wg_clients = adapter.list_wireguard_clients()
-            for name in ovpn_clients:
-                if not db.query(VpnConfig).filter(
-                    VpnConfig.node_id == node_id,
-                    VpnConfig.client_name == name,
-                    VpnConfig.vpn_type == VpnType.openvpn,
-                ).first():
-                    db.add(
-                        VpnConfig(
-                            node_id=node_id,
-                            client_name=name,
-                            vpn_type=VpnType.openvpn,
-                            owner_id=admin.id,
+            clients_by_type = (
+                (VpnType.openvpn, adapter.list_openvpn_clients()),
+                (VpnType.wireguard, adapter.list_wireguard_clients()),
+            )
+            for vpn_type, names in clients_by_type:
+                for name in names:
+                    if not db.query(VpnConfig).filter(
+                        VpnConfig.node_id == node_id,
+                        VpnConfig.client_name == name,
+                        VpnConfig.vpn_type == vpn_type,
+                    ).first():
+                        db.add(
+                            VpnConfig(
+                                node_id=node_id,
+                                client_name=name,
+                                vpn_type=vpn_type,
+                                owner_id=admin.id,
+                            )
                         )
-                    )
-            for name in wg_clients:
-                if not db.query(VpnConfig).filter(
-                    VpnConfig.node_id == node_id,
-                    VpnConfig.client_name == name,
-                    VpnConfig.vpn_type == VpnType.wireguard,
-                ).first():
-                    db.add(
-                        VpnConfig(
-                            node_id=node_id,
-                            client_name=name,
-                            vpn_type=VpnType.wireguard,
-                            owner_id=admin.id,
-                        )
-                    )
             db.commit()
         except Exception:
             logger.exception("Failed to seed VPN clients from local adapter")
@@ -259,10 +255,7 @@ async def lifespan(_: FastAPI):
     mark_app_started()
     seed_database()
     app_root = Path(__file__).resolve().parents[1]
-    db_url = settings.database_url
-    db_path = Path(db_url.replace("sqlite:///", ""))
-    if not db_path.is_absolute():
-        db_path = app_root / db_path
+    db_path = resolve_main_db_path()
     env_path = app_root / ".env"
     from app.cidr_database import resolve_cidr_db_path
 

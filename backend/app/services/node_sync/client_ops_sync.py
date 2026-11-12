@@ -5,20 +5,19 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
 from app.database import SessionLocal
 from app.models import Node, NodeSyncGroup
 from app.services.access_policy import (
     AccessPolicyService,
     clear_cooldown_ban,
+    policy_service_for_node,
     register_cooldown_ban,
 )
-from app.services.node_manager import get_adapter_for_node, node_metadata_dict
+from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes, is_auto_sync_enabled
 from app.services.node_sync.replicate import (
     ReplicateOperation,
@@ -27,25 +26,12 @@ from app.services.node_sync.replicate import (
 )
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 _NOT_CONNECTED_MARKERS = ("не найден", "not connected", "not found")
 
 
-def _antizapret_path_for_node(node: Node) -> Path:
-    meta = node_metadata_dict(node)
-    raw = meta.get("antizapret_path")
-    return Path(str(raw)) if raw else settings.antizapret_path
-
-
 def _policy_service(db: Session, node: Node, adapter) -> AccessPolicyService:
-    return AccessPolicyService(
-        db,
-        antizapret_path=_antizapret_path_for_node(node),
-        node_id=node.id,
-        node_name=node.name,
-        adapter=adapter,
-    )
+    return policy_service_for_node(db, node, adapter=adapter)
 
 
 def schedule_disconnect_cooldown_release(

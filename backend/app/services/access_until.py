@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Literal
 
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
 from app.models import AmneziaWg2AccessPolicy, Node, OpenVpnAccessPolicy, WgAccessPolicy
-from app.services.access_policy import AccessPolicyService
-from app.services.node_manager import get_adapter_for_node, node_metadata_dict
+from app.services.access_policy import AccessPolicyService, policy_service_for_node
+from app.services.node_manager import get_adapter_for_node
 from app.services.shared_helpers import as_utc as _as_utc
 
 logger = logging.getLogger(__name__)
@@ -67,16 +65,7 @@ def _set_row_access_until(protocol: Protocol, row, access_until: datetime | None
 
 
 def _policy_service_for_node(db: Session, node: Node) -> AccessPolicyService:
-    settings = get_settings()
-    meta = node_metadata_dict(node)
-    antizapret_path = Path(str(meta.get("antizapret_path") or settings.antizapret_path))
-    return AccessPolicyService(
-        db,
-        antizapret_path=antizapret_path,
-        node_id=node.id,
-        node_name=node.name,
-        adapter=get_adapter_for_node(node),
-    )
+    return policy_service_for_node(db, node, adapter=get_adapter_for_node(node))
 
 
 def _get_row(db: Session, protocol: Protocol, node_id: int, client_name: str):

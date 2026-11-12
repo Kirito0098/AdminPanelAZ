@@ -51,13 +51,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { dateInputToIso, isoToDateInput } from '@/lib/accessUntil'
+import { isoToDateInput } from '@/lib/accessUntil'
 import { useNotifications } from '@/context/NotificationContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { SettingsCollapsible, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import { ROLE_HINTS, ROLE_LABELS } from '@/components/settings/settingsLabels'
-import { formatDate } from '@/lib/datetime'
+import { endOfDayIso, formatDate } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type {
   User as PanelUser,
@@ -436,7 +436,7 @@ export default function UsersTab({
         // Отправляем срок только при реальной правке даты — иначе сохранение
         // Telegram ID / квоты пересинхронизировало бы сроки всех профилей.
         if (draftAccessUntil !== isoToDateInput(activeEditor.access_until)) {
-          payload.access_until = dateInputToIso(draftAccessUntil)
+          payload.access_until = endOfDayIso(draftAccessUntil)
         }
         const raw = draftConfigQuota.trim()
         payload.config_quota = raw === '' ? 0 : Number.parseInt(raw, 10)

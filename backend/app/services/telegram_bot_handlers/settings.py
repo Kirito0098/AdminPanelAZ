@@ -12,11 +12,7 @@ from starlette.requests import Request
 
 from app.schemas import TelegramSettingsUpdate
 from app.services.action_log import log_action
-from app.services.telegram_api import (
-    edit_message_text,
-    get_webhook_info_result,
-    send_message,
-)
+from app.services.telegram_api import get_webhook_info_result, send_message
 from app.services.telegram_bot_handlers.base import (
     BotContext,
     TelegramBotSettingsSnapshot,
@@ -25,6 +21,7 @@ from app.services.telegram_bot_handlers.base import (
     is_admin,
     unlinked_message,
 )
+from app.services.telegram_bot_handlers.ui import send_or_edit as _send_or_edit
 from app.services.telegram_bot_handlers import settings_fsm
 from app.services import telegram_bot_i18n as i18n
 
@@ -327,19 +324,6 @@ def _settings_root_text(settings: TelegramBotSettingsSnapshot) -> str:
         webhook_state=i18n.settings_root_webhook_state(settings.webhook_set_at),
         secret_state=i18n.settings_root_secret_state(settings.webhook_secret_set),
     )
-
-
-async def _send_or_edit(
-    ctx: BotContext,
-    text: str,
-    *,
-    markup: dict | None = None,
-    message_id: int | None = None,
-) -> None:
-    if message_id is not None:
-        await edit_message_text(ctx.bot_token, ctx.chat_id, message_id, text, reply_markup=markup)
-    else:
-        await send_message(ctx.bot_token, ctx.chat_id, text, reply_markup=markup)
 
 
 async def _require_admin_ctx(ctx: BotContext) -> bool:

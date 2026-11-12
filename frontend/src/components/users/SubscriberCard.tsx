@@ -87,7 +87,7 @@ function protocolChipClass(protocol: string): string {
   return 'border-border text-muted-foreground'
 }
 
-export interface SubscriberCardProps {
+interface SubscriberCardProps {
   user: User
   selected?: boolean
   showSelect?: boolean

@@ -2,7 +2,7 @@ import { isWireGuardOnline } from '@/lib/wireguardStatus'
 import type { DashboardSummary, MonitoringOverview, VpnConfig } from '@/types'
 
 /** Config counts for dashboard metric cards (DB list; no live VPN probe). */
-export function dashboardSummaryFromConfigs(
+function dashboardSummaryFromConfigs(
   configs: VpnConfig[],
   nodeName?: string | null,
 ): DashboardSummary {
@@ -20,7 +20,7 @@ export function dashboardSummaryFromConfigs(
 }
 
 /** Merge live connection/service fields from /monitoring/overview into config counts. */
-export function mergeDashboardSummaryMonitoring(
+function mergeDashboardSummaryMonitoring(
   base: DashboardSummary,
   overview: MonitoringOverview | null | undefined,
 ): DashboardSummary {

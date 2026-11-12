@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import Node, VpnType
-from app.services.access_policy import AccessPolicyService
+from app.services.access_policy import AccessPolicyService, policy_service_for_node
 from app.services.node_sync.openvpn_pki_state import (
     PkiState,
     newly_revoked_clients,
@@ -381,12 +381,11 @@ def sync_openvpn_pki_from_primary(
 
 
 def _replica_policy_service(db: Session, replica_node: Node, replica_adapter) -> AccessPolicyService:
-    return AccessPolicyService(
+    return policy_service_for_node(
         db,
-        antizapret_path=get_settings().antizapret_path,
-        node_id=replica_node.id,
-        node_name=replica_node.name,
+        replica_node,
         adapter=replica_adapter,
+        antizapret_path=get_settings().antizapret_path,
     )
 
 

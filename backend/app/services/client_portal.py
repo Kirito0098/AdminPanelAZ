@@ -37,6 +37,7 @@ from app.services.node_sync.groups import find_sync_group_containing_node
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
 from app.services.ssh_tunnel_pool import SshTunnelError
+from app.services.traffic_limit import human_bytes
 from app.services.vpn_profile_visibility import (
     feature_flags_from_service,
     get_default_visible_vpn_profiles,
@@ -779,15 +780,7 @@ def _setting_value(db: Session, key: str, default: str = "") -> str:
 
 
 def _format_bytes_label(n: int) -> str:
-    value = float(max(0, int(n or 0)))
-    units = ("B", "KiB", "MiB", "GiB", "TiB")
-    idx = 0
-    while value >= 1024 and idx < len(units) - 1:
-        value /= 1024.0
-        idx += 1
-    if idx == 0:
-        return f"{int(value)} {units[idx]}"
-    return f"{value:.2f} {units[idx]}"
+    return human_bytes(max(0, int(n or 0)), units=("B", "KiB", "MiB", "GiB", "TiB"), digits=2) or "0 B"
 
 
 def _policy_blocked(policy) -> bool:

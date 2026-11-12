@@ -30,7 +30,8 @@ export function getActiveTimeZone(): string {
   return activeTimeZone || getBrowserTimeZone()
 }
 
-const NAIVE_TS_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?$/
+const ISO_TS_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/
+const ZONE_SUFFIX_RE = /(?:Z|[+-]\d{2}:?\d{2})$/i
 
 function toDate(value: string | number | Date | null | undefined): Date | null {
   if (value === null || value === undefined || value === '') return null
@@ -41,8 +42,11 @@ function toDate(value: string | number | Date | null | undefined): Date | null {
   }
   let s = String(value).trim()
   if (!s) return null
-  // Naive backend timestamp (no timezone) -> interpret as UTC.
-  if (NAIVE_TS_RE.test(s)) {
+  if (/\sUTC$/i.test(s)) {
+    // "YYYY-MM-DD HH:MM:SS UTC" -> ISO with an explicit zone.
+    s = `${s.slice(0, -4).replace(' ', 'T')}Z`
+  } else if (ISO_TS_RE.test(s) && !ZONE_SUFFIX_RE.test(s)) {
+    // Naive backend timestamp (no timezone) -> interpret as UTC.
     s = `${s.replace(' ', 'T')}Z`
   }
   const d = new Date(s)

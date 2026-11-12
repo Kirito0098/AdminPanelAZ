@@ -12,7 +12,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.database import Base, get_db
-from app.models import QrDownloadToken
+from app.models import AppSetting, QrDownloadToken
 from app.routers import public_download as public_download_router
 from app.services.qr_download import QrDownloadService
 
@@ -43,9 +43,9 @@ def client(factory):
         yield c
 
 
-def _issue(factory) -> str:
+def _issue(factory, *, pin: str = "") -> str:
     with factory() as db:
-        return QrDownloadService(db, max_downloads=1).create_token(
+        return QrDownloadService(db, max_downloads=1, pin=pin).create_token(
             file_path="/root/antizapret/client/wg/alice.conf",
             config_type="wireguard",
             config_name="alice.conf",
@@ -53,19 +53,23 @@ def _issue(factory) -> str:
         )["token"]
 
 
-def test_qr_download_get_does_not_increment_download_count(client, factory):
-    token = _issue(factory)
+def _get_page(client, token: str, *, ip: str = "203.0.113.10"):
     with (
         patch("app.routers.public_download.ip_restriction_service") as ip_svc,
-        patch("app.routers.public_download.public_download_rate_limit_service"),
+        patch("app.routers.public_download.public_download_rate_limit_service") as rl,
         patch(
             "app.routers.public_download._qr_settings",
             return_value={"ttl_seconds": 600, "max_downloads": 1, "pin": ""},
         ),
-        patch("app.routers.public_download._global_pin_set", return_value=False),
     ):
-        ip_svc.get_client_ip.return_value = "203.0.113.10"
+        ip_svc.get_client_ip.return_value = ip
         resp = client.get(f"/api/public/qr-download/{token}")
+    return resp, rl
+
+
+def test_qr_download_get_does_not_increment_download_count(client, factory):
+    token = _issue(factory)
+    resp, _ = _get_page(client, token)
 
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("content-type", "")
@@ -76,6 +80,33 @@ def test_qr_download_get_does_not_increment_download_count(client, factory):
     with factory() as db:
         row = db.query(QrDownloadToken).one()
         assert row.download_count == 0
+
+
+def test_qr_download_get_with_pin_shows_pin_form(client, factory):
+    token = _issue(factory, pin="246810")
+    resp, rl = _get_page(client, token, ip="203.0.113.11")
+
+    assert resp.status_code == 200
+    assert 'name="pin"' in resp.text
+    assert "document.forms[0].submit()" not in resp.text
+    assert "script-src" not in resp.text
+    rl.consume.assert_called_once_with("203.0.113.11")
+    with factory() as db:
+        assert db.query(QrDownloadToken).one().download_count == 0
+
+
+def test_qr_download_get_with_global_pin_shows_pin_form(client, factory):
+    token = _issue(factory)
+    with factory() as db:
+        db.add(AppSetting(key="qr_download_pin", value="246810"))
+        db.commit()
+    resp, _ = _get_page(client, token)
+
+    assert resp.status_code == 200
+    assert 'name="pin"' in resp.text
+    assert "document.forms[0].submit()" not in resp.text
+    with factory() as db:
+        assert db.query(QrDownloadToken).one().download_count == 0
 
 
 def test_qr_download_post_increments_download_count_and_returns_file(client, factory):

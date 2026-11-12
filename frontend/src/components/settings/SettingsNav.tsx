@@ -43,7 +43,7 @@ type SettingsTabKey =
   | 'qr_downloads'
   | 'monitoring'
 
-export interface SettingsNavItem {
+interface SettingsNavItem {
   id: SettingsSection
   label: string
   icon: LucideIcon

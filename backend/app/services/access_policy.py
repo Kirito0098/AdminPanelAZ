@@ -3,6 +3,7 @@
 import logging
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from fastapi import HTTPException
 from sqlalchemy import func
@@ -11,6 +12,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.models import (
     AmneziaWg2AccessPolicy,
+    Node,
     OpenVpnAccessPolicy,
     OpenVpnBufferGuardEvent,
     VpnConfig,
@@ -23,6 +25,7 @@ from app.services.awg2_runtime import (
     unblock_client_runtime as awg2_unblock_client_runtime,
 )
 from app.services.node_adapter import NodeAdapter
+from app.services.node_manager import get_adapter_for_node, node_metadata_dict
 from app.services.openvpn_ban_hook import ensure_openvpn_ban_check
 from app.services.openvpn_group import (
     OPENVPN_PROTOCOL_ALL,
@@ -30,6 +33,7 @@ from app.services.openvpn_group import (
     OPENVPN_PROTOCOL_UDP,
     WIREGUARD_PROTOCOL,
 )
+from app.services.shared_helpers import as_utc
 from app.services.traffic_limit import (
     AMNEZIAWG2_PROTOCOL,
     TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED,
@@ -88,11 +92,8 @@ def _now() -> datetime:
 
 
 def _as_utc(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
+    # Aware datetimes stay as-is here (all stored values are naive UTC).
+    return as_utc(dt, convert_aware=False)
 
 
 def _policy_access_until(row) -> datetime | None:
@@ -1430,3 +1431,25 @@ class AccessPolicyService:
             "clients_changed": changed,
             "wg_runtime_calls": self.wg_runtime_calls,
         }
+
+
+def policy_service_for_node(
+    db: Session,
+    node: Node,
+    *,
+    adapter: NodeAdapter | None = None,
+    antizapret_path=None,
+) -> AccessPolicyService:
+    """AccessPolicyService for a node; adapter and antizapret path default to the node's own."""
+    if antizapret_path is None:
+        meta = node_metadata_dict(node)
+        antizapret_path = Path(str(meta.get("antizapret_path") or get_settings().antizapret_path))
+    if adapter is None:
+        adapter = get_adapter_for_node(node)
+    return AccessPolicyService(
+        db,
+        antizapret_path=antizapret_path,
+        node_id=node.id,
+        node_name=node.name,
+        adapter=adapter,
+    )

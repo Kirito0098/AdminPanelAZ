@@ -114,7 +114,7 @@ function CopyableValue({ value, label }: { value: string; label: string }) {
   )
 }
 
-export function MiniNotifyGroupsAccordion({
+function MiniNotifyGroupsAccordion({
   groups,
   events,
   eventToggles,

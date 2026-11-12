@@ -8,7 +8,6 @@ import {
   Line,
   LineChart,
   Tooltip,
-  XAxis,
   YAxis,
 } from 'recharts'
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
@@ -20,44 +19,25 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useNotifications } from '@/context/NotificationContext'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
-import { formatDate, formatDateTime, formatTime } from '@/lib/datetime'
+import {
+  CHART_COLORS,
+  CHART_GRID,
+  CHART_MARGIN,
+  RANGE_LABELS,
+  TimeXAxis,
+  formatChartLabel,
+  type ResourceChartPeriod,
+} from '@/components/monitoring/resourceChartShared'
 import type { PanelResourceCurrent, PanelResourceHistory, PanelResourceHistoryPoint } from '@/types'
 
-const CHART_CPU = 'hsl(187, 72%, 45%)'
-const CHART_RAM = 'hsl(142, 71%, 45%)'
-const CHART_DISK = 'hsl(38, 92%, 50%)'
-const CHART_TOTAL = 'hsl(217, 33%, 55%)'
-const CHART_NGINX = 'hsl(0, 62%, 50%)'
-const CHART_WATCHDOG = 'hsl(38, 92%, 50%)'
-const CHART_VITE = 'hsl(280, 65%, 55%)'
-const CHART_LOAD = 'hsl(217, 33%, 55%)'
-
-const RANGE_LABELS: Record<'1d' | '7d' | '30d', string> = {
-  '1d': '1 день',
-  '7d': '7 дней',
-  '30d': '30 дней',
-}
-
-type Period = '1d' | '7d' | '30d'
-
 type PanelResourceHistoryChartsProps = {
-  period: Period
-  onPeriodChange: (period: Period) => void
+  period: ResourceChartPeriod
+  onPeriodChange: (period: ResourceChartPeriod) => void
 }
 
-function formatLabel(ts: string, period: Period) {
-  if (period === '1d') {
-    return formatTime(ts, { hour: '2-digit', minute: '2-digit' })
-  }
-  if (period === '7d') {
-    return formatDateTime(ts, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-  }
-  return formatDate(ts, { day: '2-digit', month: '2-digit' })
-}
-
-function buildChartRows(points: PanelResourceHistoryPoint[], period: Period) {
+function buildChartRows(points: PanelResourceHistoryPoint[], period: ResourceChartPeriod) {
   return points.map((p) => ({
-    label: formatLabel(p.timestamp, period),
+    label: formatChartLabel(p.timestamp, period),
     cpu: p.backend_cpu_percent,
     memory: p.backend_memory_mb,
     nginx: p.nginx_memory_mb ?? 0,
@@ -379,29 +359,23 @@ export default function PanelResourceHistoryCharts({
                       <p className="mb-2 text-sm font-medium">Хост контроллера: CPU / RAM / Диск (%)</p>
                       <ChartResponsive height={240}>
                         {({ width, height }) => (
-                        <AreaChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                        <AreaChart width={width} height={height} data={chartData} margin={CHART_MARGIN}>
                           <defs>
                             <linearGradient id="panelHostCpu" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={CHART_CPU} stopOpacity={0.3} />
-                              <stop offset="95%" stopColor={CHART_CPU} stopOpacity={0.02} />
+                              <stop offset="5%" stopColor={CHART_COLORS.cpu} stopOpacity={0.3} />
+                              <stop offset="95%" stopColor={CHART_COLORS.cpu} stopOpacity={0.02} />
                             </linearGradient>
                             <linearGradient id="panelHostRam" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={CHART_RAM} stopOpacity={0.3} />
-                              <stop offset="95%" stopColor={CHART_RAM} stopOpacity={0.02} />
+                              <stop offset="5%" stopColor={CHART_COLORS.ram} stopOpacity={0.3} />
+                              <stop offset="95%" stopColor={CHART_COLORS.ram} stopOpacity={0.02} />
                             </linearGradient>
                             <linearGradient id="panelHostDisk" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor={CHART_DISK} stopOpacity={0.3} />
-                              <stop offset="95%" stopColor={CHART_DISK} stopOpacity={0.02} />
+                              <stop offset="5%" stopColor={CHART_COLORS.disk} stopOpacity={0.3} />
+                              <stop offset="95%" stopColor={CHART_COLORS.disk} stopOpacity={0.02} />
                             </linearGradient>
                           </defs>
-                          <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
-                          <XAxis
-                            dataKey="label"
-                            tick={{ fontSize: 11 }}
-                            tickLine={false}
-                            axisLine={false}
-                            interval="preserveStartEnd"
-                          />
+                          <CartesianGrid {...CHART_GRID} />
+                          <TimeXAxis />
                           <YAxis
                             domain={[0, 100]}
                             tick={{ fontSize: 11 }}
@@ -431,7 +405,7 @@ export default function PanelResourceHistoryCharts({
                             type="monotone"
                             dataKey="hostCpu"
                             name="hostCpu"
-                            stroke={CHART_CPU}
+                            stroke={CHART_COLORS.cpu}
                             fill="url(#panelHostCpu)"
                             strokeWidth={2}
                           />
@@ -439,7 +413,7 @@ export default function PanelResourceHistoryCharts({
                             type="monotone"
                             dataKey="hostMemory"
                             name="hostMemory"
-                            stroke={CHART_RAM}
+                            stroke={CHART_COLORS.ram}
                             fill="url(#panelHostRam)"
                             strokeWidth={2}
                           />
@@ -447,7 +421,7 @@ export default function PanelResourceHistoryCharts({
                             type="monotone"
                             dataKey="hostDisk"
                             name="hostDisk"
-                            stroke={CHART_DISK}
+                            stroke={CHART_COLORS.disk}
                             fill="url(#panelHostDisk)"
                             strokeWidth={2}
                           />
@@ -461,21 +435,15 @@ export default function PanelResourceHistoryCharts({
                     <p className="mb-2 text-sm font-medium">Backend CPU (%)</p>
                     <ChartResponsive height={220}>
                       {({ width, height }) => (
-                    <AreaChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <AreaChart width={width} height={height} data={chartData} margin={CHART_MARGIN}>
                         <defs>
                           <linearGradient id="panelCpu" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor={CHART_CPU} stopOpacity={0.3} />
-                            <stop offset="95%" stopColor={CHART_CPU} stopOpacity={0.02} />
+                            <stop offset="5%" stopColor={CHART_COLORS.cpu} stopOpacity={0.3} />
+                            <stop offset="95%" stopColor={CHART_COLORS.cpu} stopOpacity={0.02} />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
-                        <XAxis
-                          dataKey="label"
-                          tick={{ fontSize: 11 }}
-                          tickLine={false}
-                          axisLine={false}
-                          interval="preserveStartEnd"
-                        />
+                        <CartesianGrid {...CHART_GRID} />
+                        <TimeXAxis />
                         <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="%" width={44} />
                         <Tooltip
                           formatter={(value) => [`${Number(value ?? 0).toFixed(1)}%`, 'CPU']}
@@ -485,7 +453,7 @@ export default function PanelResourceHistoryCharts({
                           type="monotone"
                           dataKey="cpu"
                           name="cpu"
-                          stroke={CHART_CPU}
+                          stroke={CHART_COLORS.cpu}
                           fill="url(#panelCpu)"
                           strokeWidth={2}
                         />
@@ -498,25 +466,19 @@ export default function PanelResourceHistoryCharts({
                     <p className="mb-2 text-sm font-medium">Память процессов панели (MB)</p>
                     <ChartResponsive height={240}>
                       {({ width, height }) => (
-                    <AreaChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                    <AreaChart width={width} height={height} data={chartData} margin={CHART_MARGIN}>
                         <defs>
                           <linearGradient id="panelRam" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor={CHART_RAM} stopOpacity={0.3} />
-                            <stop offset="95%" stopColor={CHART_RAM} stopOpacity={0.02} />
+                            <stop offset="5%" stopColor={CHART_COLORS.ram} stopOpacity={0.3} />
+                            <stop offset="95%" stopColor={CHART_COLORS.ram} stopOpacity={0.02} />
                           </linearGradient>
                           <linearGradient id="panelTotal" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor={CHART_TOTAL} stopOpacity={0.2} />
-                            <stop offset="95%" stopColor={CHART_TOTAL} stopOpacity={0.02} />
+                            <stop offset="5%" stopColor={CHART_COLORS.total} stopOpacity={0.2} />
+                            <stop offset="95%" stopColor={CHART_COLORS.total} stopOpacity={0.02} />
                           </linearGradient>
                         </defs>
-                        <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
-                        <XAxis
-                          dataKey="label"
-                          tick={{ fontSize: 11 }}
-                          tickLine={false}
-                          axisLine={false}
-                          interval="preserveStartEnd"
-                        />
+                        <CartesianGrid {...CHART_GRID} />
+                        <TimeXAxis />
                         <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} unit="MB" width={52} />
                         <Tooltip
                           formatter={(value, name) => {
@@ -548,7 +510,7 @@ export default function PanelResourceHistoryCharts({
                           type="monotone"
                           dataKey="memory"
                           name="memory"
-                          stroke={CHART_RAM}
+                          stroke={CHART_COLORS.ram}
                           fill="url(#panelRam)"
                           strokeWidth={2}
                         />
@@ -557,7 +519,7 @@ export default function PanelResourceHistoryCharts({
                             type="monotone"
                             dataKey="nginx"
                             name="nginx"
-                            stroke={CHART_NGINX}
+                            stroke={CHART_COLORS.nginx}
                             fill="none"
                             strokeWidth={2}
                             strokeDasharray="4 4"
@@ -568,7 +530,7 @@ export default function PanelResourceHistoryCharts({
                             type="monotone"
                             dataKey="watchdog"
                             name="watchdog"
-                            stroke={CHART_WATCHDOG}
+                            stroke={CHART_COLORS.watchdog}
                             fill="none"
                             strokeWidth={2}
                             strokeDasharray="4 4"
@@ -579,7 +541,7 @@ export default function PanelResourceHistoryCharts({
                             type="monotone"
                             dataKey="vite"
                             name="vite"
-                            stroke={CHART_VITE}
+                            stroke={CHART_COLORS.vite}
                             fill="none"
                             strokeWidth={2}
                             strokeDasharray="4 4"
@@ -589,7 +551,7 @@ export default function PanelResourceHistoryCharts({
                           type="monotone"
                           dataKey="total"
                           name="total"
-                          stroke={CHART_TOTAL}
+                          stroke={CHART_COLORS.total}
                           fill="url(#panelTotal)"
                           strokeWidth={2}
                         />
@@ -602,15 +564,9 @@ export default function PanelResourceHistoryCharts({
                     <p className="mb-2 text-sm font-medium">Workers uvicorn</p>
                     <ChartResponsive height={180}>
                       {({ width, height }) => (
-                    <LineChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
-                        <XAxis
-                          dataKey="label"
-                          tick={{ fontSize: 11 }}
-                          tickLine={false}
-                          axisLine={false}
-                          interval="preserveStartEnd"
-                        />
+                    <LineChart width={width} height={height} data={chartData} margin={CHART_MARGIN}>
+                        <CartesianGrid {...CHART_GRID} />
+                        <TimeXAxis />
                         <YAxis
                           allowDecimals={false}
                           tick={{ fontSize: 11 }}
@@ -626,7 +582,7 @@ export default function PanelResourceHistoryCharts({
                           type="monotone"
                           dataKey="workers"
                           name="workers"
-                          stroke={CHART_LOAD}
+                          stroke={CHART_COLORS.load}
                           strokeWidth={2}
                           dot={false}
                         />

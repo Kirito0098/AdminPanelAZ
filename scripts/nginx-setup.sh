@@ -46,12 +46,6 @@ usage() {
 EOF
 }
 
-validate_domain() {
-  local value="$1"
-  [[ "$value" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] || nginx_die "Неверный формат домена: $value"
-  nginx_assert_domain_not_az_vpn_host "$value"
-}
-
 require_safe_domain() {
   nginx_is_safe_host "$1" || nginx_die "Неверный формат домена: ${1//$'\n'/\\n}"
 }
@@ -135,7 +129,8 @@ prompt_port() {
 resolve_domain() {
   local required="${1:-false}"
   if [[ -n "${DOMAIN:-}" ]]; then
-    validate_domain "$DOMAIN"
+    nginx_validate_domain "$DOMAIN"
+    nginx_assert_domain_not_az_vpn_host "$DOMAIN"
     return 0
   fi
   if [[ "$required" == "true" ]] && nginx_is_non_interactive; then
@@ -144,7 +139,8 @@ resolve_domain() {
   if nginx_is_non_interactive; then
     DOMAIN="$(hostname -f 2>/dev/null || hostname)"
     [[ -n "$DOMAIN" ]] || nginx_die "DOMAIN не задан и hostname пуст"
-    validate_domain "$DOMAIN"
+    nginx_validate_domain "$DOMAIN"
+    nginx_assert_domain_not_az_vpn_host "$DOMAIN"
     return 0
   fi
   prompt_domain
@@ -154,7 +150,7 @@ prompt_domain() {
   while true; do
     local conflict_msg=""
     read -r -p "Доменное имя (например, panel.example.com): " DOMAIN
-    if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+    if ! nginx_is_valid_domain "$DOMAIN"; then
       echo "Неверный формат домена."
       continue
     fi
@@ -164,19 +160,6 @@ prompt_domain() {
     fi
     return 0
   done
-}
-
-restart_panel_if_needed() {
-  if [[ "${SKIP_PANEL_RESTART:-false}" == "true" ]]; then
-    nginx_log "Перезапуск панели отложен (выполнится после завершения задачи в UI)"
-    return 0
-  fi
-  if systemctl is-enabled "$SERVICE_NAME" >/dev/null 2>&1 \
-    || systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
-    systemctl restart "$SERVICE_NAME" 2>/dev/null || nginx_warn "Не удалось перезапустить $SERVICE_NAME"
-  else
-    nginx_warn "Перезапустите панель вручную: systemctl restart $SERVICE_NAME"
-  fi
 }
 
 nginx_apply_publish_firewall_for_mode() {
@@ -247,7 +230,7 @@ setup_http_direct() {
   nginx_apply_publish_firewall_for_mode "http_direct" "$BACKEND_PORT" "0" "0"
   nginx_log_access_url "http_direct" "$domain" "$BACKEND_PORT"
   nginx_log "HTTP без nginx: http://<сервер>:${BACKEND_PORT}/"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 resolve_access_path() {
@@ -305,7 +288,7 @@ setup_nginx_letsencrypt() {
     nginx_log "Nginx + Let's Encrypt настроен: https://${domain}:${HTTPS_PUBLIC_PORT}/"
   fi
   nginx_finalize_nginx_mode "nginx_le" "$domain"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 setup_nginx_selfsigned() {
@@ -344,7 +327,7 @@ setup_nginx_selfsigned() {
     nginx_log "Nginx + самоподписанный SSL: https://${domain}:${HTTPS_PUBLIC_PORT}/"
   fi
   nginx_finalize_nginx_mode "nginx_selfsigned" "$domain"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 setup_nginx_custom_certs() {
@@ -402,7 +385,7 @@ setup_nginx_custom_certs() {
     nginx_log "Nginx + пользовательские сертификаты: https://${domain}:${HTTPS_PUBLIC_PORT}/"
   fi
   nginx_finalize_nginx_mode "nginx_custom" "$domain"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 setup_uvicorn_letsencrypt() {
@@ -427,7 +410,7 @@ setup_uvicorn_letsencrypt() {
     nginx_log "HTTPS на uvicorn + Let's Encrypt: https://${domain}:${BACKEND_PORT}/"
   fi
   nginx_finalize_uvicorn_mode "uvicorn_le" "$domain" "$BACKEND_PORT"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 setup_uvicorn_selfsigned() {
@@ -460,7 +443,7 @@ setup_uvicorn_selfsigned() {
     nginx_log "HTTPS на uvicorn + самоподписанный SSL: https://${domain}:${BACKEND_PORT}/"
   fi
   nginx_finalize_uvicorn_mode "uvicorn_selfsigned" "$domain" "$BACKEND_PORT"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 setup_uvicorn_custom_certs() {
@@ -504,7 +487,7 @@ setup_uvicorn_custom_certs() {
     nginx_log "HTTPS на uvicorn + пользовательские сертификаты: https://${domain}:${BACKEND_PORT}/"
   fi
   nginx_finalize_uvicorn_mode "uvicorn_custom" "$domain" "$BACKEND_PORT"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 choose_https_type() {

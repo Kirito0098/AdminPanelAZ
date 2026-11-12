@@ -11,6 +11,7 @@ UNIT_DIR="$TMP_DIR/units"
 mkdir -p "$FAKE_ROOT/scripts" "$FAKE_ROOT/systemd" "$FAKE_ROOT/backend" "$UNIT_DIR" "$TMP_DIR/bin"
 cp "$ROOT_DIR"/scripts/install-node-systemd.sh "$ROOT_DIR"/scripts/install-proxy-systemd.sh \
   "$ROOT_DIR"/scripts/refresh-systemd-units.sh "$ROOT_DIR"/scripts/lib-agent-key.sh \
+  "$ROOT_DIR"/scripts/systemd-unit-lib.sh \
   "$ROOT_DIR"/scripts/env-file.sh "$FAKE_ROOT/scripts/" 2>/dev/null || true
 cp "$ROOT_DIR"/systemd/adminpanelaz-node.service "$ROOT_DIR"/systemd/adminpanelaz-proxy.service "$FAKE_ROOT/systemd/"
 

@@ -28,6 +28,7 @@ from fastapi import HTTPException, status
 from app.config import get_settings
 from app.services.client_names import CLIENT_NAME_RE
 from app.services.ip_geo import is_local_geoip_loaded, parse_client_endpoint
+from app.services.shared_helpers import read_kv_file as _read_kv_file
 
 logger = logging.getLogger(__name__)
 
@@ -343,19 +344,6 @@ def iter_install_stream_events(
             proc.kill()
         if lock_handle is not None:
             lock_handle.close()
-
-
-def _read_kv_file(path: Path) -> dict[str, str]:
-    data: dict[str, str] = {}
-    if not path.is_file():
-        return data
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        data[key.strip()] = value.strip().strip('"').strip("'")
-    return data
 
 
 def _read_services_env() -> dict[str, str]:

@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
-export type ViewModeOption<T extends string> = {
+type ViewModeOption<T extends string> = {
   value: T
   label: string
   icon?: LucideIcon

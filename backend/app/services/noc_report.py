@@ -28,6 +28,7 @@ from app.models import (
 )
 from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.shared_helpers import as_utc as _as_utc
+from app.services.shared_helpers import format_avg_peak as _format_resource_avg_peak
 from app.services.feature_guards import get_feature_service
 from app.services.feature_toggles import is_awg2_enabled
 from app.services.node_compare_metrics import get_traffic_totals_by_node
@@ -475,14 +476,6 @@ def _traffic_limit_summary(db: Session, *, since: datetime, until: datetime) -> 
             .count()
         )
     return {"blocked_now": blocked_now, "blocks_in_period": blocks_in_period}
-
-
-def _format_resource_avg_peak(avg: float | None, peak: float | None, *, suffix: str = "%") -> str | None:
-    if avg is None and peak is None:
-        return None
-    avg_label = "—" if avg is None else f"{avg:g}{suffix}"
-    peak_label = "—" if peak is None else f"{peak:g}{suffix}"
-    return f"{avg_label} / {peak_label}"
 
 
 def _enrich_summary_with_period_resource_averages(

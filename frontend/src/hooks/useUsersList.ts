@@ -13,7 +13,7 @@ import {
 } from '@/lib/usersListPrefs'
 import type { User } from '@/types'
 
-export interface UsersListMetrics {
+interface UsersListMetrics {
   total: number
   withPlan: number
   expiringOrExpired: number

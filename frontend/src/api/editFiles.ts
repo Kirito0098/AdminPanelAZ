@@ -23,7 +23,7 @@ export async function saveEditFilesBatch(files: Record<string, string>, runDoall
   })
 }
 
-export interface EditFileTransferNodeResult {
+interface EditFileTransferNodeResult {
   node_id: number
   node_name: string | null
   status: 'success' | 'failed' | 'skipped'

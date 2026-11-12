@@ -4,7 +4,7 @@ import { pluralProviders } from './utils'
 
 export type RoutingTab = 'overview' | 'providers' | 'pipeline' | 'analysis' | 'settings'
 
-export type WorkflowStage = 1 | 2 | 3 | 4
+type WorkflowStage = 1 | 2 | 3 | 4
 
 export interface WorkflowStep {
   stage: WorkflowStage

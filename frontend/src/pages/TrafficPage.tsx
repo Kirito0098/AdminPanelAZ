@@ -30,11 +30,12 @@ import {
 } from '@/api/client'
 import { getRetentionSettings } from '@/api/settings'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
-import { formatBytes } from '@/lib/trafficFormat'
+import { formatBytes, protocolBadgeVariant, protocolLabel } from '@/lib/trafficFormat'
 import TrafficPeriodControls, {
   type TrafficPeriodPreset,
 } from '@/components/traffic/TrafficPeriodControls'
 import TrafficUsersView from '@/components/traffic/TrafficUsersView'
+import ShareBar from '@/components/shared/ShareBar'
 import ViewModeToggle from '@/components/shared/ViewModeToggle'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import { NodeBadge } from '@/components/NodeSelector'
@@ -70,7 +71,6 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
-import { PercentBar } from '@/components/ui/percent-bar'
 import { formatDateTime } from '@/lib/datetime'
 import {
   isAppliedCustomValid,
@@ -131,27 +131,6 @@ const SORT_LABELS: Record<SortKey, string> = {
   common_name: 'Имя клиента',
 }
 
-function getProtocolLabel(protocol: string) {
-  const p = protocol.toLowerCase()
-  if (p === 'wireguard') return 'WireGuard'
-  if (p === 'openvpn') return 'OpenVPN'
-  if (p === 'amneziawg2') return 'AWG 2.0'
-  return protocol
-}
-
-function getProtocolVariant(protocol: string): 'default' | 'secondary' | 'outline' {
-  const p = protocol.toLowerCase()
-  if (p === 'openvpn') return 'default'
-  if (p === 'wireguard') return 'secondary'
-  if (p === 'amneziawg2') return 'outline'
-  return 'outline'
-}
-
-function formatLastSeen(value?: string | null) {
-  if (!value) return '—'
-  return formatDateTime(value)
-}
-
 type SummaryCardProps = {
   label: string
   value: string
@@ -174,22 +153,6 @@ function SummaryCard({ label, value, icon: Icon, sub, accent }: SummaryCardProps
         {sub && <p className="mt-1 text-xs text-muted-foreground">{sub}</p>}
       </CardContent>
     </Card>
-  )
-}
-
-type TrafficShareBarProps = {
-  value: number
-  max: number
-}
-
-function TrafficShareBar({ value, max }: TrafficShareBarProps) {
-  return (
-    <div className="flex items-center gap-2">
-      <PercentBar value={value} max={max} className="h-1.5 min-w-0 flex-1" />
-      <span className="mono w-10 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
-        {max > 0 ? Math.min((value / max) * 100, 100).toFixed(0) : '0'}%
-      </span>
-    </div>
   )
 }
 
@@ -233,12 +196,12 @@ function TrafficClientCard({
             />
             <div className="min-w-0">
               <p className="truncate font-medium">{row.common_name}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">{formatLastSeen(row.last_seen_at)}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{formatDateTime(row.last_seen_at)}</p>
             </div>
           </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant={getProtocolVariant(row.protocol_type)} className="text-[10px]">
-            {getProtocolLabel(row.protocol_type)}
+          <Badge variant={protocolBadgeVariant(row.protocol_type)} className="text-[10px]">
+            {protocolLabel(row.protocol_type)}
           </Badge>
           <Badge variant={row.is_active ? 'success' : 'secondary'} className="text-[10px]">
             {row.is_active ? 'Онлайн' : 'Офлайн'}
@@ -269,7 +232,7 @@ function TrafficClientCard({
         </div>
       </div>
       <div className="mt-3">
-        <TrafficShareBar value={row.total_bytes} max={totalBytes} />
+        <ShareBar value={row.total_bytes} max={totalBytes} />
       </div>
       </button>
       {expanded && children && (
@@ -288,13 +251,13 @@ function NeverConnectedCard({ row }: NeverConnectedCardProps) {
     <div className="rounded-lg border border-border/80 bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="min-w-0 truncate font-medium">{row.common_name}</p>
-        <Badge variant={getProtocolVariant(row.protocol_type)} className="text-[10px]">
-          {getProtocolLabel(row.protocol_type)}
+        <Badge variant={protocolBadgeVariant(row.protocol_type)} className="text-[10px]">
+          {protocolLabel(row.protocol_type)}
         </Badge>
       </div>
       <p className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
         <Clock size={12} className="shrink-0" />
-        Конфиг создан: {formatLastSeen(row.created_at)}
+        Конфиг создан: {formatDateTime(row.created_at)}
       </p>
     </div>
   )
@@ -316,7 +279,7 @@ function DeletedTrafficCard({ row, onDelete, disabled }: DeletedTrafficCardProps
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate font-medium">{row.common_name}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{getProtocolLabel(row.protocol_type)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{protocolLabel(row.protocol_type)}</p>
           <p className="mono mt-2 text-sm font-medium tabular-nums">{formatBytes(row.total_bytes)}</p>
         </div>
         <Button
@@ -742,7 +705,7 @@ export default function TrafficPage() {
       ? rows.filter(
           (r) =>
             r.common_name.toLowerCase().includes(q) ||
-            getProtocolLabel(r.protocol_type).toLowerCase().includes(q) ||
+            protocolLabel(r.protocol_type).toLowerCase().includes(q) ||
             (r.owner_username || '').toLowerCase().includes(q) ||
             (r.owner_id != null && String(r.owner_id) === q),
         )
@@ -1349,8 +1312,8 @@ export default function TrafficPage() {
                                 </TableCell>
                                 <TableCell className="font-medium">{r.common_name}</TableCell>
                             <TableCell>
-                              <Badge variant={getProtocolVariant(r.protocol_type)} className="text-[10px]">
-                                {getProtocolLabel(r.protocol_type)}
+                              <Badge variant={protocolBadgeVariant(r.protocol_type)} className="text-[10px]">
+                                {protocolLabel(r.protocol_type)}
                               </Badge>
                             </TableCell>
                             <TableCell className="whitespace-nowrap text-right font-mono text-xs">
@@ -1363,7 +1326,7 @@ export default function TrafficPage() {
                               {formatBytes(r.total_bytes)}
                             </TableCell>
                             <TableCell>
-                              <TrafficShareBar value={r.total_bytes} max={totalBytes} />
+                              <ShareBar value={r.total_bytes} max={totalBytes} />
                             </TableCell>
                             <TableCell className="whitespace-nowrap text-right font-mono text-xs">
                               {formatBytes(r.traffic_period)}
@@ -1371,7 +1334,7 @@ export default function TrafficPage() {
                             <TableCell className="text-xs text-muted-foreground">
                               <span className="inline-flex items-center gap-1">
                                 <Clock size={12} className="shrink-0" />
-                                {formatLastSeen(r.last_seen_at)}
+                                {formatDateTime(r.last_seen_at)}
                               </span>
                             </TableCell>
                                 <TableCell>
@@ -1470,14 +1433,14 @@ export default function TrafficPage() {
                             <TableRow key={`${row.common_name}-${row.protocol_type}-${row.config_id ?? 'na'}`}>
                               <TableCell className="font-medium">{row.common_name}</TableCell>
                               <TableCell>
-                                <Badge variant={getProtocolVariant(row.protocol_type)} className="text-[10px]">
-                                  {getProtocolLabel(row.protocol_type)}
+                                <Badge variant={protocolBadgeVariant(row.protocol_type)} className="text-[10px]">
+                                  {protocolLabel(row.protocol_type)}
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-xs text-muted-foreground">
                                 <span className="inline-flex items-center gap-1">
                                   <Clock size={12} className="shrink-0" />
-                                  {formatLastSeen(row.created_at)}
+                                  {formatDateTime(row.created_at)}
                                 </span>
                               </TableCell>
                             </TableRow>
@@ -1536,7 +1499,7 @@ export default function TrafficPage() {
                             {deletedRows.map((row) => (
                               <TableRow key={`${row.common_name}-${row.protocol_type}`}>
                                 <TableCell>{row.common_name}</TableCell>
-                                <TableCell>{getProtocolLabel(row.protocol_type)}</TableCell>
+                                <TableCell>{protocolLabel(row.protocol_type)}</TableCell>
                                 <TableCell className="text-right font-mono text-xs">{formatBytes(row.total_bytes)}</TableCell>
                                 <TableCell>
                                   <Button

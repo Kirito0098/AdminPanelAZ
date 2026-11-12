@@ -33,6 +33,22 @@ nginx_is_non_interactive() {
   [[ "$NON_INTERACTIVE" == "true" || "$NON_INTERACTIVE" == "1" ]] || [[ ! -t 0 ]]
 }
 
+# Перезапуск панели после правки .env или vhost. SKIP_PANEL_RESTART=true|1 — отложить: перезапуск
+# сделает фоновая задача панели после завершения публикации.
+nginx_restart_panel_if_needed() {
+  local service="${SERVICE_NAME:-adminpanelaz}"
+  if [[ "${SKIP_PANEL_RESTART:-false}" == "true" || "${SKIP_PANEL_RESTART:-false}" == "1" ]]; then
+    nginx_log "Перезапуск панели отложен (SKIP_PANEL_RESTART)"
+    return 0
+  fi
+  if systemctl is-enabled "$service" >/dev/null 2>&1 \
+    || systemctl cat "$service" >/dev/null 2>&1; then
+    systemctl restart "$service" 2>/dev/null || nginx_warn "Не удалось перезапустить $service"
+  else
+    nginx_warn "Перезапустите панель вручную: systemctl restart $service"
+  fi
+}
+
 nginx_validate_port() {
   local value="$1"
   local label="$2"
@@ -200,6 +216,15 @@ nginx_resolve_existing_ssl_paths() {
   fi
 
   return 1
+}
+
+# Формат домена (FQDN) для публикации панели: буква/цифра, затем буквы, цифры, точки и дефисы, TLD ≥2 букв.
+nginx_is_valid_domain() {
+  [[ "${1:-}" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]
+}
+
+nginx_validate_domain() {
+  nginx_is_valid_domain "${1:-}" || nginx_die "Неверный формат домена: ${1:-}"
 }
 
 # Домен или IPv4 для server_name, CN сертификата и .env: только буквы, цифры, точки и дефисы.

@@ -10,7 +10,7 @@ export interface PortalFileMeta {
   openvpn_import_url?: string
 }
 
-export interface PortalStatusMeta {
+interface PortalStatusMeta {
   status: 'active' | 'expired' | 'blocked' | string
   status_label: string
   expires_at: string | null
@@ -34,7 +34,7 @@ export interface PortalNodeEntry {
   clients: PortalClientEntry[]
 }
 
-export interface ClientPortalMetaResponse extends PortalClientEntry {
+interface ClientPortalMetaResponse extends PortalClientEntry {
   kind?: 'client'
   brand_title: string
   unlock_codes_enabled: boolean
@@ -45,7 +45,7 @@ export interface PortalBanner {
   created_at: string | null
 }
 
-export interface UserPortalMetaResponse {
+interface UserPortalMetaResponse {
   kind: 'user'
   brand_title: string
   unlock_codes_enabled: boolean

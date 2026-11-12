@@ -16,7 +16,7 @@ import {
   Users,
   X,
 } from 'lucide-react'
-import { ApiError, deleteUser, updateUser } from '@/api/client'
+import { ApiError, updateUser } from '@/api/client'
 import {
   approveRequest,
   createProvisionedUser,
@@ -97,8 +97,6 @@ const SORT_OPTIONS: { value: SortKey; label: string }[] = [
 type DeletableUser = {
   id: number
   username: string
-  provision_state?: string | null
-  client_base_name?: string | null
 }
 
 export default function UsersPage() {
@@ -375,11 +373,7 @@ export default function UsersPage() {
   const handleDeleteUser = async (user: DeletableUser, opts?: { skipConfirm?: boolean }) => {
     if (!opts?.skipConfirm && !window.confirm(`Удалить пользователя «${user.username}»?`)) return
     try {
-      if (user.provision_state === 'unmanaged' || !user.client_base_name) {
-        await deleteUser(user.id)
-      } else {
-        await deleteProvisionedUser(user.id)
-      }
+      await deleteProvisionedUser(user.id)
       success(`Пользователь «${user.username}» удалён`)
       setUsers((prev) => prev.filter((u) => u.id !== user.id))
       if (detailId === user.id) closeDetail()

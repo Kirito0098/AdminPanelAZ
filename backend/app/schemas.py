@@ -2161,14 +2161,6 @@ class ProxyStatusResponse(BaseModel):
     detail: str | None = None
 
 
-class ProxyMappingItem(BaseModel):
-    client_ip: str
-    client_port: int | None = None
-    proxy_sport: int | None = None
-    dest_ip: str | None = None
-    dest_port: int | None = None
-
-
 class ActiveNodeResponse(BaseModel):
     node: NodeResponse
     active: bool = True

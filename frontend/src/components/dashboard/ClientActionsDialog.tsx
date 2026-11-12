@@ -36,8 +36,8 @@ import {
   wgUnblock,
 } from '@/api/client'
 import { setClientAccessUntil, syncClientAccessUntilFromOwner, type UnlockCodeProtocol } from '@/api/unlockCodes'
-import { dateInputToIso, isoToDateInput, parseAccessUntilConflict } from '@/lib/accessUntil'
-import { clientPortalActionConfirm, type ClientPortalAction } from '@/lib/clientPortalConfirm'
+import { isoToDateInput, parseAccessUntilConflict } from '@/lib/accessUntil'
+import { portalActionConfirm, type PortalAction } from '@/lib/portalConfirm'
 import {
   clearProfileTrafficLimits,
   formatProfileProtocols,
@@ -73,7 +73,7 @@ import {
   type ProtocolTab,
 } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
-import { formatDate } from '@/lib/datetime'
+import { endOfDayIso, formatDate } from '@/lib/datetime'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
@@ -561,9 +561,9 @@ export default function ClientActionsDialog({
     }
   }
 
-  const confirmPortalAction = (action: ClientPortalAction) => {
+  const confirmPortalAction = (action: PortalAction) => {
     confirm({
-      ...clientPortalActionConfirm(action, config.client_name),
+      ...portalActionConfirm(action, config.client_name, 'клиенту'),
       destructive: true,
       onConfirm: () => (action === 'rotate' ? handlePortalRotate() : handlePortalRevoke()),
     })
@@ -628,7 +628,7 @@ export default function ClientActionsDialog({
 
   const handleAccessUntilSave = async (confirmOverride = false) => {
     setBusyAction('access-until')
-    const nextIso = dateInputToIso(accessUntilValue)
+    const nextIso = endOfDayIso(accessUntilValue)
     try {
       if (confirmOverride) {
         await applyProfileAccessUntilOverride(nextIso)

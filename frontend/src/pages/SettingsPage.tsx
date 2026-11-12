@@ -1,7 +1,8 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Settings, User as UserIcon } from 'lucide-react'
 import { Navigate, NavLink, useParams } from 'react-router-dom'
-import { ApiError, changePassword, createUser, deleteUser, getSettings, getUsers } from '@/api/client'
+import { ApiError, changePassword, createUser, getSettings, getUsers } from '@/api/client'
+import { deleteProvisionedUser } from '@/api/users'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import MobileSettingsSectionPicker from '@/components/settings/MobileSettingsSectionPicker'
@@ -37,10 +38,6 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useTheme } from '@/context/ThemeContext'
-import {
-  settingsSectionNeedsNodeSettings,
-  settingsSectionNeedsUsers,
-} from '@/lib/settingsPageLoads'
 import type { AppSettings, User, UserRole } from '@/types'
 
 export default function SettingsPage() {
@@ -76,7 +73,7 @@ export default function SettingsPage() {
   // GET /settings reads active-node config files — only maintenance uses the parent payload.
   // Users are panel-wide. Personal and other tabs self-fetch; skip reloads on node switch.
   useEffect(() => {
-    if (!settingsSectionNeedsNodeSettings(activeSection) || nodeLoading) return
+    if (activeSection !== 'maintenance' || nodeLoading) return
     let cancelled = false
     const loadNodeSettings = async () => {
       startGlobal()
@@ -98,7 +95,7 @@ export default function SettingsPage() {
   }, [activeSection, nodeLoading, activeNode?.id, user?.role, startGlobal, doneGlobal, notifyError])
 
   useEffect(() => {
-    if (!settingsSectionNeedsUsers(activeSection, isAdmin)) return
+    if (!isAdmin || activeSection !== 'users') return
     let cancelled = false
     const loadUsersList = async () => {
       try {
@@ -150,7 +147,7 @@ export default function SettingsPage() {
       destructive: true,
       onConfirm: async () => {
         try {
-          await deleteUser(id)
+          await deleteProvisionedUser(id)
           setUsers(await getUsers())
           success(`Пользователь «${name}» удалён`)
         } catch (err) {

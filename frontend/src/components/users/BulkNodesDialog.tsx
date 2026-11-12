@@ -36,7 +36,7 @@ const SKIP_HINTS: Record<string, string> = {
   only_server: '— уберите у них вручную или используйте «Перенести»',
 }
 
-export interface BulkNodesDialogProps {
+interface BulkNodesDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Пресет с карточки сервера. */

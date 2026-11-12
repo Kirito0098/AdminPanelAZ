@@ -7,6 +7,7 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.services.node_update import resolve_repo_root
+from app.services.shared_helpers import read_kv_file
 
 
 def resolve_node_agent_env_file() -> Path:
@@ -51,16 +52,7 @@ def _mtls_env_paths() -> tuple[tuple[str, Path], ...]:
 
 
 def _read_env_values(env_file: Path) -> dict[str, str]:
-    if not env_file.is_file():
-        return {}
-    values: dict[str, str] = {}
-    for raw in env_file.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip('"').strip("'")
-    return values
+    return read_kv_file(env_file, errors=None)
 
 
 def missing_mtls_files(env_file: Path) -> list[str]:

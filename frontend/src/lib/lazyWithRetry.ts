@@ -1,6 +1,6 @@
 import { lazy } from 'react'
 
-export const CHUNK_RELOAD_STORAGE_KEY = 'az:chunk-reload-at'
+const CHUNK_RELOAD_STORAGE_KEY = 'az:chunk-reload-at'
 const CHUNK_RELOAD_WINDOW_MS = 60_000
 const RETRY_DELAYS_MS = [500, 1500]
 
@@ -17,7 +17,7 @@ type ReloadDeps = {
 
 let nonFinalAttempts = 0
 
-export function isChunkLoadError(error: unknown): boolean {
+function isChunkLoadError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false
   const { name, message } = error as { name?: unknown; message?: unknown }
   return name === 'ChunkLoadError' || (typeof message === 'string' && CHUNK_ERROR_RE.test(message))
@@ -34,7 +34,7 @@ async function nonFinalAttempt<T>(factory: () => Promise<T>): Promise<T> {
   }
 }
 
-export async function retryImport<T>(factory: () => Promise<T>): Promise<T> {
+async function retryImport<T>(factory: () => Promise<T>): Promise<T> {
   for (const delay of RETRY_DELAYS_MS) {
     try {
       return await nonFinalAttempt(factory)
@@ -47,7 +47,7 @@ export async function retryImport<T>(factory: () => Promise<T>): Promise<T> {
 
 export const lazyWithRetry: typeof lazy = (factory) => lazy(() => retryImport(factory))
 
-export function shouldAutoReload(storage: ReloadStorage, now: number): boolean {
+function shouldAutoReload(storage: ReloadStorage, now: number): boolean {
   try {
     const last = Number(storage.getItem(CHUNK_RELOAD_STORAGE_KEY))
     if (last > 0 && now >= last && now - last < CHUNK_RELOAD_WINDOW_MS) return false
