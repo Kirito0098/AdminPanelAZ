@@ -11,7 +11,13 @@ import {
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
@@ -138,26 +144,28 @@ export default function TwoFactorTab({ className }: { className?: string }) {
   }
 
   return (
-    <Card className={cn('flex h-full flex-col shadow-sm', className)}>
-      <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-        <div>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <ShieldCheck size={18} />
-            Дополнительная защита входа
-          </CardTitle>
-          <CardDescription className="mt-1.5">
-            Код из приложения на телефоне (Google Authenticator, Яндекс.Ключ и др.)
-          </CardDescription>
+    <Card className={cn('flex h-full flex-col', className)}>
+      <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <ShieldCheck size={16} aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <CardTitle>Дополнительная защита входа</CardTitle>
+            <CardDescription className="mt-0.5">
+              Код из приложения на телефоне (Google Authenticator, Яндекс.Ключ и др.)
+            </CardDescription>
+          </div>
         </div>
         <Badge variant={enabled ? 'success' : 'secondary'} className="shrink-0">
           {enabled ? 'Включена' : 'Выключена'}
         </Badge>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="flex flex-1 flex-col space-y-4">
         <InlineProgressBar active={loading} label="Обработка..." />
 
         {enabled && backupRemaining > 0 && (
-          <p className="rounded-lg border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+          <p className="rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
             Резервных кодов осталось: <span className="font-medium text-foreground">{backupRemaining}</span>
           </p>
         )}
@@ -170,11 +178,11 @@ export default function TwoFactorTab({ className }: { className?: string }) {
         )}
 
         {setupData && (
-          <div className="space-y-4 rounded-xl border bg-muted/20 p-4">
-            <div className="flex justify-center rounded-xl border border-border/50 bg-white p-4 shadow-sm">
+          <div className="space-y-4 rounded-lg border border-border/70 bg-muted/20 p-3 sm:p-4">
+            <div className="flex justify-center rounded-lg border border-border/50 bg-white p-4 shadow-sm">
               <img src={setupData.qr_data_url} alt="QR 2FA" className="h-40 w-40" />
             </div>
-            <div className="rounded-xl border bg-card/50 p-3">
+            <div className="rounded-lg border border-border/70 bg-card p-3">
               <p className="mb-2 text-center text-xs text-muted-foreground">Ключ для ручного ввода</p>
               <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
                 <code className="select-all flex-1 break-all rounded-lg bg-muted/50 px-3 py-2 text-center font-mono text-sm leading-relaxed tracking-wide">
@@ -204,7 +212,7 @@ export default function TwoFactorTab({ className }: { className?: string }) {
         )}
 
         {enabled && (
-          <div className="space-y-3 rounded-xl border bg-muted/20 p-4">
+          <div className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-3 sm:p-4">
             <div className="space-y-2">
               <Label htmlFor="2fa-code">Код из приложения</Label>
               <Input
@@ -217,7 +225,7 @@ export default function TwoFactorTab({ className }: { className?: string }) {
               {regenerateArmed && <p className="text-xs text-muted-foreground">{backupCodesConfirm.codeHint}</p>}
             </div>
             {regenerateArmed ? (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 border-t border-border/70 pt-3">
                 <Button onClick={handleRegenerate} disabled={loading || !verifyCode}>
                   {backupCodesConfirm.submitLabel}
                 </Button>
@@ -226,7 +234,7 @@ export default function TwoFactorTab({ className }: { className?: string }) {
                 </Button>
               </div>
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-2 border-t border-border/70 pt-3">
                 <Button variant="destructive" onClick={handleDisable} disabled={loading}>
                   Отключить защиту входа
                 </Button>
@@ -239,7 +247,7 @@ export default function TwoFactorTab({ className }: { className?: string }) {
         )}
 
         {backupCodes.length > 0 && (
-          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4">
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 sm:p-4">
             <p className="mb-2 text-sm font-medium">Сохраните резервные коды (одноразовые):</p>
             <ul className="grid grid-cols-1 gap-1.5 font-mono text-xs sm:grid-cols-2 md:grid-cols-3">
               {backupCodes.map((c) => (

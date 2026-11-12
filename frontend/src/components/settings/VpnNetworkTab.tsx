@@ -607,13 +607,19 @@ export default function VpnNetworkTab() {
       <ConfirmDialogHost dialogProps={dialogProps} />
 
       <Tabs value={activeInnerTab} onValueChange={setActiveInnerTab} className="space-y-4">
-        <TabsList className="flex h-auto w-full flex-wrap gap-1 bg-muted/50 p-1 sm:inline-flex sm:w-auto">
-          <TabsTrigger value="publish" className="gap-1.5">
-            <Globe2 size={16} />
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1 rounded-lg bg-muted/50 p-1 sm:inline-flex sm:w-auto">
+          <TabsTrigger
+            value="publish"
+            className="gap-1.5 data-[state=active]:bg-primary/5 data-[state=active]:text-foreground data-[state=active]:ring-1 data-[state=active]:ring-primary/20"
+          >
+            <Globe2 size={16} aria-hidden />
             Публикация
           </TabsTrigger>
-          <TabsTrigger value="cloudflare" className="gap-1.5">
-            <Cloud size={16} />
+          <TabsTrigger
+            value="cloudflare"
+            className="gap-1.5 data-[state=active]:bg-primary/5 data-[state=active]:text-foreground data-[state=active]:ring-1 data-[state=active]:ring-primary/20"
+          >
+            <Cloud size={16} aria-hidden />
             Cloudflare
           </TabsTrigger>
         </TabsList>
@@ -635,14 +641,14 @@ export default function VpnNetworkTab() {
                 {settings.bullet_points.map((point) => (
                   <li
                     key={point}
-                    className="flex gap-2 rounded-lg border bg-muted/20 px-3 py-2 text-sm text-muted-foreground"
+                    className="flex gap-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-sm text-muted-foreground"
                   >
                     <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
                     <span>{point}</span>
                   </li>
                 ))}
               </ul>
-              <aside className="space-y-4 rounded-xl border bg-muted/20 p-4">
+              <aside className="space-y-4 rounded-lg border border-border/70 bg-muted/20 p-4">
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
                     Внутренний адрес
@@ -767,7 +773,7 @@ export default function VpnNetworkTab() {
             description="Если мастер не подходит — команда для терминала на сервере"
             icon={<Terminal size={16} />}
           >
-            <code className="block rounded-xl border bg-muted/30 px-4 py-3 font-mono text-xs leading-relaxed">
+            <code className="block rounded-lg border border-border/70 bg-muted/30 px-4 py-3 font-mono text-xs leading-relaxed">
               sudo ./{settings.nginx_setup_hint}
             </code>
             <p className="text-sm text-muted-foreground">

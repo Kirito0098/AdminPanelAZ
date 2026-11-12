@@ -13,7 +13,19 @@ import {
 import { ApiError, applySystemUpdate, checkSystemUpdates, getLatestChangelog, getServerConfigPreview } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
-import { SettingsCollapsible, SettingsMetaLine, SettingsPanel, SettingsToolbar } from '@/components/settings/SettingsChrome'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
+import {
+  SettingsCollapsible,
+  SettingsPanel,
+  SettingsStatCard,
+  SettingsToolbar,
+} from '@/components/settings/SettingsChrome'
 import {
   UPDATE_CONFIRM_DURATION_NOTICE,
   UPDATE_LONG_RUNNING_NOTICE,
@@ -25,7 +37,6 @@ import {
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
@@ -213,18 +224,6 @@ export default function UpdatesTab() {
       <InlineProgressBar active={updating} label="Применение обновления..." />
 
       <SettingsToolbar
-        title="Обновления панели"
-        meta={
-          info ? (
-            <SettingsMetaLine
-              items={[
-                { label: 'установлено', value: shortHash(info.local_hash) },
-                { label: 'на сервере', value: shortHash(info.remote_hash) },
-                ...(hasUpdate ? [{ label: 'отставание', value: `${commitsBehind} комм.` }] : []),
-              ]}
-            />
-          ) : undefined
-        }
         actions={
           <>
             <Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>
@@ -243,6 +242,34 @@ export default function UpdatesTab() {
       />
 
       <p className="text-sm text-muted-foreground">{statusDescription}</p>
+
+      {info ? (
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <SettingsStatCard
+            label="Установлено"
+            value={<span className="font-mono text-base">{shortHash(info.local_hash)}</span>}
+            hint="текущий коммит"
+            icon={GitCommit}
+          />
+          <SettingsStatCard
+            label="На сервере"
+            value={<span className="font-mono text-base">{shortHash(info.remote_hash)}</span>}
+            hint="origin/main"
+            icon={Server}
+          />
+          <SettingsStatCard
+            label="Отставание"
+            value={commitsBehind}
+            hint="коммитов до обновления"
+            icon={Download}
+          />
+          <SettingsStatCard
+            label="Статус"
+            value={<Badge variant={statusBadge.variant}>{statusBadge.label}</Badge>}
+            hint={hasUpdate ? 'обновление готово к установке' : info.error ? 'проверка не удалась' : 'обновлений нет'}
+          />
+        </div>
+      ) : null}
 
       {!hasUpdate && serverPending > 0 ? (
         <SettingsAlert variant="warning" title={`Осталось обновить настройки сервера: ${serverPending}`}>
@@ -290,14 +317,14 @@ export default function UpdatesTab() {
       ) : null}
 
       {hasUpdate ? (
-        <Card className="shadow-sm">
-          <CardHeader className="pb-3">
+        <Card>
+          <CardHeader>
             <div className="flex items-start gap-3">
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-                <Rocket size={20} />
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Rocket size={16} aria-hidden />
               </div>
               <div>
-                <CardTitle className="text-base">Установить обновление</CardTitle>
+                <CardTitle>Установить обновление</CardTitle>
                 <CardDescription className="mt-1">
                   Выполнит полный цикл обновления и перезапустит панель автоматически
                 </CardDescription>
@@ -337,7 +364,7 @@ export default function UpdatesTab() {
         !latestRelease?.sections?.length ? (
           <SettingsPanel>
             <div className="flex flex-col items-center gap-3 py-6 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10 text-primary">
                 <CheckCircle2 size={24} />
               </div>
               <div>

@@ -62,7 +62,7 @@ function RouterFileRow({
   return (
     <li
       className={cn(
-        'rounded-xl border bg-card/50 p-3 transition-colors hover:bg-muted/30',
+        'rounded-lg border border-border/70 bg-card/50 p-3 transition-colors hover:bg-muted/30',
         !ready && 'opacity-75',
       )}
     >
@@ -70,8 +70,8 @@ function RouterFileRow({
         <div className="flex min-w-0 items-center gap-3">
           <div
             className={cn(
-              'flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold',
-              ready ? 'bg-primary/15 text-primary' : 'bg-muted text-muted-foreground',
+              'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-semibold',
+              ready ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
             )}
           >
             {meta?.initial ?? '?'}
@@ -201,22 +201,27 @@ export default function RouteResultsPanel({ showPublicLinks = false }: RouteResu
   }
 
   return (
-    <div className="mt-auto space-y-3 rounded-xl border bg-muted/20 p-3">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-medium">Готовые конфиги</p>
-            {routerFiles.length > 0 && (
-              <Badge variant={readyCount > 0 ? 'success' : 'secondary'} className="text-[10px]">
-                {readyCount}/{routerFiles.length}
-              </Badge>
-            )}
+    <div className="mt-auto space-y-3 rounded-lg border border-border/70 bg-muted/15 p-3">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex min-w-0 items-start gap-2.5">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <FileText size={14} aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-semibold">Готовые конфиги</p>
+              {routerFiles.length > 0 && (
+                <Badge variant={readyCount > 0 ? 'success' : 'secondary'} className="text-[10px]">
+                  {readyCount}/{routerFiles.length}
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {readyCount > 0
+                ? 'Файлы с активного узла — скачайте или отправьте клиенту'
+                : 'Появятся после маршрутизации на активном узле'}
+            </p>
           </div>
-          <p className="text-xs text-muted-foreground">
-            {readyCount > 0
-              ? 'Файлы с активного узла — скачайте или отправьте клиенту'
-              : 'Появятся после маршрутизации на активном узле'}
-          </p>
         </div>
         <Button size="sm" variant="outline" className="shrink-0 gap-1.5" disabled={refreshing} onClick={() => void load(true)}>
           <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} />
@@ -225,7 +230,7 @@ export default function RouteResultsPanel({ showPublicLinks = false }: RouteResu
       </div>
 
       {routerFiles.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-muted-foreground/20 bg-card/30 px-4 py-8 text-center">
+        <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/20 bg-card/30 px-4 py-8 text-center">
           <FileText className="mb-2 h-8 w-8 text-muted-foreground/70" />
           <p className="text-sm font-medium">Файлы ещё не готовы</p>
           <p className="mt-1 max-w-xs text-xs text-muted-foreground">

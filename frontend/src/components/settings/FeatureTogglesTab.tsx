@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   Gauge,
+  Layers,
   Leaf,
   RefreshCw,
   Rocket,
@@ -23,12 +24,18 @@ import {
 } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import PanelRestartCard from '@/components/settings/PanelRestartCard'
-import { SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
+import { SettingsStatCard } from '@/components/settings/SettingsChrome'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
@@ -128,6 +135,36 @@ const SCENARIO_FILTERS: { value: ScenarioFilter; label: string }[] = [
   { value: 'commercial', label: '💼 Коммерческое' },
 ]
 
+/** Card header with the shared settings icon chip. */
+function CardHead({
+  icon: Icon,
+  title,
+  description,
+  aside,
+}: {
+  icon: LucideIcon
+  title: string
+  description?: string
+  aside?: ReactNode
+}) {
+  return (
+    <CardHeader>
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Icon size={18} aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <CardTitle>{title}</CardTitle>
+            {aside}
+          </div>
+          {description ? <CardDescription className="mt-1">{description}</CardDescription> : null}
+        </div>
+      </div>
+    </CardHeader>
+  )
+}
+
 /** Linear/Clerk-style preference row: label + description left, switch right. */
 function ModuleToggleRow({
   item,
@@ -147,8 +184,11 @@ function ModuleToggleRow({
   return (
     <div
       className={cn(
-        'group relative border-b border-border/80 px-1 py-3.5 transition-colors sm:px-2',
-        !enabled && 'opacity-90',
+        'group relative h-full rounded-lg border px-3 py-3 transition-colors',
+        enabled
+          ? 'border-primary/20 bg-primary/5 ring-1 ring-primary/20'
+          : 'border-border/70 bg-card/40 hover:border-border',
+        disabledSwitch && 'opacity-90',
       )}
     >
       <div className="flex items-start gap-3">
@@ -184,12 +224,12 @@ function ModuleToggleRow({
               </Badge>
             )}
           </div>
-          <p className="mt-0.5 line-clamp-2 text-sm leading-relaxed text-muted-foreground" title={item.description}>
+          <p className="mt-0.5 line-clamp-2 text-xs leading-relaxed text-muted-foreground" title={item.description}>
             {item.description}
           </p>
 
           {item.key === 'proxy_nodes' && (
-            <p className="mt-2 rounded-md border border-amber-500/25 bg-amber-500/8 px-2.5 py-1.5 text-xs text-amber-950 dark:text-amber-100">
+            <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-2.5 py-1.5 text-xs text-amber-950 dark:text-amber-100">
               Включайте только если уже установили proxy.sh сами. Панель не ставит и не запускает
               proxy.sh.
             </p>
@@ -199,7 +239,7 @@ function ModuleToggleRow({
             <p className="mt-2 text-xs leading-snug text-muted-foreground">{item.disable_hint}</p>
           )}
           {disabledSwitch && blockHint && (
-            <p className="mt-2 rounded-md border border-amber-500/25 bg-amber-500/8 px-2.5 py-1.5 text-xs text-amber-950 dark:text-amber-100">
+            <p className="mt-2 rounded-lg border border-amber-500/25 bg-amber-500/8 px-2.5 py-1.5 text-xs text-amber-950 dark:text-amber-100">
               {blockHint}
             </p>
           )}
@@ -259,7 +299,7 @@ function PresetCard({
       disabled={applying || current}
       onClick={onApply}
       className={cn(
-        'relative flex h-full w-full flex-col overflow-hidden rounded-xl border p-3 text-left transition-all',
+        'relative flex h-full w-full flex-col overflow-hidden rounded-lg border p-3 text-left transition-all',
         current
           ? 'cursor-default border-primary/40 bg-primary/5 shadow-sm ring-1 ring-primary/20'
           : 'bg-card/50 hover:border-primary/35 hover:bg-muted/30 disabled:opacity-60',
@@ -379,7 +419,7 @@ function ImpactSummary({
 }) {
   if (!impact && workers.length === 0) return null
   return (
-    <div className="rounded-xl border bg-muted/15 p-4 text-sm">
+    <div className="rounded-lg border border-border/70 bg-muted/15 p-4 text-sm">
       <p className="mb-2 font-medium">Экономия после применения сценария</p>
       <div className="space-y-1 text-muted-foreground">
         {impact?.ram && <p>RAM: {impact.ram}</p>}
@@ -609,51 +649,49 @@ export default function FeatureTogglesTab() {
     <div className="space-y-4">
       <InlineProgressBar active={saving || applyingPreset !== null} label="Сохранение..." />
 
-      <SettingsToolbar
-        title="Разделы панели"
-        meta={
-          <SettingsMetaLine
-            items={[
-              { label: 'вкл.', value: enabledCount },
-              { label: 'всего модулей', value: items.length },
-              { label: 'сценарий', value: resolved?.badge_label ?? '—' },
-            ]}
-          />
-        }
-        actions={
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-9 gap-1.5"
-              onClick={() => {
-                void load()
-                void loadPanelRam()
-              }}
-              disabled={saving}
-            >
-              <RefreshCw size={14} />
-              Обновить
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              className="h-9 gap-1.5"
-              onClick={() => void save()}
-              disabled={!dirty || saving}
-            >
-              <Save size={14} />
-              {saving ? 'Сохранение...' : 'Сохранить'}
-            </Button>
-          </>
-        }
-      />
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs text-muted-foreground">
+          Замер только стека AdminPanelAZ: панель, node agent и VPN-сервисы локальной ноды
+          (OpenVPN, <code className="text-xs">ANTIZAPRET_PATH</code>). Другие проекты на VDS не учитываются.
+        </p>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={() => {
+              void load()
+              void loadPanelRam()
+            }}
+            disabled={saving}
+          >
+            <RefreshCw size={14} />
+            Обновить
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            className="h-9 gap-1.5"
+            onClick={() => void save()}
+            disabled={!dirty || saving}
+          >
+            <Save size={14} />
+            {saving ? 'Сохранение...' : 'Сохранить'}
+          </Button>
+        </div>
+      </div>
 
-      <p className="text-xs text-muted-foreground">
-        Замер только стека AdminPanelAZ: панель, node agent и VPN-сервисы локальной ноды
-        (OpenVPN, <code className="text-xs">ANTIZAPRET_PATH</code>). Другие проекты на VDS не учитываются.
-      </p>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <SettingsStatCard label="Включено" value={enabledCount} icon={Server} hint={`из ${items.length} модулей`} />
+        <SettingsStatCard label="Сценарий" value={resolved?.badge_label ?? '—'} icon={Gauge} />
+        <SettingsStatCard
+          label="Не сохранено"
+          value={dirtyCount}
+          icon={Save}
+          hint={dirtyCount ? 'изменения ждут сохранения' : 'все изменения сохранены'}
+        />
+      </div>
 
       {pendingRestart && (
         <div className="space-y-3">
@@ -670,17 +708,15 @@ export default function FeatureTogglesTab() {
         </div>
       )}
 
-      <Card className="shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Сценарии</CardTitle>
-          <CardDescription>
-            Быстрые пресеты нагрузки: «Только панель» (без локального AntiZapret), «Домашнее» и
-            «Коммерческое». VPN на том же хосте почти не меняется.
-          </CardDescription>
-        </CardHeader>
+      <Card>
+        <CardHead
+          icon={Gauge}
+          title="Сценарии"
+          description="Быстрые пресеты нагрузки: «Только панель» (без локального AntiZapret), «Домашнее» и «Коммерческое». VPN на том же хосте почти не меняется."
+        />
         <CardContent className="space-y-3">
           {resolved?.is_custom && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
               <Badge variant="outline" className="text-[11px] font-normal">
                 {resolved.badge_label}
               </Badge>
@@ -697,7 +733,7 @@ export default function FeatureTogglesTab() {
             </div>
           )}
           {resolved?.locks_active && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-primary/25 bg-primary/5 px-3 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-primary/25 bg-primary/5 px-3 py-2 ring-1 ring-primary/20">
               <p className="text-xs text-muted-foreground">
                 Сценарий «{resolved.is_custom ? resolved.base_label ?? resolved.label : resolved.label}»:
                 обязательные модули
@@ -774,7 +810,7 @@ export default function FeatureTogglesTab() {
       </div>
 
       {grouped.length === 0 ? (
-        <Card className="shadow-sm">
+        <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
             Ничего не найдено по запросу «{query.trim()}».
             <button
@@ -790,26 +826,25 @@ export default function FeatureTogglesTab() {
         grouped.map(([group, groupItems]) => {
           const enabledInGroup = groupItems.filter((i) => draft[i.key]).length
           return (
-            <Card key={group} className="shadow-sm">
-              <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-2">
-                <div className="min-w-0">
-                  <CardTitle className="text-base">
-                    {groupItems[0]?.group_meta?.badge || 'Модули'}
-                  </CardTitle>
-                  <CardDescription className="mt-1">
-                    {groupItems[0]?.group_meta?.description ||
-                      (group === 'app_module'
-                        ? 'Скрывают пункты меню и страницы панели'
-                        : 'Работают в фоне — разделы в интерфейсе остаются')}
-                  </CardDescription>
-                </div>
-                <Badge variant="secondary" className="shrink-0 tabular-nums">
-                  {enabledInGroup} / {groupItems.length}
-                  {queryActive ? '' : ' вкл.'}
-                </Badge>
-              </CardHeader>
-              <CardContent className="pt-0">
-                <div className="grid grid-cols-1 gap-x-8 md:grid-cols-2">
+            <Card key={group}>
+              <CardHead
+                icon={group === 'app_module' ? Layers : Server}
+                title={groupItems[0]?.group_meta?.badge || 'Модули'}
+                description={
+                  groupItems[0]?.group_meta?.description ||
+                  (group === 'app_module'
+                    ? 'Скрывают пункты меню и страницы панели'
+                    : 'Работают в фоне — разделы в интерфейсе остаются')
+                }
+                aside={
+                  <Badge variant="secondary" className="shrink-0 tabular-nums">
+                    {enabledInGroup} / {groupItems.length}
+                    {queryActive ? '' : ' вкл.'}
+                  </Badge>
+                }
+              />
+              <CardContent>
+                <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
                   {groupItems.map((item) => {
                     const coreBlocked = isLastEnabledCoreModule(item.key, draft)
                     const lockedByScenario = Boolean(item.locked && (draft[item.key] ?? false))

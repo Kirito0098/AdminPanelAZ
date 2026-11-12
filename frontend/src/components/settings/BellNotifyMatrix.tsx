@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Bell, RefreshCw } from 'lucide-react'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { CATEGORY_ICON, CATEGORY_LABEL } from '@/components/notifications/labels'
 import {
@@ -74,15 +80,17 @@ export default function BellNotifyMatrix() {
     <Card>
       <CardHeader>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Bell size={18} />
-              Уведомления в панели
-            </CardTitle>
-            <CardDescription className="mt-1.5">
-              Кто из админов видит категорию в колокольчике и ленте «Уведомления». На Telegram не
-              влияет.
-            </CardDescription>
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Bell size={18} aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <CardTitle>Матрица подписок</CardTitle>
+              <CardDescription className="mt-1">
+                Кто из админов видит категорию в колокольчике и ленте «Уведомления». На Telegram не
+                влияет.
+              </CardDescription>
+            </div>
           </div>
           <Button
             variant="ghost"
@@ -104,16 +112,19 @@ export default function BellNotifyMatrix() {
           <p className="py-6 text-sm text-muted-foreground">Админов нет.</p>
         ) : (
           <>
-            <div className="hidden md:block">
+            <div className="hidden overflow-hidden rounded-lg border border-border/70 md:block">
               <div
-                className={`grid ${GRID_COLS} items-center gap-2 border-b border-border/60 pb-2 text-[11px] uppercase tracking-wide text-muted-foreground`}
+                className={`grid ${GRID_COLS} items-center gap-2 border-b border-border/70 bg-muted/30 px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground`}
               >
                 <span>Админ</span>
                 {CATEGORIES.map((key) => {
                   const Icon = CATEGORY_ICON[key]
                   return (
-                    <span key={key} className="flex items-center justify-center gap-1.5">
-                      <Icon size={12} />
+                    <span
+                      key={key}
+                      className="flex items-center justify-center gap-1.5 text-center leading-tight"
+                    >
+                      <Icon size={12} className="shrink-0" />
                       {CATEGORY_LABEL[key]}
                     </span>
                   )
@@ -122,7 +133,7 @@ export default function BellNotifyMatrix() {
               {admins.map((admin) => (
                 <div
                   key={admin.user_id}
-                  className={`grid ${GRID_COLS} items-center gap-2 border-b border-border/40 py-2.5 last:border-0 hover:bg-muted/30`}
+                  className={`grid ${GRID_COLS} items-center gap-2 border-b border-border/40 px-3 py-2.5 transition-colors last:border-0 hover:bg-muted/30`}
                 >
                   <span className="truncate text-sm font-medium">{admin.username}</span>
                   {CATEGORIES.map((key) => (
@@ -134,17 +145,23 @@ export default function BellNotifyMatrix() {
               ))}
             </div>
 
-            <div className="flex flex-col gap-3 md:hidden">
+            <div className="flex flex-col gap-2.5 md:hidden">
               {admins.map((admin) => (
-                <div key={admin.user_id} className="rounded-xl border border-border/60 p-3">
+                <div
+                  key={admin.user_id}
+                  className="rounded-lg border border-border/70 bg-card/40 p-3"
+                >
                   <p className="mb-2 text-sm font-medium">{admin.username}</p>
                   <div className="flex flex-col gap-2">
                     {CATEGORIES.map((key) => {
                       const Icon = CATEGORY_ICON[key]
                       return (
-                        <label key={key} className="flex items-center justify-between gap-3 text-xs">
+                        <label
+                          key={key}
+                          className="flex items-center justify-between gap-3 rounded-lg border border-border/50 px-2.5 py-1.5 text-xs"
+                        >
                           <span className="flex items-center gap-1.5 text-muted-foreground">
-                            <Icon size={12} />
+                            <Icon size={12} className="shrink-0" />
                             {CATEGORY_LABEL[key]}
                           </span>
                           {renderSwitch(admin, key)}

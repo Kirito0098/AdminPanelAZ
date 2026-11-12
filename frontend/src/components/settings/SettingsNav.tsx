@@ -121,6 +121,20 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
   },
 ]
 
+/** Section → icon map, derived from the nav groups so hub and sidebar can't drift apart. */
+export const SECTION_ICONS: Record<SettingsSection, LucideIcon> = SETTINGS_NAV_GROUPS.reduce(
+  (acc, group) => {
+    for (const item of group.items) acc[item.id] = item.icon
+    return acc
+  },
+  {} as Record<SettingsSection, LucideIcon>,
+)
+
+/** Icon for a settings section (used by the section header). */
+export function getSectionIcon(section: SettingsSection): LucideIcon {
+  return SECTION_ICONS[section]
+}
+
 function isNavItemVisible(
   item: SettingsNavItem,
   group: SettingsNavGroup,

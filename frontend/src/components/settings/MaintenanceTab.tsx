@@ -9,6 +9,7 @@ import {
   RefreshCw,
   RotateCcw,
   Save,
+  Server,
   ServerCrash,
   Sparkles,
   Timer,
@@ -28,18 +29,28 @@ import {
   updateRetentionSettings,
 } from '@/api/client'
 import { purgeChatAttachments } from '@/api/maintenance'
-import { getVpnServiceLabel } from '@/components/settings/settingsLabels'
-import { SettingsCollapsible, SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import { getVpnServiceLabel } from '@/components/settings/settingsLabels'
+import {
+  SettingsCollapsible,
+  SettingsDangerZone,
+  SettingsStatCard,
+} from '@/components/settings/SettingsChrome'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
+import ToggleRow from '@/components/settings/ToggleRow'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { NodeStatusBadge } from '@/components/NodeSelector'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
-import { Switch } from '@/components/ui/switch'
 import { useNotifications } from '@/context/NotificationContext'
 import { useNode } from '@/context/NodeContext'
 import { useProgress } from '@/context/ProgressContext'
@@ -68,39 +79,6 @@ const INTERVAL_PRESETS = [6, 12, 24] as const
 
 interface MaintenanceTabProps {
   settings: AppSettings | null
-}
-
-function ToggleRow({
-  id,
-  label,
-  description,
-  checked,
-  disabled,
-  onCheckedChange,
-}: {
-  id: string
-  label: string
-  description?: string
-  checked: boolean
-  disabled?: boolean
-  onCheckedChange: (checked: boolean) => void
-}) {
-  return (
-    <div
-      className={cn(
-        'flex items-start justify-between gap-4 rounded-xl border bg-card/50 p-4 transition-colors',
-        disabled && 'opacity-60',
-      )}
-    >
-      <div className="min-w-0 space-y-1">
-        <Label htmlFor={id} className={cn('font-medium', !disabled && 'cursor-pointer')}>
-          {label}
-        </Label>
-        {description && <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>}
-      </div>
-      <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
-    </div>
-  )
 }
 
 function ActionRow({
@@ -400,21 +378,45 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
       <ConfirmDialogHost dialogProps={dialogProps} />
       <InlineProgressBar active={retentionSaving} label="Сохранение настроек очистки..." />
 
-      <SettingsToolbar
-        title="Обслуживание"
-        meta={
-          <SettingsMetaLine
-            items={[
-              { label: 'геолокация', value: geoIpStatus ? (geoLoaded ? 'локальная база' : 'онлайн-сервис') : '…' },
-              { label: 'автоочистка', value: retention?.enabled ? 'активна' : 'выключена' },
-            ]}
-          />
-        }
-      />
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <SettingsStatCard
+          label="VPN-узлы"
+          value={vpnNodes.length}
+          hint="доступны для перезагрузки ОС"
+          icon={Server}
+        />
+        <SettingsStatCard
+          label="Страна по IP"
+          value={geoIpStatus ? (geoLoaded ? 'Локально' : 'Онлайн') : '…'}
+          hint={
+            geoIpStatus
+              ? geoLoaded
+                ? 'база GeoLite2 на сервере'
+                : 'внешний сервис геолокации'
+              : 'состояние не загружено'
+          }
+          icon={MapPin}
+        />
+        <SettingsStatCard
+          label="Автоочистка"
+          value={retention ? (retention.enabled ? 'Вкл' : 'Выкл') : '…'}
+          hint={
+            retention?.enabled
+              ? `проверка каждые ${retention.interval_hours} ч`
+              : 'по расписанию не выполняется'
+          }
+          icon={Timer}
+        />
+      </div>
 
-      <Card className="shadow-sm">
+      <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Операции с VPN</CardTitle>
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Sparkles size={16} aria-hidden />
+            </span>
+            Операции с VPN
+          </CardTitle>
           <CardDescription>
             Запускайте в период низкой нагрузки — клиенты могут кратковременно отключиться
           </CardDescription>
@@ -522,7 +524,7 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
                           className={cn(
                             'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
                             activePresetId === preset.id
-                              ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
+                              ? 'border-primary/40 bg-primary/5 text-primary ring-1 ring-primary/20'
                               : 'hover:border-muted-foreground/30 hover:bg-muted/50',
                           )}
                         >
@@ -546,7 +548,7 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
                           className={cn(
                             'rounded-lg border px-3 py-1.5 text-sm transition-colors',
                             retention.interval_hours === h
-                              ? 'border-primary bg-primary/10 text-primary'
+                              ? 'border-primary/40 bg-primary/5 text-primary ring-1 ring-primary/20'
                               : 'hover:bg-muted/50',
                           )}
                         >
@@ -735,10 +737,12 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
         </div>
       </SettingsCollapsible>
 
-      <Card className="border-destructive/30 shadow-sm">
+      <Card className="border-destructive/30">
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base text-destructive">
-            <ServerCrash size={18} />
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
+              <ServerCrash size={16} aria-hidden />
+            </span>
             Перезапуск службы
           </CardTitle>
           <CardDescription>Только если обычное обновление не помогло</CardDescription>
@@ -758,7 +762,7 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
                 className={cn(
                   'rounded-lg border px-3 py-2.5 text-left text-sm transition-all',
                   service === s
-                    ? 'border-destructive bg-destructive/10 ring-1 ring-destructive/50'
+                    ? 'border-destructive/40 bg-destructive/[0.06] ring-1 ring-destructive/30'
                     : 'hover:border-muted-foreground/30 hover:bg-muted/40',
                 )}
               >
@@ -780,10 +784,12 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
         </CardContent>
       </Card>
 
-      <Card className="border-destructive/40 shadow-sm">
+      <Card className="border-destructive/40">
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base text-destructive">
-            <Power size={18} />
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
+              <Power size={16} aria-hidden />
+            </span>
             Перезагрузка сервера
           </CardTitle>
           <CardDescription>
@@ -815,15 +821,10 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
             </SettingsAlert>
           )}
 
-          <div className="flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/5 p-3 text-xs text-muted-foreground">
-            <AlertTriangle size={14} className="mt-0.5 shrink-0 text-destructive" />
-            <span>
-              Сервер будет полностью перезагружен. Все службы на узле остановятся на время загрузки ОС.
-            </span>
-          </div>
-
           {vpnNodes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">VPN-узлы не найдены</p>
+            <p className="rounded-lg border border-dashed border-border/80 px-3 py-4 text-center text-sm text-muted-foreground">
+              VPN-узлы не найдены
+            </p>
           ) : (
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
               {vpnNodes.map((node) => (
@@ -835,7 +836,7 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
                   className={cn(
                     'rounded-lg border px-3 py-2.5 text-left text-sm transition-all',
                     rebootNodeId === node.id
-                      ? 'border-destructive bg-destructive/10 ring-1 ring-destructive/50'
+                      ? 'border-destructive/40 bg-destructive/[0.06] ring-1 ring-destructive/30'
                       : 'hover:border-muted-foreground/30 hover:bg-muted/40',
                     pendingReboot && 'opacity-60',
                   )}
@@ -854,16 +855,21 @@ export default function MaintenanceTab({ settings }: MaintenanceTabProps) {
             </div>
           )}
 
-          <Button
-            className="w-full"
-            variant="destructive"
-            size="lg"
-            disabled={!!busy || !!pendingReboot || rebootNodeId == null || rebootScheduling}
-            onClick={handleScheduleReboot}
+          <SettingsDangerZone
+            title="Перезагрузить ОС сервера"
+            description="Сервер будет полностью перезагружен. Все службы на узле остановятся на время загрузки ОС."
           >
-            <Power size={18} />
-            {rebootScheduling ? 'Планирование...' : 'Перезагрузить ОС сервера'}
-          </Button>
+            <Button
+              className="w-full sm:w-auto"
+              variant="destructive"
+              size="sm"
+              disabled={!!busy || !!pendingReboot || rebootNodeId == null || rebootScheduling}
+              onClick={handleScheduleReboot}
+            >
+              <Power size={16} />
+              {rebootScheduling ? 'Планирование...' : 'Перезагрузить ОС'}
+            </Button>
+          </SettingsDangerZone>
         </CardContent>
       </Card>
     </div>

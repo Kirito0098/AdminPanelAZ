@@ -7,9 +7,16 @@ import {
   updateDdnsSettings,
 } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
+import ToggleRow from '@/components/settings/ToggleRow'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -19,7 +26,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Switch } from '@/components/ui/switch'
 import { useNotifications } from '@/context/NotificationContext'
 import type { DdnsProvider, DdnsSettings } from '@/types'
 
@@ -154,7 +160,7 @@ export default function DdnsSettingsCard({ onSuggestDomain }: Props) {
 
   if (loading) {
     return (
-      <Card className="shadow-sm">
+      <Card>
         <CardContent className="flex items-center gap-3 py-8 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin text-primary" />
           Загрузка DDNS…
@@ -165,7 +171,7 @@ export default function DdnsSettingsCard({ onSuggestDomain }: Props) {
 
   if (loadError) {
     return (
-      <Card className="shadow-sm">
+      <Card>
         <CardContent className="space-y-3 py-6">
           <SettingsAlert variant="danger" title="DDNS недоступен">
             {loadError}
@@ -179,11 +185,13 @@ export default function DdnsSettingsCard({ onSuggestDomain }: Props) {
   }
 
   return (
-    <Card className="shadow-sm">
+    <Card>
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-center gap-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Globe2 size={18} />
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Globe2 size={16} aria-hidden />
+            </span>
             Динамический DNS
           </CardTitle>
           {settings?.configured ? (
@@ -309,20 +317,15 @@ export default function DdnsSettingsCard({ onSuggestDomain }: Props) {
           )}
 
           {provider !== 'none' && (
-            <div className="flex items-center justify-between gap-4 rounded-xl border bg-muted/15 px-4 py-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">Автообновление IP</p>
-                <p className="text-xs text-muted-foreground">
-                  systemd timer каждые 5 минут
-                  {settings?.timer_detail ? ` — ${settings.timer_detail}` : ''}
-                </p>
-              </div>
-              <Switch
-                checked={enableTimer}
-                onCheckedChange={setEnableTimer}
-                aria-label="Автообновление IP"
-              />
-            </div>
+            <ToggleRow
+              id="ddns-timer"
+              label="Автообновление IP"
+              description={`systemd timer каждые 5 минут${
+                settings?.timer_detail ? ` — ${settings.timer_detail}` : ''
+              }`}
+              checked={enableTimer}
+              onCheckedChange={setEnableTimer}
+            />
           )}
 
           <div className="flex flex-wrap gap-2">

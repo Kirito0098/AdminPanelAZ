@@ -4,8 +4,14 @@ import { Link } from 'react-router-dom'
 import { ApiError, getSecuritySettings, updateSecuritySettings } from '@/api/client'
 import RouteResultsPanel from '@/components/settings/RouteResultsPanel'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
 import Spinner from '@/components/ui/Spinner'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import ToggleRow from '@/components/settings/ToggleRow'
 import { useNotifications } from '@/context/NotificationContext'
@@ -62,10 +68,12 @@ export default function ConfigDeliveryTab() {
         .
       </p>
 
-      <Card className="shadow-sm">
+      <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Router size={18} />
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Router size={16} aria-hidden />
+            </span>
             Скачивание маршрутов
           </CardTitle>
           <CardDescription>

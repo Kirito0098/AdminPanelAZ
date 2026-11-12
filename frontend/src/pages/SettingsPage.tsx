@@ -7,7 +7,6 @@ import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import MobileSettingsSectionPicker from '@/components/settings/MobileSettingsSectionPicker'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
-import DocsLink from '@/components/shared/DocsLink'
 import { DOCS } from '@/lib/docsUrls'
 import BackupTab from '@/components/settings/BackupTab'
 import BellNotifyMatrix from '@/components/settings/BellNotifyMatrix'
@@ -18,11 +17,13 @@ import MonitoringTab from '@/components/settings/MonitoringTab'
 import PersonalTab from '@/components/settings/PersonalTab'
 import SecurityTab from '@/components/settings/SecurityTab'
 import {
+  getSectionIcon,
   getVisibleNavGroups,
   isSectionAvailable,
   isValidSettingsSection,
   type SettingsSection,
 } from '@/components/settings/SettingsNav'
+import { SettingsSectionHeader } from '@/components/settings/SettingsChrome'
 import SettingsSectionBrowser from '@/components/settings/SettingsSectionBrowser'
 import { getSectionMeta } from '@/components/settings/settingsLabels'
 import PanelOpsTab from '@/components/settings/PanelOpsTab'
@@ -273,17 +274,6 @@ export default function SettingsPage() {
     <div className="flex flex-col gap-6 orientation-compact-settings-page">
       <ConfirmDialogHost dialogProps={dialogProps} />
       <HaReplicaBanner />
-      <PageSectionHeader
-        icon={isAdmin ? Settings : UserIcon}
-        title={isAdmin ? 'Настройки' : 'Мой профиль'}
-        titleAddon={<NodeBadge name={activeNode?.name ?? settings?.node_name} status={activeNode?.status} />}
-        description={
-          isAdmin
-            ? 'Профиль, доступ, VPN и работа панели'
-            : 'Тема, пароль, Telegram и дополнительная защита при входе'
-        }
-        docsHref={isAdmin ? DOCS.settings : DOCS.profile}
-      />
 
       <div className="flex items-center justify-between gap-3 lg:hidden">
         <div className="min-w-0 flex-1">
@@ -302,19 +292,14 @@ export default function SettingsPage() {
           <SettingsSectionBrowser groups={visibleGroups} variant="nav" activeSection={section} />
         </aside>
 
-        <div className="min-w-0 flex-1 flex flex-col gap-4 orientation-compact-settings-section">
-          <div className="orientation-compact-settings-section-header">
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <h3 className="text-base font-semibold tracking-tight">{sectionMeta.title}</h3>
-              <p className="text-xs text-muted-foreground">{sectionMeta.description}</p>
-              {sectionMeta.docsHref ? (
-                <DocsLink href={sectionMeta.docsHref} className="shrink-0" />
-              ) : null}
-            </div>
-            {sectionMeta.hint ? (
-              <p className="mt-1 text-xs text-muted-foreground/80">{sectionMeta.hint}</p>
-            ) : null}
-          </div>
+        <div className="min-w-0 flex-1 space-y-4 orientation-compact-settings-section">
+          <SettingsSectionHeader
+            icon={getSectionIcon(section)}
+            title={sectionMeta.title}
+            description={sectionMeta.description}
+            hint={sectionMeta.hint}
+            docsHref={sectionMeta.docsHref}
+          />
           {renderSection()}
         </div>
       </div>

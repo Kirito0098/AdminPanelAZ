@@ -29,7 +29,7 @@ interface SettingsAlertProps {
 export default function SettingsAlert({ variant, title, children, className }: SettingsAlertProps) {
   const { box, icon: Icon } = variantStyles[variant]
   return (
-    <div className={cn('flex gap-3 rounded-lg border p-4 text-sm', box, className)}>
+    <div className={cn('flex gap-3 rounded-xl border p-4 text-sm', box, className)}>
       <Icon className="mt-0.5 h-4 w-4 shrink-0" />
       <div className="min-w-0 space-y-1">
         {title && <p className="font-medium">{title}</p>}

@@ -85,11 +85,13 @@ export default function SelfServiceLimitsSection() {
   if (!loaded) return <Spinner label="Загрузка лимитов..." className="py-4" />
 
   return (
-    <SelfServiceLimitsForm
-      values={values}
-      onChange={setValues}
-      onSave={() => void save()}
-      disabled={saving}
-    />
+    <div className="rounded-lg border border-border/70 bg-card/60 p-4">
+      <SelfServiceLimitsForm
+        values={values}
+        onChange={setValues}
+        onSave={() => void save()}
+        disabled={saving}
+      />
+    </div>
   )
 }

@@ -1,13 +1,19 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import type { LucideIcon } from 'lucide-react'
-import { Cpu, MemoryStick, Save } from 'lucide-react'
+import { Cpu, Gauge, MemoryStick, Save } from 'lucide-react'
 import { ApiError, getMonitorSettings, updateMonitorSettings } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
-import { SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
+import { SettingsMetaLine } from '@/components/settings/SettingsChrome'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useNotifications } from '@/context/NotificationContext'
@@ -53,7 +59,7 @@ function PresetButtons({
           className={cn(
             'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
             selected === value
-              ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
+              ? 'border-primary/40 bg-primary/5 text-primary ring-1 ring-primary/20'
               : 'hover:border-muted-foreground/30 hover:bg-muted/50',
           )}
         >
@@ -82,7 +88,7 @@ function ThresholdField({
   onChange: (value: number) => void
 }) {
   return (
-    <div className="space-y-3 rounded-xl border bg-muted/15 p-4">
+    <div className="space-y-3 rounded-lg border bg-muted/15 p-4">
       <div className="flex items-center gap-2">
         <Icon size={16} className="text-muted-foreground" />
         <Label htmlFor={id} className="font-medium">
@@ -173,135 +179,139 @@ export default function MonitorSettingsCard() {
   }
 
   return (
-    <div className="space-y-4">
-      <SettingsToolbar
-        title="Нагрузка на сервер"
-        meta={
-          <SettingsMetaLine
-            items={[
-              { label: 'порог CPU', value: `${cpu}%` },
-              { label: 'порог RAM', value: `${ram}%` },
-              { label: 'проверка', value: formatInterval(intervalSec) },
-              { label: 'удержание', value: formatSustained(sustainedSec) },
-            ]}
-          />
-        }
-      />
-      <p className="text-sm text-muted-foreground">
-        Панель следит за CPU и RAM и шлёт предупреждение в Telegram, если нагрузка долго выше порога
-      </p>
-
-      <Card className="shadow-sm">
-        <CardContent className="pt-4">
-          <InlineProgressBar active={saving} label="Сохранение настроек..." />
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="grid gap-4 md:grid-cols-2">
-              <ThresholdField
-                id="monitor-cpu"
-                icon={Cpu}
-                label="Процессор (CPU)"
-                hint="Уведомление, если загрузка процессора держится выше порога"
-                value={cpu}
-                presets={CPU_PRESETS}
-                onChange={setCpu}
-              />
-              <ThresholdField
-                id="monitor-ram"
-                icon={MemoryStick}
-                label="Память (RAM)"
-                hint="Уведомление, если занятой памяти больше указанного процента"
-                value={ram}
-                presets={RAM_PRESETS}
-                onChange={setRam}
+    <Card>
+      <CardHeader>
+        <div className="flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Gauge size={16} aria-hidden />
+          </span>
+          <div className="min-w-0">
+            <CardTitle>Нагрузка на сервер</CardTitle>
+            <CardDescription className="mt-1">
+              Панель следит за CPU и RAM и шлёт предупреждение в Telegram, если нагрузка долго выше порога
+            </CardDescription>
+            <div className="mt-2 text-xs text-muted-foreground">
+              <SettingsMetaLine
+                items={[
+                  { label: 'порог CPU', value: `${cpu}%` },
+                  { label: 'порог RAM', value: `${ram}%` },
+                  { label: 'проверка', value: formatInterval(intervalSec) },
+                  { label: 'удержание', value: formatSustained(sustainedSec) },
+                ]}
               />
             </div>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <InlineProgressBar active={saving} label="Сохранение настроек..." />
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div className="grid gap-4 md:grid-cols-2">
+            <ThresholdField
+              id="monitor-cpu"
+              icon={Cpu}
+              label="Процессор (CPU)"
+              hint="Уведомление, если загрузка процессора держится выше порога"
+              value={cpu}
+              presets={CPU_PRESETS}
+              onChange={setCpu}
+            />
+            <ThresholdField
+              id="monitor-ram"
+              icon={MemoryStick}
+              label="Память (RAM)"
+              hint="Уведомление, если занятой памяти больше указанного процента"
+              value={ram}
+              presets={RAM_PRESETS}
+              onChange={setRam}
+            />
+          </div>
 
-            <div className="grid grid-cols-1 gap-4 rounded-xl border bg-muted/10 p-4 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="space-y-3">
-                <Label className="text-xs text-muted-foreground">Как часто проверять</Label>
-                <PresetButtons
-                  values={INTERVAL_PRESETS}
-                  selected={intervalSec}
-                  onSelect={setIntervalSec}
-                  format={formatInterval}
+          <div className="grid grid-cols-1 gap-4 rounded-lg border bg-muted/10 p-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-3">
+              <Label className="text-xs text-muted-foreground">Как часто проверять</Label>
+              <PresetButtons
+                values={INTERVAL_PRESETS}
+                selected={intervalSec}
+                onSelect={setIntervalSec}
+                format={formatInterval}
+              />
+              <div className="flex items-center gap-2">
+                <Input
+                  id="monitor-interval"
+                  type="number"
+                  min={10}
+                  max={3600}
+                  className="h-9 w-24"
+                  value={intervalSec}
+                  onChange={(e) => setIntervalSec(Number(e.target.value))}
                 />
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="monitor-interval"
-                    type="number"
-                    min={10}
-                    max={3600}
-                    className="h-9 w-24"
-                    value={intervalSec}
-                    onChange={(e) => setIntervalSec(Number(e.target.value))}
-                  />
-                  <span className="text-xs text-muted-foreground">сек</span>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <Label className="text-xs text-muted-foreground">{LABEL_COOLDOWN_MIN}</Label>
-                <PresetButtons
-                  values={COOLDOWN_PRESETS}
-                  selected={cooldownMin}
-                  onSelect={setCooldownMin}
-                  format={(v) => `${v} мин`}
-                />
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="monitor-cooldown"
-                    type="number"
-                    min={1}
-                    max={1440}
-                    className="h-9 w-20"
-                    value={cooldownMin}
-                    onChange={(e) => setCooldownMin(Number(e.target.value))}
-                  />
-                  <span className="text-xs text-muted-foreground">мин</span>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                <Label className="text-xs text-muted-foreground">Длительность высокой нагрузки</Label>
-                <PresetButtons
-                  values={SUSTAINED_PRESETS}
-                  selected={sustainedSec}
-                  onSelect={setSustainedSec}
-                  format={formatSustained}
-                />
-                <div className="flex items-center gap-2">
-                  <Input
-                    id="monitor-sustained"
-                    type="number"
-                    min={0}
-                    max={3600}
-                    className="h-9 w-24"
-                    value={sustainedSec}
-                    onChange={(e) => setSustainedSec(Number(e.target.value))}
-                  />
-                  <span className="text-xs text-muted-foreground">сек</span>
-                </div>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  0 — сразу после превышения. При интервале {formatInterval(intervalSec)} и значении{' '}
-                  {formatSustained(sustainedSec)} — несколько замеров подряд.
-                </p>
+                <span className="text-xs text-muted-foreground">сек</span>
               </div>
             </div>
 
-            <SettingsAlert variant="info" title="Как это работает">
-              Сначала нагрузка должна превысить порог и удержаться заданное время. Повторные сообщения не чаще, чем
-              раз в {cooldownMin} мин.
-            </SettingsAlert>
-
-            <div className="flex justify-end border-t pt-4">
-              <Button type="submit" disabled={saving || !isDirty} className="gap-1.5">
-                <Save size={16} />
-                {saving ? 'Сохранение...' : 'Сохранить'}
-              </Button>
+            <div className="space-y-3">
+              <Label className="text-xs text-muted-foreground">{LABEL_COOLDOWN_MIN}</Label>
+              <PresetButtons
+                values={COOLDOWN_PRESETS}
+                selected={cooldownMin}
+                onSelect={setCooldownMin}
+                format={(v) => `${v} мин`}
+              />
+              <div className="flex items-center gap-2">
+                <Input
+                  id="monitor-cooldown"
+                  type="number"
+                  min={1}
+                  max={1440}
+                  className="h-9 w-20"
+                  value={cooldownMin}
+                  onChange={(e) => setCooldownMin(Number(e.target.value))}
+                />
+                <span className="text-xs text-muted-foreground">мин</span>
+              </div>
             </div>
-          </form>
-        </CardContent>
-      </Card>
-    </div>
+
+            <div className="space-y-3">
+              <Label className="text-xs text-muted-foreground">Длительность высокой нагрузки</Label>
+              <PresetButtons
+                values={SUSTAINED_PRESETS}
+                selected={sustainedSec}
+                onSelect={setSustainedSec}
+                format={formatSustained}
+              />
+              <div className="flex items-center gap-2">
+                <Input
+                  id="monitor-sustained"
+                  type="number"
+                  min={0}
+                  max={3600}
+                  className="h-9 w-24"
+                  value={sustainedSec}
+                  onChange={(e) => setSustainedSec(Number(e.target.value))}
+                />
+                <span className="text-xs text-muted-foreground">сек</span>
+              </div>
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                0 — сразу после превышения. При интервале {formatInterval(intervalSec)} и значении{' '}
+                {formatSustained(sustainedSec)} — несколько замеров подряд.
+              </p>
+            </div>
+          </div>
+
+          <SettingsAlert variant="info" title="Как это работает">
+            Сначала нагрузка должна превысить порог и удержаться заданное время. Повторные сообщения не чаще, чем
+            раз в {cooldownMin} мин.
+          </SettingsAlert>
+
+          <div className="flex justify-end border-t pt-4">
+            <Button type="submit" disabled={saving || !isDirty} className="gap-1.5">
+              <Save size={16} />
+              {saving ? 'Сохранение...' : 'Сохранить'}
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   )
 }

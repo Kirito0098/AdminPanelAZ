@@ -54,31 +54,33 @@ export default function UserGraceSection() {
   const options = loaded.allowed_months?.length ? loaded.allowed_months : FALLBACK_MONTHS
 
   return (
-    <div className="space-y-3">
-      <div className="space-y-1.5">
-        <Label htmlFor="userGraceMonths">Удержание конфигов после истечения доступа</Label>
-        <select
-          id="userGraceMonths"
-          value={String(months)}
-          onChange={(e) => setMonths(Number.parseInt(e.target.value, 10))}
-          disabled={saving}
-          className="flex h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-        >
-          {options.map((value) => (
-            <option key={value} value={String(value)}>
-              {value === 0 ? 'Выключено (0 мес.)' : `${value} мес.`}
-            </option>
-          ))}
-        </select>
-        <p className="text-xs text-muted-foreground">
-          После истечения срока доступа конфиги не удаляются автоматически — администратор получит
-          одно предупреждение в «Задачах» и сможет удалить их вручную. 0 — предупреждений нет.
-        </p>
+    <div className="rounded-lg border border-border/70 bg-card/60 p-4">
+      <div className="space-y-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="userGraceMonths">Удержание конфигов после истечения доступа</Label>
+          <select
+            id="userGraceMonths"
+            value={String(months)}
+            onChange={(e) => setMonths(Number.parseInt(e.target.value, 10))}
+            disabled={saving}
+            className="flex h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          >
+            {options.map((value) => (
+              <option key={value} value={String(value)}>
+                {value === 0 ? 'Выключено (0 мес.)' : `${value} мес.`}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            После истечения срока доступа конфиги не удаляются автоматически — администратор получит
+            одно предупреждение в «Задачах» и сможет удалить их вручную. 0 — предупреждений нет.
+          </p>
+        </div>
+        <Button type="button" size="sm" onClick={() => void save()} disabled={saving}>
+          <Save size={15} />
+          {saving ? 'Сохранение...' : 'Сохранить'}
+        </Button>
       </div>
-      <Button type="button" size="sm" onClick={() => void save()} disabled={saving}>
-        <Save size={15} />
-        {saving ? 'Сохранение...' : 'Сохранить'}
-      </Button>
     </div>
   )
 }

@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { ApiError, getSelfServiceLimits, updateSelfServiceLimits } from '@/api/client'
-import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
+import ToggleRow from '@/components/settings/ToggleRow'
 import { useNotifications } from '@/context/NotificationContext'
 
 export default function PasswordChangePolicyRow() {
@@ -37,22 +36,13 @@ export default function PasswordChangePolicyRow() {
   }
 
   return (
-    <div className="flex items-start justify-between gap-4 rounded-xl border bg-card/50 p-4">
-      <div className="min-w-0 space-y-1">
-        <Label htmlFor="requirePasswordChange" className="cursor-pointer font-medium">
-          Требовать смену пароля при первом входе
-        </Label>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          Для новых учётных записей и после сброса пароля администратором. До смены пароля панель недоступна,
-          Mini App работает.
-        </p>
-      </div>
-      <Switch
-        id="requirePasswordChange"
-        checked={enabled ?? false}
-        disabled={enabled === null || saving}
-        onCheckedChange={(next) => void toggle(next)}
-      />
-    </div>
+    <ToggleRow
+      id="requirePasswordChange"
+      label="Требовать смену пароля при первом входе"
+      description="Для новых учётных записей и после сброса пароля администратором. До смены пароля панель недоступна, Mini App работает."
+      checked={enabled ?? false}
+      disabled={enabled === null || saving}
+      onCheckedChange={(next) => void toggle(next)}
+    />
   )
 }

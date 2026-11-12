@@ -17,10 +17,17 @@ import { ApiError, updateUser } from '@/api/client'
 import AppDialog from '@/components/shared/AppDialog'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import PasswordChangePolicyRow from '@/components/settings/PasswordChangePolicyRow'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
+import ToggleRow from '@/components/settings/ToggleRow'
 import EmptyState from '@/components/ui/EmptyState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,7 +36,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
 import {
   Table,
   TableBody,
@@ -122,7 +128,7 @@ function UserCard({
   onDelete: () => void
 }) {
   return (
-    <div className="rounded-lg border bg-card px-3 py-3">
+    <div className="rounded-lg border border-border/70 bg-card px-3 py-3 transition-colors hover:border-primary/20 hover:bg-primary/[0.03]">
       <div className="flex items-start gap-3">
         <UserAvatar username={user.username} size="sm" />
         <div className="min-w-0 flex-1">
@@ -264,46 +270,6 @@ export default function UsersTab({
 
   return (
     <div className="space-y-4">
-      <SettingsToolbar
-        title="Учётные записи"
-        count={stats.total}
-        meta={`${stats.admins} админ. · ${stats.regular} польз. · ${stats.active} активных`}
-        actions={
-          <>
-            <div className="relative w-full sm:w-64">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={userQuery}
-                onChange={(e) => setUserQuery(e.target.value)}
-                placeholder="Поиск: логин, роль, Telegram…"
-                className="h-9 pl-9"
-                aria-label="Поиск пользователей"
-              />
-              {userQuery ? (
-                <button
-                  type="button"
-                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                  onClick={() => setUserQuery('')}
-                  aria-label="Очистить поиск"
-                >
-                  <X size={14} />
-                </button>
-              ) : null}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              className="h-9 shrink-0 gap-1.5"
-              onClick={() => setCreateOpen((v) => !v)}
-              aria-expanded={createOpen}
-            >
-              <UserPlus size={15} />
-              Добавить
-            </Button>
-          </>
-        }
-      />
-
       {provisioningOn && (
         <SettingsAlert variant="info">
           Абоненты VPN, их конфиги и квоты — в разделе{' '}
@@ -318,14 +284,18 @@ export default function UsersTab({
       )}
 
       {createOpen ? (
-        <Card className="border-primary/25 shadow-sm">
-          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <UserPlus size={16} />
-                Новый пользователь
-              </CardTitle>
-              <CardDescription className="mt-1">Логин, пароль и роль доступа к панели</CardDescription>
+        <Card className="border-primary/25 ring-1 ring-primary/10">
+          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <UserPlus size={16} aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <CardTitle>Новый пользователь</CardTitle>
+                <CardDescription className="mt-0.5">
+                  Логин, пароль и роль доступа к панели
+                </CardDescription>
+              </div>
             </div>
             <Button
               type="button"
@@ -390,13 +360,54 @@ export default function UsersTab({
         </Card>
       ) : null}
 
-      <Card className="shadow-sm">
+      <Card>
+        <CardHeader className="gap-3 border-b border-border/70">
+          <SettingsToolbar
+            title="Учётные записи"
+            count={stats.total}
+            meta={`${stats.admins} админ. · ${stats.regular} польз. · ${stats.active} активных`}
+            actions={
+              <>
+                <div className="relative w-full sm:w-64">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={userQuery}
+                    onChange={(e) => setUserQuery(e.target.value)}
+                    placeholder="Поиск: логин, роль, Telegram…"
+                    className="h-9 pl-9"
+                    aria-label="Поиск пользователей"
+                  />
+                  {userQuery ? (
+                    <button
+                      type="button"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      onClick={() => setUserQuery('')}
+                      aria-label="Очистить поиск"
+                    >
+                      <X size={14} />
+                    </button>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-9 shrink-0 gap-1.5"
+                  onClick={() => setCreateOpen((v) => !v)}
+                  aria-expanded={createOpen}
+                >
+                  <UserPlus size={15} />
+                  Добавить пользователя
+                </Button>
+              </>
+            }
+          />
+        </CardHeader>
         <CardContent className="p-0 pt-0">
           {displayedUsers.length === 0 ? (
             <EmptyState
               icon={Users}
               title="Нет учётных записей панели"
-              description="Нажмите «Добавить», чтобы создать администратора или пользователя панели"
+              description="Нажмите «Добавить пользователя», чтобы создать администратора или пользователя панели"
               className="py-10"
             />
           ) : filteredUsers.length === 0 ? (
@@ -419,18 +430,29 @@ export default function UsersTab({
               ))}
               desktop={
                 <Table>
-                  <TableHeader>
+                  <TableHeader className="bg-muted/30 [&_tr]:border-border/70">
                     <TableRow className="hover:bg-transparent">
-                      <TableHead className="h-10 pl-4">Пользователь</TableHead>
-                      <TableHead className="h-10">Статус</TableHead>
-                      <TableHead className="h-10">Роль</TableHead>
-                      <TableHead className="h-10">Telegram</TableHead>
-                      <TableHead className="h-10 pr-4 text-right"> </TableHead>
+                      <TableHead className="h-9 pl-4 text-[11px] font-medium uppercase tracking-wide">
+                        Пользователь
+                      </TableHead>
+                      <TableHead className="h-9 text-[11px] font-medium uppercase tracking-wide">
+                        Статус
+                      </TableHead>
+                      <TableHead className="h-9 text-[11px] font-medium uppercase tracking-wide">
+                        Роль
+                      </TableHead>
+                      <TableHead className="h-9 text-[11px] font-medium uppercase tracking-wide">
+                        Telegram
+                      </TableHead>
+                      <TableHead className="h-9 pr-4 text-right"> </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredUsers.map((u) => (
-                      <TableRow key={u.id} className="group">
+                      <TableRow
+                        key={u.id}
+                        className="group border-border/60 transition-colors hover:bg-muted/40"
+                      >
                         <TableCell className="py-2.5 pl-4">
                           <div className="flex items-center gap-2.5">
                             <UserAvatar username={u.username} size="sm" />
@@ -530,7 +552,7 @@ export default function UsersTab({
       >
         <div className="space-y-4">
           {activeEditor && (
-            <div className="flex items-center gap-3 rounded-xl border bg-muted/20 px-3 py-2.5">
+            <div className="flex items-center gap-3 rounded-lg border border-border/70 bg-muted/20 px-3 py-2.5">
               <UserAvatar username={activeEditor.username} />
               <div className="min-w-0">
                 <p className="font-medium leading-tight">{activeEditor.username}</p>
@@ -541,7 +563,7 @@ export default function UsersTab({
             </div>
           )}
 
-          <div className="space-y-2 rounded-xl border bg-muted/20 p-3">
+          <div className="space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3">
             <Label>Роль</Label>
             <div className="flex flex-wrap gap-2">
               {ROLE_OPTIONS.map(({ id, icon: Icon }) => (
@@ -553,7 +575,7 @@ export default function UsersTab({
                   className={cn(
                     'inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-all',
                     draftRole === id
-                      ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
+                      ? 'border-primary/40 bg-primary/10 text-primary ring-1 ring-primary/20'
                       : 'hover:border-muted-foreground/30 hover:bg-muted/50',
                   )}
                 >
@@ -565,7 +587,7 @@ export default function UsersTab({
             <p className="text-xs leading-relaxed text-muted-foreground">{ROLE_HINTS[draftRole]}</p>
           </div>
 
-          <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">
+          <div className="space-y-1.5 rounded-lg border border-border/70 bg-muted/20 p-3">
             <Label htmlFor="editTelegramId">Telegram ID</Label>
             <Input
               id="editTelegramId"
@@ -579,39 +601,31 @@ export default function UsersTab({
             </p>
           </div>
 
-          <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/20 p-3">
-            <div className="space-y-0.5">
-              <Label htmlFor="editActive">Активность</Label>
-              <p className="text-xs text-muted-foreground">
-                Выкл. — учётная запись отключена, активные сессии завершаются.
-              </p>
-            </div>
-            <Switch id="editActive" checked={draftActive} onCheckedChange={setDraftActive} />
-          </div>
+          <ToggleRow
+            id="editActive"
+            label="Активность"
+            description="Выкл. — учётная запись отключена, активные сессии завершаются."
+            checked={draftActive}
+            onCheckedChange={setDraftActive}
+          />
 
-          <div className="flex items-center justify-between gap-3 rounded-xl border bg-muted/20 p-3">
-            <div className="space-y-0.5">
-              <Label htmlFor="editPanelLogin">Вход в панель</Label>
-              <p className="text-xs text-muted-foreground">
-                Выкл. — войти в панель под этим логином нельзя.
-              </p>
-            </div>
-            <Switch
-              id="editPanelLogin"
-              checked={draftPanelLogin}
-              onCheckedChange={(next) => {
-                setDraftPanelLogin(next)
-                if (!next) setDraftPassword('')
-              }}
-            />
-          </div>
+          <ToggleRow
+            id="editPanelLogin"
+            label="Вход в панель"
+            description="Выкл. — войти в панель под этим логином нельзя."
+            checked={draftPanelLogin}
+            onCheckedChange={(next) => {
+              setDraftPanelLogin(next)
+              if (!next) setDraftPassword('')
+            }}
+          />
 
           {activeEditor?.id === currentUserId ? (
-            <p className="rounded-xl border border-dashed bg-muted/10 p-3 text-xs text-muted-foreground">
+            <p className="rounded-lg border border-dashed border-border/70 bg-muted/10 p-3 text-xs text-muted-foreground">
               Свой пароль меняется в «Моём профиле» — с вводом текущего пароля.
             </p>
           ) : draftPanelLogin ? (
-            <div className="space-y-1.5 rounded-xl border bg-muted/20 p-3">
+            <div className="space-y-1.5 rounded-lg border border-border/70 bg-muted/20 p-3">
               <Label htmlFor="editPassword">Сброс пароля</Label>
               <Input
                 id="editPassword"
@@ -627,7 +641,7 @@ export default function UsersTab({
               </p>
             </div>
           ) : (
-            <p className="rounded-xl border border-dashed bg-muted/10 p-3 text-xs text-muted-foreground">
+            <p className="rounded-lg border border-dashed border-border/70 bg-muted/10 p-3 text-xs text-muted-foreground">
               Вход в панель выключен — пароль не нужен. Включите вход, чтобы задать новый.
             </p>
           )}

@@ -4,9 +4,15 @@ import TwoFactorTab from '@/components/settings/TwoFactorTab'
 import PasskeysTab from '@/components/settings/PasskeysTab'
 import PersonalTelegramCard from '@/components/settings/PersonalTelegramCard'
 import NocScheduleCard from '@/components/settings/NocScheduleCard'
-import { SettingsCollapsible, SettingsPanel, SettingsToolbar } from '@/components/settings/SettingsChrome'
+import { SettingsCollapsible, SettingsPanel } from '@/components/settings/SettingsChrome'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -63,10 +69,6 @@ export default function PersonalTab({
   const { user } = useAuth()
   const [extrasOpen, setExtrasOpen] = useState(false)
   const now = new Date()
-  const themeLabel = theme === 'light' ? 'Светлая' : 'Тёмная'
-  const tzLabel = timeZone
-    ? options.find((o) => o.value === timeZone)?.label ?? effectiveTimeZone
-    : `Браузер (${getTimeZoneLabel(browserTimeZone)})`
 
   const showTelegramCard = isEnabled('telegram') && Boolean(user)
   const showNocCard = user?.role === 'admin'
@@ -74,23 +76,20 @@ export default function PersonalTab({
 
   return (
     <div className="space-y-4">
-      <SettingsToolbar
-        title="Профиль"
-        meta={
-          <>
-            Тема: {themeLabel} · Часовой пояс: {tzLabel}
-          </>
-        }
-      />
-
       <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
-        <Card className="flex h-full flex-col shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Palette size={18} />
-              Внешний вид
-            </CardTitle>
-            <CardDescription>Выберите тему интерфейса панели</CardDescription>
+        <Card className="flex h-full flex-col">
+          <CardHeader>
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Palette size={16} aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <CardTitle>Внешний вид</CardTitle>
+                <CardDescription className="mt-0.5">
+                  Выберите тему интерфейса панели
+                </CardDescription>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col">
             <div className="grid grid-cols-1 flex-1 gap-3 sm:grid-cols-2">
@@ -100,15 +99,15 @@ export default function PersonalTab({
                   type="button"
                   onClick={() => onThemeChange(value)}
                   className={cn(
-                    'flex h-full flex-col gap-3 rounded-xl border p-3 text-left transition-all',
+                    'flex h-full flex-col gap-3 rounded-lg border p-3 text-left transition-all',
                     theme === value
-                      ? 'border-primary bg-primary/5 ring-1 ring-primary'
-                      : 'bg-card/50 hover:border-muted-foreground/30 hover:bg-muted/30',
+                      ? 'border-primary/40 bg-primary/5 ring-1 ring-primary/30'
+                      : 'border-border/70 bg-muted/10 hover:border-muted-foreground/30 hover:bg-muted/30',
                   )}
                 >
                   <div
                     className={cn(
-                      'relative min-h-[4.5rem] flex-1 overflow-hidden rounded-lg border bg-gradient-to-br',
+                      'relative min-h-[4.5rem] flex-1 overflow-hidden rounded-lg border border-border/60 bg-gradient-to-br',
                       preview,
                     )}
                   >
@@ -136,23 +135,28 @@ export default function PersonalTab({
           </CardContent>
         </Card>
 
-        <Card className="flex h-full flex-col shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Clock size={18} />
-              Часовой пояс
-            </CardTitle>
-            <CardDescription>
-              Дата и время в панели и в Telegram-оповещениях
-            </CardDescription>
+        <Card className="flex h-full flex-col">
+          <CardHeader>
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Clock size={16} aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <CardTitle>Часовой пояс</CardTitle>
+                <CardDescription className="mt-0.5">
+                  Дата и время в панели и в Telegram-оповещениях
+                </CardDescription>
+              </div>
+            </div>
           </CardHeader>
           <CardContent className="flex flex-1 flex-col justify-between gap-4">
-            <div className="rounded-xl border bg-muted/20 p-4 text-center">
-              <p className="text-lg font-semibold tabular-nums tracking-tight">
+            <div className="rounded-lg border border-border/70 bg-muted/20 px-4 py-3">
+              <p className="text-xl font-semibold tabular-nums tracking-tight">
                 {now.toLocaleTimeString('ru-RU', { timeZone: effectiveTimeZone, hour: '2-digit', minute: '2-digit' })}
               </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {formatDateTime(now)} · {effectiveTimeZone}
+              <p className="mt-1 text-xs text-muted-foreground">{formatDateTime(now)}</p>
+              <p className="mt-1.5 inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium tabular-nums text-primary">
+                {effectiveTimeZone}
               </p>
             </div>
             <div className="space-y-2">
@@ -181,16 +185,20 @@ export default function PersonalTab({
       </div>
 
       <SettingsPanel>
-        <div className="mb-3 flex items-center gap-2">
-          <KeyRound size={18} className="text-muted-foreground" />
-          <div>
+        <div className="mb-4 flex items-start gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <KeyRound size={16} aria-hidden />
+          </span>
+          <div className="min-w-0">
             <h3 className="text-sm font-semibold tracking-tight">Смена пароля</h3>
-            <p className="text-xs text-muted-foreground">Обновите пароль для вашей учётной записи</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Обновите пароль для вашей учётной записи
+            </p>
           </div>
         </div>
         <form noValidate onSubmit={onChangePassword} className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-2 md:items-stretch">
-            <div className="flex flex-col space-y-2 rounded-xl border bg-muted/20 p-4">
+          <div className="grid gap-3 md:grid-cols-2 md:items-stretch">
+            <div className="flex flex-col space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3 sm:p-4">
               <Label htmlFor="currentPwd">Текущий пароль</Label>
               <Input
                 id="currentPwd"
@@ -201,7 +209,7 @@ export default function PersonalTab({
                 className="w-full"
               />
             </div>
-            <div className="flex flex-col space-y-2 rounded-xl border bg-muted/20 p-4">
+            <div className="flex flex-col space-y-2 rounded-lg border border-border/70 bg-muted/20 p-3 sm:p-4">
               <Label htmlFor="newPwd">Новый пароль</Label>
               <Input
                 id="newPwd"
@@ -213,7 +221,7 @@ export default function PersonalTab({
               />
             </div>
           </div>
-          <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col-reverse gap-3 border-t border-border/70 pt-4 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs text-muted-foreground">Минимум 8 символов, буквы и цифры</p>
             <Button type="submit" className="w-full gap-1.5 sm:w-auto sm:shrink-0">
               <Save size={16} />

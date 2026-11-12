@@ -7,10 +7,16 @@ import {
   updateCloudflareProxySettings,
 } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
@@ -177,7 +183,7 @@ export default function CloudflareProxyCard() {
 
   if (loading) {
     return (
-      <Card className="shadow-sm">
+      <Card>
         <CardContent className="flex items-center gap-3 py-8 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin text-primary" />
           Загрузка Cloudflare…
@@ -188,7 +194,7 @@ export default function CloudflareProxyCard() {
 
   if (loadError) {
     return (
-      <Card className="shadow-sm">
+      <Card>
         <CardContent className="space-y-3 py-6">
           <SettingsAlert variant="danger" title="Cloudflare proxy-mode недоступен">
             {loadError}
@@ -207,11 +213,13 @@ export default function CloudflareProxyCard() {
 
   return (
     <>
-    <Card className="shadow-sm">
+    <Card>
       <CardHeader className="pb-3">
         <div className="flex flex-wrap items-center gap-2">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Cloud size={18} className="text-primary" />
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Cloud size={16} aria-hidden />
+            </span>
             Cloudflare proxy-mode
           </CardTitle>
           <Badge variant={settings.enabled ? 'success' : 'secondary'}>
@@ -226,8 +234,8 @@ export default function CloudflareProxyCard() {
       <CardContent className="space-y-4">
         <div
           className={cn(
-            'flex items-start justify-between gap-4 rounded-xl border bg-muted/15 px-4 py-3',
-            settings.enabled && 'border-primary/20 bg-primary/5',
+            'flex items-start justify-between gap-4 rounded-lg border border-border/70 bg-muted/15 px-4 py-3',
+            settings.enabled && 'border-primary/30 bg-primary/5 ring-1 ring-primary/20',
           )}
         >
           <div className="min-w-0">
@@ -246,8 +254,10 @@ export default function CloudflareProxyCard() {
 
         <div
           className={cn(
-            'flex items-start justify-between gap-4 rounded-xl border bg-muted/15 px-4 py-3',
-            settings.origin_lock_enabled && settings.enabled && 'border-primary/20 bg-primary/5',
+            'flex items-start justify-between gap-4 rounded-lg border border-border/70 bg-muted/15 px-4 py-3',
+            settings.origin_lock_enabled &&
+              settings.enabled &&
+              'border-primary/30 bg-primary/5 ring-1 ring-primary/20',
           )}
         >
           <div className="min-w-0">
@@ -266,7 +276,7 @@ export default function CloudflareProxyCard() {
           />
         </div>
 
-        <div className="flex items-start justify-between gap-4 rounded-xl border bg-muted/15 px-4 py-3">
+        <div className="flex items-start justify-between gap-4 rounded-lg border border-border/70 bg-muted/15 px-4 py-3">
           <div className="min-w-0">
             <p className="text-sm font-medium">Автообновление списков IP Cloudflare</p>
             <p className="text-xs leading-relaxed text-muted-foreground">
@@ -311,7 +321,7 @@ export default function CloudflareProxyCard() {
           </Button>
         </div>
 
-        <div className="space-y-2 rounded-xl border bg-card/50 px-4 py-3 text-sm">
+        <div className="space-y-2 rounded-lg border border-border/70 bg-card/50 px-4 py-3 text-sm">
           <p className="text-muted-foreground">
             Последнее успешное обновление:{' '}
             <span className="text-foreground">{formatDateTime(settings.last_success_at)}</span>

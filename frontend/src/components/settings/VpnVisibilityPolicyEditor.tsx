@@ -1,3 +1,4 @@
+import SettingsAlert from '@/components/settings/SettingsAlert'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import type { VisibleVpnProfilesPolicy } from '@/types'
@@ -73,9 +74,9 @@ export default function VpnVisibilityPolicyEditor({
     options: readonly { key: string; label: string }[],
     axis: 'routes' | 'protocols' | 'openvpn_groups',
   ) => (
-    <div className="space-y-2">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
-      <div className="flex flex-wrap gap-3">
+    <div className="space-y-2 rounded-lg border border-border/70 bg-muted/15 p-3">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
+      <div className="flex flex-wrap gap-x-4 gap-y-2">
         {options.map((option) => {
           const checked = value[axis].includes(option.key)
           return (
@@ -103,11 +104,11 @@ export default function VpnVisibilityPolicyEditor({
       {renderGroup('Маршруты', ROUTE_OPTIONS, 'routes')}
       {renderGroup('OpenVPN группы', OPENVPN_GROUP_OPTIONS, 'openvpn_groups')}
       {renderGroup('Протоколы', PROTOCOL_OPTIONS, 'protocols')}
-      <div className="space-y-2">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <div className="space-y-2 rounded-lg border border-border/70 bg-muted/15 p-3">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
           AmneziaWG 2.0 файлы
         </p>
-        <div className="flex flex-wrap gap-3">
+        <div className="flex flex-wrap gap-x-4 gap-y-2">
           <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
             <Checkbox checked={awg2Enabled} disabled />
             .conf
@@ -128,9 +129,9 @@ export default function VpnVisibilityPolicyEditor({
         )}
       </div>
       {empty && (
-        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
+        <SettingsAlert variant="warning" title="Профили скрыты">
           Пользователь не увидит ни одного профиля. Отметьте хотя бы маршрут и протокол.
-        </p>
+        </SettingsAlert>
       )}
       {value.protocols.includes('openvpn') && value.openvpn_groups.length === 0 && (
         <p className="text-xs text-muted-foreground">

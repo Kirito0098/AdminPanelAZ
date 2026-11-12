@@ -3,8 +3,15 @@ import { RefreshCw, ServerCrash } from 'lucide-react'
 import { ApiError, restartPanel } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
+import { SettingsDangerZone } from '@/components/settings/SettingsChrome'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 
@@ -61,30 +68,39 @@ export default function PanelRestartCard({ className, compact = false, onRestart
   return (
     <div className={className}>
       <ConfirmDialogHost dialogProps={dialogProps} />
-      <Card className="border-destructive/30 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <ServerCrash size={18} className="text-destructive" />
-            Перезапуск панели
-          </CardTitle>
-          <CardDescription>
-            Применяет изменения из .env и перезапускает сервис adminpanelaz без обновления кода
-          </CardDescription>
+      <Card>
+        <CardHeader>
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-destructive/10 text-destructive">
+              <ServerCrash size={16} aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <CardTitle>Перезапуск панели</CardTitle>
+              <CardDescription className="mt-1">
+                Применяет изменения из .env и перезапускает сервис adminpanelaz без обновления кода
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <SettingsAlert variant="warning" title="Кратковременная недоступность">
             Панель будет недоступна несколько секунд. Незавершённые фоновые задачи прервутся.
           </SettingsAlert>
-          <Button
-            type="button"
-            variant="destructive"
-            className="gap-2"
-            disabled={restarting}
-            onClick={handleRestart}
+          <SettingsDangerZone
+            title="Перезапустить сервис"
+            description="Сессия прервётся, страница станет недоступна на несколько секунд."
           >
-            <RefreshCw size={16} className={restarting ? 'animate-spin' : ''} />
-            {restarting ? 'Перезапуск...' : 'Перезапустить панель'}
-          </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="gap-2"
+              disabled={restarting}
+              onClick={handleRestart}
+            >
+              <RefreshCw size={16} className={restarting ? 'animate-spin' : ''} />
+              {restarting ? 'Перезапуск...' : 'Перезапустить панель'}
+            </Button>
+          </SettingsDangerZone>
         </CardContent>
       </Card>
     </div>

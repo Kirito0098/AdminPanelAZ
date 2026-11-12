@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw, Wrench } from 'lucide-react'
+import { ClipboardCheck, RefreshCw, Wrench } from 'lucide-react'
 import { ApiError, applyServerConfig, getServerConfigPreview } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import { SettingsToolbar } from '@/components/settings/SettingsChrome'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
@@ -35,7 +41,7 @@ function ItemDetail({ detail }: { detail: ServerConfigDetail }) {
   return (
     <div className="mt-1.5 space-y-2">
       {diff ? (
-        <div className="overflow-x-auto rounded-md border bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed">
+        <div className="overflow-x-auto rounded-lg border bg-muted/40 px-3 py-2 font-mono text-xs leading-relaxed">
           <DetailLines sign="−" lines={detail.removed} className="whitespace-pre text-destructive" />
           <DetailLines sign="+" lines={detail.added} className="whitespace-pre text-emerald-600 dark:text-emerald-400" />
         </div>
@@ -167,9 +173,17 @@ export default function ServerConfigTab() {
       />
 
       {rows.length > 0 ? (
-        <Card className="shadow-sm">
-          <CardContent className="space-y-2 pt-6">
-            <h4 className="text-sm font-semibold">Итог</h4>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <ClipboardCheck size={16} aria-hidden />
+              </span>
+              Итог применения
+            </CardTitle>
+            <CardDescription>Результат последнего запуска — шаг за шагом</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-2">
             <ul className="space-y-1.5">
               {rows.map((row) => (
                 <li key={row.step} className="flex flex-wrap items-center gap-2 text-sm">
@@ -192,10 +206,21 @@ export default function ServerConfigTab() {
       ) : null}
 
       {sections ? (
-        <Card className="shadow-sm">
-          <CardContent className="space-y-5 pt-6">
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Wrench size={16} aria-hidden />
+              </span>
+              План изменений
+            </CardTitle>
+            <CardDescription>Что добавится, изменится и останется как есть</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-5">
             {pending === 0 ? (
-              <p className="text-sm">Всё, что можно обновить отсюда, уже в актуальном состоянии.</p>
+              <p className="rounded-lg border border-dashed border-border/80 px-3 py-3 text-sm text-muted-foreground">
+                Всё, что можно обновить отсюда, уже в актуальном состоянии.
+              </p>
             ) : null}
             <Section title="Добавится" items={sections.add} />
             <Section
