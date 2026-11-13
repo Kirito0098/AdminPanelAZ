@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import { CloudDownload, Search } from 'lucide-react'
+import { CloudDownload } from 'lucide-react'
+import ProviderFilterBar from '@/components/routing/ProviderFilterBar'
+import { filterProviders } from '@/components/routing/providerFilters'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
 import type { CidrDbStatus, CidrProviderInfo } from '@/types'
 import {
@@ -14,8 +15,8 @@ import {
   statusLabel,
 } from './utils'
 
-const CATEGORY_FILTERS = ['all', 'cdn', 'cloud', 'hosting'] as const
-type CategoryFilter = (typeof CATEGORY_FILTERS)[number]
+/** Фиксированный набор чипов категорий — как в фильтре до объединения. */
+const CATEGORY_CHIPS = ['cdn', 'cloud', 'hosting'] as const
 
 const STATUS_RING: Record<ReturnType<typeof providerStatusTone>, string> = {
   ok: 'border-emerald-500/30',
@@ -52,8 +53,8 @@ export default function ProviderFileSelection({
   onRefreshOne,
   showQuickIngest = false,
 }: ProviderFileSelectionProps) {
-  const [search, setSearch] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>('all')
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState('all')
 
   const selectedSet = new Set(selectedFiles)
   const allFilenames = providers.map((p) => p.filename)
@@ -66,6 +67,8 @@ export default function ProviderFileSelection({
     }
   }
 
+  // Действия ниже работают по полному набору провайдеров, а не по отфильтрованному:
+  // «Все (N)» и «Ошибки (N)» показывают те же числа, что и выбирают.
   const selectAll = () => onSelectedFilesChange([...allFilenames])
   const selectNone = () => onSelectedFilesChange([])
   const selectFailed = () => {
@@ -75,32 +78,35 @@ export default function ProviderFileSelection({
     onSelectedFilesChange(failed)
   }
 
-  const selectByCategory = (category: CategoryFilter) => {
-    if (category === 'all') {
+  const selectByCategory = (target: string) => {
+    if (target === 'all') {
       selectAll()
       return
     }
-    onSelectedFilesChange(providers.filter((p) => p.category === category).map((p) => p.filename))
+    onSelectedFilesChange(providers.filter((p) => p.category === target).map((p) => p.filename))
   }
 
   const failedCount = providers.filter(
     (p) => cidrDb?.providers?.[p.filename]?.refresh_status === 'error',
   ).length
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return providers.filter((p) => {
-      if (categoryFilter !== 'all' && p.category !== categoryFilter) return false
-      if (!q) return true
-      const slug = providerSlug(p.filename)
-      return (
-        p.name.toLowerCase().includes(q) ||
-        slug.includes(q) ||
-        p.category.toLowerCase().includes(q) ||
-        providerCategoryLabel(p.category).toLowerCase().includes(q)
-      )
-    })
-  }, [providers, search, categoryFilter])
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const provider of providers) {
+      counts[provider.category] = (counts[provider.category] ?? 0) + 1
+    }
+    return counts
+  }, [providers])
+
+  const filtered = useMemo(
+    () =>
+      filterProviders(providers, {
+        query,
+        category,
+        tagsOf: (provider) => cidrDb?.providers?.[provider.filename]?.tags,
+      }),
+    [providers, cidrDb, query, category],
+  )
 
   const selectedCidrTotal = useMemo(
     () =>
@@ -136,60 +142,34 @@ export default function ProviderFileSelection({
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-        <div className="relative flex-1 max-w-md">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Поиск: Akamai, cloud, hosting…"
-            className="h-9 pl-9"
-            disabled={disabled}
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {CATEGORY_FILTERS.map((cat) => {
-            const label = cat === 'all' ? 'Все' : providerCategoryLabel(cat)
-            const count =
-              cat === 'all'
-                ? providers.length
-                : providers.filter((p) => p.category === cat).length
-            const active = categoryFilter === cat
-            return (
-              <button
-                key={cat}
-                type="button"
-                disabled={disabled}
-                onClick={() => setCategoryFilter(cat)}
-                aria-pressed={active}
-                className={cn(
-                  'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
-                  active
-                    ? 'border-primary bg-primary text-primary-foreground'
-                    : 'border-border bg-muted/30 text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-                  disabled && 'opacity-50 pointer-events-none',
-                )}
-              >
-                {label} ({count})
-              </button>
-            )
-          })}
-          {categoryFilter !== 'all' && (
+      <ProviderFilterBar
+        query={query}
+        onQueryChange={setQuery}
+        category={category}
+        onCategoryChange={setCategory}
+        categories={CATEGORY_CHIPS}
+        categoryCounts={categoryCounts}
+        resultCount={filtered.length}
+        totalCount={providers.length}
+        disabled={disabled}
+        placeholder="Поиск: Akamai, cloud, hosting…"
+        extra={
+          category !== 'all' ? (
             <Button
               type="button"
               size="sm"
               variant="ghost"
               className="h-7 px-2 text-xs"
               disabled={disabled}
-              title={`Выбрать только категорию «${providerCategoryLabel(categoryFilter)}»`}
-              aria-label={`Выбрать только категорию «${providerCategoryLabel(categoryFilter)}»`}
-              onClick={() => selectByCategory(categoryFilter)}
+              title={`Выбрать только категорию «${providerCategoryLabel(category)}»`}
+              aria-label={`Выбрать только категорию «${providerCategoryLabel(category)}»`}
+              onClick={() => selectByCategory(category)}
             >
-              Только «{providerCategoryLabel(categoryFilter)}»
+              Только «{providerCategoryLabel(category)}»
             </Button>
-          )}
-        </div>
-      </div>
+          ) : undefined
+        }
+      />
 
       <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
         {filtered.map((provider) => {

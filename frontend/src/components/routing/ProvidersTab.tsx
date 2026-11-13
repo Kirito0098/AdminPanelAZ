@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Route, Search, Pencil, Play } from 'lucide-react'
 import ProviderEditorDialog from '@/components/routing/ProviderEditorDialog'
+import ProviderFilterBar, { type ProviderFilterStatusOption } from '@/components/routing/ProviderFilterBar'
+import { filterProviders, type ProviderQuickFilter } from '@/components/routing/providerFilters'
 import { ROUTING_TAB_UPDATE, STAGE_BUILD, STAGE_DEPLOY } from '@/components/routing/routingLabels'
 import type { RoutingTab, RoutingWorkflowState } from '@/components/routing/routingWorkflow'
 import { hasControllerArtifact, providerNeedsCompile, providerNeedsDeploy } from '@/components/routing/routingWorkflow'
@@ -8,15 +10,7 @@ import StatusPanel from '@/components/noc/StatusPanel'
 import EmptyState from '@/components/ui/EmptyState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import type { CidrDbStatus, CidrProviderInfo, Node } from '@/types'
@@ -36,7 +30,13 @@ interface ProvidersTabProps {
   workflow?: RoutingWorkflowState
 }
 
-type QuickFilter = 'all' | 'enabled' | 'disabled' | 'errors' | 'needs_deploy' | 'needs_compile'
+const STATUS_OPTIONS: readonly ProviderFilterStatusOption[] = [
+  { value: 'all', label: 'Все статусы' },
+  { value: 'ok', label: 'OK' },
+  { value: 'partial', label: 'Частично' },
+  { value: 'error', label: 'Ошибка' },
+  { value: 'never', label: 'Нет данных' },
+]
 
 function controllerCidrCount(cidrDb: CidrDbStatus | null, filename: string): number | null {
   const artifact = cidrDb?.compile_artifacts?.[filename]
@@ -202,10 +202,10 @@ export default function ProvidersTab({
   onApplyRouting,
   workflow,
 }: ProvidersTabProps) {
-  const [search, setSearch] = useState('')
+  const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
-  const [quickFilter, setQuickFilter] = useState<QuickFilter>('all')
+  const [quickFilter, setQuickFilter] = useState<ProviderQuickFilter>('all')
   const [editorFilename, setEditorFilename] = useState<string | null>(null)
   const [editorName, setEditorName] = useState('')
 
@@ -213,6 +213,14 @@ export default function ProvidersTab({
     () => [...new Set(providers.map((p) => p.category))].sort(),
     [providers],
   )
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const provider of providers) {
+      counts[provider.category] = (counts[provider.category] ?? 0) + 1
+    }
+    return counts
+  }, [providers])
 
   const needsCompile = (workflow?.pendingCompileCount ?? 0) > 0
   const needsDeploy = (workflow?.pendingDeployCount ?? 0) > 0
@@ -234,31 +242,20 @@ export default function ProvidersTab({
     return { enabled, disabled, errors, needsDeployCount, needsCompileCount }
   }, [providers, cidrDb])
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return providers.filter((p) => {
-      const dbMeta = cidrDb?.providers?.[p.filename]
-      const dbStatus = dbMeta?.refresh_status ?? 'never'
-
-      if (statusFilter !== 'all' && dbStatus !== statusFilter) return false
-      if (categoryFilter !== 'all' && p.category !== categoryFilter) return false
-
-      if (quickFilter === 'enabled' && !p.enabled) return false
-      if (quickFilter === 'disabled' && p.enabled) return false
-      if (quickFilter === 'errors' && dbStatus !== 'error') return false
-      if (quickFilter === 'needs_deploy' && !providerNeedsDeploy(cidrDb, p)) return false
-      if (quickFilter === 'needs_compile' && !providerNeedsCompile(cidrDb, p)) return false
-
-      if (!q) return true
-      const slug = providerSlug(p.filename)
-      return (
-        p.name.toLowerCase().includes(q) ||
-        slug.includes(q) ||
-        p.category.toLowerCase().includes(q) ||
-        providerCategoryLabel(p.category).toLowerCase().includes(q)
-      )
-    })
-  }, [providers, cidrDb, search, statusFilter, categoryFilter, quickFilter])
+  const filtered = useMemo(
+    () =>
+      filterProviders(providers, {
+        query,
+        category: categoryFilter,
+        status: statusFilter,
+        quickFilter,
+        statusOf: (provider) => cidrDb?.providers?.[provider.filename]?.refresh_status,
+        tagsOf: (provider) => cidrDb?.providers?.[provider.filename]?.tags,
+        needsCompile: (provider) => providerNeedsCompile(cidrDb, provider),
+        needsDeploy: (provider) => providerNeedsDeploy(cidrDb, provider),
+      }),
+    [providers, cidrDb, query, statusFilter, categoryFilter, quickFilter],
+  )
 
   if (providers.length === 0) {
     return (
@@ -275,7 +272,7 @@ export default function ProvidersTab({
   const enabledCount = workflow?.enabledCount ?? providers.filter((p) => p.enabled).length
   const showApplySection = !readonly && onNodeCount > 0 && !needsDeploy
 
-  const quickFilters: Array<{ id: QuickFilter; label: string; count?: number }> = [
+  const quickFilters: Array<{ id: ProviderQuickFilter; label: string; count?: number }> = [
     { id: 'all', label: 'Все', count: providers.length },
     { id: 'enabled', label: 'Включённые', count: quickFilterCounts.enabled },
     { id: 'disabled', label: 'Выключенные', count: quickFilterCounts.disabled },
@@ -430,43 +427,19 @@ export default function ProvidersTab({
             })}
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-            <div className="relative w-full min-w-0 sm:max-w-sm sm:flex-1">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Поиск по имени или категории…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full sm:w-[160px]">
-                <SelectValue placeholder="Статус БД" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все статусы</SelectItem>
-                <SelectItem value="ok">OK</SelectItem>
-                <SelectItem value="partial">Частично</SelectItem>
-                <SelectItem value="error">Ошибка</SelectItem>
-                <SelectItem value="never">Нет данных</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-full sm:w-[160px]">
-                <SelectValue placeholder="Категория" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все категории</SelectItem>
-                {categories.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {providerCategoryLabel(c)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <span className="text-xs text-muted-foreground">Показано: {filtered.length}</span>
-          </div>
+          <ProviderFilterBar
+            query={query}
+            onQueryChange={setQuery}
+            category={categoryFilter}
+            onCategoryChange={setCategoryFilter}
+            categories={categories}
+            categoryCounts={categoryCounts}
+            status={statusFilter}
+            onStatusChange={setStatusFilter}
+            statusOptions={STATUS_OPTIONS}
+            resultCount={filtered.length}
+            totalCount={providers.length}
+          />
 
           <p className="text-[11px] text-muted-foreground">
             CIDR: <strong>БД</strong> — SQLite на контроллере · <strong>Контр.</strong> — собранный
