@@ -33,15 +33,27 @@ export default function RoutingOverviewTab({
   }, [budgetVersion])
 
   const budgetFromArtifacts = routeBudget?.source === 'artifacts'
-  const budgetSourceLabel = budgetFromArtifacts
-    ? 'По собранным файлам на контроллере'
-    : 'По последней оценке обновления CIDR'
-  const budgetSourceHint = budgetFromArtifacts
-    ? 'Лимит и занятость посчитаны по AP-*-include-ips.txt на контроллере'
-    : 'Значения из последней задачи оценки (dry-run) обновления CIDR'
-  const budgetSourceTone = budgetFromArtifacts
-    ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
-    : 'text-muted-foreground'
+  const budgetFromNode = routeBudget?.source === 'node'
+  const budgetSourceLabel = budgetFromNode
+    ? 'По фактическим маршрутам узла'
+    : budgetFromArtifacts
+      ? 'По собранным файлам на контроллере'
+      : 'По последней оценке обновления CIDR'
+  const budgetSourceHint = budgetFromNode
+    ? 'route-ips.txt на узле: включённые AP-*, свой include-ips.txt и встроенные списки'
+    : budgetFromArtifacts
+      ? 'Лимит и занятость посчитаны по AP-*-include-ips.txt на контроллере'
+      : 'Значения из последней задачи оценки (dry-run) обновления CIDR'
+  const budgetSourceTone = budgetFromNode
+    ? 'border-sky-500/40 text-sky-700 dark:text-sky-300'
+    : budgetFromArtifacts
+      ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+      : 'text-muted-foreground'
+  const budgetSourceBadge = budgetFromNode ? 'узел' : budgetFromArtifacts ? 'артефакты' : 'оценка'
+  const budgetOverLimit =
+    routeBudget?.limit != null && (routeBudget.used ?? 0) > routeBudget.limit
+  const budgetPanelDiffers =
+    routeBudget?.panel_used != null && routeBudget.panel_used !== routeBudget.used
 
   return (
     <div className="space-y-6">
@@ -50,15 +62,31 @@ export default function RoutingOverviewTab({
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="text-sm font-medium">Бюджет маршрутов OpenVPN</div>
+              {budgetFromNode && (
+                <div className="text-sm">
+                  на узле {routeBudget.used} из {routeBudget.limit}, свободно{' '}
+                  {routeBudget.remaining ?? 0}
+                </div>
+              )}
               <div className="text-xs text-muted-foreground">
                 {budgetSourceLabel}
                 {routeBudget.finished_at ? ` · ${formatDt(routeBudget.finished_at)}` : ''}
               </div>
+              {budgetPanelDiffers && (
+                <div className="text-xs text-muted-foreground">
+                  панель собрала {routeBudget.panel_used}
+                </div>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <Badge variant="outline" className={`text-[10px] ${budgetSourceTone}`} title={budgetSourceHint}>
-                {budgetFromArtifacts ? 'артефакты' : 'оценка'}
+                {budgetSourceBadge}
               </Badge>
+              {budgetOverLimit && (
+                <Badge variant="destructive" title="Фактическое число маршрутов больше лимита OpenVPN">
+                  лимит превышен
+                </Badge>
+              )}
               <Badge variant={routeBudget.remaining === 0 ? 'destructive' : 'secondary'}>
                 осталось {routeBudget.remaining ?? 0} из {routeBudget.limit}
               </Badge>

@@ -707,10 +707,14 @@ export interface GeoIpStatus {
 
 export interface RouteBudgetInfo {
   available: boolean
-  /** estimate — из задачи оценки, artifacts — по AP-*-include-ips.txt на контроллере. */
-  source?: 'estimate' | 'artifacts' | null
+  /** node — фактический route-ips.txt узла, estimate — из задачи оценки, artifacts — по AP-*-include-ips.txt на контроллере. */
+  source?: 'node' | 'estimate' | 'artifacts' | null
   limit?: number | null
   used?: number | null
+  /** Маршруты из route-ips.txt на узле (source === 'node'). */
+  node_used?: number | null
+  /** Сколько собрала панель по артефактам контроллера. */
+  panel_used?: number | null
   remaining?: number | null
   original_total?: number | null
   warning?: string | null

@@ -32,6 +32,19 @@ class _FakeAdapter:
         return {"providers": [], "route_stats": {}}
 
 
+class _FakeNodeAdapter:
+    """Node adapter returning route result files or raising like an offline node."""
+
+    def __init__(self, files: list[dict] | None = None, error: Exception | None = None) -> None:
+        self._files = files or []
+        self._error = error
+
+    def get_route_result_files(self) -> dict:
+        if self._error is not None:
+            raise self._error
+        return {"files": self._files}
+
+
 @pytest.fixture
 def list_dir(tmp_path, monkeypatch):
     root = tmp_path / "list"
@@ -110,6 +123,126 @@ def test_budget_unavailable_without_estimate_and_artifacts(tmp_path, monkeypatch
 
     assert payload["available"] is False
     assert payload["message"]
+
+
+def test_budget_source_is_node_route_ips(list_dir, monkeypatch):
+    monkeypatch.setattr(route_budget, "_get_openvpn_route_total_cidr_limit", lambda: 900)
+    monkeypatch.setattr(route_budget, "find_last_completed_cidr_task", lambda _task_type: None)
+    _write(list_dir / CLOUDFLARE, "1.1.1.0/24", "2.2.2.0/24")
+    _write(list_dir / "akamai-ips.txt", "3.3.3.0/24")
+    adapter = _FakeNodeAdapter(
+        [
+            {"key": "route_ips", "filename": "route-ips.txt", "exists": True, "line_count": 254},
+            {"key": "result_ips", "filename": "result-ips.txt", "exists": True, "line_count": 999},
+        ]
+    )
+
+    payload = route_budget.build_route_budget_payload(adapter=adapter)
+
+    assert payload["available"] is True
+    assert payload["source"] == "node"
+    assert payload["used"] == 254
+    assert payload["panel_used"] == 3
+    assert payload["limit"] == 900
+    assert payload["remaining"] == 646
+    assert payload["original_total"] is None
+    assert payload["warning"] is None
+
+
+def test_budget_falls_back_when_node_raises(list_dir, monkeypatch):
+    monkeypatch.setattr(route_budget, "_get_openvpn_route_total_cidr_limit", lambda: 100)
+    monkeypatch.setattr(
+        route_budget,
+        "find_last_completed_cidr_task",
+        lambda _task_type: {
+            "task_id": "t3",
+            "status": "completed",
+            "finished_at": "2026-01-01T00:00:00+00:00",
+            "result": {
+                "global_route_optimization": {
+                    "strategy": "none",
+                    "limit": 50,
+                    "original_total_cidr_count": 40,
+                    "compressed_total_cidr_count": 40,
+                    "warning": None,
+                }
+            },
+        },
+    )
+    _write(list_dir / CLOUDFLARE, "1.1.1.0/24")
+
+    payload = route_budget.build_route_budget_payload(
+        adapter=_FakeNodeAdapter(error=RuntimeError("node offline"))
+    )
+
+    assert payload["source"] == "estimate"
+    assert payload["used"] == 40
+    assert payload["panel_used"] == 1
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        [],
+        [{"key": "result_ips", "filename": "result-ips.txt", "exists": True, "line_count": 5}],
+        [{"key": "route_ips", "filename": "route-ips.txt", "exists": False, "line_count": 0}],
+    ],
+)
+def test_budget_falls_back_without_node_route_ips(list_dir, monkeypatch, files):
+    monkeypatch.setattr(route_budget, "_get_openvpn_route_total_cidr_limit", lambda: 100)
+    monkeypatch.setattr(route_budget, "find_last_completed_cidr_task", lambda _task_type: None)
+    _write(list_dir / CLOUDFLARE, "1.1.1.0/24", "2.2.2.0/24")
+
+    payload = route_budget.build_route_budget_payload(adapter=_FakeNodeAdapter(files))
+
+    assert payload["source"] == "artifacts"
+    assert payload["used"] == 2
+    assert payload["panel_used"] == 2
+
+
+def test_budget_node_warns_when_over_limit(list_dir, monkeypatch):
+    monkeypatch.setattr(route_budget, "_get_openvpn_route_total_cidr_limit", lambda: 900)
+    monkeypatch.setattr(route_budget, "find_last_completed_cidr_task", lambda _task_type: None)
+    _write(list_dir / CLOUDFLARE, "1.1.1.0/24")
+    adapter = _FakeNodeAdapter(
+        [{"key": "route_ips", "filename": "route-ips.txt", "exists": True, "line_count": 950}]
+    )
+
+    payload = route_budget.build_route_budget_payload(adapter=adapter)
+
+    assert payload["source"] == "node"
+    assert payload["remaining"] == 0
+    assert payload["warning"]
+
+
+def test_budget_without_adapter_keeps_estimate_priority(list_dir, monkeypatch):
+    monkeypatch.setattr(
+        route_budget,
+        "find_last_completed_cidr_task",
+        lambda _task_type: {
+            "task_id": "t4",
+            "status": "completed",
+            "finished_at": "2026-01-01T00:00:00+00:00",
+            "result": {
+                "global_route_optimization": {
+                    "strategy": "none",
+                    "limit": 50,
+                    "original_total_cidr_count": 40,
+                    "compressed_total_cidr_count": 40,
+                    "warning": None,
+                }
+            },
+        },
+    )
+    _write(list_dir / CLOUDFLARE, "1.1.1.0/24", "2.2.2.0/24")
+
+    payload = route_budget.build_route_budget_payload()
+
+    assert payload["source"] == "estimate"
+    assert payload["used"] == 40
+    assert payload["remaining"] == 10
+    assert payload["panel_used"] == 2
+    assert payload.get("node_used") is None
 
 
 def test_total_route_limit_keeps_meta_when_under_limit():

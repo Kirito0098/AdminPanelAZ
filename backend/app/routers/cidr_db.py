@@ -1,5 +1,6 @@
 """CIDR database pipeline API (download, antifilter, generate)."""
 
+import logging
 import os
 import re
 from pathlib import Path
@@ -51,6 +52,8 @@ from app.services.notify_time import get_client_timezone_from_request
 
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/routing/cidr-db", tags=["cidr-db"])
 
@@ -698,8 +701,13 @@ def antifilter_refresh(user: User = Depends(require_admin), db: Session = Depend
 
 
 @router.get("/route-budget", response_model=RouteBudgetInfo)
-def route_budget(_: User = Depends(require_admin)):
-    return RouteBudgetInfo(**build_route_budget_payload())
+def route_budget(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    try:
+        adapter = get_active_adapter(db)
+    except Exception as exc:  # node offline - fall back to estimate/artifacts
+        logger.warning("route budget: active node adapter unavailable: %s", exc)
+        adapter = None
+    return RouteBudgetInfo(**build_route_budget_payload(adapter=adapter))
 
 
 @router.post("/analyze-dpi")

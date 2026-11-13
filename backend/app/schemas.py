@@ -1470,6 +1470,8 @@ class RouteBudgetInfo(BaseModel):
     source: str | None = None
     limit: int | None = None
     used: int | None = None
+    node_used: int | None = None
+    panel_used: int | None = None
     remaining: int | None = None
     original_total: int | None = None
     warning: str | None = None
