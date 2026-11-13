@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.database import SessionLocal
 from app.services.app_setting_store import _get_setting, _set_setting
+from app.services.cidr.cidr_tasks import find_active_pipeline_task
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.cidr.pipeline.deploy import compute_artifact_stamp
 from app.services.cidr.pipeline.orchestrator import run_compile, run_ingest, run_multi_deploy
@@ -121,8 +122,18 @@ def _summarize_deploy_result(result: dict[str, Any]) -> dict[str, Any]:
 
 def run_nightly_cidr_pipeline(db: Session, settings: Settings) -> dict[str, Any]:
     """Run ingest and optionally compile + deploy for the scheduled cron."""
-    svc = CidrDbUpdaterService(db=db)
     summary: dict[str, Any] = {"refresh": None, "compile": None, "deploy": None}
+
+    active = find_active_pipeline_task()
+    if active:
+        logger.info(
+            "CIDR DB scheduler: skipped, pipeline busy with %s",
+            active.get("task_type") or "unknown",
+        )
+        summary["skipped"] = "active_task"
+        return summary
+
+    svc = CidrDbUpdaterService(db=db)
 
     logger.info("CIDR DB scheduler: starting scheduled refresh")
     refresh_result = run_ingest(db, triggered_by="cron")
@@ -270,6 +281,9 @@ def _run_scheduled_refresh(settings: Settings) -> None:
             return
         started_at = datetime.now(timezone.utc)
         summary = run_nightly_cidr_pipeline(db, settings)
+        if summary.get("skipped"):
+            logger.info("CIDR DB scheduler: run skipped (%s)", summary["skipped"])
+            return
         refresh_status = str((summary.get("refresh") or {}).get("status") or "")
         if refresh_status in ("ok", "partial"):
             mark_cron_run(db, started_at)

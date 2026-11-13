@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   applyRouting,
   deployCidrToNode,
+  estimateCidrFromDb,
   generateCidrFromDb,
   getAntifilterStatus,
   getCidrDbStatus,
@@ -15,12 +16,12 @@ import {
   previewCidrDeploy,
   rollbackCidrFromBackup,
   addCustomCidrProviderEntries,
-  ApiError,
 } from '@/api/client'
 import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
+import { createLatestRequest } from '@/lib/latestRequest'
 import { usePipelineTaskPoll } from '@/components/routing/usePipelineTaskPoll'
 import type {
   AntifilterStatus,
@@ -42,7 +43,6 @@ function errorMessage(err: unknown, fallback: string): string {
 export type ConfirmAction =
   | 'apply-doall'
   | 'deploy-only'
-  | 'generate-doall'
   | 'generate-only'
   | 'rollback-cidr'
   | 'sync-providers'
@@ -51,7 +51,7 @@ export type ConfirmAction =
 export function useRoutingPage() {
   const { activeNode, activeNodeHa, loading: nodeLoading } = useNode()
   const haReplicaReadonly = activeNodeHa?.role === 'replica'
-  const { success, error: notifyError } = useNotifications()
+  const { success, error: notifyError, warning: notifyWarning } = useNotifications()
   const {
     startGlobal,
     doneGlobal,
@@ -75,7 +75,9 @@ export function useRoutingPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [actionLoading, setActionLoading] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(false)
-  const [countdown, setCountdown] = useState(REFRESH_INTERVAL)
+  // Only the deadline lives in the hook: the ticking seconds are rendered by RoutingPageHeader,
+  // so a 1 Hz counter no longer re-renders the whole page tree.
+  const [nextRefreshAt, setNextRefreshAt] = useState<number | null>(null)
 
   const [filterAntifilter, setFilterAntifilter] = useState(false)
   const [deployAllOnline, setDeployAllOnline] = useState(false)
@@ -89,31 +91,29 @@ export function useRoutingPage() {
   const pendingRollbackStampRef = useRef<string | null>(null)
   const [customWizardOpen, setCustomWizardOpen] = useState(false)
   const [customWizardLoading, setCustomWizardLoading] = useState(false)
+  /** Растёт после каждой завершённой задачи пайплайна: по нему UI перезапрашивает бюджет маршрутов. */
+  const [lastTaskFinishedAt, setLastTaskFinishedAt] = useState(0)
   const trackedTaskIdRef = useRef<string | null>(null)
   const pipelinePollingRef = useRef(false)
   const loadRef = useRef<(opts?: { initial?: boolean; manual?: boolean; fullMeta?: boolean }) => Promise<void>>(
     async () => {},
   )
   const loadPipelineMetaRef = useRef<(opts?: { light?: boolean }) => Promise<void>>(async () => {})
-  const rateLimitNotifiedRef = useRef(false)
+  // Answers only apply to the node they were requested for, and only while no newer request is out.
+  const [latestNodeRequest] = useState(() => createLatestRequest<number | null>(null))
+  const inFlightRef = useRef<{ scope: number | null; full: boolean; promise: Promise<void> } | null>(null)
+  const refreshDueRef = useRef(false)
 
   useEffect(() => {
     pipelinePollingRef.current = pipelinePolling
   }, [pipelinePolling])
 
-  const notifyLoadError = useCallback(
-    (err: unknown, fallback: string) => {
-      if (err instanceof ApiError && err.status === 429) {
-        if (!rateLimitNotifiedRef.current) {
-          rateLimitNotifiedRef.current = true
-          notifyError('Слишком много запросов. Подождите минуту и обновите страницу.')
-        }
-        return
-      }
-      notifyError(errorMessage(err, fallback))
-    },
-    [notifyError],
-  )
+  // Single HA gate for every routing mutation (pipeline, inline, background, clear, custom provider).
+  const guardMutation = useCallback((): boolean => {
+    if (!haReplicaReadonly) return false
+    notifyError('HA replica: изменения маршрутизации только на primary')
+    return true
+  }, [haReplicaReadonly, notifyError])
 
   const attachPipelineTask = useCallback(
     (
@@ -131,6 +131,7 @@ export function useRoutingPage() {
         onComplete: (task) => {
           trackedTaskIdRef.current = null
           setPendingPipelineAction(null)
+          setLastTaskFinishedAt(Date.now())
           success(okMsg)
           if (task.task_type === 'cidr_rollback') {
             const stamp =
@@ -144,9 +145,7 @@ export function useRoutingPage() {
         onError: (task, message) => {
           trackedTaskIdRef.current = null
           setPendingPipelineAction(null)
-          if (!message.includes('Слишком много запросов')) {
-            notifyError(task?.error || task?.message || message)
-          }
+          notifyError(task?.error || task?.message || message)
           void loadPipelineMetaRef.current()
         },
       })
@@ -167,10 +166,13 @@ export function useRoutingPage() {
     [attachPipelineTask],
   )
 
-  const loadPipelineMeta = useCallback(async (opts: { light?: boolean } = {}) => {
+  const loadPipelineMeta = useCallback(async (opts: { light?: boolean; guard?: () => boolean } = {}) => {
+    const guard = opts.guard
+    const stale = () => guard !== undefined && !guard()
     try {
       if (opts.light) {
         const summary = await getCidrDbStatusSummary()
+        if (stale()) return
         setCidrDb((prev) =>
           prev
             ? {
@@ -191,6 +193,7 @@ export function useRoutingPage() {
         return
       }
       const [dbStatus, afStatus] = await Promise.all([getCidrDbStatus(), getAntifilterStatus()])
+      if (stale()) return
       setCidrDb(dbStatus)
       setAntifilter(afStatus)
       if (dbStatus.active_task) {
@@ -209,35 +212,68 @@ export function useRoutingPage() {
   // Pipeline progress comes from usePipelineTaskPoll (5s). Do not dual-poll
   // /cidr-db/status/summary every 10s while a task is already tracked.
 
-  const load = useCallback(
-    async (opts: { initial?: boolean; manual?: boolean; fullMeta?: boolean } = {}) => {
-      const { initial = false, manual = false, fullMeta = false } = opts
+  const startLoad = useCallback(
+    (opts: { initial?: boolean; manual?: boolean; fullMeta?: boolean; scope: number | null }): Promise<void> => {
+      const { initial = false, manual = false, fullMeta = false, scope } = opts
+      const isCurrent = latestNodeRequest.begin(scope)
+      // The shown node is gone (or a newer request took over) — do not even fire the request.
+      if (!isCurrent()) return Promise.resolve()
+      // Auto-refresh: light CIDR meta only (summary). Full ASN/artifacts status
+      // on initial load, manual refresh, and after pipeline completion.
+      const wantFullMeta = fullMeta || initial || manual
+
       if (initial) {
         setLoading(true)
         startGlobal()
       } else if (manual) {
         setRefreshing(true)
       }
-      try {
-        // Auto-refresh: light CIDR meta only (summary). Full ASN/artifacts status
-        // on initial load, manual refresh, and after pipeline completion.
-        const wantFullMeta = fullMeta || initial || manual
-        const [overview] = await Promise.all([
-          getRoutingOverview(),
-          loadPipelineMeta(wantFullMeta ? {} : { light: true }),
-        ])
-        setData(overview)
-        setCountdown(REFRESH_INTERVAL)
-        if (manual) success('Данные маршрутизации обновлены')
-      } catch (err) {
-        notifyLoadError(err, 'Ошибка загрузки маршрутизации')
-      } finally {
-        setLoading(false)
-        setRefreshing(false)
-        if (initial) doneGlobal()
+
+      let tracked: Promise<void> | null = null
+      const run = async () => {
+        try {
+          const [overview] = await Promise.all([
+            getRoutingOverview(),
+            loadPipelineMeta({ ...(wantFullMeta ? {} : { light: true }), guard: isCurrent }),
+          ])
+          if (!isCurrent()) return
+          setData(overview)
+          if (manual) success('Данные маршрутизации обновлены')
+        } catch (err) {
+          if (isCurrent()) notifyError(errorMessage(err, 'Ошибка загрузки маршрутизации'))
+        } finally {
+          if (inFlightRef.current?.promise === tracked) inFlightRef.current = null
+          if (isCurrent()) {
+            // Re-arm the deadline on failure too: a broken request must not retry every tick.
+            setNextRefreshAt(Date.now() + REFRESH_INTERVAL * 1000)
+            setLoading(false)
+            setRefreshing(false)
+            if (initial) doneGlobal()
+          }
+        }
       }
+      tracked = run()
+      inFlightRef.current = { scope, full: wantFullMeta, promise: tracked }
+      return tracked
     },
-    [startGlobal, doneGlobal, notifyLoadError, loadPipelineMeta, success],
+    [startGlobal, doneGlobal, loadPipelineMeta, success, latestNodeRequest],
+  )
+
+  const load = useCallback(
+    (opts: { initial?: boolean; manual?: boolean; fullMeta?: boolean } = {}): Promise<void> => {
+      const { initial = false, manual = false, fullMeta = false } = opts
+      const scope = activeNode?.id ?? null
+      const wantFullMeta = fullMeta || initial || manual
+      const running = inFlightRef.current
+      // Auto-refresh and manual refresh must not hit the endpoint twice. A heavier request
+      // (manual/full meta) waits for the light one instead of being swallowed by it.
+      if (running && running.scope === scope) {
+        if (!wantFullMeta || running.full) return running.promise
+        return running.promise.then(() => startLoad({ initial, manual, fullMeta, scope }))
+      }
+      return startLoad({ initial, manual, fullMeta, scope })
+    },
+    [activeNode?.id, startLoad],
   )
 
   useEffect(() => {
@@ -273,31 +309,47 @@ export function useRoutingPage() {
   )
 
   useEffect(() => {
+    // The shown node changed (or the node list was reloaded): answers of requests started
+    // before it no longer describe the page, so drop them and start a request for the new node.
+    latestNodeRequest.reset(activeNode?.id ?? null)
+    inFlightRef.current = null
     if (nodeLoading) return
     void load({ initial: true })
     // Reload only when active node changes, not when load callback identity changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeLoading, activeNode?.id])
+  }, [nodeLoading, activeNode?.id, latestNodeRequest])
+
+  // Enabling auto-refresh arms the first deadline; later loads re-arm it themselves.
+  useEffect(() => {
+    if (!autoRefresh) return
+    setNextRefreshAt((prev) =>
+      prev !== null && prev > Date.now() ? prev : Date.now() + REFRESH_INTERVAL * 1000,
+    )
+  }, [autoRefresh])
 
   useIntervalWhenVisible(
     () => {
-      setCountdown((c) => {
-        if (c <= 1) {
-          load()
-          return REFRESH_INTERVAL
-        }
-        return c - 1
+      if (nextRefreshAt === null || Date.now() < nextRefreshAt) return
+      if (refreshDueRef.current) return
+      refreshDueRef.current = true
+      void load().finally(() => {
+        refreshDueRef.current = false
       })
     },
     1000,
     {
       enabled: autoRefresh,
       onBecomeVisible: () => {
-        setCountdown(REFRESH_INTERVAL)
         void load()
       },
     },
   )
+
+  // A deploy preview describes exactly the targets it was built for: a changed selection
+  // must fetch a new one instead of confirming someone else's diff.
+  useEffect(() => {
+    setDeployPreview(null)
+  }, [deployAllOnline, deployTargetNodeIds, selectedProviderFiles])
 
   const withPipelineAction = async (
     fn: () => Promise<{ task_id: string; message: string }>,
@@ -305,10 +357,7 @@ export function useRoutingPage() {
     stage: PipelineStage,
     ingestKind?: IngestKind,
   ) => {
-    if (haReplicaReadonly) {
-      notifyError('HA replica: изменения маршрутизации только на primary')
-      return
-    }
+    if (guardMutation()) return
     setActionLoading(true)
     try {
       const resp = await fn()
@@ -354,15 +403,23 @@ export function useRoutingPage() {
     await runRefreshCidrDb(undefined, { retryFailedMode: 'last' })
   }
 
+  /** Dry-run: пересчитать бюджет маршрутов по текущей БД, файлы на узлах не меняются. */
+  const estimateCidr = async () => {
+    const regions = resolveSelectedProviderPayload()
+    if (regions === undefined) return
+    await withPipelineAction(
+      () => estimateCidrFromDb({ regions, filter_by_antifilter: filterAntifilter }),
+      'Оценка бюджета маршрутов обновлена',
+      2,
+    )
+  }
+
   const withAction = async (
     fn: () => Promise<unknown>,
     okMsg: string,
     progressLabel = 'Выполнение операции...',
   ) => {
-    if (haReplicaReadonly) {
-      notifyError('HA replica: изменения маршрутизации только на primary')
-      return
-    }
+    if (guardMutation()) return
     setActionLoading(true)
     try {
       await withInline(fn, progressLabel)
@@ -379,10 +436,7 @@ export function useRoutingPage() {
     fn: () => Promise<{ task_id: string; message?: string }>,
     okMsg: string,
   ) => {
-    if (haReplicaReadonly) {
-      notifyError('HA replica: изменения маршрутизации только на primary')
-      return
-    }
+    if (guardMutation()) return
     setActionLoading(true)
     try {
       const resp = await fn()
@@ -412,7 +466,7 @@ export function useRoutingPage() {
         await withBackgroundTask(applyRouting, 'doall + client.sh 7 выполнены')
         break
       case 'sync-providers':
-        await withAction(syncRoutingProviders, 'Синхронизация выполнена', 'Синхронизация провайдеров...')
+        await withBackgroundTask(syncRoutingProviders, 'Синхронизация выполнена')
         break
       case 'generate-only': {
         const regions = resolveSelectedProviderPayload()
@@ -430,23 +484,6 @@ export function useRoutingPage() {
           count > 0 && count < (data?.providers.length ?? count)
             ? `CIDR-файлы собраны (${count} провайдеров)`
             : 'CIDR-файлы собраны на контроллере',
-          2,
-        )
-        break
-      }
-      case 'generate-doall': {
-        const regions = resolveSelectedProviderPayload()
-        if (regions === undefined) return
-        await withPipelineAction(
-          () =>
-            generateCidrFromDb({
-              regions,
-              filter_by_antifilter: filterAntifilter,
-              deploy_after: true,
-              sync_after: true,
-              apply_after: true,
-            }),
-          'Сгенерировано, развёрнуто и применено (doall.sh)',
           2,
         )
         break
@@ -504,6 +541,7 @@ export function useRoutingPage() {
     (!!pipelineTask && ['queued', 'running'].includes(pipelineTask.status))
 
   const clearCidrDbData = async () => {
+    if (guardMutation()) return
     const selected_files = resolveSelectedProviderPayload()
     if (selected_files === undefined) return
     setActionLoading(true)
@@ -544,6 +582,7 @@ export function useRoutingPage() {
     cidrs_text: string
     asns_text: string
   }) => {
+    if (guardMutation()) return
     setCustomWizardLoading(true)
     try {
       const asns = payload.asns_text
@@ -582,7 +621,11 @@ export function useRoutingPage() {
     pipelineBusy,
     autoRefresh,
     setAutoRefresh,
-    countdown,
+    nextRefreshAt,
+    /** Время последней завершённой задачи пайплайна — триггер перезапроса бюджета маршрутов. */
+    lastTaskFinishedAt,
+    /** HA replica: routing is read-only on this node, mutating buttons must be disabled. */
+    readonly: haReplicaReadonly,
     filterAntifilter,
     setFilterAntifilter,
     deployAllOnline,
@@ -599,7 +642,11 @@ export function useRoutingPage() {
     executeConfirm,
     toggleProvider: (filename: string, enabled: boolean, name: string) =>
       withAction(
-        () => toggleRoutingProvider(filename, enabled),
+        async () => {
+          const resp = await toggleRoutingProvider(filename, enabled)
+          if (resp.warnings?.length) notifyWarning(resp.warnings.join('; '))
+          return resp
+        },
         enabled ? `${name} включён` : `${name} отключён`,
         enabled ? `Включение ${name}...` : `Отключение ${name}...`,
       ),
@@ -607,6 +654,7 @@ export function useRoutingPage() {
     refreshCidrDb: () => runRefreshCidrDb(),
     refreshOneProvider,
     retryFailedProviders,
+    estimateCidr,
     refreshAntifilter: () => withPipelineAction(refreshAntifilter, 'Antifilter синхронизирован', 1, 'antifilter'),
     deployCidr: () => setConfirmAction('deploy-only'),
     applyRouting: () => setConfirmAction('apply-doall'),

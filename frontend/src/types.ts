@@ -707,6 +707,8 @@ export interface GeoIpStatus {
 
 export interface RouteBudgetInfo {
   available: boolean
+  /** estimate — из задачи оценки, artifacts — по AP-*-include-ips.txt на контроллере. */
+  source?: 'estimate' | 'artifacts' | null
   limit?: number | null
   used?: number | null
   remaining?: number | null
@@ -981,31 +983,6 @@ export interface TgMiniAwg2Status {
   ifaces_summary: string
   top_traffic: TgMiniAwg2TopTraffic[]
   health_error?: string | null
-}
-
-export interface TgMiniCidrPipelineTask {
-  task_id?: string | number | null
-  task_type?: string | null
-  task_label?: string | null
-  status?: string | null
-  progress_percent?: number | null
-  progress_stage?: string | null
-  message?: string | null
-}
-
-export interface TgMiniCidrStatus {
-  total_cidrs: number
-  last_refresh_status?: string | null
-  last_refresh_finished?: string | null
-  last_refresh_started?: string | null
-  active_task?: string | null
-  pipeline_task?: TgMiniCidrPipelineTask | null
-  providers_loaded?: number | null
-  providers_total?: number | null
-  alerts_count?: number | null
-  has_compile_artifacts?: boolean | null
-  last_compile?: Record<string, unknown> | null
-  last_deploy?: Record<string, unknown> | null
 }
 
 export interface VpnNetworkEnvRow {
@@ -1292,6 +1269,10 @@ interface CidrDeployPreviewFile {
   controller_cidr_count?: number
   node_cidr_count?: number
   diff?: { added: number; removed: number; unchanged: number; changed: boolean }
+  /** AP-…-include-ips.txt на узле и его состояние относительно контроллера. */
+  include_file?: string
+  include_status?: 'in_sync' | 'stale' | 'not_enabled' | 'unknown'
+  include_cidr_count?: number
   error?: string
 }
 
@@ -1305,14 +1286,19 @@ export interface CidrDeployPreviewNode {
   total_added?: number
   total_removed?: number
   files_changed?: number
+  files_stale?: number
+  stale_files?: string[]
   error?: string
 }
 
 export interface CidrDeployPreview {
   success: boolean
   message: string
+  summary?: string
   dry_run?: boolean
   has_changes?: boolean
+  has_stale_includes?: boolean
+  stale_files?: string[]
   artifact_files?: string[]
   controller_artifacts?: Record<string, CidrCompileArtifact>
   per_node?: CidrDeployPreviewNode[]

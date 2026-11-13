@@ -7,20 +7,30 @@ from app.services.cidr.constants import IP_FILES
 from app.services.cidr.line_counts import count_nonempty_lines, remember_line_count
 
 
+def provider_prefix(fname: str) -> str:
+    """Provider slug shared by list file and include file names."""
+    if fname.endswith("-ips.txt"):
+        return fname[: -len("-ips.txt")]
+    if fname.endswith(".txt"):
+        return fname[: -len(".txt")]
+    return fname
+
+
+def masked_include_name(fname: str) -> str:
+    """Node-side include file name of an enabled provider."""
+    return f"AP-{provider_prefix(fname)}-include-ips.txt"
+
+
 class IpManager:
     def __init__(self, list_dir: Path, config_dir: Path):
         self.list_dir = list_dir
         self.config_dir = config_dir
 
     def _provider_prefix(self, fname: str) -> str:
-        if fname.endswith("-ips.txt"):
-            return fname[: -len("-ips.txt")]
-        if fname.endswith(".txt"):
-            return fname[: -len(".txt")]
-        return fname
+        return provider_prefix(fname)
 
     def _masked_include_path(self, fname: str) -> Path:
-        return self.config_dir / f"AP-{self._provider_prefix(fname)}-include-ips.txt"
+        return self.config_dir / masked_include_name(fname)
 
     def _legacy_masked_path(self, fname: str) -> Path:
         return self.config_dir / f"{self._provider_prefix(fname)}-include-ips.txt"

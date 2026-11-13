@@ -148,6 +148,11 @@ class ClientSubnetsPayload(BaseModel):
     alternative_fake_ip: bool
 
 
+class ApplyConfigPayload(BaseModel):
+    # CIDR-only doall: hosts lists are not needed for routing-only changes and cost ~100 MB.
+    ips_only: bool = False
+
+
 class OpenVpnTuningPayload(BaseModel):
     duplicate: bool
     logs: bool
@@ -593,8 +598,10 @@ def write_config(filename: str, payload: ConfigContent, _: None = Depends(verify
 
 
 @app.post("/configs/apply")
-def apply_config(_: None = Depends(verify_api_key)):
-    output = service.apply_config_changes()
+def apply_config(payload: ApplyConfigPayload | None = None, _: None = Depends(verify_api_key)):
+    # Body is optional: an older panel sends no payload and gets the full doall.sh.
+    ips_only = bool(payload.ips_only) if payload is not None else False
+    output = service.apply_config_changes(ips_only=ips_only)
     return {"message": "Настройки применены", "detail": output}
 
 

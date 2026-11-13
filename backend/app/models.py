@@ -59,6 +59,7 @@ DEFAULT_TG_NOTIFY_EVENTS: dict[str, bool] = {
     "node_sync_drift": True,
     "cidr_deploy_failed": True,
     "cidr_ingest_partial": True,
+    "cidr_rollback_failed": True,
     "noc_report": True,
     "alert_rule": True,
     "openvpn_buffer_guard_triggered": True,

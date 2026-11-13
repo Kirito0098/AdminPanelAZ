@@ -1,4 +1,5 @@
 """DB-backed CIDR file generation pipeline."""
+import ipaddress
 import os
 
 from app.services.cidr.constants import IP_FILES
@@ -18,15 +19,36 @@ from app.services.cidr.pipeline.geo import (
 )
 from app.services.cidr.pipeline.parsers import _normalize_cidrs, _render_file_content
 from app.services.cidr.pipeline.route_limits import (
+    _allocate_route_budget,
     _apply_total_route_limit,
-    _normalize_dpi_priority_files,
-    _normalize_priority_min_budget,
 )
 from app.services.cidr.pipeline.file_pipeline import (
     _emit_progress,
     _make_runtime_backup,
-    _snapshot_baseline_if_missing,
 )
+
+
+def _collapse_cidrs(cidrs):
+    """Collapse overlapping/adjacent prefixes (same aggregation as file rendering)."""
+    values = [value for value in (cidrs or []) if value]
+    if not values:
+        return []
+    try:
+        parsed = [ipaddress.ip_network(value, strict=False) for value in values]
+    except (ValueError, TypeError):
+        return list(cidrs)
+    return [str(network) for network in ipaddress.collapse_addresses(parsed)]
+
+
+def _collapse_planned_cidrs(entries):
+    """Collapse per-entry prefixes before route budgeting.
+
+    Overlapping prefixes must not inflate the route count, otherwise the global
+    limit cuts more routes than necessary. Rendering collapses again (idempotent).
+    """
+    for item in entries:
+        item["cidrs"] = _collapse_cidrs(item.get("cidrs"))
+
 
 def update_cidr_files_from_db(
     selected_files=None,
@@ -91,7 +113,6 @@ def _update_cidr_files_from_db_impl(
     from app.models import ProviderCidr, ProviderMeta
 
     _emit_progress(progress_callback, 2, "Подготовка: чтение данных из БД")
-    _snapshot_baseline_if_missing()
 
     # Load antifilter index once (if requested) before processing files
     af_index = None
@@ -257,6 +278,7 @@ def _update_cidr_files_from_db_impl(
         _emit_progress(progress_callback, progress_done, f"Файл {file_name}: {len(cidrs)} CIDR из БД")
 
     effective_limit = int(total_cidr_limit) if total_cidr_limit and int(total_cidr_limit) > 0 else _get_openvpn_route_total_cidr_limit()
+    _collapse_planned_cidrs(planned_updates)
     planned_updates, global_route_optimization_meta = _apply_total_route_limit(
         planned_updates,
         effective_limit,
@@ -274,6 +296,15 @@ def _update_cidr_files_from_db_impl(
         cidrs = item.get("cidrs") or []
         source_name = item.get("source") or "db"
         final_counts_by_file[file_name] = len(cidrs)
+
+        if not cidrs:
+            # Do not overwrite the last-good artifact with an empty (header-only) file.
+            file_quality = quality_by_file[file_name]
+            file_quality["status"] = "skipped"
+            file_quality["skip_reason"] = "empty_after_total_limit"
+            file_quality["final_after_limit_count"] = 0
+            skipped.append({"file": file_name, "reason": "empty_after_total_limit"})
+            continue
 
         out_path = os.path.join(constants.LIST_DIR, file_name)
         content = _render_file_content(file_name, cidrs, source_name)
@@ -425,160 +456,57 @@ def _estimate_cidr_matches_from_db_impl(
 
     def _apply_total_route_limit_counts(counts_by_file):
         route_limit = int(total_cidr_limit) if total_cidr_limit and int(total_cidr_limit) > 0 else _get_openvpn_route_total_cidr_limit()
-        if route_limit is None or int(route_limit) <= 0:
-            return dict(counts_by_file), None
+        counts = {name: int(value or 0) for name, value in counts_by_file.items()}
 
-        ordered_files = list(counts_by_file.keys())
-        original_total = sum(int(counts_by_file.get(name) or 0) for name in ordered_files)
+        budgets, budget_meta = _allocate_route_budget(
+            counts,
+            route_limit,
+            dpi_priority_files=dpi_priority_files,
+            dpi_mandatory_files=dpi_mandatory_files,
+            dpi_priority_min_budget=dpi_priority_min_budget,
+        )
+        if budget_meta is None:
+            return counts, None
 
-        if original_total <= int(route_limit):
-            return dict(counts_by_file), None
+        limit = int(budget_meta["limit"])
+        original_total = int(budget_meta["original_total"])
+        if budget_meta["strategy"] == "none":
+            # Keep the meta even when nothing was cut: UI needs the budget itself.
+            return counts, {
+                "strategy": "none",
+                "limit": limit,
+                "original_total_cidr_count": original_total,
+                "compressed_total_cidr_count": original_total,
+                "warning": None,
+            }
 
-        route_limit = int(route_limit)
-        counts = [int(counts_by_file.get(name) or 0) for name in ordered_files]
-        non_empty_indices = [idx for idx, value in enumerate(counts) if value > 0]
-        if not non_empty_indices:
-            return dict(counts_by_file), None
-
-        priority_files = set(_normalize_dpi_priority_files(dpi_priority_files))
-        mandatory_files = set(_normalize_dpi_priority_files(dpi_mandatory_files))
-        priority_files.update(mandatory_files)
-        priority_min_budget = _normalize_priority_min_budget(dpi_priority_min_budget)
-
-        budgets = {idx: 0 for idx in non_empty_indices}
-
-        if route_limit < len(non_empty_indices):
-            prioritized_indices = sorted(non_empty_indices, key=lambda idx: counts[idx], reverse=True)
-
-            if mandatory_files:
-                mandatory_first = sorted(
-                    [
-                        idx for idx in non_empty_indices
-                        if ordered_files[idx] in mandatory_files
-                    ],
-                    key=lambda idx: counts[idx],
-                    reverse=True,
-                )
-                fallback_rest = [idx for idx in prioritized_indices if idx not in mandatory_first]
-                prioritized_indices = mandatory_first + fallback_rest
-            elif priority_files and priority_min_budget > 0:
-                priority_first = [idx for idx in non_empty_indices if ordered_files[idx] in priority_files]
-                fallback_rest = [idx for idx in prioritized_indices if idx not in priority_first]
-                prioritized_indices = priority_first + fallback_rest
-
-            allowed_indices = set(prioritized_indices[:route_limit])
-            for idx in non_empty_indices:
-                budgets[idx] = 1 if idx in allowed_indices else 0
-        else:
-            reserved_total = 0
-
-            if mandatory_files:
-                for idx in non_empty_indices:
-                    if ordered_files[idx] not in mandatory_files:
-                        continue
-                    budgets[idx] = max(budgets[idx], 1)
-                    reserved_total += 1
-
-            if reserved_total > route_limit:
-                mandatory_indices = sorted(
-                    [idx for idx in non_empty_indices if ordered_files[idx] in mandatory_files],
-                    key=lambda idx: counts[idx],
-                    reverse=True,
-                )
-                budgets = {idx: 0 for idx in non_empty_indices}
-                allocated = 0
-                for idx in mandatory_indices:
-                    if allocated >= route_limit:
-                        break
-                    budgets[idx] = 1
-                    allocated += 1
-                reserved_total = allocated
-
-            if priority_files and priority_min_budget > 0:
-                for idx in non_empty_indices:
-                    if ordered_files[idx] not in priority_files:
-                        continue
-                    reserved = min(counts[idx], priority_min_budget)
-                    new_budget = max(budgets[idx], reserved)
-                    reserved_total += max(0, new_budget - budgets[idx])
-                    budgets[idx] = new_budget
-
-            if reserved_total > route_limit:
-                priority_indices = sorted(
-                    [idx for idx in non_empty_indices if ordered_files[idx] in priority_files],
-                    key=lambda idx: counts[idx],
-                    reverse=True,
-                )
-                budgets = {idx: 0 for idx in non_empty_indices}
-                allocated = 0
-                for idx in priority_indices:
-                    if allocated >= route_limit:
-                        break
-                    budgets[idx] = 1
-                    allocated += 1
-                reserved_total = allocated
-
-            remaining_limit = max(route_limit - reserved_total, 0)
-            remaining_capacity = {idx: max(0, counts[idx] - budgets[idx]) for idx in non_empty_indices}
-            total_capacity = sum(remaining_capacity.values())
-            raw_shares = {}
-
-            if remaining_limit > 0 and total_capacity > 0:
-                for idx in non_empty_indices:
-                    capacity = remaining_capacity[idx]
-                    if capacity <= 0:
-                        raw_shares[idx] = 0.0
-                        continue
-                    share = (capacity * remaining_limit) / total_capacity
-                    raw_shares[idx] = share
-                    budgets[idx] += min(capacity, int(share))
-
-                allocated = sum(budgets.values())
-                if allocated > route_limit:
-                    for idx, _ in sorted(budgets.items(), key=lambda pair: pair[1], reverse=True):
-                        while budgets[idx] > 0 and allocated > route_limit:
-                            budgets[idx] -= 1
-                            allocated -= 1
-                        if allocated <= route_limit:
-                            break
-
-                if allocated < route_limit:
-                    for idx, _ in sorted(raw_shares.items(), key=lambda pair: pair[1] - int(pair[1]), reverse=True):
-                        upper_bound = counts[idx]
-                        while budgets[idx] < upper_bound and allocated < route_limit:
-                            budgets[idx] += 1
-                            allocated += 1
-                        if allocated >= route_limit:
-                            break
+        priority_files = set(budget_meta["priority_files"])
+        mandatory_files = set(budget_meta["mandatory_files"])
+        priority_min_budget = int(budget_meta["priority_min_budget"])
 
         compressed_counts_by_file = {}
         per_file = []
-        for idx, file_name in enumerate(ordered_files):
-            original_count = counts[idx]
-            target_budget = budgets.get(idx, original_count)
-            compressed_count = min(original_count, max(0, int(target_budget)))
+        for file_name, original_count in counts.items():
+            target_budget = int(budgets.get(file_name, original_count))
+            compressed_count = min(original_count, max(0, target_budget))
             compressed_counts_by_file[file_name] = compressed_count
             per_file.append(
                 {
                     "file": file_name,
                     "original_cidr_count": original_count,
                     "compressed_cidr_count": compressed_count,
-                    "target_budget": int(target_budget),
+                    "target_budget": target_budget,
                     "dpi_priority": bool(file_name in priority_files),
                     "dpi_mandatory": bool(file_name in mandatory_files),
                 }
             )
 
         compressed_total = sum(compressed_counts_by_file.values())
-        present_mandatory_files = {
-            file_name for file_name, count in compressed_counts_by_file.items()
-            if file_name in mandatory_files and count > 0
-        }
-        dropped_mandatory_files = sorted(mandatory_files - present_mandatory_files)
+        dropped_mandatory_files = list(budget_meta["dropped_mandatory_files"])
 
         meta = {
             "strategy": "global_total_route_limit",
-            "limit": route_limit,
+            "limit": limit,
             "original_total_cidr_count": original_total,
             "compressed_total_cidr_count": compressed_total,
             "files": per_file,
@@ -590,7 +518,7 @@ def _estimate_cidr_matches_from_db_impl(
                 "dropped_mandatory_files": dropped_mandatory_files,
             }
             if dropped_mandatory_files:
-                meta["warning"] = "Не все обязательные detected-провайдеры поместились в лимит"
+                meta["warning"] = budget_meta["warning"]
         if priority_files and priority_min_budget > 0:
             meta["dpi_priority"] = {
                 "enabled": True,
@@ -848,6 +776,7 @@ def _estimate_cidr_matches_from_db_impl(
         quality_by_file[file_name] = file_quality
 
     effective_limit = int(total_cidr_limit) if total_cidr_limit and int(total_cidr_limit) > 0 else _get_openvpn_route_total_cidr_limit()
+    _collapse_planned_cidrs(planned_estimated)
     pre_limit_counts_by_file = {
         item["file"]: len(item.get("cidrs") or [])
         for item in planned_estimated

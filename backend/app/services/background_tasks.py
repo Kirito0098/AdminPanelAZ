@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 from app.config import DEFAULT_BACKEND_PORT
 from app.database import SessionLocal
 from app.models import BackgroundTask
+from app.services.cidr.apply_pipeline import apply_routing_changes, format_apply_output
 from app.services.expected_node import forget_confirmed_node
 from app.services.process_identity import current_process_owner, is_owner_alive
 
@@ -49,6 +50,8 @@ _PIPELINE_TASK_TYPES = {
     "cidr_estimate_from_db",
     "cidr_generate_from_db",
     "cidr_deploy",
+    "cidr_rollback",
+    "routing_sync",
     "antifilter_refresh",
     "config_bulk_op",
     "config_csv_import",
@@ -68,6 +71,7 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "run_doall": ("AntiZapret: применение изменений…", "AntiZapret: запуск doall.sh…", 5),
     "routing_apply": ("Применение маршрутизации…", "Синхронизация провайдеров…", 5),
     "routing_apply_replica": ("Применение маршрутизации на replica…", "Синхронизация провайдеров…", 5),
+    "routing_sync": ("Синхронизация провайдеров…", "Чтение списков с активного узла…", 5),
     "restart_service": ("Перезапуск службы…", "Перезапуск службы…", 10),
     "update_system": ("Обновление кода и зависимостей…", "Обновление: проверка репозитория…", 5),
     "rebuild_frontend": ("Пересборка интерфейса…", "npm run build:all…", 10),
@@ -98,6 +102,7 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "run_doall": "AntiZapret: изменения применены",
     "routing_apply": "Маршрутизация применена",
     "routing_apply_replica": "Маршрутизация на replica применена",
+    "routing_sync": "Провайдеры синхронизированы",
     "restart_service": "Служба перезапущена",
     "update_system": "Обновление завершено",
     "rebuild_frontend": "Пересборка завершена",
@@ -475,8 +480,24 @@ class BackgroundTaskService:
             detail = exc.detail
             if isinstance(detail, list):
                 detail = "; ".join(str(item) for item in detail)
+            if isinstance(detail, dict):
+                return RuntimeError(self._detail_error_text(detail))
             return RuntimeError(str(detail or "Ошибка операции"))
         return RuntimeError(str(exc))
+
+    @staticmethod
+    def _detail_error_text(detail: dict[str, Any]) -> str:
+        # Link errors carry {"code", "message", "hint"}: show the message, not a Python dict repr.
+        message = str(detail.get("message") or "").strip()
+        if not message:
+            return json.dumps(detail, ensure_ascii=False)
+        hint = str(detail.get("hint") or "").strip()
+        if hint:
+            return f"{message} ({hint})"
+        code = str(detail.get("code") or "").strip()
+        if code:
+            return f"{message} [{code}]"
+        return message
 
     def task_run_doall(
         self,
@@ -486,50 +507,29 @@ class BackgroundTaskService:
         recreate_profiles: bool = True,
         hosts: list[str] | None = None,
         ensure_openvpn_multihome: bool = False,
+        ips_only: bool = False,
     ) -> dict[str, str]:
-        if progress_updater:
-            progress_updater(10, "AntiZapret: запуск doall.sh…")
         try:
-            doall_output = adapter.apply_config_changes()
+            result = apply_routing_changes(
+                adapter,
+                sync=False,
+                doall=True,
+                ips_only=ips_only,
+                recreate_profiles=recreate_profiles,
+                hosts=hosts,
+                ensure_multihome=ensure_openvpn_multihome,
+                run_config_queue=True,
+                progress=progress_updater,
+            )
         except Exception as exc:
             raise self._adapter_error(exc) from exc
-        recreate_output = ""
-        if recreate_profiles:
-            if progress_updater:
-                progress_updater(65, "AntiZapret: пересоздание профилей клиентов…")
-            try:
-                from app.services.openvpn_profile_repair import recreate_openvpn_profiles
-
-                result = recreate_openvpn_profiles(adapter, hosts=hosts)
-                if not result.success:
-                    raise RuntimeError(
-                        result.errors[0] if result.errors else "Ошибка пересоздания профилей"
-                    )
-                recreate_output = result.output
-            except Exception as exc:
-                raise self._adapter_error(exc) from exc
-        multihome_output = ""
-        if ensure_openvpn_multihome:
-            if progress_updater:
-                progress_updater(90, "AntiZapret: восстановление OpenVPN multihome…")
-            try:
-                mh = adapter.ensure_openvpn_multihome(True, restart_if_unchanged=False)
-                if isinstance(mh, dict):
-                    multihome_output = json.dumps(mh, ensure_ascii=False)
-                else:
-                    multihome_output = str(mh or "")
-            except Exception as exc:
-                raise self._adapter_error(exc) from exc
-        combined = "\n".join(
-            part for part in [doall_output, recreate_output, multihome_output] if part
-        ).strip()
         return {
             "message": (
                 "doall и пересоздание профилей клиентов выполнены успешно"
                 if recreate_profiles
                 else "doall выполнен успешно (профили не пересоздавались)"
             ),
-            "output": combined,
+            "output": format_apply_output(result),
         }
 
     def task_routing_apply(
@@ -541,24 +541,23 @@ class BackgroundTaskService:
         hosts: list[str] | None = None,
         ensure_openvpn_multihome: bool = False,
     ) -> dict[str, str]:
-        if progress_updater:
-            progress_updater(5, "Синхронизация провайдеров…")
         try:
-            sync_output = adapter.sync_cidr_providers()
+            # Routing apply only rewrites CIDR files: hosts/adblock lists are untouched, skip their download.
+            result = apply_routing_changes(
+                adapter,
+                sync=True,
+                doall=True,
+                ips_only=True,
+                recreate_profiles=recreate_profiles,
+                hosts=hosts,
+                ensure_multihome=ensure_openvpn_multihome,
+                progress=progress_updater,
+            )
         except Exception as exc:
             raise self._adapter_error(exc) from exc
-        sync_text = json.dumps(sync_output, ensure_ascii=False) if isinstance(sync_output, dict) else str(sync_output or "")
-        result = self.task_run_doall(
-            adapter,
-            progress_updater,
-            recreate_profiles=recreate_profiles,
-            hosts=hosts,
-            ensure_openvpn_multihome=ensure_openvpn_multihome,
-        )
-        combined = "\n".join(part for part in [sync_text, result.get("output", "")] if part).strip()
         return {
             "message": "Маршрутизация применена (doall.sh)",
-            "output": combined,
+            "output": format_apply_output(result),
         }
 
     def make_routing_apply_for_node_callable(

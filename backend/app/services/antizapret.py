@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tarfile
 import tempfile
@@ -26,6 +27,11 @@ from app.services.profile_files import iter_client_profile_paths, profile_filena
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
+# doall.sh budget: full run downloads ~100 MB of host lists, ``ips`` mode only re-parses CIDR.
+APPLY_TIMEOUT_ENV = "ANTIZAPRET_APPLY_TIMEOUT_SECONDS"
+DEFAULT_APPLY_TIMEOUT_SECONDS = 300
+# The panel must outlive the agent request, otherwise it reports a timeout while the agent still works.
+APPLY_AGENT_TIMEOUT_MARGIN_SECONDS = 30
 WIREGUARD_SERVER_INTERFACES = frozenset({"antizapret", "vpn"})
 WIREGUARD_SERVER_CONFIG_DIR = Path("/etc/wireguard")
 WIREGUARD_TEMPLATES_DIR = Path("/etc/wireguard/templates")
@@ -68,6 +74,31 @@ _NO_CERTIFICATE_MARKERS = (
 # AntiZapret's WireGuard script answers this when the peer is not in the server config.
 _WIREGUARD_CLIENT_MISSING_MARKERS = ("please check if client exists",)
 
+
+def apply_timeout_seconds() -> int:
+    """doall.sh budget from ``ANTIZAPRET_APPLY_TIMEOUT_SECONDS`` (default 300)."""
+    try:
+        value = int(os.environ.get(APPLY_TIMEOUT_ENV, ""))
+    except (TypeError, ValueError):
+        return DEFAULT_APPLY_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_APPLY_TIMEOUT_SECONDS
+
+
+def apply_agent_timeout_seconds() -> float:
+    """Panel-side HTTP timeout: the agent must time out first, not the panel."""
+    return float(apply_timeout_seconds() + APPLY_AGENT_TIMEOUT_MARGIN_SECONDS)
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """Kill the whole doall.sh tree: update.sh/parse.sh/curl keep writing config/ after a timeout."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except OSError:
+        logger.warning("doall.sh: cannot kill process group of pid %s", proc.pid, exc_info=True)
+        try:
+            proc.kill()
+        except OSError:
+            logger.warning("doall.sh: cannot kill pid %s", proc.pid, exc_info=True)
 
 
 def _install_staged(src: Path, dst: Path) -> None:
@@ -1355,23 +1386,40 @@ class AntiZapretService:
             "missing": status.get("missing") or [],
         }
 
-    def apply_config_changes(self) -> str:
+    def apply_config_changes(self, *, ips_only: bool = False) -> str:
+        """Run doall.sh; ``ips_only`` skips the hosts download that CIDR-only routes never read."""
         doall = self.base_path / "doall.sh"
         if not doall.exists():
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="doall.sh не найден")
+        args = [str(doall), "ips"] if ips_only else [str(doall)]
+        timeout = apply_timeout_seconds()
+        # Own session: on timeout the whole tree (update.sh, parse.sh, curl, ipset) must die,
+        # otherwise it keeps rewriting config/ and result/ after the panel reported 504.
+        proc = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(self.base_path),
+            start_new_session=True,
+        )
         try:
-            result = subprocess.run(
-                [str(doall)],
-                capture_output=True,
-                text=True,
-                timeout=300,
-                check=False,
-                cwd=str(self.base_path),
-            )
+            stdout, stderr = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Таймаут обновления списков") from exc
-        output = (result.stdout or "") + (result.stderr or "")
-        if result.returncode != 0:
+            _kill_process_group(proc)
+            try:
+                proc.communicate(timeout=5)
+            except (subprocess.TimeoutExpired, OSError):
+                logger.warning("doall.sh: outputs were not closed after SIGKILL (pid %s)", proc.pid)
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail=(
+                    f"Таймаут обновления списков ({timeout} с): операция прервана, "
+                    "процессы doall.sh остановлены"
+                ),
+            ) from exc
+        output = (stdout or "") + (stderr or "")
+        if proc.returncode != 0:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=output.strip())
         return output.strip()
 

@@ -7,9 +7,7 @@ from app.paths import get_cidr_list_dir, resolve_backend_path
 
 _settings = get_settings()
 LIST_DIR = str(get_cidr_list_dir())
-BASELINE_DIR = os.path.join(LIST_DIR, "_baseline")
 RUNTIME_BACKUP_ROOT = str(resolve_backend_path("data/cidr/runtime_backups"))
-CIDR_DB_STAGING_ROOT = str(resolve_backend_path("data/cidr/staging"))
 RUNTIME_BACKUP_RETENTION_SECONDS = 12 * 60 * 60
 ENV_FILE_PATH = str(resolve_backend_path(".env"))
 
@@ -20,8 +18,6 @@ _BGP_TOOLS_RAW_ALLOC_IPV4_PATTERN = re.compile(
     r"\[ipv4\]\s*--\s*(.+?)(?=(?:\[ipv[46]\]\s*--|\[asn\]\s*--|##\s+Additional\s+Links|$))",
     re.IGNORECASE | re.DOTALL,
 )
-
-SOURCE_FORMATS_WITH_GEO = {"aws_json", "google_json", "ripe_geo_json"}
 
 
 def _parse_positive_int(raw, default):
@@ -71,13 +67,8 @@ def _get_openvpn_route_total_cidr_limit():
     return min(raw_limit, OPENVPN_ROUTE_TOTAL_CIDR_LIMIT_MAX_IOS)
 
 
-OPENVPN_ROUTE_CIDR_LIMIT = _read_positive_int_env("OPENVPN_ROUTE_CIDR_LIMIT", 1500)
 OPENVPN_ROUTE_TOTAL_CIDR_LIMIT = _read_positive_int_env("OPENVPN_ROUTE_TOTAL_CIDR_LIMIT", 1500)
 OPENVPN_ROUTE_TOTAL_CIDR_LIMIT_MAX_IOS = _read_positive_int_env("OPENVPN_ROUTE_TOTAL_CIDR_LIMIT_MAX_IOS", 900)
-OPENVPN_ROUTE_MIN_PREFIXLEN = min(
-    32,
-    _read_positive_int_env("OPENVPN_ROUTE_MIN_PREFIXLEN", 8),
-)
 RU_COUNTRY_CIDR_SOURCE_URL = os.getenv(
     "CIDR_EXCLUDE_RU_SOURCE_URL",
     "https://www.ipdeny.com/ipblocks/data/countries/ru.zone",

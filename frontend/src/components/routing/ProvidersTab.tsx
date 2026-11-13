@@ -26,7 +26,8 @@ interface ProvidersTabProps {
   providers: CidrProviderInfo[]
   cidrDb: CidrDbStatus | null
   activeNode: Node | null
-  isAdmin: boolean
+  /** HA replica: маршрутизация только для чтения, действия недоступны. */
+  readonly?: boolean
   actionLoading: boolean
   onToggle: (filename: string, enabled: boolean, name: string) => void
   pipelineBusy?: boolean
@@ -83,7 +84,7 @@ function CidrCountsGrid({
 interface ProviderListItemProps {
   provider: CidrProviderInfo
   cidrDb: CidrDbStatus | null
-  isAdmin: boolean
+  readonly: boolean
   actionLoading: boolean
   pipelineBusy: boolean
   onToggle: (filename: string, enabled: boolean, name: string) => void
@@ -93,7 +94,7 @@ interface ProviderListItemProps {
 function ProviderListItem({
   provider: p,
   cidrDb,
-  isAdmin,
+  readonly,
   actionLoading,
   pipelineBusy,
   onToggle,
@@ -102,7 +103,7 @@ function ProviderListItem({
   const dbMeta = cidrDb?.providers?.[p.filename]
   const onController = hasControllerArtifact(cidrDb, p.filename)
   const enableBlocked = !p.has_source && !p.enabled
-  const toggleDisabled = !isAdmin || actionLoading || enableBlocked
+  const toggleDisabled = readonly || actionLoading || enableBlocked
   const switchId = `provider-enabled-${providerSlug(p.filename)}`
   const rowHint = !p.has_source
     ? onController
@@ -157,11 +158,11 @@ function ProviderListItem({
           aria-label={`${p.name}: ${p.enabled ? 'включён' : 'выключен'}`}
           className={p.enabled ? 'bg-emerald-600' : undefined}
           onCheckedChange={(next) => {
-            if (!isAdmin || next === p.enabled) return
+            if (readonly || next === p.enabled) return
             onToggle(p.filename, next, p.name)
           }}
         />
-        {isAdmin && (
+        {!readonly && (
           <Button
             size="sm"
             variant="ghost"
@@ -193,7 +194,7 @@ export default function ProvidersTab({
   providers,
   cidrDb,
   activeNode,
-  isAdmin,
+  readonly = false,
   actionLoading,
   onToggle,
   pipelineBusy = false,
@@ -272,7 +273,7 @@ export default function ProvidersTab({
   const nodeLabel = activeNode?.name ?? 'активном узле'
   const onNodeCount = workflow?.onNodeCount ?? providers.filter((p) => p.has_source).length
   const enabledCount = workflow?.enabledCount ?? providers.filter((p) => p.enabled).length
-  const showApplySection = isAdmin && onNodeCount > 0 && !needsDeploy
+  const showApplySection = !readonly && onNodeCount > 0 && !needsDeploy
 
   const quickFilters: Array<{ id: QuickFilter; label: string; count?: number }> = [
     { id: 'all', label: 'Все', count: providers.length },
@@ -287,7 +288,7 @@ export default function ProvidersTab({
     <>
       <StatusPanel title="CIDR-провайдеры" icon={Route}>
         <div className="space-y-4">
-          {needsCompile && isAdmin && !workflow?.optionalCompileRemaining && (
+          {needsCompile && !readonly && !workflow?.optionalCompileRemaining && (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
               Данные провайдеров уже в БД (этап 1), но файлы списков ещё не собраны на контроллере.{' '}
               {onNavigateTab ? (
@@ -305,7 +306,7 @@ export default function ProvidersTab({
               )}
             </div>
           )}
-          {needsCompile && isAdmin && workflow?.optionalCompileRemaining && (
+          {needsCompile && !readonly && workflow?.optionalCompileRemaining && (
             <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
               Сборка завершена.{' '}
               {workflow.pendingCompileNames.length === 1 ? (
@@ -343,7 +344,7 @@ export default function ProvidersTab({
               .
             </div>
           )}
-          {needsDeploy && !needsCompile && isAdmin && (
+          {needsDeploy && !needsCompile && !readonly && (
             <div className="rounded-md border border-sky-500/40 bg-sky-500/10 px-4 py-3 text-sm text-sky-950 dark:text-sky-100">
               Списки собраны на контроллере.{' '}
               {onNavigateTab ? (
@@ -485,7 +486,7 @@ export default function ProvidersTab({
                   key={p.filename}
                   provider={p}
                   cidrDb={cidrDb}
-                  isAdmin={isAdmin}
+                  readonly={readonly}
                   actionLoading={actionLoading}
                   pipelineBusy={pipelineBusy}
                   onToggle={onToggle}

@@ -89,10 +89,15 @@ def normalize_number(param: Mapping[str, Any], value: Any) -> str:
 
 
 def normalize_string(param: Mapping[str, Any], value: Any) -> str:
-    """Validate a string param that has a ``pattern`` (e.g. WARP_ENDPOINT host:port)."""
+    """Validate a string param; a value without ``pattern`` must stay one setup line."""
     s = "" if value is None else str(value).strip()
+    if not s:
+        return s
     pattern = param.get("pattern")
-    if not s or not pattern:
+    if not pattern:
+        # setup is KEY=VALUE read by root scripts: a newline would inject a foreign line.
+        if re.fullmatch(r"\S+", s) is None:
+            raise ValueError(f"{param['env']}: недопустимые символы")
         return s
     if re.fullmatch(pattern, s) is None:
         raise ValueError(f"{param['env']}: {param.get('pattern_hint', 'недопустимое значение')}")

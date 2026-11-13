@@ -1467,6 +1467,7 @@ class SecretRotationApplyResponse(BaseModel):
 
 class RouteBudgetInfo(BaseModel):
     available: bool = False
+    source: str | None = None
     limit: int | None = None
     used: int | None = None
     remaining: int | None = None

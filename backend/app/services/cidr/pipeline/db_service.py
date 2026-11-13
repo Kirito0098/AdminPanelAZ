@@ -4,15 +4,18 @@ The nightly cron job calls refresh_all_providers() to populate ProviderCidr tabl
 Web UI then reads from DB when generating the final CIDR .txt files.
 """
 
+import hashlib
 import json
 import logging
+import math
 import os
 import threading
 import time
 from copy import deepcopy
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 from datetime import datetime, timezone
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +96,12 @@ SOURCE_CACHE_TTL_SECONDS = _read_positive_int_env(
     "CIDR_DB_SOURCE_CACHE_TTL_SECONDS",
     900,
 )
+SOURCE_DISK_CACHE_MAX_AGE_SECONDS = _read_positive_int_env(
+    "CIDR_DB_SOURCE_DISK_CACHE_MAX_AGE_SECONDS",
+    7 * 24 * 60 * 60,
+)
+# Bound the on-disk source cache; oldest entries are evicted first.
+SOURCE_DISK_CACHE_MAX_BYTES = 200 * 1024 * 1024
 ASN_FETCH_SOURCE_TIMEOUT_SECONDS = _read_positive_int_env(
     "CIDR_DB_ASN_FETCH_TIMEOUT",
     30,
@@ -103,6 +112,18 @@ SOURCE_FETCH_TIMEOUT_SECONDS = _read_positive_int_env(
 )
 SOURCE_FETCH_RETRIES = _read_positive_int_env(
     "CIDR_DB_SOURCE_FETCH_RETRIES",
+    3,
+)
+ASN_OPTIONAL_SOURCE_TIMEOUT_SECONDS = _read_positive_int_env(
+    "CIDR_DB_ASN_OPTIONAL_FETCH_TIMEOUT",
+    3,
+)
+OPTIONAL_SOURCE_GRACE_SECONDS = _read_positive_int_env(
+    "CIDR_DB_OPTIONAL_SOURCE_GRACE",
+    3,
+)
+ASN_FETCH_ATTEMPTS = _read_positive_int_env(
+    "CIDR_DB_ASN_FETCH_ATTEMPTS",
     3,
 )
 CIDR_FALLBACK_DROP_RATIO_WITH_ERRORS = 0.45
@@ -117,6 +138,163 @@ _CIDR_DB_USER_AGENT = "AdminAntizapret-CIDR-DB/1.0"
 
 def _download_text(url, timeout=45):
     return _download_cidr_text(url, timeout=timeout, user_agent=_CIDR_DB_USER_AGENT)
+
+
+def _custom_provider_list_path():
+    """Resolve the manual list lazily so tests can repoint LIST_DIR."""
+    from app.services.cidr.pipeline.constants import LIST_DIR
+    from app.services.cidr.pipeline.provider_sources import CUSTOM_PROVIDER_KEY
+
+    return Path(LIST_DIR) / CUSTOM_PROVIDER_KEY
+
+
+def _parse_custom_provider_text(text):
+    """Parse a manual list into CIDR items.
+
+    Returns (items, invalid_lines, negated_count). ``!`` negations cannot be
+    stored in ProviderCidr: importing them as includes would silently widen
+    the routing pool, so they are reported to the caller instead.
+    """
+    from app.services.cidr.pipeline.parsers import _normalize_cidrs
+
+    items = []
+    invalid_lines = []
+    negated_count = 0
+    for lineno, raw in enumerate(str(text or "").splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("!"):
+            negated_count += 1
+            continue
+        normalized = _normalize_cidrs([line])
+        if not normalized:
+            invalid_lines.append(f"{lineno}: {line[:80]}")
+            continue
+        items.extend({"cidr": cidr, "region": None, "countries": None} for cidr in normalized)
+    return items, invalid_lines, negated_count
+
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Persistent last-good source cache
+# ──────────────────────────────────────────────────────────────────────
+
+def _source_disk_cache_dir() -> Path:
+    """Directory for persisted source responses, next to the CSV staging files."""
+    from app.config import get_settings
+    from app.paths import resolve_backend_path
+
+    return resolve_backend_path(get_settings().cidr_db_staging_dir) / "source_cache"
+
+
+def _source_disk_cache_path(url, source_format) -> Path:
+    # Timeout is intentionally excluded: changing retries/timeouts must not invalidate cache.
+    key = hashlib.sha256(f"{url}|{source_format}".encode("utf-8")).hexdigest()
+    return _source_disk_cache_dir() / f"{key}.json"
+
+
+def _current_source_disk_cache_max_age_seconds() -> int:
+    return _read_positive_int_env(
+        "CIDR_DB_SOURCE_DISK_CACHE_MAX_AGE_SECONDS",
+        SOURCE_DISK_CACHE_MAX_AGE_SECONDS,
+    )
+
+
+def _read_source_disk_cache(url, source_format):
+    """Return cached payload when the file is fresh enough, else None."""
+    path = _source_disk_cache_path(url, source_format)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            entry = json.load(fh)
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        logger.warning("CIDR source disk cache read failed for %s: %s", path, exc)
+        return None
+
+    payload = entry.get("payload") if isinstance(entry, dict) else None
+    if not isinstance(payload, str):
+        return None
+    try:
+        fetched_at = float(entry.get("fetched_at") or 0)
+    except (TypeError, ValueError):
+        return None
+    if time.time() - fetched_at > _current_source_disk_cache_max_age_seconds():
+        return None
+    return payload
+
+
+def _prune_source_disk_cache(max_bytes=None) -> None:
+    """Evict the oldest cache entries (by fetched_at, then mtime) above the size limit."""
+    limit = SOURCE_DISK_CACHE_MAX_BYTES if max_bytes is None else int(max_bytes)
+    cache_dir = _source_disk_cache_dir()
+    entries = []
+    total = 0
+    try:
+        paths = list(cache_dir.glob("*.json"))
+    except OSError as exc:
+        logger.warning("CIDR source disk cache listing failed for %s: %s", cache_dir, exc)
+        return
+
+    # Hot path stays stat-only: payloads are large and parsing them per write is wasteful.
+    for path in paths:
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        entries.append((stat.st_mtime, stat.st_size, path))
+        total += stat.st_size
+
+    if total <= limit:
+        return
+
+    sized = []
+    for mtime, size, path in entries:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                fetched_at = float((json.load(fh) or {}).get("fetched_at") or 0)
+        except Exception:
+            fetched_at = mtime
+        sized.append((fetched_at, mtime, path, size))
+
+    sized.sort(key=lambda item: (item[0], item[1]))
+    for _fetched_at, _mtime, path, size in sized:
+        if total <= limit:
+            break
+        try:
+            path.unlink()
+            total -= size
+        except OSError as exc:
+            logger.warning("CIDR source disk cache eviction failed for %s: %s", path, exc)
+
+
+def _write_source_disk_cache(url, source_format, payload) -> None:
+    """Store a raw source payload atomically; disk errors never break a refresh."""
+    path = _source_disk_cache_path(url, source_format)
+    tmp_path = path.with_name(
+        f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+    )
+    entry = {
+        "url": url,
+        "format": source_format,
+        "fetched_at": time.time(),
+        "payload": str(payload or ""),
+    }
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(tmp_path, "w", encoding="utf-8") as fh:
+            json.dump(entry, fh, ensure_ascii=False)
+        os.replace(tmp_path, path)
+    except Exception as exc:
+        logger.warning("CIDR source disk cache write failed for %s: %s", path, exc)
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return
+
+    _prune_source_disk_cache()
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -390,6 +568,120 @@ class CidrDbUpdaterService:
             },
         }
 
+    def _refresh_custom_provider(self, *, previous_cidr_count):
+        """Build the custom provider pool from LIST_DIR/custom-ips.txt (no network).
+
+        A missing file keeps the stored pool: the wizard writes straight to the
+        DB and the file only appears after the next compile.
+        """
+        from app.services.cidr.pipeline.provider_sources import CUSTOM_PROVIDER_KEY
+
+        m = _get_models()
+        path = _custom_provider_list_path()
+        previous = int(previous_cidr_count or 0)
+        asn_count = int(
+            self.db.query(m.ProviderAsn).filter_by(provider_key=CUSTOM_PROVIDER_KEY).count() or 0
+        )
+        active_asn_count = int(
+            self.db.query(m.ProviderAsn)
+            .filter_by(provider_key=CUSTOM_PROVIDER_KEY, active=True)
+            .count() or 0
+        )
+
+        def _result(*, count, candidate, items, status, error, skip_write, anomaly_level, anomaly_reason):
+            return {
+                "status": status,
+                "cidr_count": count,
+                "candidate_cidr_count": candidate,
+                "source": "manual",
+                "source_details": [{
+                    "name": CUSTOM_PROVIDER_KEY,
+                    # No URL: the content is local, do not render a fake link.
+                    "url": None,
+                    "status": "error" if error else "ok",
+                    "count": count,
+                    "error": error,
+                    "cache_hit": False,
+                    "stale": False,
+                }],
+                "partial_reasons_by_source": (
+                    [{"source": CUSTOM_PROVIDER_KEY, "reason": error}] if error else []
+                ),
+                "asn_count": asn_count,
+                "active_asn_count": active_asn_count,
+                "expected_asn_min": 0,
+                "anomaly_level": anomaly_level,
+                "anomaly_reason": anomaly_reason,
+                "asn_errors": [],
+                "asn_optional_errors": [],
+                "asn_discovery_errors": [],
+                "asn_fetch_errors": [],
+                "fallback_applied": False,
+                "skip_write": skip_write,
+                "merged_items": items,
+                "discovered_asns": [],
+                "asn_fetch_meta": {},
+                "error": error,
+                "dry_run_changes": {
+                    "previous_cidr_count": previous,
+                    "candidate_cidr_count": candidate,
+                    "final_cidr_count": count,
+                    "would_insert": max(0, candidate - previous),
+                    "would_delete": max(0, previous - candidate),
+                    "fallback_applied": False,
+                },
+            }
+
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except FileNotFoundError:
+            return _result(
+                count=previous,
+                candidate=previous,
+                items=[],
+                status="ok",
+                error=None,
+                skip_write=True,
+                anomaly_level="info" if previous else "none",
+                anomaly_reason=(
+                    f"Файл {CUSTOM_PROVIDER_KEY} не найден: пул в БД оставлен без изменений"
+                    if previous
+                    else None
+                ),
+            )
+        except OSError as exc:
+            raise ValueError(f"Не удалось прочитать {path}: {exc}") from exc
+
+        items, invalid_lines, negated_count = _parse_custom_provider_text(text)
+        merged_items = self._merge_cidr_items(items)
+        count = self._count_unique_cidrs(merged_items)
+
+        problems = []
+        if invalid_lines:
+            problems.append(
+                f"пропущены некорректные строки: {len(invalid_lines)} ({invalid_lines[0]})"
+            )
+        if negated_count:
+            problems.append(
+                f"строки с «!» ({negated_count}) не поддерживаются в БД и выпадут при сборке"
+            )
+        error = "; ".join(problems) or None
+
+        if not merged_items and (invalid_lines or negated_count):
+            # A broken file must not wipe the previous pool.
+            raise ValueError(error)
+
+        return _result(
+            count=count,
+            candidate=count,
+            items=merged_items,
+            status="partial" if error else "ok",
+            error=error,
+            skip_write=False,
+            anomaly_level="warning" if error else "none",
+            anomaly_reason=error,
+        )
+
     # ── Public API ────────────────────────────────────────────────────
 
     def refresh_all_providers(
@@ -404,7 +696,7 @@ class CidrDbUpdaterService:
 
         Returns a summary dict with status, counts, and per-provider details.
         """
-        from app.services.cidr.pipeline.provider_sources import PROVIDER_SOURCES
+        from app.services.cidr.pipeline.provider_sources import LOCAL_PROVIDER_KEYS, PROVIDER_SOURCES
 
         m = _get_models()
 
@@ -486,7 +778,7 @@ class CidrDbUpdaterService:
             write_span = max(1, slot_end - write_base)
             sources = PROVIDER_SOURCES.get(file_name) or []
 
-            if not sources:
+            if not sources and file_name not in LOCAL_PROVIDER_KEYS:
                 err_msg = "Пустой список источников"
                 logger.warning("CIDR DB refresh failed for %s: %s", file_name, err_msg)
                 if not dry_run:
@@ -509,47 +801,57 @@ class CidrDbUpdaterService:
                 _emit_progress(slot_end, f"Ошибка: {file_name} ({index}/{total_files})")
                 continue
 
-            _emit_progress(slot_base, f"Провайдер {index}/{total_files}: загрузка {file_name}…")
-            fetch_span = max(1, write_base - slot_base)
-
-            def _fetch_progress(rel_pct: int, stage: str) -> None:
-                abs_pct = slot_base + int((max(0, min(100, rel_pct)) / 100) * fetch_span)
-                heartbeat_state["pct"] = abs_pct
-                heartbeat_state["stage"] = stage
-                _emit_progress(abs_pct, stage)
-
-            heartbeat_stop = threading.Event()
-            heartbeat_state = {
-                "pct": slot_base,
-                "stage": f"Провайдер {index}/{total_files}: загрузка {file_name}…",
-                "tick": 0,
-            }
-
-            def _fetch_heartbeat_loop() -> None:
-                while not heartbeat_stop.wait(3.0):
-                    heartbeat_state["tick"] += 1
-                    elapsed = heartbeat_state["tick"] * 3
-                    _emit_progress(
-                        heartbeat_state["pct"],
-                        f"{heartbeat_state['stage']} ({elapsed}с)",
+            if file_name in LOCAL_PROVIDER_KEYS:
+                # Manual list: the file in LIST_DIR is the source, nothing to download.
+                _emit_progress(slot_base, f"Провайдер {index}/{total_files}: чтение {file_name}…")
+                try:
+                    result = self._refresh_custom_provider(
+                        previous_cidr_count=previous_cidr_counts.get(file_name, 0),
                     )
+                except Exception as exc:
+                    result = {"status": "error", "error": str(exc)}
+            else:
+                _emit_progress(slot_base, f"Провайдер {index}/{total_files}: загрузка {file_name}…")
+                fetch_span = max(1, write_base - slot_base)
 
-            heartbeat_thread = threading.Thread(target=_fetch_heartbeat_loop, daemon=True)
-            heartbeat_thread.start()
-            try:
-                result = self._process_provider_refresh_context(
-                    file_name=file_name,
-                    sources=sources,
-                    prev_cidr_count=previous_cidr_counts.get(file_name, 0),
-                    prev_asn_count=previous_asn_counts.get(file_name, 0),
-                    prev_active_asn_count=previous_active_asn_counts.get(file_name, 0),
-                    progress_callback=_fetch_progress,
-                )
-            except Exception as exc:
-                result = {"status": "error", "error": str(exc)}
-            finally:
-                heartbeat_stop.set()
-                heartbeat_thread.join(timeout=0.5)
+                def _fetch_progress(rel_pct: int, stage: str) -> None:
+                    abs_pct = slot_base + int((max(0, min(100, rel_pct)) / 100) * fetch_span)
+                    heartbeat_state["pct"] = abs_pct
+                    heartbeat_state["stage"] = stage
+                    _emit_progress(abs_pct, stage)
+
+                heartbeat_stop = threading.Event()
+                heartbeat_state = {
+                    "pct": slot_base,
+                    "stage": f"Провайдер {index}/{total_files}: загрузка {file_name}…",
+                    "tick": 0,
+                }
+
+                def _fetch_heartbeat_loop() -> None:
+                    while not heartbeat_stop.wait(3.0):
+                        heartbeat_state["tick"] += 1
+                        elapsed = heartbeat_state["tick"] * 3
+                        _emit_progress(
+                            heartbeat_state["pct"],
+                            f"{heartbeat_state['stage']} ({elapsed}с)",
+                        )
+
+                heartbeat_thread = threading.Thread(target=_fetch_heartbeat_loop, daemon=True)
+                heartbeat_thread.start()
+                try:
+                    result = self._process_provider_refresh_context(
+                        file_name=file_name,
+                        sources=sources,
+                        prev_cidr_count=previous_cidr_counts.get(file_name, 0),
+                        prev_asn_count=previous_asn_counts.get(file_name, 0),
+                        prev_active_asn_count=previous_active_asn_counts.get(file_name, 0),
+                        progress_callback=_fetch_progress,
+                    )
+                except Exception as exc:
+                    result = {"status": "error", "error": str(exc)}
+                finally:
+                    heartbeat_stop.set()
+                    heartbeat_thread.join(timeout=0.5)
 
             if "error" in result and result.get("status") == "error":
                 err_msg = str(result.get("error") or "unknown error")
@@ -575,9 +877,6 @@ class CidrDbUpdaterService:
                 continue
 
             provider_status = str(result.get("status") or "ok")
-            providers_updated += 1
-            if provider_status == "partial":
-                providers_partial += 1
 
             count = int(result.get("cidr_count") or 0)
             total_cidrs += count
@@ -585,19 +884,21 @@ class CidrDbUpdaterService:
 
             _emit_progress(write_base, f"Провайдер {index}/{total_files}: запись {file_name}…")
 
-            if not dry_run and not bool(result.get("fallback_applied")):
+            if not dry_run and not bool(result.get("fallback_applied")) and not bool(result.get("skip_write")):
                 try:
 
                     def _provider_write_progress(rel_pct: int, stage: str) -> None:
                         abs_pct = write_base + int((max(0, min(100, rel_pct)) / 100) * write_span)
                         _emit_progress(abs_pct, stage)
 
-                    asn_rows = self._upsert_provider_asns(
-                        file_name, result.get("discovered_asns") or [], commit=True
-                    )
-                    self._apply_provider_asn_runtime_meta(
-                        file_name, result.get("asn_fetch_meta") or {}, commit=True
-                    )
+                    if file_name not in LOCAL_PROVIDER_KEYS:
+                        # Manual ASNs live only in this provider; a file refresh must not deactivate them.
+                        asn_rows = self._upsert_provider_asns(
+                            file_name, result.get("discovered_asns") or [], commit=True
+                        )
+                        self._apply_provider_asn_runtime_meta(
+                            file_name, result.get("asn_fetch_meta") or {}, commit=True
+                        )
                     count = self._upsert_provider_cidrs(
                         file_name,
                         result.get("merged_items") or [],
@@ -611,9 +912,9 @@ class CidrDbUpdaterService:
                         source_used=result.get("source"),
                         status=provider_status,
                         error=(
-                            "; ".join((result.get("asn_errors") or [])[:6])
-                            if (result.get("asn_errors") or [])
-                            else None
+                            result.get("error")
+                            or "; ".join((result.get("asn_errors") or [])[:6])
+                            or None
                         ),
                         expected_asn_min=result.get("expected_asn_min"),
                         asn_count=(len(asn_rows) if asn_rows else result.get("asn_count")),
@@ -634,18 +935,32 @@ class CidrDbUpdaterService:
                 except Exception as exc:
                     self.db.rollback()
                     err_msg = str(exc)
-                    logger.warning("CIDR DB persist failed for %s: %s", file_name, err_msg)
+                    # Never wipe the provider pool here: the CSV import runs in one
+                    # transaction (chunked commits only above cidr_db_csv_import_chunk_rows),
+                    # so a rollback leaves the previous rows intact. Even a partially
+                    # committed chunked import is a usable pool; deleting it would make
+                    # the next compile see no_db_data and drop the provider from routes.
                     try:
-                        m = _get_models()
-                        self.cidr_db.query(m.ProviderCidr).filter_by(provider_key=file_name).delete(
-                            synchronize_session=False
-                        )
-                        self.cidr_db.commit()
-                    except Exception as cleanup_exc:
-                        logger.warning(
-                            "CIDR DB cleanup of %s rows failed: %s", file_name, cleanup_exc
-                        )
                         self.cidr_db.rollback()
+                        m = _get_models()
+                        pool_rows = int(
+                            self.cidr_db.query(m.ProviderCidr)
+                            .filter_by(provider_key=file_name)
+                            .count() or 0
+                        )
+                    except Exception as count_exc:
+                        pool_rows = None
+                        logger.warning(
+                            "CIDR DB row count after persist failure for %s failed: %s",
+                            file_name,
+                            count_exc,
+                        )
+                    logger.warning(
+                        "CIDR DB persist failed for %s: %s; pool preserved after persist error (%s rows kept)",
+                        file_name,
+                        err_msg,
+                        "unknown" if pool_rows is None else pool_rows,
+                    )
                     try:
                         self._update_provider_meta(
                             file_name,
@@ -661,6 +976,8 @@ class CidrDbUpdaterService:
                         self.db.rollback()
                         raise
                     _emit_progress(slot_end, f"Ошибка записи: {file_name} ({index}/{total_files})")
+                    providers_failed += 1
+                    per_provider[file_name] = {"status": "error", "error": err_msg}
                     continue
             elif not dry_run:
                 try:
@@ -670,9 +987,12 @@ class CidrDbUpdaterService:
                         source_used=result.get("source"),
                         status=provider_status,
                         error=(
-                            "safe-fallback to previous CIDR pool"
-                            if result.get("fallback_applied")
-                            else None
+                            result.get("error")
+                            or (
+                                "safe-fallback to previous CIDR pool"
+                                if result.get("fallback_applied")
+                                else None
+                            )
                         ),
                         expected_asn_min=result.get("expected_asn_min"),
                         asn_count=result.get("asn_count"),
@@ -684,6 +1004,12 @@ class CidrDbUpdaterService:
                 except Exception:
                     self.db.rollback()
                     raise
+
+            # Count the provider only after its rows and meta were persisted, so a
+            # persist failure lands in the refresh log as failed instead of "ok".
+            providers_updated += 1
+            if provider_status == "partial":
+                providers_partial += 1
 
             per_provider[file_name] = {
                 "status": provider_status,
@@ -784,7 +1110,10 @@ class CidrDbUpdaterService:
         )
         asn_map = defaultdict(list)
         for row in asn_rows:
-            asn_map[row.provider_key].append(f"AS{row.asn}")
+            # Contract with frontend types.ts: active_asns is number[], no "AS" prefix.
+            asn_value = _normalize_asn(row.asn)
+            if asn_value is not None:
+                asn_map[row.provider_key].append(asn_value)
 
         providers_info = {}
         for provider_key in PROVIDER_SOURCES.keys():
@@ -1049,18 +1378,20 @@ class CidrDbUpdaterService:
                 "name": f"ripe-as{asn_value}-bgpstate",
                 "url": RIPE_BGP_STATE_URL.format(asn=asn_value),
                 "format": "ripe_bgp_state_json",
-                "timeout": ASN_FETCH_SOURCE_TIMEOUT_SECONDS,
+                "timeout": ASN_OPTIONAL_SOURCE_TIMEOUT_SECONDS,
+                "optional": True,
+                "retries": 1,
             },
         ]
 
         last_error = None
-        for attempt in range(3):
+        for attempt in range(ASN_FETCH_ATTEMPTS):
             try:
                 items, source_used = self._download_cidrs_with_meta(sources)
                 return items, source_used, None
             except Exception as exc:
                 last_error = str(exc)
-                if attempt < 2:
+                if attempt < ASN_FETCH_ATTEMPTS - 1:
                     time.sleep(1 + attempt)
                     continue
         return [], None, last_error
@@ -1346,18 +1677,41 @@ class CidrDbUpdaterService:
         workers = max(1, int(self._current_source_fetch_workers() or 1))
         workers = min(workers, len(source_list), 16)
 
-        def _fetch_single(source):
-            fmt = source.get("format", "")
+        def _source_retries(source):
+            # Explicit retries: 0 means one attempt, not the default retry count.
+            retries = source.get("retries")
+            return max(1, int(SOURCE_FETCH_RETRIES if retries is None else retries))
+
+        def _source_timeout(source):
             timeout = source.get("timeout", SOURCE_FETCH_TIMEOUT_SECONDS)
             try:
                 timeout = int(timeout)
             except (TypeError, ValueError):
                 timeout = SOURCE_FETCH_TIMEOUT_SECONDS
-            timeout = max(3, min(timeout, 180))
+            return max(3, min(timeout, 180))
+
+        def _source_detail(source, *, status, count, error, cache_hit):
+            return {
+                "name": source.get("name"),
+                "url": source.get("url"),
+                "status": status,
+                "count": count,
+                "error": error,
+                "cache_hit": bool(cache_hit),
+                "stale": source.get("url") in stale_source_urls,
+            }
+
+        # URLs served from the on-disk last-good cache during this call.
+        stale_source_urls = set()
+
+        def _fetch_single(source):
+            fmt = source.get("format", "")
+            timeout = _source_timeout(source)
+            url = source.get("url")
 
             cache_ttl = self._current_source_cache_ttl_seconds()
-            cache_key = f"{source.get('url')}|{fmt}|{timeout}"
-            retries = max(1, int(SOURCE_FETCH_RETRIES or 1))
+            cache_key = f"{url}|{fmt}|{timeout}"
+            retries = _source_retries(source)
             last_exc = None
 
             for attempt in range(retries):
@@ -1372,13 +1726,13 @@ class CidrDbUpdaterService:
 
                 if text_data is None:
                     try:
-                        text_data = _download_text(source["url"], timeout=timeout)
+                        text_data = _download_text(url, timeout=timeout)
                     except Exception as exc:
                         last_exc = exc
                         if attempt < retries - 1:
                             time.sleep(1 + attempt)
                             continue
-                        raise
+                        break
 
                 try:
                     items = _extract_cidrs_with_meta(text_data, fmt)
@@ -1389,81 +1743,147 @@ class CidrDbUpdaterService:
                     if attempt < retries - 1:
                         time.sleep(1 + attempt)
                         continue
-                    raise
+                    break
 
                 if not cache_hit:
+                    payload = str(text_data or "")
                     with self._source_cache_lock:
-                        self._source_cache[cache_key] = {"ts": now, "payload": str(text_data or "")}
+                        self._source_cache[cache_key] = {"ts": now, "payload": payload}
+                    _write_source_disk_cache(url, fmt, payload)
                 return items, cache_hit
+
+            # Upstream failed after retries: fall back to the last good on-disk payload.
+            stale_payload = _read_source_disk_cache(url, fmt)
+            if stale_payload is not None:
+                try:
+                    stale_items = _extract_cidrs_with_meta(stale_payload, fmt)
+                except Exception as exc:
+                    logger.warning(
+                        "CIDR source disk cache unusable for %s: %s", url, exc
+                    )
+                else:
+                    if stale_items:
+                        logger.warning("using stale disk cache for %s", url)
+                        stale_source_urls.add(url)
+                        return stale_items, True
 
             raise last_exc or ValueError("Не удалось загрузить источник")
 
         if workers <= 1:
+            # Sequential mode: an optional source is already bounded by its short
+            # per-source timeout (ASN_OPTIONAL_SOURCE_TIMEOUT_SECONDS), so the
+            # parallel-only grace window is unnecessary here.
             for source in source_list:
                 try:
                     items, cache_hit = _fetch_single(source)
                     all_items.extend(items)
                     source_names_used.append(source["name"])
-                    source_details.append({
-                        "name": source.get("name"),
-                        "url": source.get("url"),
-                        "status": "ok",
-                        "count": len(items),
-                        "error": None,
-                        "cache_hit": bool(cache_hit),
-                    })
+                    source_details.append(_source_detail(
+                        source,
+                        status="ok",
+                        count=len(items),
+                        error=None,
+                        cache_hit=cache_hit,
+                    ))
                 except Exception as exc:
                     err_msg = f"{source['name']}: {exc}"
                     errors.append(err_msg)
-                    source_details.append({
-                        "name": source.get("name"),
-                        "url": source.get("url"),
-                        "status": "error",
-                        "count": 0,
-                        "error": str(exc),
-                        "cache_hit": False,
-                    })
+                    source_details.append(_source_detail(
+                        source,
+                        status="error",
+                        count=0,
+                        error=str(exc),
+                        cache_hit=False,
+                    ))
         else:
             success_by_index = {}
             error_by_index = {}
             cache_hit_by_index = {}
-            with ThreadPoolExecutor(max_workers=workers) as executor:
-                future_to_index = {
-                    executor.submit(_fetch_single, source): idx
-                    for idx, source in enumerate(source_list)
-                }
-                for future in as_completed(future_to_index):
-                    idx = future_to_index[future]
+            required_indexes = [idx for idx, source in enumerate(source_list) if not source.get("optional")]
+            optional_indexes = [idx for idx, source in enumerate(source_list) if source.get("optional")]
+
+            def _wait_budget():
+                # Required sources start in waves of `workers`; every wave after the
+                # first waits for a free worker, so the budget must cover all waves.
+                waves = max(1, math.ceil(len(required_indexes) / workers))
+                per_source_worst = 0
+                for idx in required_indexes:
                     source = source_list[idx]
-                    try:
-                        items, cache_hit = future.result()
-                        success_by_index[idx] = items
-                        cache_hit_by_index[idx] = bool(cache_hit)
-                    except Exception as exc:
-                        error_by_index[idx] = f"{source['name']}: {exc}"
+                    retries = _source_retries(source)
+                    # _fetch_single sleeps 1 + attempt between attempts; count it in.
+                    backoff = sum(1 + attempt for attempt in range(retries - 1))
+                    per_source_worst = max(
+                        per_source_worst, _source_timeout(source) * retries + backoff
+                    )
+                return waves * per_source_worst + 5
+
+            futures_by_index = {}
+            executor = ThreadPoolExecutor(max_workers=workers)
+            try:
+                for idx, source in enumerate(source_list):
+                    futures_by_index[idx] = executor.submit(_fetch_single, source)
+
+                required_futures = [futures_by_index[idx] for idx in required_indexes]
+                optional_futures = [futures_by_index[idx] for idx in optional_indexes]
+                if required_futures:
+                    budget = _wait_budget()
+                    wait(required_futures, timeout=budget)
+                    for idx in required_indexes:
+                        if not futures_by_index[idx].done():
+                            logger.warning(
+                                "CIDR required source %s skipped after %.1fs budget",
+                                source_list[idx].get("name"),
+                                budget,
+                            )
+                if optional_futures:
+                    # Short grace: a hung optional source must not delay the whole result.
+                    grace = OPTIONAL_SOURCE_GRACE_SECONDS
+                    wait(optional_futures, timeout=grace)
+                    for idx in optional_indexes:
+                        if not futures_by_index[idx].done():
+                            logger.debug(
+                                "CIDR source %s skipped after %.1fs grace",
+                                source_list[idx].get("name"),
+                                grace,
+                            )
+
+                for idx, future in futures_by_index.items():
+                    source = source_list[idx]
+                    if future.done() and not future.cancelled():
+                        try:
+                            items, cache_hit = future.result()
+                            success_by_index[idx] = items
+                            cache_hit_by_index[idx] = bool(cache_hit)
+                        except Exception as exc:
+                            error_by_index[idx] = f"{source['name']}: {exc}"
+                    else:
+                        error_by_index[idx] = (
+                            f"{source['name']}: не получен за отведённое время"
+                        )
+            finally:
+                # wait=False: a stuck urllib worker must not block the caller on exit.
+                executor.shutdown(wait=False, cancel_futures=True)
 
             for idx, source in enumerate(source_list):
                 if idx in success_by_index:
                     all_items.extend(success_by_index[idx])
                     source_names_used.append(source["name"])
-                    source_details.append({
-                        "name": source.get("name"),
-                        "url": source.get("url"),
-                        "status": "ok",
-                        "count": len(success_by_index[idx]),
-                        "error": None,
-                        "cache_hit": bool(cache_hit_by_index.get(idx)),
-                    })
+                    source_details.append(_source_detail(
+                        source,
+                        status="ok",
+                        count=len(success_by_index[idx]),
+                        error=None,
+                        cache_hit=cache_hit_by_index.get(idx),
+                    ))
                 elif idx in error_by_index:
                     errors.append(error_by_index[idx])
-                    source_details.append({
-                        "name": source.get("name"),
-                        "url": source.get("url"),
-                        "status": "error",
-                        "count": 0,
-                        "error": error_by_index[idx],
-                        "cache_hit": False,
-                    })
+                    source_details.append(_source_detail(
+                        source,
+                        status="error",
+                        count=0,
+                        error=error_by_index[idx],
+                        cache_hit=False,
+                    ))
 
         if not all_items:
             raise ValueError("; ".join(errors) if errors else "Все источники вернули пустой результат")

@@ -1,5 +1,5 @@
 import { Navigate } from 'react-router-dom'
-import AntizapretConfigTab from '@/components/routing/AntizapretConfigTab'
+import AntizapretConfigTab from '@/components/protocols/antizapret/AntizapretConfigTab'
 import { useAuth } from '@/context/AuthContext'
 
 export default function AntizapretConfigPage() {

@@ -13,12 +13,15 @@ interface RoutingOverviewTabProps {
   data: RoutingOverview
   antifilter: AntifilterStatus | null
   workflow: RoutingWorkflowState
+  /** Меняется после сборки/развёртывания (например, finished_at из cidrDb) — по нему перезапрашивается бюджет. */
+  budgetVersion?: string | number
 }
 
 export default function RoutingOverviewTab({
   data,
   antifilter,
   workflow,
+  budgetVersion,
 }: RoutingOverviewTabProps) {
   const stats = data.route_stats
   const [routeBudget, setRouteBudget] = useState<RouteBudgetInfo | null>(null)
@@ -27,7 +30,18 @@ export default function RoutingOverviewTab({
     void getRouteBudget()
       .then(setRouteBudget)
       .catch(() => setRouteBudget(null))
-  }, [])
+  }, [budgetVersion])
+
+  const budgetFromArtifacts = routeBudget?.source === 'artifacts'
+  const budgetSourceLabel = budgetFromArtifacts
+    ? 'По собранным файлам на контроллере'
+    : 'По последней оценке обновления CIDR'
+  const budgetSourceHint = budgetFromArtifacts
+    ? 'Лимит и занятость посчитаны по AP-*-include-ips.txt на контроллере'
+    : 'Значения из последней задачи оценки (dry-run) обновления CIDR'
+  const budgetSourceTone = budgetFromArtifacts
+    ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+    : 'text-muted-foreground'
 
   return (
     <div className="space-y-6">
@@ -37,13 +51,18 @@ export default function RoutingOverviewTab({
             <div>
               <div className="text-sm font-medium">Бюджет маршрутов OpenVPN</div>
               <div className="text-xs text-muted-foreground">
-                По последней оценке обновления CIDR
+                {budgetSourceLabel}
                 {routeBudget.finished_at ? ` · ${formatDt(routeBudget.finished_at)}` : ''}
               </div>
             </div>
-            <Badge variant={routeBudget.remaining === 0 ? 'destructive' : 'secondary'}>
-              осталось {routeBudget.remaining ?? 0} из {routeBudget.limit}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className={`text-[10px] ${budgetSourceTone}`} title={budgetSourceHint}>
+                {budgetFromArtifacts ? 'артефакты' : 'оценка'}
+              </Badge>
+              <Badge variant={routeBudget.remaining === 0 ? 'destructive' : 'secondary'}>
+                осталось {routeBudget.remaining ?? 0} из {routeBudget.limit}
+              </Badge>
+            </div>
           </div>
           <PercentBar
             value={routeBudget.used ?? 0}

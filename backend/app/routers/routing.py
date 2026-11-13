@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
+from app.cidr_database import get_cidr_db
 from app.database import get_db
 from app.models import BackgroundTask, User
 from app.schemas import (
@@ -28,12 +30,17 @@ from app.services.antizapret_settings import (
     setting_write_mismatch_warnings,
 )
 from app.services.background_tasks import background_task_service
+from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
+from app.services.cidr.pipeline.provider_sources import CUSTOM_PROVIDER_KEY
 from app.services.env_file import EnvFileService
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.antizapret_sync import enqueue_ha_routing_apply_replicas, replicate_antizapret_settings
-from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import find_sync_group_for_primary, is_auto_sync_enabled, require_ha_primary_for_config_ops
-from app.services.node_sync.provider_sync import deploy_compiled_providers_to_replicas, replicate_provider_content
+from app.services.node_sync.provider_sync import (
+    deploy_compiled_providers_to_replicas,
+    replicate_provider_content,
+    replicate_provider_enabled,
+)
 from app.services.profile_delivery import load_node_remote_hosts
 
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
@@ -51,15 +58,21 @@ def _enqueue_routing_apply_tasks(
     if background_task_service.find_active_task("routing_apply"):
         return None
 
+    # Pin the node: activating another node in a parallel tab must not redirect this task.
+    node_id = get_active_node(db).id
+
     def _callable(progress_updater=None):
         from app.database import SessionLocal
+        from app.models import Node
+        from app.services.node_manager import get_adapter_for_node
 
         worker_db = SessionLocal()
         try:
-            adapter = get_active_adapter(worker_db)
-            node = get_active_node(worker_db)
+            node = worker_db.get(Node, node_id)
+            if node is None:
+                raise RuntimeError(f"Узел {node_id} больше не существует — применение маршрутизации отменено")
             return background_task_service.task_routing_apply(
-                adapter,
+                get_adapter_for_node(node),
                 progress_updater,
                 hosts=load_node_remote_hosts(worker_db, node.id),
                 ensure_openvpn_multihome=bool(node.openvpn_multihome),
@@ -74,12 +87,55 @@ def _enqueue_routing_apply_tasks(
         queued_message="Применение маршрутизации поставлено в очередь",
     )
 
-    active_node = get_active_node(db)
-    group = find_sync_group_for_primary(db, active_node.id)
+    group = find_sync_group_for_primary(db, node_id)
     if group and is_auto_sync_enabled(group):
         enqueue_ha_routing_apply_replicas(db, group, created_by_username=created_by_username)
 
     return task
+
+
+def _enqueue_routing_sync_task(
+    db: Session,
+    *,
+    created_by_username: str,
+) -> BackgroundTask:
+    """Enqueue provider sync on the active node and HA deploy to replicas."""
+    node_id = get_active_node(db).id
+
+    def _callable(progress_updater=None):
+        from app.database import SessionLocal
+        from app.models import Node
+        from app.services.node_manager import get_adapter_for_node
+
+        worker_db = SessionLocal()
+        try:
+            node = worker_db.get(Node, node_id)
+            if node is None:
+                raise RuntimeError(f"Узел {node_id} больше не существует — синхронизация провайдеров отменена")
+            adapter = get_adapter_for_node(node)
+            if progress_updater:
+                progress_updater(20, "Синхронизация провайдеров…")
+            result = adapter.sync_cidr_providers()
+            group = find_sync_group_for_primary(worker_db, node_id)
+            if group and is_auto_sync_enabled(group):
+                ha_deploy = deploy_compiled_providers_to_replicas(
+                    worker_db, group, adapter, sync_result=result
+                )
+                result = {**result, "ha_deploy": ha_deploy}
+            return {
+                "success": True,
+                "message": "Провайдеры синхронизированы",
+                "output": json.dumps(result, ensure_ascii=False, default=str),
+            }
+        finally:
+            worker_db.close()
+
+    return background_task_service.enqueue_background_task(
+        "routing_sync",
+        _callable,
+        created_by_username=created_by_username,
+        queued_message="Синхронизация провайдеров поставлена в очередь",
+    )
 
 
 class ContentUpdate(BaseModel):
@@ -108,12 +164,35 @@ def get_provider(filename: str, _: User = Depends(require_admin), db: Session = 
     return get_active_adapter(db).get_provider_content(filename)
 
 
+def _import_custom_provider_to_db(db: Session, cidr_db: Session) -> str | None:
+    """Refresh the CIDR DB from the saved manual list; return a warning on failure."""
+    svc = CidrDbUpdaterService(db=db, cidr_db=cidr_db)
+    try:
+        import_result = svc.refresh_all_providers(
+            triggered_by="panel:custom-ips",
+            selected_files=[CUSTOM_PROVIDER_KEY],
+        )
+    except Exception as exc:
+        logger.warning("CIDR DB import of %s failed: %s", CUSTOM_PROVIDER_KEY, exc, exc_info=True)
+        return f"Файл {CUSTOM_PROVIDER_KEY} сохранён, но импорт в CIDR БД не удался: {exc}"
+    finally:
+        svc.close()
+
+    if import_result.get("success"):
+        return None
+    provider = (import_result.get("per_provider") or {}).get(CUSTOM_PROVIDER_KEY) or {}
+    error = provider.get("error") or import_result.get("message") or import_result.get("status")
+    logger.warning("CIDR DB import of %s failed: %s", CUSTOM_PROVIDER_KEY, error)
+    return f"Файл {CUSTOM_PROVIDER_KEY} сохранён, но импорт в CIDR БД не удался: {error}"
+
+
 @router.put("/providers/{filename}")
 def save_provider(
     filename: str,
     payload: ContentUpdate,
     _: User = Depends(require_admin),
     db: Session = Depends(get_db),
+    cidr_db: Session = Depends(get_cidr_db),
 ):
     require_ha_primary_for_config_ops(db)
     result = get_active_adapter(db).save_provider_content(filename, payload.content)
@@ -121,6 +200,11 @@ def save_provider(
     group = find_sync_group_for_primary(db, active_node.id)
     if group and is_auto_sync_enabled(group):
         replicate_provider_content(db, group, filename, payload.content)
+    # The manual list is a DB provider: without the import the next compile drops the edit.
+    if filename == CUSTOM_PROVIDER_KEY:
+        warning = _import_custom_provider_to_db(db, cidr_db)
+        if warning:
+            result = {**result, "warnings": [*result.get("warnings", []), warning]}
     return result
 
 
@@ -132,44 +216,38 @@ def toggle_provider(
     db: Session = Depends(get_db),
 ):
     require_ha_primary_for_config_ops(db)
-    return get_active_adapter(db).set_provider_enabled(filename, payload.enabled)
-
-
-@router.post("/sync")
-def sync_providers(_: User = Depends(require_admin), db: Session = Depends(get_db)):
-    require_ha_primary_for_config_ops(db)
-    adapter = get_active_adapter(db)
-    result = adapter.sync_cidr_providers()
-    active_node = get_active_node(db)
-    group = find_sync_group_for_primary(db, active_node.id)
+    result = get_active_adapter(db).set_provider_enabled(filename, payload.enabled)
+    group = find_sync_group_for_primary(db, get_active_node(db).id)
     if group and is_auto_sync_enabled(group):
-        ha_deploy = deploy_compiled_providers_to_replicas(db, group, adapter, sync_result=result)
-        result = {**result, "ha_deploy": ha_deploy}
+        replicate = replicate_provider_enabled(db, group, filename, payload.enabled)
+        if replicate.errors:
+            result = {
+                **result,
+                "warnings": [
+                    f"HA replica «{item.get('node_name') or item.get('node_id')}»: {item.get('error')}"
+                    for item in replicate.errors
+                ],
+            }
     return result
 
 
-@router.get("/files/{file_key}")
-def read_route_file(file_key: str, _: User = Depends(require_admin), db: Session = Depends(get_db)):
-    return get_active_adapter(db).read_route_file(file_key)
-
-
-@router.put("/files/{file_key}")
-def write_route_file(
-    file_key: str,
-    payload: ContentUpdate,
-    _: User = Depends(require_admin),
-    db: Session = Depends(get_db),
-):
+@router.post("/sync", status_code=status.HTTP_202_ACCEPTED)
+def sync_providers(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     require_ha_primary_for_config_ops(db)
-    result = get_active_adapter(db).write_route_file(file_key, payload.content)
-    maybe_replicate_config_files(
-        db,
-        node_id=get_active_node(db).id,
-        file_keys=[file_key],
-        run_doall=False,
-        content_overrides={file_key: payload.content},
+    active = background_task_service.find_active_task("routing_sync")
+    if active:
+        return JSONResponse(
+            status_code=status.HTTP_409_CONFLICT,
+            content={
+                "detail": "Синхронизация провайдеров уже выполняется",
+                "active_task_id": active.id,
+            },
+        )
+    task = _enqueue_routing_sync_task(db, created_by_username=admin.username)
+    return background_task_service.build_accepted_payload(
+        task,
+        "Синхронизация провайдеров запущена в фоне",
     )
-    return result
 
 
 @router.get("/results")
@@ -271,13 +349,32 @@ def apply_antizapret_runtime_changes(
     return result
 
 
+_MAX_SETTING_VALUE_LEN = 512
+
+
+def _validate_setting_payload(payload: dict[str, str]) -> None:
+    """Reject values that could break the root-readable setup file (setup is KEY=VALUE)."""
+    for key, value in payload.items():
+        if any(ch in value for ch in ("\r", "\n", "\t")):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{key}: недопустимые символы (перевод строки или табуляция)",
+            )
+        if len(value) > _MAX_SETTING_VALUE_LEN:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{key}: значение длиннее {_MAX_SETTING_VALUE_LEN} символов",
+            )
+
+
 @router.put("/antizapret-settings", response_model=AntizapretSettingsUpdateResponse)
 def put_antizapret_settings(
-    payload: dict[str, Any],
+    payload: dict[str, str],
     apply: bool = Query(False, description="После сохранения поставить apply в очередь (только HA auto)"),
     admin: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
+    _validate_setting_payload(payload)
     require_ha_primary_for_config_ops(db)
     filtered = filter_known_keys(payload)
     env = EnvFileService(_ENV_FILE)

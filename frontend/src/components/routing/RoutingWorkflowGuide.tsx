@@ -7,7 +7,6 @@ import { pluralProviders } from './utils'
 
 interface RoutingWorkflowGuideProps {
   workflow: RoutingWorkflowState
-  isAdmin: boolean
   pipelineBusy: boolean
   onNavigate: (tab: RoutingTab, anchor?: string) => void
 }
@@ -29,7 +28,6 @@ function guideHint(workflow: RoutingWorkflowState): string {
 
 export default function RoutingWorkflowGuide({
   workflow,
-  isAdmin,
   pipelineBusy,
   onNavigate,
 }: RoutingWorkflowGuideProps) {
@@ -45,7 +43,7 @@ export default function RoutingWorkflowGuide({
         {workflow.nextAction && (
           <Button
             size="sm"
-            disabled={pipelineBusy && isAdmin}
+            disabled={pipelineBusy}
             onClick={() => onNavigate(workflow.nextAction!.tab, workflow.nextAction!.anchor)}
           >
             {workflow.nextAction.label}

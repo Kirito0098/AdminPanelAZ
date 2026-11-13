@@ -21,7 +21,7 @@ from app.config import get_settings
 from app.paths import get_cidr_list_dir
 from app.services.node_mtls import build_node_agent_ssl_context, node_agent_base_scheme
 from app.services.node_mtls_certs import MtlsProvisionBundle
-from app.services.antizapret import AntiZapretService
+from app.services.antizapret import AntiZapretService, apply_agent_timeout_seconds
 from app.services.antizapret_settings import (
     choice_updates_for_agent,
     read_antizapret_settings,
@@ -310,7 +310,7 @@ class NodeAdapter(ABC):
     def write_config_file(self, filename: str, content: str) -> None: ...
 
     @abstractmethod
-    def apply_config_changes(self) -> str: ...
+    def apply_config_changes(self, *, ips_only: bool = False) -> str: ...
 
     def get_dns_servers(self) -> dict[str, Any]:
         """Выбор DNS-резолверов: есть только у VPN-узлов (LocalAdapter / RemoteAdapter)."""
@@ -949,8 +949,8 @@ class LocalNodeAdapter(NodeAdapter):
     def write_config_file(self, filename: str, content: str) -> None:
         return self._service.write_config_file(filename, content)
 
-    def apply_config_changes(self) -> str:
-        return self._service.apply_config_changes()
+    def apply_config_changes(self, *, ips_only: bool = False) -> str:
+        return self._service.apply_config_changes(ips_only=ips_only)
 
     def get_dns_servers(self) -> dict[str, Any]:
         return self._service.get_dns_servers()
@@ -1695,8 +1695,29 @@ class RemoteNodeAdapter(NodeAdapter):
         with self._config_file_request(filename):
             self._request("PUT", f"/configs/files/{filename}", json={"content": content}, timeout=timeout)
 
-    def apply_config_changes(self) -> str:
-        data = self._request("POST", "/configs/apply", timeout=300.0)
+    def apply_config_changes(self, *, ips_only: bool = False) -> str:
+        """``ips_only`` asks for a CIDR-only doall; old agents answer 404/422 → full doall.
+
+        The panel timeout outlives the agent timeout, otherwise a slow but alive node is
+        reported as failed while the agent keeps writing its config.
+        """
+        timeout = apply_agent_timeout_seconds()
+        try:
+            data = self._request(
+                "POST", "/configs/apply", json={"ips_only": bool(ips_only)}, timeout=timeout
+            )
+        except HTTPException as exc:
+            if not ips_only or exc.status_code not in (
+                status.HTTP_404_NOT_FOUND,
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+            ):
+                raise
+            logger.warning(
+                "node agent %s: ips_only не поддерживается (HTTP %s) — выполняется полный doall.sh",
+                self.base_url,
+                exc.status_code,
+            )
+            data = self._request("POST", "/configs/apply", timeout=timeout)
         return data.get("detail") or data.get("message", "ok")
 
     def _dns_servers_request(self, method: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:

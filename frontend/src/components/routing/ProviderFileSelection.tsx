@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Check, CloudDownload, Search } from 'lucide-react'
+import { CloudDownload, Search } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -117,7 +117,7 @@ export default function ProviderFileSelection({
         <div className="space-y-1">
           <div className="text-sm font-semibold tracking-tight">Выбор провайдеров</div>
           <p className="text-xs text-muted-foreground max-w-xl">
-            Отметьте одного или нескольких — необязательно обновлять все 12. Технический ID скрыт;
+            Отметьте одного или нескольких — необязательно обновлять все {providers.length}. Технический ID скрыт;
             на узле используются файлы вида <span className="font-mono">AP-…-include-ips.txt</span>.
           </p>
         </div>
@@ -147,7 +147,7 @@ export default function ProviderFileSelection({
             disabled={disabled}
           />
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {CATEGORY_FILTERS.map((cat) => {
             const label = cat === 'all' ? 'Все' : providerCategoryLabel(cat)
             const count =
@@ -161,8 +161,7 @@ export default function ProviderFileSelection({
                 type="button"
                 disabled={disabled}
                 onClick={() => setCategoryFilter(cat)}
-                onDoubleClick={() => !disabled && selectByCategory(cat)}
-                title={cat === 'all' ? undefined : `Двойной щелчок — выбрать только ${label}`}
+                aria-pressed={active}
                 className={cn(
                   'rounded-full border px-3 py-1 text-xs font-medium transition-colors',
                   active
@@ -175,6 +174,20 @@ export default function ProviderFileSelection({
               </button>
             )
           })}
+          {categoryFilter !== 'all' && (
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              disabled={disabled}
+              title={`Выбрать только категорию «${providerCategoryLabel(categoryFilter)}»`}
+              aria-label={`Выбрать только категорию «${providerCategoryLabel(categoryFilter)}»`}
+              onClick={() => selectByCategory(categoryFilter)}
+            >
+              Только «{providerCategoryLabel(categoryFilter)}»
+            </Button>
+          )}
         </div>
       </div>
 
@@ -182,56 +195,48 @@ export default function ProviderFileSelection({
         {filtered.map((provider) => {
           const dbMeta = cidrDb?.providers?.[provider.filename]
           const selected = selectedSet.has(provider.filename)
-          const inputId = `${idPrefix}-${provider.filename}`
+          const checkboxId = `${idPrefix}-${provider.filename}`
           const slug = providerSlug(provider.filename)
           const tone = providerStatusTone(dbMeta?.refresh_status)
           const cidrCount = dbMeta?.cidr_count
+          const quickIngestVisible = showQuickIngest && Boolean(onRefreshOne)
 
           return (
             <div
               key={provider.filename}
-              role="button"
-              tabIndex={disabled ? -1 : 0}
-              aria-pressed={selected}
-              aria-labelledby={`${inputId}-title`}
               title={`ID: ${slug} · файл списка: ${provider.filename}`}
-              onClick={() => !disabled && toggleFile(provider.filename)}
-              onKeyDown={(e) => {
-                if (disabled) return
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  toggleFile(provider.filename)
-                }
-              }}
               className={cn(
-                'group relative rounded-md border p-2 text-left transition-all',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+                'group relative rounded-md border transition-all',
                 selected
                   ? 'border-primary/60 bg-primary/10 shadow-sm'
                   : cn('bg-muted/15 hover:bg-muted/25', STATUS_RING[tone]),
-                disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+                disabled && 'opacity-60',
               )}
             >
-              <div className="flex items-start gap-1.5">
-                <div
-                  className={cn(
-                    'mt-px flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors',
-                    selected
-                      ? 'border-primary bg-primary text-primary-foreground'
-                      : 'border-muted-foreground/40 bg-background/50',
-                  )}
-                >
-                  {selected && <Check size={10} strokeWidth={3} />}
-                </div>
+              <label
+                htmlFor={checkboxId}
+                className={cn(
+                  'flex items-start gap-1.5 rounded-md p-2',
+                  disabled ? 'cursor-not-allowed' : 'cursor-pointer',
+                )}
+              >
+                <input
+                  id={checkboxId}
+                  type="checkbox"
+                  checked={selected}
+                  disabled={disabled}
+                  aria-label={provider.name}
+                  onChange={() => toggleFile(provider.filename)}
+                  className="mt-px h-4 w-4 shrink-0 cursor-pointer accent-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed"
+                />
 
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-baseline justify-between gap-1">
-                    <div
-                      id={`${inputId}-title`}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-baseline justify-between gap-1">
+                    <span
                       className="truncate text-[13px] font-semibold leading-tight"
                     >
                       {provider.name}
-                    </div>
+                    </span>
                     {cidrCount != null && cidrCount > 0 ? (
                       <span className="shrink-0 font-mono text-[11px] font-semibold tabular-nums text-muted-foreground">
                         {formatCompactCount(cidrCount)}
@@ -241,10 +246,15 @@ export default function ProviderFileSelection({
                         —
                       </Badge>
                     )}
-                  </div>
+                  </span>
 
-                  <div className="mt-0.5 flex items-center justify-between gap-1">
-                    <div className="flex min-w-0 items-center gap-1">
+                  <span
+                    className={cn(
+                      'mt-0.5 flex items-center justify-between gap-1',
+                      quickIngestVisible && 'pr-5',
+                    )}
+                  >
+                    <span className="flex min-w-0 items-center gap-1">
                       <span
                         className={cn('h-1.5 w-1.5 shrink-0 rounded-full', STATUS_DOT[tone])}
                         title={statusLabel(dbMeta?.refresh_status)}
@@ -255,38 +265,25 @@ export default function ProviderFileSelection({
                           <> · {statusLabel(dbMeta.refresh_status)}</>
                         )}
                       </span>
-                    </div>
+                    </span>
+                  </span>
+                </span>
+              </label>
 
-                    {showQuickIngest && onRefreshOne && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-5 w-5 shrink-0 p-0 opacity-70 hover:opacity-100"
-                        disabled={disabled}
-                        title="Загрузить только этого провайдера"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onRefreshOne(provider.filename)
-                        }}
-                      >
-                        <CloudDownload size={11} />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <input
-                id={inputId}
-                type="checkbox"
-                checked={selected}
-                disabled={disabled}
-                onChange={() => toggleFile(provider.filename)}
-                onClick={(e) => e.stopPropagation()}
-                className="sr-only"
-                aria-hidden
-              />
+              {quickIngestVisible && onRefreshOne && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="absolute bottom-1 right-1 h-5 w-5 shrink-0 p-0 opacity-70 hover:opacity-100"
+                  disabled={disabled}
+                  title="Загрузить только этого провайдера"
+                  aria-label={`Загрузить только провайдера ${provider.name}`}
+                  onClick={() => onRefreshOne(provider.filename)}
+                >
+                  <CloudDownload size={11} />
+                </Button>
+              )}
             </div>
           )
         })}

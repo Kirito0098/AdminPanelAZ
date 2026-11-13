@@ -1,10 +1,51 @@
 import type { CidrDbStatus, CidrProviderInfo } from '@/types'
 import { STAGE_BUILD, STAGE_DEPLOY, STAGE_LOAD } from './routingLabels'
-import { pluralProviders } from './utils'
+import { pluralProviders, type PipelineStage } from './utils'
 
 export type RoutingTab = 'overview' | 'providers' | 'pipeline' | 'analysis' | 'settings'
 
 type WorkflowStage = 1 | 2 | 3 | 4
+
+export interface PipelineStageMeta {
+  stage: PipelineStage
+  /** Якорь блока этапа на вкладке обновления списков. */
+  id: string
+  /** Полное название этапа: «Загрузка данных на контроллер». */
+  label: string
+  /** Одно слово для навигации и бейджей: «Загрузка». */
+  shortLabel: string
+  /** Компактная формулировка шага для цепочки этапов и подсказок. */
+  description: string
+}
+
+/** Единственный источник описания этапов пайплайна (навигация, заголовки, цепочка). */
+export const PIPELINE_STAGES: readonly PipelineStageMeta[] = [
+  {
+    stage: 1,
+    id: 'pipeline-stage-1',
+    label: `${STAGE_LOAD} данных на контроллер`,
+    shortLabel: STAGE_LOAD,
+    description: 'Данные на контроллер (SQLite)',
+  },
+  {
+    stage: 2,
+    id: 'pipeline-stage-2',
+    label: `${STAGE_BUILD} списков на контроллере`,
+    shortLabel: STAGE_BUILD,
+    description: 'Списки на контроллере',
+  },
+  {
+    stage: 3,
+    id: 'pipeline-stage-3',
+    label: `${STAGE_DEPLOY} списков на узел`,
+    shortLabel: STAGE_DEPLOY,
+    description: 'Списки на узел',
+  },
+]
+
+export function getPipelineStageMeta(stage: PipelineStage): PipelineStageMeta {
+  return PIPELINE_STAGES.find((item) => item.stage === stage) ?? PIPELINE_STAGES[0]
+}
 
 export interface WorkflowStep {
   stage: WorkflowStage
@@ -117,7 +158,6 @@ function providersSummary(enabledCount: number, onNodeCount: number): string {
 export function getRoutingWorkflowState(
   providers: CidrProviderInfo[],
   cidrDb: CidrDbStatus | null,
-  isAdmin: boolean,
 ): RoutingWorkflowState {
   const enabledCount = providers.filter((p) => p.enabled).length
   const onNodeCount = providers.filter((p) => p.has_source).length
@@ -168,22 +208,24 @@ export function getRoutingWorkflowState(
     return 'pending'
   }
 
+  const [loadStage, buildStage, deployStage] = PIPELINE_STAGES
+
   const steps: WorkflowStep[] = [
     {
       stage: 1,
-      label: 'Данные на контроллере',
-      shortLabel: STAGE_LOAD,
-      tab: isAdmin ? 'pipeline' : 'overview',
-      anchor: isAdmin ? 'pipeline-stage-1' : undefined,
+      label: loadStage.label,
+      shortLabel: loadStage.shortLabel,
+      tab: 'pipeline',
+      anchor: loadStage.id,
       status: stageStatus(1),
       summary: ingestSummary(cidrDb),
     },
     {
       stage: 2,
-      label: 'Сборка списков',
-      shortLabel: STAGE_BUILD,
-      tab: isAdmin ? 'pipeline' : 'overview',
-      anchor: isAdmin ? 'pipeline-stage-2' : undefined,
+      label: buildStage.label,
+      shortLabel: buildStage.shortLabel,
+      tab: 'pipeline',
+      anchor: buildStage.id,
       status: stageStatus(2),
       summary: compileSummary(
         cidrDb,
@@ -195,10 +237,10 @@ export function getRoutingWorkflowState(
     },
     {
       stage: 3,
-      label: `${STAGE_DEPLOY} на узел`,
-      shortLabel: STAGE_DEPLOY,
-      tab: isAdmin ? 'pipeline' : 'overview',
-      anchor: isAdmin ? 'pipeline-stage-3' : undefined,
+      label: deployStage.label,
+      shortLabel: deployStage.shortLabel,
+      tab: 'pipeline',
+      anchor: deployStage.id,
       status: stageStatus(3),
       summary: deploySummary(cidrDb, pendingDeployCount, onNodeCount),
     },
@@ -214,28 +256,28 @@ export function getRoutingWorkflowState(
 
   let nextAction: RoutingWorkflowState['nextAction'] = null
 
-  if (currentStage === 1 && isAdmin) {
+  if (currentStage === 1) {
     nextAction = {
       label: 'Обновить из интернета',
       tab: 'pipeline',
-      anchor: 'pipeline-stage-1',
+      anchor: loadStage.id,
       hint: 'Загрузите CIDR-провайдеров в SQLite на контроллере (этап 1).',
     }
-  } else if (currentStage === 2 && isAdmin) {
+  } else if (currentStage === 2) {
     nextAction = {
       label: 'Собрать списки',
       tab: 'pipeline',
-      anchor: 'pipeline-stage-2',
+      anchor: buildStage.id,
       hint:
         pendingCompileNames.length === 1
           ? `Сформируйте файл для «${pendingCompileNames[0]}» из локальной БД (этап 2).`
           : 'Сформируйте AP-*-include-ips.txt из локальной БД (этап 2).',
     }
-  } else if (currentStage === 3 && isAdmin) {
+  } else if (currentStage === 3) {
     nextAction = {
       label: 'Развернуть на узел',
       tab: 'pipeline',
-      anchor: 'pipeline-stage-3',
+      anchor: deployStage.id,
       hint: optionalCompileRemaining
         ? 'Списки собраны. Отправьте их на узел — провайдеры без файла можно пропустить.'
         : 'Отправьте готовые списки с контроллера на узел AntiZapret.',
@@ -245,14 +287,6 @@ export function getRoutingWorkflowState(
       label: 'Выбрать провайдеров',
       tab: 'providers',
       hint: 'Включите нужные списки, затем на вкладке «Провайдеры» выполните doall + client.sh 7.',
-    }
-  } else if (currentStage == null) {
-    nextAction = null
-  } else if (!isAdmin && currentStage <= 3) {
-    nextAction = {
-      label: 'Смотреть статус',
-      tab: 'overview',
-      hint: 'Обновление списков выполняет администратор. Здесь — текущий прогресс.',
     }
   }
 

@@ -7,15 +7,6 @@ from app.services.cidr.constants import IP_FILES
 from app.services.cidr.pipeline.constants import RUNTIME_BACKUP_RETENTION_SECONDS
 from app.services.cidr.pipeline import constants
 
-def _snapshot_baseline_if_missing():
-    os.makedirs(constants.BASELINE_DIR, exist_ok=True)
-    for file_name in IP_FILES.keys():
-        source_path = os.path.join(constants.LIST_DIR, file_name)
-        target_path = os.path.join(constants.BASELINE_DIR, file_name)
-        if os.path.exists(target_path):
-            continue
-        if os.path.exists(source_path):
-            shutil.copyfile(source_path, target_path)
 
 def _make_runtime_backup(files):
     _prune_runtime_backups()

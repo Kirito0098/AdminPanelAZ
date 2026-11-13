@@ -6,26 +6,46 @@ export function formatDt(value?: string | null) {
   return formatDateTime(value, undefined, value)
 }
 
-export function statusBadgeVariant(status?: string | null) {
-  if (status === 'ok') return 'default' as const
-  if (status === 'partial') return 'secondary' as const
-  if (status === 'error') return 'destructive' as const
-  if (status === 'running') return 'secondary' as const
-  return 'outline' as const
+export type StatusBadgeVariant = 'default' | 'secondary' | 'destructive' | 'outline' | 'success' | 'warning'
+
+export interface StatusMeta {
+  label: string
+  badge: StatusBadgeVariant
 }
 
-export function statusLabel(status?: string | null) {
-  const map: Record<string, string> = {
-    ok: 'OK',
-    partial: 'Частично',
-    error: 'Ошибка',
-    running: 'Выполняется',
-    never: 'Нет данных',
-    queued: 'В очереди',
-    completed: 'Завершено',
-    failed: 'Сбой',
-  }
-  return map[status ?? ''] ?? status ?? '—'
+/**
+ * Единый маппинг статусов задач, развёртывания и провайдеров.
+ * Значения совпадают с ответами бэкенда: ok/partial/error/never для refresh,
+ * queued/running/completed/failed/cancelled для задач, success/skipped для узлов.
+ */
+export const TASK_STATUS_META: Record<string, StatusMeta> = {
+  ok: { label: 'OK', badge: 'default' },
+  success: { label: 'Успех', badge: 'success' },
+  partial: { label: 'Частично', badge: 'warning' },
+  queued: { label: 'В очереди', badge: 'secondary' },
+  running: { label: 'Выполняется', badge: 'secondary' },
+  completed: { label: 'Завершено', badge: 'success' },
+  failed: { label: 'Ошибка', badge: 'destructive' },
+  error: { label: 'Ошибка', badge: 'destructive' },
+  cancelled: { label: 'Отменено', badge: 'outline' },
+  skipped: { label: 'Пропущен', badge: 'secondary' },
+  never: { label: 'Нет данных', badge: 'outline' },
+}
+
+const UNKNOWN_STATUS_META: StatusMeta = { label: 'Неизвестно', badge: 'outline' }
+
+export function statusMeta(status?: string | null): StatusMeta {
+  const key = String(status ?? '').trim()
+  if (!key) return { label: '—', badge: 'outline' }
+  return TASK_STATUS_META[key] ?? UNKNOWN_STATUS_META
+}
+
+export function statusBadgeVariant(status?: string | null): StatusBadgeVariant {
+  return statusMeta(status).badge
+}
+
+export function statusLabel(status?: string | null): string {
+  return statusMeta(status).label
 }
 
 export function isPipelineRunning(task: { status: string } | null) {
@@ -63,8 +83,8 @@ export function getIngestKind(taskType: string | undefined | null): IngestKind |
 export function getPipelineStage(taskType: string | undefined | null): PipelineStage | null {
   const normalized = String(taskType || '').trim()
   if (!normalized) return null
-  for (const [stage, types] of Object.entries(STAGE_TASK_TYPES) as unknown as [PipelineStage, readonly string[]][]) {
-    if (types.includes(normalized)) return stage
+  for (const stage of [1, 2, 3] as const) {
+    if (STAGE_TASK_TYPES[stage].includes(normalized)) return stage
   }
   return null
 }
@@ -90,21 +110,6 @@ export function pendingMatchesStage(
   if (!pending || pending.stage !== stage) return false
   if (stage === 1 && ingestKind) return pending.ingestKind === ingestKind
   return true
-}
-
-export function pipelineTaskStatusLabel(status: string): string {
-  switch (status) {
-    case 'queued':
-      return 'В очереди'
-    case 'running':
-      return 'Выполняется'
-    case 'completed':
-      return 'Завершено'
-    case 'failed':
-      return 'Ошибка'
-    default:
-      return status
-  }
 }
 
 /** Internal list key, e.g. digitalocean-ips.txt → digitalocean */

@@ -1,35 +1,61 @@
 """Deploy CIDR artifacts from controller LIST_DIR to nodes."""
 
 import hashlib
+import logging
 import os
 from typing import Any
 
+from app.services.cidr.constants import IP_FILES
 from app.services.cidr.pipeline.constants import LIST_DIR
 from app.services.node_adapter import NodeAdapter
 
+logger = logging.getLogger(__name__)
+
+ALLOWED_ARTIFACT_FILES = frozenset(IP_FILES)
+
+
+def _requested_filenames(filenames: list[str] | list[dict] | None) -> list[str]:
+    names: list[str] = []
+    for item in filenames or []:
+        name = item.get("file") if isinstance(item, dict) else item
+        if name:
+            names.append(str(name))
+    return names
+
 
 def _normalize_filenames(filenames: list[str] | list[dict] | None) -> list[str]:
-    if not filenames:
-        return []
+    """Keep plain provider filenames; paths and unknown names are rejected."""
     normalized: list[str] = []
-    for item in filenames:
-        if isinstance(item, dict):
-            name = item.get("file")
-            if name:
-                normalized.append(str(name))
-        else:
-            normalized.append(str(item))
+    for name in _requested_filenames(filenames):
+        if name != os.path.basename(name) or name not in ALLOWED_ARTIFACT_FILES:
+            logger.warning("ignored unknown deploy filename: %r", name)
+            continue
+        if name not in normalized:
+            normalized.append(name)
     return normalized
+
+
+def _artifact_path(filename: str) -> str | None:
+    """Resolve a whitelisted artifact inside LIST_DIR, None if it escapes."""
+    path = os.path.join(LIST_DIR, filename)
+    root = os.path.realpath(LIST_DIR)
+    if not os.path.realpath(path).startswith(root + os.sep):
+        logger.warning("ignored deploy path outside LIST_DIR: %r", filename)
+        return None
+    return path
 
 
 def _list_artifact_filenames() -> list[str]:
     if not os.path.isdir(LIST_DIR):
         return []
-    return sorted(
-        name
-        for name in os.listdir(LIST_DIR)
-        if name.endswith(".txt") and os.path.isfile(os.path.join(LIST_DIR, name))
-    )
+    names: list[str] = []
+    for name in os.listdir(LIST_DIR):
+        if name not in ALLOWED_ARTIFACT_FILES:
+            continue
+        path = _artifact_path(name)
+        if path is not None and os.path.isfile(path):
+            names.append(name)
+    return sorted(names)
 
 
 def _count_cidr_lines(path: str) -> int:
@@ -62,15 +88,19 @@ def push_cidr_artifacts(
     filenames: list[str] | list[dict] | None = None,
 ) -> dict[str, Any]:
     """Read compiled CIDR files from LIST_DIR and push them via the node adapter."""
-    targets = _normalize_filenames(filenames) or _list_artifact_filenames()
+    requested = _requested_filenames(filenames)
+    targets = _normalize_filenames(filenames)
+    if not targets and not requested:
+        targets = _list_artifact_filenames()
+    # Explicitly selected unknown names are reported, never widened to all artifacts.
+    skipped: list[str] = [name for name in requested if name not in targets]
 
     pushed: list[str] = []
     failed: list[dict[str, str]] = []
-    skipped: list[str] = []
 
     for filename in targets:
-        file_path = os.path.join(LIST_DIR, filename)
-        if not os.path.isfile(file_path):
+        file_path = _artifact_path(filename)
+        if file_path is None or not os.path.isfile(file_path):
             skipped.append(filename)
             continue
         try:

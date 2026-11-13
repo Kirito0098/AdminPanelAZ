@@ -5,6 +5,15 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+# OPENVPN_HOST / WIREGUARD_HOST: hostname, FQDN, IPv4 or bracketed IPv6 — no scheme, port or path.
+AZ_VPN_HOST_PATTERN = (
+    r"(?:"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"|\[[0-9A-Fa-f:.]+\]"
+    r")"
+)
+
 ANTIZAPRET_PARAMS = [
     {
         "key": "route_all",
@@ -351,8 +360,24 @@ ANTIZAPRET_PARAMS = [
         "description": "После обновления списков (doall.sh) и каждую ночь очищать кеш Knot Resolver. Помогает, когда домен уже переехал на новый IP, а клиенты видят старый. Нужно «Применить (doall.sh)»; на AntiZapret-VPN до 09.11.2026 опция не читается",
         "verify_write": True,
     },
-    {"key": "openvpn_host", "env": "OPENVPN_HOST", "type": "string", "default": "", "html_id": "openvpn-host-input"},
-    {"key": "wireguard_host", "env": "WIREGUARD_HOST", "type": "string", "default": "", "html_id": "wireguard-host-input"},
+    {
+        "key": "openvpn_host",
+        "env": "OPENVPN_HOST",
+        "type": "string",
+        "default": "",
+        "html_id": "openvpn-host-input",
+        "pattern": AZ_VPN_HOST_PATTERN,
+        "pattern_hint": "ожидается домен или IP-адрес без схемы, порта и пути",
+    },
+    {
+        "key": "wireguard_host",
+        "env": "WIREGUARD_HOST",
+        "type": "string",
+        "default": "",
+        "html_id": "wireguard-host-input",
+        "pattern": AZ_VPN_HOST_PATTERN,
+        "pattern_hint": "ожидается домен или IP-адрес без схемы, порта и пути",
+    },
     # Только для записи в setup из карточки OpenVPN: своих переключателей в разделе «Конфиг» у них нет.
     {"key": "OPENVPN_DUPLICATE", "env": "OPENVPN_DUPLICATE", "type": "flag", "default": "y", "html_id": "openvpn-duplicate-env", "hidden": True},
     {"key": "OPENVPN_LOG", "env": "OPENVPN_LOG", "type": "flag", "default": "n", "html_id": "openvpn-log-env", "hidden": True},

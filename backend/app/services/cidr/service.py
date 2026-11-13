@@ -1,6 +1,10 @@
 """CIDR routing management service."""
 
+import ipaddress
+import os
 import re
+import shutil
+import tempfile
 from pathlib import Path
 
 from fastapi import HTTPException, status
@@ -13,9 +17,75 @@ from app.services.cidr.line_counts import (
     remember_line_count,
 )
 
-CIDR_PATTERN = re.compile(
-    r"\b(?:25[0-5]|2[0-4]\d|1?\d?\d)(?:\.(?:25[0-5]|2[0-4]\d|1?\d?\d)){3}/(?:[0-9]|[12][0-9]|3[0-2])\b"
-)
+MAX_CIDR_CONTENT_BYTES = 8 * 1024 * 1024
+MAX_VALIDATION_ERRORS = 10
+ASN_PATTERN = re.compile(r"AS\d{1,10}", re.IGNORECASE)
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """Write via a sibling temp file so a crash never leaves a truncated list."""
+    try:
+        mode = path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        mode = 0o644
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp_name, mode)
+        os.replace(tmp_name, path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
+
+
+def _backup_file(path: Path) -> None:
+    """Keep a single previous copy as ``<name>.bak`` next to the file."""
+    backup = path.with_name(path.name + ".bak")
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.bak.", suffix=".tmp")
+    os.close(fd)
+    try:
+        shutil.copy2(path, tmp_name)
+        os.replace(tmp_name, backup)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
+
+
+def _is_valid_cidr_entry(line: str) -> bool:
+    value = line[1:] if line.startswith("!") else line
+    if not value:
+        return False
+    if ASN_PATTERN.fullmatch(value):
+        return True
+    try:
+        return ipaddress.ip_network(value, strict=False).version == 4
+    except ValueError:
+        return False
+
+
+def _validate_cidr_content(content: str, *, filename: str) -> None:
+    """Reject oversized files and broken lines before they reach parse.sh."""
+    size = len(content.encode("utf-8"))
+    if size > MAX_CIDR_CONTENT_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Слишком большой файл {filename}: {size} байт (максимум {MAX_CIDR_CONTENT_BYTES})",
+        )
+    errors: list[str] = []
+    for lineno, raw in enumerate(content.splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if _is_valid_cidr_entry(line):
+            continue
+        errors.append(f"{filename}: некорректная строка {lineno}: {line[:80]}")
+        if len(errors) >= MAX_VALIDATION_ERRORS:
+            break
+    if errors:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="\n".join(errors))
 
 
 class CidrRoutingService:
@@ -92,9 +162,12 @@ class CidrRoutingService:
     def save_provider_content(self, filename: str, content: str) -> dict:
         if filename not in IP_FILES:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неизвестный провайдер")
+        _validate_cidr_content(content, filename=filename)
         path = self.list_dir / filename
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        if path.exists() and path.read_bytes() != content.encode("utf-8"):
+            _backup_file(path)
+        _atomic_write_text(path, content)
         count = count_nonempty_lines_in_text(content)
         remember_line_count(path, count)
         return {"filename": filename, "cidr_count": count}
@@ -131,9 +204,12 @@ class CidrRoutingService:
         if file_key not in ROUTE_CONFIG_FILES:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Файл недоступен для записи")
         fname = ROUTE_CONFIG_FILES[file_key]
+        _validate_cidr_content(content, filename=fname)
         path = self.config_dir / fname
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        if path.exists():
+            _backup_file(path)
+        _atomic_write_text(path, content)
         count = count_nonempty_lines_in_text(content)
         remember_line_count(path, count)
         return {"file_key": file_key, "filename": fname, "line_count": count}

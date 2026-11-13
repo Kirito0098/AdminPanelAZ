@@ -1,6 +1,10 @@
 """Provider URLs, region scopes, and DPI maps."""
 import re
 
+# Manual list edited in the panel: content comes from LIST_DIR, never the network.
+CUSTOM_PROVIDER_KEY = "custom-ips.txt"
+LOCAL_PROVIDER_KEYS = frozenset({CUSTOM_PROVIDER_KEY})
+
 PROVIDER_SOURCES = {
     "akamai-ips.txt": [
         {
@@ -151,6 +155,8 @@ PROVIDER_SOURCES = {
             "format": "ripe_json",
         }
     ],
+    # No external sources: refresh imports LIST_DIR/custom-ips.txt (see LOCAL_PROVIDER_KEYS).
+    CUSTOM_PROVIDER_KEY: [],
 }
 STRICT_GEO_BUCKET_SCOPES = (
     "europe",

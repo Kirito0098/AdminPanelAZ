@@ -78,6 +78,7 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("node_sync_drift", "HA: расхождение основного узла и реплики"),
     ("cidr_deploy_failed", "Ошибка развёртывания CIDR"),
     ("cidr_ingest_partial", "Частичное обновление CIDR БД"),
+    ("cidr_rollback_failed", "Ошибка отката CIDR"),
     ("noc_report", "NOC: ежедневная/еженедельная сводка"),
     ("alert_rule", "Alert rule: срабатывание порога"),
     ("openvpn_buffer_guard_triggered", "OpenVPN Buffer Guard"),
@@ -124,7 +125,7 @@ TG_NOTIFY_EVENT_GROUPS: list[tuple[str, str, str, tuple[str, ...]]] = [
     ("settings", "Настройки", "⚙️", ("settings_change",)),
     ("load", "Нагрузка", "📊", ("high_cpu", "high_ram")),
     ("nodes_ha", "Узлы и HA", "🖥️", ("node_offline", "node_sync_drift")),
-    ("cidr", "CIDR", "🌐", ("cidr_deploy_failed", "cidr_ingest_partial")),
+    ("cidr", "CIDR", "🌐", ("cidr_deploy_failed", "cidr_ingest_partial", "cidr_rollback_failed")),
     (
         "reports",
         "Отчёты и алерты",
@@ -1084,7 +1085,7 @@ class AdminNotifyService:
     ) -> None:
         self.send(
             db,
-            "settings_cidr_rollback_queued",
+            "cidr_rollback_failed",
             actor_username=actor_username,
             details=details,
         )
@@ -1454,6 +1455,15 @@ class AdminNotifyService:
                 detail_lines=detail_lines,
             )
 
+        if event_type == "cidr_rollback_failed":
+            detail_lines = [_line_text("📋", "Детали", details or "Откат CIDR завершился с ошибкой")]
+            return _format_notify_card(
+                "❌ <b>Ошибка отката CIDR</b>",
+                when,
+                actor_line=_fmt_actor(actor_username, as_admin=True) if actor_username else None,
+                detail_lines=detail_lines,
+            )
+
         if event_type in (
             "user_cert_expiry_reminder",
             "user_access_expiry_reminder",
@@ -1691,6 +1701,11 @@ def _preview_event_build_kwargs(event_key: str, *, actor_username: str) -> dict 
             "event_type": "cidr_ingest_partial",
             "actor_username": actor_username,
             "details": "Обновлено: 3, ошибок: 1 · Проблемные: antifilter",
+        },
+        "cidr_rollback_failed": {
+            "event_type": "cidr_rollback_failed",
+            "actor_username": actor_username,
+            "details": "Резервная копия 20260101T000000Z не найдена",
         },
         "alert_rule": {
             "event_type": "alert_rule",

@@ -257,8 +257,10 @@
 - `resource_metrics*.py`, `panel_resource_metrics*.py` — CPU/RAM узлов и панели
 
 ### CIDR / маршрутизация
-- `services/cidr/` — pipeline, scheduler, deploy
-- `services/cidr/pipeline/` — orchestrator, db_pipeline, file_pipeline, csv import
+- `services/cidr/` — pipeline, scheduler, deploy, `route_budget.py` (бюджет маршрутов: оценка → артефакты)
+- `services/cidr/pipeline/` — orchestrator, db_pipeline, file_pipeline (в т.ч. `runtime_backups`), csv import, `provider_sources.py`
+- `services/cidr/cidr_tasks.py` — единый pipeline-lock и фоновые задачи CIDR
+- `services/node_sync/provider_sync.py` — HA-репликация list-файлов, toggle провайдера и deploy на реплики
 
 ### Telegram
 - `telegram_bot.py` + `telegram_bot_handlers/` — команды бота

@@ -1,4 +1,5 @@
 import { GitBranch, Play, RefreshCw } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import { NodeBadge } from '@/components/NodeSelector'
 import { Button } from '@/components/ui/button'
@@ -10,30 +11,54 @@ import type { NodeStatus } from '@/types'
 interface RoutingPageHeaderProps {
   nodeName?: string | null
   nodeStatus?: NodeStatus
-  isAdmin: boolean
   autoRefresh: boolean
-  countdown: number
+  /** When the next auto-refresh fires; the hook keeps the deadline, not the ticking counter. */
+  nextRefreshAt: number | null
   refreshing: boolean
   pipelineBusy: boolean
+  /** HA replica: routing data is shown read-only, mutations are refused by the hook. */
+  readonly: boolean
   onToggleAutoRefresh: () => void
   onRefresh: () => void
   onSyncProviders: () => void
   onApplyDoall: () => void
 }
 
+function remainingSeconds(nextRefreshAt: number | null): number {
+  if (nextRefreshAt === null) return REFRESH_INTERVAL
+  const left = Math.ceil((nextRefreshAt - Date.now()) / 1000)
+  return Math.min(REFRESH_INTERVAL, Math.max(0, left))
+}
+
+/** Second-by-second display only: re-renders the header alone, not the routing page tree. */
+function useCountdown(nextRefreshAt: number | null, enabled: boolean): number {
+  const [seconds, setSeconds] = useState(() => remainingSeconds(nextRefreshAt))
+
+  useEffect(() => {
+    setSeconds(remainingSeconds(nextRefreshAt))
+    if (!enabled) return
+    const id = window.setInterval(() => setSeconds(remainingSeconds(nextRefreshAt)), 1000)
+    return () => window.clearInterval(id)
+  }, [nextRefreshAt, enabled])
+
+  return seconds
+}
+
 export default function RoutingPageHeader({
   nodeName,
   nodeStatus,
-  isAdmin,
   autoRefresh,
-  countdown,
+  nextRefreshAt,
   refreshing,
   pipelineBusy,
+  readonly,
   onToggleAutoRefresh,
   onRefresh,
   onSyncProviders,
   onApplyDoall,
 }: RoutingPageHeaderProps) {
+  const countdown = useCountdown(nextRefreshAt, autoRefresh)
+
   return (
     <PageSectionHeader
       card
@@ -52,24 +77,25 @@ export default function RoutingPageHeader({
             onToggle={onToggleAutoRefresh}
             onManualRefresh={onRefresh}
           />
-          {isAdmin && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full sm:w-auto"
-                disabled={pipelineBusy}
-                onClick={onSyncProviders}
-              >
-                <RefreshCw size={14} className="mr-1.5" />
-                Синхронизировать
-              </Button>
-              <Button size="sm" className="w-full sm:w-auto" disabled={pipelineBusy} onClick={onApplyDoall}>
-                <Play size={14} className="mr-1.5" />
-                Применить doall + client.sh 7
-              </Button>
-            </>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full sm:w-auto"
+            disabled={pipelineBusy || readonly}
+            onClick={onSyncProviders}
+          >
+            <RefreshCw size={14} className="mr-1.5" />
+            Синхронизировать
+          </Button>
+          <Button
+            size="sm"
+            className="w-full sm:w-auto"
+            disabled={pipelineBusy || readonly}
+            onClick={onApplyDoall}
+          >
+            <Play size={14} className="mr-1.5" />
+            Применить doall + client.sh 7
+          </Button>
         </>
       }
     />

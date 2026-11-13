@@ -1,6 +1,7 @@
-import { ArrowRight, CloudDownload, Info, PlusCircle, Rocket, Shield, Sparkles, Trash2 } from 'lucide-react'
+import { ArrowRight, CloudDownload, Gauge, Info, PlusCircle, Rocket, Shield, Sparkles, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import ProviderFileSelection from '@/components/routing/ProviderFileSelection'
+import { PIPELINE_STAGES } from '@/components/routing/routingWorkflow'
 import type { RoutingWorkflowState } from '@/components/routing/routingWorkflow'
 import StatusPanel from '@/components/noc/StatusPanel'
 import PipelineStageProgress from '@/components/routing/PipelineStageProgress'
@@ -14,8 +15,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { parseTimestamp } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
 import type { AntifilterStatus, CidrDbStatus, CidrDeployPreview, CidrPipelineTask, CidrProviderInfo, Node } from '@/types'
-import { STAGE_BUILD, STAGE_DEPLOY, STAGE_LOAD, nodeStatusRu } from './routingLabels'
-import { formatDt, getPipelineStage, isPipelineRunning, pendingMatchesStage, statusBadgeVariant, statusLabel, type PipelinePendingAction } from './utils'
+import { STAGE_DEPLOY, nodeStatusRu } from './routingLabels'
+import { formatDt, getPipelineStage, isPipelineRunning, pendingMatchesStage, statusBadgeVariant, statusLabel, type PipelinePendingAction, type PipelineStage } from './utils'
 
 interface CidrPipelineTabProps {
   providers: CidrProviderInfo[]
@@ -31,6 +32,8 @@ interface CidrPipelineTabProps {
   selectedProviderFiles: string[]
   filterAntifilter: boolean
   pipelineBusy: boolean
+  /** HA replica: этапы только для просмотра, мутации недоступны. */
+  readonly?: boolean
   onFilterAntifilterChange: (v: boolean) => void
   onDeployAllOnlineChange: (v: boolean) => void
   onDeployTargetNodeIdsChange: (ids: number[]) => void
@@ -40,6 +43,8 @@ interface CidrPipelineTabProps {
   onRefreshOne?: (filename: string) => void
   onRefreshAntifilter: () => void
   onGenerate: () => void
+  /** Dry-run: оценить бюджет маршрутов по локальной БД без записи файлов. */
+  onEstimate: () => void
   onDeploy: () => void
   onClearDb: () => void | Promise<void>
   onOpenCustomWizard: () => void
@@ -51,17 +56,11 @@ interface CidrPipelineTabProps {
   workflow?: RoutingWorkflowState
 }
 
-const pipelineStageNav = [
-  { id: 'pipeline-stage-1', num: 1, label: STAGE_LOAD, icon: CloudDownload },
-  { id: 'pipeline-stage-2', num: 2, label: STAGE_BUILD, icon: Sparkles },
-  { id: 'pipeline-stage-3', num: 3, label: STAGE_DEPLOY, icon: Rocket },
-] as const
-
-const workflowSteps = [
-  { num: 1, text: 'Данные на контроллер (SQLite)' },
-  { num: 2, text: 'Списки на контроллере' },
-  { num: 3, text: 'Списки на узел' },
-]
+const STAGE_ICONS: Record<PipelineStage, typeof CloudDownload> = {
+  1: CloudDownload,
+  2: Sparkles,
+  3: Rocket,
+}
 
 function nodeCheckboxLabel(node: Node, replicaNodeIds?: ReadonlySet<number>): string {
   const status = nodeStatusRu(node.status)
@@ -87,6 +86,7 @@ export default function CidrPipelineTab({
   selectedProviderFiles,
   filterAntifilter,
   pipelineBusy,
+  readonly = false,
   onFilterAntifilterChange,
   onDeployAllOnlineChange,
   onDeployTargetNodeIdsChange,
@@ -96,6 +96,7 @@ export default function CidrPipelineTab({
   onRefreshOne,
   onRefreshAntifilter,
   onGenerate,
+  onEstimate,
   onDeploy,
   onClearDb,
   onOpenCustomWizard,
@@ -108,6 +109,7 @@ export default function CidrPipelineTab({
 }: CidrPipelineTabProps) {
   const [confirmClear, setConfirmClear] = useState(false)
   const [clearing, setClearing] = useState(false)
+  const [loadStage, buildStage, deployStage] = PIPELINE_STAGES
 
   const scrollToStage = (anchorId: string) => {
     document.getElementById(anchorId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -115,9 +117,10 @@ export default function CidrPipelineTab({
   const onlineNodes = nodes.filter((n) => n.status === 'online')
   const deployDisabled =
     pipelineBusy ||
+    readonly ||
     selectedProviderFiles.length === 0 ||
     (!deployAllOnline && deployTargetNodeIds.length === 0 && onlineNodes.length === 0)
-  const refreshDisabled = pipelineBusy || selectedProviderFiles.length === 0
+  const refreshDisabled = pipelineBusy || readonly || selectedProviderFiles.length === 0
   const failedProviderCount = providers.filter(
     (p) => cidrDb?.providers?.[p.filename]?.refresh_status === 'error',
   ).length
@@ -158,11 +161,18 @@ export default function CidrPipelineTab({
 
   return (
     <div className="space-y-6">
+      {readonly && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-sm text-amber-950 dark:text-amber-100">
+          HA replica: изменения только на primary. Этапы доступны только для просмотра.
+        </div>
+      )}
+
       <div className="sticky top-14 z-20 -mx-1 rounded-lg border bg-background/95 px-3 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80">
         <div className="flex flex-wrap items-center gap-2">
-          {pipelineStageNav.map((item) => {
-            const step = workflow?.steps.find((s) => s.stage === item.num)
-            const isCurrent = workflow?.currentStage === item.num
+          {PIPELINE_STAGES.map((item) => {
+            const step = workflow?.steps.find((s) => s.stage === item.stage)
+            const isCurrent = workflow?.currentStage === item.stage
+            const Icon = STAGE_ICONS[item.stage]
             return (
               <button
                 key={item.id}
@@ -174,8 +184,8 @@ export default function CidrPipelineTab({
                   step?.status === 'done' && !isCurrent && 'border-emerald-500/30 text-emerald-700 dark:text-emerald-400',
                 )}
               >
-                <item.icon size={13} />
-                <span className="font-medium">{item.num}. {item.label}</span>
+                <Icon size={13} />
+                <span className="font-medium">{item.stage}. {item.shortLabel}</span>
               </button>
             )
           })}
@@ -189,11 +199,11 @@ export default function CidrPipelineTab({
       </div>
 
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 p-4 text-sm">
-        {workflowSteps.map((step, i) => {
-          const isActive = highlightedStage === step.num
-          const isPast = highlightedStage != null && step.num < highlightedStage
+        {PIPELINE_STAGES.map((step, i) => {
+          const isActive = highlightedStage === step.stage
+          const isPast = highlightedStage != null && step.stage < highlightedStage
           return (
-            <div key={step.num} className="flex items-center gap-2">
+            <div key={step.stage} className="flex items-center gap-2">
               <span
                 className={cn(
                   'flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold transition-colors',
@@ -204,10 +214,10 @@ export default function CidrPipelineTab({
                       : 'bg-muted-foreground/30 text-muted-foreground',
                 )}
               >
-                {step.num}
+                {step.stage}
               </span>
-              <span className={cn(isActive && 'font-medium text-foreground')}>{step.text}</span>
-              {i < workflowSteps.length - 1 && (
+              <span className={cn(isActive && 'font-medium text-foreground')}>{step.description}</span>
+              {i < PIPELINE_STAGES.length - 1 && (
                 <ArrowRight size={14} className="mx-1 text-muted-foreground" />
               )}
             </div>
@@ -226,11 +236,11 @@ export default function CidrPipelineTab({
         </div>
       </div>
 
-      <div id="pipeline-stage-1" className="scroll-mt-24">
-      <StatusPanel title={`Этап 1 — ${STAGE_LOAD} данных на контроллер`} icon={CloudDownload}>
+      <div id={loadStage.id} className="scroll-mt-24">
+      <StatusPanel title={`Этап ${loadStage.stage} — ${loadStage.label}`} icon={CloudDownload}>
         <p className="mb-4 text-sm text-muted-foreground">
           Загрузка из интернета в SQLite на контроллере. Можно обновить одного или нескольких провайдеров — не
-          обязательно все 12 сразу. Узлы не затрагиваются.
+          обязательно все {providers.length} сразу. Узлы не затрагиваются.
         </p>
 
         <ProviderFileSelection
@@ -238,7 +248,7 @@ export default function CidrPipelineTab({
           cidrDb={cidrDb}
           selectedFiles={selectedProviderFiles}
           onSelectedFilesChange={onSelectedProviderFilesChange}
-          disabled={pipelineBusy}
+          disabled={pipelineBusy || readonly}
           idPrefix="ingest-provider"
           onRefreshOne={onRefreshOne}
           showQuickIngest={Boolean(onRefreshOne)}
@@ -256,7 +266,7 @@ export default function CidrPipelineTab({
                   <Button
                     size="sm"
                     variant="outline"
-                    disabled={pipelineBusy}
+                    disabled={pipelineBusy || readonly}
                     onClick={onRetryFailedProviders}
                   >
                     Повторить ошибочные ({failedProviderCount})
@@ -269,7 +279,7 @@ export default function CidrPipelineTab({
                 <Button
                   size="sm"
                   variant="outline"
-                  disabled={pipelineBusy}
+                  disabled={pipelineBusy || readonly}
                   onClick={onOpenCustomWizard}
                 >
                   <PlusCircle size={14} className="mr-1.5" />
@@ -279,7 +289,7 @@ export default function CidrPipelineTab({
                   size="sm"
                   variant="outline"
                   className="text-destructive hover:text-destructive"
-                  disabled={pipelineBusy}
+                  disabled={pipelineBusy || readonly}
                   onClick={() => setConfirmClear(true)}
                 >
                   <Trash2 size={14} className="mr-1.5" />
@@ -320,7 +330,7 @@ export default function CidrPipelineTab({
                   Заблокированные подсети → SQLite; применяются при сборке списков (этап 2)
                 </div>
               </div>
-              <Button size="sm" variant="outline" disabled={pipelineBusy} onClick={onRefreshAntifilter}>
+              <Button size="sm" variant="outline" disabled={pipelineBusy || readonly} onClick={onRefreshAntifilter}>
                 <Shield size={14} className="mr-1.5" />
                 Обновить antifilter
               </Button>
@@ -349,8 +359,8 @@ export default function CidrPipelineTab({
       </StatusPanel>
       </div>
 
-      <div id="pipeline-stage-2" className="scroll-mt-24">
-      <StatusPanel title={`Этап 2 — ${STAGE_BUILD} списков на контроллере`} icon={Sparkles}>
+      <div id={buildStage.id} className="scroll-mt-24">
+      <StatusPanel title={`Этап ${buildStage.stage} — ${buildStage.label}`} icon={Sparkles}>
         <PipelineStageProgress
           task={pipelineTask}
           stage={2}
@@ -380,7 +390,7 @@ export default function CidrPipelineTab({
           <Button
             size="sm"
             variant="secondary"
-            disabled={pipelineBusy || selectedProviderFiles.length === 0}
+            disabled={pipelineBusy || readonly || selectedProviderFiles.length === 0}
             onClick={onGenerate}
           >
             <Sparkles size={14} className="mr-1.5" />
@@ -388,12 +398,25 @@ export default function CidrPipelineTab({
               ? `Сгенерировать (${selectedProviderFiles.length})`
               : 'Сгенерировать из БД'}
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={pipelineBusy || readonly || selectedProviderFiles.length === 0}
+            onClick={onEstimate}
+            title="Dry-run: оценка бюджета маршрутов без записи файлов"
+          >
+            <Gauge size={14} className="mr-1.5" />
+            Оценить
+          </Button>
         </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          Оценка (dry-run) считает бюджет маршрутов по локальной БД — файлы на контроллере и узлах не меняются.
+        </p>
 
         {(cidrDb?.runtime_backups?.length ?? 0) > 0 && (
           <RuntimeBackupsPanel
             backups={cidrDb!.runtime_backups!}
-            pipelineBusy={pipelineBusy}
+            pipelineBusy={pipelineBusy || readonly}
             recentRollbackStamp={recentRollbackStamp}
             onRollback={onRollback}
           />
@@ -401,8 +424,8 @@ export default function CidrPipelineTab({
       </StatusPanel>
       </div>
 
-      <div id="pipeline-stage-3" className="scroll-mt-24">
-      <StatusPanel title={`Этап 3 — ${STAGE_DEPLOY} списков на узел`} icon={Rocket}>
+      <div id={deployStage.id} className="scroll-mt-24">
+      <StatusPanel title={`Этап ${deployStage.stage} — ${deployStage.label}`} icon={Rocket}>
         <PipelineStageProgress
           task={pipelineTask}
           stage={3}

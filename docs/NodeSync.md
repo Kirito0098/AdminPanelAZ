@@ -105,7 +105,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 | Редактор файлов (один / batch) | То же: запись на primary сразу, `doall`/HA — фон `config_apply` |
 | AZ-AWG2 restore / obfuscation | Overlay на primary сразу; реплики — фон `ha_awg2_sync` (лок группы) |
 | Routing UI (route files: include/exclude/forward/drop IPs) | Те же файлы на replica без `doall.sh` по умолчанию |
-| Routing UI (provider files) | Аналогично, если файл в scope HA |
+| Routing UI (provider files) | Тот же list-файл на реплике; включение/выключение провайдера тоже реплицируется, `AP-*-include-ips.txt` строится на каждой реплике |
 | Редактор: файлы WARP и RPZ (`include-warp-hosts.txt`, `exclude-warp-hosts.txt`, `*-rpz.txt`) | Те же файлы + опционально `doall.sh` |
 | Редактор: `custom.lua` / `custom2.lua` / `custom3.lua` (`/etc/knot-resolver`) | Тот же файл, перезапуск `kresd@1` / `kresd@2` / `kresd@3` на replica без `doall.sh`; если резолвер не поднялся — прежний файл возвращается |
 | **DNS: ответ на AAAA** | Помеченный блок в `custom.lua` / `custom2.lua` — как при правке Lua |
@@ -119,7 +119,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 | Операция | Replica |
 |----------|---------|
 | `PUT /routing/antizapret-settings` | Те же ключи `setup` (см. исключения ниже) |
-| `POST /routing/apply` | Фоновый apply (`doall.sh`) на каждой replica |
+| `POST /routing/apply` | Фоновый apply (`doall.sh ips`) на каждой replica — **только** при `sync_mode=auto` и наличии группы; профили на реплике не пересоздаются |
 
 Режимы встроенного WARP None / All уходят на replica как `n` / `y` — их понимает и старый (до 1.11.0) node agent. Режимы Domain / Custom (`ANTIZAPRET_WARP` 3 / 4) и `WARP_MTU` старый агент записать не может: после записи панель перечитывает setup реплики и при расхождении помечает синхронизацию ошибкой (`sync_status=failed`, «Обновите node agent панели на узле и сохраните ещё раз»), а не оставляет реплику молча без WARP.
 
@@ -129,8 +129,9 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 
 | Операция | Replica |
 |----------|---------|
-| Ручное редактирование provider file | Файл `AP-*-include-ips.txt` |
-| `POST /routing/sync` (compile) | Deploy скомпилированных файлов на replica группы |
+| Ручное редактирование provider file | Тот же **list-файл** (`*-ips.txt`) на реплике; `AP-*-include-ips.txt` создаётся только когда провайдер включён на узле |
+| Toggle провайдера (`POST /routing/providers/{filename}/enabled`) | Тот же флаг на всех репликах (`replicate_provider_enabled`): `AP-*-include-ips.txt` появляется или удаляется на каждой реплике |
+| `POST /routing/sync` (compile) | Deploy скомпилированных list-файлов на replica группы; apply на репликах — отдельными задачами |
 
 ### Исключения (не копировать / не перезаписывать)
 

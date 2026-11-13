@@ -2,33 +2,10 @@ import BackgroundTaskProgress from '@/components/ui/BackgroundTaskProgress'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import type { CidrDeployPerNodeResult, CidrPipelineTask } from '@/types'
+import { statusBadgeVariant, statusLabel } from './utils'
 
 interface PipelineTaskProgressProps {
   task: CidrPipelineTask | null
-}
-
-function nodeStatusVariant(status: CidrDeployPerNodeResult['status']): 'default' | 'destructive' | 'secondary' {
-  switch (status) {
-    case 'success':
-      return 'default'
-    case 'failed':
-      return 'destructive'
-    default:
-      return 'secondary'
-  }
-}
-
-function nodeStatusLabel(status: CidrDeployPerNodeResult['status']): string {
-  switch (status) {
-    case 'success':
-      return 'Успех'
-    case 'failed':
-      return 'Ошибка'
-    case 'skipped':
-      return 'Пропущен'
-    default:
-      return status
-  }
 }
 
 function DeployPerNodeResults({ perNode }: { perNode: CidrDeployPerNodeResult[] }) {
@@ -52,7 +29,7 @@ function DeployPerNodeResults({ perNode }: { perNode: CidrDeployPerNodeResult[] 
                   {entry.node_name ?? `Узел #${entry.node_id}`}
                 </TableCell>
                 <TableCell>
-                  <Badge variant={nodeStatusVariant(entry.status)}>{nodeStatusLabel(entry.status)}</Badge>
+                  <Badge variant={statusBadgeVariant(entry.status)}>{statusLabel(entry.status)}</Badge>
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm">
                   {entry.pushed_files?.length ?? 0}
