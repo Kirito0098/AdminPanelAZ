@@ -133,6 +133,8 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 | Toggle провайдера (`POST /routing/providers/{filename}/enabled`) | Тот же флаг на всех репликах (`replicate_provider_enabled`): `AP-*-include-ips.txt` появляется или удаляется на каждой реплике |
 | `POST /routing/sync` (compile) | Deploy скомпилированных list-файлов на replica группы; apply на репликах — отдельными задачами |
 
+Панель реплицирует только свои `AP-*-include-ips.txt` и list-файлы провайдеров; встроенные списки AntiZapret (`download/*ips.txt`) на репликах обновляет сам AntiZapret-VPN.
+
 ### Исключения (не копировать / не перезаписывать)
 
 | Область | Исключение | Где задано |

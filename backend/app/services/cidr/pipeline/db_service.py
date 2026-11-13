@@ -13,7 +13,12 @@ import threading
 import time
 from copy import deepcopy
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed, wait
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    ThreadPoolExecutor,
+    as_completed,
+    wait,
+)
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -38,6 +43,19 @@ def _safe_progress(progress_callback, pct, stage) -> None:
         progress_callback(pct, stage)
     except Exception:
         logger.debug("CIDR progress callback failed at %s", stage, exc_info=True)
+
+
+def _commit_db_with_retry(db) -> None:
+    from sqlalchemy.exc import OperationalError
+
+    for attempt in range(5):
+        try:
+            db.commit()
+            return
+        except OperationalError as exc:
+            if "database is locked" not in str(exc).lower() or attempt == 4:
+                raise
+            time.sleep(0.1 * (attempt + 1))
 
 
 _UNSET = object()
@@ -92,6 +110,13 @@ SOURCE_FETCH_WORKERS = _read_positive_int_env(
     "CIDR_DB_SOURCE_FETCH_WORKERS",
     4,
 )
+# Providers downloaded concurrently in the fetch phase of refresh_all_providers.
+PROVIDER_FETCH_WORKERS = _read_positive_int_env(
+    "CIDR_DB_PROVIDER_FETCH_WORKERS",
+    3,
+)
+# Main-thread heartbeat while providers are being downloaded.
+PROVIDER_FETCH_HEARTBEAT_SECONDS = 3.0
 SOURCE_CACHE_TTL_SECONDS = _read_positive_int_env(
     "CIDR_DB_SOURCE_CACHE_TTL_SECONDS",
     900,
@@ -328,6 +353,12 @@ class CidrDbUpdaterService:
     def _current_source_fetch_workers():
         return _read_positive_int_env("CIDR_DB_SOURCE_FETCH_WORKERS", SOURCE_FETCH_WORKERS)
 
+    @staticmethod
+    def _current_provider_fetch_workers():
+        return max(1, min(_read_positive_int_env(
+            "CIDR_DB_PROVIDER_FETCH_WORKERS", PROVIDER_FETCH_WORKERS
+        ), 8))
+
 
     @staticmethod
     def _current_source_cache_ttl_seconds():
@@ -387,6 +418,32 @@ class CidrDbUpdaterService:
         prev_active_asn_count,
         progress_callback=None,
     ):
+        """Fetch one provider's CIDR pool (kept as the integration point for tests).
+
+        Pure network/CPU work: no DB access, so it is safe to run in a worker
+        thread of the parallel fetch phase.
+        """
+        return self._fetch_provider_refresh_context(
+            file_name=file_name,
+            sources=sources,
+            prev_cidr_count=prev_cidr_count,
+            prev_asn_count=prev_asn_count,
+            prev_active_asn_count=prev_active_asn_count,
+            progress_callback=progress_callback,
+        )
+
+    def _fetch_provider_refresh_context(
+        self,
+        *,
+        file_name,
+        sources,
+        prev_cidr_count,
+        prev_asn_count,
+        prev_active_asn_count,
+        progress_callback=None,
+    ):
+        """Download and parse one provider. Never touches ``self.db``/``self.cidr_db``."""
+
         def _emit(rel_pct: int, stage: str) -> None:
             _safe_progress(progress_callback, max(0, min(100, int(rel_pct))), stage)
 
@@ -568,6 +625,151 @@ class CidrDbUpdaterService:
             },
         }
 
+    def _persist_provider_refresh_context(
+        self,
+        *,
+        file_name,
+        result,
+        dry_run,
+        log_entry=None,
+        progress_callback=None,
+    ):
+        """Write one fetched provider result to the DB in the calling thread.
+
+        Returns ``{"ok": bool, "count": int, "error": str | None}``. Errors are
+        handled the same way as before: roll back, keep the previous pool,
+        record the failure in provider meta and report it to the caller.
+        """
+        from app.services.cidr.pipeline.provider_sources import LOCAL_PROVIDER_KEYS
+
+        provider_status = str(result.get("status") or "ok")
+        count = int(result.get("cidr_count") or 0)
+        asn_rows = []
+        write_items = (
+            not dry_run
+            and not bool(result.get("fallback_applied"))
+            and not bool(result.get("skip_write"))
+        )
+
+        if write_items:
+            try:
+
+                def _provider_write_progress(rel_pct: int, stage: str) -> None:
+                    _safe_progress(progress_callback, rel_pct, stage)
+
+                if file_name not in LOCAL_PROVIDER_KEYS:
+                    # Manual ASNs live only in this provider; a file refresh must not deactivate them.
+                    asn_rows = self._upsert_provider_asns(
+                        file_name, result.get("discovered_asns") or [], commit=True
+                    )
+                    self._apply_provider_asn_runtime_meta(
+                        file_name, result.get("asn_fetch_meta") or {}, commit=True
+                    )
+                count = self._upsert_provider_cidrs(
+                    file_name,
+                    result.get("merged_items") or [],
+                    commit=True,
+                    progress_callback=_provider_write_progress,
+                    progress_label=file_name,
+                )
+                self._update_provider_meta(
+                    file_name,
+                    cidr_count=count,
+                    source_used=result.get("source"),
+                    status=provider_status,
+                    error=(
+                        result.get("error")
+                        or "; ".join((result.get("asn_errors") or [])[:6])
+                        or None
+                    ),
+                    expected_asn_min=result.get("expected_asn_min"),
+                    asn_count=(len(asn_rows) if asn_rows else result.get("asn_count")),
+                    active_asn_count=(
+                        len([row for row in asn_rows if row.active])
+                        if asn_rows
+                        else result.get("active_asn_count")
+                    ),
+                    anomaly_level=result.get("anomaly_level"),
+                    anomaly_reason=result.get("anomaly_reason"),
+                    commit=False,
+                )
+                if log_entry is not None and asn_rows:
+                    self._write_provider_asn_snapshots(
+                        log_entry.id, file_name, asn_rows, commit=False
+                    )
+                _commit_db_with_retry(self.db)
+            except Exception as exc:
+                self.db.rollback()
+                err_msg = str(exc)
+                # Never wipe the provider pool here: the CSV import runs in one
+                # transaction (chunked commits only above cidr_db_csv_import_chunk_rows),
+                # so a rollback leaves the previous rows intact. Even a partially
+                # committed chunked import is a usable pool; deleting it would make
+                # the next compile see no_db_data and drop the provider from routes.
+                m = _get_models()
+                try:
+                    self.cidr_db.rollback()
+                    pool_rows = int(
+                        self.cidr_db.query(m.ProviderCidr)
+                        .filter_by(provider_key=file_name)
+                        .count() or 0
+                    )
+                except Exception as count_exc:
+                    pool_rows = None
+                    logger.warning(
+                        "CIDR DB row count after persist failure for %s failed: %s",
+                        file_name,
+                        count_exc,
+                    )
+                logger.warning(
+                    "CIDR DB persist failed for %s: %s; pool preserved after persist error (%s rows kept)",
+                    file_name,
+                    err_msg,
+                    "unknown" if pool_rows is None else pool_rows,
+                )
+                try:
+                    self._update_provider_meta(
+                        file_name,
+                        cidr_count=None,
+                        source_used=None,
+                        status="error",
+                        error=err_msg,
+                        anomaly_level="critical",
+                        anomaly_reason=err_msg,
+                        commit=True,
+                    )
+                except Exception:
+                    self.db.rollback()
+                    raise
+                return {"ok": False, "count": count, "error": err_msg}
+        elif not dry_run:
+            try:
+                self._update_provider_meta(
+                    file_name,
+                    cidr_count=count,
+                    source_used=result.get("source"),
+                    status=provider_status,
+                    error=(
+                        result.get("error")
+                        or (
+                            "safe-fallback to previous CIDR pool"
+                            if result.get("fallback_applied")
+                            else None
+                        )
+                    ),
+                    expected_asn_min=result.get("expected_asn_min"),
+                    asn_count=result.get("asn_count"),
+                    active_asn_count=result.get("active_asn_count"),
+                    anomaly_level=result.get("anomaly_level"),
+                    anomaly_reason=result.get("anomaly_reason"),
+                    commit=True,
+                )
+            except Exception:
+                self.db.rollback()
+                raise
+
+        return {"ok": True, "count": count, "error": None}
+
     def _refresh_custom_provider(self, *, previous_cidr_count):
         """Build the custom provider pool from LIST_DIR/custom-ips.txt (no network).
 
@@ -691,8 +893,14 @@ class CidrDbUpdaterService:
         selected_files=None,
         progress_callback=None,
         dry_run=False,
+        task_id=None,
     ):
         """Download CIDRs from all providers and store/update in DB.
+
+        Two phases: providers are fetched in parallel (network/CPU only, no DB
+        access) and then persisted one by one in the original order, so both
+        SQLAlchemy sessions stay in this thread. ``task_id`` enables cooperative
+        cancel checks between fetch tasks when the caller owns the task.
 
         Returns a summary dict with status, counts, and per-provider details.
         """
@@ -748,8 +956,14 @@ class CidrDbUpdaterService:
 
         total_files = max(len(files_to_update), 1)
 
+        # Progress must stay monotonic: the fetch phase fills the first slice of
+        # the bar, the persist phase returns to per-provider slots.
+        progress_state = {"max_pct": 0}
+
         def _emit_progress(pct, stage):
-            _safe_progress(progress_callback, pct, stage)
+            value = max(0, min(100, int(pct)))
+            progress_state["max_pct"] = max(progress_state["max_pct"], value)
+            _safe_progress(progress_callback, progress_state["max_pct"], stage)
 
         def _provider_progress_slot(index: int) -> tuple[int, int, int]:
             """Return (slot_base, write_base, slot_end) percents for one provider."""
@@ -759,47 +973,139 @@ class CidrDbUpdaterService:
             write_base = slot_base + max(1, int(slot_span * 0.25))
             return slot_base, write_base, slot_end
 
-        def _commit_db_with_retry() -> None:
-            from sqlalchemy.exc import OperationalError
+        def _cancel_requested() -> bool:
+            if task_id is None:
+                return False
+            from app.services.cidr.cidr_tasks import is_cancel_requested
 
-            for attempt in range(5):
-                try:
-                    self.db.commit()
-                    return
-                except OperationalError as exc:
-                    if "database is locked" not in str(exc).lower() or attempt == 4:
-                        raise
-                    time.sleep(0.1 * (attempt + 1))
+            return is_cancel_requested(task_id)
+
+        def _cancel_signal() -> BaseException:
+            from app.services.cidr.cidr_tasks import CidrTaskCancelled
+
+            return CidrTaskCancelled(str(task_id))
 
         _emit_progress(3, "Подготовка обновления провайдеров")
 
+        # ── Phase 1: fetch (parallel, no DB access) ───────────────────
+        # Global providers only; the manual list is local and stays in phase 2.
+        fetch_results = {}
+        fetch_jobs = []
+        for index, file_name in enumerate(files_to_update, start=1):
+            if file_name in LOCAL_PROVIDER_KEYS:
+                continue
+            if not (PROVIDER_SOURCES.get(file_name) or []):
+                fetch_results[file_name] = {
+                    "status": "error",
+                    "error": "Пустой список источников",
+                }
+                continue
+            fetch_jobs.append((index, file_name))
+
+        fetch_progress = {}
+        fetch_progress_lock = threading.Lock()
+
+        def _collect_fetch_progress(file_name):
+            def _collect(rel_pct, stage):
+                with fetch_progress_lock:
+                    fetch_progress[file_name] = (
+                        max(0, min(100, int(rel_pct))),
+                        str(stage or file_name),
+                    )
+
+            return _collect
+
+        def _latest_fetch_stage():
+            with fetch_progress_lock:
+                if not fetch_progress:
+                    return None
+                return next(reversed(fetch_progress.values()))[1]
+
+        fetch_done = 0
+        fetch_total = max(len(fetch_jobs), 1)
+        fetch_start_pct = 5
+        fetch_end_pct = _provider_progress_slot(1)[2]
+
+        def _emit_fetch_progress():
+            span = max(0, fetch_end_pct - fetch_start_pct)
+            pct = fetch_start_pct + int((fetch_done / fetch_total) * span)
+            stage = f"Провайдеры: загрузка {fetch_done}/{len(fetch_jobs)}"
+            latest = _latest_fetch_stage()
+            if latest:
+                stage = f"{stage} — {latest}"
+            _emit_progress(pct, stage)
+
+        if fetch_jobs:
+            fetch_workers = min(self._current_provider_fetch_workers(), len(fetch_jobs))
+            pending = list(fetch_jobs)
+            running = {}
+            cancelled = False
+            executor = ThreadPoolExecutor(max_workers=fetch_workers)
+
+            def _submit_next():
+                index, file_name = pending.pop(0)
+                _emit_progress(
+                    fetch_start_pct,
+                    f"Провайдер {index}/{total_files}: загрузка {file_name}…",
+                )
+                future = executor.submit(
+                    self._process_provider_refresh_context,
+                    file_name=file_name,
+                    sources=PROVIDER_SOURCES.get(file_name) or [],
+                    prev_cidr_count=previous_cidr_counts.get(file_name, 0),
+                    prev_asn_count=previous_asn_counts.get(file_name, 0),
+                    prev_active_asn_count=previous_active_asn_counts.get(file_name, 0),
+                    progress_callback=_collect_fetch_progress(file_name),
+                )
+                running[future] = (index, file_name)
+
+            try:
+                while pending and len(running) < fetch_workers and not _cancel_requested():
+                    _submit_next()
+
+                while running and not cancelled:
+                    done, _ = wait(
+                        list(running),
+                        timeout=PROVIDER_FETCH_HEARTBEAT_SECONDS,
+                        return_when=FIRST_COMPLETED,
+                    )
+                    if not done:
+                        # Heartbeat lives in this thread: the callback touches the task.
+                        _emit_fetch_progress()
+                        if _cancel_requested():
+                            cancelled = True
+                            break
+                        continue
+                    for future in done:
+                        _index, file_name = running.pop(future)
+                        try:
+                            fetch_results[file_name] = future.result()
+                        except Exception as exc:
+                            fetch_results[file_name] = {
+                                "status": "error",
+                                "error": str(exc),
+                            }
+                        fetch_done += 1
+                    _emit_fetch_progress()
+                    # Cancellation check between completed providers.
+                    if _cancel_requested():
+                        cancelled = True
+                        break
+                    while pending and len(running) < fetch_workers:
+                        _submit_next()
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
+
+            if cancelled:
+                raise _cancel_signal()
+
+        # ── Phase 2: persist (sequential, original order) ─────────────
         for index, file_name in enumerate(files_to_update, start=1):
             slot_base, write_base, slot_end = _provider_progress_slot(index)
             write_span = max(1, slot_end - write_base)
-            sources = PROVIDER_SOURCES.get(file_name) or []
 
-            if not sources and file_name not in LOCAL_PROVIDER_KEYS:
-                err_msg = "Пустой список источников"
-                logger.warning("CIDR DB refresh failed for %s: %s", file_name, err_msg)
-                if not dry_run:
-                    try:
-                        self._update_provider_meta(
-                            file_name,
-                            cidr_count=None,
-                            source_used=None,
-                            status="error",
-                            error=err_msg,
-                            anomaly_level="critical",
-                            anomaly_reason=err_msg,
-                            commit=True,
-                        )
-                    except Exception:
-                        self.db.rollback()
-                        raise
-                providers_failed += 1
-                per_provider[file_name] = {"status": "error", "error": err_msg}
-                _emit_progress(slot_end, f"Ошибка: {file_name} ({index}/{total_files})")
-                continue
+            if _cancel_requested():
+                raise _cancel_signal()
 
             if file_name in LOCAL_PROVIDER_KEYS:
                 # Manual list: the file in LIST_DIR is the source, nothing to download.
@@ -811,47 +1117,10 @@ class CidrDbUpdaterService:
                 except Exception as exc:
                     result = {"status": "error", "error": str(exc)}
             else:
-                _emit_progress(slot_base, f"Провайдер {index}/{total_files}: загрузка {file_name}…")
-                fetch_span = max(1, write_base - slot_base)
-
-                def _fetch_progress(rel_pct: int, stage: str) -> None:
-                    abs_pct = slot_base + int((max(0, min(100, rel_pct)) / 100) * fetch_span)
-                    heartbeat_state["pct"] = abs_pct
-                    heartbeat_state["stage"] = stage
-                    _emit_progress(abs_pct, stage)
-
-                heartbeat_stop = threading.Event()
-                heartbeat_state = {
-                    "pct": slot_base,
-                    "stage": f"Провайдер {index}/{total_files}: загрузка {file_name}…",
-                    "tick": 0,
+                result = fetch_results.get(file_name) or {
+                    "status": "error",
+                    "error": "Результат загрузки не получен",
                 }
-
-                def _fetch_heartbeat_loop() -> None:
-                    while not heartbeat_stop.wait(3.0):
-                        heartbeat_state["tick"] += 1
-                        elapsed = heartbeat_state["tick"] * 3
-                        _emit_progress(
-                            heartbeat_state["pct"],
-                            f"{heartbeat_state['stage']} ({elapsed}с)",
-                        )
-
-                heartbeat_thread = threading.Thread(target=_fetch_heartbeat_loop, daemon=True)
-                heartbeat_thread.start()
-                try:
-                    result = self._process_provider_refresh_context(
-                        file_name=file_name,
-                        sources=sources,
-                        prev_cidr_count=previous_cidr_counts.get(file_name, 0),
-                        prev_asn_count=previous_asn_counts.get(file_name, 0),
-                        prev_active_asn_count=previous_active_asn_counts.get(file_name, 0),
-                        progress_callback=_fetch_progress,
-                    )
-                except Exception as exc:
-                    result = {"status": "error", "error": str(exc)}
-                finally:
-                    heartbeat_stop.set()
-                    heartbeat_thread.join(timeout=0.5)
 
             if "error" in result and result.get("status") == "error":
                 err_msg = str(result.get("error") or "unknown error")
@@ -880,130 +1149,30 @@ class CidrDbUpdaterService:
 
             count = int(result.get("cidr_count") or 0)
             total_cidrs += count
-            asn_rows = []
 
             _emit_progress(write_base, f"Провайдер {index}/{total_files}: запись {file_name}…")
 
-            if not dry_run and not bool(result.get("fallback_applied")) and not bool(result.get("skip_write")):
-                try:
+            def _provider_write_progress(rel_pct: int, stage: str) -> None:
+                abs_pct = write_base + int((max(0, min(100, int(rel_pct))) / 100) * write_span)
+                _emit_progress(abs_pct, stage)
 
-                    def _provider_write_progress(rel_pct: int, stage: str) -> None:
-                        abs_pct = write_base + int((max(0, min(100, rel_pct)) / 100) * write_span)
-                        _emit_progress(abs_pct, stage)
+            persisted = self._persist_provider_refresh_context(
+                file_name=file_name,
+                result=result,
+                dry_run=dry_run,
+                log_entry=log_entry,
+                progress_callback=_provider_write_progress,
+            )
+            if not persisted["ok"]:
+                _emit_progress(slot_end, f"Ошибка записи: {file_name} ({index}/{total_files})")
+                providers_failed += 1
+                per_provider[file_name] = {
+                    "status": "error",
+                    "error": persisted["error"],
+                }
+                continue
 
-                    if file_name not in LOCAL_PROVIDER_KEYS:
-                        # Manual ASNs live only in this provider; a file refresh must not deactivate them.
-                        asn_rows = self._upsert_provider_asns(
-                            file_name, result.get("discovered_asns") or [], commit=True
-                        )
-                        self._apply_provider_asn_runtime_meta(
-                            file_name, result.get("asn_fetch_meta") or {}, commit=True
-                        )
-                    count = self._upsert_provider_cidrs(
-                        file_name,
-                        result.get("merged_items") or [],
-                        commit=True,
-                        progress_callback=_provider_write_progress,
-                        progress_label=file_name,
-                    )
-                    self._update_provider_meta(
-                        file_name,
-                        cidr_count=count,
-                        source_used=result.get("source"),
-                        status=provider_status,
-                        error=(
-                            result.get("error")
-                            or "; ".join((result.get("asn_errors") or [])[:6])
-                            or None
-                        ),
-                        expected_asn_min=result.get("expected_asn_min"),
-                        asn_count=(len(asn_rows) if asn_rows else result.get("asn_count")),
-                        active_asn_count=(
-                            len([row for row in asn_rows if row.active])
-                            if asn_rows
-                            else result.get("active_asn_count")
-                        ),
-                        anomaly_level=result.get("anomaly_level"),
-                        anomaly_reason=result.get("anomaly_reason"),
-                        commit=False,
-                    )
-                    if log_entry is not None and asn_rows:
-                        self._write_provider_asn_snapshots(
-                            log_entry.id, file_name, asn_rows, commit=False
-                        )
-                    _commit_db_with_retry()
-                except Exception as exc:
-                    self.db.rollback()
-                    err_msg = str(exc)
-                    # Never wipe the provider pool here: the CSV import runs in one
-                    # transaction (chunked commits only above cidr_db_csv_import_chunk_rows),
-                    # so a rollback leaves the previous rows intact. Even a partially
-                    # committed chunked import is a usable pool; deleting it would make
-                    # the next compile see no_db_data and drop the provider from routes.
-                    try:
-                        self.cidr_db.rollback()
-                        m = _get_models()
-                        pool_rows = int(
-                            self.cidr_db.query(m.ProviderCidr)
-                            .filter_by(provider_key=file_name)
-                            .count() or 0
-                        )
-                    except Exception as count_exc:
-                        pool_rows = None
-                        logger.warning(
-                            "CIDR DB row count after persist failure for %s failed: %s",
-                            file_name,
-                            count_exc,
-                        )
-                    logger.warning(
-                        "CIDR DB persist failed for %s: %s; pool preserved after persist error (%s rows kept)",
-                        file_name,
-                        err_msg,
-                        "unknown" if pool_rows is None else pool_rows,
-                    )
-                    try:
-                        self._update_provider_meta(
-                            file_name,
-                            cidr_count=None,
-                            source_used=None,
-                            status="error",
-                            error=err_msg,
-                            anomaly_level="critical",
-                            anomaly_reason=err_msg,
-                            commit=True,
-                        )
-                    except Exception:
-                        self.db.rollback()
-                        raise
-                    _emit_progress(slot_end, f"Ошибка записи: {file_name} ({index}/{total_files})")
-                    providers_failed += 1
-                    per_provider[file_name] = {"status": "error", "error": err_msg}
-                    continue
-            elif not dry_run:
-                try:
-                    self._update_provider_meta(
-                        file_name,
-                        cidr_count=count,
-                        source_used=result.get("source"),
-                        status=provider_status,
-                        error=(
-                            result.get("error")
-                            or (
-                                "safe-fallback to previous CIDR pool"
-                                if result.get("fallback_applied")
-                                else None
-                            )
-                        ),
-                        expected_asn_min=result.get("expected_asn_min"),
-                        asn_count=result.get("asn_count"),
-                        active_asn_count=result.get("active_asn_count"),
-                        anomaly_level=result.get("anomaly_level"),
-                        anomaly_reason=result.get("anomaly_reason"),
-                        commit=True,
-                    )
-                except Exception:
-                    self.db.rollback()
-                    raise
+            count = int(persisted["count"] or 0)
 
             # Count the provider only after its rows and meta were persisted, so a
             # persist failure lands in the refresh log as failed instead of "ok".
@@ -1052,7 +1221,7 @@ class CidrDbUpdaterService:
                 log_entry.total_cidrs = full_pool_total
                 total_cidrs = full_pool_total
                 log_entry.details_json = json.dumps(per_provider, ensure_ascii=False)
-                _commit_db_with_retry()
+                _commit_db_with_retry(self.db)
             except Exception as exc:
                 self.db.rollback()
                 logger.warning("CIDR DB refresh failed to persist: %s", exc)
