@@ -13,6 +13,7 @@ import SettingsAlert from '@/components/settings/SettingsAlert'
 import { Button } from '@/components/ui/button'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useNode } from '@/context/NodeContext'
+import { protocolLabel } from '@/lib/vpnTypes'
 import type { Awg2HealthResponse, Awg2StatusResponse } from '@/types'
 
 export default function Awg2Page() {
@@ -38,7 +39,9 @@ export default function Awg2Page() {
     } catch (err) {
       setHealth(null)
       setStatus(null)
-      setLoadError(err instanceof Error ? err.message : 'Не удалось загрузить AZ-AWG2')
+      setLoadError(
+        err instanceof Error ? err.message : `Не удалось загрузить данные ${protocolLabel('amneziawg2')}`,
+      )
     } finally {
       setLoading(false)
     }
@@ -70,14 +73,14 @@ export default function Awg2Page() {
 
       {ready && (
         <SettingsAlert variant="info" title="Данные активного узла">
-          Слой AmneziaWG 2.0 управляется на{' '}
+          Слой {protocolLabel('amneziawg2')} управляется на{' '}
           <strong>{activeNode?.name ?? nodeLabel}</strong>
           {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
           Клиенты — на странице{' '}
           <Link to="/" className="font-medium text-foreground underline-offset-2 hover:underline">
             Клиенты
           </Link>{' '}
-          (вкладка AmneziaWG 2.0). install-base и перезагрузка — только по SSH.
+          (вкладка {protocolLabel('amneziawg2')}). install-base и перезагрузка — только по SSH.
         </SettingsAlert>
       )}
 
@@ -101,7 +104,7 @@ export default function Awg2Page() {
               </TabsTrigger>
             </TabsList>
             <Button asChild variant="outline" size="sm">
-              <Link to="/">Клиенты · AmneziaWG 2.0</Link>
+              <Link to="/">Клиенты · {protocolLabel('amneziawg2')}</Link>
             </Button>
           </div>
 

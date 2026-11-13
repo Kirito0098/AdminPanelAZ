@@ -12,10 +12,11 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
+import { REQUEST_PROTOCOLS } from '@/lib/accessRequests'
 import { formatDate } from '@/lib/datetime'
 import { pluralRu } from '@/lib/plural'
 import { cn } from '@/lib/utils'
-import { vpnTypeLabel } from '@/lib/vpnTypes'
+import { protocolLabel } from '@/lib/vpnTypes'
 
 type Step = 'who' | 'access' | 'summary'
 type CreateMode = 'provision' | 'from_existing'
@@ -32,7 +33,7 @@ type ConfigOption = {
 }
 
 function configOptionSubtitle(cfg: ConfigOption): string {
-  const parts: string[] = [cfg.node_name, vpnTypeLabel(cfg.vpn_type)]
+  const parts: string[] = [cfg.node_name, protocolLabel(cfg.vpn_type)]
   if (cfg.description?.trim()) parts.push(cfg.description.trim())
   if (cfg.owner_username) parts.push(`владелец: ${cfg.owner_username}`)
   else if (cfg.owner_id == null) parts.push('без владельца')
@@ -68,12 +69,6 @@ interface CreateUserDialogProps {
   onApproveRequest?: (id: number, data: CreateUserPayload) => void | Promise<void>
 }
 
-const PROTOCOLS: { id: string; label: string; featureKeys: string[] }[] = [
-  { id: 'wireguard', label: 'WireGuard', featureKeys: ['wireguard', 'amneziawg'] },
-  { id: 'openvpn', label: 'OpenVPN', featureKeys: ['openvpn'] },
-  { id: 'amneziawg2', label: 'AmneziaWG 2.0', featureKeys: ['awg2'] },
-]
-
 function protocolEnabled(
   isEnabled: (key: string) => boolean,
   featureKeys: string[],
@@ -95,7 +90,7 @@ export default function CreateUserDialog({
 }: CreateUserDialogProps) {
   const { isEnabled } = useFeatureModules()
   const availableProtocols = useMemo(
-    () => PROTOCOLS.filter((p) => protocolEnabled(isEnabled, p.featureKeys)),
+    () => REQUEST_PROTOCOLS.filter((p) => protocolEnabled(isEnabled, p.featureKeys)),
     [isEnabled],
   )
   const [step, setStep] = useState<Step>('who')
@@ -291,7 +286,7 @@ export default function CreateUserDialog({
           c.name,
           c.node_name,
           c.owner_username ?? '',
-          vpnTypeLabel(c.vpn_type),
+          protocolLabel(c.vpn_type),
           c.vpn_type,
           c.description ?? '',
           String(c.id),
@@ -309,7 +304,7 @@ export default function CreateUserDialog({
     return configIds.map((id) => {
       const c = byId.get(id)
       if (!c) return `#${id}`
-      return `${c.name} · ${c.node_name} · ${vpnTypeLabel(c.vpn_type)}`
+      return `${c.name} · ${c.node_name} · ${protocolLabel(c.vpn_type)}`
     })
   }, [configIds, configOptions])
 
@@ -763,7 +758,7 @@ export default function CreateUserDialog({
                 <legend className="sr-only">Протоколы</legend>
                 {availableProtocols.length === 0 ? (
                   <p className="text-xs text-destructive">
-                    Нет включённых VPN-модулей. Включите OpenVPN / WireGuard / AmneziaWG 2.0 в
+                    Нет включённых VPN-модулей. Включите OpenVPN / WireGuard / AmneziaWG 1.5 / AWG 2.0 в
                     Настройках → Разделы.
                   </p>
                 ) : null}
@@ -787,16 +782,16 @@ export default function CreateUserDialog({
                           else ids.delete(proto.id)
                           setSelectedProtocols(Array.from(ids))
                         }}
-                        aria-label={proto.label}
+                        aria-label={protocolLabel(proto.id)}
                       />
-                      {proto.label}
+                      {protocolLabel(proto.id)}
                     </label>
                   )
                 })}
               </fieldset>
               {awg2Enabled && awg2Blocked.length > 0 ? (
                 <p className="text-xs text-muted-foreground">
-                  AmneziaWG 2.0: AZ-AWG2 не установлен на: {awg2Blocked.map((n) => n.name).join(', ')}
+                  {protocolLabel('amneziawg2')} не установлен на: {awg2Blocked.map((n) => n.name).join(', ')}
                 </p>
               ) : null}
             </div>
@@ -948,7 +943,7 @@ export default function CreateUserDialog({
                 <div className="flex items-center gap-2 mt-1">
                   <span className="font-medium">Протоколы:</span>
                   <span className="text-[11px]">
-                    {selectedProtocols.map(vpnTypeLabel).join(', ') || '—'}
+                    {selectedProtocols.map(protocolLabel).join(', ') || '—'}
                   </span>
                 </div>
                 <div className="flex items-center gap-2 mt-1">

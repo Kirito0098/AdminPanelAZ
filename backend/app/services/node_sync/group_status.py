@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 ACTIVE_TASK_STATUSES = ("queued", "running")
 ERROR_MAX_LEN = 1000
 REPLICA_DRIFT_HINT = (
-    "Файлы на реплику скопированы, но WireGuard / AZ-AWG2 их не применил: "
+    "Файлы на реплику скопированы, но WireGuard / AWG 2.0 их не применил: "
     "проверьте реплику и нажмите «Синхронизировать»"
 )
 

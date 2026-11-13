@@ -1,4 +1,5 @@
 import type { BackgroundTask } from '@/types'
+import { protocolLabel } from '@/lib/vpnTypes'
 
 type HaHostCopy = {
   node_name?: string
@@ -88,9 +89,9 @@ export interface HaSyncResultView {
 
 const HOST_LABELS: Record<string, string> = {
   openvpn_host: 'Домен в .ovpn-конфигах (OpenVPN)',
-  wireguard_host: 'Домен в .conf-конфигах (WireGuard)',
+  wireguard_host: `Домен в .conf-конфигах (${protocolLabel('wireguard')})`,
   OPENVPN_HOST: 'Домен в .ovpn-конфигах (OpenVPN)',
-  WIREGUARD_HOST: 'Домен в .conf-конфигах (WireGuard)',
+  WIREGUARD_HOST: `Домен в .conf-конфигах (${protocolLabel('wireguard')})`,
 }
 
 const OPENVPN_UNIT_LABELS: Record<string, string> = {
@@ -173,8 +174,7 @@ function buildHostCopySection(items: HaHostCopy[] | undefined): HaSyncResultSect
   if (!items?.length) return null
   return {
     title: 'Адреса в конфигах клиентов',
-    description:
-      'На реплику скопированы те же домены, что и на основном узле. Их увидят пользователи в выданных .ovpn и WireGuard-конфигах.',
+    description: `На реплику скопированы те же домены, что и на основном узле. Их увидят пользователи в выданных .ovpn-конфигах и в конфигах ${protocolLabel('wireguard')}.`,
     items: items.map((item) => {
       const name = nodeLabel(item)
       if (item.error) {
@@ -255,7 +255,7 @@ function buildRestoredSection(items: HaPushFullPayload['restored']): HaSyncResul
   return {
     title: 'Копия состояния AntiZapret',
     description:
-      'VPN/crypto на реплике заменены содержимым с primary (wipe-and-replace): PKI OpenVPN, ключи WireGuard и профили клиентов. Каталог config/ по-прежнему merge; без client.sh 7 на реплике.',
+      `VPN/crypto на реплике заменены содержимым с primary (wipe-and-replace): PKI OpenVPN, ключи ${protocolLabel('wireguard')} и профили клиентов. Каталог config/ по-прежнему merge; без client.sh 7 на реплике.`,
     items: items.map((item) => ({
       nodeName: nodeLabel(item),
       text: 'VPN/crypto на реплике совпадает с основным узлом',
@@ -270,7 +270,7 @@ function buildReplicaPruneSection(items: HaReplicaPrune[] | undefined): HaSyncRe
   return {
     title: 'Очистка лишних VPN-клиентов на replica',
     description:
-      'Клиенты OpenVPN и WireGuard, которых нет на primary, удалены с диска и из runtime реплики — чтобы Verify не показывал only_replica.',
+      `Клиенты OpenVPN и ${protocolLabel('wireguard')}, которых нет на primary, удалены с диска и из runtime реплики — чтобы Verify не показывал only_replica.`,
     items: items.map((item) => {
       const name = nodeLabel(item)
       const removedOvpn = item.removed_ovpn ?? []
@@ -281,7 +281,7 @@ function buildReplicaPruneSection(items: HaReplicaPrune[] | undefined): HaSyncRe
         details.push(`OpenVPN: ${removedOvpn.join(', ')}`)
       }
       if (removedWg.length) {
-        details.push(`WireGuard: ${removedWg.join(', ')}`)
+        details.push(`${protocolLabel('wireguard')}: ${removedWg.join(', ')}`)
       }
       if (errors.length) {
         details.push(...errors.map((entry) => `Ошибка: ${entry}`))
@@ -305,7 +305,7 @@ function buildReplicaPruneSection(items: HaReplicaPrune[] | undefined): HaSyncRe
       }
       return {
         nodeName: name,
-        text: `Удалено клиентов: OpenVPN ${removedOvpn.length}, WireGuard ${removedWg.length}`,
+        text: `Удалено клиентов: OpenVPN ${removedOvpn.length}, ${protocolLabel('wireguard')} ${removedWg.length}`,
         explanation: 'После очистки реплика содержит только тех VPN-клиентов, что есть на основном узле.',
         status: 'success' as const,
         details: details.length ? details : undefined,

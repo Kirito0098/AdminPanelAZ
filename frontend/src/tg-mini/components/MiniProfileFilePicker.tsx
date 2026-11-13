@@ -1,4 +1,5 @@
 import { Check, FileKey } from 'lucide-react'
+import { protocolLabel } from '@/lib/vpnTypes'
 import { cn } from '@/lib/utils'
 import {
   profileFormatHint,
@@ -117,7 +118,8 @@ export default function MiniProfileFilePicker({
       {showFormatLegend && (
         <p className="tg-mini-format-legend">
           <span>
-            <strong>.conf</strong> — AmneziaWG / awg-quick
+            <strong>.conf</strong> — {protocolLabel('wireguard')} / {protocolLabel('amneziawg2')},
+            awg-quick / wg-quick
           </span>
           <span>
             <strong>.vpn</strong> — AmneziaVPN (vpn://…)

@@ -26,7 +26,7 @@ from app.services.admin_notify_settings_text import (
 )
 from app.services.feature_guards import get_feature_service
 from app.services.notify_time import format_notify_when, resolve_notify_timezone
-from app.services.protocols import PROTOCOL_LABELS, normalize_protocol, protocol_label
+from app.services.protocols import CANONICAL_PROTOCOLS, normalize_protocol, protocol_label
 from app.services.notify_backends import dispatch_admin_notify, register_notify_backend
 from app.services.telegram import send_tg_message
 from app.services.telegram_recipients import filter_notify_recipients
@@ -260,12 +260,9 @@ def _fmt_code(value: str | None) -> str:
 
 def _fmt_protocol(target_type: str | None) -> str:
     kind = normalize_protocol(target_type)
-    if kind in {"wireguard", "amneziawg"}:
-        return PROTOCOL_LABELS[kind]
-    label = _mini_protocol_label(kind)
-    if label != "неизвестно":
-        return label
-    return ""
+    if kind not in CANONICAL_PROTOCOLS:
+        return ""
+    return protocol_label(kind)
 
 
 def _protocol_emoji(target_type: str | None) -> str:

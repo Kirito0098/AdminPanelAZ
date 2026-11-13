@@ -30,12 +30,12 @@ import {
   isConfigConnected,
   matchesFilter,
   matchesPresenceFilter,
-  protocolLabel,
   type ClientConnectionMap,
   type ClientFilter,
   type ClientPresenceFilter,
   type ProtocolTab,
 } from '@/lib/configCardUtils'
+import { protocolModuleLabel } from '@/lib/vpnTypes'
 import { configOwnerCandidates } from '@/lib/configOwners'
 import {
   copyConfigPortalLink,
@@ -79,7 +79,12 @@ interface ConfigCardsSectionProps {
   onNotifyError: (msg: string) => void
 }
 
+/** Вкладки идут отдельно по модулям: WG и AWG 1.5 управляются раздельно. */
 const TAB_ORDER: ProtocolTab[] = ['openvpn', 'amneziawg2', 'amneziawg', 'wireguard']
+
+function tabLabel(tab: ProtocolTab): string {
+  return protocolModuleLabel(tab)
+}
 
 type ConfirmAction = 'delete' | 'block' | 'unblock' | null
 type BulkAction = 'block_temp' | 'block_perm' | 'unblock' | 'delete' | 'renew_cert' | 'change_owner' | null
@@ -499,38 +504,18 @@ export default function ConfigCardsSection({
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ProtocolTab)}>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
               <TabsList className="h-auto w-full min-w-0 flex-wrap justify-start gap-1 bg-muted/50 p-1 sm:w-auto">
-                {visibleTabs.includes('openvpn') && (
-                  <TabsTrigger value="openvpn" className="gap-1.5 data-[state=active]:shadow-sm">
-                    OpenVPN
+                {visibleTabs.map((tab) => (
+                  <TabsTrigger
+                    key={tab}
+                    value={tab}
+                    className="gap-1.5 data-[state=active]:shadow-sm"
+                  >
+                    {tabLabel(tab)}
                     <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                      {tabCounts.openvpn}
+                      {tabCounts[tab]}
                     </Badge>
                   </TabsTrigger>
-                )}
-                {visibleTabs.includes('amneziawg2') && (
-                  <TabsTrigger value="amneziawg2" className="gap-1.5 data-[state=active]:shadow-sm">
-                    AmneziaWG 2.0
-                    <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                      {tabCounts.amneziawg2}
-                    </Badge>
-                  </TabsTrigger>
-                )}
-                {visibleTabs.includes('amneziawg') && (
-                  <TabsTrigger value="amneziawg" className="gap-1.5 data-[state=active]:shadow-sm">
-                    AmneziaWG
-                    <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                      {tabCounts.amneziawg}
-                    </Badge>
-                  </TabsTrigger>
-                )}
-                {visibleTabs.includes('wireguard') && (
-                  <TabsTrigger value="wireguard" className="gap-1.5 data-[state=active]:shadow-sm">
-                    WireGuard
-                    <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                      {tabCounts.wireguard}
-                    </Badge>
-                  </TabsTrigger>
-                )}
+                ))}
               </TabsList>
 
               {activeTab === 'openvpn' && openvpnTabEnabled && openvpnGroupOptions.length > 0 && (
@@ -711,8 +696,8 @@ export default function ConfigCardsSection({
                     title="Нет клиентов"
                     description={
                       search || filter !== 'all' || presenceFilter !== 'all' || tagFilterIds.length > 0
-                        ? `Нет результатов для «${protocolLabel(tab)}» с текущими фильтрами`
-                        : `В категории ${protocolLabel(tab)} пока нет конфигураций`
+                        ? `Нет результатов для «${tabLabel(tab)}» с текущими фильтрами`
+                        : `В категории ${tabLabel(tab)} пока нет конфигураций`
                     }
                     className="py-10"
                   />

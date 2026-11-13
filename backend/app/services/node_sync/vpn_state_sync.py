@@ -35,11 +35,11 @@ class Awg2EmptyStateError(RuntimeError):
 
 
 AWG2_REPLICA_NOT_INSTALLED_MSG = (
-    "AZ-AWG2 установлен на primary, но не установлен на реплике. "
-    "Установите AZ-AWG2 на реплике и повторите синхронизацию."
+    "AWG 2.0 установлен на primary, но не установлен на реплике. "
+    "Установите AWG 2.0 на реплике и повторите синхронизацию."
 )
 AWG2_PRIMARY_EMPTY_STATE_MSG = (
-    "На primary нет состояния AZ-AWG2 (пустые конфиги сервера или клиентов). "
+    "На primary нет состояния AWG 2.0 (пустые конфиги сервера или клиентов). "
     "Создайте клиентов или дождитесь завершения установки на primary и повторите синхронизацию."
 )
 
@@ -139,7 +139,7 @@ def _copy_all_wireguard_profiles_from_primary(
     raise HTTPException(
         status_code=500,
         detail=(
-            "На primary нет файлов профилей WireGuard/AmneziaWG для копирования на replica. "
+            "На primary нет файлов профилей WG/AWG 1.5 для копирования на replica. "
             "Проверьте node agent и каталог client/wireguard на основном узле."
         ),
     )
@@ -233,7 +233,7 @@ def sync_wireguard_state_from_primary(
     if reblock:
         _reapply_blocked_wireguard_policies(db, replica_node, replica_adapter)
     if runtime_error is not None:
-        raise ReplicaRuntimeError(f"WireGuard на реплике не применён (файлы скопированы): {runtime_error}")
+        raise ReplicaRuntimeError(f"WG/AWG 1.5 на реплике не применён (файлы скопированы): {runtime_error}")
 
 
 def copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter) -> None:
@@ -399,12 +399,12 @@ def _raise_reblock_errors(results: list[dict], protocol: str, replica_node: Node
 
 def _reapply_blocked_awg2_policies(db: Session, replica_node: Node, replica_adapter) -> None:
     results = _replica_policy_service(db, replica_node, replica_adapter)._reapply_all_blocked_awg2_runtime()
-    _raise_reblock_errors(results, "AWG2", replica_node)
+    _raise_reblock_errors(results, "AWG 2.0", replica_node)
 
 
 def _reapply_blocked_wireguard_policies(db: Session, replica_node: Node, replica_adapter) -> None:
     results = _replica_policy_service(db, replica_node, replica_adapter)._reapply_all_blocked_runtime()
-    _raise_reblock_errors(results, "WireGuard", replica_node)
+    _raise_reblock_errors(results, "WG/AWG 1.5", replica_node)
 
 
 def _reapply_blocks_after_failure(reapply, db: Session, replica_node: Node, replica_adapter) -> None:
@@ -453,12 +453,12 @@ def sync_amneziawg2_state_from_primary(
         raise
     runtime_error: str | None = None
     if not runtime.get("success"):
-        runtime_error = "; ".join(str(entry) for entry in runtime.get("errors") or []) or "AWG2 runtime apply failed"
+        runtime_error = "; ".join(str(entry) for entry in runtime.get("errors") or []) or "AWG 2.0 runtime apply failed"
         logger.warning("HA AWG2 runtime apply partial: %s", runtime_error)
     if reblock:
         _reapply_blocked_awg2_policies(db, replica_node, replica_adapter)
     if runtime_error is not None:
-        raise ReplicaRuntimeError(f"AZ-AWG2 на реплике не применён (файлы скопированы): {runtime_error}")
+        raise ReplicaRuntimeError(f"AWG 2.0 на реплике не применён (файлы скопированы): {runtime_error}")
 
 
 def sync_vpn_crypto_from_primary(

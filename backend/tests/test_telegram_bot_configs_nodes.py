@@ -236,8 +236,62 @@ def test_group_keyboard_hides_the_protocol_button_for_a_single_protocol():
 def test_parse_configs_callback_reads_the_node(nodes):
     _germany, usa = nodes
 
-    assert handler.parse_configs_callback(f"configs:1:wg:{usa.id}") == (1, "wg", usa.id)
+    assert handler.parse_configs_callback(f"configs:1:wg:{usa.id}") == (1, "wg_awg", usa.id)
+    assert handler.parse_configs_callback(f"configs:1:awg:{usa.id}") == (1, "wg_awg", usa.id)
+    assert handler.parse_configs_callback(f"configs:1:awg2:{usa.id}") == (1, "awg2", usa.id)
     assert handler.parse_configs_callback("configs:0:all") == (0, "all", 0)
+
+
+def test_profile_groups_merge_wg_awg_and_keep_awg2_separate():
+    from app.services.telegram_profile_ui import (
+        build_profile_file_groups,
+        classify_config_profile_groups,
+        format_config_protocol_badge,
+        protocol_group_key,
+    )
+
+    assert classify_config_profile_groups(
+        [{"protocol": "wireguard"}], VpnType.wireguard
+    ) == frozenset({"wg_awg"})
+    assert classify_config_profile_groups(
+        [{"protocol": "amneziawg"}], VpnType.wireguard
+    ) == frozenset({"wg_awg"})
+    assert classify_config_profile_groups(
+        [{"protocol": "amneziawg2"}], VpnType.amneziawg2
+    ) == frozenset({"awg2"})
+    assert classify_config_profile_groups(
+        [{"protocol": "openvpn"}], VpnType.openvpn
+    ) == frozenset({"ovpn"})
+
+    assert format_config_protocol_badge(frozenset({"wg_awg"})) == ("🛡️", "WG/AWG 1.5")
+    assert format_config_protocol_badge(frozenset({"awg2"})) == ("🌀", "AWG 2.0")
+    assert protocol_group_key("amneziawg2") == "awg2"
+    assert protocol_group_key("amneziawg") == "wg_awg"
+
+    groups = build_profile_file_groups(
+        "ivan",
+        [
+            {"path": "/profiles/ivan.conf", "protocol": "wireguard"},
+            {"path": "/profiles/ivan-am.conf", "protocol": "amneziawg2"},
+        ],
+    )
+    assert [(group.key, group.title) for group in groups] == [
+        ("wg_awg", "WG/AWG 1.5"),
+        ("awg2", "AWG 2.0"),
+    ]
+
+
+def test_protocol_counts_use_one_bucket_per_config():
+    counts = handler._count_by_protocol(
+        {
+            1: frozenset({"wg_awg"}),
+            2: frozenset({"wg_awg"}),
+            3: frozenset({"awg2"}),
+            4: frozenset(),
+        }
+    )
+
+    assert counts == {"ovpn": 0, "wg_awg": 2, "awg2": 1}
 
 
 def test_node_without_profile_files_is_marked_in_the_switcher(nodes, configs):

@@ -19,6 +19,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { parseTimestamp } from '@/lib/datetime'
 import { cn } from '@/lib/utils'
+import { protocolLabel } from '@/lib/vpnTypes'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 
 interface UserAccessSectionProps {
@@ -456,12 +457,7 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
             <fieldset className="m-0 grid gap-1 border-none p-0 sm:grid-cols-3">
               <legend className="sr-only">Протоколы</legend>
               {['wireguard', 'openvpn', 'amneziawg2'].map((proto) => {
-                const label =
-                  proto === 'wireguard'
-                    ? 'WireGuard'
-                    : proto === 'openvpn'
-                      ? 'OpenVPN'
-                      : 'AmneziaWG 2.0'
+                const label = protocolLabel(proto)
                 const checked = draftProtocols.includes(proto)
                 const awg2Disabled = proto === 'amneziawg2' && awg2Blocked.length > 0 && !checked
                 const disabled = !provisioningOn || expired || awg2Disabled
@@ -489,7 +485,7 @@ export default function UserAccessSection({ card, onRefresh, onDirtyChange }: Us
             </fieldset>
             {awg2Enabled && awg2Blocked.length > 0 ? (
               <p className="text-xs text-muted-foreground">
-                AmneziaWG 2.0: AZ-AWG2 не установлен на: {awg2Blocked.map((n) => n.name).join(', ')}
+                {protocolLabel('amneziawg2')} не установлен на: {awg2Blocked.map((n) => n.name).join(', ')}
               </p>
             ) : null}
           </div>

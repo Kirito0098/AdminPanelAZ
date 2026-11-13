@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+# Protocol names live in one place; badges and module labels must not drift.
+from app.services.protocols import PROTOCOL_MODULE_LABELS as VPN_TYPE_LABELS
+
 # --- Shared helpers ---
 
 
@@ -39,16 +42,12 @@ def settings_root_secret_state(webhook_secret_set: bool) -> str:
 
 # --- Protocol labels ---
 
-VPN_TYPE_LABELS: dict[str, str] = {
-    "openvpn": "OpenVPN",
-    "wireguard": "WireGuard",
-    "amneziawg2": "AmneziaWG 2.0",
-}
-
 
 def vpn_type_label(value: str | None) -> str:
     """Человеческое имя протокола вместо enum из базы."""
-    key = (value or "").strip().lower()
+    from app.services.protocols import normalize_protocol
+
+    key = normalize_protocol(value)
     return VPN_TYPE_LABELS.get(key, value or "—")
 
 
@@ -109,7 +108,7 @@ BTN_MENU_SETTINGS = "⚙️ Настройки"
 BTN_MENU_NODES = "🖥 Узлы"
 BTN_MENU_CIDR = "🗂 CIDR"
 BTN_MENU_WARPER = "🌐 WARP"
-BTN_MENU_AWG2 = "🛡️ AWG2"
+BTN_MENU_AWG2 = "AWG 2.0"
 BTN_MENU_UNLOCK_CODES = "🎟 Коды доступа"
 BTN_REDEEM_UNLOCK = "🎟 Продлить по ключу"
 
@@ -225,7 +224,7 @@ BOT_COMMANDS_ADMIN: tuple[tuple[str, str], ...] = BOT_COMMANDS_USER + (
     ("nodes", "VPN-узлы (admin)"),
     ("cidr", "Статус CIDR pipeline (admin)"),
     ("warper", "Статус AZ-WARP (admin)"),
-    ("awg2", "Статус AZ-AWG2 (admin)"),
+    ("awg2", "Статус AWG 2.0 (admin)"),
     ("unlock", "Генерация unlock-кода (admin)"),
 )
 
@@ -283,7 +282,7 @@ HELP_ADMIN_CIDR = "• /cidr — статус CIDR pipeline"
 HELP_ADMIN_NODES = "• /nodes — VPN-узлы (health, активация)"
 HELP_ADMIN_UNLOCK = "• /unlock — генерация unlock-ключа"
 HELP_ADMIN_WARPER = "• /warper — статус AZ-WARP"
-HELP_ADMIN_AWG2 = "• /awg2 — статус AZ-AWG2"
+HELP_ADMIN_AWG2 = "• /awg2 — статус AWG 2.0"
 HELP_ADMIN_SETTINGS = "/settings — настройки панели (inline-меню)"
 HELP_ADMIN_FOOTER = ""
 HELP_LINES = HELP_LINES_MAIN
@@ -321,11 +320,14 @@ CONFIGS_LIST = (
 )
 CONFIGS_FILTER_ALL = "все типы"
 CONFIGS_FILTER_OVPN = "🔐 OpenVPN"
-CONFIGS_FILTER_WG = "🛡️ WireGuard"
-CONFIGS_FILTER_AWG = "🌀 AmneziaWG"
-CONFIGS_FILTER_HINT = "\n💡 🔐OVPN · 🛡️WG · 🌀AWG — метка на каждой кнопке"
+CONFIGS_FILTER_WG_AWG = "🛡️ WG/AWG 1.5"
+CONFIGS_FILTER_AWG2 = "🌀 AWG 2.0"
+# Старые имена оставлены для обратной совместимости вызовов.
+CONFIGS_FILTER_WG = CONFIGS_FILTER_WG_AWG
+CONFIGS_FILTER_AWG = CONFIGS_FILTER_WG_AWG
+CONFIGS_FILTER_HINT = "\n💡 🔐 OpenVPN · 🛡️ WG/AWG 1.5 · 🌀 AWG 2.0 — метка на каждой кнопке"
 CONFIGS_FILTER_HINT_WG_AWG = (
-    "\n💡 <b>WG</b> — WireGuard · <b>AWG</b> — AmneziaWG"
+    "\n💡 <b>WG/AWG 1.5</b> — WireGuard и AmneziaWG · <b>AWG 2.0</b> — AmneziaWG 2.0"
     "\nПри выборе фильтра сразу откроются файлы нужного типа"
 )
 CONFIGS_NONE = "📭 Конфигурации не найдены.\n\nСоздайте клиента в веб-панели или Mini App."
@@ -625,7 +627,7 @@ WARPER_ERROR = "Не удалось получить статус AZ-WARP: {deta
 
 # --- /awg2 ---
 
-AWG2_TITLE = "🛡️ <b>AZ-AWG2</b>"
+AWG2_TITLE = "🛡️ <b>AWG 2.0</b>"
 AWG2_YES = "да"
 AWG2_NO = "нет"
 AWG2_NONE = "—"
@@ -641,8 +643,8 @@ AWG2_BODY = (
     "Интерфейсы: <code>{ifaces_summary}</code>\n"
     "Топ трафика:\n{top_traffic}"
 )
-AWG2_DISABLED = MODULE_DISABLED.format(name="AZ-AWG2")
-AWG2_ERROR = "Не удалось получить статус AZ-AWG2: {detail}"
+AWG2_DISABLED = MODULE_DISABLED.format(name="AWG 2.0")
+AWG2_ERROR = "Не удалось получить статус AWG 2.0: {detail}"
 
 # --- /nodes ---
 

@@ -1,4 +1,5 @@
 import type { NodeSyncMismatch, NodeSyncVerifyResult, OpenVpnProfileCertIssue } from '@/types'
+import { protocolLabel } from '@/lib/vpnTypes'
 
 export type HaVerifyResultVariant = 'success' | 'warning'
 
@@ -43,10 +44,10 @@ export interface HaVerifyResultView {
 const VERIFY_CHECKS = [
   'доступность узлов (online)',
   'список клиентов OpenVPN',
-  'список клиентов WireGuard',
-  'работающие peer WireGuard',
-  'клиенты AZ-AWG2',
-  'сертификаты PKI и файлы WireGuard',
+  `список клиентов ${protocolLabel('wireguard')}`,
+  `работающие peer ${protocolLabel('wireguard')}`,
+  `клиенты ${protocolLabel('amneziawg2')}`,
+  `сертификаты PKI и файлы ${protocolLabel('wireguard')}`,
   'сертификаты в файлах .ovpn (не отозваны)',
   'OpenVPN перезапущен после смены сертификата сервера',
   'файлы настроек AntiZapret (config/)',
@@ -65,7 +66,7 @@ const FINGERPRINT_LABELS: Record<string, string> = {
   'easyrsa3/pki/crl.pem': 'Список отозванных сертификатов (CRL)',
   'easyrsa3/pki/index.txt': 'Реестр выданных сертификатов',
   'easyrsa3/pki/serial': 'Счётчик серийных номеров PKI',
-  'wireguard/conf_files': 'Конфигурации WireGuard (/etc/wireguard/*.conf)',
+  'wireguard/conf_files': `Конфигурации ${protocolLabel('wireguard')} (/etc/wireguard/*.conf)`,
   'openvpn/client_profiles': 'Файлы профилей OpenVPN (.ovpn)',
   'antizapret/config': 'Файлы настроек AntiZapret (config/)',
 }
@@ -249,7 +250,7 @@ function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismatchView 
       )
     }
     return {
-      title: 'Разные клиенты WireGuard',
+      title: `Разные клиенты ${protocolLabel('wireguard')}`,
       details: details.length ? details : ['Наборы имён peer на узлах не совпадают.'],
       hint: 'Выровняйте клиентов через основной узел или выполните полную синхронизацию HA.',
     }
@@ -258,18 +259,18 @@ function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismatchView 
   if (mismatch.kind === 'wireguard_peers') {
     const details = setDiffDetails(mismatch)
     return {
-      title: 'Работающий WireGuard на реплике отличается',
-      details: details.length ? details : ['Активные peer WireGuard на узлах не совпадают.'],
-      hint: 'Файлы могли скопироваться, но WireGuard на реплике их не применил. Проверьте WireGuard на реплике и нажмите «Синхронизировать».',
+      title: `Работающий ${protocolLabel('wireguard')} на реплике отличается`,
+      details: details.length ? details : [`Активные peer ${protocolLabel('wireguard')} на узлах не совпадают.`],
+      hint: 'Файлы могли скопироваться, но WireGuard на реплике их не применил. Проверьте службу WireGuard на реплике и нажмите «Синхронизировать».',
     }
   }
 
   if (mismatch.kind === 'awg2_clients') {
     const details = setDiffDetails(mismatch)
     return {
-      title: 'Разные клиенты AZ-AWG2',
-      details: details.length ? details : ['Наборы клиентов AZ-AWG2 на узлах не совпадают.'],
-      hint: 'Проверьте AZ-AWG2 на реплике (установлен ли, применилось ли состояние) и нажмите «Синхронизировать».',
+      title: `Разные клиенты ${protocolLabel('amneziawg2')}`,
+      details: details.length ? details : [`Наборы клиентов ${protocolLabel('amneziawg2')} на узлах не совпадают.`],
+      hint: `Проверьте ${protocolLabel('amneziawg2')} на реплике (установлен ли, применилось ли состояние) и нажмите «Синхронизировать».`,
     }
   }
 
@@ -315,7 +316,7 @@ function formatVerifyMismatch(mismatch: NodeSyncMismatch): HaVerifyMismatchView 
 
     const hint =
       path.startsWith('easyrsa3/') || path === 'wireguard/conf_files' || path === 'openvpn/client_profiles'
-        ? 'Скорее всего реплика отстаёт от основного — нажмите «Синхронизировать» (копирует PKI, .ovpn и WireGuard).'
+        ? `Скорее всего реплика отстаёт от основного — нажмите «Синхронизировать» (копирует PKI, .ovpn и ${protocolLabel('wireguard')}).`
         : 'Файлы config/ различаются — проверьте правки на основном узле или выполните синхронизацию.'
     return { title: 'Разное содержимое файлов', details, hint }
   }

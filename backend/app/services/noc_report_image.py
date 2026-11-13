@@ -10,6 +10,7 @@ from typing import Any
 from PIL import Image, ImageDraw, ImageFont
 
 from app.services.image_fonts import load_image_font, load_mono_font
+from app.services.protocols import protocol_badge
 from app.services.shared_helpers import format_avg_peak
 from app.services.traffic_limit import human_bytes
 
@@ -292,12 +293,12 @@ class NocWeeklyImageRenderer:
                 "sub": f"накопительно: {human_bytes(summary.get('total_traffic_bytes')) or '0 B'}",
             },
             {
-                "label": "OpenVPN сессии",
+                "label": f"{protocol_badge('openvpn')} сессии",
                 "value": f"{summary.get('total_openvpn', 0)} / {summary.get('total_openvpn_peak', 0)}",
                 "sub": "среднее / пик",
             },
             {
-                "label": "WireGuard сессии",
+                "label": f"{protocol_badge('wireguard')} сессии",
                 "value": f"{summary.get('total_wireguard', 0)} / {summary.get('total_wireguard_peak', 0)}",
                 "sub": "среднее / пик",
             },
@@ -305,7 +306,7 @@ class NocWeeklyImageRenderer:
         if bool(summary.get("awg2_enabled")):
             cards.append(
                 {
-                    "label": "AmneziaWG2 сессии",
+                    "label": f"{protocol_badge('amneziawg2')} сессии",
                     "value": (
                         f"{summary.get('total_amneziawg2', 0)} / "
                         f"{summary.get('total_amneziawg2_peak', 0)}"
@@ -388,11 +389,11 @@ class NocWeeklyImageRenderer:
         cw = self._content_w()
         awg2_enabled = bool(summary.get("awg2_enabled"))
         if awg2_enabled:
-            cols = ["Узел", "Статус", "OVPN", "WG", "AWG2", "CPU", "RAM", "Диск", "7д", "Всего"]
-            widths = [0.15, 0.07, 0.07, 0.07, 0.07, 0.12, 0.12, 0.12, 0.09, 0.12]
+            cols = ["Узел", "Статус", protocol_badge("openvpn"), protocol_badge("wireguard"), protocol_badge("amneziawg2"), "CPU", "RAM", "Диск", "7д", "Всего"]
+            widths = [0.15, 0.06, 0.075, 0.095, 0.075, 0.105, 0.105, 0.105, 0.08, 0.15]
         else:
-            cols = ["Узел", "Статус", "OVPN", "WG", "CPU", "RAM", "Диск", "7д", "Всего"]
-            widths = [0.17, 0.07, 0.08, 0.08, 0.13, 0.13, 0.13, 0.09, 0.12]
+            cols = ["Узел", "Статус", protocol_badge("openvpn"), protocol_badge("wireguard"), "CPU", "RAM", "Диск", "7д", "Всего"]
+            widths = [0.17, 0.06, 0.08, 0.10, 0.12, 0.12, 0.12, 0.09, 0.14]
         col_px = [int(cw * w) for w in widths]
         col_px[-1] = cw - sum(col_px[:-1])
 

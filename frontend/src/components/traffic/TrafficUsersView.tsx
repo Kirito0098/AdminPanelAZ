@@ -3,6 +3,7 @@ import { ChevronDown, Clock, User } from 'lucide-react'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import ShareBar from '@/components/shared/ShareBar'
 import { Badge } from '@/components/ui/badge'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import {
   Table,
   TableBody,
@@ -12,7 +13,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { formatDateTime } from '@/lib/datetime'
-import { formatBytes, protocolBadgeVariant, protocolLabel } from '@/lib/trafficFormat'
+import { formatBytes } from '@/lib/trafficFormat'
 import type { TrafficUserGroup } from '@/lib/userGrouping'
 import { cn } from '@/lib/utils'
 import type { TrafficClientRow } from '@/types'
@@ -45,9 +46,7 @@ function UserSummary({ group, open }: { group: TrafficUserGroup; open: boolean }
               {group.activeConfigsCount}/{group.configsCount} конфигов
             </Badge>
             {group.protocols.map((protocol) => (
-              <Badge key={protocol} variant={protocolBadgeVariant(protocol)} className="text-[10px]">
-                {protocolLabel(protocol)}
-              </Badge>
+              <ProtocolBadge key={protocol} protocol={protocol} />
             ))}
           </div>
           <p className="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -152,9 +151,7 @@ export default function TrafficUsersView({
                       >
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium">{row.common_name}</p>
-                          <Badge variant={protocolBadgeVariant(row.protocol_type)} className="mt-1 text-[10px]">
-                            {protocolLabel(row.protocol_type)}
-                          </Badge>
+                          <ProtocolBadge protocol={row.protocol_type} className="mt-1" />
                         </div>
                         <div className="shrink-0 text-right">
                           <p className="mono text-sm tabular-nums">{formatBytes(row.total_bytes)}</p>
@@ -255,9 +252,7 @@ function UserGroupRows({
         <TableCell>
           <div className="flex flex-wrap gap-1">
             {group.protocols.map((protocol) => (
-              <Badge key={protocol} variant={protocolBadgeVariant(protocol)} className="text-[10px]">
-                {protocolLabel(protocol)}
-              </Badge>
+              <ProtocolBadge key={protocol} protocol={protocol} />
             ))}
           </div>
         </TableCell>
@@ -308,9 +303,7 @@ function UserGroupRows({
                 </TableCell>
                 <TableCell className="pl-6 text-sm">{row.common_name}</TableCell>
                 <TableCell>
-                  <Badge variant={protocolBadgeVariant(row.protocol_type)} className="text-[10px]">
-                    {protocolLabel(row.protocol_type)}
-                  </Badge>
+                  <ProtocolBadge protocol={row.protocol_type} />
                 </TableCell>
                 <TableCell className="whitespace-nowrap text-right font-mono text-xs">
                   {formatBytes(row.total_received)}

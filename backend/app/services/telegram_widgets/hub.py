@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models import NodeStatus, TelegramWidget, User, UserAccessRequest
 from app.services import telegram_bot_i18n as i18n
 from app.services.app_setting_store import _get_setting
+from app.services.protocols import protocol_badge
 from app.services.telegram_api import (
     answer_widget_query,
     delete_message,
@@ -41,7 +42,6 @@ _VIEWS = frozenset(
 _MAX_QUEUE = 4
 _MAX_ROWS = 5
 _KIND_CODES = {"new_user": "nu", "add_config": "ac", "extend_access": "ex"}
-_PROTO_SHORT = {"openvpn": "OVPN", "wireguard": "WG", "amneziawg2": "AWG2"}
 
 # HTML неизменен после отправки; всё изменяемое — в chatData. Кнопки рисуются
 # из состояния (сервер присылает готовый список), поэтому один шаблон на все роли.
@@ -217,14 +217,14 @@ p{margin:0}
   }
   function awg2(d) {
     var a = d.aw;
-    if (!a) { return head("AWG2", "") + '<p class="sub">Нет данных</p>' + nav(); }
+    if (!a) { return head("AWG 2.0", "") + '<p class="sub">Нет данных</p>' + nav(); }
     if (!a.i) {
-      return head("AWG2", a.n) + '<div class="list">' + kv("Установлен", "нет") + "</div>" + nav();
+      return head("AWG 2.0", a.n) + '<div class="list">' + kv("Установлен", "нет") + "</div>" + nav();
     }
     var top = (a.t || []).map(function (it) {
       return kv(it.n, "↓" + it.rx + " ↑" + it.tx);
     }).join("");
-    return head("AWG2", a.n) +
+    return head("AWG 2.0", a.n) +
       '<div class="card kpi"><div><b>' + esc(a.on) + "</b><span>онлайн</span></div>" +
       "<div><b>" + esc(a.pe) + "</b><span>пиров</span></div></div>" +
       '<div class="list">' + kv("Интерфейсы", a.if) + top + "</div>" + nav();
@@ -442,7 +442,7 @@ def _configs_view(db: Session, user: User) -> dict | None:
             {
                 "i": config.id,
                 "n": (config.client_name or "")[:18],
-                "p": _PROTO_SHORT.get(str(config.vpn_type.value), str(config.vpn_type.value)),
+                "p": protocol_badge(str(config.vpn_type.value)),
                 "nd": str(labels.get(config.node_id, config.node_id))[:14],
                 "d": expiry.strftime("%d.%m.%y") if isinstance(expiry, datetime) else "",
                 "t": human_bytes(traffic.get((config.client_name or "").lower(), 0)) or "0 B",
@@ -564,7 +564,7 @@ def _help_items(db: Session, role: str) -> list[list[str]]:
             ["⚙️", "/settings — настройки", "a:settings"],
             ["🗂", "/cidr — CIDR", "v:cidr"],
             ["🌐", "/warper — WARP", "v:warper"],
-            ["🛡️", "/awg2 — AWG2", "v:awg2"],
+            ["🛡️", "/awg2 — AWG 2.0", "v:awg2"],
             ["🎟", "/unlock — коды", "a:unlock"],
             ["🔗", "/link <код> — привязка", "v:link"],
         ]
@@ -595,7 +595,7 @@ def _more_items(db: Session) -> list[list[str]]:
     if _feature_on("warper"):
         items.append(["🌐", "WARP", "v:warper"])
     if _feature_on("awg2"):
-        items.append(["🛡️", "AWG2", "v:awg2"])
+        items.append(["🛡️", "AWG 2.0", "v:awg2"])
     if _feature_on("unlock_codes"):
         items.append(["🎟", "Коды доступа", "a:unlock"])
     items.append(["❓", "Помощь", "v:help"])

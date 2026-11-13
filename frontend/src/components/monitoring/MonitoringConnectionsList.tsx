@@ -11,7 +11,6 @@ import {
   Unplug,
 } from 'lucide-react'
 import { formatBytes } from '@/lib/trafficFormat'
-import { protocolBadgeVariant, protocolLabel } from '@/lib/vpnTypes'
 import {
   getConnectionDisplayAddress,
   getConnectionGeoLabel,
@@ -20,6 +19,7 @@ import {
 import EmptyState from '@/components/ui/EmptyState'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import { Badge } from '@/components/ui/badge'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -392,9 +392,7 @@ function ConnectionCard({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {showNodeColumn && <NodeCell row={row} />}
-          <Badge variant={protocolBadgeVariant(row.protocol)} className="text-xs">
-            {protocolLabel(row.protocol)}
-          </Badge>
+          <ProtocolBadge protocol={row.protocol} />
           <Badge variant={row.online ? 'success' : 'secondary'} className="text-xs">
             {row.online ? 'Онлайн' : 'Офлайн'}
           </Badge>
@@ -645,15 +643,13 @@ export default function MonitoringConnectionsList({
                   key={row.key}
                   className={cn(
                     'align-top',
-                    row.online && row.protocol === 'wireguard' && 'bg-emerald-500/5',
-                    row.online && row.protocol === 'amneziawg2' && 'bg-amber-500/5',
+                    row.online && row.protocol === 'wireguard' && 'bg-[#D14343]/5',
+                    row.online && row.protocol === 'amneziawg2' && 'bg-[#4F7FBF]/5',
                   )}
                 >
                   <TableCell>
                     <div className="flex flex-col gap-1.5">
-                      <Badge variant={protocolBadgeVariant(row.protocol)} className="w-fit text-xs">
-                        {protocolLabel(row.protocol)}
-                      </Badge>
+                      <ProtocolBadge protocol={row.protocol} />
                       <Badge variant={row.online ? 'success' : 'secondary'} className="w-fit text-xs">
                         {row.online ? 'Онлайн' : 'Офлайн'}
                       </Badge>

@@ -94,7 +94,7 @@ const GROUPS: SidebarNavGroup[] = [
       { to: '/protocols/antizapret', label: 'AntiZapret', icon: Settings2, end: false, adminOnly: true, featureKey: 'antizapret_config' },
       { to: '/protocols/openvpn', label: 'OpenVPN', icon: Cable, end: false, adminOnly: true, featureKey: 'openvpn' },
       { to: '/protocols/warper', label: 'AZ-WARP', icon: Globe, end: false, adminOnly: true, featureKey: 'warper' },
-      { to: '/protocols/awg2', label: 'AZ-AWG2', icon: Shield, end: false, adminOnly: true, featureKey: 'awg2' },
+      { to: '/protocols/awg2', label: 'AWG 2.0', icon: Shield, end: false, adminOnly: true, featureKey: 'awg2' },
     ],
   },
   {

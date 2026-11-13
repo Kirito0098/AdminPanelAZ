@@ -25,6 +25,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { formatDateTime } from '@/lib/datetime'
+import { protocolLabel } from '@/lib/vpnTypes'
 import type { Awg2HealthResponse, Awg2ObfuscationResponse } from '@/types'
 import { AWG2_PRESETS, AWG2_TEMPLATES } from './utils'
 
@@ -107,7 +108,7 @@ function ObfuscationPanel({ health }: ObfuscationTabProps) {
     const taskId = data.ha?.task_id
     if (taskId) {
       trackBackgroundTask(taskId, {
-        onComplete: () => success('HA-синхронизация AZ-AWG2 завершена'),
+        onComplete: () => success(`HA-синхронизация ${protocolLabel('amneziawg2')} завершена`),
         onError: (task, errMessage) => notifyError(task?.error || task?.message || errMessage),
       })
     }
@@ -147,7 +148,7 @@ function ObfuscationPanel({ health }: ObfuscationTabProps) {
     confirm({
       title: 'Перегенерировать профиль обфускации?',
       description:
-        'Узел создаст новые случайные параметры обфускации. Клиенты AmneziaWG 2.0 не подключатся, пока не переимпортируют конфиги на устройствах.',
+        `Узел создаст новые случайные параметры обфускации. Клиенты ${protocolLabel('amneziawg2')} не подключатся, пока не переимпортируют конфиги на устройствах.`,
       confirmLabel: 'Перегенерировать',
       destructive: true,
       onConfirm: onRegenerate,
@@ -163,7 +164,7 @@ function ObfuscationPanel({ health }: ObfuscationTabProps) {
     confirm({
       title: `Применить preset ${preset}?`,
       description:
-        'Параметры обфускации на узле изменятся. Клиенты AmneziaWG 2.0 не подключатся, пока не переимпортируют конфиги на устройствах.',
+        `Параметры обфускации на узле изменятся. Клиенты ${protocolLabel('amneziawg2')} не подключатся, пока не переимпортируют конфиги на устройствах.`,
       confirmLabel: 'Применить',
       onConfirm: () => onApply(mtuValue),
     })
@@ -185,7 +186,7 @@ function ObfuscationPanel({ health }: ObfuscationTabProps) {
       <ConfirmDialogHost dialogProps={dialogProps} />
       {reimportAlert && (
         <SettingsAlert variant="warning" title="Требуется re-import">
-          Параметры обфускации изменились. Переимпортируйте клиентские конфиги AmneziaWG 2.0 на устройствах.
+          Параметры обфускации изменились. Переимпортируйте клиентские конфиги {protocolLabel('amneziawg2')} на устройствах.
         </SettingsAlert>
       )}
 

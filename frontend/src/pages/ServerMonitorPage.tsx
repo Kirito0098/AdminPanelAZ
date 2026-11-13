@@ -63,8 +63,9 @@ import type { BandwidthChart, ResourceHistory, ServerMetrics } from '@/types'
 
 import { apiBase as API_BASE } from '@/lib/panelBase'
 
-const CHART_RX = 'hsl(187, 72%, 45%)'
-const CHART_TX = 'hsl(38, 92%, 50%)'
+// RX/TX — нейтральная пара bandwidth, не цвета протоколов.
+const CHART_RX = '#5D8AA8'
+const CHART_TX = '#8A94A6'
 
 const RANGE_LABELS: Record<'1d' | '7d' | '30d', string> = {
   '1d': '1 день',
@@ -77,7 +78,7 @@ const GROUP_LABELS: Record<string, string> = {
   vpn: 'VPN',
   antizapret: 'AntiZapret',
   openvpn: 'OpenVPN',
-  wireguard: 'WireGuard / AWG',
+  wireguard: 'WG/AWG 1.5',
 }
 
 function interfaceTransport(name: string): 'UDP' | 'TCP' | null {
@@ -133,14 +134,14 @@ function formatInterfaceLabel(
     return `${scope} · ${proto} (${name})`
   }
   if (scope && protocol === 'wireguard') {
-    return `${scope} · WireGuard / AWG (${name})`
+    return `${scope} · WG/AWG 1.5 (${name})`
   }
   if (protocol === 'openvpn') {
     const proto = transport ? `OpenVPN (${transport})` : 'OpenVPN'
     return `${proto} (${name})`
   }
   if (protocol === 'wireguard') {
-    return `WireGuard / AWG (${name})`
+    return `WG/AWG 1.5 (${name})`
   }
   return name
 }

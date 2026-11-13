@@ -29,6 +29,7 @@ import {
 } from '@/lib/unlockCodeStatus'
 import { unlockCodeRevokeConfirm } from '@/lib/unlockCodeConfirm'
 import { cn } from '@/lib/utils'
+import { protocolLabel } from '@/lib/vpnTypes'
 import type { PortalPublishStatus, UnlockCodeRecord } from '@/types'
 import { getUnlockCodes, revokeUnlockCode, type UnlockCodeProtocol } from '@/api/unlockCodes'
 
@@ -334,7 +335,7 @@ export default function SubscriptionPage({ embedded = false }: SubscriptionPageP
                   const redeemed = unlockCodeRedeemedCount(code)
                   const exhausted = isUnlockCodeExhausted(code)
                   const statusLabel = unlockCodeStatusLabel(code)
-                  const protocolList = code.protocols.join(', ')
+                  const protocolList = code.protocols.map(protocolLabel).join(', ')
                   const redemptions = code.redemptions ?? []
                   return (
                     <div
@@ -426,8 +427,8 @@ export default function SubscriptionPage({ embedded = false }: SubscriptionPageP
               Unlock-ключи
             </CardTitle>
             <CardDescription>
-              Включите хотя бы один VPN-протокол (OpenVPN, WireGuard / AmneziaWG или AmneziaWG 2.0),
-              чтобы создавать unlock-ключи.
+              Включите хотя бы один VPN-протокол ({protocolLabel('openvpn')}, {protocolLabel('wireguard')} или{' '}
+              {protocolLabel('amneziawg2')}), чтобы создавать unlock-ключи.
             </CardDescription>
           </CardHeader>
         </Card>

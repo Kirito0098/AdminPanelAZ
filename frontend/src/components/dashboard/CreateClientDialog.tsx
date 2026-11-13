@@ -23,6 +23,7 @@ import { CLIENT_NAME_HINT, isValidClientName } from '@/lib/clientName'
 import { endOfDayIso } from '@/lib/datetime'
 import { setProfileTrafficLimits } from '@/lib/profileTrafficLimit'
 import { panelToday } from '@/lib/trafficPeriod'
+import { protocolLabel } from '@/lib/vpnTypes'
 import {
   Select,
   SelectContent,
@@ -35,15 +36,9 @@ import type { User, VpnType } from '@/types'
 
 const PROTOCOL_ORDER: VpnType[] = ['openvpn', 'wireguard', 'amneziawg2']
 
-function vpnLabel(type: VpnType): string {
-  if (type === 'openvpn') return 'OpenVPN'
-  if (type === 'wireguard') return 'WireGuard / AmneziaWG'
-  return 'AmneziaWG 2.0'
-}
-
 function vpnHint(type: VpnType): string {
   if (type === 'openvpn') return 'Сертификат + .ovpn'
-  if (type === 'wireguard') return 'WG / AWG профиль'
+  if (type === 'wireguard') return 'Профиль WG/AWG 1.5'
   return 'AWG 2.0 peer'
 }
 
@@ -152,8 +147,8 @@ export default function CreateClientDialog({
     } catch (err) {
       onWarning(
         err instanceof ApiError
-          ? `Клиент создан, но срок доступа не сохранён (${vpnLabel(protocol)}): ${err.message}`
-          : `Клиент «${name}» создан, но срок доступа не сохранён (${vpnLabel(protocol)})`,
+          ? `Клиент создан, но срок доступа не сохранён (${protocolLabel(protocol)}): ${err.message}`
+          : `Клиент «${name}» создан, но срок доступа не сохранён (${protocolLabel(protocol)})`,
       )
     }
   }
@@ -175,7 +170,7 @@ export default function CreateClientDialog({
       limitUnit,
       period,
     )
-    const failures = failed.map((item) => `${vpnLabel(item.protocol)}: ${item.message}`)
+    const failures = failed.map((item) => `${protocolLabel(item.protocol)}: ${item.message}`)
     if (applied.length === 0) {
       return `лимит трафика не применён (${failures.join('; ')})`
     }
@@ -252,7 +247,7 @@ export default function CreateClientDialog({
             }
             const detail = err instanceof ApiError ? err.message : 'ошибка создания'
             onWarning(
-              `Создано: ${created.map(vpnLabel).join(', ')}. Не удалось: ${vpnLabel(vpnType)} — ${detail}`,
+              `Создано: ${created.map(protocolLabel).join(', ')}. Не удалось: ${protocolLabel(vpnType)} — ${detail}`,
             )
             break
           }
@@ -277,11 +272,11 @@ export default function CreateClientDialog({
       if (created.length === ordered.length && created.length > 0) {
         onSuccess(
           created.length === 1
-            ? `Клиент «${trimmedName}» создан (${vpnLabel(created[0])})${limitNote}`
-            : `Профиль «${trimmedName}»: ${created.map(vpnLabel).join(', ')}${limitNote}`,
+            ? `Клиент «${trimmedName}» создан (${protocolLabel(created[0])})${limitNote}`
+            : `Профиль «${trimmedName}»: ${created.map(protocolLabel).join(', ')}${limitNote}`,
         )
       } else if (created.length > 0) {
-        onSuccess(`Профиль «${trimmedName}»: создано ${created.map(vpnLabel).join(', ')}${limitNote}`)
+        onSuccess(`Профиль «${trimmedName}»: создано ${created.map(protocolLabel).join(', ')}${limitNote}`)
       }
       if (trafficWarning) {
         onWarning(`Профиль создан, но ${trafficWarning}`)
@@ -380,7 +375,7 @@ export default function CreateClientDialog({
                         checked ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-muted/50',
                       )}
                     >
-                      <span className="block font-medium leading-tight">{vpnLabel(type)}</span>
+                      <span className="block font-medium leading-tight">{protocolLabel(type)}</span>
                       <span className="mt-0.5 block text-xs text-muted-foreground lg:mt-1 lg:text-sm">
                         {checked ? vpnHint(type) : 'Не выбрано'}
                       </span>
@@ -389,7 +384,7 @@ export default function CreateClientDialog({
                 })}
               </div>
               {showAwg2MissingHint && (
-                <p className={hintClass}>AZ-AWG2 не установлен на активном узле.</p>
+                <p className={hintClass}>AWG 2.0 не установлен на активном узле.</p>
               )}
               {availableProtocols.length === 0 && (
                 <p className="text-xs text-destructive lg:text-sm">Нет доступных протоколов на этом узле.</p>
@@ -423,7 +418,7 @@ export default function CreateClientDialog({
                 {showAwg2Opts && (
                   <div className="space-y-2">
                     <Label htmlFor="createAwg2Ttl" className="lg:text-base">
-                      TTL AmneziaWG 2.0
+                      TTL {protocolLabel('amneziawg2')}
                     </Label>
                     <Select value={awg2Ttl} onValueChange={setAwg2Ttl} disabled={submitting}>
                       <SelectTrigger id="createAwg2Ttl" className={fieldClass}>

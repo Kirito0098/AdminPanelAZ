@@ -40,11 +40,17 @@ const EMPTY_NOTIFICATION_COUNTS: NotificationCounts = {
 }
 
 const PAGE_SIZE = 50
-const BELL_PREVIEW_LIMIT = 5
+/** Сколько карточек видно в панели колокола. */
+export const BELL_PREVIEW_LIMIT = 8
+/** Запрашиваем с запасом: отложенные отсеиваются уже в панели и не должны съедать слоты. */
+const BELL_FETCH_LIMIT = 12
 
 interface NotificationCenterValue {
   items: NotificationItem[]
-  /** Только непрочитанные для колокола: свои параметры запроса, фильтры ленты на них не влияют. */
+  /**
+   * Превью для колокола: последние уведомления вместе с прочитанными, свои параметры запроса,
+   * фильтры ленты на них не влияют.
+   */
   bellItems: NotificationItem[]
   counts: NotificationCounts
   unreadCount: number
@@ -54,6 +60,10 @@ interface NotificationCenterValue {
   loading: boolean
   hasMore: boolean
   refetch: () => Promise<void>
+  /** Загрузка и ошибка превью колокола — отдельные от ленты. */
+  bellLoading: boolean
+  bellError: boolean
+  refetchBell: () => Promise<void>
   loadMore: () => Promise<void>
   markAllRead: () => Promise<void>
   markReadUpTo: (id: number) => Promise<void>
@@ -99,6 +109,8 @@ export function NotificationCenterProvider({ children }: { children: React.React
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0)
   const [loading, setLoading] = useState(false)
   const [hasMore, setHasMore] = useState(false)
+  const [bellLoading, setBellLoading] = useState(false)
+  const [bellError, setBellError] = useState(false)
 
   const queryRef = useRef<NotificationQuery>(DEFAULT_NOTIFICATION_QUERY)
   const prevPendingRef = useRef<number | null>(null)
@@ -162,14 +174,23 @@ export function NotificationCenterProvider({ children }: { children: React.React
   const refetchBell = useCallback(async () => {
     if (!isAdmin) return
     // Колокол дёргают SSE, фокус и действия пользователя: ответы могут прийти в обратном
-    // порядке, и устаревший не должен вернуть уже прочитанную карточку. counts живут
-    // у refetch(), чтобы два параллельных запроса не писали счётчики вразнобой.
+    // порядке, и устаревший не должен перезаписать свежий список.
     const generation = ++bellGenerationRef.current
+    setBellLoading(true)
+    setBellError(false)
     try {
-      const data = await fetchNotifications({ unread_only: true, limit: BELL_PREVIEW_LIMIT })
-      if (generation === bellGenerationRef.current) setBellItems(data.items)
+      const data = await fetchNotifications({ limit: BELL_FETCH_LIMIT })
+      if (generation === bellGenerationRef.current) {
+        setBellItems(data.items)
+        // Счётчики глобальные: шапка и бейдж обновляются вместе со списком.
+        setCounts(data.counts)
+      }
     } catch {
       // Колокол — вторичный список: при сбое остаются прошлые карточки, тост не поднимаем.
+      if (generation === bellGenerationRef.current) setBellError(true)
+    } finally {
+      // Устаревший ответ не должен гасить скелетон свежего запроса.
+      if (generation === bellGenerationRef.current) setBellLoading(false)
     }
   }, [isAdmin])
 
@@ -274,6 +295,9 @@ export function NotificationCenterProvider({ children }: { children: React.React
       loading,
       hasMore,
       refetch,
+      bellLoading,
+      bellError,
+      refetchBell,
       loadMore,
       markAllRead,
       markReadUpTo,
@@ -289,6 +313,9 @@ export function NotificationCenterProvider({ children }: { children: React.React
       loading,
       hasMore,
       refetch,
+      bellLoading,
+      bellError,
+      refetchBell,
       loadMore,
       markAllRead,
       markReadUpTo,

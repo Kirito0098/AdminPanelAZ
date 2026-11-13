@@ -10,6 +10,7 @@ import {
 import { ProvisioningConfigNode, UserProvisioningCard } from '@/types'
 import { useNotifications } from '@/context/NotificationContext'
 import { Badge } from '@/components/ui/badge'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -22,7 +23,7 @@ import EmptyState from '@/components/ui/EmptyState'
 import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
 import { pluralRu } from '@/lib/plural'
 import { triggerFileDownload } from '@/lib/triggerFileDownload'
-import { vpnTypeLabel } from '@/lib/vpnTypes'
+import { protocolLabel } from '@/lib/vpnTypes'
 import UserSection from './UserSection'
 import UserAccessSection from './UserAccessSection'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
@@ -48,7 +49,7 @@ type FilePickState = {
 
 function fileLabel(file: UserConfigFile): string {
   const variant = (file.variant || '').trim()
-  if (!variant) return file.protocol || 'Профиль'
+  if (!variant) return file.protocol ? protocolLabel(file.protocol) : 'Профиль'
   if (variant === 'vpn' || variant === 'antizapret') {
     return variant === 'vpn' ? 'VPN профиль' : 'AntiZapret'
   }
@@ -321,9 +322,7 @@ export default function UserConfigsSection({
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-sm font-medium">{entry.node_label}</span>
-                                  <Badge variant="outline" className="text-[10px]">
-                                    {vpnTypeLabel(entry.vpn_type)}
-                                  </Badge>
+                                  <ProtocolBadge protocol={entry.vpn_type} />
                                 </div>
                                 <p className="mt-0.5 text-[11px] text-muted-foreground">
                                   узел ID {entry.node_id}

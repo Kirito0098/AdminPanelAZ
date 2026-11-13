@@ -1,8 +1,10 @@
+import type { CSSProperties } from 'react'
 import { Search, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
+import { PROTOCOL_ORDER, protocolKey, protocolLabel, type Protocol } from '@/lib/vpnTypes'
 import { cn } from '@/lib/utils'
 
-export type ProtocolFilter = 'all' | 'openvpn' | 'wireguard' | 'amneziawg2'
+export type ProtocolFilter = 'all' | Protocol
 
 type ProtocolCounts = Partial<Record<ProtocolFilter, number>>
 
@@ -20,9 +22,7 @@ interface MiniListToolbarProps {
 
 const PROTOCOL_OPTIONS: Array<{ value: ProtocolFilter; label: string }> = [
   { value: 'all', label: 'Все' },
-  { value: 'openvpn', label: 'OpenVPN' },
-  { value: 'wireguard', label: 'WG/AWG 1.5' },
-  { value: 'amneziawg2', label: 'AWG 2.0' },
+  ...PROTOCOL_ORDER.map((protocol) => ({ value: protocol, label: protocolLabel(protocol) })),
 ]
 
 export function matchesSearchQuery(value: string, query: string): boolean {
@@ -33,7 +33,9 @@ export function matchesSearchQuery(value: string, query: string): boolean {
 
 export function matchesProtocolFilter(vpnType: string, filter: ProtocolFilter): boolean {
   if (filter === 'all') return true
-  return vpnType === filter
+  const key = protocolKey(vpnType)
+  // AmneziaWG 1.5 — та же категория WG/AWG 1.5, что и WireGuard.
+  return key === filter || (filter === 'wireguard' && key === 'amneziawg')
 }
 
 export default function MiniListToolbar({
@@ -76,7 +78,13 @@ export default function MiniListToolbar({
       </div>
 
       {showProtocol && options.length > 1 && (
-        <div className="tg-mini-segmented" role="tablist" aria-label="Фильтр протокола">
+        <div
+          className="tg-mini-segmented"
+          role="tablist"
+          aria-label="Фильтр протокола"
+          data-cols={options.length}
+          style={{ '--tg-mini-segment-cols': options.length } as CSSProperties}
+        >
           {options.map((option) => {
             const count = protocolCounts?.[option.value]
             const active = protocol === option.value

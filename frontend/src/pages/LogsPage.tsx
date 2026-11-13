@@ -734,7 +734,7 @@ export default function LogsPage({ embedded = false }: LogsPageProps) {
             description={
               <>
                 События панели по всем узлам: заявки, безопасность, серверы и сеть, задачи. Колокол в
-                шапке показывает только непрочитанные.
+                шапке показывает последние уведомления, непрочитанные — выше.
               </>
             }
           />
@@ -845,7 +845,7 @@ export default function LogsPage({ embedded = false }: LogsPageProps) {
             {showSocketsTab && (
               <TabsTrigger value="openvpn-sockets" className="gap-1.5">
                 <Plug size={14} />
-                OVPN сокеты
+                OpenVPN сокеты
               </TabsTrigger>
             )}
             {showNotificationsTab && (

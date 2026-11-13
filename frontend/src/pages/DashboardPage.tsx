@@ -49,6 +49,7 @@ import { useProgress } from '@/context/ProgressContext'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { buildClientConnectionMap, type ClientConnectionMap } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
+import { protocolLabel } from '@/lib/vpnTypes'
 import type {
   ClientPoliciesResponseEntry,
   DashboardSummary,
@@ -347,7 +348,7 @@ export default function DashboardPage() {
             VPN-клиенты на узле{' '}
             <strong className="font-medium text-foreground">{activeNode?.name ?? summary?.node_name ?? 'не выбран'}</strong>
             {activeNode?.is_local ? ' (локальный controller)' : activeNode ? ' (удалённый node agent)' : ''}.
-            OpenVPN и WireGuard / AmneziaWG.
+            OpenVPN и WG/AWG 1.5.
           </>
         }
         docsHref={DOCS.configurations}
@@ -462,7 +463,7 @@ export default function DashboardPage() {
           <MetricCard
             label={isAdmin ? 'Всего клиентов' : 'Мои конфигурации'}
             value={String(summary.total_configs)}
-            sub={`OVPN ${summary.openvpn_configs} · WG ${summary.wireguard_configs}`}
+            sub={`${protocolLabel('openvpn')} ${summary.openvpn_configs} · ${protocolLabel('wireguard')} ${summary.wireguard_configs}`}
             icon={Users}
             accent="cyan"
           />
@@ -471,7 +472,7 @@ export default function DashboardPage() {
               <MetricCard
                 label="Онлайн"
                 value={String(summary.connected_openvpn + summary.connected_wireguard)}
-                sub={`OVPN ${summary.connected_openvpn} · WG ${summary.connected_wireguard}`}
+                sub={`${protocolLabel('openvpn')} ${summary.connected_openvpn} · ${protocolLabel('wireguard')} ${summary.connected_wireguard}`}
                 icon={Wifi}
                 accent="green"
               />

@@ -157,8 +157,8 @@ ANTIZAPRET_PARAMS = [
         "type": "flag",
         "default": "n",
         "html_id": "WIREGUARD_540_580-toggle",
-        "title": "WireGuard/AmneziaWG",
-        "description": "Включает резервные порты WireGuard/AmneziaWG (540,580) для обхода блокировок провайдеров, если стандартный порт заблокирован.",
+        "title": "WG/AWG 1.5",
+        "description": "Включает резервные порты WG/AWG 1.5 (540,580) для обхода блокировок провайдеров, если стандартный порт заблокирован.",
     },
     {
         "key": "ANTIZAPRET_WARP",

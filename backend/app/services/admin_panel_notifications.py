@@ -425,7 +425,7 @@ def list_notifications_for_admin(
     if before_id is not None:
         query = query.filter(AdminPanelNotification.id < before_id)
     if unread_only:
-        # «Непрочитано» считается в Python (is_unread), но колоколу нужны ровно пять строк:
+        # «Непрочитано» считается в Python (is_unread), но колоколу нужны ровно limit строк:
         # отдаём фильтр в SQL по тем же правилам — водяной знак, прочтение, скрытие, отложенное.
         # Состояние уникально по (user_id, notification_id), поэтому join не размножает строки.
         state_row = aliased(AdminPanelNotificationState)

@@ -10,6 +10,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.services.env_file import EnvFileService
+from app.services.protocols import protocol_module_label
 from app.services.shared_helpers import parse_bool as _parse_bool
 
 RESOURCE_IMPACT_LEVELS = {
@@ -69,8 +70,8 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
     FeatureToggleDefinition(
         key="wg_policy_sync",
         env_key="WG_POLICY_SYNC_ENABLED",
-        label="Синхронизация WG/AWG политик",
-        description="Периодическая сверка блокировок WireGuard/AWG с runtime (expiry, temp block, drift repair).",
+        label="Синхронизация политик WG/AWG 1.5",
+        description="Периодическая сверка блокировок WG/AWG 1.5 с runtime (expiry, temp block, drift repair).",
         icon="🛡️",
         disable_hint="Автоматическое применение WG-блокировок после перезапуска и по расписанию будет отключено.",
         resource_impact_level="medium",
@@ -93,7 +94,7 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
     FeatureToggleDefinition(
         key="openvpn",
         env_key="FEATURE_OPENVPN_ENABLED",
-        label="OpenVPN",
+        label=protocol_module_label("openvpn"),
         description="Управление клиентами OpenVPN, блокировки и лимиты трафика.",
         icon="🔐",
         disable_hint="Действия OpenVPN на главной станут недоступны.",
@@ -106,7 +107,7 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
     FeatureToggleDefinition(
         key="wireguard",
         env_key="FEATURE_WIREGUARD_ENABLED",
-        label="WireGuard",
+        label=protocol_module_label("wireguard"),
         description="Вкладка WireGuard, политики доступа и лимиты трафика.",
         icon="🛡️",
         disable_hint="Вкладка WireGuard и связанные действия станут недоступны.",
@@ -118,10 +119,10 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
     FeatureToggleDefinition(
         key="amneziawg",
         env_key="FEATURE_AMNEZIAWG_ENABLED",
-        label="AmneziaWG",
-        description="Вкладка AmneziaWG на главной и связанные операции с клиентами AWG.",
+        label=protocol_module_label("amneziawg"),
+        description="Вкладка AmneziaWG 1.5 на главной и связанные операции с клиентами WG/AWG 1.5.",
         icon="🛡️",
-        disable_hint="Вкладка AmneziaWG и связанные действия станут недоступны.",
+        disable_hint="Вкладка AmneziaWG 1.5 и связанные действия станут недоступны.",
         resource_impact_level="minimal",
         default=True,
         group="app_module",
@@ -204,10 +205,10 @@ FEATURE_TOGGLES: tuple[FeatureToggleDefinition, ...] = (
     FeatureToggleDefinition(
         key="awg2",
         env_key="FEATURE_AWG2_ENABLED",
-        label="AZ-AWG2",
-        description="Параллельный слой AmneziaWG 2.0 (az-awg2): статусы и установка. Клиенты — в следующем срезе.",
+        label=protocol_module_label("amneziawg2"),
+        description="Параллельный слой AWG 2.0 (az-awg2): статусы и установка. Клиенты — в следующем срезе.",
         icon="🧬",
-        disable_hint="Раздел AZ-AWG2 и связанные API станут недоступны.",
+        disable_hint="Раздел AWG 2.0 и связанные API станут недоступны.",
         resource_impact_level="minimal",
         default=False,
         group="app_module",
@@ -1301,7 +1302,7 @@ class FeatureToggleService:
         if not any(intended.get(key, False) for key in VPN_PROTOCOL_TOGGLES):
             raise ValueError(
                 "Должен оставаться включённым хотя бы один VPN-протокол: "
-                "OpenVPN, WireGuard, AmneziaWG или AZ-AWG2."
+                "OpenVPN, WireGuard, AmneziaWG 1.5 или AWG 2.0."
             )
 
     def _custom_scenario_state(

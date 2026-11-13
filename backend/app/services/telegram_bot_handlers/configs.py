@@ -42,19 +42,27 @@ logger = logging.getLogger(__name__)
 _PAGE_SIZE = 12
 _COLUMNS = 2
 _NAME_MAX_LEN = 20
-_VALID_FILTERS = frozenset({"all", "ovpn", "wg", "awg"})
+_VALID_FILTERS = frozenset({"all", "ovpn", "wg_awg", "awg2"})
+# Старые callback-данные: wg и awg схлопываются в общий WG/AWG 1.5.
+_LEGACY_FILTERS = {"wg": "wg_awg", "awg": "wg_awg"}
 _FILTER_LABELS = {
     "all": i18n.CONFIGS_FILTER_ALL,
     "ovpn": i18n.CONFIGS_FILTER_OVPN,
-    "wg": i18n.CONFIGS_FILTER_WG,
-    "awg": i18n.CONFIGS_FILTER_AWG,
+    "wg_awg": i18n.CONFIGS_FILTER_WG_AWG,
+    "awg2": i18n.CONFIGS_FILTER_AWG2,
 }
+
+
+def _coerce_filter_key(value: str | None) -> str:
+    key = (value or "all").strip().lower()
+    key = _LEGACY_FILTERS.get(key, key)
+    return key if key in _VALID_FILTERS else "all"
 
 
 def parse_configs_callback(data: str) -> tuple[int, str, int]:
     parts = data.split(":")
     page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-    filter_key = parts[2] if len(parts) > 2 and parts[2] in _VALID_FILTERS else "all"
+    filter_key = _coerce_filter_key(parts[2] if len(parts) > 2 else None)
     node_id = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
     return page, filter_key, node_id
 
@@ -62,13 +70,12 @@ def parse_configs_callback(data: str) -> tuple[int, str, int]:
 def parse_config_callback(data: str) -> tuple[int, str]:
     parts = data.split(":")
     config_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-    filter_key = parts[2] if len(parts) > 2 and parts[2] in _VALID_FILTERS else "all"
+    filter_key = _coerce_filter_key(parts[2] if len(parts) > 2 else None)
     return config_id, filter_key
 
 
 def _normalize_filter_key(filter_key: str | None) -> str:
-    value = (filter_key or "all").strip().lower()
-    return value if value in _VALID_FILTERS else "all"
+    return _coerce_filter_key(filter_key)
 
 
 def _cfg_callback(config_id: int, filter_key: str = "all") -> str:
@@ -155,11 +162,11 @@ def _config_button_label(
 
 
 def _count_by_protocol(protocol_map: dict[int, frozenset[str]]) -> dict[str, int]:
-    counts = {"ovpn": 0, "wg": 0, "awg": 0}
+    counts = {"ovpn": 0, "wg_awg": 0, "awg2": 0}
     for groups in protocol_map.values():
-        for key in groups:
-            if key in counts:
-                counts[key] += 1
+        key = next((item for item in ("ovpn", "wg_awg", "awg2") if item in groups), None)
+        if key is not None:
+            counts[key] += 1
     return counts
 
 
@@ -177,8 +184,6 @@ def _filter_configs(
 ) -> list[VpnConfig]:
     if filter_key == "all":
         return configs
-    if filter_key == "ovpn":
-        return [config for config in configs if "ovpn" in protocol_map.get(config.id, frozenset())]
     return [config for config in configs if filter_key in protocol_map.get(config.id, frozenset())]
 
 
@@ -190,7 +195,7 @@ def _chunk_buttons(buttons: list[dict], columns: int = _COLUMNS) -> list[list[di
 
 
 def _build_filter_rows(counts: dict[str, int], current: str, *, node_id: int = 0) -> list[list[dict]]:
-    active_types = [key for key in ("ovpn", "wg", "awg") if counts.get(key, 0) > 0]
+    active_types = [key for key in ("ovpn", "wg_awg", "awg2") if counts.get(key, 0) > 0]
     if len(active_types) < 2:
         return []
 
@@ -334,7 +339,7 @@ def _back_to_configs_row(filter_key: str = "all") -> list:
 
 def _narrow_profile_groups(groups: list[ProfileFileGroup], filter_key: str) -> list[ProfileFileGroup]:
     filter_key = _normalize_filter_key(filter_key)
-    if filter_key in ("ovpn", "wg", "awg"):
+    if filter_key in ("ovpn", "wg_awg", "awg2"):
         matched = [group for group in groups if group.key == filter_key]
         if matched:
             return matched
@@ -541,9 +546,9 @@ async def handle_configs(
     chunk = filtered[start : start + _PAGE_SIZE]
 
     counts = _count_by_protocol(protocol_map)
-    active_types = sum(1 for key in ("ovpn", "wg", "awg") if counts.get(key, 0) > 0)
+    active_types = sum(1 for key in ("ovpn", "wg_awg", "awg2") if counts.get(key, 0) > 0)
     hint = ""
-    if counts.get("wg", 0) > 0 and counts.get("awg", 0) > 0:
+    if counts.get("wg_awg", 0) > 0 and counts.get("awg2", 0) > 0:
         hint = i18n.CONFIGS_FILTER_HINT_WG_AWG
     elif active_types > 1 and filter_key == "all" and len(configs_with_files) > _PAGE_SIZE:
         hint = i18n.CONFIGS_FILTER_HINT

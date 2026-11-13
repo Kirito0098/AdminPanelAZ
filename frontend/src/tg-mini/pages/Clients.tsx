@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Ban,
   CalendarPlus,
@@ -43,6 +43,9 @@ import { getTgNodes } from '@/tg-mini/api'
 import { formatDate, formatDateTime } from '@/lib/datetime'
 import { formatBytes } from '@/lib/trafficFormat'
 import { selectablePlanNodes } from '@/tg-mini/lib/planNodes'
+import { featureEnabledProtocols } from '@/tg-mini/lib/vpnVisibility'
+import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
+import { protocolLabel } from '@/lib/vpnTypes'
 import { cn } from '@/lib/utils'
 import type {
   PresetResponse,
@@ -314,6 +317,8 @@ function ClientActionsDialog({
   onResetTraffic,
   onDelete,
 }: ClientActionsDialogProps) {
+  const { features } = useTgAuth()
+  const availableProtocols = useMemo(() => featureEnabledProtocols(features), [features])
   const [tab, setTab] = useState<ClientTab>('actions')
   const [reason, setReason] = useState('Заблокирован администратором')
   const [limitGb, setLimitGb] = useState('')
@@ -587,7 +592,7 @@ function ClientActionsDialog({
                       className="rounded-md border border-border/70 p-2 text-xs"
                     >
                       <p className="font-medium">
-                        {row.client_name} · {row.vpn_type}
+                        {row.client_name} · {protocolLabel(row.vpn_type)}
                       </p>
                       <p className="text-muted-foreground">
                         {formatBytes(row.total_bytes)} · сессий: {row.total_sessions} · узел {row.node_id}
@@ -641,7 +646,7 @@ function ClientActionsDialog({
                 <Label>Видимые протоколы</Label>
                 {canEditVisibility ? (
                   <div className="flex flex-wrap gap-1.5">
-                    {['openvpn', 'wireguard', 'amneziawg2'].map((protocol) => (
+                    {availableProtocols.map((protocol) => (
                       <button
                         key={protocol}
                         type="button"
@@ -659,7 +664,7 @@ function ClientActionsDialog({
                           )
                         }
                       >
-                        {protocol}
+                        {protocolLabel(protocol)}
                       </button>
                     ))}
                   </div>
@@ -696,13 +701,22 @@ interface CreateClientDialogProps {
 }
 
 function CreateClientDialog({ open, onOpenChange, onCreated }: CreateClientDialogProps) {
+  const { features } = useTgAuth()
+  const availableProtocols = useMemo(() => featureEnabledProtocols(features), [features])
+  const defaultProtocols = useMemo(() => {
+    const preferred = availableProtocols.filter((protocol) => protocol !== 'amneziawg2')
+    return preferred.length > 0 ? preferred : availableProtocols
+  }, [availableProtocols])
+  // Сброс формы при открытии берёт актуальные фичи, но не срабатывает на их фоновое обновление.
+  const defaultProtocolsRef = useRef(defaultProtocols)
+  defaultProtocolsRef.current = defaultProtocols
   const [username, setUsername] = useState('')
   const [baseName, setBaseName] = useState('')
   const [presets, setPresets] = useState<PresetResponse[]>([])
   const [presetId, setPresetId] = useState('')
   const [nodes, setNodes] = useState<TgMiniNode[]>([])
   const [nodeIds, setNodeIds] = useState<number[]>([])
-  const [protocols, setProtocols] = useState<string[]>(['openvpn', 'wireguard'])
+  const [protocols, setProtocols] = useState<string[]>([])
   const [count, setCount] = useState('1')
   const [panelLogin, setPanelLogin] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -713,6 +727,7 @@ function CreateClientDialog({ open, onOpenChange, onCreated }: CreateClientDialo
     setUsername('')
     setBaseName('')
     setPresetId('')
+    setProtocols(defaultProtocolsRef.current)
     setCount('1')
     setPanelLogin(false)
     setError(null)
@@ -730,9 +745,9 @@ function CreateClientDialog({ open, onOpenChange, onCreated }: CreateClientDialo
     const preset = presets.find((item) => String(item.id) === presetId)
     if (!preset) return
     setNodeIds(preset.node_ids)
-    setProtocols(preset.protocols)
+    setProtocols(preset.protocols.filter((protocol) => availableProtocols.some((item) => item === protocol)))
     setCount(String(preset.config_count))
-  }, [presetId, presets])
+  }, [presetId, presets, availableProtocols])
 
   const submit = async () => {
     const name = username.trim()
@@ -827,6 +842,7 @@ function CreateClientDialog({ open, onOpenChange, onCreated }: CreateClientDialo
             onProtocolsChange={setProtocols}
             count={count}
             onCountChange={setCount}
+            availableProtocols={availableProtocols}
           />
 
           <label className="flex items-center gap-2 text-sm">

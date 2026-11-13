@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
+import { protocolLabel } from '@/lib/vpnTypes'
 import { AZ_PROXY_SH_DOCS_URL } from '@/components/nodes/ProxyNodePanel'
 import { ArrowDown, ArrowUp, Cable, Plus, RefreshCw, Save, Shield, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -156,7 +157,7 @@ function RemoteHostsListBody({
           панель не ставит proxy.sh).
         </li>
         <li>
-          AmneziaWG/WireGuard по умолчанию берут хост из WIREGUARD_HOST (как client.sh). Первый
+          {protocolLabel('wireguard')} по умолчанию берут хост из WIREGUARD_HOST (как client.sh). Первый
           адрес (слот прокси) попадает в их Endpoint только если включить галочку ниже — и только
           если на прокси форвардятся UDP 52443/52080 (как в proxy.sh).
         </li>
@@ -240,13 +241,15 @@ function RemoteHostsListBody({
           checked={applyToWireguard}
           disabled={listDisabled}
           onCheckedChange={onApplyToWireguardChange}
-          aria-label="Подставлять первый адрес в Endpoint AmneziaWG, WireGuard и AWG 2.0"
+          aria-label={`Подставлять первый адрес в Endpoint ${protocolLabel('wireguard')} и ${protocolLabel('amneziawg2')}`}
         />
         <span>
-          <span className="font-medium">Также для AmneziaWG / WireGuard / AWG 2.0</span>
+          <span className="font-medium">
+            Также для {protocolLabel('wireguard')} / {protocolLabel('amneziawg2')}
+          </span>
           <span className="mt-0.5 block text-xs text-muted-foreground">
             Первый адрес (прокси) пишется в WIREGUARD_HOST и при скачивании в Endpoint
-            стокового AWG/WG и AmneziaWG 2.0 (порт в конфиге не меняется). Для стока нужен
+            стокового {protocolLabel('wireguard')} и {protocolLabel('amneziawg2')} (порт в конфиге не меняется). Для стока нужен
             proxy.sh с 52443/52080; для AWG 2.0 — ещё DNAT своих UDP-портов на RU (см. docs).
           </span>
         </span>

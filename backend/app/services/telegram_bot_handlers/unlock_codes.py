@@ -7,6 +7,7 @@ from html import escape
 
 from app.services import telegram_bot_i18n as i18n
 from app.services.feature_guards import get_feature_service, module_disabled_message
+from app.services.protocols import protocol_badge
 from app.services.telegram_api import send_message
 from app.services.telegram_bot_handlers.base import (
     BotContext,
@@ -29,14 +30,10 @@ _PROTOCOL_ALIASES = {
     "openvpn": "openvpn",
     "wg": "wireguard",
     "wireguard": "wireguard",
-    "awg": "amneziawg2",
+    "awg": "wireguard",
+    "amneziawg": "wireguard",
     "awg2": "amneziawg2",
     "amneziawg2": "amneziawg2",
-}
-_PROTOCOL_LABELS = {
-    "openvpn": "OpenVPN",
-    "wireguard": "WireGuard",
-    "amneziawg2": "AmneziaWG 2.0",
 }
 _MODE_BUTTONS = inline_keyboard(
     [
@@ -50,7 +47,7 @@ _MODE_BUTTONS = inline_keyboard(
 _ROOT_BUTTONS = inline_keyboard(
     [
         [
-            inline_button("30д OVPN", callback_data="uc:preset:ovpn30"),
+            inline_button("30д OpenVPN", callback_data="uc:preset:ovpn30"),
             inline_button("30д все", callback_data="uc:preset:all30"),
         ],
         [inline_button("◀️ Назад", callback_data="nav:more")],
@@ -58,10 +55,6 @@ _ROOT_BUTTONS = inline_keyboard(
 )
 _MULTI_DEFAULT_MAX_REDEMPTIONS = 10
 _FORCE_REPLY = {"force_reply": True, "selective": True}
-
-
-def _protocol_label(protocol: str) -> str:
-    return _PROTOCOL_LABELS.get(protocol, protocol)
 
 
 def _require_enabled() -> str | None:
@@ -85,7 +78,7 @@ async def _require_admin_ctx(ctx: BotContext) -> bool:
 
 
 def _format_protocols(protocols: tuple[str, ...] | list[str]) -> str:
-    return ", ".join(_protocol_label(protocol) for protocol in protocols)
+    return ", ".join(protocol_badge(protocol) for protocol in protocols)
 
 
 def _parse_grant_days(text: str) -> int:
@@ -112,7 +105,7 @@ def _parse_protocols(text: str) -> tuple[str, ...]:
         protocol = _PROTOCOL_ALIASES.get(token)
         if protocol is None:
             raise ValueError(
-                "Неизвестный протокол. Используйте OpenVPN, WireGuard, AmneziaWG2 или «все»."
+                "Неизвестный протокол. Используйте OpenVPN, WG/AWG 1.5, AWG 2.0 или «все»."
             )
         if protocol in seen:
             continue
@@ -269,7 +262,7 @@ async def handle_unlock_codes_text(ctx: BotContext, text: str) -> bool:
                 ctx.bot_token,
                 ctx.chat_id,
                 "Введите протоколы через запятую или пробел.\n"
-                "Доступны: OpenVPN, WireGuard, AmneziaWG2.\n"
+                "Доступны: OpenVPN, WG/AWG 1.5, AWG 2.0.\n"
                 "Можно написать «все».",
                 reply_markup=_FORCE_REPLY,
             )

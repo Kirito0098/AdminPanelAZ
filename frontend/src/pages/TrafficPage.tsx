@@ -30,7 +30,7 @@ import {
 } from '@/api/client'
 import { getRetentionSettings } from '@/api/settings'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
-import { formatBytes, protocolBadgeVariant, protocolLabel } from '@/lib/trafficFormat'
+import { formatBytes, protocolLabel } from '@/lib/trafficFormat'
 import TrafficPeriodControls, {
   type TrafficPeriodPreset,
 } from '@/components/traffic/TrafficPeriodControls'
@@ -47,6 +47,7 @@ import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Badge } from '@/components/ui/badge'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -200,9 +201,7 @@ function TrafficClientCard({
             </div>
           </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant={protocolBadgeVariant(row.protocol_type)} className="text-[10px]">
-            {protocolLabel(row.protocol_type)}
-          </Badge>
+          <ProtocolBadge protocol={row.protocol_type} />
           <Badge variant={row.is_active ? 'success' : 'secondary'} className="text-[10px]">
             {row.is_active ? 'Онлайн' : 'Офлайн'}
           </Badge>
@@ -251,9 +250,7 @@ function NeverConnectedCard({ row }: NeverConnectedCardProps) {
     <div className="rounded-lg border border-border/80 bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="min-w-0 truncate font-medium">{row.common_name}</p>
-        <Badge variant={protocolBadgeVariant(row.protocol_type)} className="text-[10px]">
-          {protocolLabel(row.protocol_type)}
-        </Badge>
+        <ProtocolBadge protocol={row.protocol_type} />
       </div>
       <p className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
         <Clock size={12} className="shrink-0" />
@@ -933,7 +930,7 @@ export default function TrafficPage({ embedded = false }: TrafficPageProps) {
         await loadDeletedClients()
         await loadNeverConnectedClients()
       }, 'Сброс статистики трафика...')
-      success(`Статистика сброшена (${resetScope})`)
+      success(`Статистика сброшена (${resetScope === 'all' ? 'всё' : protocolLabel(resetScope)})`)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сброса')
     } finally {
@@ -1008,9 +1005,11 @@ export default function TrafficPage({ embedded = false }: TrafficPageProps) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">Сброс: всё</SelectItem>
-              <SelectItem value="openvpn">Сброс: OpenVPN</SelectItem>
-              <SelectItem value="wireguard">Сброс: WG/AWG</SelectItem>
-              {awg2Enabled && <SelectItem value="amneziawg2">Сброс: AWG 2.0</SelectItem>}
+              <SelectItem value="openvpn">Сброс: {protocolLabel('openvpn')}</SelectItem>
+              <SelectItem value="wireguard">Сброс: {protocolLabel('wireguard')}</SelectItem>
+              {awg2Enabled && (
+                <SelectItem value="amneziawg2">Сброс: {protocolLabel('amneziawg2')}</SelectItem>
+              )}
             </SelectContent>
           </Select>
           <Button variant="outline" size="sm" onClick={handleReset} disabled={resetting}>
@@ -1323,9 +1322,7 @@ export default function TrafficPage({ embedded = false }: TrafficPageProps) {
                                 </TableCell>
                                 <TableCell className="font-medium">{r.common_name}</TableCell>
                             <TableCell>
-                              <Badge variant={protocolBadgeVariant(r.protocol_type)} className="text-[10px]">
-                                {protocolLabel(r.protocol_type)}
-                              </Badge>
+                              <ProtocolBadge protocol={r.protocol_type} />
                             </TableCell>
                             <TableCell className="whitespace-nowrap text-right font-mono text-xs">
                               {formatBytes(r.total_received)}
@@ -1444,9 +1441,7 @@ export default function TrafficPage({ embedded = false }: TrafficPageProps) {
                             <TableRow key={`${row.common_name}-${row.protocol_type}-${row.config_id ?? 'na'}`}>
                               <TableCell className="font-medium">{row.common_name}</TableCell>
                               <TableCell>
-                                <Badge variant={protocolBadgeVariant(row.protocol_type)} className="text-[10px]">
-                                  {protocolLabel(row.protocol_type)}
-                                </Badge>
+                                <ProtocolBadge protocol={row.protocol_type} />
                               </TableCell>
                               <TableCell className="text-xs text-muted-foreground">
                                 <span className="inline-flex items-center gap-1">

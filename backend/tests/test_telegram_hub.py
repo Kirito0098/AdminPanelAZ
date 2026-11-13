@@ -209,10 +209,20 @@ def test_configs_view_lists_config_with_traffic(monkeypatch):
 
     item = state["cf"]["c"][0]
     assert item["n"] == "ivan-phone"
-    assert item["p"] == "WG"
+    assert item["p"] == "WG/AWG 1.5"
     assert item["nd"] == "nl-1"
     assert item["d"] == "31.12.26"
     assert item["t"]
+
+
+def test_awg2_module_label_is_unified(monkeypatch):
+    monkeypatch.setattr(hub, "_feature_on", lambda key: True)
+
+    more_items = [item[1] for item in hub._more_items(_FakeDb())]
+    help_items = [item[1] for item in hub._help_items(_FakeDb(), "admin")]
+
+    assert "AWG 2.0" in more_items
+    assert any(label.startswith("/awg2") and "AWG 2.0" in label for label in help_items)
 
 
 def test_nodes_view_marks_active_node(monkeypatch):

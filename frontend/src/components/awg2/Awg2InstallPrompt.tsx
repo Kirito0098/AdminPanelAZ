@@ -21,7 +21,7 @@ export default function Awg2InstallPrompt({ health, activeNode, onInstalled }: A
       <EmptyState
         icon={CloudOff}
         title="Слой не установлен"
-        description={`На узле ${nodeLabel} AZ-AWG2 (az-awg2) не обнаружен. Управление клиентами появится после установки слоя на сервере.`}
+        description={`На узле ${nodeLabel} AWG 2.0 (az-awg2) не обнаружен. Управление клиентами появится после установки слоя на сервере.`}
       />
       <div className="mx-auto mt-2 max-w-xl space-y-3">
         <div className="flex items-start gap-2 rounded-lg border bg-muted/30 p-3 text-sm">

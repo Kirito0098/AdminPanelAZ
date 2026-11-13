@@ -259,7 +259,7 @@ up_effects() {
       UP_EFFECT+=("Агент $unit перезапустится — панель на несколько секунд потеряет связь с этим сервером")
     done < <(menu_agent_units)
   fi
-  UP_EFFECT+=("VPN-клиенты остаются подключёнными: OpenVPN и WireGuard не перезапускаются")
+  UP_EFFECT+=("VPN-клиенты остаются подключёнными: OpenVPN и WG/AWG 1.5 не перезапускаются")
   if [[ "$UP_SERVER_ONLY" != true ]] && panel_uses_systemd; then
     UP_EFFECT+=("Перед обновлением делается резервная копия панели; восстановить — sudo adminpanelaz $FU_ARROW 6")
   fi

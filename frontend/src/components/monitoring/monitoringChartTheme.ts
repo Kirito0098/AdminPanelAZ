@@ -1,18 +1,17 @@
+import { PROTOCOL_CHART_COLORS, protocolKey } from '@/lib/vpnTypes'
+
 export const MONITORING_CHART_HEIGHT = 220
 
-export const MONITORING_PROTOCOL_COLORS = {
-  openvpn: 'hsl(187, 72%, 45%)',
-  wireguard: 'hsl(142, 71%, 45%)',
-  amneziawg2: 'hsl(38, 92%, 50%)',
-  total: 'hsl(217, 33%, 55%)',
-} as const
+/** Брендовая палитра протоколов — единый источник в lib/vpnTypes. */
+export const MONITORING_PROTOCOL_COLORS = PROTOCOL_CHART_COLORS
 
+// Независимая категориальная палитра для гео-срезов. Не связана с протоколами:
+// цвета протоколов живут в PROTOCOL_CHART_COLORS.
 // Keep order aligned with .monitoring-slice-dot-* in styles/index.css (geo legends).
-// AWG 2.0 chart bars use MONITORING_PROTOCOL_COLORS.amneziawg2 via getProtocolBarColor — not this palette.
 const MONITORING_SLICE_COLORS = [
-  MONITORING_PROTOCOL_COLORS.openvpn,
-  MONITORING_PROTOCOL_COLORS.wireguard,
-  MONITORING_PROTOCOL_COLORS.total,
+  'hsl(187, 72%, 45%)',
+  'hsl(142, 71%, 45%)',
+  'hsl(217, 33%, 55%)',
   'hsl(38, 92%, 50%)',
   'hsl(280, 65%, 55%)',
   'hsl(0, 72%, 58%)',
@@ -30,9 +29,17 @@ export function getMonitoringSliceDotClass(index: number) {
   return `monitoring-slice-dot-${index % MONITORING_SLICE_COLORS.length}`
 }
 
-export function getProtocolBarColor(name: string) {
-  if (name === 'OpenVPN') return MONITORING_PROTOCOL_COLORS.openvpn
-  if (name === 'WireGuard') return MONITORING_PROTOCOL_COLORS.wireguard
-  if (name === 'AWG 2.0') return MONITORING_PROTOCOL_COLORS.amneziawg2
-  return MONITORING_PROTOCOL_COLORS.total
+/** Цвет столбца по каноническому ключу протокола, не по подписи. */
+export function getProtocolBarColor(protocol: string) {
+  switch (protocolKey(protocol)) {
+    case 'openvpn':
+      return MONITORING_PROTOCOL_COLORS.openvpn
+    case 'wireguard':
+    case 'amneziawg':
+      return MONITORING_PROTOCOL_COLORS.wireguard
+    case 'amneziawg2':
+      return MONITORING_PROTOCOL_COLORS.amneziawg2
+    default:
+      return MONITORING_PROTOCOL_COLORS.total
+  }
 }

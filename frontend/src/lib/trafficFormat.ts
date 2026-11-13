@@ -1,6 +1,6 @@
 import type { MonitoringOverview } from '@/types'
 
-export { protocolBadgeVariant, protocolLabel } from '@/lib/vpnTypes'
+export { protocolLabel } from '@/lib/vpnTypes'
 
 export function formatBytes(n: number) {
   if (!Number.isFinite(n) || n < 0) return '—'

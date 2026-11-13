@@ -1,7 +1,6 @@
 import type { ClientAccessPolicy, ClientPoliciesResponseEntry, OpenVpnClient, VpnConfig, WireGuardPeer } from '@/types'
 import { formatDate, parseTimestamp } from '@/lib/datetime'
 import { getProfileDownloadFilename } from '@/lib/profileDownloadName'
-import { vpnTypeLabel } from '@/lib/vpnTypes'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
 
 export type ProtocolTab = 'openvpn' | 'wireguard' | 'amneziawg' | 'amneziawg2'
@@ -67,10 +66,6 @@ export function pickAzFile(config: VpnConfig, tab?: ProtocolTab): ProfileFile | 
 export function pickVpnFile(config: VpnConfig, tab?: ProtocolTab): ProfileFile | undefined {
   const files = tab ? profileFilesForTab(config, tab) : config.profile_files
   return preferPrimaryConf(files.filter(isVpnProfile))
-}
-
-export function protocolLabel(tab: ProtocolTab): string {
-  return vpnTypeLabel(tab)
 }
 
 function hasProtocolProfiles(
@@ -379,13 +374,6 @@ export function pickPrimaryFile(config: VpnConfig, tab?: ProtocolTab) {
 
 export function getDownloadFilename(config: VpnConfig, file: ProfileFile): string {
   return getProfileDownloadFilename(config.client_name, file)
-}
-
-/** Вариант бейджа в карточке клиента: AWG/AWG2 — secondary, WireGuard — outline. */
-export function getProtocolBadgeVariant(tab: ProtocolTab): 'default' | 'secondary' | 'outline' {
-  if (tab === 'openvpn') return 'default'
-  if (tab === 'amneziawg' || tab === 'amneziawg2') return 'secondary'
-  return 'outline'
 }
 
 type ClientConnectionEntry = {

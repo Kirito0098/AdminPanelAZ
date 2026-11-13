@@ -15,14 +15,21 @@ import {
   unlockCodeStatusLabel,
 } from '@/lib/unlockCodeStatus'
 import { cn } from '@/lib/utils'
-import { vpnTypeBadgeClass, vpnTypeLabel } from '@/tg-mini/lib/vpnLabels'
+import { PROTOCOL_ORDER, protocolLabel } from '@/lib/vpnTypes'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import type { UnlockCodeRecord } from '@/types'
 import { Ban, CalendarClock, Copy, KeyRound, Loader2, RefreshCw, ShieldCheck, Trash2, Users } from 'lucide-react'
 
-const ALL_PROTOCOLS: UnlockCodeProtocol[] = ['openvpn', 'wireguard', 'amneziawg2']
+const ALL_PROTOCOLS: UnlockCodeProtocol[] = [...PROTOCOL_ORDER]
 
-function protocolLabel(protocol: UnlockCodeProtocol) {
-  return vpnTypeLabel(protocol)
+/** Человеческие подписи режима выдачи вместо сырых single/multi. */
+const UNLOCK_MODE_LABELS: Record<string, string> = {
+  single: 'одноразовый',
+  multi: 'многоразовый',
+}
+
+function unlockModeLabel(mode: string): string {
+  return UNLOCK_MODE_LABELS[mode] ?? mode
 }
 
 type Feedback = { tone: 'success' | 'error' | 'info'; text: string }
@@ -51,12 +58,6 @@ function FeedbackBanner({ feedback }: { feedback: Feedback }) {
       {feedback.tone === 'error' ? <Ban size={18} className="shrink-0" aria-hidden /> : <ShieldCheck size={18} className="shrink-0 opacity-80" aria-hidden />}
       <p className="text-sm leading-snug">{feedback.text}</p>
     </div>
-  )
-}
-
-function ProtocolPill({ protocol }: { protocol: UnlockCodeProtocol }) {
-  return (
-    <span className={cn('tg-mini-protocol-badge', vpnTypeBadgeClass(protocol))}>{protocolLabel(protocol)}</span>
   )
 }
 
@@ -246,11 +247,11 @@ export default function UnlockCodes() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <Badge variant="outline">{createdCode.grant_days} дн.</Badge>
-                <Badge variant="outline">{createdCode.mode}</Badge>
+                <Badge variant="outline">{unlockModeLabel(createdCode.mode)}</Badge>
                 <Badge variant="outline">Активаций: {createdCode.max_redemptions}</Badge>
                 <Badge variant="outline">Истекает: {formatDateTime(createdCode.code_expires_at)}</Badge>
                 {createdCode.protocols.map((protocol) => (
-                  <ProtocolPill key={protocol} protocol={protocol as UnlockCodeProtocol} />
+                  <ProtocolBadge key={protocol} protocol={protocol as UnlockCodeProtocol} />
                 ))}
               </div>
             </div>
@@ -418,7 +419,7 @@ export default function UnlockCodes() {
                     <div className="min-w-0 space-y-1.5">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="break-all font-mono text-sm font-semibold">{code.code}</p>
-                        <Badge variant={code.mode === 'multi' ? 'default' : 'secondary'}>{code.mode}</Badge>
+                        <Badge variant={code.mode === 'multi' ? 'default' : 'secondary'}>{unlockModeLabel(code.mode)}</Badge>
                         {statusLabel === 'Отозван' && <Badge variant="destructive">Отозван</Badge>}
                         {statusLabel === 'Активирован' && <Badge variant="success">Активирован</Badge>}
                         {statusLabel === 'Исчерпан' && <Badge variant="warning">Исчерпан</Badge>}
@@ -427,12 +428,16 @@ export default function UnlockCodes() {
                       <p className="text-xs text-muted-foreground">
                         {code.grant_days} дн. · активаций {redeemed} / {code.max_redemptions}
                       </p>
-                      <p className="text-xs text-muted-foreground">
-                        Протоколы:{' '}
-                        {code.protocols
-                          .map((protocol) => protocolLabel(protocol as UnlockCodeProtocol))
-                          .join(', ') || '—'}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs text-muted-foreground">Протоколы:</span>
+                        {code.protocols.length > 0 ? (
+                          code.protocols.map((protocol) => (
+                            <ProtocolBadge key={protocol} protocol={protocol} />
+                          ))
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground">
                         Создан: {formatDateTime(code.created_at)} · Истекает:{' '}
                         {formatDateTime(code.code_expires_at)}

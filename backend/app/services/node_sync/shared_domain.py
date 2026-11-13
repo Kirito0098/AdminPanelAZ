@@ -66,7 +66,7 @@ def _shared_domain_success_message(result: dict[str, Any]) -> str:
     openvpn = str(result.get("openvpn_host") or "").strip()
     wireguard = str(result.get("wireguard_host") or "").strip()
     if openvpn and wireguard and openvpn != wireguard:
-        domain_part = f"Домены OpenVPN={openvpn}, WG/AWG={wireguard} записаны в setup"
+        domain_part = f"Домены OpenVPN={openvpn}, WG/AWG 1.5={wireguard} записаны в setup"
     else:
         domain_part = f"Домен {domain or openvpn or wireguard} записан в setup"
     nodes = [str(item.get("node_name") or item.get("node_id") or "") for item in result.get("updated") or []]

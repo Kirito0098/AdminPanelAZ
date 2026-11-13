@@ -2,6 +2,7 @@ import { Badge } from '@/components/ui/badge'
 import { parseTimestamp } from '@/lib/datetime'
 import { DOCS } from '@/lib/docsUrls'
 import { cn } from '@/lib/utils'
+import { protocolLabel } from '@/lib/vpnTypes'
 
 type NocDataFreshnessProps = {
   timestamp?: string | null
@@ -36,10 +37,10 @@ function geoipLabel(mode?: string | null): string {
 }
 
 function sourceLabel(source?: string | null): string {
-  if (source === 'management_socket') return 'OVPN: management socket'
-  if (source === 'status_log') return 'OVPN: status log'
+  if (source === 'management_socket') return `${protocolLabel('openvpn')}: management socket`
+  if (source === 'status_log') return `${protocolLabel('openvpn')}: status log`
   if (source === 'federated') return 'Сводка: все узлы'
-  if (source === 'db_fallback') return 'OVPN: сессии из БД'
+  if (source === 'db_fallback') return `${protocolLabel('openvpn')}: сессии из БД`
   return 'Источник: н/д'
 }
 

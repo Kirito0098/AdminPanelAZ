@@ -33,6 +33,7 @@ from app.services.feature_guards import get_feature_service
 from app.services.feature_toggles import is_awg2_enabled
 from app.services.node_compare_metrics import get_traffic_totals_by_node
 from app.services.notify_time import _timezone_suffix, format_notify_when, resolve_notify_timezone
+from app.services.protocols import protocol_badge
 from app.services.resource_metrics import get_latest_samples_by_node, get_resource_stats_by_node
 from app.services.telegram import send_tg_message, send_tg_photo
 from app.services.traffic_limit import human_bytes
@@ -136,7 +137,7 @@ def _session_stats_by_node(
     since: datetime,
     until: datetime,
 ) -> tuple[dict[int, dict[str, float | int]], dict[str, int]]:
-    """Average/peak concurrent OVPN/WG sessions per node and fleet-wide peaks."""
+    """Average/peak concurrent OpenVPN and WG/AWG 1.5 sessions per node and fleet-wide peaks."""
     since_n = _to_naive_utc(since)
     until_n = _to_naive_utc(until)
     period_seconds = (until_n - since_n).total_seconds()
@@ -183,7 +184,7 @@ def _awg2_stats_from_connection_samples(
     since: datetime,
     until: datetime,
 ) -> tuple[dict[int, dict[str, float | int]], dict[str, int]]:
-    """Average/peak AWG2 connection counts from ConnectionCountSample rows.
+    """Average/peak AWG 2.0 connection counts from ConnectionCountSample rows.
 
     Fleet peak is the max over time of the sum of per-node counts (carry-forward
     sweep as samples arrive).
@@ -699,19 +700,19 @@ def format_noc_report_message(
     lines.append(f"Узлы: <b>{summary['nodes_online']}/{summary['nodes_total']}</b> online")
     awg2_enabled = bool(summary.get("awg2_enabled"))
     session_avg_parts = [
-        f"OVPN <b>{_format_session_count(summary['total_openvpn'])}</b>",
-        f"WG <b>{_format_session_count(summary['total_wireguard'])}</b>",
+        f"{protocol_badge('openvpn')} <b>{_format_session_count(summary['total_openvpn'])}</b>",
+        f"{protocol_badge('wireguard')} <b>{_format_session_count(summary['total_wireguard'])}</b>",
     ]
     session_peak_parts = [
-        f"OVPN <b>{summary.get('total_openvpn_peak', 0)}</b>",
-        f"WG <b>{summary.get('total_wireguard_peak', 0)}</b>",
+        f"{protocol_badge('openvpn')} <b>{summary.get('total_openvpn_peak', 0)}</b>",
+        f"{protocol_badge('wireguard')} <b>{summary.get('total_wireguard_peak', 0)}</b>",
     ]
     if awg2_enabled:
         session_avg_parts.append(
-            f"AWG2 <b>{_format_session_count(summary.get('total_amneziawg2', 0))}</b>"
+            f"{protocol_badge('amneziawg2')} <b>{_format_session_count(summary.get('total_amneziawg2', 0))}</b>"
         )
         session_peak_parts.append(
-            f"AWG2 <b>{summary.get('total_amneziawg2_peak', 0)}</b>"
+            f"{protocol_badge('amneziawg2')} <b>{summary.get('total_amneziawg2_peak', 0)}</b>"
         )
     lines.append(f"Сессии, {average_label}: {' · '.join(session_avg_parts)}")
     lines.append(f"Макс. одновременно, {peak_label}: {' · '.join(session_peak_parts)}")
@@ -801,12 +802,12 @@ def format_noc_report_message(
     for node in nodes:
         status_icon = "🟢" if node.get("status") == NodeStatus.online.value else "🔴"
         parts = [
-            f"OVPN {_format_session_count(node.get('openvpn', 0))} (макс. {node.get('openvpn_peak', 0)})",
-            f"WG {_format_session_count(node.get('wireguard', 0))} (макс. {node.get('wireguard_peak', 0)})",
+            f"{protocol_badge('openvpn')} {_format_session_count(node.get('openvpn', 0))} (макс. {node.get('openvpn_peak', 0)})",
+            f"{protocol_badge('wireguard')} {_format_session_count(node.get('wireguard', 0))} (макс. {node.get('wireguard_peak', 0)})",
         ]
         if awg2_enabled:
             parts.append(
-                f"AWG2 {_format_session_count(node.get('amneziawg2', 0))}"
+                f"{protocol_badge('amneziawg2')} {_format_session_count(node.get('amneziawg2', 0))}"
                 f" (макс. {node.get('amneziawg2_peak', 0)})"
             )
         if node.get("cpu_percent") is not None:

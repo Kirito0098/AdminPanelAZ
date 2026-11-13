@@ -100,6 +100,7 @@ import { groupConnectionsByOwner } from '@/lib/connectionUserGroups'
 import { cn } from '@/lib/utils'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
 import { createStorage } from '@/lib/safeStorage'
+import { protocolLabel } from '@/lib/vpnTypes'
 import type {
   ConnectionHistoryResponse,
   MonitoringNodeSummary,
@@ -141,7 +142,7 @@ const TAB_META: Record<MonitoringTab, { label: string; icon: typeof Server; docs
     label: 'Подключения',
     icon: Wifi,
     docsHref: DOCS.noc,
-    description: 'Активные VPN-подключения OpenVPN и WireGuard в реальном времени',
+    description: `Активные VPN-подключения ${protocolLabel('openvpn')} и ${protocolLabel('wireguard')} в реальном времени`,
   },
   services: {
     label: 'Службы',
@@ -849,7 +850,9 @@ export default function MonitoringPage() {
       { key: 'status', label: 'Статус' },
       {
         key: 'vpn',
-        label: awg2Enabled ? 'Online OVPN / WG / AWG 2.0' : 'Online OVPN / WG',
+        label: awg2Enabled
+          ? `Online ${protocolLabel('openvpn')} / ${protocolLabel('wireguard')} / ${protocolLabel('amneziawg2')}`
+          : `Online ${protocolLabel('openvpn')} / ${protocolLabel('wireguard')}`,
       },
       { key: 'services', label: 'Службы active/total' },
       { key: 'cpu', label: 'CPU' },
@@ -888,8 +891,8 @@ export default function MonitoringPage() {
                 {isFederated
                   ? 'Сводка активных VPN-подключений со всех узлов'
                   : awg2Enabled
-                    ? 'Активные VPN-подключения OpenVPN, WireGuard и AWG 2.0 в реальном времени'
-                    : 'Активные VPN-подключения OpenVPN и WireGuard в реальном времени'}
+                    ? `Активные VPN-подключения ${protocolLabel('openvpn')}, ${protocolLabel('wireguard')} и ${protocolLabel('amneziawg2')} в реальном времени`
+                    : `Активные VPN-подключения ${protocolLabel('openvpn')} и ${protocolLabel('wireguard')} в реальном времени`}
                 {data?.timestamp && <> · обновлено {formatDateTime(data.timestamp)}</>}
               </div>
               <NocDataFreshness
@@ -1120,10 +1123,26 @@ export default function MonitoringPage() {
                                       <TableHead className="h-9 w-[18%] whitespace-nowrap px-3">Узел</TableHead>
                                       <TableHead className="h-9 w-[11%] whitespace-nowrap px-3">Статус</TableHead>
                                       <TableHead className="h-9 w-[7%] whitespace-nowrap px-3 text-center">Health</TableHead>
-                                      <TableHead className="h-9 w-[6%] whitespace-nowrap px-3 text-right">OVPN</TableHead>
-                                      <TableHead className="h-9 w-[6%] whitespace-nowrap px-3 text-right">WG</TableHead>
+                                      <TableHead
+                                        className="h-9 w-[6%] whitespace-nowrap px-3 text-right"
+                                        title={protocolLabel('openvpn')}
+                                        aria-label={protocolLabel('openvpn')}
+                                      >
+                                        OVPN
+                                      </TableHead>
+                                      <TableHead
+                                        className="h-9 w-[6%] whitespace-nowrap px-3 text-right"
+                                        title={protocolLabel('wireguard')}
+                                        aria-label={protocolLabel('wireguard')}
+                                      >
+                                        WG
+                                      </TableHead>
                                       {awg2Enabled && (
-                                        <TableHead className="h-9 w-[7%] whitespace-nowrap px-3 text-right">
+                                        <TableHead
+                                          className="h-9 w-[7%] whitespace-nowrap px-3 text-right"
+                                          title={protocolLabel('amneziawg2')}
+                                          aria-label={protocolLabel('amneziawg2')}
+                                        >
                                           AWG 2.0
                                         </TableHead>
                                       )}
@@ -1315,24 +1334,24 @@ export default function MonitoringPage() {
                       label="OpenVPN онлайн"
                       value={String(isFederated ? data.total_connected_openvpn ?? openvpnClients.length : openvpnClients.length)}
                       icon={Wifi}
-                      accent="text-primary"
+                      accent="text-[#EA7E20]"
                       sub="активных сессий"
                     />
                     <SummaryCard
-                      label="WireGuard онлайн"
+                      label={`${protocolLabel('wireguard')} онлайн`}
                       value={String(isFederated ? data.total_connected_wireguard ?? wgActive : wgActive)}
                       icon={Radio}
-                      accent="text-emerald-500"
+                      accent="text-[#D14343]"
                       sub={`из ${wireguardPeers.length} пиров`}
                     />
                     {awg2Enabled && (
                       <SummaryCard
-                        label="AWG 2.0 онлайн"
+                        label={`${protocolLabel('amneziawg2')} онлайн`}
                         value={String(
                           isFederated ? data.total_connected_amneziawg2 ?? awg2Active : awg2Active,
                         )}
                         icon={Radio}
-                        accent="text-amber-500"
+                        accent="text-[#4F7FBF]"
                         sub={`из ${amneziawg2Peers.length} пиров`}
                       />
                     )}
@@ -1342,8 +1361,8 @@ export default function MonitoringPage() {
                       icon={Users}
                       sub={
                         awg2Enabled
-                          ? `OVPN ${openvpnClients.length} · WG ${wgActive} · AWG 2.0 ${awg2Active}`
-                          : `OVPN ${openvpnClients.length} · WG ${wgActive}`
+                          ? `${protocolLabel('openvpn')} ${openvpnClients.length} · ${protocolLabel('wireguard')} ${wgActive} · ${protocolLabel('amneziawg2')} ${awg2Active}`
+                          : `${protocolLabel('openvpn')} ${openvpnClients.length} · ${protocolLabel('wireguard')} ${wgActive}`
                       }
                     />
                     <SummaryCard
@@ -1437,9 +1456,11 @@ export default function MonitoringPage() {
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="all">Все протоколы</SelectItem>
-                                <SelectItem value="openvpn">OpenVPN</SelectItem>
-                                <SelectItem value="wireguard">WireGuard</SelectItem>
-                                {awg2Enabled && <SelectItem value="amneziawg2">AWG 2.0</SelectItem>}
+                                <SelectItem value="openvpn">{protocolLabel('openvpn')}</SelectItem>
+                                <SelectItem value="wireguard">{protocolLabel('wireguard')}</SelectItem>
+                                {awg2Enabled && (
+                                  <SelectItem value="amneziawg2">{protocolLabel('amneziawg2')}</SelectItem>
+                                )}
                               </SelectContent>
                             </Select>
                             <div className="flex h-9 shrink-0 items-center gap-2">

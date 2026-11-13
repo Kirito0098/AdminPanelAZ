@@ -2,7 +2,7 @@
 
 > Справочник для навигации по кодовой базе. Обновлять при значительных архитектурных изменениях.
 
-**AdminPanel AntiZapret** — веб-панель для администрирования VPN-сервера [AntiZapret](https://github.com/GubernievS/AntiZapret-VPN): клиенты (OpenVPN / WireGuard / AmneziaWG), маршрутизация CIDR, мониторинг, бэкапы, Telegram-бот и Mini App.
+**AdminPanel AntiZapret** — веб-панель для администрирования VPN-сервера [AntiZapret](https://github.com/GubernievS/AntiZapret-VPN): клиенты (OpenVPN / WG/AWG 1.5 / AWG 2.0), маршрутизация CIDR, мониторинг, бэкапы, Telegram-бот и Mini App.
 
 **Пользовательские инструкции** (без жаргона, для админов и клиентов VPN): [`docs/README.md`](README.md).
 

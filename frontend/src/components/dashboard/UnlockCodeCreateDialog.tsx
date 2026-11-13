@@ -14,9 +14,11 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useNotifications } from '@/context/NotificationContext'
 import { endOfDayIso, formatDate } from '@/lib/datetime'
+import { protocolLabel } from '@/lib/vpnTypes'
 import { cn } from '@/lib/utils'
 import type { UnlockCodeRecord, VpnType } from '@/types'
 
@@ -25,19 +27,6 @@ const ALL_PROTOCOLS: UnlockCodeProtocol[] = ['openvpn', 'wireguard', 'amneziawg2
 type ClientOption = {
   name: string
   protocols: UnlockCodeProtocol[]
-}
-
-function protocolLabel(protocol: UnlockCodeProtocol) {
-  if (protocol === 'openvpn') return 'OpenVPN'
-  // One WG access policy covers both portal tabs WireGuard and AmneziaWG (vpn_type=wireguard).
-  if (protocol === 'wireguard') return 'WireGuard / AmneziaWG'
-  return 'AmneziaWG 2.0'
-}
-
-function shortProtocolLabel(protocol: UnlockCodeProtocol) {
-  if (protocol === 'openvpn') return 'OVPN'
-  if (protocol === 'wireguard') return 'WG'
-  return 'AWG2'
 }
 
 function toUnlockProtocol(vpnType: VpnType | string): UnlockCodeProtocol | null {
@@ -332,9 +321,7 @@ export default function UnlockCodeCreateDialog({
                       <Badge variant="outline">Профиль</Badge>
                     ) : (
                       createdCode.protocols.map((protocol) => (
-                        <Badge key={protocol} variant="outline">
-                          {protocolLabel(protocol as UnlockCodeProtocol)}
-                        </Badge>
+                        <ProtocolBadge key={protocol} protocol={protocol} />
                       ))
                     )}
                     <Badge variant="outline">
@@ -485,9 +472,7 @@ export default function UnlockCodeCreateDialog({
                         <span className="min-w-0 truncate font-medium">{client.name}</span>
                         <span className="flex shrink-0 flex-wrap justify-end gap-1">
                           {client.protocols.map((protocol) => (
-                            <Badge key={protocol} variant="outline" className="px-1.5 py-0 text-[10px]">
-                              {shortProtocolLabel(protocol)}
-                            </Badge>
+                            <ProtocolBadge key={protocol} protocol={protocol} />
                           ))}
                         </span>
                       </button>

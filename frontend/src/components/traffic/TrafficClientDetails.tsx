@@ -24,7 +24,7 @@ import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import { MONITORING_PROTOCOL_COLORS } from '@/components/monitoring/monitoringChartTheme'
 import { getTrafficClientSessions } from '@/api/client'
 import { formatBytes } from '@/lib/trafficFormat'
-import { protocolBadgeVariant, protocolLabel } from '@/lib/vpnTypes'
+import { protocolLabel } from '@/lib/vpnTypes'
 import TrafficPeriodControls, {
   CHART_PERIOD_PRESETS,
   type TrafficPeriodPreset,
@@ -32,6 +32,7 @@ import TrafficPeriodControls, {
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import { Button } from '@/components/ui/button'
 import {
   Table,
@@ -48,8 +49,10 @@ import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { COL_VPN_IP } from '@/lib/uiLabels'
 import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficClientSessions } from '@/types'
 
-const CHART_VPN = MONITORING_PROTOCOL_COLORS.openvpn
-const CHART_ANTIZAPRET = MONITORING_PROTOCOL_COLORS.amneziawg2
+// VPN/AntiZapret — классы трафика, не протоколы: нейтральная пара,
+// чтобы не читались как OpenVPN/AWG 2.0.
+const CHART_VPN = '#8A94A6'
+const CHART_ANTIZAPRET = '#5D8AA8'
 
 const RANGE_LABELS: Record<TrafficPeriodPreset, string> = {
   '1h': '1 час',
@@ -162,7 +165,7 @@ function SplitBar({ label, value, total, variant }: SplitBarProps) {
         value={value}
         max={total}
         className="h-2"
-        barClassName={variant === 'vpn' ? 'fill-[hsl(187,72%,45%)]' : 'fill-[hsl(38,92%,50%)]'}
+        barClassName={variant === 'vpn' ? 'fill-[#8A94A6]' : 'fill-[#5D8AA8]'}
       />
     </div>
   )
@@ -325,7 +328,7 @@ export default function TrafficClientDetails({
           <UserRound size={16} />
           Мониторинг клиента
         </p>
-        <Badge variant={protocolBadgeVariant(row.protocol_type)}>{protocolLabel(row.protocol_type)}</Badge>
+        <ProtocolBadge protocol={row.protocol_type} />
         <Badge variant={row.is_active ? 'success' : 'secondary'}>
           {row.is_active ? 'Онлайн' : 'Офлайн'}
         </Badge>

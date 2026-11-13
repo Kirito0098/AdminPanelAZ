@@ -28,7 +28,7 @@
 | Протоколы → AntiZapret | [antizapret-config.md](antizapret-config.md) | Только админ |
 | Протоколы → OpenVPN | [antizapret-config.md](antizapret-config.md#openvpn-профили-логи-и-состояние-установки) | Только админ |
 | Протоколы → AZ-WARP | [warper.md](warper.md) | Только админ |
-| Протоколы → AZ-AWG2 | [awg2.md](awg2.md) | Админ (страница); пользователи — свои конфиги на Клиентах |
+| Протоколы → AWG 2.0 | [awg2.md](awg2.md) | Админ (страница); пользователи — свои конфиги на Клиентах |
 | Система → Telegram | [Telegram.md](Telegram.md) | Только админ |
 | Система → Редактор файлов | [edit-files.md](edit-files.md) | Только админ |
 | SSH-транспорт узлов | [node-ssh-transport.md](node-ssh-transport.md) | Только админ (модуль `node_ssh_transport`) |

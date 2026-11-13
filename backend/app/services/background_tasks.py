@@ -91,7 +91,7 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "ha_client_sync": ("Синхронизация HA клиентов…", "Подготовка…", 5),
     "config_apply": ("Применение конфигурации…", "Подготовка…", 5),
     "recreate_profiles": ("Пересоздание профилей…", "client.sh 7…", 5),
-    "ha_awg2_sync": ("HA-синхронизация AZ-AWG2…", "Подготовка…", 5),
+    "ha_awg2_sync": ("HA-синхронизация AWG 2.0…", "Подготовка…", 5),
 }
 
 _TASK_DONE_PROGRESS: dict[str, str] = {
@@ -121,7 +121,7 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "ha_client_sync": "Синхронизация HA клиентов завершена",
     "config_apply": "Конфигурация применена",
     "recreate_profiles": "Профили пересозданы",
-    "ha_awg2_sync": "HA-синхронизация AZ-AWG2 завершена",
+    "ha_awg2_sync": "HA-синхронизация AWG 2.0 завершена",
 }
 
 

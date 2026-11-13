@@ -42,6 +42,7 @@ import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import ConfirmDialog, { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -58,14 +59,13 @@ import { panelToday } from '@/lib/trafficPeriod'
 import {
   getConfigStatus,
   getDownloadFilename,
-  getProtocolBadgeVariant,
   hasAzProfiles,
   hasVpnProfiles,
   pickAzFile,
   pickVpnFile,
-  protocolLabel,
   type ProtocolTab,
 } from '@/lib/configCardUtils'
+import { protocolLabel } from '@/lib/vpnTypes'
 import { cn } from '@/lib/utils'
 import { endOfDayIso, formatDate } from '@/lib/datetime'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
@@ -295,14 +295,14 @@ export default function ClientActionsDialog({
     )
     if (applied.length === 0) {
       throw new Error(
-        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
+        failed.map((item) => `${protocolLabel(item.protocol)}: ${item.message}`).join('; ') ||
           'Не удалось установить лимит',
       )
     }
     if (failed.length > 0) {
       onNotifyError(
         `Лимит частично не применён: ${failed
-          .map((item) => `${item.protocol}: ${item.message}`)
+          .map((item) => `${protocolLabel(item.protocol)}: ${item.message}`)
           .join('; ')}`,
       )
     }
@@ -320,14 +320,14 @@ export default function ClientActionsDialog({
     )
     if (cleared.length === 0) {
       throw new Error(
-        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
+        failed.map((item) => `${protocolLabel(item.protocol)}: ${item.message}`).join('; ') ||
           'Не удалось снять лимит',
       )
     }
     if (failed.length > 0) {
       onNotifyError(
         `Лимит частично не снят: ${failed
-          .map((item) => `${item.protocol}: ${item.message}`)
+          .map((item) => `${protocolLabel(item.protocol)}: ${item.message}`)
           .join('; ')}`,
       )
     }
@@ -361,14 +361,14 @@ export default function ClientActionsDialog({
     }
     if (applied.length === 0) {
       throw new Error(
-        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
+        failed.map((item) => `${protocolLabel(item.protocol)}: ${item.message}`).join('; ') ||
           'Не удалось обновить срок доступа',
       )
     }
     if (failed.length > 0) {
       onNotifyError(
         `Срок доступа частично не обновлён: ${failed
-          .map((item) => `${item.protocol}: ${item.message}`)
+          .map((item) => `${protocolLabel(item.protocol)}: ${item.message}`)
           .join('; ')}`,
       )
     }
@@ -1003,7 +1003,7 @@ export default function ClientActionsDialog({
               </DialogDescription>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              <Badge variant={getProtocolBadgeVariant(tab)}>{protocolLabel(tab)}</Badge>
+              <ProtocolBadge protocol={tab} />
               <Badge variant={statusBadgeVariant} className="gap-1">
                 <StatusIcon size={12} />
                 {status.label}

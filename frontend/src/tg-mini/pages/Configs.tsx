@@ -15,9 +15,11 @@ import MiniListToolbar, {
 import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
 import PortalLinkCard from '@/tg-mini/components/PortalLinkCard'
 import { guessInstallPlatform } from '@/tg-mini/lib/platformMeta'
-import { vpnTypeBadgeClass, vpnTypeLabel } from '@/tg-mini/lib/vpnLabels'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import {
+  featureEnabledProtocols,
   isVpnTypeVisibleInPolicy,
+  protocolFilterForVpnType,
   protocolFiltersForPolicy,
 } from '@/tg-mini/lib/vpnVisibility'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
@@ -109,26 +111,31 @@ function UserConfigs() {
     }
   }, [])
 
-  const { openvpnEnabled, wireguardEnabled, awg2Enabled } = useMemo(() => {
-    const policy = settings?.visible_vpn_profiles
-    const allowOpenvpn =
-      Boolean(features.openvpn ?? true) &&
-      isVpnTypeVisibleInPolicy('openvpn', policy, isAdmin)
-    const allowWireguard =
-      (Boolean(features.wireguard ?? true) || Boolean(features.amneziawg ?? true)) &&
-      isVpnTypeVisibleInPolicy('wireguard', policy, isAdmin)
-    const allowAwg2 =
-      Boolean(features.awg2) && isVpnTypeVisibleInPolicy('amneziawg2', policy, isAdmin)
-    return {
-      openvpnEnabled: allowOpenvpn,
-      wireguardEnabled: allowWireguard,
-      awg2Enabled: allowAwg2,
-    }
-  }, [features, isAdmin, settings?.visible_vpn_profiles])
+  const policy = settings?.visible_vpn_profiles
+
+  const availableProtocols = useMemo(() => featureEnabledProtocols(features), [features])
+
+  const { openvpnEnabled, wireguardEnabled, awg2Enabled } = useMemo(
+    () => ({
+      openvpnEnabled:
+        availableProtocols.includes('openvpn') &&
+        isVpnTypeVisibleInPolicy('openvpn', policy, isAdmin),
+      wireguardEnabled:
+        availableProtocols.includes('wireguard') &&
+        isVpnTypeVisibleInPolicy('wireguard', policy, isAdmin),
+      awg2Enabled:
+        availableProtocols.includes('amneziawg2') &&
+        isVpnTypeVisibleInPolicy('amneziawg2', policy, isAdmin),
+    }),
+    [availableProtocols, isAdmin, policy],
+  )
 
   const protocolOptions = useMemo(
-    () => protocolFiltersForPolicy(settings?.visible_vpn_profiles, isAdmin),
-    [isAdmin, settings?.visible_vpn_profiles],
+    () =>
+      protocolFiltersForPolicy(policy, isAdmin).filter(
+        (option) => option === 'all' || availableProtocols.some((protocol) => protocol === option),
+      ),
+    [availableProtocols, isAdmin, policy],
   )
 
   useEffect(() => {
@@ -142,20 +149,14 @@ function UserConfigs() {
   }, [protocol, protocolOptions])
 
   const visibleGroups = useMemo(() => {
-    return configs.filter((group) =>
-      group.nodes.some((n) => isVpnTypeVisibleInPolicy(n.vpn_type, settings?.visible_vpn_profiles, isAdmin)),
-    )
-  }, [configs, isAdmin, settings?.visible_vpn_profiles])
-
-  const protocolCounts = useMemo(
-    () => ({
-      all: visibleGroups.reduce((s, g) => s + g.nodes.length, 0),
-      openvpn: visibleGroups.reduce((s, g) => s + g.nodes.filter((n) => n.vpn_type === 'openvpn').length, 0),
-      wireguard: visibleGroups.reduce((s, g) => s + g.nodes.filter((n) => n.vpn_type === 'wireguard').length, 0),
-      amneziawg2: visibleGroups.reduce((s, g) => s + g.nodes.filter((n) => n.vpn_type === 'amneziawg2').length, 0),
-    }),
-    [visibleGroups],
-  )
+    return configs
+      .map((group) => ({
+        ...group,
+        // Скрытый policy-протокол не должен попадать ни в счётчики, ни в бейджи.
+        nodes: group.nodes.filter((node) => isVpnTypeVisibleInPolicy(node.vpn_type, policy, isAdmin)),
+      }))
+      .filter((group) => group.nodes.length > 0)
+  }, [configs, isAdmin, policy])
 
   const allNodes = useMemo(
     () =>
@@ -164,6 +165,20 @@ function UserConfigs() {
       ),
     [visibleGroups],
   )
+
+  const protocolCounts = useMemo(() => {
+    const counts: Record<ProtocolFilter, number> = {
+      all: allNodes.length,
+      openvpn: 0,
+      wireguard: 0,
+      amneziawg2: 0,
+    }
+    for (const node of allNodes) {
+      const bucket = protocolFilterForVpnType(node.vpn_type)
+      if (bucket) counts[bucket] += 1
+    }
+    return counts
+  }, [allNodes])
 
   const filteredNodes = useMemo(() => {
     const q = search.trim()
@@ -542,9 +557,7 @@ function UserConfigs() {
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <span className="font-medium">{entry.node_label}</span>
-                              <span className={`tg-mini-protocol-badge ${vpnTypeBadgeClass(entry.vpn_type)}`}>
-                                {vpnTypeLabel(entry.vpn_type)}
-                              </span>
+                              <ProtocolBadge protocol={entry.vpn_type} />
                               <Badge variant={created ? 'success' : 'secondary'} className="text-[10px]">
                                 {created ? 'создан' : 'не создан'}
                               </Badge>

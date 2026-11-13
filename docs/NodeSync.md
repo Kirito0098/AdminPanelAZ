@@ -8,7 +8,7 @@
 
 - **Sync Group** — primary + 1+ replica, shared domains (`shared_domain` → `OPENVPN_HOST`, `shared_domain_wireguard` → `WIREGUARD_HOST`; пустой WG-домен = тот же, что OpenVPN)
 - **Push full** — `client.sh 8` на primary → transfer → **HA restore** на replica (`?ha_replica=true`): **wipe-and-replace** VPN/crypto (PKI `easyrsa3`, server WireGuard `.conf`, каталоги профилей OVPN/WG/AWG) — **без `client.sh 7`**. Каталог `config/` — **merge** (как раньше). Дополнительно копирует непустые `OPENVPN_HOST` / `WIREGUARD_HOST` из `setup` primary на каждую replica **перед** restore. После restore — **байт-копия `.ovpn`** с primary, **prune** VPN-клиентов only-on-replica, restart OpenVPN + apply WireGuard runtime. Если на primary установлен слой AZ-AWG2 — overlay копируется на replica (`sync_amneziawg2_state_from_primary`). Ошибки copy/prune/restart/AWG2 → `sync_status=failed` (не warning).
-- **Блокировки WireGuard / AWG2 на replica** — `wg syncconf` из конфигов primary возвращает peer'ов, убранных из runtime блокировкой. Поэтому после копирования политик доступа в Push full и после каждой HA crypto sync (create/delete/renew, heal) панель заново блокирует на replica всех заблокированных по её политикам клиентов: node agent 1.11.0 — пакетно (`…/runtime/block-batch`), старый агент — по одному клиенту. Если синхронизация упала после применения состояния primary, блокировки всё равно возвращаются, а исходная ошибка сообщается. Сбой блокировки одного клиента не останавливает остальных; синхронизация помечается неуспешной с именами клиентов.
+- **Блокировки WG/AWG 1.5 / AWG 2.0 на replica** — `wg syncconf` из конфигов primary возвращает peer'ов, убранных из runtime блокировкой. Поэтому после копирования политик доступа в Push full и после каждой HA crypto sync (create/delete/renew, heal) панель заново блокирует на replica всех заблокированных по её политикам клиентов: node agent 1.11.0 — пакетно (`…/runtime/block-batch`), старый агент — по одному клиенту. Если синхронизация упала после применения состояния primary, блокировки всё равно возвращаются, а исходная ошибка сообщается. Сбой блокировки одного клиента не останавливает остальных; синхронизация помечается неуспешной с именами клиентов.
 - **Verify** — списки OVPN/WG клиентов + checksums PKI/WG/config/**`.ovpn`** + **read-only проверка сертификатов в `.ovpn`**
 
 ### OpenVPN-профили и HA
@@ -20,7 +20,7 @@
 - **Verify** сравнивает fingerprint `openvpn/client_profiles` и блок `openvpn_profile_certs` (read-only). При расхождении — **Push full**, не автоматический renew.
 - **Verify** сравнивает и то, что реплика реально запустила: peer WireGuard на интерфейсах `antizapret`/`vpn` (`wg show`, расхождение `wireguard_peers`) и клиентов AZ-AWG2, если он установлен на primary (`awg2_clients`).
 
-### AWG2 HA crypto-sync
+### AWG 2.0 HA crypto-sync
 
 - Для AZ-AWG2 в HA используется crypto-sync через byte-copy, а не `awg-client add` на replica.
 - Архивируются пути `/etc/amnezia/amneziawg` и `/opt/antizapret-awg/clients`; из архива исключаются `stats.db`, `venv/` и `__pycache__/`. Локальный `stats.db` на узле остаётся для мониторинга и в HA не копируется.
@@ -39,7 +39,7 @@
 | POST | `/api/nodes/sync-groups/{id}/verify` |
 | GET | `/api/nodes/sync-groups/{id}/status` |
 
-Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backups/antizapret/restore?ha_replica=true`, `GET /backups/antizapret/download`, `GET /backups/antizapret/fingerprints`, `GET/POST /profiles/openvpn/export|import`, `GET /openvpn/easyrsa3/index`, `GET /wireguard/server-config-files`, `DELETE /wireguard/server-config-file/{filename}`. Пакетная переблокировка WireGuard/AWG2, файлы WARP/RPZ/Lua и запись режимов WARP 3/4 и `WARP_MTU` на replica требуют node agent **1.11.0** — обновление агента: [uzly.md](uzly.md#обновление-агента-на-узле).
+Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backups/antizapret/restore?ha_replica=true`, `GET /backups/antizapret/download`, `GET /backups/antizapret/fingerprints`, `GET/POST /profiles/openvpn/export|import`, `GET /openvpn/easyrsa3/index`, `GET /wireguard/server-config-files`, `DELETE /wireguard/server-config-file/{filename}`. Пакетная переблокировка WG/AWG 1.5 / AWG 2.0, файлы WARP/RPZ/Lua и запись режимов WARP 3/4 и `WARP_MTU` на replica требуют node agent **1.11.0** — обновление агента: [uzly.md](uzly.md#обновление-агента-на-узле).
 
 ## Ограничения
 
@@ -81,7 +81,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 
 | Операция | Replica |
 |----------|---------|
-| Create / delete client | Копия crypto-состояния primary: `/etc/wireguard/antizapret.conf` и `vpn.conf` (WARP-аккаунты `warp-*.conf` у каждого узла свои и не копируются) + **те же файлы профилей** WG/AWG (PrivateKey/PSK) или `/etc/openvpn/easyrsa3/` + **байт-копия `.ovpn`** с primary + restart OpenVPN (OVPN); shadow `VpnConfig` |
+| Create / delete client | Копия crypto-состояния primary: `/etc/wireguard/antizapret.conf` и `vpn.conf` (WARP-аккаунты `warp-*.conf` у каждого узла свои и не копируются) + **те же файлы профилей** WG/AWG 1.5 (PrivateKey/PSK) или `/etc/openvpn/easyrsa3/` + **байт-копия `.ovpn`** с primary + restart OpenVPN (OVPN); shadow `VpnConfig` |
 | Renew OpenVPN cert | Копия easyrsa3 + `.ovpn` с primary после явного `client.sh 1` на primary; тот же `client_name`, новый срок |
 | Temp / permanent block, unblock | Та же политика в БД + runtime (iptables/WG) |
 | Set / clear traffic limit | Те же `traffic_limit_*` + reconcile runtime |
@@ -147,7 +147,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 - `shared_domain` → `OPENVPN_HOST`
 - `shared_domain_wireguard` → `WIREGUARD_HOST` (если пусто — тот же host, что `shared_domain`)
 
-Так же, как в оригинальном AntiZapret `setup.sh`, можно задать **разные** домены для OpenVPN и WireGuard/AmneziaWG. Затем на каждом узле: список **Адреса подключения** **заменяется** на `[shared_domain]` (чужие remote от другого HA/прокси сбрасываются — иначе они оставались 2–3-й строкой в `.ovpn`); `doall.sh` + `client.sh 7`. Прокси и запасные remote для этой группы снова задаются вручную в «Адреса подключения». Фоновая задача `node_sync_shared_domain`; ошибка на одном узле не прерывает остальные (partial failure → `sync_status=failed`, детали в `last_sync_error`). Вызывается при **HA Setup** (если при создании включён переключатель «Сразу настроить группу»), при изменении доменов в группе, а также вручную кнопкой «Домен». Создание группы **без** Setup **не** применяет домены автоматически.
+Так же, как в оригинальном AntiZapret `setup.sh`, можно задать **разные** домены для OpenVPN и WG/AWG 1.5. Затем на каждом узле: список **Адреса подключения** **заменяется** на `[shared_domain]` (чужие remote от другого HA/прокси сбрасываются — иначе они оставались 2–3-й строкой в `.ovpn`); `doall.sh` + `client.sh 7`. Прокси и запасные remote для этой группы снова задаются вручную в «Адреса подключения». Фоновая задача `node_sync_shared_domain`; ошибка на одном узле не прерывает остальные (partial failure → `sync_status=failed`, детали в `last_sync_error`). Вызывается при **HA Setup** (если при создании включён переключатель «Сразу настроить группу»), при изменении доменов в группе, а также вручную кнопкой «Домен». Создание группы **без** Setup **не** применяет домены автоматически.
 
 ### Partial failure
 

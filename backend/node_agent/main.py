@@ -466,7 +466,7 @@ def list_wireguard(_: None = Depends(verify_api_key)):
 @app.post("/clients/wireguard")
 def add_wireguard(payload: WireGuardClientRequest, _: None = Depends(verify_api_key)):
     output = service.add_wireguard_client(payload.client_name)
-    return {"message": "WireGuard клиент создан", "detail": output}
+    return {"message": "WG/AWG 1.5 клиент создан", "detail": output}
 
 
 @app.delete("/clients/wireguard/{client_name}")
@@ -487,7 +487,7 @@ def list_awg2_clients(
 def add_awg2_client(payload: Awg2ClientRequest, _: None = Depends(verify_api_key)):
     try:
         output = Awg2Service().add_client(payload.client_name, ttl=payload.ttl)
-        return {"message": "AmneziaWG2 клиент создан", "detail": output}
+        return {"message": "AWG 2.0 клиент создан", "detail": output}
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -784,7 +784,7 @@ async def import_wireguard_profiles(
 ):
     content = await archive.read()
     await asyncio.to_thread(service.import_wireguard_client_profiles_archive, content)
-    return {"message": "Профили WireGuard/AmneziaWG импортированы"}
+    return {"message": "Профили WG/AWG 1.5 импортированы"}
 
 
 @app.get("/openvpn/easyrsa3/index")

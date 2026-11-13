@@ -45,17 +45,17 @@ const ACTION_LOG_LABELS: Record<string, string> = {
   openvpn_traffic_limit_set: 'Установка лимита трафика OpenVPN',
   openvpn_traffic_limit_clear: 'Снятие лимита трафика OpenVPN',
 
-  // WireGuard — клиенты
-  wg_set_expiry: 'Изменение срока WireGuard',
-  wg_temp_block: 'Временная блокировка WireGuard',
-  wg_perm_block: 'Постоянная блокировка WireGuard',
-  wg_unblock: 'Разблокировка WireGuard',
-  wg_traffic_limit_set: 'Установка лимита трафика WireGuard',
-  wg_traffic_limit_clear: 'Снятие лимита трафика WireGuard',
+  // WG/AWG 1.5 — клиенты
+  wg_set_expiry: 'Изменение срока WG/AWG 1.5',
+  wg_temp_block: 'Временная блокировка WG/AWG 1.5',
+  wg_perm_block: 'Постоянная блокировка WG/AWG 1.5',
+  wg_unblock: 'Разблокировка WG/AWG 1.5',
+  wg_traffic_limit_set: 'Установка лимита трафика WG/AWG 1.5',
+  wg_traffic_limit_clear: 'Снятие лимита трафика WG/AWG 1.5',
 
-  // AmneziaWG 2.0 — клиенты
-  awg2_traffic_limit_set: 'Установка лимита трафика AmneziaWG 2.0',
-  awg2_traffic_limit_clear: 'Снятие лимита трафика AmneziaWG 2.0',
+  // AWG 2.0 — клиенты
+  awg2_traffic_limit_set: 'Установка лимита трафика AWG 2.0',
+  awg2_traffic_limit_clear: 'Снятие лимита трафика AWG 2.0',
 
   // Уведомления (внутренние коды блокировок)
   temp_block: 'Временная блокировка',

@@ -6,21 +6,21 @@ from dataclasses import dataclass
 
 from app.services.profile_download_name import enrich_profile_files, is_az_profile
 
-GROUP_ORDER = ("ovpn", "wg", "awg")
+GROUP_ORDER = ("ovpn", "wg_awg", "awg2")
 GROUP_META: dict[str, tuple[str, str]] = {
     "ovpn": ("🔐", "OpenVPN"),
-    "wg": ("🛡️", "WireGuard"),
-    "awg": ("🌀", "AmneziaWG"),
+    "wg_awg": ("🛡️", "WG/AWG 1.5"),
+    "awg2": ("🌀", "AWG 2.0"),
 }
 PROTOCOL_BUTTON_TAG: dict[str, str] = {
-    "ovpn": "OVPN",
-    "wg": "WG",
-    "awg": "AWG",
+    "ovpn": "OpenVPN",
+    "wg_awg": "WG/AWG 1.5",
+    "awg2": "AWG 2.0",
 }
 
 
 def classify_config_profile_groups(files: list[dict[str, str]], vpn_type) -> frozenset[str]:
-    """Classify config for bot labels/filters: ovpn, wg, awg (from profile files)."""
+    """Classify config for bot labels/filters: ovpn, wg_awg, awg2 (from profile files)."""
     from app.models import VpnType
 
     if not files:
@@ -29,33 +29,23 @@ def classify_config_profile_groups(files: list[dict[str, str]], vpn_type) -> fro
     vt = vpn_type if isinstance(vpn_type, VpnType) else VpnType(str(vpn_type))
     if vt == VpnType.openvpn:
         return frozenset({"ovpn"})
+    if vt == VpnType.amneziawg2:
+        return frozenset({"awg2"})
 
     protocols = {(item.get("protocol") or "").strip().lower() for item in files}
     groups: set[str] = set()
-    if "wireguard" in protocols:
-        groups.add("wg")
-    if "amneziawg" in protocols:
-        groups.add("awg")
+    if protocols & {"wireguard", "amneziawg"}:
+        groups.add("wg_awg")
     if not groups:
-        groups.add("wg")
+        groups.add("wg_awg")
     return frozenset(groups)
 
 
 def format_config_protocol_badge(groups: frozenset[str]) -> tuple[str, str]:
-    if "ovpn" in groups:
-        return GROUP_META["ovpn"][0], PROTOCOL_BUTTON_TAG["ovpn"]
-
-    emojis: list[str] = []
-    tags: list[str] = []
-    if "wg" in groups:
-        emojis.append(GROUP_META["wg"][0])
-        tags.append(PROTOCOL_BUTTON_TAG["wg"])
-    if "awg" in groups:
-        emojis.append(GROUP_META["awg"][0])
-        tags.append(PROTOCOL_BUTTON_TAG["awg"])
-    if not tags:
-        return GROUP_META["wg"][0], PROTOCOL_BUTTON_TAG["wg"]
-    return "".join(emojis), "·".join(tags)
+    for key in GROUP_ORDER:
+        if key in groups:
+            return GROUP_META[key][0], PROTOCOL_BUTTON_TAG[key]
+    return GROUP_META["wg_awg"][0], PROTOCOL_BUTTON_TAG["wg_awg"]
 
 
 def format_config_protocol_badge_for_filter(groups: frozenset[str], filter_key: str) -> tuple[str, str]:
@@ -82,10 +72,10 @@ def protocol_group_key(protocol: str) -> str:
     value = (protocol or "").strip().lower()
     if value == "openvpn":
         return "ovpn"
-    if value == "wireguard":
-        return "wg"
-    if value == "amneziawg":
-        return "awg"
+    if value in {"wireguard", "amneziawg"}:
+        return "wg_awg"
+    if value == "amneziawg2":
+        return "awg2"
     return "other"
 
 

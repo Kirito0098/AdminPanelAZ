@@ -40,6 +40,7 @@ import { useConfirmDialog } from "@/hooks/useConfirmDialog";
 import { useHaReplicaReadonly } from "@/hooks/useHaReplicaReadonly";
 import { DOCS } from "@/lib/docsUrls";
 import { cn } from "@/lib/utils";
+import { protocolLabel } from "@/lib/vpnTypes";
 import type { AntizapretSettingField, VpnNetworkSettings } from "@/types";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -85,7 +86,7 @@ const FIELD_DISPLAY: Partial<Record<string, { title: string; description: string
       "Домен или IP для клиентских конфигов OpenVPN. Не используйте домен панели (DOMAIN) — иначе панель станет недоступна через AZ.",
   },
   wireguard_host: {
-    title: "WireGuard / AmneziaWG",
+    title: protocolLabel("wireguard"),
     description:
       "Домен или IP для клиентских конфигов WireGuard и AmneziaWG. Не используйте домен панели (DOMAIN).",
   },
@@ -129,7 +130,7 @@ const FIELD_SECTIONS: {
   {
     title: "Резервные порты",
     description:
-      "Альтернативные порты OpenVPN и WireGuard/AmneziaWG для обхода блокировок",
+      `Альтернативные порты ${protocolLabel("openvpn")} и ${protocolLabel("wireguard")} для обхода блокировок`,
     icon: Network,
     keys: ["OPENVPN_BACKUP_TCP", "OPENVPN_BACKUP_UDP", "WIREGUARD_BACKUP"],
   },
@@ -672,7 +673,7 @@ function ConnectionAddressesCard({
                 </div>
                 <p className="text-xs text-muted-foreground">
                   {wireguardSynced
-                    ? "Первый адрес списка remote при сохранении записывается в WIREGUARD_HOST (прокси для AWG/WG). Поле setup здесь только для просмотра."
+                    ? `Первый адрес списка remote при сохранении записывается в WIREGUARD_HOST (прокси для ${protocolLabel("wireguard")}). Поле setup здесь только для просмотра.`
                     : fieldDisplay(wireguardField).description}
                 </p>
                 <p className="font-mono text-[10px] text-muted-foreground/70">
@@ -693,7 +694,7 @@ function ConnectionAddressesCard({
               />
               <p className="text-xs text-muted-foreground">
                 {wireguardSynced
-                  ? "Галочка «Также для AmneziaWG / WireGuard» на странице OpenVPN."
+                  ? "Галочка «Также для WG/AWG 1.5 / AWG 2.0» на странице OpenVPN."
                   : "Несколько адресов пока только для OpenVPN. Для прокси GubernievS включите галочку на странице OpenVPN."}
               </p>
             </div>

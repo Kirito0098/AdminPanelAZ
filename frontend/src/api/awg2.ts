@@ -66,7 +66,7 @@ export function openAwg2InstallStream(
         try {
           onEvent(JSON.parse(event.data) as Awg2InstallStreamEvent)
         } catch {
-          onError?.('Ошибка разбора потока установки AZ-AWG2')
+          onError?.('Ошибка разбора потока установки AWG 2.0')
         }
       }
     },

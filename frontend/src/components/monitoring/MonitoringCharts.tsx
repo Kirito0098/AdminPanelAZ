@@ -14,6 +14,7 @@ import {
 } from 'recharts'
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import { formatTime } from '@/lib/datetime'
+import { protocolLabel } from '@/lib/vpnTypes'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
 import MonitoringChartCard, { MonitoringChartEmpty } from '@/components/monitoring/MonitoringChartCard'
 import {
@@ -94,11 +95,11 @@ export default function MonitoringCharts({
     const wgActive = data.wireguard_peers.filter(isWireGuardOnline).length
     const awg2Active = (data.amneziawg2_peers ?? []).filter(isWireGuardOnline).length
     const bars = [
-      { name: 'OpenVPN', count: data.openvpn_clients.length },
-      { name: 'WireGuard', count: wgActive },
+      { id: 'openvpn', name: protocolLabel('openvpn'), count: data.openvpn_clients.length },
+      { id: 'wireguard', name: protocolLabel('wireguard'), count: wgActive },
     ]
     if (showAwg2) {
-      bars.push({ name: 'AWG 2.0', count: awg2Active })
+      bars.push({ id: 'amneziawg2', name: protocolLabel('amneziawg2'), count: awg2Active })
     }
     return bars
   }, [data, showAwg2])
@@ -147,7 +148,7 @@ export default function MonitoringCharts({
                 <Line
                   type="monotone"
                   dataKey="ovpn"
-                  name="OpenVPN"
+                  name={protocolLabel('openvpn')}
                   stroke={MONITORING_PROTOCOL_COLORS.openvpn}
                   strokeWidth={2}
                   dot={false}
@@ -155,7 +156,7 @@ export default function MonitoringCharts({
                 <Line
                   type="monotone"
                   dataKey="wg"
-                  name="WireGuard"
+                  name={protocolLabel('wireguard')}
                   stroke={MONITORING_PROTOCOL_COLORS.wireguard}
                   strokeWidth={2}
                   dot={false}
@@ -164,7 +165,7 @@ export default function MonitoringCharts({
                   <Line
                     type="monotone"
                     dataKey="awg2"
-                    name="AWG 2.0"
+                    name={protocolLabel('amneziawg2')}
                     stroke={MONITORING_PROTOCOL_COLORS.amneziawg2}
                     strokeWidth={2}
                     dot={false}
@@ -194,7 +195,7 @@ export default function MonitoringCharts({
               <Tooltip {...monitoringChartTooltipProps} />
               <Bar dataKey="count" name="Клиенты" radius={[4, 4, 0, 0]}>
                 {connectionsBar.map((entry) => (
-                  <Cell key={entry.name} fill={getProtocolBarColor(entry.name)} />
+                  <Cell key={entry.id} fill={getProtocolBarColor(entry.id)} />
                 ))}
               </Bar>
             </BarChart>

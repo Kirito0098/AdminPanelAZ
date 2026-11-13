@@ -30,16 +30,9 @@ import {
   wgSetTrafficLimit,
 } from '@/api/vpnAccess'
 import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
+import { PROTOCOL_ORDER, protocolLabel } from '@/lib/vpnTypes'
 import { cn } from '@/lib/utils'
 import type { SelfServiceQuota, User, VpnType } from '@/types'
-
-const PROTOCOL_ORDER: VpnType[] = ['openvpn', 'wireguard', 'amneziawg2']
-
-function vpnLabel(type: VpnType): string {
-  if (type === 'openvpn') return 'OpenVPN'
-  if (type === 'wireguard') return 'WG/AWG 1.5'
-  return 'AWG 2.0'
-}
 
 async function setTrafficLimitForProtocol(
   protocol: VpnType,
@@ -161,9 +154,6 @@ export default function CreateConfigDialog({
     dateValue: string,
   ): Promise<string | null> => {
     if (!isAdmin || !dateValue) return null
-    if (protocol !== 'openvpn' && protocol !== 'wireguard' && protocol !== 'amneziawg2') {
-      return 'дата доступа не применена для этого протокола'
-    }
     const iso = endOfDayIso(dateValue)
     if (!iso) return 'некорректная дата доступа'
     try {
@@ -254,7 +244,7 @@ export default function CreateConfigDialog({
         } catch (err) {
           if (created.length === 0) throw err
           setError(
-            `Создано: ${created.map(vpnLabel).join(', ')}. Не удалось: ${vpnLabel(vpnType)} — ${
+            `Создано: ${created.map(protocolLabel).join(', ')}. Не удалось: ${protocolLabel(vpnType)} — ${
               err instanceof ApiError ? err.message : 'ошибка'
             }`,
           )
@@ -275,7 +265,7 @@ export default function CreateConfigDialog({
             )
           } catch (err) {
             failed.push(
-              `${vpnLabel(protocol)}: ${err instanceof ApiError ? err.message : 'ошибка'}`,
+              `${protocolLabel(protocol)}: ${err instanceof ApiError ? err.message : 'ошибка'}`,
             )
           }
         }
@@ -349,7 +339,7 @@ export default function CreateConfigDialog({
                         checked ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-muted/50',
                       )}
                     >
-                      <span className="block font-medium">{vpnLabel(type)}</span>
+                      <span className="block font-medium">{protocolLabel(type)}</span>
                       <span className="text-xs text-muted-foreground">
                         {checked ? 'Выбрано' : 'Не выбрано'}
                       </span>
@@ -376,7 +366,7 @@ export default function CreateConfigDialog({
 
             {isAdmin && selectedProtocols.includes('amneziawg2') && (
               <div className="space-y-2">
-                <Label htmlFor="tg-mini-awg2-ttl">TTL AWG 2.0</Label>
+                <Label htmlFor="tg-mini-awg2-ttl">TTL {protocolLabel('amneziawg2')}</Label>
                 <Select value={ttl} onValueChange={setTtl} disabled={busy || quotaReached}>
                   <SelectTrigger id="tg-mini-awg2-ttl">
                     <SelectValue />

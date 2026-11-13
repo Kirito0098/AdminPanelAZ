@@ -16,10 +16,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import MiniPlatformPicker from '@/tg-mini/components/MiniPlatformPicker'
 import MiniProfileFilePicker from '@/tg-mini/components/MiniProfileFilePicker'
 import ConfigManagePanel from '@/tg-mini/components/ConfigManagePanel'
-import { vpnTypeBadgeClass, vpnTypeLabel } from '@/tg-mini/lib/vpnLabels'
 import type { InstallPlatform, TgMiniConfig, TgMiniConfigFile } from '@/types'
 import { useEffect, useState, type ReactNode } from 'react'
 
@@ -143,11 +143,7 @@ export default function ConfigActionDialog({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2 pr-6">
                 <DialogTitle className="tg-mini-config-hero-title">{config?.client_name}</DialogTitle>
-                {config && (
-                  <span className={cn('tg-mini-protocol-badge', vpnTypeBadgeClass(config.vpn_type))}>
-                    {vpnTypeLabel(config.vpn_type)}
-                  </span>
-                )}
+                {config && <ProtocolBadge protocol={config.vpn_type} />}
               </div>
               <DialogDescription className="tg-mini-config-hero-desc">
                 {sentSuccess

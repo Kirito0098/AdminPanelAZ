@@ -1,9 +1,8 @@
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { PROTOCOL_ORDER, protocolLabel, type Protocol } from '@/lib/vpnTypes'
 import { cn } from '@/lib/utils'
 import type { TgMiniNode } from '@/types'
-
-const PROTOCOL_OPTIONS = ['openvpn', 'wireguard', 'amneziawg2'] as const
 
 interface MiniPlanFieldsProps {
   nodes: TgMiniNode[]
@@ -14,6 +13,8 @@ interface MiniPlanFieldsProps {
   count: string
   onCountChange: (count: string) => void
   idPrefix: string
+  /** Протоколы, включённые в фичах; по умолчанию — весь PROTOCOL_ORDER. */
+  availableProtocols?: readonly Protocol[]
 }
 
 function toggle<T>(list: T[], value: T): T[] {
@@ -30,6 +31,7 @@ export default function MiniPlanFields({
   count,
   onCountChange,
   idPrefix,
+  availableProtocols = PROTOCOL_ORDER,
 }: MiniPlanFieldsProps) {
   return (
     <>
@@ -55,7 +57,7 @@ export default function MiniPlanFields({
       <div className="space-y-1.5">
         <Label>Протоколы</Label>
         <div className="flex flex-wrap gap-1.5">
-          {PROTOCOL_OPTIONS.map((protocol) => (
+          {availableProtocols.map((protocol) => (
             <button
               key={protocol}
               type="button"
@@ -65,7 +67,7 @@ export default function MiniPlanFields({
               )}
               onClick={() => onProtocolsChange(toggle(protocols, protocol))}
             >
-              {protocol}
+              {protocolLabel(protocol)}
             </button>
           ))}
         </div>

@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { PercentBar } from '@/components/ui/percent-bar'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import { useNode } from '@/context/NodeContext'
 import { formatRelative, parseTimestamp } from '@/lib/datetime'
 import { nodeLabelMap, userNodeLabels } from '@/lib/nodeLabels'
@@ -74,17 +75,6 @@ function MetaLine({ row }: { row: MetaRow }) {
       </span>
     </div>
   )
-}
-
-function protocolChipClass(protocol: string): string {
-  const p = protocol.toLowerCase()
-  if (p.includes('openvpn') || p === 'ovpn') {
-    return 'border-sky-500/40 text-sky-600 dark:text-sky-300'
-  }
-  if (p.includes('wireguard') || p === 'wg' || p.includes('amnezia') || p.includes('awg')) {
-    return 'border-orange-500/40 text-orange-600 dark:text-orange-300'
-  }
-  return 'border-border text-muted-foreground'
 }
 
 interface SubscriberCardProps {
@@ -276,15 +266,7 @@ export default function SubscriberCard({
             {user.role === 'admin' ? 'Админ' : 'Абонент'}
           </Badge>
           {protocols.map((protocol) => (
-            <span
-              key={protocol}
-              className={cn(
-                'inline-flex items-center rounded-md border px-1.5 py-0.5 text-[10px] font-medium',
-                protocolChipClass(protocol),
-              )}
-            >
-              {protocol}
-            </span>
+            <ProtocolBadge key={protocol} protocol={protocol} />
           ))}
           {user.traffic_limit_blocked ? (
             <Badge variant="destructive" className="h-5 px-1.5 text-[10px]">

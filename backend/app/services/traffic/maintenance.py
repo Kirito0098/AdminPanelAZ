@@ -16,6 +16,7 @@ from app.models import (
     VpnConfig,
     VpnType,
 )
+from app.services.protocols import protocol_badge
 from app.services.traffic.collector import (
     _parse_status_timestamp,
     build_session_key,
@@ -63,11 +64,11 @@ class TrafficMaintenanceService:
             if not name:
                 continue
             if row.vpn_type == VpnType.wireguard:
-                protocols_by_client[name.lower()].add("WireGuard")
+                protocols_by_client[name.lower()].add("wireguard")
             elif row.vpn_type == VpnType.amneziawg2:
-                protocols_by_client[name.lower()].add("AmneziaWG2")
+                protocols_by_client[name.lower()].add("amneziawg2")
             else:
-                protocols_by_client[name.lower()].add("OpenVPN")
+                protocols_by_client[name.lower()].add("openvpn")
         return dict(protocols_by_client)
 
     def collect_existing_config_client_names(self) -> set[str]:
@@ -83,7 +84,7 @@ class TrafficMaintenanceService:
         result: set[str] = set()
         for client_name, protocols in protocols_by_client.items():
             normalized = {str(protocol or "").strip() for protocol in protocols if str(protocol or "").strip()}
-            if normalized == {"WireGuard"}:
+            if normalized == {"wireguard"}:
                 if client_name:
                     result.add(client_name)
         return result
@@ -532,9 +533,9 @@ class TrafficMaintenanceService:
         scope = normalize_traffic_protocol_scope(protocol_scope)
         scope_human = {
             "all": "вся статистика",
-            "openvpn": "OpenVPN",
-            "wireguard": "WireGuard/AWG",
-            "amneziawg2": "AmneziaWG 2.0",
+            "openvpn": protocol_badge("openvpn"),
+            "wireguard": protocol_badge("wireguard"),
+            "amneziawg2": protocol_badge("amneziawg2"),
         }
 
         try:

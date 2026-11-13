@@ -3,6 +3,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import type { VisibleVpnProfilesPolicy } from '@/types'
 import { cn } from '@/lib/utils'
+import { protocolModuleLabel } from '@/lib/vpnTypes'
 
 export const FULL_VISIBLE_VPN_POLICY: VisibleVpnProfilesPolicy = {
   routes: ['az', 'vpn'],
@@ -23,10 +24,10 @@ const OPENVPN_GROUP_OPTIONS = [
 ] as const
 
 const PROTOCOL_OPTIONS = [
-  { key: 'openvpn', label: 'OpenVPN' },
-  { key: 'wireguard', label: 'WireGuard' },
-  { key: 'amneziawg', label: 'AmneziaWG' },
-  { key: 'amneziawg2', label: 'AmneziaWG 2.0' },
+  { key: 'openvpn', label: protocolModuleLabel('openvpn') },
+  { key: 'wireguard', label: protocolModuleLabel('wireguard') },
+  { key: 'amneziawg', label: protocolModuleLabel('amneziawg') },
+  { key: 'amneziawg2', label: protocolModuleLabel('amneziawg2') },
 ] as const
 
 function toggleValue(list: string[], key: string, checked: boolean): string[] {
@@ -106,7 +107,7 @@ export default function VpnVisibilityPolicyEditor({
       {renderGroup('Протоколы', PROTOCOL_OPTIONS, 'protocols')}
       <div className="space-y-2 rounded-lg border border-border/70 bg-muted/15 p-3">
         <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          AmneziaWG 2.0 файлы
+          {protocolModuleLabel('amneziawg2')} файлы
         </p>
         <div className="flex flex-wrap gap-x-4 gap-y-2">
           <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
@@ -124,7 +125,7 @@ export default function VpnVisibilityPolicyEditor({
         </div>
         {!awg2Enabled && (
           <p className="text-xs text-muted-foreground">
-            Включите протокол AmneziaWG 2.0, чтобы настроить файлы.
+            Включите протокол {protocolModuleLabel('amneziawg2')}, чтобы настроить файлы.
           </p>
         )}
       </div>

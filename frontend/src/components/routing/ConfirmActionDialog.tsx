@@ -1,4 +1,5 @@
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
+import { protocolLabel } from '@/lib/vpnTypes'
 import type { ConfirmAction } from './useRoutingPage'
 import type { CidrDeployPreview } from '@/types'
 import { formatBackupLabel } from './utils'
@@ -9,8 +10,7 @@ const confirmMeta: Record<
 > = {
   'apply-doall': {
     title: 'Применить маршрутизацию?',
-    description:
-      'На активном узле будут синхронизированы провайдеры, выполнены doall.sh (правила маршрутизации) и client.sh 7 (перегенерация профилей WG/AWG). Длительная операция.',
+    description: `На активном узле будут синхронизированы провайдеры, выполнены doall.sh (правила маршрутизации) и client.sh 7 (перегенерация профилей ${protocolLabel('wireguard')}). Длительная операция.`,
     confirmLabel: 'Применить doall + client.sh 7',
     destructive: true,
     alertTitle: 'Длительная операция',

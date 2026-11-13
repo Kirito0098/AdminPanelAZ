@@ -8,6 +8,7 @@ import { useNotifications } from '@/context/NotificationContext'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatBytes } from '@/lib/trafficFormat'
 import { formatDateTime, parseTimestamp } from '@/lib/datetime'
+import { protocolLabel } from '@/lib/vpnTypes'
 import UserMetric from './UserMetric'
 import UserSection from './UserSection'
 
@@ -149,7 +150,7 @@ export default function UserStatsSection({ userId }: UserStatsSectionProps) {
             {rows.map((row) => (
               <TableRow key={`${row.node_id}-${row.vpn_type}`}>
                 <TableCell className="font-mono text-xs">{row.node_id}</TableCell>
-                <TableCell className="text-xs">{row.vpn_type}</TableCell>
+                <TableCell className="text-xs">{protocolLabel(row.vpn_type)}</TableCell>
                 <TableCell className="text-right font-mono text-xs">{formatBytes(row.period_bytes)}</TableCell>
                 <TableCell className="text-right font-mono text-xs">{formatBytes(row.total_bytes)}</TableCell>
                 <TableCell className="text-right text-xs">{row.total_sessions}</TableCell>

@@ -5,11 +5,11 @@ import MonitoringConnectionsList, {
   type MonitoringConnectionRow,
 } from '@/components/monitoring/MonitoringConnectionsList'
 import { Badge } from '@/components/ui/badge'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import { Button } from '@/components/ui/button'
 import { groupConnectionsByOwner } from '@/lib/connectionUserGroups'
 import { formatDateTime } from '@/lib/datetime'
 import { formatBytes } from '@/lib/trafficFormat'
-import { protocolLabel } from '@/lib/vpnTypes'
 import { cn } from '@/lib/utils'
 
 function usersLabel(count: number) {
@@ -108,9 +108,7 @@ export default function MonitoringUsersList({
                       {group.onlineCount}/{group.connectionsCount} {connectionsLabel(group.connectionsCount)}
                     </Badge>
                     {group.protocols.map((protocol) => (
-                      <Badge key={protocol} variant="secondary" className="text-[10px]">
-                        {protocolLabel(protocol)}
-                      </Badge>
+                      <ProtocolBadge key={protocol} protocol={protocol} />
                     ))}
                   </div>
                   <p className="truncate text-xs text-muted-foreground">

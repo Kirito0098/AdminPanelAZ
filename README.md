@@ -127,7 +127,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
   <img src="docs/assets/telegram-promo/10-configurations.png" alt="Конфигурации — VPN-клиенты" width="900">
 </p>
 
-- OpenVPN, WireGuard, AmneziaWG — создание, скачивание, QR-коды ([инструкция](docs/konfiguracii.md))
+- OpenVPN, WG/AWG 1.5, AWG 2.0 — создание, скачивание, QR-коды ([инструкция](docs/konfiguracii.md))
 - Блокировка, срок действия, лимиты трафика
 - **Подписка** — отдельный раздел меню (`/subscription`): unlock-коды и доступ до даты, настройка клиентского портала ([инструкция](docs/podpiska.md))
 - **Срок доступа на пользователе** — поле «Доступ до» в **Настройки → Пользователи** продлевает или ограничивает сразу все его VPN-профили ([подписка](docs/podpiska.md#срок-доступа-пользователя))

@@ -11,16 +11,16 @@ export const RANGE_LABELS: Record<ResourceChartPeriod, string> = {
   '30d': '30 дней',
 }
 
-/** Палитра метрик: один и тот же показатель одного цвета на обоих экранах. */
+/** Палитра метрик: нейтральные цвета ресурсов, не оттенки протоколов. */
 export const CHART_COLORS = {
-  cpu: 'hsl(187, 72%, 45%)',
-  ram: 'hsl(142, 71%, 45%)',
-  disk: 'hsl(38, 92%, 50%)',
-  load: 'hsl(217, 33%, 55%)',
-  total: 'hsl(217, 33%, 55%)',
-  nginx: 'hsl(0, 62%, 50%)',
-  watchdog: 'hsl(38, 92%, 50%)',
-  vite: 'hsl(280, 65%, 55%)',
+  cpu: '#5D8AA8',
+  ram: '#6E9E8A',
+  disk: '#8C7FA8',
+  load: '#7A8797',
+  total: '#7A8797',
+  nginx: '#9E7A7A',
+  watchdog: '#7FA3A3',
+  vite: '#A68FB0',
 } as const
 
 export const CHART_MARGIN = { top: 8, right: 8, left: 0, bottom: 0 }

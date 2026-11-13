@@ -56,7 +56,7 @@ export default function Awg2OverviewCards({
         <MetricCard
           label="Клиенты"
           value={formatAwg2ClientCount(status)}
-          sub="Клиенты → AmneziaWG 2.0"
+          sub="Клиенты → AWG 2.0"
           icon={Users}
           accent="cyan"
         />

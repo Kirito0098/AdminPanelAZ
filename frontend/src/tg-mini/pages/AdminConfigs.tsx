@@ -16,7 +16,8 @@ import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import { getTgConfigs, getTgAdminConfigFiles, sendTgAdminConfig } from '@/tg-mini/api'
 import { guessInstallPlatform } from '@/tg-mini/lib/platformMeta'
 import { splitProfileFilesByRoute } from '@/tg-mini/lib/profileFiles'
-import { vpnTypeBadgeClass, vpnTypeLabel } from '@/tg-mini/lib/vpnLabels'
+import { featureEnabledProtocols, protocolFilterForVpnType } from '@/tg-mini/lib/vpnVisibility'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import type { InstallPlatform, TgMiniConfig, TgMiniConfigFile } from '@/types'
 
 /** Admin «Конфиги»: все конфиги на активном узле, полное управление (без CSV). */
@@ -56,19 +57,34 @@ export default function AdminConfigs() {
     void load()
   }, [load])
 
-  const openvpnEnabled = Boolean(features.openvpn ?? true)
-  const wireguardEnabled = Boolean(features.wireguard ?? true) || Boolean(features.amneziawg)
-  const awg2Enabled = Boolean(features.awg2)
-
-  const protocolCounts = useMemo(
-    () => ({
-      all: configs.length,
-      openvpn: configs.filter((c) => c.vpn_type === 'openvpn').length,
-      wireguard: configs.filter((c) => c.vpn_type === 'wireguard').length,
-      amneziawg2: configs.filter((c) => c.vpn_type === 'amneziawg2').length,
-    }),
-    [configs],
+  const availableProtocols = useMemo(() => featureEnabledProtocols(features), [features])
+  const openvpnEnabled = availableProtocols.includes('openvpn')
+  const wireguardEnabled = availableProtocols.includes('wireguard')
+  const awg2Enabled = availableProtocols.includes('amneziawg2')
+  const protocolOptions = useMemo<ProtocolFilter[]>(
+    () => ['all', ...availableProtocols],
+    [availableProtocols],
   )
+
+  useEffect(() => {
+    if (protocol !== 'all' && !protocolOptions.includes(protocol)) {
+      setProtocol('all')
+    }
+  }, [protocol, protocolOptions])
+
+  const protocolCounts = useMemo(() => {
+    const counts: Record<ProtocolFilter, number> = {
+      all: configs.length,
+      openvpn: 0,
+      wireguard: 0,
+      amneziawg2: 0,
+    }
+    for (const config of configs) {
+      const bucket = protocolFilterForVpnType(config.vpn_type)
+      if (bucket) counts[bucket] += 1
+    }
+    return counts
+  }, [configs])
 
   const filtered = useMemo(
     () =>
@@ -157,7 +173,7 @@ export default function AdminConfigs() {
         protocol={protocol}
         onProtocolChange={setProtocol}
         protocolCounts={protocolCounts}
-        protocolOptions={['all', 'openvpn', 'wireguard', 'amneziawg2']}
+        protocolOptions={protocolOptions}
       />
 
       {loading && configs.length === 0 ? (
@@ -186,9 +202,7 @@ export default function AdminConfigs() {
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate font-medium">{config.client_name}</span>
-                    <span className={`tg-mini-protocol-badge ${vpnTypeBadgeClass(config.vpn_type)}`}>
-                      {vpnTypeLabel(config.vpn_type)}
-                    </span>
+                    <ProtocolBadge protocol={config.vpn_type} />
                   </div>
                   <p className="mt-1 truncate text-xs text-muted-foreground">
                     {config.owner_username ? `Владелец: ${config.owner_username}` : 'Без владельца'}

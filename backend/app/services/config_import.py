@@ -17,6 +17,7 @@ from app.services.openvpn_cert import (
     resolve_openvpn_cert_not_after,
     to_naive_utc,
 )
+from app.services.protocols import protocol_badge
 
 logger = logging.getLogger(__name__)
 
@@ -166,5 +167,5 @@ def format_config_disk_sync_message(result: ConfigDiskSyncResult) -> str:
         parts.append(f"удалено {result.removed}")
     message = f"Синхронизация: {', '.join(parts)}" if parts else "Синхронизация завершена без изменений"
     if result.awg2_skipped:
-        message += ". AmneziaWG 2.0 на узле не ответил — его клиенты не изменены"
+        message += f". {protocol_badge('amneziawg2')} на узле не ответил — его клиенты не изменены"
     return message

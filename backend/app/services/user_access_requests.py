@@ -41,6 +41,7 @@ from app.services.feature_guards import get_feature_service
 from app.services.client_portal import get_or_create_user_portal_token, user_link_response
 from app.services.rate_limit.backends import MemoryRateLimitBackend
 from app.services.rate_limit.sliding_window import SlidingWindowLimiter
+from app.services.protocols import protocol_badge
 from app.services import telegram_api
 from app.services.telegram_api import send_message
 from app.services.user_provisioning import (
@@ -1334,7 +1335,7 @@ def _delivery_text(
     added: bool = False,
     protocols: set[str] | None = None,
 ) -> str:
-    """Текст абоненту после одобрения; подсказка про устройства — только для WireGuard."""
+    """Текст абоненту после одобрения; подсказка про устройства — для WG/AWG 1.5 и AWG 2.0."""
     if added:
         lines = ["✅ Дополнительный конфиг одобрен", ""]
         if portal_url:
@@ -1347,9 +1348,15 @@ def _delivery_text(
         if portal_url:
             lines += [f"Ваша ссылка на портал: {portal_url}", ""]
         issued = protocols or set()
-        if issued & {"wireguard", "amneziawg2"}:
+        device_protocols = issued & {"wireguard", "amneziawg2"}
+        if device_protocols:
+            names = " / ".join(
+                protocol_badge(name)
+                for name in ("wireguard", "amneziawg2")
+                if name in device_protocols
+            )
             lines.append(
-                "Один конфиг WireGuard/AmneziaWG = одно устройство онлайн. "
+                f"Один конфиг {names} = одно устройство онлайн. "
                 "Нужно ещё устройство — нажмите «Запросить ещё конфиг»."
             )
         elif "openvpn" in issued:

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, Loader2, MessageSquare, ReceiptText, X } from 'lucide-react'
 import { ApiError } from '@/api/client'
 import { Badge } from '@/components/ui/badge'
@@ -25,6 +25,8 @@ import {
 import { getTgNodes } from '@/tg-mini/api'
 import { formatDateTime } from '@/lib/datetime'
 import { selectablePlanNodes } from '@/tg-mini/lib/planNodes'
+import { featureEnabledProtocols } from '@/tg-mini/lib/vpnVisibility'
+import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
 import type { AccessRequestResponse, PresetResponse, TgMiniNode } from '@/types'
 
 const TYPE_LABELS: Record<string, string> = {
@@ -279,12 +281,23 @@ function ApproveNewUserDialog({
   const [presetId, setPresetId] = useState('')
   const [nodes, setNodes] = useState<TgMiniNode[]>([])
   const [nodeIds, setNodeIds] = useState<number[]>([])
-  const [protocols, setProtocols] = useState<string[]>(['openvpn', 'wireguard'])
+  const [protocols, setProtocols] = useState<string[]>([])
   const [count, setCount] = useState('1')
   const [error, setError] = useState<string | null>(null)
 
+  const { features } = useTgAuth()
+  const availableProtocols = useMemo(() => featureEnabledProtocols(features), [features])
+  const defaultProtocols = useMemo(() => {
+    const preferred = availableProtocols.filter((protocol) => protocol !== 'amneziawg2')
+    return preferred.length > 0 ? preferred : availableProtocols
+  }, [availableProtocols])
+  // Сброс формы при смене заявки берёт актуальные фичи, но не срабатывает на их фоновое обновление.
+  const defaultProtocolsRef = useRef(defaultProtocols)
+  defaultProtocolsRef.current = defaultProtocols
+
   useEffect(() => {
     setUsername(request.telegram_username || `tg_${request.telegram_id}`)
+    setProtocols(defaultProtocolsRef.current)
     void listPresets().then(setPresets).catch(() => setPresets([]))
     void getTgNodes()
       .then((data) => {
@@ -365,6 +378,7 @@ function ApproveNewUserDialog({
               onProtocolsChange={setProtocols}
               count={count}
               onCountChange={setCount}
+              availableProtocols={availableProtocols}
             />
           )}
 

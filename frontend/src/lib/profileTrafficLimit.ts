@@ -7,7 +7,7 @@ import {
   wgSetTrafficLimit,
 } from '@/api/vpnAccess'
 import type { VpnType } from '@/types'
-import { vpnTypeLabel } from '@/lib/vpnTypes'
+import { protocolLabel } from '@/lib/vpnTypes'
 
 const PROFILE_VPN_ORDER: VpnType[] = ['openvpn', 'wireguard', 'amneziawg2']
 
@@ -86,6 +86,6 @@ export async function clearProfileTrafficLimits(
 
 export function formatProfileProtocols(protocols: Iterable<VpnType>): string {
   return orderedProfileProtocols(protocols)
-    .map(vpnTypeLabel)
+    .map(protocolLabel)
     .join(', ')
 }

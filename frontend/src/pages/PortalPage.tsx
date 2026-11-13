@@ -28,6 +28,7 @@ import { closedAccessCopy } from '@/lib/closedAccess'
 import { parseTimestamp } from '@/lib/datetime'
 import { normalizePortalNodes, pickPortalSelection, portalClientKey, portalProfileLabel } from '@/lib/portalNodes'
 import { cn } from '@/lib/utils'
+import { protocolLabel } from '@/lib/vpnTypes'
 import type { ClosedAccessView } from '@/types'
 
 type OsId = 'windows' | 'android' | 'ios' | 'mac' | 'linux'
@@ -82,14 +83,6 @@ const APP_DOWNLOADS: Record<string, Partial<Record<OsId, { label: string; url: s
     android: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
     ios: { label: 'AmneziaWG', url: 'https://apps.apple.com/app/amneziawg/id6478942365' },
   },
-}
-
-function protocolTitle(vpnType: string): string {
-  if (vpnType === 'openvpn') return 'OpenVPN'
-  if (vpnType === 'wireguard') return 'WireGuard'
-  if (vpnType === 'amneziawg') return 'AmneziaWG'
-  if (vpnType === 'amneziawg2') return 'AmneziaWG 2.0'
-  return vpnType
 }
 
 function detectOs(): OsId {
@@ -568,15 +561,7 @@ export default function PortalPage() {
         .sort()
       const appliedLatest = appliedDates.length > 0 ? appliedDates[appliedDates.length - 1] : null
       const protocolNames = applied
-        .map((protocol) =>
-          protocol === 'openvpn'
-            ? 'OpenVPN'
-            : protocol === 'wireguard'
-              ? 'WireGuard'
-              : protocol === 'amneziawg2'
-                ? 'AmneziaWG 2.0'
-                : protocol,
-        )
+        .map((protocol) => protocolLabel(protocol))
         .join(', ')
       if (appliedLatest && result.access_until && appliedLatest.slice(0, 10) !== result.access_until.slice(0, 10)) {
         setToast(
@@ -883,7 +868,7 @@ export default function PortalPage() {
                           : 'border-white/10 text-slate-300 hover:bg-white/5',
                       )}
                     >
-                      {protocolTitle(p)}
+                      {protocolLabel(p)}
                     </button>
                   ))}
                 </div>
@@ -917,7 +902,7 @@ export default function PortalPage() {
               >
                 <p className="text-sm text-slate-300">
                   Установите официальный клиент для {OS_OPTIONS.find((o) => o.id === os)?.label} и{' '}
-                  {protocolTitle(protocol || preferredClientProtocol(activeClient) || 'openvpn')}.
+                  {protocolLabel(protocol || preferredClientProtocol(activeClient) || 'openvpn')}.
                 </p>
                 {appLink ? (
                   <Button asChild className="gap-1.5 bg-cyan-400 text-slate-950 hover:bg-cyan-300">
