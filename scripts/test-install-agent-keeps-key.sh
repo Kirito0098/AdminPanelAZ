@@ -48,9 +48,10 @@ printf 'NODE_AGENT_API_KEY=change-me-node-agent-key\nNODE_AGENT_PORT=9100\n' >"$
 printf 'PROXY_AGENT_API_KEY=change-me-proxy-agent-key\nPROXY_AGENT_PORT=9101\n' >"$TMP_DIR/proxy.example"
 
 run_setup() {
+  local env_lib="$ROOT_DIR/scripts/env-file.sh"
   NODE_ENV_FILE="$NODE_ENV_FILE" PROXY_ENV_FILE="$PROXY_ENV_FILE" \
     NODE_ENV_EXAMPLE="$TMP_DIR/node.example" PROXY_ENV_EXAMPLE="$TMP_DIR/proxy.example" \
-    ENV_FILE_LIB="$ROOT_DIR/scripts/env-file.sh" ROOT_DIR="$TMP_DIR" bash -c '
+    ENV_FILE_LIB="$env_lib" ROOT_DIR="$TMP_DIR" bash -c '
     set -euo pipefail
     log() { :; }
     warn() { echo "WARN $*" >>"'"$TMP_DIR"'/warn.log"; }
