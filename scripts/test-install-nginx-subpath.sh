@@ -51,7 +51,16 @@ cat >"$TMP/bin/systemctl" <<'EOF'
 echo "$*" >>"${SYSTEMCTL_LOG:?}"
 exit 0
 EOF
-chmod +x "$TMP/bin/nginx" "$TMP/bin/systemctl"
+# nginx-setup.sh проверяет root через id -u; в CI runner не root, каталоги nginx уже временные.
+cat >"$TMP/bin/id" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == "-u" ]]; then
+  echo 0
+  exit 0
+fi
+exec /usr/bin/id "$@"
+EOF
+chmod +x "$TMP/bin/nginx" "$TMP/bin/systemctl" "$TMP/bin/id"
 export PATH="$TMP/bin:$PATH"
 
 # shellcheck source=scripts/nginx-common.sh
