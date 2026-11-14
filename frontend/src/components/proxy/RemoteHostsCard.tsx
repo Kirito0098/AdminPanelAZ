@@ -11,7 +11,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { useNotifications } from '@/context/NotificationContext'
+import { useProgress } from '@/context/ProgressContext'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
+import { protocolLabel } from '@/lib/vpnTypes'
 import { AZ_PROXY_SH_DOCS_URL } from '@/components/nodes/ProxyNodePanel'
 import { ArrowDown, ArrowUp, Cable, Plus, RefreshCw, Save, Shield, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -29,6 +31,10 @@ type RemoteHostsCardProps = {
   variant?: 'card' | 'embedded'
   className?: string
   id?: string
+  /** Override empty-state when no nodeId (Proxy hub has its own VPN picker). */
+  missingNodeMessage?: string
+  /** Card header description; default mentions the selected VPN node. */
+  cardDescription?: string
   /** Fired after successful load or save with the persisted hosts list. */
   onSavedHostsChange?: (hosts: string[], applyToWireguard?: boolean) => void
   /** Fired when draft vs saved dirty state changes. */
@@ -47,6 +53,7 @@ function RemoteHostsListBody({
   remoteHostsSaving,
   remoteHostsLoadError,
   allowFirstBusy,
+  missingNodeMessage,
   onRetry,
   onRemoteHostsChange,
   onApplyToWireguardChange,
@@ -62,6 +69,7 @@ function RemoteHostsListBody({
   remoteHostsSaving: boolean
   remoteHostsLoadError: string | null
   allowFirstBusy: boolean
+  missingNodeMessage?: string
   onRetry: () => void
   onRemoteHostsChange: (hosts: string[]) => void
   onApplyToWireguardChange: (value: boolean) => void
@@ -84,8 +92,9 @@ function RemoteHostsListBody({
 
   if (nodeId == null) {
     return (
-      <SettingsAlert variant="warning" title="Нет активного узла">
-        Выберите активный узел, чтобы редактировать список адресов подключения.
+      <SettingsAlert variant="warning" title="Нет VPN-узла">
+        {missingNodeMessage ??
+          'Выберите VPN-узел, чтобы редактировать список адресов подключения.'}
       </SettingsAlert>
     )
   }
@@ -148,7 +157,7 @@ function RemoteHostsListBody({
           панель не ставит proxy.sh).
         </li>
         <li>
-          AmneziaWG/WireGuard по умолчанию берут хост из WIREGUARD_HOST (как client.sh). Первый
+          {protocolLabel('wireguard')} по умолчанию берут хост из WIREGUARD_HOST (как client.sh). Первый
           адрес (слот прокси) попадает в их Endpoint только если включить галочку ниже — и только
           если на прокси форвардятся UDP 52443/52080 (как в proxy.sh).
         </li>
@@ -232,14 +241,16 @@ function RemoteHostsListBody({
           checked={applyToWireguard}
           disabled={listDisabled}
           onCheckedChange={onApplyToWireguardChange}
-          aria-label="Подставлять первый адрес в Endpoint AmneziaWG и WireGuard"
+          aria-label={`Подставлять первый адрес в Endpoint ${protocolLabel('wireguard')} и ${protocolLabel('amneziawg2')}`}
         />
         <span>
-          <span className="font-medium">Также для AmneziaWG / WireGuard</span>
+          <span className="font-medium">
+            Также для {protocolLabel('wireguard')} / {protocolLabel('amneziawg2')}
+          </span>
           <span className="mt-0.5 block text-xs text-muted-foreground">
-            Как шаг 4 в README AntiZapret: первый адрес (слот входа / прокси) пишется в
-            WIREGUARD_HOST и в Endpoint новых -am.conf / -wg.conf. Нужен proxy.sh с форвардом
-            портов 52443 и 52080.
+            Первый адрес (прокси) пишется в WIREGUARD_HOST и при скачивании в Endpoint
+            стокового {protocolLabel('wireguard')} и {protocolLabel('amneziawg2')} (порт в конфиге не меняется). Для стока нужен
+            proxy.sh с 52443/52080; для AWG 2.0 — ещё DNAT своих UDP-портов на RU (см. docs).
           </span>
         </span>
       </label>
@@ -292,11 +303,14 @@ export default function RemoteHostsCard({
   variant = 'card',
   className,
   id,
+  missingNodeMessage,
+  cardDescription,
   onSavedHostsChange,
   onDirtyChange,
   onHostsPersisted,
 }: RemoteHostsCardProps) {
   const { success, error: notifyError, warning: notifyWarning } = useNotifications()
+  const { trackBackgroundTask } = useProgress()
   const haReplicaReadonly = useHaReplicaReadonly()
   const controlsDisabled = disabled || haReplicaReadonly
 
@@ -308,9 +322,14 @@ export default function RemoteHostsCard({
   const [allowFirstBusy, setAllowFirstBusy] = useState(false)
   const [remoteHostsLoadError, setRemoteHostsLoadError] = useState<string | null>(null)
   const loadedNodeIdRef = useRef<number | null>(null)
+  const nodeIdRef = useRef(nodeId)
   const onSavedHostsChangeRef = useRef(onSavedHostsChange)
   const onDirtyChangeRef = useRef(onDirtyChange)
   const onHostsPersistedRef = useRef(onHostsPersisted)
+
+  useEffect(() => {
+    nodeIdRef.current = nodeId
+  }, [nodeId])
 
   useEffect(() => {
     onSavedHostsChangeRef.current = onSavedHostsChange
@@ -352,6 +371,8 @@ export default function RemoteHostsCard({
       }
       try {
         const hostsResp = await getNodeRemoteHosts(idToLoad)
+        // Ignore stale response if the selected VPN changed while the request was in flight.
+        if (nodeIdRef.current !== idToLoad) return false
         const applyWg = Boolean(hostsResp.apply_to_wireguard)
         setRemoteHosts(hostsResp.hosts)
         setSavedRemoteHosts(hostsResp.hosts)
@@ -362,6 +383,7 @@ export default function RemoteHostsCard({
         onSavedHostsChangeRef.current?.(hostsResp.hosts, applyWg)
         return true
       } catch (err) {
+        if (nodeIdRef.current !== idToLoad) return false
         const message =
           err instanceof ApiError ? err.message : 'Не удалось загрузить адреса подключения'
         setRemoteHostsLoadError(message)
@@ -395,7 +417,7 @@ export default function RemoteHostsCard({
 
   const saveRemoteHosts = useCallback(async () => {
     if (nodeId == null) {
-      notifyError('Нет активного узла для сохранения адресов')
+      notifyError('Нет VPN-узла для сохранения адресов')
       return
     }
     if (remoteHostsLoadError != null) {
@@ -427,7 +449,7 @@ export default function RemoteHostsCard({
 
   const allowFirst = useCallback(async () => {
     if (nodeId == null) {
-      notifyError('Нет активного узла')
+      notifyError('Нет VPN-узла')
       return
     }
     if (savedRemoteHosts.length === 0) {
@@ -443,6 +465,12 @@ export default function RemoteHostsCard({
       const result = await allowFirstRemoteHost(nodeId)
       if (result.added) {
         success(`Адрес ${result.host} добавлен в allow-ips.txt`)
+        if (result.apply_task_id) {
+          trackBackgroundTask(result.apply_task_id, {
+            onComplete: () => success('doall для allow-ips завершён'),
+            onError: (task, message) => notifyError(task?.error || task?.message || message),
+          })
+        }
       } else {
         notifyWarning(
           result.detail ? `${result.host}: ${result.detail}` : `${result.host} уже есть в allow-ips`,
@@ -463,6 +491,7 @@ export default function RemoteHostsCard({
     notifyError,
     notifyWarning,
     success,
+    trackBackgroundTask,
   ])
 
   const listProps = {
@@ -475,6 +504,7 @@ export default function RemoteHostsCard({
     remoteHostsSaving,
     remoteHostsLoadError,
     allowFirstBusy,
+    missingNodeMessage,
     onRetry: () => {
       if (nodeId != null) void loadRemoteHosts(nodeId)
     },
@@ -503,8 +533,8 @@ export default function RemoteHostsCard({
             <div className="min-w-0">
               <CardTitle className="text-base">Адреса подключения</CardTitle>
               <CardDescription className="mt-1">
-                Список remote OpenVPN для активного VPN-узла. Первый адрес — слот входа (прокси,
-                если он есть). Нельзя совпадать с доменом панели.
+                {cardDescription ??
+                  'Список remote OpenVPN для выбранного VPN-узла. Первый адрес — слот входа (прокси, если он есть). Нельзя совпадать с доменом панели.'}
               </CardDescription>
             </div>
           </div>

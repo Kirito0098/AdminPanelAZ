@@ -1,5 +1,4 @@
-import { ApiError } from '@/api/client'
-import { parseHttpErrorBody } from '@/lib/httpErrorMessage'
+import { apiFetch, apiFetchAtBase, setApiTransport } from '@/api/http'
 import {
   getTelegramWebApp,
   resolveTelegramInitData,
@@ -7,34 +6,28 @@ import {
 } from '@/tg-mini/lib/telegramInitData'
 import type {
   AdminNotifySettings,
-  FeatureModulesResponse,
+  ClosedAccessView,
   InstallPlatform,
+  MessageThread,
   SelfServiceLimits,
-  SelfServiceQuota,
+  SendMessageResult,
   TelegramSettings,
   TgMiniAuthResponse,
   TgMiniConfig,
   TgMiniConfigFile,
-  TgMiniDashboard,
+  TgMeConfig,
+  TgMeStatus,
   TgMiniNodeActionResponse,
   TgMiniNodesResponse,
-  TgMiniQrLink,
+  TgMiniPublicConfig,
   TgMiniSettings,
-  TgMiniWarperStatus,
-  TgMiniAwg2Status,
-  TgMiniCidrStatus,
-  User,
+  TgPortalLink,
+  UserMessageItem,
   VpnConfig,
-  VpnType,
-  ClientTemplate,
-  ClientAccessPolicy,
-  UnlockCodeRecord,
-  ClientPoliciesResponseEntry,
 } from '@/types'
 import { apiBase } from '@/lib/panelBase'
 
 const API_BASE = `${apiBase}/tg-mini`
-const PANEL_API_BASE = apiBase
 const LEGACY_TOKEN_KEY = 'tg_token'
 
 /** Kept in memory only: Telegram re-sends initData on every launch, so a persisted JWT buys nothing. */
@@ -59,45 +52,27 @@ export function clearTgToken(): void {
   tgToken = null
 }
 
-async function parseApiResponse<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    const body = await response.text()
-    const detail = parseHttpErrorBody(body, response.status)
-    throw new ApiError(detail, response.status)
-  }
-  if (response.status === 204) return undefined as T
-  return response.json()
-}
+/**
+ * The Mini App shares the panel transport and panel API modules, but signs in with a
+ * Telegram token: no session cookie, no timezone/session headers, and a 401 is renewed
+ * from initData instead of the panel's refresh cookie.
+ */
+setApiTransport({
+  token: () => tgToken,
+  onUnauthorized: ({ sentToken }) => renewAfterUnauthorized(sentToken),
+})
 
 async function tgFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
-  const headers = new Headers(options.headers)
-  if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
-    headers.set('Content-Type', 'application/json')
-  }
-  const token = getTgToken()
-  if (token) headers.set('Authorization', `Bearer ${token}`)
-
-  const response = await fetch(`${API_BASE}${path}`, { ...options, headers })
-  if (response.status === 401 && retry && path !== '/auth' && (await renewAfterUnauthorized(token))) {
-    return tgFetch<T>(path, options, false)
-  }
-  return parseApiResponse<T>(response)
+  return apiFetchAtBase<T>(API_BASE, path, options, retry)
 }
 
-/** Mini App token is accepted only by backend endpoints marked `@tg_mini_token_allowed` (401 otherwise). */
-async function panelApiFetch<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
-  const headers = new Headers(options.headers)
-  if (!headers.has('Content-Type') && !(options.body instanceof FormData)) {
-    headers.set('Content-Type', 'application/json')
+function queryString(params: Record<string, string | number | undefined>): string {
+  const search = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== '') search.set(key, String(value))
   }
-  const token = getTgToken()
-  if (token) headers.set('Authorization', `Bearer ${token}`)
-
-  const response = await fetch(`${PANEL_API_BASE}${path}`, { ...options, headers })
-  if (response.status === 401 && retry && (await renewAfterUnauthorized(token))) {
-    return panelApiFetch<T>(path, options, false)
-  }
-  return parseApiResponse<T>(response)
+  const suffix = search.toString()
+  return suffix ? `?${suffix}` : ''
 }
 
 export async function refreshTgSessionFromInitData(initData: string): Promise<void> {
@@ -139,40 +114,78 @@ async function renewAfterUnauthorized(sentToken: string | null): Promise<boolean
   return refreshTgSession()
 }
 
-export async function tgAuth(initData: string): Promise<TgMiniAuthResponse> {
-  const response = await fetch(`${API_BASE}/auth`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ init_data: initData }),
-  })
-  return parseApiResponse<TgMiniAuthResponse>(response)
-}
-
-export async function getTgDashboard(): Promise<TgMiniDashboard> {
-  return tgFetch<TgMiniDashboard>('/dashboard')
+async function tgAuth(initData: string): Promise<TgMiniAuthResponse> {
+  return tgFetch<TgMiniAuthResponse>(
+    '/auth',
+    { method: 'POST', body: JSON.stringify({ init_data: initData }) },
+    false,
+  )
 }
 
 export async function getTgConfigs(): Promise<{ configs: TgMiniConfig[] }> {
   return tgFetch<{ configs: TgMiniConfig[] }>('/configs')
 }
 
+export async function getTgMeConfigs(): Promise<{
+  configs: TgMeConfig[]
+  closed_access: ClosedAccessView | null
+  status: TgMeStatus
+}> {
+  return tgFetch<{
+    configs: TgMeConfig[]
+    closed_access: ClosedAccessView | null
+    status: TgMeStatus
+  }>('/me/configs')
+}
+
+/** Продление доступа unlock-кодом (owner scope) — Mini App. */
+export async function redeemTgMeCode(code: string): Promise<{
+  grant_days: number
+  protocols_applied: string[]
+  access_until_by_protocol: Record<string, string | null>
+}> {
+  return tgFetch<{
+    grant_days: number
+    protocols_applied: string[]
+    access_until_by_protocol: Record<string, string | null>
+  }>('/me/redeem-code', {
+    method: 'POST',
+    body: JSON.stringify({ code }),
+  })
+}
+
+/** Самосервис плана конфигов: добавить следующее свободное имя. */
+export async function createTgMePlanConfig(): Promise<{ index: number; task_id: string }> {
+  return tgFetch<{ index: number; task_id: string }>('/me/plan-configs', {
+    method: 'POST',
+  })
+}
+
+/** Самосервис плана конфигов: убрать имя по индексу. */
+export async function removeTgMePlanConfig(
+  index: number,
+  confirmDeletions = false,
+): Promise<{ task_id: string }> {
+  const qs = confirmDeletions ? '?confirm_deletions=true' : ''
+  return tgFetch<{ task_id: string }>(`/me/plan-configs/${index}${qs}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function getTgConfigFiles(configId: number): Promise<{ files: TgMiniConfigFile[] }> {
-  return tgFetch<{ files: TgMiniConfigFile[] }>(`/configs/${configId}/files`)
+  // /me/... ищет конфиг на его собственном узле; /configs/{id}/files работает
+  // только с активным узлом и даёт 404 для конфига на другом сервере.
+  return tgFetch<{ files: TgMiniConfigFile[] }>(`/me/configs/${configId}/files`)
 }
 
 export async function sendTgConfig(
   configId: number,
   data: { path?: string; destination: 'self' | 'owner'; platform?: InstallPlatform },
 ): Promise<{ message: string }> {
-  return tgFetch<{ message: string }>(`/configs/${configId}/send`, {
+  return tgFetch<{ message: string }>(`/me/configs/${configId}/send`, {
     method: 'POST',
     body: JSON.stringify(data),
   })
-}
-
-export async function getTgQrLink(configId: number, path: string): Promise<TgMiniQrLink> {
-  const params = new URLSearchParams({ config_id: String(configId), path })
-  return tgFetch<TgMiniQrLink>(`/qr-link?${params.toString()}`)
 }
 
 export async function getTgSettings(opts?: { retry?: boolean }): Promise<TgMiniSettings> {
@@ -238,209 +251,104 @@ export async function getTgNodes(): Promise<TgMiniNodesResponse> {
   return tgFetch<TgMiniNodesResponse>('/nodes')
 }
 
-export async function checkTgNodeHealth(nodeId: number): Promise<TgMiniNodeActionResponse> {
-  return tgFetch<TgMiniNodeActionResponse>(`/nodes/${nodeId}/health`, { method: 'POST' })
-}
-
 export async function activateTgNode(nodeId: number): Promise<TgMiniNodeActionResponse> {
   return tgFetch<TgMiniNodeActionResponse>(`/nodes/${nodeId}/activate`, { method: 'POST' })
 }
 
-export async function getTgWarperStatus(): Promise<TgMiniWarperStatus> {
-  return tgFetch<TgMiniWarperStatus>('/warper/status')
+/** Публичный конфиг Mini App: без токена, только имя бота для ссылки на вход. */
+export async function getTgMiniPublicConfig(): Promise<TgMiniPublicConfig> {
+  return tgFetch<TgMiniPublicConfig>('/config', {}, false)
 }
 
-export async function getTgAwg2Status(): Promise<TgMiniAwg2Status> {
-  return tgFetch<TgMiniAwg2Status>('/awg2/status')
+/** Одна панельная конфигурация по id: в `@/api/configs` нет геттера без списка. */
+export async function getTgConfig(configId: number): Promise<VpnConfig> {
+  return apiFetch<VpnConfig>(`/configs/${configId}?include_files=false`)
 }
 
-export async function getTgCidrStatus(): Promise<TgMiniCidrStatus> {
-  return tgFetch<TgMiniCidrStatus>('/cidr/status')
-}
+/* ------------------- Админ: конфиги на активном узле ------------------- */
 
-export async function getTgFeatureModules(): Promise<FeatureModulesResponse> {
-  return panelApiFetch<FeatureModulesResponse>('/feature-modules')
-}
-
-export async function getTgConfigQuota(): Promise<SelfServiceQuota> {
-  return panelApiFetch<SelfServiceQuota>('/configs/quota')
-}
-
-export async function getTgPanelConfig(configId: number): Promise<VpnConfig> {
-  return panelApiFetch<VpnConfig>(`/configs/${configId}?include_files=false`)
-}
-
-export async function createTgPanelConfig(data: {
-  client_name: string
-  vpn_type: VpnType
-  cert_expire_days?: number
-  description?: string
-  owner_id?: number
-  ttl?: string
-}): Promise<VpnConfig> {
-  return panelApiFetch<VpnConfig>('/configs', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
-}
-
-export async function updateTgPanelConfig(
+/** Файлы профиля на активном узле (админский список конфигов). */
+export async function getTgAdminConfigFiles(
   configId: number,
-  data: { description?: string; cert_expire_days?: number; owner_id?: number },
-): Promise<VpnConfig> {
-  return panelApiFetch<VpnConfig>(`/configs/${configId}`, {
-    method: 'PATCH',
-    body: JSON.stringify(data),
-  })
+): Promise<{ files: TgMiniConfigFile[] }> {
+  return tgFetch<{ files: TgMiniConfigFile[] }>(`/configs/${configId}/files`)
 }
 
-export async function deleteTgPanelConfig(configId: number): Promise<{ message: string }> {
-  return panelApiFetch<{ message: string }>(`/configs/${configId}`, { method: 'DELETE' })
-}
-
-export async function getTgPanelUsers(): Promise<User[]> {
-  return panelApiFetch<User[]>('/users')
-}
-
-export async function getTgClientTemplates(): Promise<ClientTemplate[]> {
-  return panelApiFetch<ClientTemplate[]>('/client-templates')
-}
-
-export async function applyTgClientTemplate(
-  templateId: number,
-  data: { client_name: string; owner_id?: number },
-): Promise<VpnConfig> {
-  return panelApiFetch<VpnConfig>(`/client-templates/${templateId}/apply`, {
+export async function sendTgAdminConfig(
+  configId: number,
+  data: { path?: string; destination: 'self' | 'owner'; platform?: InstallPlatform },
+): Promise<{ message: string }> {
+  return tgFetch<{ message: string }>(`/configs/${configId}/send`, {
     method: 'POST',
     body: JSON.stringify(data),
   })
 }
 
-export async function getTgClientPolicy(
-  clientName: string,
-  vpnType: VpnType,
-): Promise<ClientAccessPolicy | null> {
-  const params = new URLSearchParams({ clients: clientName })
-  const data = await panelApiFetch<Record<string, ClientPoliciesResponseEntry>>(
-    `/client-access/policies?${params.toString()}`,
-  )
-  const entry = data[clientName]
-  if (!entry) return null
-  if (vpnType === 'openvpn') return entry.openvpn
-  if (vpnType === 'amneziawg2') return entry.amneziawg2 ?? null
-  return entry.wireguard
-}
+/* ------------------- Чат абонент ↔ администратор ------------------- */
 
-async function postClientAccess(path: string, clientName: string, extra?: Record<string, unknown>) {
-  return panelApiFetch(path, {
-    method: 'POST',
-    body: JSON.stringify({ client_name: clientName, ...extra }),
-  })
-}
-
-export async function tgOpenvpnTempBlock(clientName: string, days: number) {
-  return postClientAccess('/client-access/openvpn/temp-block', clientName, { days })
-}
-
-export async function tgOpenvpnPermanentBlock(clientName: string) {
-  return postClientAccess('/client-access/openvpn/permanent-block', clientName)
-}
-
-export async function tgOpenvpnUnblock(clientName: string) {
-  return postClientAccess('/client-access/openvpn/unblock', clientName)
-}
-
-export async function tgWgTempBlock(clientName: string, days: number) {
-  return postClientAccess('/client-access/wireguard/temp-block', clientName, { days })
-}
-
-export async function tgWgPermanentBlock(clientName: string) {
-  return postClientAccess('/client-access/wireguard/permanent-block', clientName)
-}
-
-export async function tgWgUnblock(clientName: string) {
-  return postClientAccess('/client-access/wireguard/unblock', clientName)
-}
-
-export async function tgOpenvpnSetTrafficLimit(
-  clientName: string,
-  limitValue: number,
-  limitUnit = 'MB',
-  limitPeriodDays?: number | null,
-) {
-  return postClientAccess('/client-access/openvpn/set-traffic-limit', clientName, {
-    limit_value: limitValue,
-    limit_unit: limitUnit,
-    limit_period_days: limitPeriodDays ?? null,
-  })
-}
-
-export async function tgWgSetTrafficLimit(
-  clientName: string,
-  limitValue: number,
-  limitUnit = 'MB',
-  limitPeriodDays?: number | null,
-) {
-  return postClientAccess('/client-access/wireguard/set-traffic-limit', clientName, {
-    limit_value: limitValue,
-    limit_unit: limitUnit,
-    limit_period_days: limitPeriodDays ?? null,
-  })
-}
-
-export async function tgAwg2SetTrafficLimit(
-  clientName: string,
-  limitValue: number,
-  limitUnit = 'MB',
-  limitPeriodDays?: number | null,
-) {
-  return postClientAccess('/client-access/amneziawg2/set-traffic-limit', clientName, {
-    limit_value: limitValue,
-    limit_unit: limitUnit,
-    limit_period_days: limitPeriodDays ?? null,
-  })
-}
-
-export type UnlockCodeProtocol = 'openvpn' | 'wireguard' | 'amneziawg2'
-
-export async function setTgClientAccessUntil(
-  protocol: UnlockCodeProtocol,
-  clientName: string,
-  accessUntil: string | null,
-) {
-  return panelApiFetch<{ access_until: string | null }>(
-    `/client-access/${protocol}/${encodeURIComponent(clientName)}/access-until`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify({ access_until: accessUntil }),
-    },
+/** Свой диалог абонента (owner scope), новые сообщения первыми. */
+export async function getTgMeMessages(
+  params: { limit?: number; beforeId?: number } = {},
+): Promise<UserMessageItem[]> {
+  return tgFetch<UserMessageItem[]>(
+    `/me/messages${queryString({ limit: params.limit, before_id: params.beforeId })}`,
   )
 }
 
-export async function getTgUnlockCodes(includeRevoked = false): Promise<UnlockCodeRecord[]> {
-  const params = new URLSearchParams()
-  if (includeRevoked) params.set('include_revoked', 'true')
-  const query = params.toString()
-  return panelApiFetch<UnlockCodeRecord[]>(`/unlock-codes${query ? `?${query}` : ''}`)
-}
-
-export async function createTgUnlockCode(payload: {
-  grant_days: number
-  protocols: UnlockCodeProtocol[]
-  mode: 'single' | 'multi'
-  max_redemptions?: number
-  code_expires_at?: string | null
-  code?: string | null
-  allowed_client_names?: string[]
-}): Promise<UnlockCodeRecord> {
-  return panelApiFetch<UnlockCodeRecord>('/unlock-codes', {
+export async function sendTgMeMessage(text: string): Promise<UserMessageItem> {
+  return tgFetch<UserMessageItem>('/me/messages', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ text }),
   })
 }
 
-export async function revokeTgUnlockCode(codeId: number): Promise<{ ok: boolean; id: number }> {
-  return panelApiFetch<{ ok: boolean; id: number }>(`/unlock-codes/${codeId}/revoke`, {
+export async function getTgMeMessagesUnread(): Promise<{ count: number }> {
+  return tgFetch<{ count: number }>('/me/messages/unread')
+}
+
+export async function markTgMeMessagesRead(): Promise<{ marked: number }> {
+  return tgFetch<{ marked: number }>('/me/messages/read', { method: 'POST' })
+}
+
+/** Админ: список диалогов (поиск по логину, только непрочитанные). */
+export async function getTgMessageThreads(
+  params: { q?: string; unread?: boolean } = {},
+): Promise<MessageThread[]> {
+  return tgFetch<MessageThread[]>(
+    `/messages/threads${queryString({ q: params.q, unread: params.unread ? 1 : undefined })}`,
+  )
+}
+
+export async function getTgMessageThread(
+  userId: number,
+  params: { beforeId?: number; limit?: number } = {},
+): Promise<UserMessageItem[]> {
+  return tgFetch<UserMessageItem[]>(
+    `/messages/${userId}${queryString({ before_id: params.beforeId, limit: params.limit })}`,
+  )
+}
+
+export async function sendTgMessageThread(userId: number, text: string): Promise<SendMessageResult> {
+  return tgFetch<SendMessageResult>(`/messages/${userId}`, {
     method: 'POST',
+    body: JSON.stringify({ text }),
   })
 }
+
+export async function getTgMessagesUnreadTotal(): Promise<{ count: number }> {
+  return tgFetch<{ count: number }>('/messages/unread-count')
+}
+
+/** Собственная ссылка клиентского портала: получить, создать, перевыпустить. */
+export async function getTgPortalLink(): Promise<TgPortalLink> {
+  return tgFetch<TgPortalLink>('/me/portal-link')
+}
+
+export async function createTgPortalLink(): Promise<TgPortalLink> {
+  return tgFetch<TgPortalLink>('/me/portal-link', { method: 'POST' })
+}
+
+export async function rotateTgPortalLink(): Promise<TgPortalLink> {
+  return tgFetch<TgPortalLink>('/me/portal-link/rotate', { method: 'POST' })
+}
+

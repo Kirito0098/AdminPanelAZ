@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
+from app.config import get_settings
 from app.services.awg2 import Awg2NotInstalledError, Awg2Service
 from app.services.backup_manager import BackupManager
 from app.services.node_manager import get_active_adapter
@@ -31,7 +32,9 @@ def apply_backup_overlays(
 
 
 def _apply_local(payload: dict, *, config_root: Path | None) -> None:
-    root = config_root or (Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret")) / "config")
+    root = config_root or (
+        Path(os.environ.get("ANTIZAPRET_PATH") or get_settings().antizapret_path) / "config"
+    )
     configs = payload.get("configs") or {}
     try:
         root.mkdir(parents=True, exist_ok=True)
@@ -82,10 +85,13 @@ def _apply_adapter(payload: dict, *, db) -> None:
                 runtime.get("errors") or [],
             )
             return
-        from app.routers.awg2 import _ha_sync_awg2_from_active
+        from app.routers.awg2 import _enqueue_ha_awg2_from_active
 
-        ha = _ha_sync_awg2_from_active(db)
+        # Queue HA push so panel restore HTTP does not wait on replica AWG2 copy.
+        ha = _enqueue_ha_awg2_from_active(db)
         if ha.get("errors"):
             logger.warning("AZ-AWG2 HA sync after panel restore: %s", ha["errors"])
+        elif ha.get("queued"):
+            logger.info("AZ-AWG2 HA sync queued after panel restore: %s", ha.get("task_id"))
     except Exception as exc:
         logger.warning("Could not restore AZ-AWG2 overlay from panel backup: %s", exc)

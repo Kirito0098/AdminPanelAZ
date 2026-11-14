@@ -5,8 +5,10 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
+from app.services.access_log_privacy import install_uvicorn_access_log_filter
 
 logger = logging.getLogger(__name__)
+install_uvicorn_access_log_filter()
 from app.middleware.api_rate_limit import ApiRateLimitMiddleware
 from app.middleware.http_security import (
     HttpSecurityMiddleware,
@@ -22,7 +24,14 @@ from app.services.security_bootstrap import (
     restrict_sensitive_file_permissions,
     validate_panel_settings,
 )
-from app.database import Base, SessionLocal, engine, migrations_lock, run_db_migrations
+from app.database import (
+    Base,
+    SessionLocal,
+    engine,
+    migrations_lock,
+    resolve_main_db_path,
+    run_db_migrations,
+)
 from app.cidr_database import run_cidr_db_migrations
 from app.models import User, UserRole, VpnConfig, VpnType
 from app.routers import (
@@ -38,14 +47,18 @@ from app.routers import (
     configs,
     configs_bulk,
     dns_aaaa,
+    dns_servers,
     edit_files,
     ip_blocked,
     logs,
     maintenance,
+    messages,
     monitoring,
+    notifications,
     nodes,
     node_sync,
     openvpn_buffer_guard,
+    openvpn_tuning,
     public_download,
     public_portal,
     routing,
@@ -68,6 +81,7 @@ from app.routers import (
 )
 from app.routers import settings as settings_router
 from app.routers import users
+from app.routers import me
 from app.services.admin_bootstrap import upsert_bootstrap_admin
 from app.services.node_manager import get_active_adapter, get_active_node, sync_local_node
 from app.services.ip_restriction import ip_restriction_service
@@ -78,7 +92,9 @@ from app.services.lifespan_workers import (
     start_leader_workers,
 )
 from app.services.background_gate import configure_background_gate
+from app.services.node_http_gate import configure_node_http_gate
 from app.services.shared_state import configure_shared_state
+from app.services.sqlite_tx_watchdog import install as install_sqlite_tx_watchdog
 from app.services.worker_leader import WorkerLeaderLock
 from app.services.worker_lifecycle import should_start_resource_monitor
 
@@ -121,36 +137,25 @@ def _seed_database():
                 raise ValueError("admin user not found")
             adapter = get_active_adapter(db)
             node_id = get_active_node(db).id
-            ovpn_clients = adapter.list_openvpn_clients()
-            wg_clients = adapter.list_wireguard_clients()
-            for name in ovpn_clients:
-                if not db.query(VpnConfig).filter(
-                    VpnConfig.node_id == node_id,
-                    VpnConfig.client_name == name,
-                    VpnConfig.vpn_type == VpnType.openvpn,
-                ).first():
-                    db.add(
-                        VpnConfig(
-                            node_id=node_id,
-                            client_name=name,
-                            vpn_type=VpnType.openvpn,
-                            owner_id=admin.id,
+            clients_by_type = (
+                (VpnType.openvpn, adapter.list_openvpn_clients()),
+                (VpnType.wireguard, adapter.list_wireguard_clients()),
+            )
+            for vpn_type, names in clients_by_type:
+                for name in names:
+                    if not db.query(VpnConfig).filter(
+                        VpnConfig.node_id == node_id,
+                        VpnConfig.client_name == name,
+                        VpnConfig.vpn_type == vpn_type,
+                    ).first():
+                        db.add(
+                            VpnConfig(
+                                node_id=node_id,
+                                client_name=name,
+                                vpn_type=vpn_type,
+                                owner_id=admin.id,
+                            )
                         )
-                    )
-            for name in wg_clients:
-                if not db.query(VpnConfig).filter(
-                    VpnConfig.node_id == node_id,
-                    VpnConfig.client_name == name,
-                    VpnConfig.vpn_type == VpnType.wireguard,
-                ).first():
-                    db.add(
-                        VpnConfig(
-                            node_id=node_id,
-                            client_name=name,
-                            vpn_type=VpnType.wireguard,
-                            owner_id=admin.id,
-                        )
-                    )
             db.commit()
         except Exception:
             logger.exception("Failed to seed VPN clients from local adapter")
@@ -199,6 +204,29 @@ def run_leader_startup_actions() -> None:
     except Exception:
         logger.debug("Systemd unit migration skipped", exc_info=True)
     try:
+        from app.services.feature_guards import get_feature_service
+
+        # Stage 5 (§8.2): RESOURCE_PROFILE → SCENARIO_PRESET, label only.
+        if get_feature_service().migrate_resource_profile_label_only():
+            logger.info("Migrated RESOURCE_PROFILE label to SCENARIO_PRESET in .env (toggles untouched)")
+    except Exception:
+        logger.exception("Failed to migrate RESOURCE_PROFILE label to SCENARIO_PRESET on startup")
+    try:
+        from app.database import SessionLocal
+        from app.services.feature_guards import get_feature_service
+
+        # Update from 2.26.5 migrates RESOURCE_PROFILE -> SCENARIO_PRESET on startup; the
+        # install/update pip step runs before that and cannot create the grace AppSetting.
+        # Do it after the label migration so the UI shows the chosen scenario, not "custom".
+        startup_db = SessionLocal()
+        try:
+            if get_feature_service().ensure_scenario_grace_setting(startup_db):
+                logger.info("Scenario grace setting created on startup")
+        finally:
+            startup_db.close()
+    except Exception:
+        logger.exception("Failed to sync scenario grace setting on startup")
+    try:
         ip_restriction_service.sync_firewall()
     except Exception:
         logger.exception("Failed to sync IP restriction firewall on startup")
@@ -212,6 +240,25 @@ def run_leader_startup_actions() -> None:
             startup_db.close()
     except Exception:
         logger.exception("Failed to sync whitelist port firewall on startup")
+    try:
+        from app.database import SessionLocal
+        from app.services.privacy_upgrade import run_privacy_upgrade
+
+        privacy_db = SessionLocal()
+        try:
+            result = run_privacy_upgrade(privacy_db)
+            if result.get("grants_changed") or result.get("pin_migrated"):
+                logger.info(
+                    "Privacy upgrade: grants=%s pin=%s webhook=%s nginx=%s",
+                    result.get("grants_changed"),
+                    result.get("pin_migrated"),
+                    result.get("webhook"),
+                    result.get("nginx"),
+                )
+        finally:
+            privacy_db.close()
+    except Exception:
+        logger.exception("Failed to run privacy upgrade on startup")
 
 
 @asynccontextmanager
@@ -223,10 +270,7 @@ async def lifespan(_: FastAPI):
     mark_app_started()
     seed_database()
     app_root = Path(__file__).resolve().parents[1]
-    db_url = settings.database_url
-    db_path = Path(db_url.replace("sqlite:///", ""))
-    if not db_path.is_absolute():
-        db_path = app_root / db_path
+    db_path = resolve_main_db_path()
     env_path = app_root / ".env"
     from app.cidr_database import resolve_cidr_db_path
 
@@ -242,7 +286,9 @@ async def lifespan(_: FastAPI):
         return tasks
 
     configure_background_gate(db_path)
+    configure_node_http_gate(db_path)
     configure_shared_state(SessionLocal)
+    install_sqlite_tx_watchdog(engine)
     leader_lock = WorkerLeaderLock(leader_lock_path(db_path))
     background_tasks = start_leader_workers(
         leader_lock, start=_start_workers, on_startup=run_leader_startup_actions
@@ -251,6 +297,7 @@ async def lifespan(_: FastAPI):
     await cancel_background_tasks(background_tasks)
     leader_lock.release()
     configure_background_gate(None)
+    configure_node_http_gate(None)
     configure_shared_state(None)
 
 
@@ -277,21 +324,26 @@ app.add_middleware(
         EXPECTED_NODE_HEADER,
         "Accept",
     ],
-    expose_headers=["X-Qr-Content", "X-Qr-Download-Url", "Content-Disposition"],
+    expose_headers=["Content-Disposition"],
 )
 app.add_middleware(ApiRateLimitMiddleware)
 
 app.include_router(auth.router, prefix=_API_PREFIX)
 app.include_router(session.router, prefix=_API_PREFIX)
 app.include_router(users.router, prefix=_API_PREFIX)
+app.include_router(me.router, prefix=_API_PREFIX)
 app.include_router(configs.router, prefix=_API_PREFIX)
 app.include_router(configs_bulk.router, prefix=_API_PREFIX)
 app.include_router(config_tags.router, prefix=_API_PREFIX)
 app.include_router(client_templates.router, prefix=_API_PREFIX)
 app.include_router(monitoring.router, prefix=_API_PREFIX)
+app.include_router(notifications.router, prefix=_API_PREFIX)
+app.include_router(messages.router, prefix=_API_PREFIX)
 app.include_router(alert_rules.router, prefix=_API_PREFIX)
 app.include_router(openvpn_buffer_guard.router, prefix=_API_PREFIX)
 app.include_router(dns_aaaa.router, prefix=_API_PREFIX)
+app.include_router(dns_servers.router, prefix=_API_PREFIX)
+app.include_router(openvpn_tuning.router, prefix=_API_PREFIX)
 app.include_router(settings_router.router, prefix=_API_PREFIX)
 app.include_router(maintenance.router, prefix=_API_PREFIX)
 app.include_router(settings_reboot.router, prefix=_API_PREFIX)
@@ -371,6 +423,12 @@ async def feature_guard_middleware(request, call_next):
 async def ip_restriction_middleware(request, call_next):
     path = request.url.path
     api = _API_PREFIX
+    # Mini App is opened from mobile networks, so the panel allowlist must not
+    # apply to it. Banned/scanner IPs are still refused; hashed assets are the
+    # only exception, otherwise every JS chunk would cost a DB round-trip.
+    tg_mini_hard_deny_only = path.startswith(f"{api}/tg-mini") and not path.startswith(
+        f"{api}/tg-mini/assets/"
+    )
     exempt = (
         path.startswith(f"{api}/public/")
         or path.startswith("/api/public/")
@@ -394,7 +452,7 @@ async def ip_restriction_middleware(request, call_next):
             with_access_path(settings, "/ip-blocked"),
         )
     )
-    if exempt:
+    if exempt and not tg_mini_hard_deny_only:
         return await call_next(request)
 
     from fastapi.responses import JSONResponse, RedirectResponse
@@ -402,7 +460,9 @@ async def ip_restriction_middleware(request, call_next):
 
     client_ip = ip_restriction_service.get_client_ip(request)
     # Runs on every non-exempt request: SQLite must not block the event loop.
-    verdict = await run_in_threadpool(_ip_restriction_verdict, client_ip, path)
+    verdict = await run_in_threadpool(
+        _ip_restriction_verdict, client_ip, path, hard_deny_only=tg_mini_hard_deny_only
+    )
     if verdict == "hard_deny":
         return JSONResponse(status_code=403, content={"detail": "Доступ заблокирован на уровне сервера"})
     if verdict == "deny":
@@ -413,14 +473,20 @@ async def ip_restriction_middleware(request, call_next):
     return await call_next(request)
 
 
-def _ip_restriction_verdict(client_ip: str, path: str) -> str | None:
-    """``hard_deny``, ``deny`` (attempt recorded) or ``None`` when the IP may pass."""
+def _ip_restriction_verdict(client_ip: str, path: str, *, hard_deny_only: bool = False) -> str | None:
+    """``hard_deny``, ``deny`` (attempt recorded) or ``None`` when the IP may pass.
+
+    ``hard_deny_only`` is used by exempt surfaces (Mini App): a banned IP is
+    refused, but the panel allowlist and denied-access bookkeeping are skipped.
+    """
     from app.database import SessionLocal
 
     db = SessionLocal()
     try:
         if ip_restriction_service.should_hard_deny(db, client_ip):
             return "hard_deny"
+        if hard_deny_only:
+            return None
         ip_settings = ip_restriction_service.get_settings(db)
         if ip_settings.get("ip_restriction_enabled") and not ip_restriction_service.is_ip_allowed(db, client_ip):
             if ip_restriction_service.should_count_denied_access(path):
@@ -460,10 +526,16 @@ _register_openapi_docs_routes()
 
 
 @app.get(f"{_API_PREFIX}/health")
-def health():
-    from app.services.health_checks import build_light_health
+def health(request: Request):
+    from app.services.health_checks import app_started_at, build_light_health
+    from app.services.openapi_docs_gate import has_admin_bearer
 
-    return build_light_health()
+    payload = build_light_health()
+    # Public callers see only the status; the settings UI needs the process start time
+    # to dismiss its "restart the panel" banner.
+    if has_admin_bearer(request):
+        payload["started_at"] = app_started_at()
+    return payload
 
 
 @app.get(f"{_API_PREFIX}/health/deep")
@@ -542,7 +614,7 @@ def _mount_frontend(app: FastAPI) -> None:
     async def api_route_not_found(rest: str):
         from fastapi import HTTPException
 
-        raise HTTPException(status_code=404, detail="API endpoint not found — перезапустите панель после обновления")
+        raise HTTPException(status_code=404, detail="Not found")
 
     spa_route = f"{spa_prefix}/{{full_path:path}}" if spa_prefix else "/{full_path:path}"
 

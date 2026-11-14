@@ -49,6 +49,7 @@ from app.services.node_transport import (
     resolve_transport_id,
 )
 from app.services.node_manager import (
+    _node_kind,
     check_node_health,
     clear_active_node_id,
     sync_local_node,
@@ -73,8 +74,12 @@ from app.services.background_tasks import background_task_service
 from app.services.geo_routing_hint import build_geo_routing_hint
 from app.services.ssh_tunnel_pool import forget_ssh_host_key, get_ssh_tunnel_pool
 from app.services.node_transport_preflight import preflight_transport_switch
-from app.services.node_sync.config_sync import maybe_replicate_config_files
-from app.services.node_sync.groups import build_ha_node_context, find_group_for_node
+from app.services.config_apply_queue import enqueue_doall_and_replicate
+from app.services.node_sync.groups import (
+    build_ha_node_context,
+    find_group_for_node,
+    require_ha_primary_for_node_activation,
+)
 from app.services.openvpn_remote_hosts import (
     RemoteHostsError,
     append_host_to_allow_ips,
@@ -167,6 +172,10 @@ def _node_transport_value(node: Node) -> str:
 
 def _to_response(node: Node) -> NodeResponse:
     transport = _node_transport_value(node)
+    meta = node_metadata_dict(node)
+    awg2_installed = meta.get("awg2_installed")
+    if awg2_installed is not None:
+        awg2_installed = bool(awg2_installed)
     return NodeResponse(
         id=node.id,
         name=node.name,
@@ -187,7 +196,8 @@ def _to_response(node: Node) -> NodeResponse:
         linked_vpn_node_id=getattr(node, "linked_vpn_node_id", None),
         portal_label=getattr(node, "portal_label", None),
         last_seen_at=node.last_seen_at,
-        metadata=node_metadata_dict(node),
+        metadata=meta,
+        awg2_installed=awg2_installed if _node_kind(node) != NODE_KIND_PROXY else None,
         created_at=node.created_at,
         updated_at=node.updated_at,
     )
@@ -328,6 +338,8 @@ def _active_node_response(db: Session, node: Node, current_user: User) -> Active
     if current_user.role != UserRole.admin:
         node_response = node_response.model_copy(
             update={
+                "host": "hidden",
+                "port": 1,
                 "ssh_host": None,
                 "ssh_username": None,
                 "ssh_key_configured": False,
@@ -354,7 +366,7 @@ def list_nodes(_: User = Depends(require_admin), db: Session = Depends(get_db)):
 def geo_routing_hint(
     request: Request,
     client_ip: str | None = Query(default=None, description="Публичный IP клиента (опционально)"),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     resolved_ip = client_ip or ip_restriction_service.get_client_ip(request)
@@ -1004,22 +1016,14 @@ def allow_first_remote_host(
 
     adapter.write_config_file("allow-ips.txt", new_content)
     warnings: list[str] = []
-    try:
-        adapter.apply_config_changes()
-        from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
-
-        maybe_ensure_node_openvpn_multihome(adapter, node, restart_if_unchanged=False)
-    except Exception as exc:  # noqa: BLE001 — best-effort; file already written
-        detail = getattr(exc, "detail", None) or str(exc)
-        warnings.append(f"Файл сохранён, но doall.sh ошибка: {detail}")
-
-    # Same HA post-save path as edit_files PUT allow_ips.
-    maybe_replicate_config_files(
-        db,
+    task = enqueue_doall_and_replicate(
         node_id=node_id,
         file_keys=["allow_ips"],
-        run_doall=True,
         content_overrides={"allow_ips": new_content},
+        created_by_username=admin.username,
+        run_doall=True,
+        run_replicate=True,
+        queued_message="allow-ips обновлён — doall в фоне…",
     )
 
     if settings.audit_log_enabled:
@@ -1031,7 +1035,12 @@ def allow_first_remote_host(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"node_id={node_id} host={first}",
         )
-    return NodeAllowFirstRemoteHostResponse(added=True, host=first, warnings=warnings)
+    return NodeAllowFirstRemoteHostResponse(
+        added=True,
+        host=first,
+        warnings=warnings,
+        apply_task_id=task.id,
+    )
 
 
 @router.get("/{node_id}/openvpn-multihome", response_model=NodeOpenVpnMultihomeResponse)
@@ -1158,6 +1167,7 @@ def activate_node(
             detail="Прокси-узел нельзя сделать активным для VPN",
         )
 
+    require_ha_primary_for_node_activation(db, node=node)
     set_active_node_id(db, node.id)
     db.commit()
     health = check_node_health(node)

@@ -12,9 +12,15 @@ import {
 } from 'lucide-react'
 import SharedDomainPublishSection from '@/components/settings/SharedDomainPublishSection'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
@@ -101,7 +107,7 @@ function FormSection({
   return (
     <section className={cn('space-y-3', className)}>
       <div>
-        <h4 className="text-sm font-medium">{title}</h4>
+        <h4 className="text-sm font-semibold">{title}</h4>
         {description ? <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{description}</p> : null}
       </div>
       {children}
@@ -248,15 +254,17 @@ export default function PublishAccessWizard({
   }
 
   return (
-    <Card className="overflow-hidden shadow-sm">
+    <Card className="overflow-hidden">
       <CardHeader className="space-y-4 pb-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="space-y-1">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Rocket size={18} className="text-primary" />
-              Настроить доступ к панели
-            </CardTitle>
-            <CardDescription>Шаг 1 — способ публикации, шаг 2 — домен и параметры, затем применение</CardDescription>
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Rocket size={16} aria-hidden />
+            </span>
+            <div className="min-w-0 space-y-1">
+              <CardTitle>Настроить доступ к панели</CardTitle>
+              <CardDescription>Шаг 1 — способ публикации, шаг 2 — домен и параметры, затем применение</CardDescription>
+            </div>
           </div>
           {selectedModeInfo ? (
             <Badge variant="outline" className="gap-1.5 font-normal">
@@ -287,7 +295,7 @@ export default function PublishAccessWizard({
                   className={cn(
                     'flex flex-1 flex-col items-start rounded-xl border px-4 py-3 text-left transition-all',
                     active
-                      ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                      ? 'border-primary/40 bg-primary/5 ring-1 ring-primary/20'
                       : 'bg-card/50 hover:border-muted-foreground/30 hover:bg-muted/20',
                   )}
                 >
@@ -318,7 +326,7 @@ export default function PublishAccessWizard({
                   className={cn(
                     'relative flex flex-col gap-2.5 rounded-xl border p-3.5 text-left transition-all',
                     selected
-                      ? 'border-primary bg-primary/5 ring-1 ring-primary'
+                      ? 'border-primary/40 bg-primary/5 ring-1 ring-primary/20'
                       : 'bg-card/40 hover:border-muted-foreground/30 hover:bg-muted/20',
                   )}
                 >
@@ -391,7 +399,7 @@ export default function PublishAccessWizard({
         <FormSection
           title="2. Параметры"
           description="Домен, порты и при необходимости подпуть на общем домене."
-          className="rounded-xl border bg-muted/15 p-4"
+          className="rounded-lg border border-border/70 bg-muted/15 p-4"
         >
           <div className="grid gap-4 sm:grid-cols-2">
             {(selectedModeInfo?.requires_domain || showOptionalDomain) && (
@@ -643,7 +651,7 @@ export default function PublishAccessWizard({
             </SettingsAlert>
           ) : null}
           {clientPortalEnabled ? (
-            <div className="space-y-3 rounded-xl border bg-muted/15 p-3">
+            <div className="space-y-3 rounded-lg border border-border/70 bg-muted/15 p-3">
               <label className="flex cursor-pointer items-start gap-2.5 text-sm">
                 <input
                   type="checkbox"
@@ -688,7 +696,7 @@ export default function PublishAccessWizard({
         </div>
         </div>
 
-        <div className="sticky bottom-0 -mx-6 flex shrink-0 flex-col gap-3 border-t bg-card/95 px-6 py-4 pb-safe backdrop-blur-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="sticky bottom-0 -mx-4 flex shrink-0 flex-col gap-3 border-t bg-card/95 px-4 py-4 pb-safe backdrop-blur-sm sm:-mx-5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
           <div className="min-w-0 space-y-0.5">
             <p className="text-xs font-medium text-muted-foreground">Готово к применению</p>
             {previewAccessUrl ? (

@@ -2,12 +2,17 @@ import { Badge } from '@/components/ui/badge'
 import { parseTimestamp } from '@/lib/datetime'
 import { DOCS } from '@/lib/docsUrls'
 import { cn } from '@/lib/utils'
+import { protocolLabel } from '@/lib/vpnTypes'
 
 type NocDataFreshnessProps = {
   timestamp?: string | null
   refreshIntervalSec?: number
   geoipMode?: 'local_mmdb' | 'ip_api' | 'none' | null
   dataSource?: string | null
+  globalStats?: {
+    dco_enabled: boolean | null
+    max_bcast_mcast_queue: number | null
+  } | null
   servedFromCache?: boolean
   className?: string
 }
@@ -32,9 +37,10 @@ function geoipLabel(mode?: string | null): string {
 }
 
 function sourceLabel(source?: string | null): string {
-  if (source === 'management_socket') return 'OVPN: management socket'
-  if (source === 'status_log') return 'OVPN: status log'
+  if (source === 'management_socket') return `${protocolLabel('openvpn')}: management socket`
+  if (source === 'status_log') return `${protocolLabel('openvpn')}: status log`
   if (source === 'federated') return 'Сводка: все узлы'
+  if (source === 'db_fallback') return `${protocolLabel('openvpn')}: сессии из БД`
   return 'Источник: н/д'
 }
 
@@ -43,6 +49,7 @@ export default function NocDataFreshness({
   refreshIntervalSec = 30,
   geoipMode,
   dataSource,
+  globalStats,
   servedFromCache,
   className,
 }: NocDataFreshnessProps) {
@@ -65,6 +72,24 @@ export default function NocDataFreshness({
       <Badge variant={dataSource === 'management_socket' ? 'default' : 'secondary'} className="text-[10px]">
         {sourceLabel(dataSource)}
       </Badge>
+      {globalStats?.dco_enabled != null && (
+        <Badge
+          variant={globalStats.dco_enabled ? 'default' : 'outline'}
+          className="text-[10px]"
+          title="Direct Crypto Offload: шифрование OpenVPN выполняется в ядре"
+        >
+          {globalStats.dco_enabled ? 'DCO: вкл' : 'DCO: выкл'}
+        </Badge>
+      )}
+      {globalStats?.max_bcast_mcast_queue != null && (
+        <Badge
+          variant={globalStats.max_bcast_mcast_queue > 0 ? 'secondary' : 'outline'}
+          className="text-[10px]"
+          title="Максимальная длина очереди broadcast/multicast: рост = перегрузка"
+        >
+          очередь: {globalStats.max_bcast_mcast_queue}
+        </Badge>
+      )}
       {servedFromCache && (
         <Badge variant="outline" className="border-amber-500/40 text-[10px] text-amber-700 dark:text-amber-400">
           кэш

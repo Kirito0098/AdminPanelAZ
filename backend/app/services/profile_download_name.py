@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from pathlib import PurePosixPath
 
-CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+from app.services.client_names import CLIENT_NAME_RE
 AZ_PROFILE_DIR = re.compile(r"/(?:(?:openvpn|wireguard|amneziawg)/antizapret|clients/antizapret)(?:[-/]|$)")
 
 
@@ -31,10 +31,10 @@ def _parse_profile_location(path: str) -> tuple[str, str]:
     return "", ""
 
 
-def _is_az_profile(*, variant: str, path: str) -> bool:
-    if "antizapret" in variant:
+def is_az_profile(*, variant: str, path: str) -> bool:
+    if "antizapret" in (variant or ""):
         return True
-    return bool(AZ_PROFILE_DIR.search(path.replace("\\", "/")))
+    return bool(AZ_PROFILE_DIR.search((path or "").replace("\\", "/")))
 
 
 def _openvpn_suffix(variant: str, path: str) -> str:
@@ -56,7 +56,7 @@ def build_profile_download_filename(
     safe_name = sanitize_client_name(client_name)
     proto = (protocol or _parse_profile_location(path)[0]).lower()
     variant = variant or _parse_profile_location(path)[1]
-    profile_prefix = "AZ" if _is_az_profile(variant=variant, path=path) else "VPN"
+    profile_prefix = "AZ" if is_az_profile(variant=variant, path=path) else "VPN"
 
     if proto == "openvpn":
         suffix = _openvpn_suffix(variant, path)

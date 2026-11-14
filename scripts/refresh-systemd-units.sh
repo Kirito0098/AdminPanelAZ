@@ -5,6 +5,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=scripts/env-file.sh
+source "$ROOT_DIR/scripts/env-file.sh"
 UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
 PANEL_UNIT="$UNIT_DIR/adminpanelaz.service"
 NODE_UNIT="$UNIT_DIR/adminpanelaz-node.service"
@@ -36,9 +38,7 @@ _unit_env() {
 }
 
 _env_file_value() {
-  local file="$1" key="$2"
-  [[ -f "$file" ]] || return 0
-  sed -n "s/^${key}=//p" "$file" | head -1
+  env_file_get "$1" "$2"
 }
 
 # _install <установленный unit> <установщик> [ПЕРЕМЕННАЯ=значение…]. REFRESH_PREVIEW=1 — не ставить, а напечатать

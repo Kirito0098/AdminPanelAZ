@@ -1,10 +1,11 @@
+
 """Mini App tokens must work only in /tg-mini and the panel routes the Mini App actually calls."""
 
 from unittest.mock import MagicMock
 
 import jwt
 import pytest
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Response
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -21,6 +22,8 @@ from app.config import get_settings
 from app.database import Base, get_db
 from app.models import User, UserRole
 from app.routers.tg_mini import TelegramAuthRequest, tg_auth
+
+pytestmark = pytest.mark.slow
 
 
 @pytest.fixture
@@ -97,7 +100,7 @@ def test_access_token_still_works_on_marked_endpoint(client):
 
 
 def test_web_access_token_rejected_on_mini_app_router(real_client):
-    response = _call(real_client, "GET", "/api/tg-mini/dashboard", create_access_token({"sub": "bob"}))
+    response = _call(real_client, "GET", "/api/tg-mini/settings", create_access_token({"sub": "bob"}))
     assert response.status_code == 401
 
 
@@ -116,13 +119,28 @@ def test_tg_mini_token_is_not_a_panel_access_token(db_factory):
 
 # Calls made by frontend/src/tg-mini/api.ts (panelApiFetch) and a sample of /tg-mini routes.
 _MINI_APP_CALLS = [
-    ("GET", "/api/tg-mini/dashboard"),
+    ("GET", "/api/tg-mini/config"),
     ("GET", "/api/configs/quota"),
     ("GET", "/api/configs/999"),
     ("POST", "/api/configs"),
     ("PATCH", "/api/configs/999"),
     ("DELETE", "/api/configs/999"),
     ("GET", "/api/users"),
+    ("GET", "/api/users/presets"),
+    ("GET", "/api/users/requests"),
+    ("GET", "/api/users/requests/count"),
+    ("GET", "/api/users/requests/999/receipt"),
+    ("POST", "/api/users/requests/999/approve"),
+    ("POST", "/api/users/requests/999/reject"),
+    ("POST", "/api/users/provisioned"),
+    ("PATCH", "/api/users/999"),
+    ("GET", "/api/users/999/history"),
+    ("GET", "/api/users/999/stats"),
+    ("POST", "/api/users/999/suspend"),
+    ("POST", "/api/users/999/resume"),
+    ("POST", "/api/users/999/extend"),
+    ("POST", "/api/users/999/traffic-counter/reset"),
+    ("DELETE", "/api/users/999"),
     ("GET", "/api/client-templates"),
     ("POST", "/api/client-templates/999/apply"),
     ("GET", "/api/client-access/policies"),
@@ -136,12 +154,14 @@ _MINI_APP_CALLS = [
     ("GET", "/api/unlock-codes"),
     ("POST", "/api/unlock-codes"),
     ("POST", "/api/unlock-codes/999/revoke"),
+    ("POST", "/api/me/plan-configs"),
+    ("DELETE", "/api/me/plan-configs/2"),
 ]
 
 _PANEL_ONLY_CALLS = [
     ("GET", "/api/configs"),
     ("GET", "/api/configs/export"),
-    ("DELETE", "/api/users/2"),
+    ("POST", "/api/users/bulk"),
     ("POST", "/api/client-access/openvpn/disconnect"),
     ("POST", "/api/client-templates"),
 ]
@@ -149,10 +169,10 @@ _PANEL_ONLY_CALLS = [
 
 @pytest.fixture
 def real_client(db_factory):
-    from app.routers import client_access, client_templates, configs, tg_mini, unlock_codes, users
+    from app.routers import client_access, client_templates, configs, me, tg_mini, unlock_codes, users
 
     app = FastAPI()
-    for module in (configs, users, client_templates, client_access, unlock_codes, tg_mini):
+    for module in (configs, users, client_templates, client_access, unlock_codes, me, tg_mini):
         app.include_router(module.router, prefix="/api")
     app.dependency_overrides[get_db] = _db_override(db_factory)
     return TestClient(app, raise_server_exceptions=False)
@@ -186,7 +206,7 @@ def test_tg_auth_issues_scoped_mini_app_token(monkeypatch, db_factory):
     _patch_tg_auth(monkeypatch, {"id": 555})
     db = db_factory()
     try:
-        result = tg_auth(payload=TelegramAuthRequest(init_data="x"), request=MagicMock(), db=db)
+        result = tg_auth(payload=TelegramAuthRequest(init_data="x"), request=MagicMock(), response=Response(), db=db)
     finally:
         db.close()
     settings = get_settings()
@@ -200,7 +220,7 @@ def test_tg_auth_rejects_init_data_without_user_id(monkeypatch):
     notify = _patch_tg_auth(monkeypatch, {})
     db = MagicMock()
     with pytest.raises(HTTPException) as exc:
-        tg_auth(payload=TelegramAuthRequest(init_data="x"), request=MagicMock(), db=db)
+        tg_auth(payload=TelegramAuthRequest(init_data="x"), request=MagicMock(), response=Response(), db=db)
     assert exc.value.status_code == 401
     db.query.assert_not_called()
     notify.assert_not_called()
@@ -213,7 +233,7 @@ def test_tg_auth_rejects_inactive_user(monkeypatch, db_factory):
         db.query(User).filter(User.username == "bob").update({"is_active": False})
         db.commit()
         with pytest.raises(HTTPException) as exc:
-            tg_auth(payload=TelegramAuthRequest(init_data="x"), request=MagicMock(), db=db)
+            tg_auth(payload=TelegramAuthRequest(init_data="x"), request=MagicMock(), response=Response(), db=db)
     finally:
         db.close()
     assert exc.value.status_code == 401

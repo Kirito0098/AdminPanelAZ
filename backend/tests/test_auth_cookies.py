@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 
 from app.config import Settings
-from app.services.auth_cookies import client_request_is_https, refresh_token_cookie_secure
+from app.services.auth_cookies import refresh_token_cookie_secure
 
 
 def _request(*, scheme: str, forwarded: str | None = None) -> MagicMock:
@@ -61,8 +61,3 @@ def test_no_request_production_alone_is_not_secure():
     )
     assert refresh_token_cookie_secure(settings, None) is False
 
-
-def test_client_request_is_https_helpers():
-    assert client_request_is_https(None) is None
-    assert client_request_is_https(_request(scheme="https")) is True
-    assert client_request_is_https(_request(scheme="http")) is False

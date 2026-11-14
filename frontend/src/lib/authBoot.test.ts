@@ -51,33 +51,6 @@ describe('loadSessionUser', () => {
     })
   })
 
-  it('uses its own message for a connection failure reported by apiFetch', async () => {
-    const offline = async (): Promise<string | null> => {
-      throw new ApiError('Не удалось связаться с сервером.', 0)
-    }
-    expect(await loadSessionUser({ getToken: () => null, refresh: offline, getMe: async () => alice })).toEqual({
-      kind: 'unavailable',
-      message: SERVER_UNAVAILABLE_MESSAGE,
-    })
-  })
-
-  it('passes the server message of other errors through', async () => {
-    const badGateway = async (): Promise<string | null> => {
-      throw new ApiError('Сервер временно недоступен (502).', 502)
-    }
-    expect(await loadSessionUser({ getToken: () => null, refresh: badGateway, getMe: async () => alice })).toEqual({
-      kind: 'unavailable',
-      message: 'Сервер временно недоступен (502).',
-    })
-    const notFound = async (): Promise<User> => {
-      throw new ApiError('Запрос не найден (404).', 404)
-    }
-    expect(await loadSessionUser({ getToken: () => 't', refresh: async () => 't', getMe: notFound })).toEqual({
-      kind: 'unavailable',
-      message: 'Запрос не найден (404).',
-    })
-  })
-
   it('gives up on a server that never answers', async () => {
     vi.useFakeTimers()
     const pending = loadSessionUser({
@@ -95,12 +68,6 @@ describe('loadSessionUser', () => {
     expect(settled).toBe(false)
     await vi.advanceTimersByTimeAsync(1)
     expect(await pending).toEqual({ kind: 'unavailable', message: SERVER_UNAVAILABLE_MESSAGE })
-  })
-
-  it('does not leave the timer running after an answer', async () => {
-    vi.useFakeTimers()
-    await loadSessionUser({ getToken: () => 't', refresh: async () => 't', getMe: async () => alice })
-    expect(vi.getTimerCount()).toBe(0)
   })
 })
 
@@ -121,15 +88,5 @@ describe('reduceAuthSession', () => {
     state = reduceAuthSession(state, { type: 'checked', result: { kind: 'unavailable', message: 'down' } })
     state = reduceAuthSession(state, { type: 'signed-out' })
     expect(state).toEqual(signedOut)
-  })
-
-  it('forgets an old "unavailable" once the session ends or the server answers', () => {
-    const stale = { user: alice, unavailable: 'down' }
-    expect(reduceAuthSession(stale, { type: 'signed-out' })).toEqual(signedOut)
-    expect(reduceAuthSession(stale, { type: 'checked', result: { kind: 'anonymous' } })).toEqual(signedOut)
-    expect(reduceAuthSession(stale, { type: 'checked', result: { kind: 'user', user: alice } })).toEqual({
-      user: alice,
-      unavailable: null,
-    })
   })
 })

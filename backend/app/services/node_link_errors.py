@@ -15,6 +15,18 @@ CODE_ERROR = "node_error"
 CODE_SSH_AUTH = "node_ssh_auth"
 CODE_SSH_UNREACHABLE = "node_ssh_unreachable"
 CODE_SSH_TUNNEL = "node_ssh_tunnel"
+CODE_BUSY = "node_busy"
+
+# Text markers produced by a TLS proxy in front of the agent, not by the agent itself.
+# The agent's own JSON errors may mention "SSL" (e.g. EasyRSA output) and must not land here.
+_PROXY_TLS_MARKERS = (
+    "plain http request was sent to https port",
+    "http request was sent to https port",
+    "wrong version number",
+    "ssl routines",
+    "tlsv1 alert",
+    "unknown protocol",
+)
 
 _HINTS = {
     CODE_AUTH: "Проверьте API-ключ узла (X-Node-Key) и NODE_AGENT_ALLOWED_IPS.",
@@ -25,6 +37,7 @@ _HINTS = {
     CODE_SSH_AUTH: "Проверьте SSH username, private key и passphrase для узла.",
     CODE_SSH_UNREACHABLE: "Проверьте SSH host:port, firewall и доступность узла по SSH.",
     CODE_SSH_TUNNEL: "Проверьте SSH tunnel и remote agent host:port на узле.",
+    CODE_BUSY: "Агент узла занят другой операцией — повторите запрос через несколько секунд.",
 }
 
 
@@ -33,6 +46,8 @@ def link_error_detail(code: str, message: str) -> dict[str, str]:
 
 
 def http_status_for_code(code: str, *, upstream_status: int | None = None) -> int:
+    if code == CODE_BUSY:
+        return status.HTTP_503_SERVICE_UNAVAILABLE
     if code == CODE_TIMEOUT:
         return status.HTTP_504_GATEWAY_TIMEOUT
     # Preserve agent 4xx (except auth) so callers can still distinguish 404 vs generic 502.
@@ -77,16 +92,36 @@ def classify_request_error(exc: httpx.RequestError, *, mtls_enabled: bool) -> tu
     return CODE_UNREACHABLE, f"Узел недоступен: {exc}"
 
 
-def classify_http_status(status_code: int, detail: Any, *, mtls_enabled: bool) -> tuple[str, str]:
+def classify_http_status(
+    status_code: int,
+    detail: Any,
+    *,
+    mtls_enabled: bool,
+    from_agent: bool = False,
+) -> tuple[str, str]:
+    """Classify an HTTP error from the node/proxy agent.
+
+    ``from_agent`` marks a structured JSON error produced by the agent itself: such a body is an
+    operation failure (e.g. an EasyRSA message that merely mentions SSL), never a TLS mismatch.
+    TLS detection is kept only for proxy/plain-text pages that really signal a scheme mismatch.
+    """
     text = _detail_to_text(detail)
     if status_code in (status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN):
         if status_code == status.HTTP_401_UNAUTHORIZED:
             return CODE_AUTH, "Неверный API-ключ узла (заголовок X-Node-Key)"
         return CODE_AUTH, text or "Доступ запрещён — проверьте NODE_AGENT_ALLOWED_IPS на узле"
     lower = text.lower()
-    ssl_msg = _ssl_message(lower, mtls_enabled=mtls_enabled)
-    if ssl_msg:
-        return CODE_TLS_MISMATCH, ssl_msg
+    if not from_agent and any(marker in lower for marker in _PROXY_TLS_MARKERS):
+        if mtls_enabled:
+            return (
+                CODE_TLS_MISMATCH,
+                "Прокси узла вернул ошибку TLS: проверьте mTLS-сертификаты панели и HTTPS на агенте.",
+            )
+        return (
+            CODE_TLS_MISMATCH,
+            "Узел, вероятно, отвечает по HTTPS (mTLS), а панель обращается по HTTP. "
+            "Включите mTLS для узла на странице «Узлы».",
+        )
     return CODE_ERROR, text or f"Ошибка агента HTTP {status_code}"
 
 

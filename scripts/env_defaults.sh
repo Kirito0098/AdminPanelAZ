@@ -24,8 +24,6 @@ ensure_env_defaults() {
     _ensure_env_default "MONITOR_CHECK_INTERVAL_SECONDS" "60"
     _ensure_env_default "MONITOR_COOLDOWN_MINUTES" "30"
     _ensure_env_default "MONITOR_SUSTAINED_SECONDS" "180"
-    _ensure_env_default "CIDR_DB_SOURCE_FETCH_TIMEOUT" "90"
-    _ensure_env_default "CIDR_DB_SOURCE_FETCH_RETRIES" "3"
     _ensure_env_default "FEATURE_OPENVPN_ENABLED" "true"
     _ensure_env_default "FEATURE_WIREGUARD_ENABLED" "true"
     _ensure_env_default "FEATURE_AMNEZIAWG_ENABLED" "true"
@@ -35,6 +33,7 @@ ensure_env_defaults() {
     _ensure_env_default "FEATURE_WARPER_ENABLED" "true"
     _ensure_env_default "FEATURE_EDIT_FILES_ENABLED" "true"
     _ensure_env_default "FEATURE_TELEGRAM_ENABLED" "true"
+    _ensure_env_default "FEATURE_TELEGRAM_WIDGETS_ENABLED" "false"
     _ensure_env_default "FEATURE_BACKUPS_ENABLED" "true"
     _ensure_env_default "FEATURE_MAINTENANCE_ENABLED" "true"
     _ensure_env_default "FEATURE_SECURITY_ENABLED" "true"
@@ -42,6 +41,7 @@ ensure_env_defaults() {
     _ensure_env_default "FEATURE_USER_MANAGEMENT_ENABLED" "true"
     _ensure_env_default "FEATURE_ACTION_LOGS_ENABLED" "true"
     _ensure_env_default "FEATURE_SYSTEM_UPDATES_ENABLED" "true"
+    # Ключ исторический: управляет выдачей VPN-профилей (скачивание конфигов), не QR
     _ensure_env_default "FEATURE_QR_DOWNLOADS_ENABLED" "true"
     _ensure_env_default "FEATURE_VPN_NETWORK_ENABLED" "true"
     _ensure_env_default "ACTIVE_WEB_SESSION_TRACKING_ENABLED" "true"
@@ -50,7 +50,6 @@ ensure_env_defaults() {
     _ensure_env_default "NIGHTLY_IDLE_RESTART_ENABLED" "true"
     _ensure_env_default "NIGHTLY_IDLE_RESTART_CRON" "0 4 * * *"
     _ensure_env_default "RUNTIME_BACKUP_CLEANUP_ENABLED" "true"
-    _ensure_env_default "ADMIN_PANEL_AZ_SERVICE_NAME" "adminpanelaz"
     # Публикация (nginx-setup.sh задаёт DOMAIN, BEHIND_NGINX, TRUSTED_PROXY_IPS)
     _ensure_env_default "BEHIND_NGINX" "false"
     _ensure_env_default "CLOUDFLARE_PROXY_ENABLED" "true"

@@ -297,6 +297,20 @@ remove_nginx_site_if_present() {
     remove_nginx_shared_file_unless_used "$allow" "snippet Cloudflare origin allow"
   fi
 
+  # Drop-in'ы conf.d создаёт установщик; они подключаются автоматически, поэтому проверяем
+  # не include, а использование: privacy-лог — по имени log_format/map.
+  local privacy_snippet="${nginx_dir}/conf.d/adminpanelaz-privacy-log.conf"
+  local hash_snippet="${nginx_dir}/conf.d/adminpanelaz-server-names-hash.conf"
+  mapfile -t users < <(nginx_conf_users "$nginx_dir" 'adminpanelaz_privacy|adminpanelaz_log_uri' "$privacy_snippet")
+  remove_nginx_shared_file_unless_used "$privacy_snippet" "snippet privacy access log" "${users[@]}"
+  # server_names_hash — только наш drop-in: удаляем, если файл не правили, то есть совпадает с шаблоном.
+  if [[ -f "$hash_snippet" ]] \
+    && cmp -s "$hash_snippet" "$ROOT_DIR/deploy/nginx/adminpanelaz-server-names-hash.conf"; then
+    rm -f "$hash_snippet"
+    log "Удалён snippet server_names_hash: ${hash_snippet}"
+    NGINX_CHANGED=true
+  fi
+
   if [[ "$NGINX_CHANGED" == true ]] && command -v nginx >/dev/null 2>&1; then
     if ! nginx -t >/dev/null 2>&1; then
       warn "nginx -t не прошёл после удаления — nginx не перезагружен, проверьте: nginx -t"

@@ -3,29 +3,16 @@
 from __future__ import annotations
 
 from app.config import get_settings
-from app.services.rate_limit.backends import create_rate_limit_backend
-from app.services.rate_limit.sliding_window import SlidingWindowLimiter
+from app.services.rate_limit.sliding_window import LazyRateLimiter
 
 _PUBLIC_DL_DETAIL = "Слишком много запросов на скачивание. Повторите позже."
 _PUBLIC_DL_LIMIT = 30
 _PUBLIC_DL_WINDOW = 60.0
 
 
-class PublicDownloadRateLimitService:
-    def __init__(self) -> None:
-        self._limiter: SlidingWindowLimiter | None = None
-
-    def _get_limiter(self) -> SlidingWindowLimiter:
-        if self._limiter is None:
-            settings = get_settings()
-            backend = create_rate_limit_backend(
-                backend=settings.api_rate_limit_backend,
-                redis_url=settings.redis_url,
-                prefix="public_dl:",
-                label="Public download",
-            )
-            self._limiter = SlidingWindowLimiter(backend)
-        return self._limiter
+class PublicDownloadRateLimitService(LazyRateLimiter):
+    _prefix = "public_dl:"
+    _label = "Public download"
 
     def consume(self, client_ip: str) -> None:
         # Always on for public surfaces — independent of general API rate limiting.

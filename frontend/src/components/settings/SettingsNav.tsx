@@ -2,12 +2,13 @@ import type { LucideIcon } from 'lucide-react'
 import {
   Activity,
   Archive,
+  Bell,
   Download,
   FlaskConical,
   Globe,
   Puzzle,
-  QrCode,
   RefreshCw,
+  Router,
   Shield,
   User,
   Users,
@@ -23,6 +24,7 @@ export type SettingsSection =
   | 'maintenance'
   | 'backup'
   | 'monitoring'
+  | 'panel_notify'
   | 'vpn_network'
   | 'modules'
   | 'updates'
@@ -38,10 +40,9 @@ type SettingsTabKey =
   | 'users'
   | 'updates'
   | 'vpn_network'
-  | 'qr_downloads'
   | 'monitoring'
 
-export interface SettingsNavItem {
+interface SettingsNavItem {
   id: SettingsSection
   label: string
   icon: LucideIcon
@@ -79,8 +80,8 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
     items: [navItem('personal', User)],
   },
   {
-    label: 'Кто может войти',
-    description: 'Учётные записи и защита',
+    label: 'Доступ',
+    description: 'Учётные записи и защита входа',
     adminOnly: true,
     items: [
       navItem('users', Users, { settingsTab: 'users' }),
@@ -92,13 +93,13 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
     description: 'Профили клиентов и службы',
     adminOnly: true,
     items: [
-      navItem('config_delivery', QrCode, { settingsTab: 'qr_downloads' }),
+      navItem('config_delivery', Router),
       navItem('maintenance', Wrench, { settingsTab: 'maintenance' }),
     ],
   },
   {
     label: 'Сервер',
-    description: 'Сайт, копии и уведомления',
+    description: 'Сайт, копии и нагрузка',
     adminOnly: true,
     items: [
       navItem('vpn_network', Globe, { settingsTab: 'vpn_network' }),
@@ -108,9 +109,10 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
   },
   {
     label: 'Панель',
-    description: 'Функции и обновления',
+    description: 'Уведомления, функции и обновления',
     adminOnly: true,
     items: [
+      navItem('panel_notify', Bell),
       navItem('modules', Puzzle),
       navItem('updates', Download, { settingsTab: 'updates' }),
       navItem('panel_ops', RefreshCw, { settingsTab: 'panel_ops' }),
@@ -118,6 +120,20 @@ const SETTINGS_NAV_GROUPS: SettingsNavGroup[] = [
     ],
   },
 ]
+
+/** Section → icon map, derived from the nav groups so hub and sidebar can't drift apart. */
+export const SECTION_ICONS: Record<SettingsSection, LucideIcon> = SETTINGS_NAV_GROUPS.reduce(
+  (acc, group) => {
+    for (const item of group.items) acc[item.id] = item.icon
+    return acc
+  },
+  {} as Record<SettingsSection, LucideIcon>,
+)
+
+/** Icon for a settings section (used by the section header). */
+export function getSectionIcon(section: SettingsSection): LucideIcon {
+  return SECTION_ICONS[section]
+}
 
 function isNavItemVisible(
   item: SettingsNavItem,
@@ -128,7 +144,7 @@ function isNavItemVisible(
 ): boolean {
   if ((group.adminOnly || item.adminOnly) && !isAdmin) return false
   if (item.id === 'config_delivery') {
-    return isTabEnabled('qr_downloads') || isModuleEnabled('openvpn')
+    return isModuleEnabled('openvpn')
   }
   if (item.settingsTab && !isTabEnabled(item.settingsTab)) return false
   return true

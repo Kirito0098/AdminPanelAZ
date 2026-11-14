@@ -1,4 +1,5 @@
 import { isAzProfile, isVpnProfile } from '@/lib/configCardUtils'
+import { protocolKey, protocolLabel } from '@/lib/vpnTypes'
 import type { TgMiniConfigFile } from '@/types'
 
 export type ProfileRoute = 'antizapret' | 'vpn'
@@ -54,18 +55,21 @@ export function profileRouteHint(route: ProfileRoute): string {
 /** Short “who is this file for” hint under .conf / .vpn (and similar). */
 export function profileFormatHint(file: TgMiniConfigFile): string | null {
   const name = (file.download_filename || file.filename || file.path || '').toLowerCase()
-  const protocol = (file.protocol || '').toLowerCase()
+  const protocol = protocolKey(file.protocol || '')
 
   if (name.endsWith('.vpn') || name.includes('vpnuri') || name.endsWith('-vpnuri.txt')) {
     return 'Формат AmneziaVPN (часто vpn://…) — импорт в приложение AmneziaVPN'
   }
 
   if (name.endsWith('.conf')) {
-    if (protocol === 'amneziawg2' || protocol === 'amneziawg' || /awg|amnezia/.test(name)) {
-      return 'Нативный конфиг AmneziaWG — приложение AmneziaWG, awg-quick и т.п.'
+    if (protocol === 'amneziawg2' || /awg2|amneziawg-?2/.test(name)) {
+      return `${protocolLabel('amneziawg2')} — приложение AmneziaWG 2.0, awg-quick и т.п.`
     }
-    if (protocol === 'wireguard' || name.startsWith('wg-')) {
-      return 'Конфиг WireGuard — приложение WireGuard / wg-quick'
+    if (protocol === 'amneziawg' || (protocol === '' && /awg|amnezia/.test(name))) {
+      return `${protocolLabel('amneziawg')} — приложение AmneziaWG, awg-quick и т.п.`
+    }
+    if (protocol === 'wireguard' || (protocol === '' && name.startsWith('wg-'))) {
+      return `${protocolLabel('wireguard')} — приложение WireGuard, wg-quick`
     }
   }
 

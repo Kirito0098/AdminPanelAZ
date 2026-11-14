@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "codebase-memory-mcp": {
+      "command": "codebase-memory-mcp",
+      "args": []
+    },
+    "github": {
+      "command": "github-mcp-stdio"
+    },
+    "context7": {
+      "url": "https://mcp.context7.com/mcp/oauth"
+    }
+  }
+}

@@ -11,12 +11,17 @@ import {
 } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
-import { SettingsToolbar } from '@/components/settings/SettingsChrome'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -48,7 +53,7 @@ const controlBtnClass = (active: boolean) =>
   cn(
     'inline-flex h-10 min-w-10 items-center justify-center rounded-lg border px-3 text-sm font-medium transition-all',
     active
-      ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
+      ? 'border-primary/40 bg-primary/5 text-primary ring-1 ring-primary/20'
       : 'hover:border-muted-foreground/30 [@media(hover:hover)]:hover:bg-muted/50',
   )
 
@@ -74,7 +79,7 @@ function FormField({
 }
 function ListRow({ children, action }: { children: ReactNode; action?: ReactNode }) {
   return (
-    <div className="flex flex-col gap-3 rounded-xl border bg-card/50 p-3 transition-colors [@media(hover:hover)]:hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between">
+    <div className="flex flex-col gap-3 rounded-lg border bg-card/50 p-3 transition-colors [@media(hover:hover)]:hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between">
       <div className="min-w-0 flex-1">{children}</div>
       {action && <div className="flex shrink-0 flex-wrap items-center gap-2">{action}</div>}
     </div>
@@ -91,7 +96,7 @@ function PanelEmpty({
   description: string
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-muted-foreground/20 bg-muted/10 px-4 py-10 text-center">
+    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/20 bg-muted/10 px-4 py-10 text-center">
       <Icon className="mb-2 h-8 w-8 text-muted-foreground/70" />
       <p className="text-sm font-medium">{title}</p>
       <p className="mt-1 max-w-md text-xs text-muted-foreground">{description}</p>
@@ -218,21 +223,28 @@ export default function AlertRulesCard() {
     <div className="space-y-4">
       <ConfirmDialogHost dialogProps={dialogProps} />
 
-      <SettingsToolbar
-        title="Правила уведомлений"
-        meta="Свои условия поверх порогов CPU и RAM — число клиентов, недоступность узла и т.д. Срабатывание уходит в Telegram, как и при высокой нагрузке."
-        actions={
-          <Badge variant={enabledCount > 0 ? 'default' : 'secondary'} className="shrink-0">
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <BellRing size={16} aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <CardTitle>Правила уведомлений</CardTitle>
+              <CardDescription className="mt-1">
+                Свои условия поверх порогов CPU и RAM — число клиентов, недоступность узла и т.д.
+                Срабатывание уходит в Telegram, как и при высокой нагрузке.
+              </CardDescription>
+            </div>
+          </div>
+          <Badge variant={enabledCount > 0 ? 'default' : 'secondary'} className="shrink-0 tabular-nums">
             {enabledCount} / {rules.length} вкл.
           </Badge>
-        }
-      />
-
-      <Card className="shadow-sm">
-        <CardContent className="space-y-5 pt-4">
+        </CardHeader>
+        <CardContent className="space-y-5">
           <InlineProgressBar active={saving} label="Создание правила..." />
 
-          <form onSubmit={handleCreate} className="space-y-4 rounded-xl border bg-muted/15 p-4">
+          <form onSubmit={handleCreate} className="space-y-4 rounded-lg border bg-muted/15 p-4">
             <p className="text-sm font-medium">Новое правило</p>
 
             <FormField label="Название" htmlFor="alert-name">
@@ -285,7 +297,7 @@ export default function AlertRulesCard() {
             </div>
 
             <FormField label="Условие срабатывания">
-              <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-background/60 p-3">
+              <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-background/60 p-3">
                 <div className="flex flex-wrap gap-2">
                   {OPERATORS.map((item) => (
                     <button

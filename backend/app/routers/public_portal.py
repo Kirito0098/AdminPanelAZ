@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models import User
+from app.services.bulk_user_nodes_notify import clear_portal_banner
 from app.services.client_portal import (
+    assert_portal_action_origin,
     assert_portal_host,
     build_public_portal_payload,
     get_valid_portal_token,
@@ -17,6 +20,7 @@ from app.services.client_portal import (
 from app.services.feature_guards import get_feature_service, module_disabled_message
 from app.services.file_download import attachment_response
 from app.services.ip_restriction import ip_restriction_service
+from app.services.portal_redeem_lockout import portal_redeem_lockout_service
 from app.services.public_download_rate_limit import public_download_rate_limit_service
 
 router = APIRouter(prefix="/public/portal", tags=["public-portal"])
@@ -45,9 +49,10 @@ def portal_meta(token: str, request: Request, db: Session = Depends(get_db)):
 @router.get("/{token}/download")
 def portal_download(
     token: str,
-    path: str,
     request: Request,
     db: Session = Depends(get_db),
+    path: str | None = None,
+    file_id: str | None = None,
     node_id: int | None = None,
     client_name: str | None = None,
 ):
@@ -56,8 +61,36 @@ def portal_download(
     client_ip = ip_restriction_service.get_client_ip(request)
     public_download_rate_limit_service.consume(client_ip)
     row = get_valid_portal_token(db, token)
-    filename, content = read_portal_profile(db, row, path, node_id=node_id, client_name=client_name)
+    filename, content = read_portal_profile(
+        db,
+        row,
+        path,
+        file_id=file_id,
+        node_id=node_id,
+        client_name=client_name,
+    )
     return attachment_response(content, filename)
+
+
+@router.post("/{token}/banner/dismiss", status_code=status.HTTP_204_NO_CONTENT)
+def portal_banner_dismiss(
+    token: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Скрыть баннер портала (уведомление о массовой операции с серверами)."""
+    assert_portal_host(db, request.headers.get("host"))
+    assert_portal_action_origin(request)
+    client_ip = ip_restriction_service.get_client_ip(request)
+    public_download_rate_limit_service.consume(client_ip)
+    row = get_valid_portal_token(db, token)
+    if row.kind != "user" or row.user_row is None:
+        raise HTTPException(status_code=404, detail="Баннер недоступен")
+    user = db.get(User, row.user_row.user_id)
+    if user is None:
+        raise HTTPException(status_code=404, detail="Пользователь не найден")
+    clear_portal_banner(db, user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{token}/redeem")
@@ -68,16 +101,20 @@ def portal_redeem(
     db: Session = Depends(get_db),
 ):
     assert_portal_host(db, request.headers.get("host"))
+    assert_portal_action_origin(request)
     client_ip = ip_restriction_service.get_client_ip(request)
     public_download_rate_limit_service.consume(client_ip)
     _require_portal_enabled()
     if not get_feature_service().is_enabled("unlock_codes"):
         raise HTTPException(status_code=403, detail=module_disabled_message("unlock_codes"))
     row = get_valid_portal_token(db, token)
+    portal_redeem_lockout_service.check(token)
     try:
         result = redeem_public_portal_code(db, row, code=payload.code)
     except ValueError as exc:
+        portal_redeem_lockout_service.record_failure(token)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    portal_redeem_lockout_service.record_success(token)
     return {
         "ok": True,
         "grant_days": result["grant_days"],

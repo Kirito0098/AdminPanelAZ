@@ -1,0 +1,47 @@
+---
+description: Обязательный выбор skill перед работой — маршрутизация, режимы и запреты
+alwaysApply: true
+---
+
+# Skills — читать до действий, а не по памяти
+
+Скиллы лежат в `.cursor/skills/<name>/SKILL.md`; Zoo Code видит их через симлинки в `.agents/`.
+Каталог зависит от режима: универсальные — `.agents/skills/`, только Code — `.agents/skills-code/`,
+только Architect — `.agents/skills-architect/`. Cursor режимов не знает и видит весь `.cursor/skills`.
+
+Перед задачей (кроме вопроса-справки и чтения кода) сопоставь её с таблицей. Подходит — прочитай
+файл скилла. Скилла нет в каталоге сессии — читай по пути из таблицы. В первом сообщении одной
+строкой назови применённые скиллы (или почему ни один не подходит).
+
+## Маршрутизация
+
+| Ситуация | Skill | Где лежит |
+| --- | --- | --- |
+| Свой новый код: «не переусложнено ли», «что можно удалить» | `karpathy-ponytail` | `.agents/skills/` |
+| Доработка существующей фичи/кнопки/эндпоинта: править на месте, а не добавлять рядом | `surgical-edits` | `.agents/skills-code/` |
+| После кода: «что упростить и удалить в текущем диффе» | `code-simplifier` | `.agents/skills-code/` |
+| Терминал: поиск файлов и кода, диапазон строк, замена, YAML/JSON, diff | `cli-toolbox` | `.agents/skills/` |
+| Багфикс с дешёвым локальным тестом на критическом узле | `tdd` | `.agents/skills-code/` |
+| UI: страницы, компоненты, Mini App, вёрстка, a11y | `web-design-guidelines` | `.agents/skills-code/` |
+| Веб-меню, сайдбар, хедер, иерархия разделов, адаптивная навигация | `ui-ux-pro-max` (поиск: `python3 .cursor/skills/ui-ux-pro-max/scripts/search.py "<query>" --domain ux`) | `.agents/skills-code/` |
+| Визуальное направление нового экрана: палитра, типографика, тексты | `frontend-design` | `.agents/skills-code/` |
+| Проверить UI в браузере после правок фронта | `webapp-testing` | `.agents/skills-code/` |
+| React: ререндеры, бандл, тяжёлые вычисления | `react-best-practices` | `.agents/skills-code/` |
+| Компонент оброс boolean-пропсами (4+ флагов режима) | `vercel-composition-patterns` | `.agents/skills-code/` |
+| Меню/CLI в терминале: `install.sh`, консольное меню | `tui-design` | `.agents/skills-code/` |
+| Новая фича, экран или поток: «что именно нужно» до кода | `brainstorming` | `.agents/skills-architect/` |
+| Разбить большой дизайн-спек `docs/superpowers/specs/*-design.md` по папкам | `split-design-spec` | `.agents/skills-architect/` |
+| Точечный security-аудит поверхности (JWT, CORS, CSRF, WebSocket, traversal, Host header) | пак в автопоиске отключён | `~/.agents/skill-packs/<name>/SKILL.md` |
+| Баг: причина не видна после первого чтения кода, или 2–3 фикса уже не помогли | `systematic-debugging` (пак, вручную) | `~/.agents/skill-packs/systematic-debugging/SKILL.md` |
+
+## Процесс, тесты, «готово»
+
+Единственный источник — [`AGENTS.md`](../../AGENTS.md): разделы «Мелочь ≠ фича», «Тесты — только на
+критических узлах», «UI проверяется браузером, не jsdom», «Перед «готово»». Здесь не дублируем:
+правка правила делается один раз, в `AGENTS.md`.
+
+## ❌ Строгие запреты
+
+- Не применять skill «по памяти»: файл читается в текущей сессии.
+- Не писать код фичи без плана в чате и «да» пользователя (мелкая правка — тоже план, только короче).
+- Не объявлять «готово» без фактического прогона ruff / pytest / eslint / typecheck с выводом в чате.

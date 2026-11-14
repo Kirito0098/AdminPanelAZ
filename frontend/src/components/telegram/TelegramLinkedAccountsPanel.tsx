@@ -43,7 +43,7 @@ export default function TelegramLinkedAccountsPanel({
           <div className="space-y-1">
             <div className="flex items-center gap-2">
               <Users size={16} className="text-muted-foreground" />
-              <p className="text-sm font-medium">Привязанные аккаунты</p>
+              <p className="text-sm font-semibold">Привязанные аккаунты</p>
             </div>
             <p className="text-xs text-muted-foreground">
               Пользователи панели, у которых указан Telegram ID — через бота они получают команды и конфиги.
@@ -54,9 +54,13 @@ export default function TelegramLinkedAccountsPanel({
 
         {accounts.length === 0 ? (
           <SettingsAlert variant="info" title="Пока никто не привязан">
-            Получите код ниже (или в <Link to="/settings/personal" className="font-medium text-primary underline-offset-4 hover:underline">Мой профиль</Link>) и отправьте боту <code>/link &lt;код&gt;</code>, либо укажите Telegram ID в{' '}
+            Получите код в{' '}
+            <Link to="/settings/personal" className="font-medium text-primary underline-offset-4 hover:underline">
+              Моём профиле
+            </Link>{' '}
+            и отправьте боту <code>/link &lt;код&gt;</code>, либо укажите Telegram ID в{' '}
             <Link to="/settings/users" className="font-medium text-primary underline-offset-4 hover:underline">
-              Настройки → Пользователи
+              Настройки → Пользователи панели
             </Link>
             .
           </SettingsAlert>

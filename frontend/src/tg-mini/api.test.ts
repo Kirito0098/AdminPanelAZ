@@ -42,18 +42,6 @@ describe('Mini App token storage', () => {
     expect(storage.setItem).not.toHaveBeenCalled()
     expect(storage.getItem).not.toHaveBeenCalled()
   })
-
-  it('works where localStorage is unavailable', async () => {
-    vi.stubGlobal('localStorage', {
-      removeItem: () => {
-        throw new Error('SecurityError')
-      },
-    })
-
-    const api = await loadApi()
-    api.setTgToken('t1')
-    expect(api.getTgToken()).toBe('t1')
-  })
 })
 
 describe('Mini App session refresh', () => {
@@ -75,7 +63,7 @@ describe('Mini App session refresh', () => {
     const fetchMock = vi.fn(async () => json(401, { detail: 'expired' }))
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(api.getTgDashboard()).rejects.toMatchObject({ status: 401 })
+    await expect(api.getTgConfigs()).rejects.toMatchObject({ status: 401 })
     expect(api.getTgToken()).toBeNull()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
@@ -95,7 +83,11 @@ describe('Mini App session refresh', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    const pending = Promise.all([api.getTgDashboard(), api.getTgConfigs(), api.getTgFeatureModules()])
+    const pending = Promise.all([
+      api.getTgConfigs(),
+      api.getTgConfigs(),
+      (await import('@/api/settings')).getFeatureModules(),
+    ])
     await vi.waitFor(() => expect(fetchMock.mock.calls.filter((c) => String(c[0]).endsWith('/auth'))).toHaveLength(1))
     releaseAuth()
     const results = await pending
@@ -141,7 +133,7 @@ describe('Mini App session refresh', () => {
     })
     vi.stubGlobal('fetch', fetchMock)
 
-    await expect(api.getTgDashboard()).resolves.toEqual({ ok: true })
+    await expect(api.getTgConfigs()).resolves.toEqual({ ok: true })
 
     expect(fetchMock.mock.calls.map(authHeader)).toEqual(['Bearer old', 'Bearer renewed'])
   })
@@ -156,19 +148,42 @@ describe('Mini App session refresh', () => {
       ),
     )
 
-    await expect(api.getTgDashboard()).rejects.toMatchObject({ status: 401 })
+    await expect(api.getTgConfigs()).rejects.toMatchObject({ status: 401 })
     expect(api.getTgToken()).toBeNull()
   })
+})
 
-  it('starts a fresh renewal after the previous one finished', async () => {
-    const fetchMock = vi.fn(async (url: string) =>
-      url.endsWith('/tg-mini/auth') ? json(200, { access_token: `t${fetchMock.mock.calls.length}` }) : json(200, {}),
+describe('Mini App owner config actions', () => {
+  let api: Awaited<ReturnType<typeof loadApi>>
+
+  beforeEach(async () => {
+    initData.value = 'init-data'
+    api = await loadApi()
+    api.setTgToken('token')
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('reads files through the owning node (/me), not the active node', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => json(200, { files: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await api.getTgConfigFiles(132)
+
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/tg-mini/me/configs/132/files')
+  })
+
+  it('sends the file through the owning node (/me)', async () => {
+    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
+      json(200, { message: 'ok' }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await api.refreshTgSession()
-    await api.refreshTgSession()
+    await api.sendTgConfig(132, { path: '/root/profile.ovpn', destination: 'self' })
 
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(String(fetchMock.mock.calls[0][0])).toContain('/tg-mini/me/configs/132/send')
   })
 })

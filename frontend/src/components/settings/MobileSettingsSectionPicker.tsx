@@ -37,7 +37,7 @@ export default function MobileSettingsSectionPicker({ value }: MobileSettingsSec
   return (
     <div className="lg:hidden orientation-compact-settings-section">
       <Select value={value} onValueChange={(section) => navigate(`/settings/${section}`)}>
-        <SelectTrigger className="w-full">
+        <SelectTrigger className="h-10 w-full rounded-lg">
           <SelectValue placeholder="Раздел настроек" />
         </SelectTrigger>
         <SelectContent>

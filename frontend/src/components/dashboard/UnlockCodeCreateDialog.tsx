@@ -14,8 +14,11 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useNotifications } from '@/context/NotificationContext'
-import { formatDate } from '@/lib/datetime'
+import { endOfDayIso, formatDate } from '@/lib/datetime'
+import { protocolLabel } from '@/lib/vpnTypes'
 import { cn } from '@/lib/utils'
 import type { UnlockCodeRecord, VpnType } from '@/types'
 
@@ -26,30 +29,9 @@ type ClientOption = {
   protocols: UnlockCodeProtocol[]
 }
 
-function protocolLabel(protocol: UnlockCodeProtocol) {
-  if (protocol === 'openvpn') return 'OpenVPN'
-  // One WG access policy covers both portal tabs WireGuard and AmneziaWG (vpn_type=wireguard).
-  if (protocol === 'wireguard') return 'WireGuard / AmneziaWG'
-  return 'AmneziaWG 2.0'
-}
-
-function shortProtocolLabel(protocol: UnlockCodeProtocol) {
-  if (protocol === 'openvpn') return 'OVPN'
-  if (protocol === 'wireguard') return 'WG'
-  return 'AWG2'
-}
-
 function toUnlockProtocol(vpnType: VpnType | string): UnlockCodeProtocol | null {
   if (vpnType === 'openvpn' || vpnType === 'wireguard' || vpnType === 'amneziawg2') return vpnType
   return null
-}
-
-function toEndOfDayIso(value: string) {
-  if (!value) return null
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-  if (!match) return null
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
-  return date.toISOString()
 }
 
 function normalizeClientName(value: string) {
@@ -68,6 +50,12 @@ interface UnlockCodeCreateDialogProps {
   availableProtocols?: UnlockCodeProtocol[]
   initialClientNames?: string[]
   onCreated?: (code: UnlockCodeRecord) => Promise<void> | void
+  /** Привязан ли Telegram у целевого абонента (показывать чекбокс отправки). */
+  telegramBound?: boolean
+  /** id абонента для отправки ключа в личный Telegram. */
+  targetUserId?: number
+  /** Абонент, которому выдан ключ: клиенты, протоколы и режим не выбираются. */
+  boundUser?: { id: number; username: string } | null
 }
 
 export default function UnlockCodeCreateDialog({
@@ -77,11 +65,15 @@ export default function UnlockCodeCreateDialog({
   availableProtocols = ALL_PROTOCOLS,
   initialClientNames = [],
   onCreated,
+  telegramBound = false,
+  targetUserId,
+  boundUser = null,
 }: UnlockCodeCreateDialogProps) {
   const { success, error: notifyError } = useNotifications()
   const availableProtocolsKey = availableProtocols.join(',')
   const initialProtocolsKey = initialProtocols.join(',')
   const initialClientsKey = initialClientNames.map(normalizeClientName).filter(Boolean).join(',')
+  const boundUserId = boundUser?.id ?? null
   const protocolOptions = useMemo(
     () => ALL_PROTOCOLS.filter((protocol) => availableProtocols.includes(protocol)),
     [availableProtocolsKey],
@@ -97,6 +89,8 @@ export default function UnlockCodeCreateDialog({
   const [clientsLoading, setClientsLoading] = useState(false)
   const [createdCode, setCreatedCode] = useState<UnlockCodeRecord | null>(null)
   const [saving, setSaving] = useState(false)
+  const [sendToTelegram, setSendToTelegram] = useState(false)
+  const [sentTelegram, setSentTelegram] = useState(false)
   const createdCodeRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -125,10 +119,20 @@ export default function UnlockCodeCreateDialog({
     setSelectedClients(nextClients)
     setClientSearch('')
     setCreatedCode(null)
-  }, [availableProtocolsKey, initialClientsKey, initialProtocolsKey, open, protocolOptions])
+    setSentTelegram(false)
+    setSendToTelegram(Boolean(telegramBound && targetUserId != null))
+  }, [
+    availableProtocolsKey,
+    initialClientsKey,
+    initialProtocolsKey,
+    open,
+    protocolOptions,
+    telegramBound,
+    targetUserId,
+  ])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || boundUserId != null) return
     let cancelled = false
     setClientsLoading(true)
     void getConfigs(false)
@@ -160,7 +164,7 @@ export default function UnlockCodeCreateDialog({
     return () => {
       cancelled = true
     }
-  }, [open])
+  }, [open, boundUserId])
 
   const profileBound = selectedClients.length > 0
 
@@ -237,14 +241,17 @@ export default function UnlockCodeCreateDialog({
       }
       const created = await createUnlockCode({
         grant_days: parsedGrantDays,
-        protocols: protocolsForCreate,
-        mode,
-        max_redemptions: mode === 'single' ? 1 : parsedMaxRedemptions,
-        code_expires_at: toEndOfDayIso(codeExpiresAt),
-        allowed_client_names: selectedClients,
+        protocols: boundUser ? protocolOptions : protocolsForCreate,
+        mode: boundUser ? 'single' : mode,
+        max_redemptions: boundUser ? 1 : mode === 'single' ? 1 : parsedMaxRedemptions,
+        code_expires_at: endOfDayIso(codeExpiresAt),
+        allowed_client_names: boundUser ? undefined : selectedClients,
+        target_user_id: boundUser ? boundUser.id : undefined,
+        send_to_user_id: sendToTelegram && targetUserId != null ? targetUserId : undefined,
       })
       setCreatedCode(created)
-      success('Unlock-ключ создан')
+      setSentTelegram(Boolean(created.sent_to_telegram))
+      success(created.sent_to_telegram ? 'Ключ создан и отправлен в Telegram' : 'Unlock-ключ создан')
       await onCreated?.(created)
     } catch (err) {
       notifyError(err instanceof Error ? err.message : 'Не удалось создать unlock-ключ')
@@ -279,9 +286,11 @@ export default function UnlockCodeCreateDialog({
             Создание unlock-ключа
           </DialogTitle>
           <DialogDescription>
-            {profileBound
-              ? 'Ключ привязан к профилю клиента: при активации продлевается общий срок по всем протоколам профиля.'
-              : 'Без списка клиентов ключ может активировать любой клиент с пересечением по выбранным протоколам.'}
+            {boundUser
+              ? `Ключ выдан абоненту ${boundUser.username}: при активации продлевается его срок и все профили на всех узлах.`
+              : profileBound
+                ? 'Ключ привязан к профилю клиента: при активации продлевается общий срок по всем протоколам профиля.'
+                : 'Без списка клиентов ключ может активировать любой клиент с пересечением по выбранным протоколам.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -302,21 +311,28 @@ export default function UnlockCodeCreateDialog({
                 <Badge variant="secondary">{createdCode.mode === 'multi' ? 'multi' : 'single'}</Badge>
                 <Badge variant="outline">{createdCode.grant_days} дн.</Badge>
                 <Badge variant="outline">Активаций: {createdCode.max_redemptions}</Badge>
-                {(createdCode.allowed_client_names?.length ?? 0) > 0 ? (
-                  <Badge variant="outline">Профиль</Badge>
+                {createdCode.target_user_id ? (
+                  <Badge variant="outline">
+                    Абонент: {createdCode.target_user_name ?? createdCode.target_user_id}
+                  </Badge>
                 ) : (
-                  createdCode.protocols.map((protocol) => (
-                    <Badge key={protocol} variant="outline">
-                      {protocolLabel(protocol as UnlockCodeProtocol)}
+                  <>
+                    {(createdCode.allowed_client_names?.length ?? 0) > 0 ? (
+                      <Badge variant="outline">Профиль</Badge>
+                    ) : (
+                      createdCode.protocols.map((protocol) => (
+                        <ProtocolBadge key={protocol} protocol={protocol} />
+                      ))
+                    )}
+                    <Badge variant="outline">
+                      {(createdCode.allowed_client_names?.length ?? 0) > 0
+                        ? `Клиенты: ${createdCode.allowed_client_names!.join(', ')}`
+                        : 'Клиенты: любой'}
                     </Badge>
-                  ))
+                  </>
                 )}
-                <Badge variant="outline">
-                  {(createdCode.allowed_client_names?.length ?? 0) > 0
-                    ? `Клиенты: ${createdCode.allowed_client_names!.join(', ')}`
-                    : 'Клиенты: любой'}
-                </Badge>
                 <Badge variant="outline">До {formatDate(createdCode.code_expires_at)}</Badge>
+                {sentTelegram ? <Badge variant="success">Отправлен в Telegram</Badge> : null}
               </div>
             </div>
           )}
@@ -346,9 +362,18 @@ export default function UnlockCodeCreateDialog({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label>Режим</Label>
-            <div className="grid grid-cols-2 gap-2">
+          {boundUser && (
+            <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-muted-foreground">
+              Абонент:{' '}
+              <span className="font-medium text-foreground">{boundUser.username}</span> · ключ
+              активируется только им и продлевает его срок со всеми профилями
+            </div>
+          )}
+
+          {!boundUser && (
+            <div className="space-y-2">
+              <Label>Режим</Label>
+              <div className="grid grid-cols-2 gap-2">
               <Button
                 type="button"
                 variant={mode === 'single' ? 'default' : 'outline'}
@@ -371,8 +396,9 @@ export default function UnlockCodeCreateDialog({
               </Button>
             </div>
           </div>
+          )}
 
-          {hasMultiMode && (
+          {!boundUser && hasMultiMode && (
             <div className="space-y-2">
               <Label htmlFor="unlock-max-redemptions">Макс. активаций</Label>
               <Input
@@ -386,9 +412,10 @@ export default function UnlockCodeCreateDialog({
             </div>
           )}
 
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2">
-              <Label htmlFor="unlock-client-search">Клиенты (опционально)</Label>
+          {!boundUser && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <Label htmlFor="unlock-client-search">Клиенты (опционально)</Label>
               <span className="text-xs text-muted-foreground">{clientsHint}</span>
             </div>
             {selectedClients.length > 0 && (
@@ -445,9 +472,7 @@ export default function UnlockCodeCreateDialog({
                         <span className="min-w-0 truncate font-medium">{client.name}</span>
                         <span className="flex shrink-0 flex-wrap justify-end gap-1">
                           {client.protocols.map((protocol) => (
-                            <Badge key={protocol} variant="outline" className="px-1.5 py-0 text-[10px]">
-                              {shortProtocolLabel(protocol)}
-                            </Badge>
+                            <ProtocolBadge key={protocol} protocol={protocol} />
                           ))}
                         </span>
                       </button>
@@ -457,8 +482,9 @@ export default function UnlockCodeCreateDialog({
               )}
             </div>
           </div>
+          )}
 
-          {!profileBound && (
+          {!boundUser && !profileBound && (
             <div className="space-y-2">
               <Label>Протоколы</Label>
               <div className="grid gap-2 sm:grid-cols-3">
@@ -482,6 +508,16 @@ export default function UnlockCodeCreateDialog({
               </div>
             </div>
           )}
+
+          {telegramBound && targetUserId != null ? (
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                checked={sendToTelegram}
+                onCheckedChange={(v) => setSendToTelegram(v === true)}
+              />
+              Отправить ключ в Telegram абоненту
+            </label>
+          ) : null}
 
           <DialogFooter className="gap-2 sm:gap-0">
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>

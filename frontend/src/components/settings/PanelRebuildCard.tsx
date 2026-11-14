@@ -4,6 +4,14 @@ import { ApiError, rebuildPanel } from '@/api/client'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
+import { SettingsDangerZone } from '@/components/settings/SettingsChrome'
+import {
   UPDATE_CONFIRM_DURATION_NOTICE,
   UPDATE_LONG_RUNNING_NOTICE,
   UPDATE_POLL_BUSY_ALERT_BODY,
@@ -12,7 +20,6 @@ import {
   resolveUpdateTaskErrorMessage,
 } from '@/components/settings/updateGuidance'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
@@ -79,26 +86,32 @@ export default function PanelRebuildCard({ className }: Props) {
   return (
     <div className={className}>
       <ConfirmDialogHost dialogProps={dialogProps} />
-      <Card className="border-amber-500/30 shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
-            <Rocket size={18} className="text-amber-600 dark:text-amber-400" />
-            Пересборка интерфейса
-          </CardTitle>
-          <CardDescription>
-            Полная сборка frontend и mini-app без обновления кода из Git — как{' '}
-            <code className="text-xs">{'npm run build:all && systemctl restart adminpanelaz'}</code>
-          </CardDescription>
+      <Card>
+        <CardHeader>
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Rocket size={16} aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <CardTitle>Пересборка интерфейса</CardTitle>
+              <CardDescription className="mt-1">
+                Полная сборка frontend и mini-app без обновления кода из Git — как{' '}
+                <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
+                  {'npm run build:all && systemctl restart adminpanelaz'}
+                </code>
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-2 sm:grid-cols-2">
             {REBUILD_STEPS.map((step) => (
               <div
                 key={step.label}
-                className="flex items-start gap-3 rounded-xl border bg-card/60 p-3 text-sm"
+                className="flex items-start gap-3 rounded-lg border bg-muted/15 p-3 text-sm"
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                  <step.icon size={16} />
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <step.icon size={16} aria-hidden />
                 </div>
                 <div>
                   <p className="font-medium">{step.label}</p>
@@ -116,16 +129,21 @@ export default function PanelRebuildCard({ className }: Props) {
           <SettingsAlert variant="info" title="Когда использовать">
             После ручного изменения файлов frontend на сервере или если UI не обновился после деплоя.
           </SettingsAlert>
-          <Button
-            type="button"
-            variant="destructive"
-            className="gap-2"
-            disabled={rebuilding}
-            onClick={handleRebuild}
+          <SettingsDangerZone
+            title="Пересобрать и перезапустить"
+            description="После сборки сервис перезапустится — дождитесь завершения процесса, не запускайте обновление параллельно."
           >
-            <Hammer size={16} />
-            {rebuilding ? 'Запуск...' : 'Пересобрать и перезапустить'}
-          </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="gap-2"
+              disabled={rebuilding}
+              onClick={handleRebuild}
+            >
+              <Hammer size={16} />
+              {rebuilding ? 'Запуск...' : 'Пересобрать и перезапустить'}
+            </Button>
+          </SettingsDangerZone>
         </CardContent>
       </Card>
     </div>

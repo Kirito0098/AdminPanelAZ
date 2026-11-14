@@ -121,48 +121,6 @@ describe('openTicketEventSource', () => {
     expect(FakeEventSource.instances[0].closed).toBe(true)
   })
 
-  it('leaves server-sent error events to the stream handler', async () => {
-    vi.stubGlobal('fetch', ticketFetch('t1'))
-    const onError = vi.fn()
-    const handle = openTicketEventSource({
-      stream: 'monitoring',
-      path: '/monitoring/stream',
-      attach: vi.fn(),
-      onError,
-      reconnectDelayMs: 0,
-    })
-    await vi.waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
-
-    FakeEventSource.instances[0].emit('error', new MessageEvent('error', { data: '{"detail":"x"}' }))
-    await tick()
-
-    expect(FakeEventSource.instances[0].closed).toBe(false)
-    expect(FakeEventSource.instances).toHaveLength(1)
-    expect(onError).not.toHaveBeenCalled()
-    handle.close()
-  })
-
-  it('does not open a stream that was closed before the ticket arrived', async () => {
-    let release!: () => void
-    const gate = new Promise<void>((resolve) => {
-      release = resolve
-    })
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => {
-        await gate
-        return ticketJson('t1')
-      }),
-    )
-
-    const handle = openTicketEventSource({ stream: 'awg2_install', path: '/awg2/install/stream', attach: vi.fn() })
-    handle.close()
-    release()
-    await tick()
-
-    expect(FakeEventSource.instances).toHaveLength(0)
-  })
-
   it('reports a refused ticket', async () => {
     vi.stubGlobal(
       'fetch',

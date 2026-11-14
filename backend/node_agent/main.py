@@ -51,9 +51,10 @@ from app.services.awg2 import (
     Awg2Service,
     is_awg2_profile_path,
 )
+from app.config import DEFAULT_NODE_AGENT_KEY
 from app.services.openvpn_buffer_guard import fetch_unit_journal, normalize_watch_unit
 
-NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", "change-me-node-agent-key")
+NODE_AGENT_API_KEY = os.environ.get("NODE_AGENT_API_KEY", DEFAULT_NODE_AGENT_KEY)
 ANTIZAPRET_PATH = Path(os.environ.get("ANTIZAPRET_PATH", "/root/antizapret"))
 NODE_AGENT_PORT = int(os.environ.get("NODE_AGENT_PORT", "9100"))
 NODE_AGENT_MODE = os.environ.get("NODE_AGENT_MODE", "prod").strip().lower()
@@ -137,6 +138,43 @@ class ConfigContent(BaseModel):
     content: str = ""
 
 
+class DnsServersPayload(BaseModel):
+    antizapret: int = Field(ge=1, le=7)
+    vpn: int = Field(ge=1, le=2)
+
+
+class ClientSubnetsPayload(BaseModel):
+    alternative_client_ip: bool
+    alternative_fake_ip: bool
+
+
+class ApplyConfigPayload(BaseModel):
+    # CIDR-only doall: hosts lists are not needed for routing-only changes and cost ~100 MB.
+    ips_only: bool = False
+
+
+class OpenVpnTuningPayload(BaseModel):
+    duplicate: bool
+    logs: bool
+
+
+class OpenVpnMtuPayload(BaseModel):
+    openvpn: int | None = Field(default=None, ge=1280, le=1420)
+    wireguard: int | None = Field(default=None, ge=1280, le=1420)
+
+
+class OpenVpnDcoPayload(BaseModel):
+    enabled: bool
+
+
+class OpenVpnProtocolsPayload(BaseModel):
+    units: dict[str, bool]
+
+
+class OpenVpnPatchPayload(BaseModel):
+    algorithm: int = Field(ge=1, le=4)
+
+
 class OpenVpnClientRequest(BaseModel):
     client_name: str = Field(min_length=1, max_length=32)
     cert_expire_days: int = Field(default=3650, ge=1, le=3650)
@@ -194,6 +232,13 @@ class OpenVpnJournalSampleRequest(BaseModel):
 class OpenVpnKillClientRequest(BaseModel):
     unit: str = Field(min_length=1, max_length=128)
     client_name: str = Field(min_length=1, max_length=32, pattern=KILL_CLIENT_NAME_PATTERN)
+
+
+class OpenVpnClientKillByIdRequest(BaseModel):
+    """Disconnect one session (device) by its OpenVPN Client ID."""
+
+    unit: str = Field(min_length=1, max_length=128)
+    client_id: int = Field(ge=0, le=2_147_483_647)
 
 
 class RotateApiKeyRequest(BaseModel):
@@ -368,6 +413,19 @@ def openvpn_kill(payload: OpenVpnKillClientRequest, _: None = Depends(verify_api
     return openvpn_management_service.kill_client(unit, payload.client_name)
 
 
+@app.post("/openvpn/management/client-kill")
+def openvpn_client_kill(payload: OpenVpnClientKillByIdRequest, _: None = Depends(verify_api_key)):
+    unit = normalize_watch_unit(payload.unit)
+    if not unit:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Недопустимый OpenVPN unit")
+    return openvpn_management_service.kill_client_by_id(unit, payload.client_id)
+
+
+@app.get("/openvpn/management/global-stats")
+def openvpn_global_stats(_: None = Depends(verify_api_key)):
+    return openvpn_management_service.collect_global_stats()
+
+
 @app.get("/openvpn/multihome")
 def openvpn_multihome_status(_: None = Depends(verify_api_key)):
     return service.get_openvpn_multihome_status()
@@ -413,7 +471,7 @@ def list_wireguard(_: None = Depends(verify_api_key)):
 @app.post("/clients/wireguard")
 def add_wireguard(payload: WireGuardClientRequest, _: None = Depends(verify_api_key)):
     output = service.add_wireguard_client(payload.client_name)
-    return {"message": "WireGuard клиент создан", "detail": output}
+    return {"message": "WG/AWG 1.5 клиент создан", "detail": output}
 
 
 @app.delete("/clients/wireguard/{client_name}")
@@ -434,7 +492,7 @@ def list_awg2_clients(
 def add_awg2_client(payload: Awg2ClientRequest, _: None = Depends(verify_api_key)):
     try:
         output = Awg2Service().add_client(payload.client_name, ttl=payload.ttl)
-        return {"message": "AmneziaWG2 клиент создан", "detail": output}
+        return {"message": "AWG 2.0 клиент создан", "detail": output}
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -540,9 +598,59 @@ def write_config(filename: str, payload: ConfigContent, _: None = Depends(verify
 
 
 @app.post("/configs/apply")
-def apply_config(_: None = Depends(verify_api_key)):
-    output = service.apply_config_changes()
+def apply_config(payload: ApplyConfigPayload | None = None, _: None = Depends(verify_api_key)):
+    # Body is optional: an older panel sends no payload and gets the full doall.sh.
+    ips_only = bool(payload.ips_only) if payload is not None else False
+    output = service.apply_config_changes(ips_only=ips_only)
     return {"message": "Настройки применены", "detail": output}
+
+
+@app.get("/configs/dns-servers")
+def get_dns_servers(_: None = Depends(verify_api_key)):
+    return service.get_dns_servers()
+
+
+@app.put("/configs/dns-servers")
+def apply_dns_servers(payload: DnsServersPayload, _: None = Depends(verify_api_key)):
+    return service.apply_dns_servers(antizapret=payload.antizapret, vpn=payload.vpn)
+
+
+@app.put("/configs/client-subnets")
+def apply_client_subnets(payload: ClientSubnetsPayload, _: None = Depends(verify_api_key)):
+    return service.apply_client_subnets(
+        alternative_client_ip=payload.alternative_client_ip,
+        alternative_fake_ip=payload.alternative_fake_ip,
+    )
+
+
+@app.get("/openvpn/tuning")
+def get_openvpn_tuning(_: None = Depends(verify_api_key)):
+    return service.get_openvpn_tuning()
+
+
+@app.put("/openvpn/tuning")
+def apply_openvpn_tuning(payload: OpenVpnTuningPayload, _: None = Depends(verify_api_key)):
+    return service.apply_openvpn_tuning(duplicate=payload.duplicate, logs=payload.logs)
+
+
+@app.put("/openvpn/mtu")
+def apply_openvpn_mtu(payload: OpenVpnMtuPayload, _: None = Depends(verify_api_key)):
+    return service.apply_mtu(openvpn_mtu=payload.openvpn, wireguard_mtu=payload.wireguard)
+
+
+@app.put("/openvpn/dco")
+def apply_openvpn_dco(payload: OpenVpnDcoPayload, _: None = Depends(verify_api_key)):
+    return service.apply_dco(payload.enabled)
+
+
+@app.put("/openvpn/protocols")
+def apply_openvpn_protocols(payload: OpenVpnProtocolsPayload, _: None = Depends(verify_api_key)):
+    return service.apply_protocols(payload.units)
+
+
+@app.post("/openvpn/patch")
+def apply_openvpn_patch(payload: OpenVpnPatchPayload, _: None = Depends(verify_api_key)):
+    return service.apply_openvpn_patch(payload.algorithm)
 
 
 @app.post("/configs/recreate-profiles")
@@ -683,7 +791,7 @@ async def import_wireguard_profiles(
 ):
     content = await archive.read()
     await asyncio.to_thread(service.import_wireguard_client_profiles_archive, content)
-    return {"message": "Профили WireGuard/AmneziaWG импортированы"}
+    return {"message": "Профили WG/AWG 1.5 импортированы"}
 
 
 @app.get("/openvpn/easyrsa3/index")
@@ -923,6 +1031,8 @@ async def awg2_import_archive(request: Request, _: None = Depends(verify_api_key
         await asyncio.to_thread(Awg2Service().import_state_archive, data)
     except Awg2NotInstalledError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     return {"success": True}
 
 

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -7,12 +9,10 @@ from app.database import get_db
 from app.models import User
 from app.schemas import GeoIpStatusResponse, MessageResponse, ServiceRestartRequest
 from app.services.admin_notify import admin_notify_service
-from app.services.active_web_session import active_web_session_service
-from app.services.background_tasks import background_task_service
+from app.services.background_tasks import assert_heavy_apply_idle, background_task_service
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.profile_delivery import load_node_remote_hosts
-from app.config import get_settings
 
 # Shared setting helpers (canonical location: app.services.app_setting_store)
 from app.services.app_setting_store import _get_setting, _set_setting
@@ -30,6 +30,8 @@ from app.routers.settings_telegram import (
     update_admin_notify_settings,
     update_telegram_settings,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["maintenance"])
 
@@ -49,6 +51,7 @@ def run_doall(
                 "active_task_id": active.id,
             },
         )
+    assert_heavy_apply_idle(db)
 
     client_timezone = get_client_timezone_from_request(request)
 
@@ -107,16 +110,33 @@ def restart_service(
     return MessageResponse(message=f"Служба {payload.service_name} перезапущена", detail=output)
 
 
-@router.get("/maintenance/session-stats")
-def session_stats(db: Session = Depends(get_db), _: User = Depends(require_admin)):
-    cfg = get_settings()
-    return {
-        "active_web_sessions_count": active_web_session_service.count_active_sessions(db),
-        "tracking_enabled": cfg.active_web_session_tracking_enabled,
-        "nightly_idle_restart_enabled": cfg.nightly_idle_restart_enabled,
-        "active_web_session_ttl_seconds": cfg.active_web_session_ttl_seconds,
-        "nightly_idle_restart_cron": cfg.nightly_idle_restart_cron,
-    }
+@router.post("/maintenance/chat-attachments/purge", response_model=MessageResponse)
+def purge_chat_attachments(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Убрать ссылки на фото из переписок и очистить кэш превью.
+
+    Сами картинки лежат в Telegram: на сервере хранится только file_id, байты
+    скачиваются на просмотр и живут в памяти не дольше минуты.
+    """
+    from app.models import UserMessage
+    from app.services.request_receipt_preview import clear_preview_cache
+
+    cleared = (
+        db.query(UserMessage)
+        .filter(UserMessage.attachment_file_id.isnot(None))
+        .update({UserMessage.attachment_file_id: None}, synchronize_session=False)
+    )
+    db.commit()
+    cached = clear_preview_cache()
+    logger.info(
+        "chat attachments purged by %s: %s messages, %s cached previews",
+        admin.username,
+        cleared,
+        cached,
+    )
+    return MessageResponse(message=f"Удалено фото из переписок: {cleared}")
 
 
 @router.get("/maintenance/geoip-status", response_model=GeoIpStatusResponse)
@@ -144,6 +164,5 @@ __all__ = [
     "test_telegram",
     "register_telegram_webhook",
     "unregister_telegram_webhook",
-    "session_stats",
     "geoip_status",
 ]

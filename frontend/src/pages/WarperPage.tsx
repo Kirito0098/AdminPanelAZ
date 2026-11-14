@@ -149,11 +149,8 @@ export default function WarperPage() {
           <MonitoringTab
             health={health}
             status={status}
-            loading={loading}
             loadError={loadError}
             activeNode={activeNode}
-            onRefresh={() => void load()}
-            onToggled={() => void load()}
           />
         </TabsContent>
 

@@ -101,7 +101,7 @@ export default function Awg2InstallDialog({
           setRunning(false)
           setFinished({ success: event.success, returnCode: event.return_code })
           if (event.success) {
-            success(mode === 'install' ? 'AZ-AWG2 успешно установлен' : 'AZ-AWG2 успешно обновлён')
+            success(mode === 'install' ? 'AWG 2.0 успешно установлен' : 'AWG 2.0 успешно обновлён')
             onCompleted?.()
           } else {
             notifyError(`Операция завершилась с кодом ${event.return_code ?? '—'}`)
@@ -111,8 +111,8 @@ export default function Awg2InstallDialog({
         if (event.event === 'error') {
           closeStream()
           setRunning(false)
-          setLastError(event.detail || 'Ошибка потока AZ-AWG2')
-          notifyError(event.detail || 'Ошибка потока AZ-AWG2')
+          setLastError(event.detail || 'Ошибка потока AWG 2.0')
+          notifyError(event.detail || 'Ошибка потока AWG 2.0')
         }
       },
       (message) => {
@@ -134,7 +134,7 @@ export default function Awg2InstallDialog({
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{mode === 'install' ? 'Установить AZ-AWG2 из панели' : 'Обновить слой AZ-AWG2'}</DialogTitle>
+            <DialogTitle>{mode === 'install' ? 'Установить AWG 2.0 из панели' : 'Обновить слой AWG 2.0'}</DialogTitle>
             <DialogDescription>
               {mode === 'install'
                 ? 'Панель запускает upstream install.sh на активном узле и показывает live-лог выполнения.'

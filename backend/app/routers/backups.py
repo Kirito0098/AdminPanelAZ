@@ -33,6 +33,14 @@ from app.services.background_tasks import background_task_service
 from app.services.backup_manager import BackupManager
 from app.services.backup_overlays import apply_backup_overlays
 from app.services.backup_scheduler import collect_awg2_backup_archive
+from app.services.backup_telegram_privacy import (
+    GROUP_PAUSE_MESSAGE,
+    backup_password_is_set,
+    decrypt_backup_bytes,
+    is_encrypted_backup_bytes,
+    set_backup_password,
+    telegram_backup_payload,
+)
 from app.services.node_manager import get_active_adapter
 from app.services.node_update import resolve_repo_root
 from app.services.notify_time import get_client_timezone_from_request
@@ -129,8 +137,7 @@ def list_backups(_: User = Depends(require_admin)):
     return _get_backup_manager().list_backups()
 
 
-@router.get("/settings", response_model=BackupSettingsResponse)
-def get_backup_settings(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def _backup_settings_response(db: Session) -> BackupSettingsResponse:
     return BackupSettingsResponse(
         auto_backup_enabled=_get_setting(db, "backup_auto_enabled", "false") == "true",
         auto_backup_days=int(_get_setting(db, "backup_auto_days", "7") or "7"),
@@ -138,7 +145,13 @@ def get_backup_settings(db: Session = Depends(get_db), _: User = Depends(require
         backup_az_enabled=_get_setting(db, "backup_az_enabled", "true") == "true",
         backup_awg2_enabled=_get_setting(db, "backup_awg2_enabled", "true") == "true",
         retention_count=int(_get_setting(db, "backup_retention", "5") or "5"),
+        backup_password_set=backup_password_is_set(db),
     )
+
+
+@router.get("/settings", response_model=BackupSettingsResponse)
+def get_backup_settings(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return _backup_settings_response(db)
 
 
 @router.patch("/settings", response_model=BackupSettingsResponse)
@@ -159,15 +172,10 @@ def update_backup_settings(
         _set_setting(db, "backup_awg2_enabled", "true" if payload.backup_awg2_enabled else "false")
     if payload.retention_count is not None:
         _set_setting(db, "backup_retention", str(payload.retention_count))
+    if "backup_password" in payload.model_fields_set:
+        set_backup_password(db, payload.backup_password)
     db.commit()
-    return BackupSettingsResponse(
-        auto_backup_enabled=_get_setting(db, "backup_auto_enabled", "false") == "true",
-        auto_backup_days=int(_get_setting(db, "backup_auto_days", "7") or "7"),
-        telegram_on_backup=_get_setting(db, "backup_telegram_enabled", "false") == "true",
-        backup_az_enabled=_get_setting(db, "backup_az_enabled", "true") == "true",
-        backup_awg2_enabled=_get_setting(db, "backup_awg2_enabled", "true") == "true",
-        retention_count=int(_get_setting(db, "backup_retention", "5") or "5"),
-    )
+    return _backup_settings_response(db)
 
 
 def _telegram_credentials(db: Session) -> tuple[str, list[str]] | None:
@@ -227,21 +235,36 @@ def _create_backup_with_optional_telegram(
     if tg:
         bot_token, chat_ids = tg
         archive_path = manager.get_backup_path(result["file_name"])
-        for chat_id in chat_ids:
-            sent = send_tg_document(
-                bot_token,
-                chat_id,
-                str(archive_path),
-                caption=f"{panel_caption_prefix}: {result['file_name']}",
-                run_async=False,
-            )
-            if not sent:
-                if send_to_telegram:
-                    raise HTTPException(
-                        status_code=status.HTTP_502_BAD_GATEWAY,
-                        detail="Не удалось отправить архив в Telegram",
+        with telegram_backup_payload(db, chat_ids, archive_path, original_filename=result["file_name"]) as (
+            recipients,
+            send_path,
+            send_name,
+        ):
+            if send_to_telegram and not recipients:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=GROUP_PAUSE_MESSAGE,
+                )
+            for chat_id in recipients:
+                sent = send_tg_document(
+                    bot_token,
+                    chat_id,
+                    str(send_path),
+                    caption=f"{panel_caption_prefix}: {result['file_name']}",
+                    run_async=False,
+                    filename=send_name,
+                )
+                if not sent:
+                    if send_to_telegram:
+                        raise HTTPException(
+                            status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail="Не удалось отправить архив в Telegram",
+                        )
+                    logger.warning(
+                        "Не удалось отправить архив в Telegram: chat_id=%s file=%s",
+                        chat_id,
+                        send_path,
                     )
-                logger.warning("Не удалось отправить архив в Telegram: chat_id=%s file=%s", chat_id, archive_path)
 
     if include_antizapret_backup:
         try:
@@ -250,26 +273,31 @@ def _create_backup_with_optional_telegram(
             if tg and az_result.get("archive_path"):
                 archive_name = az_result.get("archive_name") or Path(az_result["archive_path"]).name
                 with adapter.antizapret_backup_file(az_result) as local_archive:
-                    for chat_id in tg[1]:
-                        sent = send_tg_document(
-                            tg[0],
-                            chat_id,
-                            str(local_archive),
-                            caption=f"{az_caption_prefix}: {archive_name}",
-                            run_async=False,
-                            filename=archive_name,
-                        )
-                        if not sent:
-                            if send_to_telegram:
-                                raise HTTPException(
-                                    status_code=status.HTTP_502_BAD_GATEWAY,
-                                    detail="Не удалось отправить архив AntiZapret в Telegram",
-                                )
-                            logger.warning(
-                                "Не удалось отправить архив AntiZapret в Telegram: chat_id=%s file=%s",
+                    with telegram_backup_payload(
+                        db, tg[1], Path(local_archive), original_filename=archive_name
+                    ) as (recipients, send_path, send_name):
+                        for chat_id in recipients:
+                            sent = send_tg_document(
+                                tg[0],
                                 chat_id,
-                                archive_name,
+                                str(send_path),
+                                caption=f"{az_caption_prefix}: {archive_name}",
+                                run_async=False,
+                                filename=send_name,
                             )
+                            if not sent:
+                                if send_to_telegram:
+                                    raise HTTPException(
+                                        status_code=status.HTTP_502_BAD_GATEWAY,
+                                        detail="Не удалось отправить архив AntiZapret в Telegram",
+                                    )
+                                logger.warning(
+                                    "Не удалось отправить архив AntiZapret в Telegram: chat_id=%s file=%s",
+                                    chat_id,
+                                    archive_name,
+                                )
+        except HTTPException:
+            raise
         except Exception as exc:
             if send_to_telegram:
                 raise
@@ -310,14 +338,20 @@ def upload_backup(
     request: Request,
     file: UploadFile = File(...),
     restore: bool = Form(False),
+    password: str | None = Form(None),
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
     original_name = os.path.basename(file.filename or "")
-    if not original_name.lower().endswith((".tar.gz", ".tgz")):
+    lower_name = original_name.lower()
+    if not (
+        lower_name.endswith((".tar.gz", ".tgz"))
+        or lower_name.endswith(".enc")
+        or lower_name.endswith(".tar.gz.enc")
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Ожидается архив .tar.gz",
+            detail="Ожидается архив .tar.gz или зашифрованный .enc",
         )
 
     content = file.file.read()
@@ -329,8 +363,24 @@ def upload_backup(
             detail=f"Размер архива превышает {MAX_BACKUP_UPLOAD_BYTES // (1024 * 1024)} МБ",
         )
 
+    if is_encrypted_backup_bytes(content):
+        if not (password or "").strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Для этого архива нужен пароль бэкапа",
+            )
+        try:
+            content = decrypt_backup_bytes(content, password.strip())
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        if lower_name.endswith(".enc"):
+            original_name = original_name[: -len(".enc")]
+            if not original_name.lower().endswith((".tar.gz", ".tgz")):
+                original_name = f"{original_name}.tar.gz"
+            lower_name = original_name.lower()
+
     manager = _get_backup_manager()
-    suffix = ".tar.gz" if original_name.lower().endswith(".tar.gz") else ".tgz"
+    suffix = ".tar.gz" if lower_name.endswith(".tar.gz") else ".tgz"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
         tmp.write(content)
         tmp_path = Path(tmp.name)
@@ -385,11 +435,39 @@ def _background_work_paused(manager: BackupManager):
         raise
 
 
-def _restore_panel_and_restart(manager: BackupManager, file_name: str, db: Session) -> dict:
-    payload = manager.load_restore_payload(file_name)
-    with _background_work_paused(manager):
-        apply_backup_overlays(payload, mode="adapter", db=db)
-        return _apply_local_restore_and_restart(manager, payload)
+def _restore_panel_and_restart(
+    manager: BackupManager,
+    file_name: str,
+    db: Session,
+    *,
+    password: str | None = None,
+) -> dict:
+    archive_path = manager.get_backup_path(file_name)
+    raw = archive_path.read_bytes()
+    decrypt_tmp: Path | None = None
+    try:
+        if is_encrypted_backup_bytes(raw):
+            if not (password or "").strip():
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Для этого архива нужен пароль бэкапа",
+                )
+            try:
+                plain = decrypt_backup_bytes(raw, password.strip())
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
+                tmp.write(plain)
+                decrypt_tmp = Path(tmp.name)
+            payload = manager.load_restore_payload(str(decrypt_tmp), allow_absolute_path=True)
+        else:
+            payload = manager.load_restore_payload(file_name)
+        with _background_work_paused(manager):
+            apply_backup_overlays(payload, mode="adapter", db=db)
+            return _apply_local_restore_and_restart(manager, payload)
+    finally:
+        if decrypt_tmp is not None:
+            decrypt_tmp.unlink(missing_ok=True)
 
 
 def _rollback_and_restart(manager: BackupManager, snapshot_id: str) -> dict:
@@ -452,7 +530,7 @@ def restore_backup(
     admin: User = Depends(require_admin),
 ):
     manager = _get_backup_manager()
-    result = _restore_panel_and_restart(manager, payload.file_name, db)
+    result = _restore_panel_and_restart(manager, payload.file_name, db, password=payload.password)
     _record_backup_restore_side_effects(
         admin=admin,
         request=request,

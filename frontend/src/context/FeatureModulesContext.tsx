@@ -15,10 +15,58 @@ interface FeatureModulesContextValue {
 
 const FeatureModulesContext = createContext<FeatureModulesContextValue | null>(null)
 
+// Кэш последнего успешного ответа: сайдбар не должен на несколько секунд показывать
+// отключённые разделы (или пустеть) до завершения /feature-modules.
+const CACHE_KEY = 'adminpanelaz:feature-modules:v1'
+
+type FeatureModulesPayload = {
+  features: Record<string, boolean>
+  frontendPaths: Record<string, string>
+  settingsTabs: Record<string, string>
+}
+
+function readCachedModules(): FeatureModulesPayload | null {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<FeatureModulesPayload> | null
+    if (!parsed || typeof parsed.features !== 'object' || !parsed.features) return null
+    return {
+      features: parsed.features,
+      frontendPaths: parsed.frontendPaths ?? {},
+      settingsTabs: parsed.settingsTabs ?? {},
+    }
+  } catch {
+    return null
+  }
+}
+
+function writeCachedModules(payload: FeatureModulesPayload) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify(payload))
+  } catch {
+    // Приватный режим/переполнение — работаем без кэша.
+  }
+}
+
+function clearCachedModules() {
+  try {
+    localStorage.removeItem(CACHE_KEY)
+  } catch {
+    // ignore
+  }
+}
+
 export function FeatureModulesProvider({ children }: { children: React.ReactNode }) {
-  const [features, setFeatures] = useState<Record<string, boolean>>({})
-  const [frontendPaths, setFrontendPaths] = useState<Record<string, string>>({})
-  const [settingsTabs, setSettingsTabs] = useState<Record<string, string>>({})
+  const [features, setFeatures] = useState<Record<string, boolean>>(
+    () => readCachedModules()?.features ?? {},
+  )
+  const [frontendPaths, setFrontendPaths] = useState<Record<string, string>>(
+    () => readCachedModules()?.frontendPaths ?? {},
+  )
+  const [settingsTabs, setSettingsTabs] = useState<Record<string, string>>(
+    () => readCachedModules()?.settingsTabs ?? {},
+  )
   const [loading, setLoading] = useState(true)
 
   const refresh = useCallback(async () => {
@@ -27,10 +75,13 @@ export function FeatureModulesProvider({ children }: { children: React.ReactNode
       setFeatures(data.features)
       setFrontendPaths(data.frontend_paths)
       setSettingsTabs(data.settings_tabs)
+      writeCachedModules({
+        features: data.features,
+        frontendPaths: data.frontend_paths,
+        settingsTabs: data.settings_tabs,
+      })
     } catch {
-      setFeatures({})
-      setFrontendPaths({})
-      setSettingsTabs({})
+      // Оставляем кэш/текущее состояние: сброс в {} включил бы все модули.
     } finally {
       setLoading(false)
     }
@@ -42,6 +93,7 @@ export function FeatureModulesProvider({ children }: { children: React.ReactNode
       refresh()
       return
     }
+    clearCachedModules()
     setFeatures({})
     setFrontendPaths({})
     setSettingsTabs({})

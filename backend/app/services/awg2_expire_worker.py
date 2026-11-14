@@ -13,7 +13,7 @@ from app.database import SessionLocal
 from app.models import Node, VpnConfig, VpnType
 from app.services.client_portal import cleanup_deleted_client_records
 from app.services.node_manager import is_vpn_node, get_adapter_for_node
-from app.services.node_sync.client_sync import maybe_replicate_delete, purge_ha_shadow_configs
+from app.services.node_sync.client_sync import enqueue_maybe_replicate_delete, purge_ha_shadow_configs
 from app.services.node_sync.groups import find_sync_group_for_primary
 from app.services.background_gate import run_background_step
 
@@ -42,7 +42,12 @@ def _node_expiry_map(adapter) -> dict[str, datetime]:
 def _delete_config_row(db: Session, node: Node, config: VpnConfig) -> None:
     """Delete a config row through the same HA-aware path as `DELETE /api/configs/{id}`."""
     if find_sync_group_for_primary(db, node.id):
-        maybe_replicate_delete(db, node_id=node.id, primary_config=config)
+        enqueue_maybe_replicate_delete(
+            db,
+            node_id=node.id,
+            primary_config=config,
+            created_by_username="system",
+        )
     purge_ha_shadow_configs(db, config.id)
     db.delete(config)
     cleanup_deleted_client_records(db, config)
@@ -110,8 +115,14 @@ def run_awg2_expire_once(db_session_factory: Callable[[], Session] = SessionLoca
                 continue
             # One unreachable or un-provisioned node must not abort expiry for the others.
             try:
-                cli_count, db_count, refresh_count = _reconcile_node(db, node)
+                from app.services.node_http_gate import NodeHttpBusy, node_http_gate_nonblocking
+
+                with node_http_gate_nonblocking():
+                    cli_count, db_count, refresh_count = _reconcile_node(db, node)
                 db.commit()
+            except NodeHttpBusy:
+                logger.debug("awg2_expire: skip node %s: agent slot busy", node.name)
+                continue
             except Exception:
                 db.rollback()
                 nodes_failed += 1

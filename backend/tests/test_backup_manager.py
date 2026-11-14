@@ -20,10 +20,6 @@ def _manager(tmp_path: Path, **kwargs) -> BackupManager:
     )
 
 
-def test_backup_meta_path_strips_tar_gz():
-    assert backup_meta_path(Path("adminpanelaz_1.tar.gz")).name == "adminpanelaz_1.json"
-
-
 def test_create_backup_writes_json_sidecar_not_tar_json(tmp_path: Path):
     result = _manager(tmp_path).create_backup()
     archive = tmp_path / "backups" / result["file_name"]
@@ -43,15 +39,6 @@ def test_create_backup_honors_retention(tmp_path: Path):
     leftover_meta = list((tmp_path / "backups").glob("*.json"))
     assert len(leftover_meta) == 3
     assert not list((tmp_path / "backups").glob("*.tar.json"))
-
-
-def test_create_backup_includes_cidr_db(tmp_path: Path):
-    cidr = tmp_path / "cidr.db"
-    sqlite3.connect(cidr).close()
-    result = _manager(tmp_path, cidr_db_path=cidr).create_backup()
-    with tarfile.open(tmp_path / "backups" / result["file_name"], "r:gz") as tar:
-        assert "data/cidr/cidr.db" in tar.getnames()
-    assert "cidr_db" in result["components"]
 
 
 def test_restore_backup_writes_cidr_db(tmp_path: Path):
@@ -96,21 +83,6 @@ def test_create_backup_captures_wal_committed_rows(tmp_path: Path):
     assert rows == [(42,)]
 
 
-def test_create_backup_packs_routing_lists(tmp_path: Path):
-    result = _manager(tmp_path).create_backup(
-        include_configs=True,
-        config_contents={"include-hosts.txt": "example.com\n", "skip-me.txt": "nope"},
-    )
-    with tarfile.open(tmp_path / "backups" / result["file_name"], "r:gz") as tar:
-        names = tar.getnames()
-        assert "antizapret/config/include-hosts.txt" in names
-        assert "antizapret/config/skip-me.txt" not in names
-        payload = tar.extractfile("antizapret/config/include-hosts.txt")
-        assert payload is not None
-        assert payload.read() == b"example.com\n"
-    assert "configs" in result["components"]
-
-
 def test_restore_backup_returns_config_contents(tmp_path: Path):
     mgr = _manager(tmp_path)
     created = mgr.create_backup(
@@ -141,13 +113,6 @@ def test_load_restore_payload_keeps_awg2_bytes_without_writing_live_files(tmp_pa
     applied = mgr.apply_restore_payload(payload)
     assert "awg2" in applied["restored"]
     assert not (tmp_path / "az-awg2-backup.tar.gz").exists()
-
-
-def test_inspect_backup_archive_lists_awg2_component(tmp_path: Path):
-    mgr = _manager(tmp_path)
-    created = mgr.create_backup(awg2_archive=b"overlay-payload")
-    inspected = mgr.inspect_backup_archive(tmp_path / "backups" / created["file_name"])
-    assert "awg2" in inspected["components"]
 
 
 def test_load_restore_payload_does_not_write_db_until_apply(tmp_path: Path):

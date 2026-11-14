@@ -2,20 +2,13 @@
 # Общие проверки /api/health для install.sh и smoke-тестов.
 # Поддерживает HTTP и HTTPS (uvicorn TLS, в т.ч. самоподписанный cert).
 
+# shellcheck source=scripts/env-file.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/env-file.sh"
+
 bhc_env_get() {
-  local key="$1" line val
   local env_file="${BHC_ENV_FILE:-}"
-  [[ -n "$env_file" && -f "$env_file" ]] || return 1
-  line="$(grep -E "^${key}=" "$env_file" 2>/dev/null | head -1 || true)"
-  [[ -n "$line" ]] || return 1
-  val="${line#*=}"
-  val="${val%$'\r'}"
-  if [[ "$val" == \"*\" && "$val" == *\" ]]; then
-    val="${val:1:-1}"
-  elif [[ "$val" == \'*\' && "$val" == *\' ]]; then
-    val="${val:1:-1}"
-  fi
-  printf '%s' "$val"
+  env_file_has "$env_file" "$1" || return 1
+  env_file_get "$env_file" "$1"
 }
 
 bhc_scheme_from_env() {

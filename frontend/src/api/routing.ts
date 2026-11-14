@@ -18,10 +18,13 @@ export async function getRoutingOverview() {
 }
 
 export async function toggleRoutingProvider(filename: string, enabled: boolean) {
-  return apiFetch(`/routing/providers/${encodeURIComponent(filename)}/enabled`, {
-    method: 'POST',
-    body: JSON.stringify({ enabled }),
-  })
+  return apiFetch<{ filename: string; enabled: boolean; cidr_count?: number; warnings?: string[] }>(
+    `/routing/providers/${encodeURIComponent(filename)}/enabled`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    },
+  )
 }
 
 export async function getRoutingProviderContent(filename: string) {
@@ -48,7 +51,7 @@ export async function getRoutingResultContent(key: string) {
 }
 
 export async function syncRoutingProviders() {
-  return apiFetch('/routing/sync', { method: 'POST' })
+  return apiFetch<BackgroundTaskAcceptedResponse>('/routing/sync', { method: 'POST' })
 }
 
 export async function applyRouting() {
@@ -134,13 +137,31 @@ export async function generateCidrFromDb(options?: {
   })
 }
 
+export async function estimateCidrFromDb(options?: {
+  regions?: string[] | null
+  filter_by_antifilter?: boolean
+  exclude_ru_cidrs?: boolean
+}) {
+  return apiFetch<{ success: boolean; queued: boolean; task_id: string; message: string }>(
+    '/routing/cidr-db/generate',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'estimate',
+        regions: options?.regions ?? null,
+        filter_by_antifilter: options?.filter_by_antifilter ?? false,
+        exclude_ru_cidrs: options?.exclude_ru_cidrs ?? false,
+      }),
+    },
+  )
+}
+
 export async function deployCidrToNode(options?: {
   target_node_id?: number | null
   target_node_ids?: number[] | null
   all_online?: boolean
   sync_after?: boolean
   apply_after?: boolean
-  recreate_profiles_after?: boolean
   selected_files?: string[] | null
 }) {
   return apiFetch<{ success: boolean; task_id: string; message: string }>('/routing/cidr-db/deploy', {
@@ -151,7 +172,6 @@ export async function deployCidrToNode(options?: {
       all_online: options?.all_online ?? false,
       sync_after: options?.sync_after ?? true,
       apply_after: options?.apply_after ?? false,
-      recreate_profiles_after: options?.recreate_profiles_after ?? false,
       selected_files: options?.selected_files ?? null,
     }),
   })

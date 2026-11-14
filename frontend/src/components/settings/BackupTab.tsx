@@ -7,6 +7,7 @@ import {
   CalendarClock,
   Check,
   Download,
+  HardDrive,
   History,
   LayoutDashboard,
   ListTree,
@@ -36,23 +37,31 @@ import {
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
+import {
   SettingsCollapsible,
-  SettingsMetaLine,
+  SettingsStatCard,
   SettingsToolbar,
 } from '@/components/settings/SettingsChrome'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Switch } from '@/components/ui/switch'
+import ToggleRow from '@/components/settings/ToggleRow'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useNotifications } from '@/context/NotificationContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useProgress } from '@/context/ProgressContext'
-import { formatDateTime } from '@/lib/datetime'
+import { formatDateTime, formatRelative } from '@/lib/datetime'
+import { triggerFileDownload } from '@/lib/triggerFileDownload'
+import { pluralRu } from '@/lib/plural'
 import { cn } from '@/lib/utils'
 import type { BackupEntry, BackupSettings, PreRestoreSnapshot } from '@/types'
 
@@ -71,14 +80,14 @@ const COMPONENT_LABELS: Record<string, string> = {
   database: 'База AdminPanel',
   antizapret_lists: 'Списки AntiZapret',
   antizapret_backup: 'Архив AntiZapret',
-  awg2: 'Слой AZ-AWG2',
+  awg2: 'Слой AWG 2.0',
 }
 
 const RESTORE_WARNING =
-  'Текущие настройки и данные панели будут перезаписаны. Если в архиве есть слой AZ-AWG2, он тоже будет восстановлен на VPN-узле. После восстановления панель будет автоматически перезапущена — страница станет недоступна на несколько секунд. Данные портала и unlock восстанавливаются из БД; HTTPS/nginx портала нужно заново применить в Подписка.'
+  'Текущие настройки и данные панели будут перезаписаны. Если в архиве есть слой AWG 2.0, он тоже будет восстановлен на VPN-узле. После восстановления панель будет автоматически перезапущена — страница станет недоступна на несколько секунд. Данные портала и unlock восстанавливаются из БД; HTTPS/nginx портала нужно заново применить в Подписка.'
 
 const ROLLBACK_WARNING =
-  'Текущие база, CIDR и .env панели будут заменены этой копией. Списки AntiZapret и слой AZ-AWG2 на VPN-узле не меняются. Текущее состояние перед откатом тоже сохранится как копия, так что откат можно отменить. После отката панель перезапустится — страница станет недоступна на несколько секунд.'
+  'Текущие база, CIDR и .env панели будут заменены этой копией. Списки AntiZapret и слой AWG 2.0 на VPN-узле не меняются. Текущее состояние перед откатом тоже сохранится как копия, так что откат можно отменить. После отката панель перезапустится — страница станет недоступна на несколько секунд.'
 
 const RESTORE_SUCCESS_MESSAGE =
   'Восстановление выполнено. Панель будет перезапущена через несколько секунд.'
@@ -92,40 +101,6 @@ const ADMIN_PANEL_ALWAYS_INCLUDED = [
 const INTERVAL_PRESETS = [1, 3, 7, 14] as const
 const RETENTION_PRESETS = [3, 5, 10] as const
 
-function ToggleRow({
-  id,
-  label,
-  description,
-  checked,
-  disabled,
-  onCheckedChange,
-}: {
-  id: string
-  label: string
-  description?: string
-  checked: boolean
-  disabled?: boolean
-  onCheckedChange: (checked: boolean) => void
-}) {
-  return (
-    <div
-      className={cn(
-        'flex items-start justify-between gap-4 rounded-xl border bg-card/50 p-4 transition-colors',
-        checked && !disabled && 'border-primary/20 bg-primary/5',
-        disabled && 'opacity-60',
-      )}
-    >
-      <div className="min-w-0 space-y-1">
-        <Label htmlFor={id} className={cn('font-medium', !disabled && 'cursor-pointer')}>
-          {label}
-        </Label>
-        {description && <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>}
-      </div>
-      <Switch id={id} checked={checked} disabled={disabled} onCheckedChange={onCheckedChange} />
-    </div>
-  )
-}
-
 function BackupScopeBlock({
   icon: Icon,
   title,
@@ -138,7 +113,7 @@ function BackupScopeBlock({
   children: React.ReactNode
 }) {
   return (
-    <div className="space-y-3 rounded-xl border bg-muted/15 p-4">
+    <div className="space-y-3 rounded-lg border bg-muted/15 p-4">
       <div className="flex gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <Icon size={18} />
@@ -187,10 +162,10 @@ function OptionCard({
       aria-label={`${label}: ${checked ? 'включено' : 'выключено'}`}
       onClick={() => onChange(!checked)}
       className={cn(
-        'group flex w-full cursor-pointer items-start gap-3 rounded-xl border-2 p-4 text-left transition-all',
+        'group flex w-full cursor-pointer items-start gap-3 rounded-lg border-2 p-4 text-left transition-all',
         checked
-          ? 'border-primary bg-primary/10 shadow-sm ring-2 ring-primary/25'
-          : 'border-border bg-card hover:border-primary/50 hover:bg-muted/40',
+          ? 'border-primary/30 bg-primary/5 shadow-sm ring-1 ring-primary/20'
+          : 'border-border bg-card hover:border-primary/40 hover:bg-muted/40',
       )}
     >
       <div
@@ -237,6 +212,8 @@ export default function BackupTab() {
   const [savingSettings, setSavingSettings] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [scheduleOpen, setScheduleOpen] = useState(false)
+  const [backupPasswordDraft, setBackupPasswordDraft] = useState('')
+  const [clearBackupPassword, setClearBackupPassword] = useState(false)
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const pendingRestoreRef = useRef(false)
 
@@ -267,24 +244,34 @@ export default function BackupTab() {
       settings.backup_az_enabled !== settingsDraft.backup_az_enabled ||
       settings.backup_awg2_enabled !== settingsDraft.backup_awg2_enabled ||
       settings.auto_backup_days !== settingsDraft.auto_backup_days ||
-      settings.retention_count !== settingsDraft.retention_count
+      settings.retention_count !== settingsDraft.retention_count ||
+      backupPasswordDraft.trim().length > 0 ||
+      clearBackupPassword
     )
-  }, [settings, settingsDraft])
+  }, [settings, settingsDraft, backupPasswordDraft, clearBackupPassword])
 
   const saveSettingsDraft = async () => {
     if (!settingsDraft) return
     setSavingSettings(true)
     try {
-      const updated = await updateBackupSettings({
+      const payload: Parameters<typeof updateBackupSettings>[0] = {
         telegram_on_backup: settingsDraft.telegram_on_backup,
         auto_backup_enabled: settingsDraft.auto_backup_enabled,
         backup_az_enabled: settingsDraft.backup_az_enabled,
         backup_awg2_enabled: settingsDraft.backup_awg2_enabled,
         auto_backup_days: settingsDraft.auto_backup_days,
         retention_count: settingsDraft.retention_count,
-      })
+      }
+      if (clearBackupPassword) {
+        payload.backup_password = ''
+      } else if (backupPasswordDraft.trim()) {
+        payload.backup_password = backupPasswordDraft.trim()
+      }
+      const updated = await updateBackupSettings(payload)
       setSettings(updated)
       setSettingsDraft(updated)
+      setBackupPasswordDraft('')
+      setClearBackupPassword(false)
       success('Настройки резервного копирования сохранены')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
@@ -296,11 +283,16 @@ export default function BackupTab() {
   const stats = useMemo(() => {
     const totalBytes = backups.reduce((sum, b) => sum + b.size_bytes, 0)
     const cfg = settingsDraft ?? settings
+    const latest = backups.reduce<BackupEntry | null>(
+      (acc, b) => (!acc || b.created_at > acc.created_at ? b : acc),
+      null,
+    )
     return {
       count: backups.length,
       totalSize: backups.length > 0 ? formatSize(totalBytes) : '—',
       auto: cfg?.auto_backup_enabled ? 'Включена' : 'Выключена',
       retention: cfg ? String(cfg.retention_count) : '—',
+      latest,
     }
   }, [backups, settings, settingsDraft])
 
@@ -312,7 +304,7 @@ export default function BackupTab() {
   const telegramDeliveryPlan = useMemo(() => {
     const files = [
       includeAwg2Backup
-        ? 'adminpanelaz_*.tar.gz — AdminPanel + слой AZ-AWG2'
+        ? 'adminpanelaz_*.tar.gz — AdminPanel + слой AWG 2.0'
         : 'adminpanelaz_*.tar.gz — AdminPanel (всегда)',
     ]
     if (includeAntizapretBackup) {
@@ -363,7 +355,19 @@ export default function BackupTab() {
       onConfirm: async () => {
         try {
           const resp = await withInline(async () => {
-            const result = await restoreBackup(fileName)
+            let result
+            try {
+              result = await restoreBackup(fileName)
+            } catch (err) {
+              const msg = err instanceof ApiError ? err.message : ''
+              if (msg.toLowerCase().includes('пароль')) {
+                const password = window.prompt('Введите пароль бэкапа для этого архива')
+                if (!password) throw err
+                result = await restoreBackup(fileName, password)
+              } else {
+                throw err
+              }
+            }
             await load()
             return result
           }, 'Восстановление и перезапуск...')
@@ -439,10 +443,20 @@ export default function BackupTab() {
 
     const restoreAfterUpload = pendingRestoreRef.current
     pendingRestoreRef.current = false
+    const needsPassword =
+      file.name.toLowerCase().endsWith('.enc') ||
+      file.name.toLowerCase().includes('.tar.gz.enc')
+    const uploadPassword = needsPassword
+      ? window.prompt('Архив зашифрован. Введите пароль бэкапа') || undefined
+      : undefined
+    if (needsPassword && !uploadPassword) {
+      notifyError('Для зашифрованного архива нужен пароль бэкапа')
+      return
+    }
     const runUpload = async () => {
       try {
         const uploaded = await withInline(async () => {
-          const entry = await uploadBackup(file, restoreAfterUpload)
+          const entry = await uploadBackup(file, restoreAfterUpload, uploadPassword)
           await load()
           return entry
         }, restoreAfterUpload ? 'Загрузка, восстановление и перезапуск...' : 'Загрузка архива...')
@@ -513,17 +527,6 @@ export default function BackupTab() {
       <InlineProgressBar active={savingSettings} label="Сохранение настроек..." />
 
       <SettingsToolbar
-        title="Резервные копии"
-        meta={
-          <SettingsMetaLine
-            items={[
-              { label: 'архивов', value: stats.count },
-              { label: 'объём', value: stats.totalSize },
-              { label: 'авто-копия', value: stats.auto },
-              { label: 'хранить', value: `${stats.retention} шт.` },
-            ]}
-          />
-        }
         actions={
           <Button
             type="button"
@@ -538,18 +541,47 @@ export default function BackupTab() {
         }
       />
 
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <SettingsStatCard
+          label="Последняя копия"
+          value={stats.latest ? formatRelative(stats.latest.created_at) : '—'}
+          hint={stats.latest ? formatDateTime(stats.latest.created_at) : 'Копий пока нет'}
+          icon={History}
+        />
+        <SettingsStatCard
+          label="Архивов"
+          value={stats.count}
+          hint="файлов adminpanelaz_*.tar.gz"
+          icon={Archive}
+        />
+        <SettingsStatCard
+          label="Объём"
+          value={stats.totalSize}
+          hint="суммарно по архивам"
+          icon={HardDrive}
+        />
+        <SettingsStatCard
+          label="Авто-копия"
+          value={stats.auto}
+          hint={`Хранить: ${stats.retention} шт.`}
+          icon={CalendarClock}
+        />
+      </div>
+
       {createOpen && (
-        <Card className="border-primary/25 shadow-sm">
-          <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-sm">
-                <Archive size={16} />
-                Создать резервную копию
-              </CardTitle>
-              <CardDescription className="mt-1">
-                Кнопка «Создать копию» всегда делает архив AdminPanel; опции ниже добавляют списки AntiZapret,
-                слой AZ-AWG2 и отдельный архив VPN
-              </CardDescription>
+        <Card className="border-primary/25 ring-1 ring-primary/10">
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Archive size={16} aria-hidden />
+              </span>
+              <div className="min-w-0">
+                <CardTitle>Создать резервную копию</CardTitle>
+                <CardDescription className="mt-1">
+                  Кнопка «Создать копию» всегда делает архив AdminPanel; опции ниже добавляют списки AntiZapret,
+                  слой AWG 2.0 и отдельный архив VPN
+                </CardDescription>
+              </div>
             </div>
             <Button
               type="button"
@@ -574,7 +606,7 @@ export default function BackupTab() {
                   <IncludedItemsList items={ADMIN_PANEL_ALWAYS_INCLUDED} />
                   <p className="text-xs text-muted-foreground">
                     Nginx/TLS портала в архив не входят. После restore откройте{' '}
-                    <Link to="/subscription" className="font-medium text-foreground underline-offset-2 hover:underline">
+                    <Link to="/users?tab=portal" className="font-medium text-foreground underline-offset-2 hover:underline">
                       Подписка
                     </Link>{' '}
                     → «Настроить под текущую публикацию».
@@ -589,8 +621,8 @@ export default function BackupTab() {
                   {awg2Enabled && (
                     <OptionCard
                       icon={Shield}
-                      label="Добавить слой AZ-AWG2"
-                      description="Узкий overlay AmneziaWG 2.0 в тот же архив AdminPanel, если слой установлен на VPN-узле"
+                      label="Добавить слой AWG 2.0"
+                      description="Узкий overlay AWG 2.0 в тот же архив AdminPanel, если слой установлен на VPN-узле"
                       checked={includeAwg2Backup}
                       onChange={setIncludeAwg2Backup}
                     />
@@ -618,7 +650,7 @@ export default function BackupTab() {
             </div>
 
             {settingsDraft && (
-              <div className="space-y-3 rounded-xl border border-dashed bg-muted/10 p-4">
+              <div className="space-y-3 rounded-lg border border-dashed bg-muted/10 p-4">
                 <div>
                   <p className="text-xs font-medium text-foreground">Telegram</p>
                   <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
@@ -641,6 +673,47 @@ export default function BackupTab() {
                   checked={settingsDraft.telegram_on_backup}
                   onChange={(checked) => patchDraft({ telegram_on_backup: checked })}
                 />
+                <div className="space-y-2 rounded-lg border bg-card/50 p-4">
+                  <div className="flex items-start gap-2">
+                    <Shield size={16} className="mt-0.5 shrink-0 text-primary" />
+                    <div className="min-w-0 space-y-1">
+                      <p className="text-sm font-medium">Пароль бэкапа для Telegram</p>
+                      <p className="text-xs leading-relaxed text-muted-foreground">
+                        Нужен, чтобы отправлять архивы в группу или канал. Пароль хранится только в
+                        панели и не уходит в Telegram. Без пароля бэкапы уходят только в личные чаты.
+                        {settings?.backup_password_set ? ' Сейчас пароль задан.' : ' Сейчас пароль не задан.'}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="backup-password">Новый пароль</Label>
+                    <Input
+                      id="backup-password"
+                      type="password"
+                      autoComplete="new-password"
+                      placeholder={settings?.backup_password_set ? '••••••••' : 'Задать пароль'}
+                      value={backupPasswordDraft}
+                      disabled={clearBackupPassword}
+                      onChange={(e) => {
+                        setBackupPasswordDraft(e.target.value)
+                        if (e.target.value) setClearBackupPassword(false)
+                      }}
+                    />
+                    {settings?.backup_password_set && (
+                      <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <input
+                          type="checkbox"
+                          checked={clearBackupPassword}
+                          onChange={(e) => {
+                            setClearBackupPassword(e.target.checked)
+                            if (e.target.checked) setBackupPasswordDraft('')
+                          }}
+                        />
+                        Сбросить пароль
+                      </label>
+                    )}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -657,7 +730,7 @@ export default function BackupTab() {
               <Button variant="outline" className="gap-1.5" onClick={() => void handleSendTelegram()}>
                 <Send size={16} />
                 {includeAntizapretBackup
-                  ? `Отправить в Telegram (${telegramDeliveryPlan.length} файла)`
+                  ? `Отправить в Telegram (${telegramDeliveryPlan.length} ${pluralRu(telegramDeliveryPlan.length, ['файл', 'файла', 'файлов'])})`
                   : 'Отправить в Telegram (1 файл)'}
               </Button>
               <Button onClick={() => void handleCreate()} className="gap-1.5">
@@ -669,21 +742,26 @@ export default function BackupTab() {
         </Card>
       )}
 
-      <Card className="shadow-sm">
-        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-          <div>
-            <CardTitle className="text-base">Архивы AdminPanel</CardTitle>
-            <CardDescription className="mt-1.5">
-              {backups.length > 0
-                ? `${backups.length} файл${backups.length === 1 ? '' : backups.length < 5 ? 'а' : 'ов'} adminpanelaz_*.tar.gz — полные архивы AntiZapret хранятся на VPN-сервере`
-                : 'Только копии панели; архивы AntiZapret создаются на VPN-сервере отдельно'}
-            </CardDescription>
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Archive size={16} aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <CardTitle>Архивы AdminPanel</CardTitle>
+              <CardDescription className="mt-1">
+                {backups.length > 0
+                  ? `${backups.length} файл${backups.length === 1 ? '' : backups.length < 5 ? 'а' : 'ов'} adminpanelaz_*.tar.gz — полные архивы AntiZapret хранятся на VPN-сервере`
+                  : 'Только копии панели; архивы AntiZapret создаются на VPN-сервере отдельно'}
+              </CardDescription>
+            </div>
           </div>
           <div className="flex flex-wrap items-center gap-2 lg:shrink-0">
             <input
               ref={uploadInputRef}
               type="file"
-              accept=".tar.gz,.tgz,application/gzip,application/x-gzip"
+              accept=".tar.gz,.tgz,.enc,application/gzip,application/x-gzip"
               className="hidden"
               onChange={(event) => void handleUploadFileSelected(event)}
             />
@@ -709,7 +787,7 @@ export default function BackupTab() {
         </CardHeader>
         <CardContent>
           {backups.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-muted-foreground/20 bg-muted/10 px-4 py-10 text-center">
+            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-muted-foreground/20 bg-muted/10 px-4 py-10 text-center">
               <ArchiveX className="mb-2 h-8 w-8 text-muted-foreground/70" />
               <p className="text-sm font-medium">Копий пока нет</p>
               <p className="mt-1 max-w-sm text-xs text-muted-foreground">
@@ -731,7 +809,7 @@ export default function BackupTab() {
               {backups.map((b) => (
                 <li
                   key={b.file_name}
-                  className="rounded-xl border bg-card/50 p-3 transition-colors hover:bg-muted/30"
+                  className="rounded-lg border bg-card/50 p-3 transition-colors hover:bg-muted/30"
                 >
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div className="min-w-0 flex-1">
@@ -759,11 +837,7 @@ export default function BackupTab() {
                         onClick={async () => {
                           try {
                             const res = await downloadBackup(b.file_name)
-                            const blob = await res.blob()
-                            const a = document.createElement('a')
-                            a.href = URL.createObjectURL(blob)
-                            a.download = b.file_name
-                            a.click()
+                            triggerFileDownload(await res.blob(), b.file_name)
                           } catch (err) {
                             notifyError(err instanceof ApiError ? err.message : 'Ошибка скачивания')
                           }
@@ -799,18 +873,20 @@ export default function BackupTab() {
         </CardContent>
       </Card>
 
-      <Card className="shadow-sm">
-        <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0 pb-3">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <History size={16} />
-              Копии перед восстановлением
-            </CardTitle>
-            <CardDescription className="mt-1.5">
-              Перед каждым восстановлением панель сохраняет базу, CIDR и .env, которые будут заменены, — через них
-              можно откатить неудачное восстановление. Хранятся последние 3. Списки AntiZapret и слой AZ-AWG2 в эти
-              копии не входят.
-            </CardDescription>
+      <Card>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0">
+          <div className="flex min-w-0 items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <History size={16} aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <CardTitle>Копии перед восстановлением</CardTitle>
+              <CardDescription className="mt-1">
+                Перед каждым восстановлением панель сохраняет базу, CIDR и .env, которые будут заменены, — через них
+                можно откатить неудачное восстановление. Хранятся последние 3. Списки AntiZapret и слой AWG 2.0 в эти
+                копии не входят.
+              </CardDescription>
+            </div>
           </div>
           {snapshots.length > 0 && (
             <Badge variant="secondary" className="shrink-0">
@@ -820,7 +896,7 @@ export default function BackupTab() {
         </CardHeader>
         <CardContent>
           {snapshots.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-muted-foreground/20 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
+            <p className="rounded-lg border border-dashed border-muted-foreground/20 bg-muted/10 px-4 py-6 text-center text-xs text-muted-foreground">
               Копии появятся после первого восстановления
             </p>
           ) : (
@@ -828,7 +904,7 @@ export default function BackupTab() {
               {snapshots.map((snapshot) => (
                 <li
                   key={snapshot.snapshot_id}
-                  className="rounded-xl border bg-card/50 p-3 transition-colors hover:bg-muted/30"
+                  className="rounded-lg border bg-card/50 p-3 transition-colors hover:bg-muted/30"
                 >
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                     <div className="min-w-0 flex-1">
@@ -888,7 +964,7 @@ export default function BackupTab() {
               label="Авто-копия AdminPanel"
               description={
                 awg2Enabled
-                  ? 'База, CIDR, .env, при доступности списки AntiZapret и слой AZ-AWG2 — файл adminpanelaz_*.tar.gz'
+                  ? 'База, CIDR, .env, при доступности списки AntiZapret и слой AWG 2.0 — файл adminpanelaz_*.tar.gz'
                   : 'База, CIDR, .env и при доступности списки AntiZapret — файл adminpanelaz_*.tar.gz'
               }
               checked={settingsDraft.auto_backup_enabled}
@@ -904,7 +980,7 @@ export default function BackupTab() {
             {awg2Enabled && (
               <ToggleRow
                 id="backup-awg2"
-                label="Плюс слой AZ-AWG2"
+                label="Плюс слой AWG 2.0"
                 description="Если слой установлен — overlay попадает в adminpanelaz_*.tar.gz, как списки маршрутизации"
                 checked={settingsDraft.backup_awg2_enabled}
                 onCheckedChange={(checked) => patchDraft({ backup_awg2_enabled: checked })}
@@ -913,7 +989,7 @@ export default function BackupTab() {
           </div>
 
           {settingsDraft.auto_backup_enabled && (
-            <div className="grid gap-4 rounded-xl border bg-muted/20 p-4 md:grid-cols-2">
+            <div className="grid gap-4 rounded-lg border bg-muted/20 p-4 md:grid-cols-2">
               <div className="space-y-3">
                 <Label className="text-xs text-muted-foreground">Интервал, дней</Label>
                 <div className="flex flex-wrap gap-2">
@@ -925,7 +1001,7 @@ export default function BackupTab() {
                       className={cn(
                         'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
                         settingsDraft.auto_backup_days === d
-                          ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
+                          ? 'border-primary/40 bg-primary/5 text-primary ring-1 ring-primary/20'
                           : 'hover:border-muted-foreground/30 hover:bg-muted/50',
                       )}
                     >
@@ -958,7 +1034,7 @@ export default function BackupTab() {
                       className={cn(
                         'rounded-lg border px-3 py-1.5 text-sm font-medium transition-all',
                         settingsDraft.retention_count === n
-                          ? 'border-primary bg-primary/10 text-primary ring-1 ring-primary'
+                          ? 'border-primary/40 bg-primary/5 text-primary ring-1 ring-primary/20'
                           : 'hover:border-muted-foreground/30 hover:bg-muted/50',
                       )}
                     >
@@ -997,7 +1073,7 @@ export default function BackupTab() {
 
       <SettingsAlert variant="info" title="Что восстанавливается откуда">
         <strong>AdminPanel</strong> — «Восстановить» в списке или «Загрузить и восстановить» для архива с
-        компьютера (после переустановки): база, CIDR, .env и при наличии списки маршрутизации и слой AZ-AWG2.{' '}
+        компьютера (после переустановки): база, CIDR, .env и при наличии списки маршрутизации и слой AWG 2.0.{' '}
         <strong>AntiZapret</strong> — полный архив VPN восстанавливается на VPN-сервере (не через этот список).
       </SettingsAlert>
 

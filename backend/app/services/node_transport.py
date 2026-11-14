@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from app.services.feature_toggles import is_node_ssh_transport_enabled
-from app.services.ssh_tunnel_pool import get_ssh_tunnel_pool
 
 TRANSPORT_HTTP = "http"
 TRANSPORT_MTLS = "mtls"

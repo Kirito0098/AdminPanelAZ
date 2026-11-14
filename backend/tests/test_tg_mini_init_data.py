@@ -9,6 +9,7 @@ import time
 import urllib.parse
 
 import pytest
+from pydantic import ValidationError
 
 from app.routers.tg_mini import helpers
 
@@ -28,6 +29,14 @@ def _fields() -> dict[str, str]:
 
 def test_valid_init_data_returns_user():
     assert helpers._verify_telegram_init_data(_signed(_fields()), BOT_TOKEN) == {"id": 555}
+
+
+def test_init_data_length_is_bounded_at_the_model():
+    helpers.TelegramAuthRequest(init_data="x")
+    helpers.TelegramAuthRequest(init_data="x" * 8192)
+    for invalid in ("", "x" * 8193):
+        with pytest.raises(ValidationError):
+            helpers.TelegramAuthRequest(init_data=invalid)
 
 
 def test_tampered_init_data_rejected():

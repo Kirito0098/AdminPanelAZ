@@ -22,7 +22,7 @@ export function apiBaseForAccessPath(path: string | undefined | null): string {
 
 const TG_MINI_PATH_RE = /^(.*)\/api\/tg-mini(?:\/|$)/
 
-export function resolveAccessPath(input: {
+function resolveAccessPath(input: {
   pathname?: string
   injected?: string | null
   viteEnv?: string | null

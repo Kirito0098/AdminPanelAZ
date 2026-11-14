@@ -18,9 +18,9 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     docsHref: DOCS.profile,
   },
   users: {
-    title: 'Пользователи',
-    description: 'Кто может входить в панель и что ему разрешено делать',
-    hint: 'Администратор управляет всем. Пользователь работает с VPN: свои конфиги, квота, доп. доступ к чужим клиентам и право создавать.',
+    title: 'Пользователи панели',
+    description: 'Кто входит в панель, с какой ролью и что ему разрешено',
+    hint: 'Это доступ в саму панель, а не абоненты VPN: логин, роль администратора и вход.',
     docsHref: DOCS.users,
   },
   security: {
@@ -31,8 +31,8 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
   },
   config_delivery: {
     title: 'Выдача VPN-профилей',
-    description: 'QR-коды для телефона и готовые файлы для роутеров',
-    hint: 'Клиенты могут скачать профиль по ссылке или QR без входа в панель — если вы это включите. Портал и unlock-ключи — в разделе «Подписка».',
+    description: 'Скачивание файлов маршрутов',
+    hint: 'Публичная ссылка открывает файлы всем, у кого она есть, — включайте осознанно.',
     docsHref: DOCS.configDelivery,
   },
   maintenance: {
@@ -46,6 +46,12 @@ export const SECTION_META: Record<SettingsSection, SectionMeta> = {
     description: 'Сохранение и восстановление настроек панели',
     hint: 'Перед крупными изменениями рекомендуется сделать копию — так проще откатиться при ошибке.',
     docsHref: DOCS.backup,
+  },
+  panel_notify: {
+    title: 'Уведомления в панели',
+    description: 'Колокольчик: какие события и какому админу показывать',
+    hint: 'Настраивает только колокольчик и ленту в панели. Сообщения бота — на странице Telegram, вкладка «Уведомления».',
+    docsHref: DOCS.monitoringAlerts,
   },
   monitoring: {
     title: 'Нагрузка и уведомления',
@@ -96,7 +102,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 
 export const ROLE_HINTS: Record<UserRole, string> = {
   admin: 'Полный доступ ко всем настройкам и VPN',
-  user: 'Свои конфиги, квота, доп. доступ и право создавать — по настройкам админа',
+  user: 'Доступ к панели с ограниченными правами.',
 }
 
 const VPN_SERVICE_LABELS: Record<string, string> = {

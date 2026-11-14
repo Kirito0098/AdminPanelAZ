@@ -9,7 +9,7 @@ import {
   XCircle,
 } from 'lucide-react'
 import { getWarperDoctor } from '@/api/client'
-import StatusPanel from '@/components/noc/StatusPanel'
+import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -17,13 +17,10 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useLatestRequest } from '@/hooks/useLatestRequest'
 import { runLatest } from '@/lib/latestRequest'
 import type { Node, WarperDoctorItem, WarperDoctorStatus, WarperHealthResponse } from '@/types'
-import { formatNodeLabel } from './utils'
 
 interface DoctorSectionProps {
   health: WarperHealthResponse | null
   activeNode: Node | null
-  embedded?: boolean
-  hideTitle?: boolean
 }
 
 type DoctorStatus = WarperDoctorStatus
@@ -70,7 +67,7 @@ function itemText(item: WarperDoctorItem): string {
   return String(item.text ?? item.check ?? item.name ?? item.message ?? '—')
 }
 
-export default function DoctorSection({ health, activeNode, embedded = false, hideTitle = false }: DoctorSectionProps) {
+export default function DoctorSection({ health, activeNode }: DoctorSectionProps) {
   const { error: notifyError } = useNotifications()
   const [items, setItems] = useState<WarperDoctorItem[]>([])
   const [passed, setPassed] = useState<boolean | null>(null)
@@ -120,15 +117,8 @@ export default function DoctorSection({ health, activeNode, embedded = false, hi
 
   const disabled = !health?.installed
 
-  const body = (
+  return (
     <>
-      {!embedded && (
-        <p className="mb-4 text-sm text-muted-foreground">
-          Проверка sing-box, kresd и конфигурации на узле{' '}
-          <strong>{formatNodeLabel(health, activeNode)}</strong>.
-        </p>
-      )}
-
       <Button type="button" size="sm" onClick={() => void runDoctor()} disabled={disabled || running}>
         {running ? (
           <>
@@ -152,7 +142,7 @@ export default function DoctorSection({ health, activeNode, embedded = false, hi
       {hasRun && !running && (
         <div className="mt-4 space-y-4">
           {items.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Нет данных диагностики.</p>
+            <EmptyState icon={Stethoscope} title="Нет данных диагностики" className="py-8" />
           ) : (
             <>
               <div
@@ -218,26 +208,11 @@ export default function DoctorSection({ health, activeNode, embedded = false, hi
       )}
 
       {!hasRun && !running && !disabled && (
-        <div className={`flex items-center gap-2 text-sm text-muted-foreground ${embedded ? 'mt-3' : 'mt-6'}`}>
+        <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
           <Circle className="h-4 w-4" />
           Нажмите «Запустить диагностику», чтобы увидеть результат проверок.
         </div>
       )}
     </>
-  )
-
-  if (embedded) {
-    return (
-      <div>
-        {!hideTitle && <h3 className="mb-3 text-sm font-semibold">Диагностика</h3>}
-        {body}
-      </div>
-    )
-  }
-
-  return (
-    <StatusPanel title="Диагностика AZ-WARP" icon={Stethoscope}>
-      {body}
-    </StatusPanel>
   )
 }

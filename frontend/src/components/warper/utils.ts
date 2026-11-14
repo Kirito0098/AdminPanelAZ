@@ -1,15 +1,11 @@
+import { nodeNameWithHost } from '@/lib/nodeLabels'
 import type { Node, WarperHealthResponse } from '@/types'
 
 export const INSTALL_CMD =
   'curl -fsSL https://raw.githubusercontent.com/Liafanx/AZ-WARP/main/install.sh | bash'
 
 export function formatNodeLabel(health: WarperHealthResponse | null, activeNode: Node | null): string {
-  const name = health?.node_name ?? activeNode?.name
-  const host = health?.node_host ?? activeNode?.host
-  if (name && host) return `${name} (${host})`
-  if (name) return name
-  if (host) return host
-  return 'активном узле панели'
+  return nodeNameWithHost(health, activeNode)
 }
 
 export function isWarperDisabled(health: WarperHealthResponse | null): boolean {
@@ -111,14 +107,6 @@ const PROXY_LINK_RE = /(?:ss|vless|hy2|hysteria2):\/\/[^\s"']+/
 export function extractProxyLink(text: string): string {
   const value = text.trim()
   return PROXY_LINK_RE.exec(value)?.[0] ?? value
-}
-
-/** Outbound mode a donor link switches to: AZ-WARP 1.5.1 turns vless:// and hy2:// from the Slave field into their modes. */
-export function donorLinkMode(link: string): Extract<WarperOutboundMode, 'slave' | 'vless' | 'hy2'> | null {
-  if (link.startsWith('ss://')) return 'slave'
-  if (link.startsWith('vless://')) return 'vless'
-  if (link.startsWith('hy2://') || link.startsWith('hysteria2://')) return 'hy2'
-  return null
 }
 
 export const WARP_KEY_SOURCES = [

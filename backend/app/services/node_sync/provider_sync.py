@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -134,13 +135,15 @@ def deploy_compiled_providers_to_replicas(
     }
 
 
-def replicate_provider_content(
+def _replicate_provider_op(
     db: Session,
     group: NodeSyncGroup,
+    *,
     filename: str,
-    content: str,
+    payload: dict[str, Any],
+    replica_call: Callable[[NodeAdapter], None],
 ) -> ReplicateResult:
-    """Replicate a provider list file from primary to all HA group replicas."""
+    """Run one provider-file operation on every replica; a failed replica does not stop the rest."""
     result = ReplicateResult(operation=ReplicateOperation.CIDR_DEPLOY_FILES)
 
     if not is_auto_sync_enabled(group):
@@ -149,7 +152,7 @@ def replicate_provider_content(
 
     for replica_node in get_replica_nodes(db, group):
         try:
-            get_adapter_for_node(replica_node).save_provider_content(filename, content)
+            replica_call(get_adapter_for_node(replica_node))
         except Exception as exc:
             logger.warning(
                 "HA provider sync failed on replica %s: %s",
@@ -166,8 +169,40 @@ def replicate_provider_content(
         db,
         group,
         result,
-        payload={"filename": filename},
+        payload=payload,
         set_synced_on_success=True,
         audit_on_partial_failure=True,
     )
     return result
+
+
+def replicate_provider_content(
+    db: Session,
+    group: NodeSyncGroup,
+    filename: str,
+    content: str,
+) -> ReplicateResult:
+    """Replicate a provider list file from primary to all HA group replicas."""
+    return _replicate_provider_op(
+        db,
+        group,
+        filename=filename,
+        payload={"filename": filename},
+        replica_call=lambda adapter: adapter.save_provider_content(filename, content),
+    )
+
+
+def replicate_provider_enabled(
+    db: Session,
+    group: NodeSyncGroup,
+    filename: str,
+    enabled: bool,
+) -> ReplicateResult:
+    """Toggle a provider file on all replicas: include/exclude lists must match the primary."""
+    return _replicate_provider_op(
+        db,
+        group,
+        filename=filename,
+        payload={"filename": filename, "enabled": enabled},
+        replica_call=lambda adapter: adapter.set_provider_enabled(filename, enabled),
+    )

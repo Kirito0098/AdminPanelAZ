@@ -16,6 +16,7 @@ from app.routers.settings_telegram import (
     _admin_notify_settings_response,
     _send_test_message_to_recipients,
     _telegram_settings_response,
+    send_test_telegram_message,
     update_telegram_settings,
 )
 from app.schemas import (
@@ -23,13 +24,11 @@ from app.schemas import (
     AdminNotifyGroupInfo,
     AdminNotifySettingsResponse,
     AdminNotifySettingsUpdate,
-    EffectiveVisibleVpnProfilesResponse,
     MessageResponse,
     SelfServiceLimitsResponse,
     SelfServiceLimitsUpdate,
     TelegramSettingsResponse,
     TelegramSettingsUpdate,
-    VisibleVpnProfilesPolicy,
 )
 from app.services.admin_notify import (
     PERSONAL_OWNER_NOTIFY_KEY_ORDER,
@@ -57,8 +56,9 @@ def _mini_notify_settings_response(db: Session, user: User) -> AdminNotifySettin
     return AdminNotifySettingsResponse(
         telegram_id=response.telegram_id,
         recipient_user_ids=[],
-        notify_enabled=response.notify_enabled,
-        bot_token_set=response.bot_token_set,
+        # C6: global admin notify / bot / grace are admin-only.
+        notify_enabled=False,
+        bot_token_set=False,
         events=[
             AdminNotifyEventItem(
                 key=key,
@@ -76,7 +76,7 @@ def _mini_notify_settings_response(db: Session, user: User) -> AdminNotifySettin
                 keys=list(PERSONAL_OWNER_NOTIFY_KEY_ORDER),
             )
         ],
-        node_offline_grace_seconds=response.node_offline_grace_seconds,
+        node_offline_grace_seconds=0,
     )
 
 
@@ -90,25 +90,19 @@ def mini_settings(db: Session = Depends(get_db), current_user: User = Depends(ge
     policy = resolve_effective_visible_vpn_profiles(db, current_user)
     return {
         "server_ip": adapter.get_server_ip() if is_admin else "",
-        "bot_configured": bool(token),
+        # Состояние бота — админская информация; бейдж в Mini App и так скрыт у пользователя.
+        "bot_configured": bool(token) if is_admin else False,
         "user_id": current_user.id,
         "username": current_user.username,
         "role": current_user.role.value,
         "theme": current_user.theme,
         "visible_vpn_profiles": policy,
+        "can_manage_configs": (
+            True
+            if current_user.role == UserRole.admin
+            else bool(getattr(current_user, "can_manage_configs", False))
+        ),
     }
-
-
-@router.get("/visible-vpn-profiles", response_model=EffectiveVisibleVpnProfilesResponse)
-def mini_visible_vpn_profiles(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_tg_mini_user),
-):
-    policy = resolve_effective_visible_vpn_profiles(db, current_user)
-    return EffectiveVisibleVpnProfilesResponse(
-        policy=VisibleVpnProfilesPolicy(**policy),
-        inherited=True,
-    )
 
 
 @router.get("/admin-notify", response_model=AdminNotifySettingsResponse)
@@ -239,40 +233,7 @@ def mini_update_self_service_limits(
 
 @router.post("/telegram-settings/test", response_model=MessageResponse)
 def mini_test_telegram(db: Session = Depends(get_db), _: User = Depends(require_tg_mini_admin)):
-    from app.routers import tg_mini as root
-    from app.services.telegram import send_tg_message
-    from app.services.telegram_recipients import get_setting_chat_ids
-
-    bot_token = root._get_bot_token(db)
-    chat_ids = get_setting_chat_ids(lambda key, default="": root._get_setting(db, key, default))
-    if not bot_token or not chat_ids:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите токен бота и получателей бэкапов")
-    sent = 0
-    for chat_id in chat_ids:
-        if send_tg_message(
-            bot_token,
-            chat_id,
-            "✅ <b>AdminPanelAZ</b>: тестовое уведомление Telegram",
-            run_async=False,
-        ):
-            sent += 1
-    if sent == 0:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
-    return MessageResponse(message=f"Тестовое сообщение отправлено ({sent} из {len(chat_ids)})")
-
-
-@router.post("/check-bot-delivery")
-def check_bot_delivery(db: Session = Depends(get_db), _: User = Depends(require_tg_mini_admin)):
-    from app.routers import tg_mini as root
-    from app.services.telegram_transport import bot_api_post_sync
-
-    token = root._get_bot_token(db)
-    if not token:
-        return {"success": False, "message": "Бот не настроен"}
-    try:
-        data = bot_api_post_sync(token, "getMe", timeout=10)
-        if data.get("ok"):
-            return {"success": True, "message": f"Бот @{data['result'].get('username', '')} доступен"}
-        return {"success": False, "message": data.get("description", "Ошибка API")}
-    except Exception as exc:
-        return {"success": False, "message": str(exc)}
+    return send_test_telegram_message(
+        db,
+        missing_recipients_detail="Укажите токен бота и получателей бэкапов",
+    )

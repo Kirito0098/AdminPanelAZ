@@ -75,7 +75,7 @@ export default function CustomProviderWizardDialog({
       open={open}
       onOpenChange={onOpenChange}
       title="Свои ASN/CIDR"
-      description="Записи попадут в SQLite CIDR БД. Затем выполните сборку (этап 2) и deploy — и включите провайдера на вкладке «Провайдеры»."
+      description="Записи попадут в SQLite CIDR БД. Затем выполните сборку (этап 2) и развёртывание — и включите провайдера на вкладке «Провайдеры»."
       confirmLabel="Добавить в БД"
       loading={loading}
       onConfirm={async () => {

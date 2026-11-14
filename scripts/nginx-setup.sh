@@ -42,14 +42,10 @@ usage() {
   SSL_KEY            Путь к приватному ключу (для --nginx-custom / --uvicorn-custom)
   ACCESS_PATH        Подпуть на домене (например /panel) для публикации на общем домене
   NGINX_SUBPATH_INTEGRATE  true — автоматически добавить include snippet в vhost домена
+  ENFORCE_HTTPS      false — не включать редирект на HTTPS (uvicorn-режимы)
+  NGINX_SKIP_FIREWALL true — не менять firewall (вызывающий применяет правила сам)
   NON_INTERACTIVE    true — пропускать prompts при заданных env
 EOF
-}
-
-validate_domain() {
-  local value="$1"
-  [[ "$value" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]] || nginx_die "Неверный формат домена: $value"
-  nginx_assert_domain_not_az_vpn_host "$value"
 }
 
 require_safe_domain() {
@@ -135,7 +131,8 @@ prompt_port() {
 resolve_domain() {
   local required="${1:-false}"
   if [[ -n "${DOMAIN:-}" ]]; then
-    validate_domain "$DOMAIN"
+    nginx_validate_domain "$DOMAIN"
+    nginx_assert_domain_not_az_vpn_host "$DOMAIN"
     return 0
   fi
   if [[ "$required" == "true" ]] && nginx_is_non_interactive; then
@@ -144,7 +141,8 @@ resolve_domain() {
   if nginx_is_non_interactive; then
     DOMAIN="$(hostname -f 2>/dev/null || hostname)"
     [[ -n "$DOMAIN" ]] || nginx_die "DOMAIN не задан и hostname пуст"
-    validate_domain "$DOMAIN"
+    nginx_validate_domain "$DOMAIN"
+    nginx_assert_domain_not_az_vpn_host "$DOMAIN"
     return 0
   fi
   prompt_domain
@@ -154,7 +152,7 @@ prompt_domain() {
   while true; do
     local conflict_msg=""
     read -r -p "Доменное имя (например, panel.example.com): " DOMAIN
-    if [[ ! "$DOMAIN" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]; then
+    if ! nginx_is_valid_domain "$DOMAIN"; then
       echo "Неверный формат домена."
       continue
     fi
@@ -166,24 +164,13 @@ prompt_domain() {
   done
 }
 
-restart_panel_if_needed() {
-  if [[ "${SKIP_PANEL_RESTART:-false}" == "true" ]]; then
-    nginx_log "Перезапуск панели отложен (выполнится после завершения задачи в UI)"
-    return 0
-  fi
-  if systemctl is-enabled "$SERVICE_NAME" >/dev/null 2>&1 \
-    || systemctl cat "$SERVICE_NAME" >/dev/null 2>&1; then
-    systemctl restart "$SERVICE_NAME" 2>/dev/null || nginx_warn "Не удалось перезапустить $SERVICE_NAME"
-  else
-    nginx_warn "Перезапустите панель вручную: systemctl restart $SERVICE_NAME"
-  fi
-}
-
 nginx_apply_publish_firewall_for_mode() {
   local mode="$1"
   local backend_port="$2"
   local https_port="${3:-443}"
   local http_port="${4:-80}"
+  # Установщик применяет firewall своим шагом (setup_firewall_if_selected) — дублировать не нужно.
+  [[ "${NGINX_SKIP_FIREWALL:-false}" == "true" ]] && return 0
   # shellcheck source=scripts/firewall-setup.sh
   source "$ROOT_DIR/scripts/firewall-setup.sh"
   firewall_apply_publish_mode "$mode" "$backend_port" "$https_port" "$http_port" || \
@@ -247,7 +234,7 @@ setup_http_direct() {
   nginx_apply_publish_firewall_for_mode "http_direct" "$BACKEND_PORT" "0" "0"
   nginx_log_access_url "http_direct" "$domain" "$BACKEND_PORT"
   nginx_log "HTTP без nginx: http://<сервер>:${BACKEND_PORT}/"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 resolve_access_path() {
@@ -280,7 +267,10 @@ setup_nginx_letsencrypt() {
   resolve_access_path
 
   nginx_ensure_nginx || nginx_die "Не удалось установить nginx"
-  nginx_obtain_letsencrypt_cert "$domain" "$email"
+  # NGINX_FAIL_SOFT=true (установщик): сертификат не выдан — код 3, установка продолжается без HTTPS.
+  if ! nginx_obtain_letsencrypt_cert "$domain" "$email"; then
+    exit 3
+  fi
 
   local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
   local key="/etc/letsencrypt/live/${domain}/privkey.pem"
@@ -305,7 +295,7 @@ setup_nginx_letsencrypt() {
     nginx_log "Nginx + Let's Encrypt настроен: https://${domain}:${HTTPS_PUBLIC_PORT}/"
   fi
   nginx_finalize_nginx_mode "nginx_le" "$domain"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 setup_nginx_selfsigned() {
@@ -344,7 +334,7 @@ setup_nginx_selfsigned() {
     nginx_log "Nginx + самоподписанный SSL: https://${domain}:${HTTPS_PUBLIC_PORT}/"
   fi
   nginx_finalize_nginx_mode "nginx_selfsigned" "$domain"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 setup_nginx_custom_certs() {
@@ -402,7 +392,7 @@ setup_nginx_custom_certs() {
     nginx_log "Nginx + пользовательские сертификаты: https://${domain}:${HTTPS_PUBLIC_PORT}/"
   fi
   nginx_finalize_nginx_mode "nginx_custom" "$domain"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 setup_uvicorn_letsencrypt() {
@@ -414,11 +404,14 @@ setup_uvicorn_letsencrypt() {
   fi
   resolve_backend_port
 
-  nginx_obtain_letsencrypt_cert "$domain" "$email"
+  # NGINX_FAIL_SOFT=true (установщик): сертификат не выдан — код 3, установка продолжается без HTTPS.
+  if ! nginx_obtain_letsencrypt_cert "$domain" "$email"; then
+    exit 3
+  fi
   local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
   local key="/etc/letsencrypt/live/${domain}/privkey.pem"
   nginx_remove_site "$(nginx_env_get DOMAIN)"
-  nginx_apply_direct_https_env "$domain" "$BACKEND_PORT" "$cert" "$key"
+  nginx_apply_direct_https_env "$domain" "$BACKEND_PORT" "$cert" "$key" "${ENFORCE_HTTPS:-true}"
   systemctl enable --now snap.certbot.renew.timer 2>/dev/null || \
     systemctl enable --now certbot.timer 2>/dev/null || true
   if [[ "$BACKEND_PORT" == "443" ]]; then
@@ -427,7 +420,7 @@ setup_uvicorn_letsencrypt() {
     nginx_log "HTTPS на uvicorn + Let's Encrypt: https://${domain}:${BACKEND_PORT}/"
   fi
   nginx_finalize_uvicorn_mode "uvicorn_le" "$domain" "$BACKEND_PORT"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 setup_uvicorn_selfsigned() {
@@ -453,14 +446,15 @@ setup_uvicorn_selfsigned() {
       -subj "/CN=${domain}" >/dev/null 2>&1
   fi
   nginx_remove_site "$(nginx_env_get DOMAIN)"
-  nginx_apply_direct_https_env "$domain" "$BACKEND_PORT" "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY"
+  nginx_apply_direct_https_env "$domain" "$BACKEND_PORT" "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" \
+    "${ENFORCE_HTTPS:-true}"
   if [[ "$BACKEND_PORT" == "443" ]]; then
     nginx_log "HTTPS на uvicorn + самоподписанный SSL: https://${domain}/"
   else
     nginx_log "HTTPS на uvicorn + самоподписанный SSL: https://${domain}:${BACKEND_PORT}/"
   fi
   nginx_finalize_uvicorn_mode "uvicorn_selfsigned" "$domain" "$BACKEND_PORT"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 setup_uvicorn_custom_certs() {
@@ -497,14 +491,14 @@ setup_uvicorn_custom_certs() {
   [[ -f "$cert_path" && -f "$key_path" ]] || nginx_die "Файлы сертификата не найдены"
   resolve_backend_port
   nginx_remove_site "$(nginx_env_get DOMAIN)"
-  nginx_apply_direct_https_env "$domain" "$BACKEND_PORT" "$cert_path" "$key_path"
+  nginx_apply_direct_https_env "$domain" "$BACKEND_PORT" "$cert_path" "$key_path" "${ENFORCE_HTTPS:-true}"
   if [[ "$BACKEND_PORT" == "443" ]]; then
     nginx_log "HTTPS на uvicorn + пользовательские сертификаты: https://${domain}/"
   else
     nginx_log "HTTPS на uvicorn + пользовательские сертификаты: https://${domain}:${BACKEND_PORT}/"
   fi
   nginx_finalize_uvicorn_mode "uvicorn_custom" "$domain" "$BACKEND_PORT"
-  restart_panel_if_needed
+  nginx_restart_panel_if_needed
 }
 
 choose_https_type() {

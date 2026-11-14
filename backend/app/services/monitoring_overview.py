@@ -2,23 +2,32 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from app.models import Node, NodeStatus, NodeSyncGroup, VpnConfig, VpnType
+from app.models import Node, NodeStatus, NodeSyncGroup, TrafficSessionState, VpnConfig, VpnType
 from app.schemas import (
     HaNodePresence,
     MonitoringNodeSummary,
     MonitoringOverview,
     MonitoringService,
     OpenVpnClient,
+    OpenVpnGlobalStats,
     VpnConfigHaInfo,
     WireGuardPeer,
 )
 from app.services.awg2_noc import fetch_awg2_peers_for_adapter
+from app.services.client_owners import (
+    ClientOwner,
+    OwnerMap,
+    find_client_owner,
+    load_client_owners,
+    owner_fields,
+)
 from app.services.feature_toggles import is_awg2_enabled, is_proxy_nodes_enabled
 from app.services.node_sync.groups import build_ha_metadata
 from app.services.ip_geo import is_local_geoip_loaded, lookup_ips_geo, parse_client_endpoint
@@ -34,6 +43,8 @@ from app.services.node_compare_metrics import extract_cidr_routes_count, get_tra
 from app.services.proxy_noc_enrich import get_mappings_for_proxy, match_client_ip, normalize_proxy_host
 from app.services.resource_metrics import get_latest_samples_by_node
 from app.services.wireguard_status import wireguard_peer_is_online as _wg_is_online
+
+logger = logging.getLogger(__name__)
 
 HaMode = Literal["dedupe", "raw"]
 
@@ -143,6 +154,7 @@ def _collect_nodes_monitoring_data(db: Session) -> list[dict]:
             else:
                 adapter = get_adapter_for_node(node)
                 ovpn_clients, _ = adapter.get_openvpn_status_snapshot()
+                ovpn_clients = _merge_openvpn_status_with_sessions(db, node.id, ovpn_clients)
                 wireguard_peers = adapter.parse_wireguard_status()
                 amneziawg2_peers = _load_awg2_peers_for_node(db, adapter)
                 payload.update(
@@ -157,6 +169,15 @@ def _collect_nodes_monitoring_data(db: Session) -> list[dict]:
                 )
         except Exception as exc:
             payload["error"] = _exc_message(exc)
+            if is_vpn_node(node) and not payload["ovpn_clients"]:
+                try:
+                    payload["ovpn_clients"] = _merge_openvpn_status_with_sessions(
+                        db, node.id, []
+                    )
+                except Exception:
+                    logger.debug(
+                        "openvpn session fallback failed node_id=%s", node.id, exc_info=True
+                    )
         node_payloads.append(payload)
 
     return node_payloads
@@ -387,6 +408,102 @@ def enrich_wireguard_peers(
     return enriched
 
 
+def _with_client_owner(
+    item: OpenVpnClient | WireGuardPeer,
+    owners: OwnerMap,
+    node_ids: list[int],
+) -> OpenVpnClient | WireGuardPeer:
+    name = getattr(item, "common_name", None) or getattr(item, "client_name", None)
+    owner: ClientOwner | None = find_client_owner(owners, node_ids, name)
+    if owner is None:
+        return item
+    return item.model_copy(update=owner_fields(owner))
+
+
+def _attach_client_owners(
+    items: list[OpenVpnClient] | list[WireGuardPeer],
+    owners: OwnerMap,
+    node_ids: list[int] | None = None,
+) -> list:
+    """Copy owner fields onto connections that have a matching config."""
+    attached = []
+    for item in items:
+        scope = node_ids
+        if scope is None:
+            node_id = getattr(item, "node_id", None)
+            scope = [node_id] if node_id is not None else []
+        attached.append(_with_client_owner(item, owners, scope))
+    return attached
+
+
+_OPENVPN_PROTOCOL_TYPES = frozenset({"openvpn", "openvpn-udp", "openvpn-tcp"})
+# Bare protocol names some writers may use; a suffix-less "wireguard" must not fall
+# into the legacy-openvpn default of protocol_type_from_profile().
+_NON_OPENVPN_PROFILES = frozenset({"wireguard", "amneziawg", "amneziawg2"})
+
+
+def _is_openvpn_session_profile(profile: str | None) -> bool:
+    from app.services.traffic.collector import protocol_type_from_profile
+
+    name = (profile or "").strip().lower()
+    if not name or name in _NON_OPENVPN_PROFILES:
+        return False
+    return protocol_type_from_profile(name) in _OPENVPN_PROTOCOL_TYPES
+
+
+def _openvpn_clients_from_sessions(db: Session, node_id: int) -> list[OpenVpnClient]:
+    """Connected OpenVPN clients known to traffic accounting for this node.
+
+    The management socket may be unreachable (missing socket, restart, permissions);
+    an active traffic session still proves the client is connected right now.
+    """
+    rows = (
+        db.query(TrafficSessionState)
+        .filter(TrafficSessionState.node_id == node_id, TrafficSessionState.is_active.is_(True))
+        .all()
+    )
+    return [
+        OpenVpnClient(
+            common_name=row.common_name,
+            real_address=row.real_address or "",
+            virtual_address=row.virtual_address or "",
+            bytes_received=int(row.last_bytes_received or 0),
+            bytes_sent=int(row.last_bytes_sent or 0),
+            connected_since="",
+            connected_since_ts=int(row.connected_since_ts or 0),
+            profile=row.profile,
+            data_source="db_fallback",
+        )
+        for row in rows
+        if _is_openvpn_session_profile(row.profile)
+    ]
+
+
+def _merge_openvpn_status_with_sessions(
+    db: Session,
+    node_id: int,
+    clients: list[OpenVpnClient],
+) -> list[OpenVpnClient]:
+    """Union management-socket clients with active traffic sessions.
+
+    Socket may list only some profiles (one unit down) while sessions still
+    track the rest — empty-only fallback would miss those and leave cards offline.
+    """
+    session_clients = _openvpn_clients_from_sessions(db, node_id)
+    if not clients:
+        return session_clients
+    if not session_clients:
+        return clients
+    known = {(c.common_name or "").strip().lower() for c in clients if c.common_name}
+    merged = list(clients)
+    for extra in session_clients:
+        key = (extra.common_name or "").strip().lower()
+        if key and key not in known:
+            merged.append(extra)
+            known.add(key)
+    return merged
+
+
 def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOverview:
     if not is_vpn_node(node):
         try:
@@ -435,6 +552,19 @@ def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOve
 
     adapter = get_adapter_for_node(node)
     ovpn_clients, openvpn_data_source = adapter.get_openvpn_status_snapshot()
+    before = len(ovpn_clients)
+    ovpn_clients = _merge_openvpn_status_with_sessions(db, node.id, ovpn_clients)
+    if ovpn_clients and before == 0:
+        openvpn_data_source = "db_fallback"
+    elif ovpn_clients and len(ovpn_clients) > before:
+        openvpn_data_source = f"{openvpn_data_source}+db_sessions"
+    try:
+        openvpn_global_stats: OpenVpnGlobalStats | None = OpenVpnGlobalStats(
+            **adapter.get_openvpn_global_stats()
+        )
+    except Exception as exc:  # старый агент без эндпоинта — не ломаем обзор
+        logger.debug("openvpn global stats unavailable node_id=%s: %s", node.id, exc)
+        openvpn_global_stats = None
     wireguard_peers = adapter.parse_wireguard_status()
     amneziawg2_peers = _load_awg2_peers_for_node(db, adapter)
     services = adapter.get_service_status()
@@ -448,33 +578,43 @@ def build_monitoring_overview_for_node(db: Session, node: Node) -> MonitoringOve
             mappings_by_proxy_ip=mappings_by_proxy_ip,
         )
     )
+    owners = load_client_owners(db, [node.id])
     enriched_awg2 = enrich_wireguard_peers(
         amneziawg2_peers,
         geo_map,
+        node_id=node.id,
+        node_name=node.name,
+        proxy_ips=proxy_ips,
+        mappings_by_proxy_ip=mappings_by_proxy_ip,
+    )
+    enriched_openvpn = enrich_openvpn_clients(
+        ovpn_clients,
+        geo_map,
+        node_id=node.id,
+        node_name=node.name,
+        proxy_ips=proxy_ips,
+        mappings_by_proxy_ip=mappings_by_proxy_ip,
+    )
+    enriched_wireguard = enrich_wireguard_peers(
+        wireguard_peers,
+        geo_map,
+        node_id=node.id,
+        node_name=node.name,
         proxy_ips=proxy_ips,
         mappings_by_proxy_ip=mappings_by_proxy_ip,
     )
     return MonitoringOverview(
         scope="node",
         services=services,
-        openvpn_clients=enrich_openvpn_clients(
-            ovpn_clients,
-            geo_map,
-            proxy_ips=proxy_ips,
-            mappings_by_proxy_ip=mappings_by_proxy_ip,
-        ),
-        wireguard_peers=enrich_wireguard_peers(
-            wireguard_peers,
-            geo_map,
-            proxy_ips=proxy_ips,
-            mappings_by_proxy_ip=mappings_by_proxy_ip,
-        ),
-        amneziawg2_peers=enriched_awg2,
+        openvpn_clients=_attach_client_owners(enriched_openvpn, owners, [node.id]),
+        wireguard_peers=_attach_client_owners(enriched_wireguard, owners, [node.id]),
+        amneziawg2_peers=_attach_client_owners(enriched_awg2, owners, [node.id]),
         server_ip=adapter.get_server_ip(),
         timestamp=datetime.utcnow(),
         node_id=node.id,
         node_name=node.name,
         openvpn_data_source=openvpn_data_source,
+        openvpn_global_stats=openvpn_global_stats,
         nodes_summary=[],
         nodes_online=1 if node.status == NodeStatus.online else 0,
         nodes_total=1,
@@ -721,6 +861,7 @@ def build_federated_monitoring_overview(
 ) -> MonitoringOverview:
     node_payloads = _collect_nodes_monitoring_data(db)
     proxy_ips, mappings_by_proxy_ip = _load_proxy_noc_context(db)
+    owners = load_client_owners(db)
     lookup_ips: list[str | None] = []
     for payload in node_payloads:
         lookup_ips.extend(
@@ -758,33 +899,42 @@ def build_federated_monitoring_overview(
         if payload["server_ip"]:
             server_ips.append(payload["server_ip"])
         all_openvpn.extend(
-            enrich_openvpn_clients(
-                ovpn_clients,
-                geo_map,
-                node_id=node.id,
-                node_name=node.name,
-                proxy_ips=proxy_ips,
-                mappings_by_proxy_ip=mappings_by_proxy_ip,
+            _attach_client_owners(
+                enrich_openvpn_clients(
+                    ovpn_clients,
+                    geo_map,
+                    node_id=node.id,
+                    node_name=node.name,
+                    proxy_ips=proxy_ips,
+                    mappings_by_proxy_ip=mappings_by_proxy_ip,
+                ),
+                owners,
             )
         )
         all_wireguard.extend(
-            enrich_wireguard_peers(
-                wireguard_peers,
-                geo_map,
-                node_id=node.id,
-                node_name=node.name,
-                proxy_ips=proxy_ips,
-                mappings_by_proxy_ip=mappings_by_proxy_ip,
+            _attach_client_owners(
+                enrich_wireguard_peers(
+                    wireguard_peers,
+                    geo_map,
+                    node_id=node.id,
+                    node_name=node.name,
+                    proxy_ips=proxy_ips,
+                    mappings_by_proxy_ip=mappings_by_proxy_ip,
+                ),
+                owners,
             )
         )
         all_amneziawg2.extend(
-            enrich_wireguard_peers(
-                amneziawg2_peers,
-                geo_map,
-                node_id=node.id,
-                node_name=node.name,
-                proxy_ips=proxy_ips,
-                mappings_by_proxy_ip=mappings_by_proxy_ip,
+            _attach_client_owners(
+                enrich_wireguard_peers(
+                    amneziawg2_peers,
+                    geo_map,
+                    node_id=node.id,
+                    node_name=node.name,
+                    proxy_ips=proxy_ips,
+                    mappings_by_proxy_ip=mappings_by_proxy_ip,
+                ),
+                owners,
             )
         )
         nodes_summary.append(summary)

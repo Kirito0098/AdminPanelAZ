@@ -10,23 +10,22 @@ import urllib.parse
 from pathlib import Path
 from typing import Literal
 
-from fastapi import HTTPException, Request, status
-from pydantic import BaseModel
+from fastapi import HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.models import AppSetting, User, VpnConfig
+from app.models import User, VpnConfig
 from app.services.app_setting_store import _get_setting, _set_setting
-from app.services.panel_publish_info import resolve_public_base_url
-from app.services.qr_download import QrDownloadService
-from app.services.security import SecurityService
 
 settings = get_settings()
 _STATIC_DIR = Path(__file__).resolve().parents[2] / "static" / "tg_mini"
 
 
 class TelegramAuthRequest(BaseModel):
-    init_data: str
+    # HMAC is computed over the raw string, and nginx accepts bodies up to 32 MB:
+    # cap initData at the boundary instead of hashing an arbitrary payload.
+    init_data: str = Field(min_length=1, max_length=8192)
 
 
 class SendConfigV2Request(BaseModel):
@@ -61,21 +60,6 @@ def _static_index() -> Path:
     return _STATIC_DIR / "index.html"
 
 
-def _qr_download_service(db: Session, request: Request) -> QrDownloadService:
-    sec = SecurityService().get_settings(db)
-    pin_row = db.query(AppSetting).filter(AppSetting.key == "qr_download_pin").first()
-    from app.services.client_portal import resolve_portal_base_url
-
-    base_url = resolve_portal_base_url(db) or resolve_public_base_url(request)
-    return QrDownloadService(
-        db,
-        base_url=base_url,
-        ttl_seconds=sec["qr_download_ttl_seconds"],
-        max_downloads=sec["qr_download_max_downloads"],
-        pin=pin_row.value if pin_row else "",
-    )
-
-
 def _get_accessible_config(db: Session, config_id: int, current_user: User) -> VpnConfig:
     from app.services.config_access import can_view_config
     from app.services.node_manager import get_active_node
@@ -86,10 +70,8 @@ def _get_accessible_config(db: Session, config_id: int, current_user: User) -> V
         .filter(VpnConfig.id == config_id, VpnConfig.node_id == node.id)
         .first()
     )
-    if not config:
+    if not config or not can_view_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not can_view_config(current_user, config, db):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     return config
 
 
@@ -146,11 +128,13 @@ def _send_config_file(
     return MessageResponse(message="Конфиг отправлен в Telegram")
 
 
-def _serialize_tg_node(node, *, active_id: int | None) -> dict:
+def _serialize_tg_node(node, *, active_id: int | None, db) -> dict:
     from app.services.node_manager import node_metadata_dict
+    from app.services.node_sync.groups import build_ha_node_context
     from app.services.node_transport import TRANSPORT_MTLS, resolve_transport_id
 
     meta = node_metadata_dict(node)
+    ha = build_ha_node_context(db, node.id) or {}
     try:
         transport = resolve_transport_id(node)
     except ValueError:
@@ -166,6 +150,8 @@ def _serialize_tg_node(node, *, active_id: int | None) -> dict:
         "mtls_enabled": False if node.is_local else (transport == TRANSPORT_MTLS),
         "node_kind": node.node_kind,
         "is_active": node.id == active_id,
+        "ha_role": ha.get("role"),
+        "ha_primary_name": ha.get("primary_node_name"),
         "last_seen_at": node.last_seen_at.isoformat() if node.last_seen_at else None,
         "metadata": {
             key: meta[key]

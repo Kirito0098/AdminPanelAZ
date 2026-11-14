@@ -14,8 +14,9 @@ import type {
   LatestChangelog,
   FeatureModulesResponse,
   FeatureTogglesResponse,
-  ResourceProfilesResponse,
-  ResourceProfileImpact,
+  ScenarioPresetsResponse,
+  ScenarioPresetImpact,
+  ScenarioPresetPreview,
   RetentionSettings,
   GeoIpStatus,
   RouteBudgetInfo,
@@ -37,8 +38,9 @@ export async function updateSettings(data: Partial<AppSettings>) {
   })
 }
 
-export async function getUsers() {
-  return apiFetch<User[]>('/users')
+export async function getUsers(options?: { includeDeleting?: boolean }) {
+  const qs = options?.includeDeleting ? '?include_deleting=true' : ''
+  return apiFetch<User[]>(`/users${qs}`)
 }
 
 export async function createUser(data: {
@@ -50,10 +52,6 @@ export async function createUser(data: {
     method: 'POST',
     body: JSON.stringify({ ...data, theme: 'dark', is_active: true }),
   })
-}
-
-export async function deleteUser(id: number) {
-  return apiFetch(`/users/${id}`, { method: 'DELETE' })
 }
 
 export async function getUserConfigAccess(userId: number) {
@@ -117,7 +115,7 @@ export async function testAuditStream() {
 }
 
 export async function recreateProfiles() {
-  return apiFetch<{ message: string; detail?: string }>('/settings/recreate-profiles', { method: 'POST' })
+  return apiFetch<BackgroundTaskAcceptedResponse>('/settings/recreate-profiles', { method: 'POST' })
 }
 
 export async function runDoall() {
@@ -187,7 +185,7 @@ export async function getLightHealth() {
     status: string
     app: string
     env: string
-    resource_profile: string
+    scenario_preset: string
     started_at?: string
   }>('/health')
 }
@@ -199,18 +197,31 @@ export async function updateFeatureToggles(toggles: Record<string, boolean>) {
   })
 }
 
-export async function getResourceProfiles() {
-  return apiFetch<ResourceProfilesResponse>('/feature-toggles/profiles')
+export async function getScenarioPresets() {
+  return apiFetch<ScenarioPresetsResponse>('/feature-toggles/presets')
 }
 
-export async function applyResourceProfile(profile: string) {
+export async function previewScenarioPreset(preset: string) {
+  return apiFetch<ScenarioPresetPreview>(
+    `/feature-toggles/preview-preset?preset=${encodeURIComponent(preset)}`,
+    { method: 'POST' },
+  )
+}
+
+export async function applyScenarioPreset(preset: string) {
   return apiFetch<{
-    profile: string
+    preset: string
     requires_restart: boolean
-    impact?: ResourceProfileImpact
+    impact?: ScenarioPresetImpact
     workers_disabled?: string[]
-    profiles: ResourceProfilesResponse
-  }>(`/feature-toggles/apply-profile?profile=${encodeURIComponent(profile)}`, {
+    presets: ScenarioPresetsResponse
+  }>(`/feature-toggles/apply-preset?preset=${encodeURIComponent(preset)}`, {
+    method: 'POST',
+  })
+}
+
+export async function clearScenarioLocks() {
+  return apiFetch<ScenarioPresetsResponse>('/feature-toggles/clear-locks', {
     method: 'POST',
   })
 }
@@ -261,9 +272,7 @@ export async function applySecretsRotation(payload: {
   })
 }
 
-export async function updateSecuritySettings(
-  data: Partial<SecuritySettings & { qr_download_pin?: string }>,
-) {
+export async function updateSecuritySettings(data: Partial<SecuritySettings>) {
   return apiFetch<SecuritySettings>('/security', {
     method: 'PATCH',
     body: JSON.stringify(data),
@@ -272,37 +281,6 @@ export async function updateSecuritySettings(
 
 export async function getPortalPublishStatus() {
   return apiFetch<PortalPublishStatus>('/security/portal-publish-status')
-}
-
-export async function publishPortalDomain(data: {
-  portal_domain: string
-  email?: string | null
-  save_domain?: boolean
-}) {
-  return apiFetch<BackgroundTaskAcceptedResponse>('/security/portal-publish', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  })
-}
-
-export async function checkPortalReadiness(data: {
-  portal_domain: string
-  save_domain?: boolean
-}) {
-  return apiFetch<BackgroundTaskAcceptedResponse>('/security/portal-readiness-check', {
-    method: 'POST',
-    body: JSON.stringify({ save_domain: false, ...data }),
-  })
-}
-
-export async function preparePortalReadiness(data: {
-  portal_domain: string
-  save_domain?: boolean
-}) {
-  return apiFetch<BackgroundTaskAcceptedResponse>('/security/portal-readiness-prepare', {
-    method: 'POST',
-    body: JSON.stringify({ save_domain: true, ...data }),
-  })
 }
 
 export async function addTempWhitelist(ip: string, hours: number) {

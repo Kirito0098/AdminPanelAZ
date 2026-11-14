@@ -48,7 +48,7 @@ PUSH_FULL_STEP_LABELS = {
     "prune": "очистка лишних клиентов",
     "restart_openvpn": "перезапуск OpenVPN",
     "apply_wireguard": "применение WireGuard",
-    "sync_awg2": "синхронизация AZ-AWG2",
+    "sync_awg2": "синхронизация AWG 2.0",
     "access_policies": "копирование клиентов и политик доступа",
     "reblock": "возврат блокировок",
 }
@@ -328,7 +328,7 @@ def run_push_full(
                     logger.warning("Push full: AWG2 health on primary failed: %s", exc)
             if isinstance(awg2_health, dict) and awg2_health.get("installed"):
                 current_step = "sync_awg2"
-                progress(percent, f"Синхронизация AZ-AWG2 на {replica_name}…", current_step)
+                progress(percent, f"Синхронизация AWG 2.0 на {replica_name}…", current_step)
                 awg2_sync_started = True
                 sync_amneziawg2_state_from_primary(primary_adapter, replica_adapter)
 

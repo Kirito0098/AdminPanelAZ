@@ -8,6 +8,7 @@ import { NodeBadge } from '@/components/NodeSelector'
 import { useNode } from '@/context/NodeContext'
 import type { Awg2HealthResponse } from '@/types'
 import { cn } from '@/lib/utils'
+import { protocolLabel } from '@/lib/vpnTypes'
 import Awg2InstallDialog from './Awg2InstallDialog'
 import { awg2StatusMeta } from './utils'
 
@@ -26,7 +27,7 @@ export default function Awg2Hero({ health, loading, nodeLabel, onRefresh, onUpda
   return (
     <PageSectionHeader
       icon={Shield}
-      title="AZ-AWG2"
+      title={protocolLabel('amneziawg2')}
       docsHref={DOCS.awg2}
       titleAddon={
         <>
@@ -43,7 +44,7 @@ export default function Awg2Hero({ health, loading, nodeLabel, onRefresh, onUpda
       }
       description={
         <>
-          AmneziaWG 2.0 на узле <strong className="font-medium text-foreground">{nodeLabel}</strong>
+          {protocolLabel('amneziawg2')} на узле <strong className="font-medium text-foreground">{nodeLabel}</strong>
           {activeNode?.is_local ? ' (локальный controller)' : activeNode ? ' (удалённый node agent)' : ''}.
           Управление клиентами — в разделе Клиенты; здесь обфускация и backup слоя.
         </>

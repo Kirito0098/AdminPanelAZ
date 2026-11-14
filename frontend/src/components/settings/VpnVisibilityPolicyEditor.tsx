@@ -1,12 +1,15 @@
+import SettingsAlert from '@/components/settings/SettingsAlert'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import type { VisibleVpnProfilesPolicy } from '@/types'
 import { cn } from '@/lib/utils'
+import { protocolModuleLabel } from '@/lib/vpnTypes'
 
 export const FULL_VISIBLE_VPN_POLICY: VisibleVpnProfilesPolicy = {
   routes: ['az', 'vpn'],
   protocols: ['openvpn', 'wireguard', 'amneziawg', 'amneziawg2'],
   openvpn_groups: ['udp_tcp', 'udp', 'tcp'],
+  awg2_tunnel_only: true,
 }
 
 const ROUTE_OPTIONS = [
@@ -21,10 +24,10 @@ const OPENVPN_GROUP_OPTIONS = [
 ] as const
 
 const PROTOCOL_OPTIONS = [
-  { key: 'openvpn', label: 'OpenVPN' },
-  { key: 'wireguard', label: 'WireGuard' },
-  { key: 'amneziawg', label: 'AmneziaWG' },
-  { key: 'amneziawg2', label: 'AmneziaWG 2.0' },
+  { key: 'openvpn', label: protocolModuleLabel('openvpn') },
+  { key: 'wireguard', label: protocolModuleLabel('wireguard') },
+  { key: 'amneziawg', label: protocolModuleLabel('amneziawg') },
+  { key: 'amneziawg2', label: protocolModuleLabel('amneziawg2') },
 ] as const
 
 function toggleValue(list: string[], key: string, checked: boolean): string[] {
@@ -46,6 +49,7 @@ export function copyVisibleVpnPolicy(policy?: VisibleVpnProfilesPolicy | null): 
     routes: [...source.routes],
     protocols: [...source.protocols],
     openvpn_groups: [...source.openvpn_groups],
+    awg2_tunnel_only: source.awg2_tunnel_only ?? true,
   }
 }
 
@@ -63,15 +67,17 @@ export default function VpnVisibilityPolicyEditor({
   className,
 }: VpnVisibilityPolicyEditorProps) {
   const empty = isVisibleVpnPolicyEmpty(value)
+  const awg2Enabled = value.protocols.includes('amneziawg2')
+  const showAmneziaFiles = !(value.awg2_tunnel_only ?? true)
 
   const renderGroup = (
     title: string,
     options: readonly { key: string; label: string }[],
-    axis: keyof VisibleVpnProfilesPolicy,
+    axis: 'routes' | 'protocols' | 'openvpn_groups',
   ) => (
-    <div className="space-y-2">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
-      <div className="flex flex-wrap gap-3">
+    <div className="space-y-2 rounded-lg border border-border/70 bg-muted/15 p-3">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
+      <div className="flex flex-wrap gap-x-4 gap-y-2">
         {options.map((option) => {
           const checked = value[axis].includes(option.key)
           return (
@@ -99,10 +105,34 @@ export default function VpnVisibilityPolicyEditor({
       {renderGroup('Маршруты', ROUTE_OPTIONS, 'routes')}
       {renderGroup('OpenVPN группы', OPENVPN_GROUP_OPTIONS, 'openvpn_groups')}
       {renderGroup('Протоколы', PROTOCOL_OPTIONS, 'protocols')}
-      {empty && (
-        <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-200">
-          Пользователь не увидит ни одного профиля. Отметьте хотя бы маршрут и протокол.
+      <div className="space-y-2 rounded-lg border border-border/70 bg-muted/15 p-3">
+        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          {protocolModuleLabel('amneziawg2')} файлы
         </p>
+        <div className="flex flex-wrap gap-x-4 gap-y-2">
+          <label className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+            <Checkbox checked={awg2Enabled} disabled />
+            .conf
+          </label>
+          <label className="inline-flex items-center gap-2 text-sm">
+            <Checkbox
+              checked={awg2Enabled && showAmneziaFiles}
+              disabled={disabled || !awg2Enabled}
+              onCheckedChange={(next) => onChange({ ...value, awg2_tunnel_only: !next })}
+            />
+            файлы Amnezia (.vpn)
+          </label>
+        </div>
+        {!awg2Enabled && (
+          <p className="text-xs text-muted-foreground">
+            Включите протокол {protocolModuleLabel('amneziawg2')}, чтобы настроить файлы.
+          </p>
+        )}
+      </div>
+      {empty && (
+        <SettingsAlert variant="warning" title="Профили скрыты">
+          Пользователь не увидит ни одного профиля. Отметьте хотя бы маршрут и протокол.
+        </SettingsAlert>
       )}
       {value.protocols.includes('openvpn') && value.openvpn_groups.length === 0 && (
         <p className="text-xs text-muted-foreground">

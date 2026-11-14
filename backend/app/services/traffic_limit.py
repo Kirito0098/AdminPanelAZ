@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 
+from app.services.shared_helpers import as_utc
+
 AMNEZIAWG2_PROTOCOL = frozenset({"amneziawg2"})
 
 TRAFFIC_LIMIT_EXCEEDED_MESSAGE = (
@@ -29,11 +31,8 @@ class TrafficLimitExceededError(ValueError):
 
 
 def _as_utc(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
+    # Aware datetimes stay as-is here (all stored values are naive UTC).
+    return as_utc(dt, convert_aware=False)
 
 
 def normalize_traffic_limit_unit(unit: str | None) -> str:
@@ -153,18 +152,25 @@ def format_traffic_limit_unblock_at(period_days: int | None, now=None):
     return formatted_at, label
 
 
-def human_bytes(value: int | None) -> str | None:
+def human_bytes(
+    value: int | float | None,
+    *,
+    units: tuple[str, ...] = ("B", "KB", "MB", "GB", "TB"),
+    digits: int = 1,
+    small_digits: int | None = None,
+) -> str | None:
+    """Bytes to a human label; ``small_digits`` overrides ``digits`` below 10 units."""
     if value is None:
         return None
     amount = float(value)
-    units = ["B", "KB", "MB", "GB", "TB"]
     idx = 0
     while amount >= 1024 and idx < len(units) - 1:
         amount /= 1024
         idx += 1
     if idx == 0:
-        return f"{int(amount)} {units[idx]}"
-    return f"{amount:.1f} {units[idx]}"
+        return f"{amount:.0f} {units[idx]}"
+    precision = digits if small_digits is None or amount >= 10 else small_digits
+    return f"{amount:.{precision}f} {units[idx]}"
 
 
 def resolve_traffic_limit_state(*, traffic_limit_bytes, traffic_limit_period_days=None, consumed_bytes):
@@ -211,6 +217,7 @@ def get_client_consumed_traffic_bytes(
     client_name: str,
     node_id: int | None = None,
     period_days: int | None = None,
+    since: datetime | None = None,
     protocol_types: set[str] | frozenset[str] | None = None,
     normalize_identity=None,
 ):
@@ -242,7 +249,20 @@ def get_client_consumed_traffic_bytes(
     if not matched:
         return 0
 
-    if period_days in TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED:
+    if since is not None:
+        # Пользовательский лимит считает от traffic_counter_reset_at: только creada_at >= since,
+        # без ограничения по концу периода и без разбивки на календарные окна.
+        since_dt = _as_utc(since).replace(tzinfo=None)
+        model = UserTrafficSample
+        total_expr = func.coalesce(model.delta_received, 0) + func.coalesce(model.delta_sent, 0)
+        query = db.query(func.coalesce(func.sum(total_expr), 0)).filter(
+            model.common_name.in_(matched),
+            model.created_at >= since_dt,
+        )
+        if node_id is not None:
+            # "+ 0" keeps SQLite on (common_name, created_at).
+            query = query.filter(model.node_id + 0 == node_id)
+    elif period_days in TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED:
         now = datetime.now(timezone.utc)
         period_start, period_end = get_traffic_limit_period_bounds(period_days, now=now)
         since_dt = _as_utc(period_start).replace(tzinfo=None)

@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Navigate, useSearchParams } from 'react-router-dom'
+import { Navigate, Link } from 'react-router-dom'
 import {
+  Activity,
   ArrowDownToLine,
   ChevronDown,
   ChevronRight,
@@ -8,28 +9,26 @@ import {
   Copy,
   Download,
   Filter,
-  Hash,
   ListOrdered,
-  QrCode,
   Radio,
   ScrollText,
   Search,
-  Wifi,
   WifiOff,
   Plug,
+  Bell,
 } from 'lucide-react'
 import {
   ApiError,
   downloadActionLogsExport,
   getActionLogs,
-  getConnectionLogs,
   getOpenVpnEvents,
   getOpenVpnSockets,
-  getQrDownloadLogs,
 } from '@/api/client'
 import { NodeBadge } from '@/components/NodeSelector'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import { parseContentDispositionFilename } from '@/lib/profileDownloadName'
+import { triggerFileDownload } from '@/lib/triggerFileDownload'
 import EmptyState from '@/components/ui/EmptyState'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import { DOCS } from '@/lib/docsUrls'
@@ -52,22 +51,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
+import { useNotificationCenter } from '@/context/NotificationCenterContext'
+import NotificationsFeed from '@/components/notifications/NotificationsFeed'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
+import { usePageTab } from '@/hooks/usePageTab'
 import { formatDateTime } from '@/lib/datetime'
 import { actionLogDetailsLabel } from '@/lib/actionLogDetails'
 import { actionLogLabel } from '@/lib/actionLogLabels'
 import { groupConsecutiveActionLogs, type ActionLogGroup } from '@/lib/groupActionLogs'
-import { COL_HANDSHAKE, COL_REAL_IP, COL_VPN_IP, connectionSourceLabel } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
-import { isWireGuardOnline } from '@/lib/wireguardStatus'
 import type {
   ActionLogEntry,
-  ConnectionLogsSnapshot,
   OpenVpnEventProfile,
   OpenVpnSocketStatus,
-  QrDownloadAuditEntry,
 } from '@/types'
 
 const REFRESH_INTERVAL = 30
@@ -75,18 +73,6 @@ const REFRESH_INTERVAL = 30
 const LOG_PAGE_SIZE = 100
 
 type LogLevel = 'all' | 'error' | 'warn' | 'info'
-
-function dataSourceLabel(source?: string) {
-  if (source === 'management_socket') return connectionSourceLabel('management_socket')
-  if (source === 'status_log') return 'Status-логи'
-  return 'Нет данных'
-}
-
-function dataSourceVariant(source?: string): 'default' | 'secondary' | 'outline' {
-  if (source === 'management_socket') return 'default'
-  if (source === 'status_log') return 'secondary'
-  return 'outline'
-}
 
 function detectLogLevel(line: string): 'error' | 'warn' | 'info' | null {
   const upper = line.toUpperCase()
@@ -103,13 +89,7 @@ const levelLineStyles: Record<'error' | 'warn' | 'info', string> = {
 }
 
 function downloadText(filename: string, text: string) {
-  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
+  triggerFileDownload(text, filename)
 }
 
 async function copyText(text: string) {
@@ -337,71 +317,6 @@ function LogViewer({ lines, emptyTitle, emptyDescription, profileName }: LogView
   )
 }
 
-type ConnectionClientCardProps = {
-  name: string
-  realIp: string
-  vpnIp: string
-}
-
-function ConnectionClientCard({ name, realIp, vpnIp }: ConnectionClientCardProps) {
-  return (
-    <div className="rounded-lg border p-3">
-      <p className="font-medium">{name}</p>
-      <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-        <div>
-          <p className="text-muted-foreground">{COL_REAL_IP}</p>
-          <p className="font-mono">{realIp}</p>
-        </div>
-        <div>
-          <p className="text-muted-foreground">{COL_VPN_IP}</p>
-          <p className="font-mono">{vpnIp}</p>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-type WireGuardPeerCardProps = {
-  name: string
-  handshake: string
-}
-
-function WireGuardPeerCard({ name, handshake }: WireGuardPeerCardProps) {
-  return (
-    <div className="rounded-lg border p-3">
-      <p className="font-medium">{name}</p>
-      <div className="mt-2 text-xs">
-        <p className="text-muted-foreground">{COL_HANDSHAKE}</p>
-        <p>{handshake}</p>
-      </div>
-    </div>
-  )
-}
-
-function QrDownloadCard({ entry }: { entry: QrDownloadAuditEntry }) {
-  return (
-    <div className="rounded-lg border p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Badge variant="secondary">{entry.event_type}</Badge>
-        <span className="text-xs text-muted-foreground">{formatDateTime(entry.created_at)}</span>
-      </div>
-      <p className="mt-2 text-sm font-medium">{entry.actor_username || '—'}</p>
-      <div className="mt-2 space-y-2 text-xs">
-        <div>
-          <p className="text-muted-foreground">IP</p>
-          <p className="font-mono break-all">{entry.remote_addr || '—'}</p>
-        </div>
-        {entry.details && (
-          <div>
-            <p className="text-muted-foreground">Детали</p>
-            <p className="break-words text-muted-foreground">{entry.details}</p>
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 function SocketCard({ socket }: { socket: OpenVpnSocketStatus }) {
   return (
     <div className="rounded-lg border p-3">
@@ -576,19 +491,26 @@ function ActionLogGroupTableRows({ group, expanded, onToggle }: ActionLogGroupTa
   )
 }
 
-export default function LogsPage() {
+type LogTab = 'openvpn-events' | 'actions' | 'openvpn-sockets' | 'notifications'
+
+type LogsPageProps = {
+  /**
+   * Внутри «Наблюдения»: без своего заголовка и отступов страницы, вкладки живут
+   * в `?log=`, права проверяет MonitoringPage.
+   */
+  embedded?: boolean
+}
+
+export default function LogsPage({ embedded = false }: LogsPageProps) {
   const { user } = useAuth()
   const { isEnabled } = useFeatureModules()
   const logsDashboardEnabled = isEnabled('logs_dashboard')
   const actionLogsEnabled = isEnabled('action_logs')
-  const qrDownloadsEnabled = isEnabled('qr_downloads')
   const { activeNode, loading: nodeLoading } = useNode()
   const { success, error: notifyError } = useNotifications()
   const { startGlobal, doneGlobal } = useProgress()
   const [actions, setActions] = useState<ActionLogEntry[]>([])
-  const [connections, setConnections] = useState<ConnectionLogsSnapshot | null>(null)
   const [events, setEvents] = useState<OpenVpnEventProfile[]>([])
-  const [qrDownloads, setQrDownloads] = useState<QrDownloadAuditEntry[]>([])
   const [openVpnSockets, setOpenVpnSockets] = useState<OpenVpnSocketStatus[]>([])
   const [socketsTimestamp, setSocketsTimestamp] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -601,38 +523,29 @@ export default function LogsPage() {
   const [expandedActionGroups, setExpandedActionGroups] = useState<Set<string>>(() => new Set())
   const [exportingActions, setExportingActions] = useState(false)
   const actionsLoadedRef = useRef(false)
-  const activeTabRef = useRef<string>('connections')
 
-  const defaultLogTab = logsDashboardEnabled ? 'connections' : 'actions'
-  const showConnectionTabs = logsDashboardEnabled
+  const showEventsTab = logsDashboardEnabled
   const showActionTab = user?.role === 'admin' && actionLogsEnabled
-  const showQrDownloadsTab = user?.role === 'admin' && qrDownloadsEnabled
   const showSocketsTab = user?.role === 'admin' && logsDashboardEnabled
+  const showNotificationsTab = user?.role === 'admin'
+  const { counts: notificationCounts } = useNotificationCenter()
 
-  const [searchParams] = useSearchParams()
-  const initialLogTab = useMemo(() => {
-    const tab = searchParams.get('tab')
-    if (tab === 'qr-downloads' && showQrDownloadsTab) return tab
-    if (tab === 'openvpn-sockets' && showSocketsTab) return tab
-    if (tab === 'actions' && showActionTab) return tab
-    if ((tab === 'connections' || tab === 'openvpn-events') && showConnectionTabs) return tab
-    return defaultLogTab
-  }, [
-    searchParams,
-    showQrDownloadsTab,
-    showSocketsTab,
-    showActionTab,
-    showConnectionTabs,
-    defaultLogTab,
-  ])
+  const availableLogTabs = useMemo<LogTab[]>(() => {
+    const tabs: LogTab[] = []
+    if (showEventsTab) tabs.push('openvpn-events')
+    if (showActionTab) tabs.push('actions')
+    if (showSocketsTab) tabs.push('openvpn-sockets')
+    if (showNotificationsTab) tabs.push('notifications')
+    return tabs
+  }, [showEventsTab, showActionTab, showSocketsTab, showNotificationsTab])
 
-  const [activeTab, setActiveTab] = useState(initialLogTab)
+  const [activeTab, setActiveTab] = usePageTab<LogTab>({
+    tabs: availableLogTabs,
+    param: embedded ? 'log' : 'tab',
+    fallback: showEventsTab ? 'openvpn-events' : 'actions',
+  })
+  const activeTabRef = useRef<LogTab>(activeTab)
   activeTabRef.current = activeTab
-
-  useEffect(() => {
-    setActiveTab(initialLogTab)
-    activeTabRef.current = initialLogTab
-  }, [initialLogTab])
 
   const load = useCallback(
     async (manual = false, initial = false, tabOverride?: string) => {
@@ -644,32 +557,17 @@ export default function LogsPage() {
       }
       const tab = tabOverride ?? activeTabRef.current
       // Auto-refresh only hits the active tab; manual/initial still avoids unused heavy probes.
-      const fetchConnections =
-        logsDashboardEnabled && (initial || manual || tab === 'connections')
       const fetchEvents =
         logsDashboardEnabled && (initial || manual || tab === 'openvpn-events')
       const fetchSockets =
         user?.role === 'admin' &&
         logsDashboardEnabled &&
         (initial || manual || tab === 'openvpn-sockets')
-      const fetchQr =
-        user?.role === 'admin' &&
-        qrDownloadsEnabled &&
-        (initial || manual || tab === 'qr-downloads')
       try {
-        const connPromise = fetchConnections ? getConnectionLogs() : Promise.resolve(undefined)
         const evtPromise = fetchEvents ? getOpenVpnEvents() : Promise.resolve(undefined)
-        const qrPromise = fetchQr ? getQrDownloadLogs() : Promise.resolve(undefined)
         const socketsPromise = fetchSockets ? getOpenVpnSockets() : Promise.resolve(undefined)
-        const [conn, evt, qr, sockets] = await Promise.all([
-          connPromise,
-          evtPromise,
-          qrPromise,
-          socketsPromise,
-        ])
-        if (conn !== undefined) setConnections(conn)
+        const [evt, sockets] = await Promise.all([evtPromise, socketsPromise])
         if (evt !== undefined) setEvents(evt.profiles)
-        if (qr !== undefined) setQrDownloads(qr)
         if (sockets !== undefined) {
           setOpenVpnSockets(sockets.sockets)
           setSocketsTimestamp(sockets.timestamp)
@@ -695,16 +593,16 @@ export default function LogsPage() {
         if (initial) doneGlobal()
       }
     },
-    [user?.role, notifyError, success, startGlobal, doneGlobal, logsDashboardEnabled, actionLogsEnabled, qrDownloadsEnabled],
+    [user?.role, notifyError, success, startGlobal, doneGlobal, logsDashboardEnabled, actionLogsEnabled],
   )
 
   useEffect(() => {
-    // Node switch (and URL deep-link): reload for the tab the user is viewing, not only initialLogTab.
-    // activeTabRef stays in sync on each render; URL changes also setActiveTab(initialLogTab) above.
+    // Node switch: reload for the tab the user is viewing. Tab deep-links are handled
+    // by the activeTab effect below, which soft-loads the newly opened tab.
     if (nodeLoading) return
     load(false, true, activeTabRef.current)
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- remount on node / tab deep-link only
-  }, [nodeLoading, activeNode?.id, initialLogTab])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- remount on node switch only
+  }, [nodeLoading, activeNode?.id])
 
   useIntervalWhenVisible(
     () => {
@@ -718,7 +616,8 @@ export default function LogsPage() {
     },
     1000,
     {
-      enabled: autoRefresh,
+      // На вкладке «Уведомления» плашки автообновления нет — логи там не нужны.
+      enabled: autoRefresh && activeTab !== 'notifications',
       onBecomeVisible: () => {
         setCountdown(REFRESH_INTERVAL)
         void load(false, false)
@@ -733,20 +632,13 @@ export default function LogsPage() {
       skipTabFetchRef.current = false
       return
     }
+    if (activeTab === 'notifications') return
     void load(false, false, activeTab)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only on explicit tab switches
   }, [activeTab])
 
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
-
-  const openvpnClients = connections?.openvpn_clients ?? []
-  const wireguardPeers = connections?.wireguard_peers ?? []
-  const activeWireguardPeers = useMemo(
-    () => wireguardPeers.filter(isWireGuardOnline),
-    [wireguardPeers],
-  )
-  const totalConnections = openvpnClients.length + activeWireguardPeers.length
 
   const activeEvents = useMemo(() => events.filter((p) => p.exists), [events])
 
@@ -801,14 +693,10 @@ export default function LogsPage() {
     try {
       const res = await downloadActionLogsExport()
       const blob = await res.blob()
-      const disposition = res.headers.get('Content-Disposition') ?? ''
-      const match = disposition.match(/filename="([^"]+)"/)
-      const filename = match?.[1] ?? `action-logs-${new Date().toISOString().slice(0, 10)}.csv`
-      const a = document.createElement('a')
-      a.href = URL.createObjectURL(blob)
-      a.download = filename
-      a.click()
-      URL.revokeObjectURL(a.href)
+      const filename =
+        parseContentDispositionFilename(res.headers.get('Content-Disposition')) ??
+        `action-logs-${new Date().toISOString().slice(0, 10)}.csv`
+      triggerFileDownload(blob, filename)
       success('Журнал действий экспортирован')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка экспорта журнала')
@@ -817,61 +705,104 @@ export default function LogsPage() {
     }
   }
 
-  if (user?.role !== 'admin') {
+  if (!embedded && user?.role !== 'admin') {
     return <Navigate to="/" replace />
   }
 
-  if (loading && !connections && events.length === 0 && actions.length === 0) {
-    return <Spinner label="Загрузка логов..." className="py-16" />
+  if (availableLogTabs.length === 0) {
+    return (
+      <EmptyState
+        icon={ScrollText}
+        title="Журналы недоступны"
+        description="Модули журналов отключены в настройках панели."
+        className="py-8"
+      />
+    )
+  }
+
+  if (loading && events.length === 0 && actions.length === 0) {
+    return <Spinner label="Загрузка логов..." className={embedded ? 'py-8' : 'py-16'} />
   }
 
   return (
-    <div className="space-y-6">
-      <PageSectionHeader
-        icon={ScrollText}
-        title="Журналы"
-        docsHref={DOCS.logs}
-        titleAddon={<NodeBadge name={activeNode?.name} status={activeNode?.status} />}
-        description={
-          <>
-            Подключения, события OpenVPN, аудит QR и действия администраторов
-            {connections?.timestamp && <> · обновлено {formatDateTime(connections.timestamp)}</>}
-          </>
-        }
-        actions={
-          <AutoRefreshControl
-            enabled={autoRefresh}
-            onToggle={() => setAutoRefresh((v) => !v)}
-            countdown={countdown}
-            intervalSec={REFRESH_INTERVAL}
-            refreshing={refreshing}
-            onManualRefresh={handleRefresh}
+    <div className={embedded ? 'space-y-4' : 'space-y-6'}>
+      {!embedded &&
+        (activeTab === 'notifications' ? (
+          <PageSectionHeader
+            icon={Bell}
+            title="Уведомления"
+            description={
+              <>
+                События панели по всем узлам: заявки, безопасность, серверы и сеть, задачи. Колокол в
+                шапке показывает последние уведомления, непрочитанные — выше.
+              </>
+            }
           />
-        }
-      />
+        ) : (
+          <>
+            <PageSectionHeader
+              icon={ScrollText}
+              title="Журналы"
+              docsHref={DOCS.logs}
+              titleAddon={<NodeBadge name={activeNode?.name} status={activeNode?.status} />}
+              description="События OpenVPN и действия администраторов"
+              actions={
+                <AutoRefreshControl
+                  enabled={autoRefresh}
+                  onToggle={() => setAutoRefresh((v) => !v)}
+                  countdown={countdown}
+                  intervalSec={REFRESH_INTERVAL}
+                  refreshing={refreshing}
+                  onManualRefresh={handleRefresh}
+                />
+              }
+            />
 
-      <SettingsAlert variant="info" title="Данные активного узла">
-        Логи собираются с <strong>{activeNode?.name ?? 'активного узла'}</strong>
-        {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
-        Переключите узел в шапке или на странице «Узлы», чтобы смотреть другой сервер.
-      </SettingsAlert>
+            <SettingsAlert variant="info" title="Данные активного узла">
+              Логи собираются с <strong>{activeNode?.name ?? 'активного узла'}</strong>
+              {activeNode?.is_local ? ' (локальный controller)' : ' (удалённый node agent)'}.
+              Переключите узел в шапке или на странице «Узлы», чтобы смотреть другой сервер.
+            </SettingsAlert>
 
-      {nodeOffline && (
-        <SettingsAlert variant="warning" title="Узел офлайн">
-          Активный узел недоступен. Логи подключений и событий могут быть устаревшими или отсутствовать.
-          Проверьте связь с node agent и повторите обновление.
-        </SettingsAlert>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              <Link
+                to="/monitoring"
+                className="inline-flex items-center gap-1.5 font-medium text-primary underline-offset-4 hover:underline"
+              >
+                <Activity size={13} aria-hidden />
+                Живые подключения — в NOC-мониторинге
+              </Link>
+              <Link
+                to="/settings/config_delivery"
+                className="inline-flex items-center gap-1.5 font-medium text-primary underline-offset-4 hover:underline"
+              >
+                <Download size={13} aria-hidden />
+                Выдача профилей — в настройках
+              </Link>
+            </div>
+          </>
+        ))}
+
+      {activeTab !== 'notifications' && (
+        <>
+          {nodeOffline && (
+            <SettingsAlert variant="warning" title="Узел офлайн">
+              Активный узел недоступен. Логи событий могут быть устаревшими или отсутствовать.
+              Проверьте связь с node agent и повторите обновление.
+            </SettingsAlert>
+          )}
+
+          {nodeUnknown && !nodeOffline && (
+            <SettingsAlert variant="warning" title="Статус узла неизвестен">
+              Связь с узлом не подтверждена. Запустите проверку здоровья на странице «Узлы».
+            </SettingsAlert>
+          )}
+
+          <InlineProgressBar active={refreshing} label="Обновление логов..." />
+        </>
       )}
 
-      {nodeUnknown && !nodeOffline && (
-        <SettingsAlert variant="warning" title="Статус узла неизвестен">
-          Связь с узлом не подтверждена. Запустите проверку здоровья на странице «Узлы».
-        </SettingsAlert>
-      )}
-
-      <InlineProgressBar active={refreshing} label="Обновление логов..." />
-
-      {loadError && !connections && events.length === 0 ? (
+      {loadError && events.length === 0 && activeTab !== 'notifications' ? (
         <Card>
           <CardContent>
             <EmptyState
@@ -887,20 +818,9 @@ export default function LogsPage() {
           </CardContent>
         </Card>
       ) : (
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as LogTab)}>
           <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1">
-            {showConnectionTabs && (
-            <TabsTrigger value="connections" className="gap-1.5">
-              <Wifi size={14} />
-              Подключения
-              {totalConnections > 0 && (
-                <Badge variant="secondary" className="h-4 px-1 text-[10px]">
-                  {totalConnections}
-                </Badge>
-              )}
-            </TabsTrigger>
-            )}
-            {showConnectionTabs && (
+            {showEventsTab && (
             <TabsTrigger value="openvpn-events" className="gap-1.5">
               <Radio size={14} />
               OpenVPN события
@@ -922,156 +842,24 @@ export default function LogsPage() {
                 )}
               </TabsTrigger>
             )}
-            {showQrDownloadsTab && (
-              <TabsTrigger value="qr-downloads" className="gap-1.5">
-                <QrCode size={14} />
-                QR-скачивания
-                {qrDownloads.length > 0 && (
-                  <Badge variant="secondary" className="h-4 px-1 text-[10px]">
-                    {qrDownloads.length}
+            {showSocketsTab && (
+              <TabsTrigger value="openvpn-sockets" className="gap-1.5">
+                <Plug size={14} />
+                OpenVPN сокеты
+              </TabsTrigger>
+            )}
+            {showNotificationsTab && (
+              <TabsTrigger value="notifications" className="gap-1.5">
+                <Bell size={14} />
+                Уведомления
+                {notificationCounts.unread > 0 && (
+                  <Badge variant="destructive" className="h-4 px-1 text-[10px]">
+                    {notificationCounts.unread > 99 ? '99+' : notificationCounts.unread}
                   </Badge>
                 )}
               </TabsTrigger>
             )}
-            {showSocketsTab && (
-              <TabsTrigger value="openvpn-sockets" className="gap-1.5">
-                <Plug size={14} />
-                OVPN сокеты
-              </TabsTrigger>
-            )}
           </TabsList>
-
-          <TabsContent value="connections" className="space-y-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant={dataSourceVariant(connections?.openvpn_data_source)}>
-                Источник OVPN: {dataSourceLabel(connections?.openvpn_data_source)}
-              </Badge>
-              <Badge variant="outline" className="gap-1">
-                <Hash size={10} />
-                OpenVPN: {openvpnClients.length}
-              </Badge>
-              <Badge variant="outline" className="gap-1">
-                <Hash size={10} />
-                WireGuard: {activeWireguardPeers.length}
-                {wireguardPeers.length > activeWireguardPeers.length && (
-                  <> / {wireguardPeers.length}</>
-                )}
-              </Badge>
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Wifi size={16} />
-                    OpenVPN
-                  </CardTitle>
-                  <CardDescription>{openvpnClients.length} активных сессий</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {openvpnClients.length === 0 ? (
-                    <EmptyState
-                      icon={WifiOff}
-                      title="Нет активных подключений"
-                      description="Клиенты OpenVPN появятся здесь после установления VPN-сессии"
-                      className="py-8"
-                    />
-                  ) : (
-                    <ResponsiveDataView
-                      mobile={openvpnClients.map((c) => (
-                        <ConnectionClientCard
-                          key={`${c.common_name}-${c.real_address}`}
-                          name={c.common_name}
-                          realIp={c.real_address}
-                          vpnIp={c.virtual_address}
-                        />
-                      ))}
-                      desktop={
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Клиент</TableHead>
-                              <TableHead>{COL_REAL_IP}</TableHead>
-                              <TableHead>{COL_VPN_IP}</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {openvpnClients.map((c) => (
-                              <TableRow key={`${c.common_name}-${c.real_address}`}>
-                                <TableCell>{c.common_name}</TableCell>
-                                <TableCell className="font-mono text-xs">{c.real_address}</TableCell>
-                                <TableCell className="font-mono text-xs">{c.virtual_address}</TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      }
-                      mobileClassName="space-y-2"
-                      desktopClassName="overflow-x-auto"
-                    />
-                  )}
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Wifi size={16} />
-                    WireGuard
-                  </CardTitle>
-                  <CardDescription>
-                    {activeWireguardPeers.length} онлайн
-                    {wireguardPeers.length > activeWireguardPeers.length &&
-                      ` из ${wireguardPeers.length} пиров`}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {activeWireguardPeers.length === 0 ? (
-                    <EmptyState
-                      icon={WifiOff}
-                      title="Нет активных пиров WireGuard"
-                      description="Пиры с недавним handshake отобразятся здесь"
-                      className="py-8"
-                    />
-                  ) : (
-                    <ResponsiveDataView
-                      mobile={activeWireguardPeers.map((p) => (
-                        <WireGuardPeerCard
-                          key={p.public_key}
-                          name={String(p.client_name || '—')}
-                          handshake={
-                            p.latest_handshake ? formatDateTime(p.latest_handshake) : '—'
-                          }
-                        />
-                      ))}
-                      desktop={
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Клиент</TableHead>
-                              <TableHead>{COL_HANDSHAKE}</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {activeWireguardPeers.map((p) => (
-                              <TableRow key={p.public_key}>
-                                <TableCell>{String(p.client_name || '—')}</TableCell>
-                                <TableCell className="text-xs">
-                                  {p.latest_handshake ? formatDateTime(p.latest_handshake) : '—'}
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      }
-                      mobileClassName="space-y-2"
-                      desktopClassName="overflow-x-auto"
-                    />
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
 
           <TabsContent value="openvpn-events" className="space-y-4">
             <Card>
@@ -1246,70 +1034,6 @@ export default function LogsPage() {
             </TabsContent>
           )}
 
-          {showQrDownloadsTab && (
-            <TabsContent value="qr-downloads" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <QrCode size={16} />
-                    Аудит QR-скачиваний
-                  </CardTitle>
-                  <CardDescription>
-                    События одноразовых ссылок и скачиваний конфигов клиентами
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {qrDownloads.length === 0 ? (
-                    <EmptyState
-                      icon={QrCode}
-                      title="Событий нет"
-                      description="Записи появятся после первых скачиваний по одноразовым ссылкам"
-                      className="py-10"
-                    />
-                  ) : (
-                    <ResponsiveDataView
-                      mobile={qrDownloads.map((entry) => (
-                        <QrDownloadCard key={entry.id} entry={entry} />
-                      ))}
-                      desktop={
-                        <Table>
-                          <TableHeader>
-                            <TableRow>
-                              <TableHead>Время</TableHead>
-                              <TableHead>Событие</TableHead>
-                              <TableHead>Пользователь</TableHead>
-                              <TableHead>IP</TableHead>
-                              <TableHead>Детали</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {qrDownloads.map((entry) => (
-                              <TableRow key={entry.id}>
-                                <TableCell className="text-xs">
-                                  {formatDateTime(entry.created_at)}
-                                </TableCell>
-                                <TableCell>
-                                  <Badge variant="secondary">{entry.event_type}</Badge>
-                                </TableCell>
-                                <TableCell>{entry.actor_username || '—'}</TableCell>
-                                <TableCell className="font-mono text-xs">{entry.remote_addr || '—'}</TableCell>
-                                <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
-                                  {entry.details || '—'}
-                                </TableCell>
-                              </TableRow>
-                            ))}
-                          </TableBody>
-                        </Table>
-                      }
-                      mobileClassName="space-y-2"
-                      desktopClassName="overflow-x-auto rounded-md border"
-                    />
-                  )}
-                </CardContent>
-              </Card>
-            </TabsContent>
-          )}
-
           {showSocketsTab && (
             <TabsContent value="openvpn-sockets" className="space-y-4">
               <Card>
@@ -1376,6 +1100,12 @@ export default function LogsPage() {
                   )}
                 </CardContent>
               </Card>
+            </TabsContent>
+          )}
+
+          {showNotificationsTab && (
+            <TabsContent value="notifications" className="space-y-4">
+              <NotificationsFeed />
             </TabsContent>
           )}
         </Tabs>

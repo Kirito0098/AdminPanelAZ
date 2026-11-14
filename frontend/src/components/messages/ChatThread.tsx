@@ -1,0 +1,217 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ApiError } from '@/api/client'
+import {
+  getMessageAttachment,
+  getUserMessages,
+  markMessagesRead,
+  sendUserMessage,
+} from '@/api/messages'
+import AppDialog from '@/components/shared/AppDialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { formatDate } from '@/lib/datetime'
+import { cn } from '@/lib/utils'
+import type { UserMessageItem } from '@/types'
+
+
+function MessageAttachment({ userId, messageId }: { userId: number; messageId: number }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    let objectUrl: string | null = null
+    getMessageAttachment(userId, messageId)
+      .then((blob) => {
+        if (cancelled) return
+        objectUrl = URL.createObjectURL(blob)
+        setUrl(objectUrl)
+      })
+      .catch(() => {
+        /* вложение не открылось — остаётся подпись сообщения */
+      })
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [userId, messageId])
+
+  if (!url) return <p className="mt-1 text-[10px] opacity-70">Загрузка фото…</p>
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => setPreviewOpen(true)}
+        className="mt-2 block cursor-zoom-in"
+        aria-label="Открыть фото"
+      >
+        <img
+          src={url}
+          alt="Фото из переписки"
+          className="max-h-64 w-auto rounded-md border border-border/60"
+        />
+      </button>
+      <AppDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        title="Фото из переписки"
+        description="Нажмите вне фото или Esc, чтобы закрыть"
+        size="xl"
+      >
+        <img
+          src={url}
+          alt="Фото из переписки"
+          className="mx-auto max-h-[70dvh] w-auto cursor-zoom-out rounded-lg object-contain"
+          onClick={() => setPreviewOpen(false)}
+        />
+      </AppDialog>
+    </>
+  )
+}
+
+interface ChatThreadProps {
+  userId: number
+  onSent?: () => void
+  onRead?: () => void
+}
+
+/** Лента диалога с абонентом: история и поле ответа (Enter — отправить). */
+export default function ChatThread({ userId, onSent, onRead }: ChatThreadProps) {
+  const [messages, setMessages] = useState<UserMessageItem[]>([])
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [warning, setWarning] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  // Колбэки держим в ref: иначе inline-пропсы меняют identity `load` и запускают
+  // бесконечный цикл «загрузка → markRead → onRead → ре-рендер → загрузка».
+  const onReadRef = useRef(onRead)
+  const onSentRef = useRef(onSent)
+  useEffect(() => {
+    onReadRef.current = onRead
+    onSentRef.current = onSent
+  }, [onRead, onSent])
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    try {
+      setMessages(await getUserMessages(userId, { limit: 100 }))
+      await markMessagesRead(userId)
+      onReadRef.current?.()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось загрузить переписку')
+    } finally {
+      setLoading(false)
+    }
+  }, [userId])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const messagesRef = useRef<UserMessageItem[]>([])
+  useEffect(() => {
+    messagesRef.current = messages
+  }, [messages])
+
+  // Автообновление ленты: раз в 10 с, только на видимой вкладке, без мигания.
+  const refresh = useCallback(async () => {
+    try {
+      const next = await getUserMessages(userId, { limit: 100 })
+      const prev = messagesRef.current
+      const same =
+        prev.length === next.length && prev[prev.length - 1]?.id === next[next.length - 1]?.id
+      if (same) return
+      setMessages(next)
+      await markMessagesRead(userId)
+      onReadRef.current?.()
+    } catch {
+      // Тик best-effort: ошибку покажет следующая ручная загрузка/открытие диалога.
+    }
+  }, [userId])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.hidden) return
+      void refresh()
+    }, 10_000)
+    return () => window.clearInterval(timer)
+  }, [refresh])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: 'end' })
+  }, [messages.length])
+
+  const submit = async () => {
+    const text = draft.trim()
+    if (!text || busy) return
+    setBusy(true)
+    setError(null)
+    setWarning(null)
+    try {
+      const result = await sendUserMessage(userId, text)
+      setMessages((prev) => [...prev, result.message])
+      setDraft('')
+      if (!result.delivered) setWarning(result.warning ?? 'Сообщение не доставлено')
+      onSentRef.current?.()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Не удалось отправить сообщение')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
+      <div className="min-h-[12rem] flex-1 space-y-2 overflow-y-auto rounded-lg border bg-muted/20 p-3">
+        {loading && <p className="text-xs text-muted-foreground">Загрузка…</p>}
+        {!loading && messages.length === 0 && (
+          <p className="text-xs text-muted-foreground">Сообщений пока нет.</p>
+        )}
+        {messages.map((message) => (
+          <div
+            key={message.id}
+            className={cn('flex', message.direction === 'out' ? 'justify-end' : 'justify-start')}
+          >
+            <div
+              className={cn(
+                'max-w-[80%] rounded-lg border px-3 py-2 text-sm',
+                message.direction === 'out'
+                  ? 'border-primary/30 bg-primary text-primary-foreground'
+                  : 'bg-background',
+              )}
+            >
+              <p className="whitespace-pre-wrap break-words">{message.text}</p>
+              {message.attachment_url && (
+                <MessageAttachment userId={userId} messageId={message.id} />
+              )}
+              <p className="mt-1 text-[10px] opacity-70">{formatDate(message.created_at)}</p>
+            </div>
+          </div>
+        ))}
+        <div ref={bottomRef} />
+      </div>
+      {warning && <p className="text-xs text-amber-600">{warning}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+      <div className="flex items-center gap-2">
+        <Input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault()
+              void submit()
+            }
+          }}
+          placeholder="Ответ абоненту…"
+          maxLength={4096}
+          aria-label="Ответ абоненту"
+        />
+        <Button type="button" onClick={() => void submit()} disabled={busy || !draft.trim()}>
+          {busy ? 'Отправка…' : 'Отправить'}
+        </Button>
+      </div>
+    </div>
+  )
+}

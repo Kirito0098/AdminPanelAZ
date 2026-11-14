@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 from fastapi import Request
 
-from app.config import Settings
+from app.config import DEFAULT_BACKEND_PORT, Settings
 from app.services.shared_helpers import parse_bool as _parse_bool
 
 PublishModeKey = str
@@ -228,7 +228,7 @@ def build_panel_publish_context(
         return str(get_env_value(key, default) or default or "").strip()
 
     backend_host = gv("BACKEND_HOST", "127.0.0.1") or "127.0.0.1"
-    backend_port = gv("BACKEND_PORT", "8000") or "8000"
+    backend_port = gv("BACKEND_PORT", str(DEFAULT_BACKEND_PORT)) or str(DEFAULT_BACKEND_PORT)
     behind_env = gv("BEHIND_NGINX", "")
     if behind_env:
         behind_nginx = _parse_bool(behind_env)

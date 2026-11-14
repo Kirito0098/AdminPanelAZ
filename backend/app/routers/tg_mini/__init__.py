@@ -12,8 +12,11 @@ from app.services.notify_time import get_client_timezone_from_request
 
 from .auth import router as auth_router
 from .auth import tg_auth
-from .configs import mini_config_files, mini_configs, mini_qr_link, mini_send_config, router as configs_router
-from .dashboard import mini_dashboard, router as dashboard_router
+from .configs import mini_config_files, mini_configs, mini_send_config, router as configs_router
+from .me_configs import router as me_configs_router
+from .me_portal import router as me_portal_router
+from .me_redeem import router as me_redeem_router
+from .messages import router as messages_router
 from .helpers import (
     SendConfigV2Request,
     TelegramAuthRequest,
@@ -22,7 +25,6 @@ from .helpers import (
     _get_bot_token,
     _get_setting,
     _get_tg_node_or_404,
-    _qr_download_service,
     _send_config_file,
     _serialize_tg_node,
     _set_setting,
@@ -30,9 +32,9 @@ from .helpers import (
     _verify_telegram_init_data,
     settings,
 )
-from .nodes import mini_activate_node, mini_get_node, mini_list_nodes, mini_node_health, router as nodes_router
+from .nodes import mini_activate_node, mini_list_nodes, router as nodes_router
+from .public import mini_public_config, router as public_router
 from .settings import (
-    check_bot_delivery,
     mini_get_admin_notify,
     mini_get_telegram_settings,
     mini_settings,
@@ -40,19 +42,20 @@ from .settings import (
     mini_test_telegram,
     mini_update_admin_notify,
     mini_update_telegram_settings,
-    mini_visible_vpn_profiles,
     router as settings_router,
 )
 from .static import mini_app_asset, mini_app_page
-from .status import mini_awg2_status, mini_cidr_status, mini_warper_status, router as status_router
 
 router = APIRouter(prefix="/tg-mini", tags=["tg-mini"])
 router.include_router(nodes_router)
-router.include_router(status_router)
 router.include_router(auth_router)
-router.include_router(dashboard_router)
 router.include_router(configs_router)
+router.include_router(me_configs_router)
+router.include_router(me_portal_router)
+router.include_router(me_redeem_router)
+router.include_router(messages_router)
 router.include_router(settings_router)
+router.include_router(public_router)
 router.add_api_route("/assets/{file_path:path}", mini_app_asset, include_in_schema=False, methods=["GET"])
 router.add_api_route("", mini_app_page, methods=["GET"])
 
@@ -64,14 +67,12 @@ __all__ = [
     "_get_bot_token",
     "_get_setting",
     "_get_tg_node_or_404",
-    "_qr_download_service",
     "_send_config_file",
     "_serialize_tg_node",
     "_set_setting",
     "_static_index",
     "_verify_telegram_init_data",
     "admin_notify_service",
-    "check_bot_delivery",
     "create_access_token",
     "create_tg_mini_token",
     "get_client_timezone_from_request",
@@ -80,25 +81,20 @@ __all__ = [
     "mini_activate_node",
     "mini_app_asset",
     "mini_app_page",
-    "mini_awg2_status",
-    "mini_cidr_status",
     "mini_config_files",
     "mini_configs",
-    "mini_dashboard",
+    "me_configs_router",
     "mini_get_admin_notify",
-    "mini_get_node",
     "mini_get_telegram_settings",
     "mini_list_nodes",
-    "mini_node_health",
-    "mini_qr_link",
+    "mini_public_config",
     "mini_send_config",
     "mini_settings",
     "mini_test_admin_notify",
     "mini_test_telegram",
     "mini_update_admin_notify",
     "mini_update_telegram_settings",
-    "mini_visible_vpn_profiles",
-    "mini_warper_status",
+    "messages_router",
     "router",
     "settings",
     "tg_auth",

@@ -52,6 +52,7 @@ export interface Node {
   destination_ip?: string | null
   linked_vpn_node_id?: number | null
   last_seen_at?: string | null
+  awg2_installed?: boolean | null
   metadata: Record<string, unknown>
   created_at: string
   updated_at: string
@@ -185,12 +186,77 @@ export interface User {
   telegram_id?: string | null
   config_quota?: number | null
   can_create_configs?: boolean
+  can_manage_configs?: boolean
   visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
   timezone?: string
   noc_daily_time?: string
   noc_weekly_dow?: string
   noc_weekly_time?: string
   created_at: string
+  /** Режим предоставления конфигов (unmanaged / pending / partial / ok). */
+  provision_state?: string
+  client_base_name?: string | null
+  /** Фактическое имя конфигов владельца, когда плана нет. */
+  owned_config_base_name?: string | null
+  plan_config_indexes?: number[] | null
+  desired_protocols?: string[] | null
+  panel_login_enabled?: boolean
+  plan_node_ids?: number[]
+  plan_protocols?: string[]
+  plan_config_count?: number
+  active_task_id?: string | null
+  /** Stage 3: админская приостановка доступа. */
+  suspended_at?: string | null
+  suspend_reason?: string | null
+  suspend_reason_visible?: boolean
+  /** Stage 3: общий лимит трафика пользователя (null — без ограничения). */
+  traffic_limit_bytes?: number | null
+  traffic_counter_reset_at?: string | null
+  traffic_limit_blocked?: boolean
+  traffic_consumed_bytes?: number
+  online?: boolean
+  last_seen_at?: string | null
+  note?: string | null
+}
+
+/** Состояние закрытого доступа для портала и Mini App (спека 7.4). */
+export type ClosedAccessState = 'suspended' | 'traffic_limit' | 'expired' | 'expiring'
+
+export interface ClosedAccessView {
+  state: ClosedAccessState
+  reason: string | null
+  access_until: string | null
+  /** Stage 2: приём заявок на продление включён. */
+  requests_enabled?: boolean
+  /** Ссылка на бота для «Написать администратору». */
+  contact_url?: string | null
+  /** Модуль «Сообщения абонентов» включён: кнопки чата в Mini App можно показывать. */
+  messaging_enabled?: boolean
+}
+
+/** ClosedAccessView плюс «открытое» состояние: срок, трафик, приостановка. */
+export interface TgMeStatus {
+  access_until: string | null
+  access_days_left: number | null
+  access_expired: boolean
+  suspended: boolean
+  suspend_reason: string | null
+  traffic_limit_bytes: number | null
+  traffic_consumed_bytes: number | null
+  traffic_bytes_left: number | null
+  traffic_limit_exceeded: boolean
+}
+
+/** Удержание конфигов после истечения срока (grace). */
+export interface GraceHold {
+  elapsed_months: number
+  limit_months: number
+}
+
+/** Настройка grace-периода (месяцы удержания после истечения доступа). */
+export interface UserGraceSettings {
+  grace_months: number
+  allowed_months: number[]
 }
 
 export interface UserUpdatePayload {
@@ -202,7 +268,12 @@ export interface UserUpdatePayload {
   telegram_id?: string | null
   config_quota?: number | null
   can_create_configs?: boolean
+  can_manage_configs?: boolean
   visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
+  panel_login_enabled?: boolean
+  /** Stage 3: лимит трафика пользователя (null — снять ограничение). */
+  traffic_limit_bytes?: number | null
+  note?: string | null
 }
 
 export interface ClientAccessUntilResponse {
@@ -227,6 +298,8 @@ export interface VisibleVpnProfilesPolicy {
   routes: string[]
   protocols: string[]
   openvpn_groups: string[]
+  /** AmneziaWG 2.0: true = только .conf (скрыть .vpn / -vpnuri.txt). Нет в старом JSON → true. */
+  awg2_tunnel_only?: boolean
 }
 
 export interface VisibleVpnProfilesDefaultResponse {
@@ -251,6 +324,7 @@ export interface SelfServiceQuota {
   remaining: number | null
   unlimited: boolean
   can_create: boolean
+  can_manage?: boolean
   create_rate_max?: number | null
   create_rate_window_seconds?: number | null
 }
@@ -298,8 +372,8 @@ export interface VpnConfig {
   id: number
   client_name: string
   vpn_type: VpnType
-  owner_id: number
-  owner_username?: string
+  owner_id: number | null
+  owner_username?: string | null
   /** Validity the certificate was issued for — not the remaining time. */
   cert_expire_days?: number | null
   cert_expires_at?: string | null
@@ -311,6 +385,8 @@ export interface VpnConfig {
   tags?: ConfigTag[]
   ha?: VpnConfigHaInfo | null
   ha_replicate_warning?: string | null
+  /** Background HA client sync task id when create/renew was queued. */
+  ha_sync_task_id?: string | null
   /** Issued VPN tunnel IP (WireGuard AllowedIPs / OpenVPN virtual address). */
   local_ip?: string | null
   profile_files: Array<{
@@ -345,6 +421,11 @@ export interface OpenVpnClient {
   connected_since_ts?: number
   profile?: string | null
   data_source?: string
+  /** OpenVPN 2.6+ per-session id (client-kill <CID>): one device, not the whole CN. */
+  client_id?: string | null
+  peer_id?: string | null
+  /** OpenVPN 2.7+ data channel cipher; non-AEAD values are a warning sign. */
+  cipher?: string | null
   display_address?: string | null
   client_ip?: string | null
   city?: string | null
@@ -362,6 +443,9 @@ export interface OpenVpnClient {
   via_proxy?: boolean
   /** Mapping found → home IP used for display/geo */
   proxy_resolved?: boolean
+  /** Owner of the matching config; null for clients without a panel config */
+  owner_id?: number | null
+  owner_username?: string | null
 }
 
 export interface WireGuardPeer {
@@ -390,6 +474,9 @@ export interface WireGuardPeer {
   via_proxy?: boolean
   /** Mapping found → home IP used for display/geo */
   proxy_resolved?: boolean
+  /** Owner of the matching config; null for peers without a panel config */
+  owner_id?: number | null
+  owner_username?: string | null
 }
 
 export interface MonitoringNodeSummary {
@@ -442,6 +529,11 @@ export interface MonitoringOverview {
   node_id?: number | null
   node_name?: string | null
   openvpn_data_source?: string
+  /** Daemon-wide OpenVPN counters (GLOBAL_STATS): DCO state and bcast/mcast queue. */
+  openvpn_global_stats?: {
+    dco_enabled: boolean | null
+    max_bcast_mcast_queue: number | null
+  } | null
   scope?: 'node' | 'all'
   nodes_summary?: MonitoringNodeSummary[]
   nodes_online?: number
@@ -514,6 +606,7 @@ export interface AppSettings {
   allow_ips: string
   node_id?: number | null
   node_name?: string | null
+  apply_task_id?: string | null
 }
 
 export interface DashboardSummary {
@@ -552,6 +645,7 @@ export interface BackupSettings {
   backup_az_enabled: boolean
   backup_awg2_enabled: boolean
   retention_count: number
+  backup_password_set: boolean
 }
 
 export interface MonitorSettings {
@@ -613,8 +707,14 @@ export interface GeoIpStatus {
 
 export interface RouteBudgetInfo {
   available: boolean
+  /** node — фактический route-ips.txt узла, estimate — из задачи оценки, artifacts — по AP-*-include-ips.txt на контроллере. */
+  source?: 'node' | 'estimate' | 'artifacts' | null
   limit?: number | null
   used?: number | null
+  /** Маршруты из route-ips.txt на узле (source === 'node'). */
+  node_used?: number | null
+  /** Сколько собрала панель по артефактам контроллера. */
+  panel_used?: number | null
   remaining?: number | null
   original_total?: number | null
   warning?: string | null
@@ -625,27 +725,60 @@ export interface RouteBudgetInfo {
   message?: string | null
 }
 
-export interface ResourceProfileImpact {
+export interface ScenarioPresetImpact {
   ram?: string
   cpu_disk?: string
   note?: string
 }
 
-export interface ResourceProfileItem {
+export interface ScenarioPresetItem {
   key: string
   label: string
   description: string
   recommended_ram_gb?: number | null
   panel_mb_delta?: number | null
   active: boolean
-  impact?: ResourceProfileImpact
+  impact?: ScenarioPresetImpact
   workers_disabled?: string[]
+  required?: string[]
+  required_labels?: string[]
 }
 
-export interface ResourceProfilesResponse {
-  current_profile: string
+export interface ScenarioResolved {
+  key: string
+  label: string
+  is_custom: boolean
+  based_on: string
+  changed_count: number
+  badge_label: string
+  last_applied: string
+  base_label?: string
+  locks_active?: boolean
+  required?: string[]
+  required_labels?: string[]
+}
+
+export interface ScenarioPresetsResponse {
+  current_preset: string
+  last_applied: string
+  resolved: ScenarioResolved
   requires_restart: boolean
-  items: ResourceProfileItem[]
+  items: ScenarioPresetItem[]
+}
+
+export interface ScenarioPresetPreview {
+  preset: string
+  label: string
+  will_enable: string[]
+  will_disable: string[]
+  will_enable_keys: string[]
+  will_disable_keys: string[]
+  settings_changes: Record<string, { from: number; to: number }>
+  summary_ru: string
+  required_keys?: string[]
+  required_labels?: string[]
+  workers_disabled: string[]
+  impact?: ScenarioPresetImpact
 }
 
 export interface ChangelogSection {
@@ -707,6 +840,8 @@ export interface TelegramSettings {
   relay_last_error: string
   relay_last_node: string
   relay_check: TelegramRelayCheck[]
+  accept_access_requests: boolean
+  pending_request_cap: number
 }
 
 export interface TelegramLinkCode {
@@ -749,21 +884,9 @@ export interface TgMiniAuthResponse {
   telegram_id: string
 }
 
-export interface TgMiniDashboard {
-  total_configs: number
-  connected_openvpn: number
-  connected_wireguard: number
-  total_wireguard_peers: number
-  server_ip: string | null
-  openvpn_clients: Array<{ common_name?: string; [key: string]: unknown }>
-  wireguard_peers: Array<{
-    client_name: string | null
-    public_key: string
-    transfer_rx: number
-    transfer_tx: number
-    latest_handshake?: string | null
-  }>
-  timestamp: string
+export interface TgMiniPublicConfig {
+  bot_username: string | null
+  bot_configured: boolean
 }
 
 export type InstallPlatform = 'ios' | 'mac' | 'windows' | 'android' | 'linux'
@@ -785,6 +908,18 @@ export interface TgMiniConfigFile {
   variant?: string
 }
 
+export interface TgMeConfigNode {
+  node_id: number
+  node_label: string
+  vpn_type: string
+  config_id: number
+}
+
+export interface TgMeConfig {
+  name: string
+  nodes: TgMeConfigNode[]
+}
+
 export interface TgMiniSettings {
   server_ip: string | null
   bot_configured: boolean
@@ -793,10 +928,15 @@ export interface TgMiniSettings {
   role: string
   theme: 'light' | 'dark'
   visible_vpn_profiles?: VisibleVpnProfilesPolicy
+  can_manage_configs?: boolean
 }
 
 export interface TgMiniNode extends Node {
   is_active: boolean
+  /** HA role when the node belongs to a sync group: primary or replica. */
+  ha_role?: 'primary' | 'replica' | null
+  /** Primary node name for a replica. */
+  ha_primary_name?: string | null
 }
 
 export interface TgMiniNodesResponse {
@@ -807,14 +947,6 @@ export interface TgMiniNodesResponse {
 export interface TgMiniNodeActionResponse {
   node: TgMiniNode
   health: Record<string, unknown>
-}
-
-export interface TgMiniQrLink {
-  url: string
-  token: string
-  expires_at: string
-  max_downloads: number
-  pin_required: boolean
 }
 
 export interface TgMiniWarperStatus {
@@ -855,31 +987,6 @@ export interface TgMiniAwg2Status {
   ifaces_summary: string
   top_traffic: TgMiniAwg2TopTraffic[]
   health_error?: string | null
-}
-
-export interface TgMiniCidrPipelineTask {
-  task_id?: string | number | null
-  task_type?: string | null
-  task_label?: string | null
-  status?: string | null
-  progress_percent?: number | null
-  progress_stage?: string | null
-  message?: string | null
-}
-
-export interface TgMiniCidrStatus {
-  total_cidrs: number
-  last_refresh_status?: string | null
-  last_refresh_finished?: string | null
-  last_refresh_started?: string | null
-  active_task?: string | null
-  pipeline_task?: TgMiniCidrPipelineTask | null
-  providers_loaded?: number | null
-  providers_total?: number | null
-  alerts_count?: number | null
-  has_compile_artifacts?: boolean | null
-  last_compile?: Record<string, unknown> | null
-  last_deploy?: Record<string, unknown> | null
 }
 
 export interface VpnNetworkEnvRow {
@@ -981,6 +1088,7 @@ export interface ClientPortalLinkResponse {
   client_name: string
   url: string
   revoked: boolean
+  expires_at?: string | null
 }
 
 export interface UserPortalLinkResponse {
@@ -989,6 +1097,7 @@ export interface UserPortalLinkResponse {
   user_id: number
   url: string
   revoked: boolean
+  expires_at?: string | null
 }
 
 export type PortalLinkResponse = ClientPortalLinkResponse | UserPortalLinkResponse
@@ -1164,6 +1273,10 @@ interface CidrDeployPreviewFile {
   controller_cidr_count?: number
   node_cidr_count?: number
   diff?: { added: number; removed: number; unchanged: number; changed: boolean }
+  /** AP-…-include-ips.txt на узле и его состояние относительно контроллера. */
+  include_file?: string
+  include_status?: 'in_sync' | 'stale' | 'not_enabled' | 'unknown'
+  include_cidr_count?: number
   error?: string
 }
 
@@ -1177,14 +1290,19 @@ export interface CidrDeployPreviewNode {
   total_added?: number
   total_removed?: number
   files_changed?: number
+  files_stale?: number
+  stale_files?: string[]
   error?: string
 }
 
 export interface CidrDeployPreview {
   success: boolean
   message: string
+  summary?: string
   dry_run?: boolean
   has_changes?: boolean
+  has_stale_includes?: boolean
+  stale_files?: string[]
   artifact_files?: string[]
   controller_artifacts?: Record<string, CidrCompileArtifact>
   per_node?: CidrDeployPreviewNode[]
@@ -1328,6 +1446,9 @@ export interface CidrDeployPerNodeResult {
   node_name?: string | null
   status: 'success' | 'failed' | 'skipped'
   pushed_files?: string[]
+  synced_files?: string[]
+  updated_files?: string[]
+  noop?: boolean
   failed?: Array<{ file: string; error: string }>
   error?: string | null
 }
@@ -1388,10 +1509,62 @@ export interface ServerConfigDetail {
   info: string[]
 }
 
+export type ServerConfigStepKey = 'apt' | 'systemd' | 'nginx' | 'firewall' | 'ddns'
+
+export interface ServerConfigStep {
+  key: ServerConfigStepKey
+  label: string
+  available: boolean
+  reason?: string
+}
+
+export type NginxVhostRole = 'panel' | 'portal' | 'other' | 'statusopenvpn'
+
+export type NginxIntegrationMode = 'dedicated_vhost' | 'subpath_snippet' | 'unknown'
+
+export interface NginxVhostImpact {
+  host: string
+  role: NginxVhostRole
+  same_domain: boolean
+  will_change: boolean
+  note?: string
+}
+
+export interface NginxForeignLocation {
+  path: string
+  project: string
+  target?: string
+}
+
+export interface NginxStatusOpenVpn {
+  detected: boolean
+  in_nginx: boolean
+  outside_nginx: boolean
+  domain?: string
+  path?: string
+  detail?: string
+}
+
+export interface NginxImpact {
+  nginx_seen: boolean
+  panel_domain: string
+  vhosts: NginxVhostImpact[]
+  foreign_locations: NginxForeignLocation[]
+  global_changes: string[]
+  warnings: string[]
+  status_openvpn: NginxStatusOpenVpn | null
+  /** Как панель встроена в nginx: отдельный vhost или snippet внутри чужого. */
+  integration_mode?: NginxIntegrationMode
+  panel_vhost?: string | null
+  panel_snippet_includes?: string[]
+}
+
 export interface ServerConfigPreview {
   sections: Record<ServerConfigSection, string[]>
   details: Record<string, ServerConfigDetail>
   pending: number
+  steps: ServerConfigStep[]
+  nginx_impact: NginxImpact
 }
 
 export interface ServerConfigRow {
@@ -1466,6 +1639,8 @@ export interface TrafficClientRow {
   ha?: VpnConfigHaInfo | null
   ha_aggregated?: boolean
   ha_node_breakdown?: TrafficHaNodeBreakdown[] | null
+  owner_id?: number | null
+  owner_username?: string | null
 }
 
 export interface TrafficSummary {
@@ -1510,6 +1685,8 @@ export interface TrafficNeverConnectedRow {
   protocol_type: string
   created_at?: string | null
   config_id?: number | null
+  owner_id?: number | null
+  owner_username?: string | null
 }
 
 export interface TrafficNeverConnectedResponse {
@@ -1568,6 +1745,8 @@ export interface UnlockCodeRecord {
   redemption_count?: number
   exhausted?: boolean
   allowed_client_names?: string[]
+  target_user_id?: number | null
+  target_user_name?: string | null
   redemptions?: UnlockCodeRedemptionRecord[]
   code_expires_at: string | null
   created_by_user_id: number | null
@@ -1594,6 +1773,9 @@ export interface FeatureToggleItem {
   resource_impact_label: string
   resource_savings: string
   enabled: boolean
+  scenario?: 'home' | 'commercial' | 'shared'
+  locked?: boolean
+  lock_reason?: string | null
   group_meta: { label?: string; description?: string; badge?: string }
 }
 
@@ -1632,12 +1814,10 @@ export interface SecuritySettings {
   block_ip_blocked_dwell: boolean
   ip_blocked_dwell_seconds: number
   temp_whitelist: Array<{ ip: string; expires_at: string; hours: number }>
-  qr_download_ttl_seconds: number
-  qr_download_max_downloads: number
-  qr_download_pin_set: boolean
   public_download_enabled: boolean
   portal_domain: string
   portal_title: string
+  portal_link_ttl_days: number
 }
 
 export interface SecretRotationItem {
@@ -1816,15 +1996,6 @@ export interface ActionLogEntry {
   created_at: string
 }
 
-export interface QrDownloadAuditEntry {
-  id: number
-  event_type: string
-  actor_username?: string | null
-  remote_addr?: string | null
-  details?: string | null
-  created_at: string
-}
-
 export interface OpenVpnSocketStatus {
   profile: string
   socket_path: string
@@ -1843,14 +2014,6 @@ export interface RoutingProviderContent {
   filename: string
   content: string
   cidr_count: number
-}
-
-export interface OneTimeLinkResponse {
-  url: string
-  token: string
-  expires_at: string
-  max_downloads: number
-  pin_required: boolean
 }
 
 export interface TrafficChartData {
@@ -1984,6 +2147,59 @@ export type DnsAaaaTarget = 'antizapret' | 'vpn'
 
 export type DnsAaaaState = Record<DnsAaaaTarget, DnsAaaaMode>
 
+export interface DnsServersOption {
+  value: string
+  label: string
+}
+
+export interface DnsServersState {
+  supported: boolean
+  antizapret: string
+  vpn: string
+  applied_antizapret?: string | null
+  applied_vpn_dns?: string | null
+  antizapret_options: DnsServersOption[]
+  vpn_options: DnsServersOption[]
+  warnings: string[]
+  restarted: string[]
+}
+
+export type OpenVpnToggleState = 'on' | 'off' | 'mixed' | 'unknown'
+
+export interface OpenVpnProtocolState {
+  unit: string
+  enabled?: boolean | null
+}
+
+export interface OpenVpnPatchState {
+  custom_binary: boolean
+  unit_exec?: string | null
+  in_use: boolean
+}
+
+export interface OpenVpnAppliedState {
+  unit: string
+  enabled?: boolean | null
+  ok: boolean
+  error?: string | null
+}
+
+export interface OpenVpnTuningState {
+  duplicate_cn: OpenVpnToggleState
+  logs: OpenVpnToggleState
+  mtu_openvpn?: number | 'mixed' | null
+  mtu_wireguard?: number | 'mixed' | null
+  dco: OpenVpnToggleState
+  patch: OpenVpnPatchState
+  protocols: OpenVpnProtocolState[]
+  update_timer?: boolean | null
+  confs: string[]
+  warnings: string[]
+  restarted: string[]
+  applied?: OpenVpnAppliedState[]
+  patch_output?: string | null
+}
+
 export interface OpenVpnBufferGuardEvent {
   id: number
   node_id: number
@@ -2014,6 +2230,7 @@ export interface AntizapretSettingsUpdateResponse {
   changes: number
   needs_apply: boolean
   warnings?: string[]
+  antizapret_restarted?: boolean
 }
 
 export interface WarperHealthResponse {
@@ -2099,6 +2316,8 @@ export interface Awg2ObfuscationResponse {
   reimport_required?: boolean
   ha?: {
     attempted?: boolean
+    queued?: boolean
+    task_id?: string | null
     errors?: Array<{ node_name?: string | null; error?: string | null }>
   }
   output?: string
@@ -2357,4 +2576,359 @@ export interface ServerRebootScheduleResponse extends ServerRebootPendingItem {
 
 export interface ServerRebootPendingResponse {
   items: ServerRebootPendingItem[]
+}
+
+/* =====================================================================
+ * Пользователи (предоставление конфигов, Stage 1)
+ * Формы запросов/ответов miroir backend-схем (routers/users.py, schemas.py).
+ ===================================================================== */
+
+export interface ProvisionPlanItem {
+  node_id: number
+  node_label: string
+  client_name: string
+  vpn_type: string
+  action: string // create|delete|conflict|skipped|blocked
+  reason: string | null
+  config_id: number | null
+}
+
+export interface ProvisionPlanResponse {
+  create: ProvisionPlanItem[]
+  delete: ProvisionPlanItem[]
+  conflict: ProvisionPlanItem[]
+  skipped: ProvisionPlanItem[]
+  blocked: boolean
+  block_reason: string | null
+}
+
+export interface ProvisioningConfigNode {
+  node_id: number
+  node_label: string
+  vpn_type: string
+  config_id: number | null
+}
+
+export interface ProvisioningConfig {
+  name: string
+  nodes: ProvisioningConfigNode[]
+}
+
+export interface UserProvisioningDesired {
+  client_base_name: string | null
+  plan_config_indexes: number[]
+  desired_protocols: string[]
+  node_ids: number[]
+}
+
+export interface UserProvisioningSuggested {
+  client_base_name: string | null
+  plan_config_indexes: number[]
+  node_ids: number[]
+  protocols: string[]
+}
+
+export interface UserProvisioningCard {
+  user: UserProvisionSummary
+  has_plan: boolean
+  desired: UserProvisioningDesired
+  suggested: UserProvisioningSuggested | null
+  plan: ProvisionPlanResponse
+  configs: ProvisioningConfig[]
+  last_task: BackgroundTask | null
+  /** Удержание после истечения срока (grace), null — не в grace. */
+  grace_hold: GraceHold | null
+}
+
+export interface UserProvisionedCreate {
+  username: string
+  client_base_name: string
+  node_ids: number[]
+  protocols: string[]
+  config_count: number
+  config_quota?: number | null
+  access_until?: string | null
+  panel_login_enabled: boolean
+  password?: string | null
+  telegram_id?: string | null
+}
+
+export interface UserFromExistingCreate {
+  username: string
+  config_ids?: number[]
+  config_quota?: number | null
+  access_until?: string | null
+  panel_login_enabled: boolean
+  password?: string | null
+  telegram_id?: string | null
+}
+
+export interface UserProvisionedResponse {
+  user: UserProvisionSummary
+  task_id: string
+}
+
+export interface UserFromExistingResponse {
+  user: UserProvisionSummary
+  assigned_config_ids: number[]
+}
+
+export interface UserProvisioningUpdate {
+  node_ids: number[]
+  protocols: string[]
+  plan_config_indexes: number[]
+  client_base_name: string | null
+  confirm_deletions: boolean
+}
+
+export interface UserProvisionSummary {
+  id: number
+  username: string
+  role: string
+  client_base_name: string | null
+  /** Фактическое имя конфигов владельца, когда плана нет. */
+  owned_config_base_name?: string | null
+  plan_config_indexes: number[] | null
+  desired_protocols: string[] | null
+  panel_login_enabled: boolean
+  provision_state: string
+  access_until: string | null
+  node_ids: number[]
+  config_quota: number | null
+  /** Права абонента на свои конфиги (панель и Telegram Mini App). */
+  can_create_configs?: boolean
+  can_manage_configs?: boolean
+  /** Stage 3: админская приостановка доступа. */
+  suspended_at?: string | null
+  suspend_reason?: string | null
+  suspend_reason_visible?: boolean
+  /** Stage 3: общий лимит трафика пользователя. */
+  traffic_limit_bytes?: number | null
+  traffic_counter_reset_at?: string | null
+  traffic_limit_blocked?: boolean
+  traffic_consumed_bytes?: number
+  online?: boolean
+  telegram_id?: string | null
+  /** Персональное исключение видимости; null — действует умолчание. */
+  visible_vpn_profiles?: VisibleVpnProfilesPolicy | null
+  note?: string | null
+}
+
+export interface UserStatsResponse {
+  user_id: number
+  period_days: number
+  rows: UserTrafficStatRow[]
+  totals: UserTrafficTotals
+}
+
+export interface UserTrafficTotals {
+  received: number
+  sent: number
+  bytes: number
+  received_vpn: number
+  sent_vpn: number
+  received_antizapret: number
+  sent_antizapret: number
+  sessions: number
+  period_bytes: number
+}
+
+export interface UserTrafficStatRow {
+  node_id: number
+  client_name: string
+  vpn_type: string
+  total_received: number
+  total_sent: number
+  total_bytes: number
+  total_received_vpn: number
+  total_sent_vpn: number
+  total_received_antizapret: number
+  total_sent_antizapret: number
+  total_sessions: number
+  period_bytes: number
+  first_seen_at: string | null
+  last_seen_at: string | null
+  daily: Array<{ date: string; bytes: number }>
+}
+
+export interface TelegramLinkCodeResponse {
+  code: string
+  expires_in_seconds: number
+}
+
+export interface PresetBase {
+  name: string
+  node_ids: number[]
+  protocols: string[]
+  config_count: number
+  config_quota: number | null
+  traffic_limit_bytes: number | null
+  access_days: number | null
+  is_default: boolean
+}
+
+export interface PresetResponse extends PresetBase {
+  id: number
+  created_at: string
+}
+
+export interface AccessRequestResponse {
+  id: number
+  request_type: string
+  user_id: number | null
+  telegram_id: string
+  telegram_username: string | null
+  telegram_name: string | null
+  requested_count: number
+  user_note: string | null
+  status: string
+  reviewed_by_id: number | null
+  reviewed_at: string | null
+  reject_reason: string | null
+  delivered_at: string | null
+  receipt_file_id: string | null
+  created_at: string
+}
+
+export interface ApproveRequest {
+  config_ids?: number[]
+  preset_id?: number
+  node_ids?: number[]
+  protocols?: string[]
+  config_count?: number
+  access_until?: string | null
+  traffic_limit_bytes?: number | null
+  username?: string
+  count?: number
+  days?: number
+}
+
+export interface RejectRequest {
+  reason?: string | null
+  ban?: boolean
+}
+
+export interface ConfirmDeletionsPayload {
+  configs: ProvisionPlanItem[]
+}
+
+/* =====================================================================
+ * Массовые операции с серверами (Stage 4)
+ * Формы запроса/ответа mirror backend-схем (routers/users.py).
+ * ===================================================================== */
+
+export type BulkNodesAction = 'add' | 'remove' | 'replace'
+
+export type BulkNodesScopeMode = 'all' | 'user_ids' | 'filter'
+
+export interface BulkNodesScope {
+  mode: BulkNodesScopeMode
+  user_ids?: number[] | null
+  state?: string | null
+  q?: string | null
+}
+
+export interface BulkNodesRequest {
+  action: BulkNodesAction
+  node_id: number
+  to_node_id?: number | null
+  scope: BulkNodesScope
+  notify_telegram?: boolean
+  note?: string | null
+  confirm_node_name?: string | null
+}
+
+export interface BulkNodesPreviewItem {
+  user_id: number
+  username: string
+  configs_create: number
+  configs_delete: number
+  expired: boolean
+  detail: string | null
+}
+
+export interface BulkNodesPreviewResponse {
+  action: string
+  node_id: number
+  to_node_id: number | null
+  node_label: string
+  to_node_label: string | null
+  affected: BulkNodesPreviewItem[]
+  skipped: Record<string, BulkNodesPreviewItem[]>
+  without_telegram: BulkNodesPreviewItem[]
+  notify_text_preview: string | null
+  configs_to_create: number
+  configs_to_delete: number
+}
+
+export type BulkUsersAction = 'extend' | 'suspend' | 'resume' | 'set_traffic_limit' | 'delete'
+
+export interface BulkUsersRequest {
+  action: BulkUsersAction
+  user_ids: number[]
+  days?: number
+  reason?: string | null
+  show_reason?: boolean
+  notify_telegram?: boolean
+  traffic_limit_bytes?: number | null
+}
+
+export interface BulkUsersFailure {
+  user_id: number
+  username: string
+  error: string
+}
+
+export interface BulkUsersResult {
+  total: number
+  succeeded: number
+  failed: BulkUsersFailure[]
+}
+
+export interface UserHistoryEntry {
+  id: number
+  actor_username?: string | null
+  action: string
+  details?: string | null
+  created_at: string
+}
+
+
+/** Строка ленты чата абонент ↔ администратор. */
+export interface UserMessageItem {
+  id: number
+  direction: 'in' | 'out'
+  admin_id: number | null
+  text: string
+  created_at: string
+  read_by_admin_at: string | null
+  attachment_url?: string | null
+}
+
+/** Диалог в списке «Сообщения». */
+export interface MessageThread {
+  user_id: number
+  username: string
+  last_text: string
+  last_at: string
+  last_direction: 'in' | 'out'
+  unread_count: number
+}
+
+/** Ответ на POST /messages/{user_id}: сообщение сохранено, доставка best-effort. */
+export interface SendMessageResult {
+  message: UserMessageItem
+  delivered: boolean
+  warning: string | null
+}
+
+
+/** Собственная ссылка клиентского портала (Mini App, абонент). */
+export interface TgPortalLink {
+  exists: boolean
+  url: string | null
+  created_at: string | null
+  expires_at: string | null
+  ttl_days: number
+  expired: boolean
 }

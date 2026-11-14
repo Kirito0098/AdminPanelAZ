@@ -11,6 +11,7 @@ import tarfile
 import tempfile
 from pathlib import Path
 
+from app.config import get_settings
 from app.services import wg_runtime
 from app.services.path_stash import stashed
 from app.services.node_sync.fingerprints import collect_antizapret_fingerprints, collect_config_file_fingerprints, CONFIG_FINGERPRINT_EXCLUDE
@@ -22,9 +23,9 @@ _HA_OVPN_PROFILE_DIR = "openvpn"
 _HA_WG_PROFILE_DIRS = ("wireguard", "amneziawg")
 
 
-def ha_vpn_crypto_paths(*, install_dir: str | Path = "/root/antizapret") -> list[Path]:
+def ha_vpn_crypto_paths(*, install_dir: str | Path | None = None) -> list[Path]:
     """VPN/crypto paths a replica replaces from the primary on HA Push full (config/ is not touched)."""
-    base = Path(install_dir or "/root/antizapret").resolve()
+    base = Path(install_dir or get_settings().antizapret_path).resolve()
     return [
         _HA_EASYRSA3_ROOT,
         *wg_runtime.WG_CONFIG_FILES.values(),
@@ -54,8 +55,10 @@ class AntizapretBackupService:
         re.IGNORECASE,
     )
 
-    def __init__(self, *, install_dir: str | Path = "/root/antizapret", timeout_seconds: int = 600):
-        self.install_dir = Path(install_dir or "/root/antizapret").resolve()
+    def __init__(
+        self, *, install_dir: str | Path | None = None, timeout_seconds: int = 600
+    ):
+        self.install_dir = Path(install_dir or get_settings().antizapret_path).resolve()
         self.timeout_seconds = max(30, int(timeout_seconds or 600))
 
     def create_backup(self) -> dict[str, str]:
@@ -119,6 +122,7 @@ class AntizapretBackupService:
                 raise RuntimeError("Архив primary не содержит easyrsa3 — реплика не изменена")
             with stashed(ha_vpn_crypto_paths(install_dir=self.install_dir)):
                 self._copy_extracted_payload(extract_root)
+                self._prune_ha_replica_config(extract_root / "config")
         finally:
             self._cleanup_extract_artifacts(extract_root, archive.name)
 
@@ -219,6 +223,24 @@ class AntizapretBackupService:
         for item in src.iterdir():
             if item.is_file():
                 shutil.copy2(item, dst / item.name)
+
+    def _prune_ha_replica_config(self, primary_config_dir: Path) -> None:
+        """Make replica config match the primary's provider files and banned_clients.
+
+        A reused replica may keep provider include files from an older panel; Verify counts
+        them as drift, so drop ``AP-*-include-ips.txt`` files the primary does not have.
+        Everything else in config/ is left untouched.
+        """
+        replica_config = self.install_dir / "config"
+        replica_config.mkdir(parents=True, exist_ok=True)
+        if primary_config_dir.is_dir():
+            primary_names = {item.name for item in primary_config_dir.iterdir() if item.is_file()}
+            for path in replica_config.glob("AP-*-include-ips.txt"):
+                if path.is_file() and path.name not in primary_names:
+                    path.unlink(missing_ok=True)
+        banned = replica_config / "banned_clients"
+        if not banned.exists():
+            banned.touch()
 
     def _cleanup_extract_artifacts(self, extract_root: Path, archive_name: str) -> None:
         resolved = extract_root.resolve()

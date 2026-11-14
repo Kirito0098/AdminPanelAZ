@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CalendarClock } from 'lucide-react'
 import { ApiError, updateSettings } from '@/api/client'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { SettingsCollapsible } from '@/components/settings/SettingsChrome'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -37,6 +37,7 @@ export default function NocScheduleCard() {
   const [weeklyDow, setWeeklyDow] = useState(DEFAULT_WEEKLY_DOW)
   const [weeklyTime, setWeeklyTime] = useState(DEFAULT_WEEKLY_TIME)
   const [saving, setSaving] = useState(false)
+  const [open, setOpen] = useState(true)
 
   useEffect(() => {
     if (!user || user.role !== 'admin') return
@@ -89,68 +90,63 @@ export default function NocScheduleCard() {
   }
 
   return (
-    <Card className="shadow-sm">
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <CalendarClock size={18} />
-          NOC сводка — расписание
-        </CardTitle>
-        <CardDescription>
-          Время по вашему часовому поясу ({effectiveTimeZone})
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {timezoneUnset ? (
-          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
-            Часовой пояс профиля не задан (сейчас {effectiveTimeZone}). Укажите пояс в блоке
-            «Часовой пояс» выше — иначе сводки могут приходить не в ожидаемое локальное время.
-          </div>
-        ) : null}
-
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="space-y-2">
-            <Label htmlFor="noc-daily-time">Ежедневно</Label>
-            <Input
-              id="noc-daily-time"
-              type="time"
-              value={dailyTime}
-              disabled={saving}
-              onChange={(e) => handleDailyChange(e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="noc-weekly-dow">День недели</Label>
-            <Select value={weeklyDow} onValueChange={handleWeeklyDowChange} disabled={saving}>
-              <SelectTrigger id="noc-weekly-dow">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DOW_OPTIONS.map((opt) => (
-                  <SelectItem key={opt.v} value={opt.v}>
-                    {opt.l}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="noc-weekly-time">Еженедельно</Label>
-            <Input
-              id="noc-weekly-time"
-              type="time"
-              value={weeklyTime}
-              disabled={saving}
-              onChange={(e) => handleWeeklyTimeChange(e.target.value)}
-            />
-          </div>
+    <SettingsCollapsible
+      open={open}
+      onOpenChange={setOpen}
+      icon={<CalendarClock size={16} />}
+      title="NOC сводка — расписание"
+      description={`Время по вашему часовому поясу (${effectiveTimeZone})`}
+    >
+      {timezoneUnset ? (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
+          Часовой пояс профиля не задан (сейчас {effectiveTimeZone}). Укажите пояс в блоке
+          «Часовой пояс» выше — иначе сводки могут приходить не в ожидаемое локальное время.
         </div>
+      ) : null}
 
-        <p className="text-xs text-muted-foreground">
-          Пока значения не сохранены, действует системное расписание. Ежедневное время
-          сохраняется отдельно; персональное еженедельное включается при изменении дня или
-          времени недели (сохраняются оба поля сразу).
-        </p>
-      </CardContent>
-    </Card>
+      <div className="grid gap-4 rounded-lg border bg-card/50 p-4 sm:grid-cols-3">
+        <div className="space-y-2">
+          <Label htmlFor="noc-daily-time">Ежедневно</Label>
+          <Input
+            id="noc-daily-time"
+            type="time"
+            value={dailyTime}
+            disabled={saving}
+            onChange={(e) => handleDailyChange(e.target.value)}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="noc-weekly-dow">День недели</Label>
+          <Select value={weeklyDow} onValueChange={handleWeeklyDowChange} disabled={saving}>
+            <SelectTrigger id="noc-weekly-dow">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {DOW_OPTIONS.map((opt) => (
+                <SelectItem key={opt.v} value={opt.v}>
+                  {opt.l}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="noc-weekly-time">Еженедельно</Label>
+          <Input
+            id="noc-weekly-time"
+            type="time"
+            value={weeklyTime}
+            disabled={saving}
+            onChange={(e) => handleWeeklyTimeChange(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <p className="text-xs text-muted-foreground">
+        Пока значения не сохранены, действует системное расписание. Ежедневное время
+        сохраняется отдельно; персональное еженедельное включается при изменении дня или
+        времени недели (сохраняются оба поля сразу).
+      </p>
+    </SettingsCollapsible>
   )
 }

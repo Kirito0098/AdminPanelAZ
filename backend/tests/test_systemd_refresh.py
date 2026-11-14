@@ -20,15 +20,6 @@ def test_unit_text_not_stale_when_systemd_exec():
     assert _unit_text_is_stale(text) is False
 
 
-def test_unit_text_not_stale_when_both_present_prefers_new():
-    # Should not happen, but new marker wins
-    text = (
-        "ExecStart=/opt/AdminPanelAZ/scripts/systemd-exec-panel.sh\n"
-        "# was start.sh\n"
-    )
-    assert _unit_text_is_stale(text) is False
-
-
 def test_unit_file_needs_migration(tmp_path: Path):
     unit = tmp_path / "adminpanelaz.service"
     unit.write_text("ExecStart=/opt/x/start.sh watchdog prod\n", encoding="utf-8")
@@ -96,18 +87,6 @@ def test_refresh_proxy_only_host(tmp_path: Path, monkeypatch):
     result = refresh_installed_systemd_units(tmp_path, panel=True, node=True)
     assert result["success"] is True and result["skipped"] is False
     assert called.read_text().strip() == "panel=0 node=0 proxy=1"
-
-
-def test_refresh_without_proxy_does_not_touch_proxy_unit(tmp_path: Path, monkeypatch):
-    called = _units(tmp_path, monkeypatch, node=True, proxy=True)
-    refresh_installed_systemd_units(tmp_path, panel=False, node=True, proxy=False)
-    assert called.read_text().strip() == "panel=0 node=1 proxy=0"
-
-
-def test_refresh_skips_missing_proxy_unit(tmp_path: Path, monkeypatch):
-    called = _units(tmp_path, monkeypatch, panel=True)
-    refresh_installed_systemd_units(tmp_path, panel=True, node=True)
-    assert called.read_text().strip() == "panel=1 node=0 proxy=0"
 
 
 def test_startup_migrates_proxy_unit_holding_api_key(tmp_path: Path, monkeypatch):

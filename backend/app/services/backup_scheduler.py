@@ -9,6 +9,7 @@ from app.database import SessionLocal
 from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.admin_notify import admin_notify_service
 from app.services.backup_manager import BackupManager
+from app.services.backup_telegram_privacy import telegram_backup_payload
 from app.services.cidr.pipeline.file_pipeline import _prune_runtime_backups
 from app.services.feature_guards import get_feature_service
 from app.services.feature_toggles import FeatureToggleService
@@ -138,21 +139,25 @@ def _run_auto_backup_once(
                 token = _get_setting(db, "telegram_bot_token")
                 chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
                 if token and chat_ids:
-                    backup_path = str(manager.get_backup_path(result["file_name"]))
-                    for chat_id in chat_ids:
-                        sent = send_tg_document(
-                            token,
-                            chat_id,
-                            backup_path,
-                            caption=f"Авто-бэкап: {result['file_name']}",
-                            run_async=False,
-                        )
-                        if not sent:
-                            logger.warning(
-                                "Auto-backup Telegram send failed: chat_id=%s file=%s",
+                    archive_path = manager.get_backup_path(result["file_name"])
+                    with telegram_backup_payload(
+                        db, chat_ids, archive_path, original_filename=result["file_name"]
+                    ) as (recipients, send_path, send_name):
+                        for chat_id in recipients:
+                            sent = send_tg_document(
+                                token,
                                 chat_id,
-                                backup_path,
+                                str(send_path),
+                                caption=f"Авто-бэкап: {result['file_name']}",
+                                run_async=False,
+                                filename=send_name,
                             )
+                            if not sent:
+                                logger.warning(
+                                    "Auto-backup Telegram send failed: chat_id=%s file=%s",
+                                    chat_id,
+                                    send_path,
+                                )
         if _get_setting(db, "backup_az_enabled", "true") == "true":
             try:
                 adapter = get_active_adapter(db)
@@ -168,21 +173,27 @@ def _run_auto_backup_once(
                         if token and chat_ids and az_result.get("archive_path"):
                             archive_name = az_result.get("archive_name") or Path(az_result["archive_path"]).name
                             with adapter.antizapret_backup_file(az_result) as local_archive:
-                                for chat_id in chat_ids:
-                                    sent = send_tg_document(
-                                        token,
-                                        chat_id,
-                                        str(local_archive),
-                                        caption=f"Авто-бэкап AntiZapret: {archive_name}",
-                                        run_async=False,
-                                        filename=archive_name,
-                                    )
-                                    if not sent:
-                                        logger.warning(
-                                            "Auto AntiZapret backup Telegram send failed: chat_id=%s file=%s",
+                                with telegram_backup_payload(
+                                    db,
+                                    chat_ids,
+                                    Path(local_archive),
+                                    original_filename=archive_name,
+                                ) as (recipients, send_path, send_name):
+                                    for chat_id in recipients:
+                                        sent = send_tg_document(
+                                            token,
                                             chat_id,
-                                            archive_name,
+                                            str(send_path),
+                                            caption=f"Авто-бэкап AntiZapret: {archive_name}",
+                                            run_async=False,
+                                            filename=send_name,
                                         )
+                                        if not sent:
+                                            logger.warning(
+                                                "Auto AntiZapret backup Telegram send failed: chat_id=%s file=%s",
+                                                chat_id,
+                                                archive_name,
+                                            )
             except Exception as exc:
                 logger.warning("Auto AntiZapret backup (client.sh 8) failed: %s", exc)
         db.commit()

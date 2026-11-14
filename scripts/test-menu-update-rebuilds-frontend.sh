@@ -10,6 +10,10 @@ trap 'rm -rf "$TMP"' EXIT
 NPM_LOG="$TMP/npm.log"
 mkdir -p "$TMP/git-only-bin" "$TMP/npm-bin"
 ln -s "$(command -v git)" "$TMP/git-only-bin/git"
+# Меню и обновлённый --after-pull используют базовые coreutils; npm в этом окружении нет.
+for tool in readlink dirname; do
+  ln -s "$(command -v "$tool")" "$TMP/git-only-bin/$tool"
+done
 # npm — отдельная программа: шаги после git pull выполняет уже обновлённый скрипт в новом процессе bash.
 cat >"$TMP/npm-bin/npm" <<'EOF'
 #!/usr/bin/env bash
@@ -29,7 +33,7 @@ setup_repos() {
   mkdir -p "$TMP/dev/frontend/src" "$TMP/dev/scripts"
   echo '{"name":"x"}' >"$TMP/dev/frontend/package.json"
   echo 'export {}' >"$TMP/dev/frontend/src/main.ts"
-  cp "$ROOT_DIR/scripts/adminpanel-menu.sh" "$TMP/dev/scripts/"
+  cp "$ROOT_DIR/scripts/adminpanel-menu.sh" "$ROOT_DIR/scripts/env-file.sh" "$TMP/dev/scripts/"
   echo v1 >"$TMP/dev/version"
   git_q -C "$TMP/dev" add -A
   git_q -C "$TMP/dev" commit -m v1

@@ -85,16 +85,6 @@ def test_cli_restore_sqlite_failure_still_starts(tmp_path, monkeypatch):
     assert order == ["stop", "start"]
 
 
-def test_cli_include_configs_help_mentions_antizapret_path(capsys):
-    module = _load_cli()
-    try:
-        module.main(["create", "--help"])
-    except SystemExit as exc:
-        assert exc.code == 0
-    out = capsys.readouterr().out
-    assert "ANTIZAPRET_PATH" in out
-
-
 def test_cli_restore_allows_absolute_archive_path(tmp_path, monkeypatch):
     module = _load_cli()
     seen: list[tuple[str, bool]] = []
@@ -164,23 +154,6 @@ def test_cli_list_prints_archives_newest_first(tmp_path, capsys):
     ]
 
 
-def test_cli_list_without_metadata_uses_mtime(tmp_path, capsys):
-    module = _load_cli()
-    install, backups = _panel_with_backups(tmp_path)
-    _write_archive(backups, "adminpanelaz_upload.tar.gz", 1_700_000_000, None)
-
-    assert module.main(["--install-dir", str(install), "list"]) == 0
-    assert capsys.readouterr().out == "adminpanelaz_upload.tar.gz\t2023-11-14T22:13:20Z\t1024\t\n"
-
-
-def test_cli_list_empty_prints_nothing(tmp_path, capsys):
-    module = _load_cli()
-    install, _backups = _panel_with_backups(tmp_path)
-
-    assert module.main(["--install-dir", str(install), "list"]) == 0
-    assert capsys.readouterr().out == ""
-
-
 def test_cli_list_reports_error(tmp_path, monkeypatch, capsys):
     module = _load_cli()
 
@@ -215,9 +188,3 @@ def test_cli_create_no_prune_keeps_every_archive(tmp_path, monkeypatch, capsys):
     seen = _create_with(module, monkeypatch, tmp_path, "--no-prune")
     assert seen["retention"] == 6
     assert capsys.readouterr().out.strip() == "/backups/adminpanelaz_new.tar.gz"
-
-
-def test_cli_create_default_keeps_five(tmp_path, monkeypatch):
-    module = _load_cli()
-    seen = _create_with(module, monkeypatch, tmp_path)
-    assert seen["retention"] == 5

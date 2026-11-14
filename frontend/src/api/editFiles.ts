@@ -10,20 +10,20 @@ export async function getEditFileContent(key: string) {
 }
 
 export async function saveEditFile(key: string, content: string) {
-  return apiFetch(`/edit-files/${key}`, {
+  return apiFetch<{ message: string; detail?: string; task_id?: string | null }>(`/edit-files/${key}`, {
     method: 'PUT',
     body: JSON.stringify({ content }),
   })
 }
 
 export async function saveEditFilesBatch(files: Record<string, string>, runDoall = false) {
-  return apiFetch<{ message: string; detail?: string }>('/edit-files/batch', {
+  return apiFetch<{ message: string; detail?: string; task_id?: string | null }>('/edit-files/batch', {
     method: 'POST',
     body: JSON.stringify({ files, run_doall: runDoall }),
   })
 }
 
-export interface EditFileTransferNodeResult {
+interface EditFileTransferNodeResult {
   node_id: number
   node_name: string | null
   status: 'success' | 'failed' | 'skipped'

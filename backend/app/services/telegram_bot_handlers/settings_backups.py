@@ -94,7 +94,7 @@ def _format_backup_menu(settings, backups) -> str:
         f"AZ-бэкап: <b>{_on_off(settings.backup_az_enabled)}</b>",
     ]
     if get_feature_service().is_enabled("awg2"):
-        lines.append(f"AWG2-слой: <b>{_on_off(settings.backup_awg2_enabled)}</b>")
+        lines.append(f"Слой AWG 2.0: <b>{_on_off(settings.backup_awg2_enabled)}</b>")
     lines.extend(
         [
             f"Хранить копий: <code>{settings.retention_count}</code>",
@@ -138,7 +138,7 @@ def _backup_main_keyboard(settings) -> dict:
         rows.append(
             [
                 inline_button(
-                    f"🧩 AWG2: {_on_off(awg2)}",
+                    f"🧩 AWG 2.0: {_on_off(awg2)}",
                     callback_data=f"st:bk:awg2:{0 if awg2 else 1}",
                 )
             ]

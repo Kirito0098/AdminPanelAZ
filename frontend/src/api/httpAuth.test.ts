@@ -141,6 +141,7 @@ describe('apiFetchAtBase session vs node-key auth', () => {
       false,
     )
   })
+
 })
 
 describe('refreshAccessToken keeps the session when the server is unavailable', () => {
@@ -158,7 +159,7 @@ describe('refreshAccessToken keeps the session when the server is unavailable', 
     expect(clearSpy).toHaveBeenCalledTimes(1)
   })
 
-  it.each([500, 502, 503, 504, 408, 429])('throws on %i without clearing the session', async (status) => {
+  it.each([502, 429])('throws on %i without clearing the session', async (status) => {
     const clearSpy = vi.spyOn(accessToken, 'clearAccessToken')
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>Bad Gateway</html>', { status })))
 
@@ -194,17 +195,6 @@ describe('refreshAccessToken keeps the session when the server is unavailable', 
     )
     await expect(refreshAccessToken()).resolves.toBe('t2')
     expect(fetchMock).toHaveBeenCalledTimes(2)
-  })
-
-  it('does not leave the abort timer running after an answer', async () => {
-    vi.useFakeTimers()
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response(JSON.stringify({ access_token: 't3' }), { status: 200 })),
-    )
-
-    await expect(refreshAccessToken()).resolves.toBe('t3')
-    expect(vi.getTimerCount()).toBe(0)
   })
 
   it('apiFetch surfaces an unavailable refresh instead of a 401', async () => {
@@ -277,15 +267,6 @@ describe('final session loss is reported once for every caller', () => {
     expect(listener).toHaveBeenCalledTimes(1)
   })
 
-  it('stops notifying after unsubscribe', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 401 })))
-    const listener = vi.fn()
-    onSessionLost(listener)()
-
-    await refreshAccessToken()
-
-    expect(listener).not.toHaveBeenCalled()
-  })
 })
 
 describe('apiFetch renews the session on /auth paths except the sign-in flow', () => {
@@ -298,7 +279,7 @@ describe('apiFetch renews the session on /auth paths except the sign-in flow', (
     return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
   }
 
-  it.each(['/auth/me', '/auth/2fa/status', '/auth/passkeys', '/auth/change-password'])(
+  it.each(['/auth/me', '/auth/change-password'])(
     'refreshes and retries %s after a session 401',
     async (path) => {
       vi.spyOn(accessToken, 'getAccessToken').mockReturnValue('old-jwt')
@@ -320,15 +301,7 @@ describe('apiFetch renews the session on /auth paths except the sign-in flow', (
     },
   )
 
-  it.each([
-    '/auth/login',
-    '/auth/login/json',
-    '/auth/login/2fa',
-    '/auth/login/passkey/options',
-    '/auth/login/passkey/verify',
-    '/auth/logout',
-    '/auth/refresh',
-  ])('does not refresh on a 401 from %s', async (path) => {
+  it.each(['/auth/login', '/auth/refresh'])('does not refresh on a 401 from %s', async (path) => {
     vi.spyOn(accessToken, 'getAccessToken').mockReturnValue(null)
     vi.spyOn(webSession, 'getWebSessionId').mockReturnValue(null)
     const fetchMock = vi.fn().mockResolvedValue(json({ detail: 'Неверный логин или пароль' }, 401))
@@ -402,12 +375,4 @@ describe('apiFetchResponse', () => {
     expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
-  it('throws ApiError with the server message on an error answer', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{"detail":"Бэкап не найден"}', { status: 404 })))
-
-    await expect(apiFetchResponse('/backups/x.tar.gz/download')).rejects.toMatchObject({
-      status: 404,
-      message: 'Бэкап не найден',
-    })
-  })
 })

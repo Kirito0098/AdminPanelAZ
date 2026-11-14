@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { cn } from '@/lib/utils'
 import { PUBLISH_RESTART_WAIT_NOTICE } from '@/components/settings/publishWizardUi'
 
 export type PublishAwaitDialogState = {
@@ -46,10 +47,19 @@ export default function PublishAwaitDialog({ state, onDismiss }: PublishAwaitDia
         }}
       >
         <DialogHeader className="shrink-0">
-          <DialogTitle className="flex items-center gap-2">
-            {state.status === 'running' && <Loader2 className="h-5 w-5 shrink-0 animate-spin text-primary" />}
-            {state.status === 'completed' && <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />}
-            {state.status === 'failed' && <Rocket className="h-5 w-5 shrink-0 text-destructive" />}
+          <DialogTitle className="flex items-center gap-2.5">
+            <span
+              className={cn(
+                'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg',
+                state.status === 'running' && 'bg-primary/10 text-primary',
+                state.status === 'completed' && 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+                state.status === 'failed' && 'bg-destructive/10 text-destructive',
+              )}
+            >
+              {state.status === 'running' && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
+              {state.status === 'completed' && <CheckCircle2 className="h-4 w-4" aria-hidden />}
+              {state.status === 'failed' && <Rocket className="h-4 w-4" aria-hidden />}
+            </span>
             {state.status === 'running' && 'Публикация запущена'}
             {state.status === 'completed' && 'Публикация завершена'}
             {state.status === 'failed' && 'Не удалось запустить публикацию'}
@@ -84,7 +94,7 @@ export default function PublishAwaitDialog({ state, onDismiss }: PublishAwaitDia
             <>
               <p>{state.message || 'Публикация успешно завершена.'}</p>
               {state.restartCommand ? (
-                <p className="rounded-lg border bg-muted/30 px-3 py-2 font-mono text-xs">{state.restartCommand}</p>
+                <p className="rounded-lg border border-border/70 bg-muted/30 px-3 py-2 font-mono text-xs">{state.restartCommand}</p>
               ) : null}
               {accessUrl ? (
                 <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2.5">

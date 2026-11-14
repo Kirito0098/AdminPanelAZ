@@ -1,14 +1,15 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { Settings, User as UserIcon } from 'lucide-react'
 import { Navigate, NavLink, useParams } from 'react-router-dom'
-import { ApiError, changePassword, createUser, deleteUser, getSettings, getUsers } from '@/api/client'
+import { ApiError, changePassword, createUser, getSettings, getUsers } from '@/api/client'
+import { deleteProvisionedUser } from '@/api/users'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import HaReplicaBanner from '@/components/dashboard/HaReplicaBanner'
 import MobileSettingsSectionPicker from '@/components/settings/MobileSettingsSectionPicker'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
-import DocsLink from '@/components/shared/DocsLink'
 import { DOCS } from '@/lib/docsUrls'
 import BackupTab from '@/components/settings/BackupTab'
+import BellNotifyMatrix from '@/components/settings/BellNotifyMatrix'
 import ConfigDeliveryTab from '@/components/settings/ConfigDeliveryTab'
 import FeatureTogglesTab from '@/components/settings/FeatureTogglesTab'
 import MaintenanceTab from '@/components/settings/MaintenanceTab'
@@ -16,11 +17,13 @@ import MonitoringTab from '@/components/settings/MonitoringTab'
 import PersonalTab from '@/components/settings/PersonalTab'
 import SecurityTab from '@/components/settings/SecurityTab'
 import {
+  getSectionIcon,
   getVisibleNavGroups,
   isSectionAvailable,
   isValidSettingsSection,
   type SettingsSection,
 } from '@/components/settings/SettingsNav'
+import { SettingsSectionHeader } from '@/components/settings/SettingsChrome'
 import SettingsSectionBrowser from '@/components/settings/SettingsSectionBrowser'
 import { getSectionMeta } from '@/components/settings/settingsLabels'
 import PanelOpsTab from '@/components/settings/PanelOpsTab'
@@ -36,10 +39,6 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import { useTheme } from '@/context/ThemeContext'
-import {
-  settingsSectionNeedsNodeSettings,
-  settingsSectionNeedsUsers,
-} from '@/lib/settingsPageLoads'
 import type { AppSettings, User, UserRole } from '@/types'
 
 export default function SettingsPage() {
@@ -75,7 +74,7 @@ export default function SettingsPage() {
   // GET /settings reads active-node config files — only maintenance uses the parent payload.
   // Users are panel-wide. Personal and other tabs self-fetch; skip reloads on node switch.
   useEffect(() => {
-    if (!settingsSectionNeedsNodeSettings(activeSection) || nodeLoading) return
+    if (activeSection !== 'maintenance' || nodeLoading) return
     let cancelled = false
     const loadNodeSettings = async () => {
       startGlobal()
@@ -97,7 +96,7 @@ export default function SettingsPage() {
   }, [activeSection, nodeLoading, activeNode?.id, user?.role, startGlobal, doneGlobal, notifyError])
 
   useEffect(() => {
-    if (!settingsSectionNeedsUsers(activeSection, isAdmin)) return
+    if (!isAdmin || activeSection !== 'users') return
     let cancelled = false
     const loadUsersList = async () => {
       try {
@@ -149,7 +148,7 @@ export default function SettingsPage() {
       destructive: true,
       onConfirm: async () => {
         try {
-          await deleteUser(id)
+          await deleteProvisionedUser(id)
           setUsers(await getUsers())
           success(`Пользователь «${name}» удалён`)
         } catch (err) {
@@ -181,6 +180,11 @@ export default function SettingsPage() {
 
   if (sectionParam === 'cloudflare') {
     return <Navigate to="/settings/vpn_network?tab=cloudflare" replace />
+  }
+
+  // Уведомления разделились: Telegram — на /telegram, матрица колокольчика — panel_notify.
+  if (sectionParam === 'notifications') {
+    return <Navigate to="/settings/panel_notify" replace />
   }
 
   if (sectionParam && !activeSection) {
@@ -249,6 +253,8 @@ export default function SettingsPage() {
         return <BackupTab />
       case 'monitoring':
         return <MonitoringTab />
+      case 'panel_notify':
+        return <BellNotifyMatrix />
       case 'modules':
         return <FeatureTogglesTab />
       case 'updates':
@@ -268,17 +274,6 @@ export default function SettingsPage() {
     <div className="flex flex-col gap-6 orientation-compact-settings-page">
       <ConfirmDialogHost dialogProps={dialogProps} />
       <HaReplicaBanner />
-      <PageSectionHeader
-        icon={isAdmin ? Settings : UserIcon}
-        title={isAdmin ? 'Настройки' : 'Мой профиль'}
-        titleAddon={<NodeBadge name={activeNode?.name ?? settings?.node_name} status={activeNode?.status} />}
-        description={
-          isAdmin
-            ? 'Профиль, доступ, VPN и работа панели'
-            : 'Тема, пароль, Telegram и дополнительная защита при входе'
-        }
-        docsHref={isAdmin ? DOCS.settings : DOCS.profile}
-      />
 
       <div className="flex items-center justify-between gap-3 lg:hidden">
         <div className="min-w-0 flex-1">
@@ -293,23 +288,18 @@ export default function SettingsPage() {
       </div>
 
       <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:gap-8">
-        <aside className="hidden w-56 shrink-0 lg:sticky lg:top-4 lg:block">
+        <aside className="hidden w-56 shrink-0 lg:sticky lg:top-[4.5rem] lg:block">
           <SettingsSectionBrowser groups={visibleGroups} variant="nav" activeSection={section} />
         </aside>
 
-        <div className="min-w-0 flex-1 flex flex-col gap-4 orientation-compact-settings-section">
-          <div className="orientation-compact-settings-section-header">
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <h3 className="text-base font-semibold tracking-tight">{sectionMeta.title}</h3>
-              <p className="text-xs text-muted-foreground">{sectionMeta.description}</p>
-              {sectionMeta.docsHref ? (
-                <DocsLink href={sectionMeta.docsHref} className="shrink-0" />
-              ) : null}
-            </div>
-            {sectionMeta.hint ? (
-              <p className="mt-1 text-xs text-muted-foreground/80">{sectionMeta.hint}</p>
-            ) : null}
-          </div>
+        <div className="min-w-0 flex-1 space-y-4 orientation-compact-settings-section">
+          <SettingsSectionHeader
+            icon={getSectionIcon(section)}
+            title={sectionMeta.title}
+            description={sectionMeta.description}
+            hint={sectionMeta.hint}
+            docsHref={sectionMeta.docsHref}
+          />
           {renderSection()}
         </div>
       </div>

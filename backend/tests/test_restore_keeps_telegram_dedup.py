@@ -1,3 +1,4 @@
+
 """A restored DB must remember update ids claimed after the backup: a redelivered bot restore must not run twice."""
 
 from __future__ import annotations
@@ -7,6 +8,7 @@ import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
@@ -17,6 +19,8 @@ from app.services import backup_manager as backup_manager_module
 from app.services import telegram_update_dedup
 from app.services.backup_manager import BackupManager
 from app.services.telegram_update_dedup import claim_telegram_update
+
+pytestmark = pytest.mark.slow
 
 
 def _session(db_path: Path):

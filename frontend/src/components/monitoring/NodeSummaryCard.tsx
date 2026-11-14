@@ -7,6 +7,7 @@ import {
 import { NodeStatusBadge } from '@/components/NodeSelector'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { cn } from '@/lib/utils'
+import { protocolLabel } from '@/lib/vpnTypes'
 import type { MonitoringNodeSummary, NodeStatus } from '@/types'
 
 type NodeSummaryCardProps = {
@@ -63,16 +64,16 @@ export default function NodeSummaryCard({ node, isActive, onSelect }: NodeSummar
         )}
       >
         <div>
-          <dt className="text-muted-foreground">OVPN</dt>
+          <dt className="text-muted-foreground">{protocolLabel('openvpn')}</dt>
           <dd className="mt-0.5 font-mono text-sm font-medium tabular-nums">{node.connected_openvpn}</dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">WG</dt>
+          <dt className="text-muted-foreground">{protocolLabel('wireguard')}</dt>
           <dd className="mt-0.5 font-mono text-sm font-medium tabular-nums">{node.connected_wireguard}</dd>
         </div>
         {showAwg2 && (
           <div>
-            <dt className="text-muted-foreground">AWG 2.0</dt>
+            <dt className="text-muted-foreground">{protocolLabel('amneziawg2')}</dt>
             <dd className="mt-0.5 font-mono text-sm font-medium tabular-nums">
               {node.connected_amneziawg2 ?? 0}
             </dd>

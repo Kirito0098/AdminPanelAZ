@@ -13,6 +13,8 @@ export LANG="${LANG:-C.UTF-8}"
 
 ROOT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 INSTALL_DIR="${INSTALL_DIR:-$ROOT_DIR}"
+# shellcheck source=scripts/env-file.sh
+source "$ROOT_DIR/scripts/env-file.sh"
 SERVICE_NAME="${SERVICE_NAME:-adminpanelaz}"
 VENV_PATH="${VENV_PATH:-$ROOT_DIR/backend/.venv}"
 UNIT_DIR="${SYSTEMD_UNIT_DIR:-/etc/systemd/system}"
@@ -210,15 +212,7 @@ _menu_python() {
 
 # Значение из backend/.env: последнее присваивание (как читает панель), без кавычек; пусто — нет файла или ключа.
 _menu_env_get() {
-  local file="$INSTALL_DIR/backend/.env" line val
-  [[ -r "$file" ]] || return 0
-  line="$(grep -E "^$1=" "$file" 2>/dev/null | tail -1)" || true
-  val="${line#*=}"
-  val="${val%$'\r'}"
-  if [[ "${#val}" -ge 2 && ( "$val" == \"*\" || "$val" == \'*\' ) ]]; then
-    val="${val:1:-1}"
-  fi
-  printf '%s' "$val"
+  env_file_get "$INSTALL_DIR/backend/.env" "$1"
 }
 
 _menu_env_true() {
@@ -448,14 +442,26 @@ frontend_build_stale() {
   return 1
 }
 
+# panel_build_frontend [reuse-deps] — npm ci, затем build:all. reuse-deps: без npm ci, если node_modules уже есть.
+# shellcheck disable=SC2120 # reuse-deps передаёт install.sh, меню вызывает без аргумента.
 panel_build_frontend() {
+  local ci_mode="${1:-always}"
   local frontend_dir="$INSTALL_DIR/frontend"
   if ! command -v npm >/dev/null 2>&1; then
     ui_fail "npm не найден — интерфейс не пересобран"
     return 1
   fi
-  ui_info "Сборка интерфейса (npm ci, npm run build:all)…"
-  if (cd "$frontend_dir" && npm ci && npm run build:all); then
+  local ok=true
+  if [[ "$ci_mode" == "reuse-deps" && -d "$frontend_dir/node_modules" ]]; then
+    ui_info "node_modules уже существует, npm ci пропущен (удалите node_modules для полной переустановки)"
+  else
+    ui_info "Сборка интерфейса (npm ci, npm run build:all)…"
+    (cd "$frontend_dir" && npm ci) || ok=false
+  fi
+  if [[ "$ok" == true ]] && ! (cd "$frontend_dir" && npm run build:all); then
+    ok=false
+  fi
+  if [[ "$ok" == true ]]; then
     ui_ok "Интерфейс пересобран"
     return 0
   fi
@@ -699,9 +705,12 @@ panel_update() {
 
   ui_info "Найдены обновления в $ref (отставание: $behind). git merge --ff-only $ref…"
   local merge_out status_out unpushed
-  if ! merge_out="$(git -C "$INSTALL_DIR" merge --ff-only "$ref" 2>&1)"; then
+  # 2.26.5: install.sh делает chmod +x файлам, которые в git лежат 644, — дерево «грязное» только
+  # режимами, и обычный ff упирается в «local changes would be overwritten». Один merge без учёта
+  # режимов пропускает такую копию; реальные правки содержимого по-прежнему дают отказ ниже.
+  if ! merge_out="$(git -C "$INSTALL_DIR" -c core.fileMode=false merge --ff-only "$ref" 2>&1)"; then
     # После force-push на origin история расходится при чистом дереве: сброс только на upstream той же ветки.
-    if ! status_out="$(git -C "$INSTALL_DIR" status --porcelain 2>/dev/null)" || [[ -n "$status_out" ]]; then
+    if ! status_out="$(git -C "$INSTALL_DIR" -c core.fileMode=false status --porcelain 2>/dev/null)" || [[ -n "$status_out" ]]; then
       [[ -n "$merge_out" ]] && printf '%s\n' "$merge_out" >&2
       ui_fail "Обновление не удалось: история расходится с $ref или есть локальные изменения — обновите вручную"
       return 1

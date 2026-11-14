@@ -7,14 +7,21 @@ import {
   previewSecretsRotation,
 } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
 import ConfirmDialog from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import Spinner from '@/components/ui/Spinner'
 import { useNotifications } from '@/context/NotificationContext'
+import { cn } from '@/lib/utils'
 import type { SecretRotationItem, SecretRotationPreview } from '@/types'
 
 type WizardStep = 'select' | 'configure' | 'preview' | 'confirm' | 'done'
@@ -150,22 +157,34 @@ export default function SecretsRotationWizard() {
     <>
       <Card>
         <CardHeader>
-          <CardTitle className="flex items-center gap-2 text-base">
-            <KeyRound size={18} />
-            Ротация секретов
-          </CardTitle>
-          <CardDescription>
-            Пошаговый мастер для SECRET_KEY, NODE_AGENT_API_KEY и токена Telegram-бота — с предпросмотром и
-            подтверждением (без тихой перезаписи .env)
-          </CardDescription>
+          <div className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <KeyRound size={18} aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1">
+              <CardTitle>Ротация секретов</CardTitle>
+              <CardDescription className="mt-1">
+                Пошаговый мастер для SECRET_KEY, NODE_AGENT_API_KEY и токена Telegram-бота — с
+                предпросмотром и подтверждением (без тихой перезаписи .env)
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3">
           <SettingsAlert variant="info" title="Безопасный flow">
             предпросмотр → подтверждение → запись. Подробнее см. SECURITY.md в репозитории.
           </SettingsAlert>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
             {catalog.map((item) => (
-              <div key={item.secret_id} className="rounded-md border p-3 text-sm">
+              <div
+                key={item.secret_id}
+                className={cn(
+                  'rounded-lg border p-3 text-sm transition-colors',
+                  item.configured
+                    ? 'border-primary/20 bg-primary/5 ring-1 ring-primary/20'
+                    : 'border-border/70 bg-card/40',
+                )}
+              >
                 <div className="mb-1 flex items-center justify-between gap-2">
                   <span className="font-medium">{item.label}</span>
                   <Badge variant={item.configured ? 'default' : 'secondary'}>
@@ -173,7 +192,9 @@ export default function SecretsRotationWizard() {
                   </Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">{item.description}</p>
-                <p className="mt-2 font-mono text-xs text-muted-foreground">{item.masked_current}</p>
+                <p className="mt-2 truncate font-mono text-xs text-muted-foreground">
+                  {item.masked_current}
+                </p>
               </div>
             ))}
           </div>
@@ -244,9 +265,12 @@ export default function SecretsRotationWizard() {
             {catalog.map((item) => (
               <label
                 key={item.secret_id}
-                className={`flex cursor-pointer gap-3 rounded-md border p-3 text-sm ${
-                  selected?.secret_id === item.secret_id ? 'border-primary bg-primary/5' : ''
-                }`}
+                className={cn(
+                  'flex cursor-pointer gap-3 rounded-lg border p-3 text-sm transition-colors',
+                  selected?.secret_id === item.secret_id
+                    ? 'border-primary/20 bg-primary/5 ring-1 ring-primary/20'
+                    : 'border-border/70 hover:bg-muted/30',
+                )}
               >
                 <input
                   type="radio"
@@ -308,18 +332,18 @@ export default function SecretsRotationWizard() {
             <Button type="button" variant="ghost" size="sm" onClick={() => setStep('configure')}>
               ← Назад
             </Button>
-            <div className="grid gap-2 rounded-md border p-3">
+            <div className="grid gap-2 rounded-lg border border-border/70 bg-muted/20 p-3">
               <div className="flex justify-between gap-2">
                 <span className="text-muted-foreground">Текущее</span>
-                <span className="font-mono">{preview.masked_current}</span>
+                <span className="truncate font-mono">{preview.masked_current}</span>
               </div>
               <div className="flex justify-between gap-2">
                 <span className="text-muted-foreground">Новое</span>
-                <span className="font-mono">{preview.masked_new_value}</span>
+                <span className="truncate font-mono">{preview.masked_new_value}</span>
               </div>
             </div>
             {preview.env_change && (
-              <div className="rounded-md border p-3 text-xs">
+              <div className="rounded-lg border border-border/70 bg-muted/20 p-3 text-xs">
                 <p className="font-medium">Запись в файл</p>
                 <p className="mt-1 font-mono text-muted-foreground">{preview.env_change.path}</p>
                 <p className="mt-1">

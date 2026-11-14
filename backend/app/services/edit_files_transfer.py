@@ -8,6 +8,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import Node
+from app.services.cidr.apply_pipeline import apply_key_for_adapter, apply_slot
 from app.services.cidr.pipeline.orchestrator import resolve_deploy_targets
 from app.services.file_editor import EDITABLE_FILES, ConfigFileUnsupportedError, is_kresd_custom_key
 from app.services.node_manager import is_vpn_node, get_active_node, get_adapter_for_node
@@ -180,7 +181,9 @@ def run_edit_files_transfer(
         doall_output = None
         if run_doall:
             try:
-                doall_output = adapter.apply_config_changes()
+                # Same node slot as the apply tasks: a doall here must not overlap one there.
+                with apply_slot(node_key=apply_key_for_adapter(adapter)):
+                    doall_output = adapter.apply_config_changes()
                 from app.services.openvpn_multihome import maybe_ensure_node_openvpn_multihome
 
                 maybe_ensure_node_openvpn_multihome(adapter, node, restart_if_unchanged=False)

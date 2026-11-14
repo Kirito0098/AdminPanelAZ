@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import secrets
@@ -10,13 +11,13 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal, NamedTuple
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
-from fastapi import HTTPException, status
+from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
+from app.config import DEFAULT_BACKEND_PORT, get_settings
 from app.models import (
     AmneziaWg2AccessPolicy,
     AppSetting,
@@ -30,13 +31,15 @@ from app.models import (
     VpnConfig,
     WgAccessPolicy,
 )
-from app.services.config_access import can_mutate_config
+from app.services.config_access import is_config_owner
 from app.services.node_adapter import node_request_timeout_cap
 from app.services.node_manager import get_active_node, get_adapter_for_node
 from app.services.node_sync.groups import find_sync_group_containing_node
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
+from app.services.portal_link_settings import get_portal_link_ttl_days, portal_link_expires_at
 from app.services.ssh_tunnel_pool import SshTunnelError
+from app.services.traffic_limit import human_bytes
 from app.services.vpn_profile_visibility import (
     feature_flags_from_service,
     get_default_visible_vpn_profiles,
@@ -61,6 +64,10 @@ PORTAL_RESTORE_HINT = (
 )
 CLIENT_PORTAL_TOKEN_PREFIX = "c_"
 USER_PORTAL_TOKEN_PREFIX = "u_"
+
+# One answer for every unusable link: a holder must not learn whether a token
+# exists, was revoked, expired or belongs to a disabled user.
+PORTAL_LINK_INVALID_DETAIL = "Ссылка недействительна"
 
 
 @dataclass(frozen=True)
@@ -208,7 +215,7 @@ def resolve_portal_base_url(db: Session) -> str | None:
     behind = (env.get_env_value("BEHIND_NGINX", "") or "").lower() in {"1", "true", "yes"}
     use_https = (env.get_env_value("USE_HTTPS", "") or "").lower() in {"1", "true", "yes"}
     backend_host = env.get_env_value("BACKEND_HOST", "127.0.0.1") or "127.0.0.1"
-    backend_port = env.get_env_value("BACKEND_PORT", "8000") or "8000"
+    backend_port = env.get_env_value("BACKEND_PORT", str(DEFAULT_BACKEND_PORT)) or str(DEFAULT_BACKEND_PORT)
     https_port_raw = env.get_env_value("HTTPS_PUBLIC_PORT", "") or str(settings.https_public_port)
     try:
         https_public_port = int(https_port_raw)
@@ -278,6 +285,42 @@ def assert_portal_host(db: Session, request_host: str | None) -> None:
     got = _request_host(request_host)
     if got != expected.lower():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+
+def _origin_host(origin: str) -> str:
+    """Host of an ``Origin`` header, lowercase; empty for opaque/unknown origins."""
+    try:
+        parts = urlsplit(origin)
+    except ValueError:
+        return ""
+    if parts.scheme not in {"http", "https"}:
+        return ""
+    return (parts.netloc or "").strip().lower()
+
+
+def assert_portal_action_origin(request: Request) -> None:
+    """Reject cross-site browser writes on the public portal (CSRF guard).
+
+    Browsers attach ``Sec-Fetch-Site``/``Origin`` and pages cannot forge them,
+    so a cross-site form post is refused while the portal page itself passes.
+    Requests without fetch metadata (curl, older clients) are let through:
+    CSRF is a browser attack, and a direct client must know the token anyway.
+
+    Call it after :func:`assert_portal_host` — the expected origin is the Host
+    that check has already pinned to ``portal_domain``.
+    """
+    fetch_site = (request.headers.get("sec-fetch-site") or "").strip().lower()
+    if fetch_site in {"cross-site", "same-site"}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Запрос отклонён")
+
+    origin = (request.headers.get("origin") or "").strip()
+    if not origin:
+        return
+
+    expected = _request_host(request.headers.get("host"))
+    got = _origin_host(origin)
+    if not expected or not got or got.split(":")[0] != expected:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Запрос отклонён")
 
 
 def _portal_node_id(db: Session) -> int:
@@ -532,7 +575,7 @@ def _creator_still_manages(db: Session, creator: User, row: ClientPortalToken) -
         )
         .all()
     )
-    return any(can_mutate_config(creator, config) for config in configs)
+    return any(is_config_owner(creator, config) for config in configs)
 
 
 def revoke_client_portal_links(db: Session, *, node_id: int, client_name: str) -> int:
@@ -634,6 +677,10 @@ def revoke_user_portal_token(db: Session, *, user_id: int) -> None:
     db.commit()
 
 
+def _invalid_portal_link() -> HTTPException:
+    return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=PORTAL_LINK_INVALID_DETAIL)
+
+
 def get_valid_portal_token(db: Session, token: str) -> PortalTokenResolution:
     client_row = db.query(ClientPortalToken).filter(ClientPortalToken.token == token).first()
     user_row = db.query(UserPortalToken).filter(UserPortalToken.token == token).first()
@@ -643,23 +690,30 @@ def get_valid_portal_token(db: Session, token: str) -> PortalTokenResolution:
     if user_row is not None:
         candidates.append(("user", user_row))
     if not candidates:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ссылка недействительна")
+        raise _invalid_portal_link()
 
     active = [(kind, row) for kind, row in candidates if row.revoked_at is None]
     if len(active) > 1:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ссылка недействительна")
+        raise _invalid_portal_link()
     if active:
         kind, row = active[0]
     else:
         kind, row = candidates[0]
-        if row.revoked_at is not None:
-            raise HTTPException(status_code=status.HTTP_410_GONE, detail="Ссылка отозвана")
+
+    if row.revoked_at is not None:
+        raise _invalid_portal_link()
+
+    if row.created_at is not None:
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        expires_at = portal_link_expires_at(row.created_at, get_portal_link_ttl_days(db))
+        if expires_at is not None and now >= expires_at:
+            raise _invalid_portal_link()
 
     if kind == "client":
         return PortalTokenResolution(kind="client", client_row=row)
     owner = db.get(User, row.user_id)
     if owner is None or not owner.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Портал пользователя отключён")
+        raise _invalid_portal_link()
     return PortalTokenResolution(kind="user", user_row=row)
 
 
@@ -746,6 +800,7 @@ def _list_files_for_configs(db: Session, configs: list[VpnConfig]) -> list[dict]
                 protocol=protocol,
                 variant=f.get("variant", ""),
                 path=path,
+                kind=f.get("kind", ""),
             ):
                 continue
             filename = (
@@ -778,15 +833,7 @@ def _setting_value(db: Session, key: str, default: str = "") -> str:
 
 
 def _format_bytes_label(n: int) -> str:
-    value = float(max(0, int(n or 0)))
-    units = ("B", "KiB", "MiB", "GiB", "TiB")
-    idx = 0
-    while value >= 1024 and idx < len(units) - 1:
-        value /= 1024.0
-        idx += 1
-    if idx == 0:
-        return f"{int(value)} {units[idx]}"
-    return f"{value:.2f} {units[idx]}"
+    return human_bytes(max(0, int(n or 0)), units=("B", "KiB", "MiB", "GiB", "TiB"), digits=2) or "0 B"
 
 
 def _policy_blocked(policy) -> bool:
@@ -924,41 +971,24 @@ def _portal_brand_title(db: Session) -> str:
     return _setting_value(db, "portal_title") or "Подключение"
 
 
-def _portal_download_url(
-    *,
-    base: str,
-    token: str,
-    path: str,
-    node_id: int | None = None,
-    client_name: str | None = None,
-) -> str:
-    params: dict[str, str | int] = {"path": path}
-    if node_id is not None:
-        params["node_id"] = node_id
-    if client_name:
-        params["client_name"] = client_name
+def _portal_file_id(path: str) -> str:
+    """Opaque public identifier for an allowed profile path (the path itself stays internal)."""
+    return "f_" + hashlib.sha256(path.encode("utf-8")).hexdigest()[:24]
+
+
+def _portal_download_url(*, base: str, token: str, file_id: str) -> str:
+    """Public download URL: only the opaque file id travels in the query."""
+    params: dict[str, str] = {"file_id": file_id}
     return f"{base}/api/public/portal/{token}/download?{urlencode(params, quote_via=quote)}"
 
 
-def _portal_file_entries(
-    *,
-    base: str,
-    token: str,
-    files_meta: list[dict],
-    node_id: int | None = None,
-    client_name: str | None = None,
-) -> list[dict]:
+def _portal_file_entries(*, base: str, token: str, files_meta: list[dict]) -> list[dict]:
     files = []
     for item in files_meta:
-        download_url = _portal_download_url(
-            base=base,
-            token=token,
-            path=item["path"],
-            node_id=node_id,
-            client_name=client_name,
-        )
+        file_id = _portal_file_id(item["path"])
+        download_url = _portal_download_url(base=base, token=token, file_id=file_id)
         entry = {
-            "path": item["path"],
+            "file_id": file_id,
             "label": item["label"],
             "filename": item["filename"],
             "vpn_type": item["vpn_type"],
@@ -1002,8 +1032,6 @@ def _build_client_portal_entry(
     node_id: int,
     client_name: str,
     base: str,
-    download_node_id: int | None = None,
-    download_client_name: str | None = None,
 ) -> dict:
     configs = (
         db.query(VpnConfig)
@@ -1019,8 +1047,6 @@ def _build_client_portal_entry(
         base=base,
         token=token,
         files_meta=files_meta,
-        node_id=download_node_id,
-        client_name=download_client_name,
     )
     return {
         "node_id": node_id,
@@ -1082,6 +1108,17 @@ def _portal_node_info(db: Session, node_ids: list[int]) -> dict[int, PortalNodeI
     return {int(row.id): PortalNodeInfo(portal_node_label(row), row.status == NodeStatus.offline) for row in rows}
 
 
+def portal_banner_payload(user: User) -> dict | None:
+    """Баннер портала для пользователя (Stage 4) — текст и время показа."""
+    text = (user.portal_banner_text or "").strip()
+    if not text:
+        return None
+    return {
+        "text": text,
+        "created_at": user.portal_banner_at.isoformat() if user.portal_banner_at else None,
+    }
+
+
 def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
     base = resolve_portal_base_url(db)
     if not base:
@@ -1105,8 +1142,6 @@ def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
                     node_id=node_id,
                     client_name=client_name,
                     base=base,
-                    download_node_id=node_id,
-                    download_client_name=client_name,
                 )
             except Exception as exc:
                 failed_nodes.add(node_id)
@@ -1132,10 +1167,14 @@ def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
         for node_id, entries in clients_by_node.items()
     ]
     nodes.sort(key=lambda node: (node["label"].casefold(), node["node_id"]))
+    from app.services.user_closed_access import closed_access_payload
+
     return {
         "kind": "user",
         "brand_title": _portal_brand_title(db),
         "unlock_codes_enabled": get_feature_service().is_enabled("unlock_codes"),
+        "closed_access": closed_access_payload(db, user),
+        "portal_banner": portal_banner_payload(user),
         "nodes": nodes,
     }
 
@@ -1155,10 +1194,14 @@ def _read_client_portal_profile(
     *,
     node_id: int,
     client_name: str,
-    path: str,
+    path: str | None = None,
+    file_id: str | None = None,
 ) -> tuple[str, str | bytes]:
     path = (path or "").strip()
-    if not path or ".." in path:
+    file_id = (file_id or "").strip()
+    if not path and not file_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Не указан файл")
+    if path and ".." in path:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный путь")
     configs = (
         db.query(VpnConfig)
@@ -1170,8 +1213,15 @@ def _read_client_portal_profile(
         .all()
     )
     with node_request_timeout_cap(PORTAL_NODE_TIMEOUT_SECONDS):
-        allowed = {item["path"] for item in _list_files_for_configs(db, configs)}
-        if path not in allowed:
+        allowed_files = _list_files_for_configs(db, configs)
+        if file_id:
+            path = next(
+                (item["path"] for item in allowed_files if _portal_file_id(item["path"]) == file_id),
+                None,
+            )
+            if path is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
+        elif path not in {item["path"] for item in allowed_files}:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
         adapter = _adapter_for_node_id(db, node_id)
         hosts = load_node_remote_hosts(db, node_id)
@@ -1183,11 +1233,18 @@ def _read_client_portal_profile(
 def read_portal_profile(
     db: Session,
     resolution: PortalTokenResolution,
-    path: str,
+    path: str | None = None,
     *,
+    file_id: str | None = None,
     node_id: int | None = None,
     client_name: str | None = None,
 ) -> tuple[str, str | bytes]:
+    """Read one allowed profile strictly inside the scope of the token.
+
+    ``node_id``/``client_name`` from the query string are legacy hints kept for
+    links cached by older builds: a client token always uses its own client, and
+    a user token may only pick among the profiles this user owns.
+    """
     if resolution.kind == "client":
         if resolution.client_row is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -1196,25 +1253,36 @@ def read_portal_profile(
             node_id=resolution.client_row.node_id,
             client_name=resolution.client_row.client_name,
             path=path,
+            file_id=file_id,
         )
 
     if resolution.user_row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    key = (client_name or "").strip().lower()
-    if node_id is None or not key:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Не указан клиент")
-    for target_node_id, target_client_name in _owned_portal_targets(db, user_id=resolution.user_row.user_id):
-        if target_node_id != node_id:
-            continue
-        if target_client_name.strip().lower() != key:
-            continue
-        return _read_client_portal_profile(
-            db,
-            node_id=target_node_id,
-            client_name=target_client_name,
-            path=path,
-        )
-    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Клиент не найден")
+    if not ((path or "").strip() or (file_id or "").strip()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Не указан файл")
+
+    targets = _owned_portal_targets(db, user_id=resolution.user_row.user_id)
+    hint_name = (client_name or "").strip().lower()
+
+    def hint_misses(target: tuple[int, str]) -> tuple[int, int]:
+        target_node_id, target_client_name = target
+        node_miss = int(node_id is not None and target_node_id != node_id)
+        name_miss = int(bool(hint_name) and target_client_name.strip().lower() != hint_name)
+        return (node_miss, name_miss)
+
+    for target_node_id, target_client_name in sorted(targets, key=hint_misses):
+        try:
+            return _read_client_portal_profile(
+                db,
+                node_id=target_node_id,
+                client_name=target_client_name,
+                path=path,
+                file_id=file_id,
+            )
+        except HTTPException as exc:
+            if exc.status_code != status.HTTP_404_NOT_FOUND:
+                raise
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Файл не найден")
 
 
 def redeem_public_portal_code(db: Session, resolution: PortalTokenResolution, *, code: str) -> dict:
@@ -1276,6 +1344,11 @@ def redeem_public_portal_code(db: Session, resolution: PortalTokenResolution, *,
     raise ValueError(last_retryable_error or "Профили пользователя не найдены")
 
 
+def _link_expires_at(db: Session, row: ClientPortalToken | UserPortalToken) -> str | None:
+    expires_at = portal_link_expires_at(row.created_at, get_portal_link_ttl_days(db))
+    return expires_at.isoformat() + "Z" if expires_at else None
+
+
 def link_response(db: Session, row: ClientPortalToken) -> dict:
     return {
         "kind": "client",
@@ -1284,6 +1357,7 @@ def link_response(db: Session, row: ClientPortalToken) -> dict:
         "client_name": row.client_name,
         "url": portal_page_url(db, row.token),
         "revoked": row.revoked_at is not None,
+        "expires_at": _link_expires_at(db, row),
     }
 
 
@@ -1294,4 +1368,5 @@ def user_link_response(db: Session, row: UserPortalToken) -> dict:
         "user_id": row.user_id,
         "url": portal_page_url(db, row.token),
         "revoked": row.revoked_at is not None,
+        "expires_at": _link_expires_at(db, row),
     }

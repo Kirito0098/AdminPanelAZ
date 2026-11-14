@@ -17,9 +17,10 @@ run_reset() {
   ENV_FILE="$TMP_DIR/.env" ENV_EXAMPLE="$TMP_DIR/.env.example" bash -c '
     set -euo pipefail
     log() { :; }
+    source "$2"
     eval "$1"
     reset_env_from_example
-  ' bash "$(extract_functions env_get env_escape_for_sed env_file_set env_set is_placeholder_secret reset_env_from_example)"
+  ' bash "$(extract_functions env_get env_set is_placeholder_secret reset_env_from_example)" "$ROOT_DIR/scripts/env-file.sh"
 }
 
 printf 'SECRET_KEY=change-me-in-production-use-long-random-string\nAPP_ENV=development\n' >"$TMP_DIR/.env.example"

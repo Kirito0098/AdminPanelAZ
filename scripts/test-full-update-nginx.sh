@@ -99,6 +99,13 @@ run() {
         echo "nginx: configuration file /etc/nginx/nginx.conf test failed" >&2
         return 1
       fi
+      # Как настоящий nginx: vhost ссылается на log_format adminpanelaz_privacy из conf.d.
+      if [[ "$1" == "-t" ]] && grep -rqs 'adminpanelaz_privacy' "$NGINX_SITES_ENABLED_DIR" \
+        && [[ ! -f "$NGINX_CONF_D_DIR/adminpanelaz-privacy-log.conf" ]]; then
+        echo "nginx: [emerg] unknown log format \"adminpanelaz_privacy\" in /etc/nginx/sites-enabled/panel_example_com:42" >&2
+        echo "nginx: configuration file /etc/nginx/nginx.conf test failed" >&2
+        return 1
+      fi
     }
     systemctl() {
       case "$1" in
@@ -157,6 +164,10 @@ cmp -s "$INSTALL/backend/.env" "$TMP/env.orig" && [[ -L "$NG/sites-enabled/panel
   && ok ".env и sites-enabled не тронуты" || bad ".env или sites-enabled изменены"
 [[ -z "$(find "$NG/backups" -maxdepth 1 -name '.apaz-install.*')" ]] && ok "транзакция snippets зафиксирована" \
   || bad "остался каталог отката: $(find "$NG/backups" -maxdepth 1 -name '.apaz-install.*')"
+# Регрессия 2.26.6: без nginx_ensure_privacy_log обновление падало на unknown log format.
+[[ -f "$NG/conf.d/adminpanelaz-privacy-log.conf" && -f "$NG/conf.d/adminpanelaz-server-names-hash.conf" ]] \
+  && ok "снипеты privacy-log и server_names_hash созданы до nginx -t" \
+  || bad "снипеты не созданы: $(ls -A "$NG/conf.d")"
 
 echo "[test] nginx -t с ошибкой: старые файлы на месте, .bak остаются, reload нет, итог «ошибка», без стопа"
 reset_nginx
@@ -170,6 +181,8 @@ cmp -s "$SA/panel_example_com" "$TMP/panel_example_com.orig" && cmp -s "$SA/port
 [[ -n "$(bak panel_example_com)" && -n "$(bak portal_example_com)" ]] && ok "копии .bak-* остались" || bad "копий нет"
 [[ -z "$(ls -A "$NG/snippets")" && ! -e "$NG/conf.d/adminpanelaz-cloudflare-origin.conf" ]] \
   && ok "созданные snippets Cloudflare убраны" || bad "snippets: $(ls -A "$NG/snippets" "$NG/conf.d")"
+[[ ! -e "$NG/conf.d/adminpanelaz-privacy-log.conf" && ! -e "$NG/conf.d/adminpanelaz-server-names-hash.conf" ]] \
+  && ok "снипеты privacy-log и server_names_hash откатаны" || bad "conf.d: $(ls -A "$NG/conf.d")"
 grep -qx "stopped=false" "$TMP/out" && ok "обновление продолжается" || bad "вывод: $(cat "$TMP/out")"
 
 echo "[test] публикация через nginx — по PUBLISH_MODE, без него — по BEHIND_NGINX; без DOMAIN — нет"

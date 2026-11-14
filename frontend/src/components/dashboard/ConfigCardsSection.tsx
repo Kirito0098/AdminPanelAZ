@@ -1,7 +1,4 @@
 import {
-  awg2PermanentBlock,
-  awg2TempBlock,
-  awg2Unblock,
   ApiError,
   bulkConfigOp,
   createConfigTag,
@@ -9,15 +6,8 @@ import {
   deleteConfigTag,
   getConfigTags,
   getOpenVpnGroup,
-  openvpnPermanentBlock,
-  openvpnTempBlock,
-  openvpnUnblock,
   setOpenVpnGroup,
-  wgPermanentBlock,
-  wgTempBlock,
-  wgUnblock,
 } from '@/api/client'
-import { createPortalLink } from '@/api/portal'
 import ClientActionsDialog from '@/components/dashboard/ClientActionsDialog'
 import ConfigCard from '@/components/dashboard/ConfigCard'
 import ConfigCardViewSettings from '@/components/dashboard/ConfigCardViewSettings'
@@ -40,13 +30,19 @@ import {
   isConfigConnected,
   matchesFilter,
   matchesPresenceFilter,
-  protocolLabel,
   type ClientConnectionMap,
   type ClientFilter,
   type ClientPresenceFilter,
   type ProtocolTab,
 } from '@/lib/configCardUtils'
+import { protocolModuleLabel } from '@/lib/vpnTypes'
 import { configOwnerCandidates } from '@/lib/configOwners'
+import {
+  copyConfigPortalLink,
+  permanentBlockConfig,
+  tempBlockConfig,
+  unblockConfig,
+} from '@/lib/configAccessOps'
 import {
   DEFAULT_CONFIG_CARD_VIEW_PREFS,
   gridColsClass,
@@ -73,21 +69,26 @@ interface ConfigCardsSectionProps {
   visibilityPolicy: VisibleVpnProfilesPolicy | null
   userRole: UserRole
   currentUserId?: number
+  canManageConfigs: boolean
   ownerCandidates?: User[]
   connectionMap?: ClientConnectionMap | null
   filesLoading?: boolean
   onRefresh: () => Promise<void>
-  onQr: (config: VpnConfig, path: string, filename: string) => Promise<void>
   onDownload: (config: VpnConfig, path: string, filename: string) => Promise<void>
   onNotifySuccess: (msg: string) => void
   onNotifyError: (msg: string) => void
 }
 
+/** Вкладки идут отдельно по модулям: WG и AWG 1.5 управляются раздельно. */
 const TAB_ORDER: ProtocolTab[] = ['openvpn', 'amneziawg2', 'amneziawg', 'wireguard']
+
+function tabLabel(tab: ProtocolTab): string {
+  return protocolModuleLabel(tab)
+}
 
 type ConfirmAction = 'delete' | 'block' | 'unblock' | null
 type BulkAction = 'block_temp' | 'block_perm' | 'unblock' | 'delete' | 'renew_cert' | 'change_owner' | null
-type LoadingKey = `${number}-${'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy'}` | null
+type LoadingKey = `${number}-${'download' | 'block' | 'unblock' | 'delete' | 'portal-copy'}` | null
 
 function useVisibleTabs(visibilityPolicy: VisibleVpnProfilesPolicy | null, userRole: UserRole): ProtocolTab[] {
   const { isEnabled } = useFeatureModules()
@@ -109,11 +110,11 @@ export default function ConfigCardsSection({
   visibilityPolicy,
   userRole,
   currentUserId,
+  canManageConfigs,
   ownerCandidates = [],
   connectionMap = null,
   filesLoading = false,
   onRefresh,
-  onQr,
   onDownload,
   onNotifySuccess,
   onNotifyError,
@@ -121,7 +122,6 @@ export default function ConfigCardsSection({
   const { isEnabled } = useFeatureModules()
   const haReplicaReadonly = useHaReplicaReadonly()
   const { trackBackgroundTask } = useProgress()
-  const qrDownloadsEnabled = isEnabled('qr_downloads')
   const trafficLinkEnabled = isEnabled('traffic_sync')
   const clientPortalEnabled = isEnabled('client_portal')
   const visibleTabs = useVisibleTabs(visibilityPolicy, userRole)
@@ -244,7 +244,7 @@ export default function ConfigCardsSection({
 
   const setCardLoading = (
     configId: number,
-    action: 'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy' | null,
+    action: 'download' | 'block' | 'unblock' | 'delete' | 'portal-copy' | null,
   ) => {
     setLoadingAction(action ? `${configId}-${action}` : null)
   }
@@ -252,8 +252,7 @@ export default function ConfigCardsSection({
   const copyPortalLink = async (config: VpnConfig) => {
     setCardLoading(config.id, 'portal-copy')
     try {
-      const link = await createPortalLink(config.client_name)
-      await navigator.clipboard.writeText(link.url)
+      await copyConfigPortalLink(config.client_name)
       onNotifySuccess('Ссылка портала скопирована')
     } catch (err) {
       onNotifyError(err instanceof ApiError ? err.message : 'Ошибка ссылки портала')
@@ -268,17 +267,6 @@ export default function ConfigCardsSection({
       await onDownload(config, path, filename)
     } catch (err) {
       onNotifyError(err instanceof ApiError ? err.message : 'Ошибка скачивания')
-    } finally {
-      setCardLoading(config.id, null)
-    }
-  }
-
-  const handleCardQr = async (config: VpnConfig, path: string, filename: string) => {
-    setCardLoading(config.id, 'qr')
-    try {
-      await onQr(config, path, filename)
-    } catch (err) {
-      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка генерации QR')
     } finally {
       setCardLoading(config.id, null)
     }
@@ -301,8 +289,6 @@ export default function ConfigCardsSection({
     setCardLoading(confirmTarget.id, confirmAction)
     try {
       const name = confirmTarget.client_name
-      const isOvpn = confirmTarget.vpn_type === 'openvpn'
-      const isAwg2 = confirmTarget.vpn_type === 'amneziawg2'
 
       if (confirmAction === 'delete') {
         await deleteConfig(confirmTarget.id)
@@ -314,13 +300,7 @@ export default function ConfigCardsSection({
       }
 
       if (confirmAction === 'unblock') {
-        if (isOvpn) {
-          await openvpnUnblock(name)
-        } else if (isAwg2) {
-          await awg2Unblock(name)
-        } else {
-          await wgUnblock(name)
-        }
+        await unblockConfig(confirmTarget)
         onNotifySuccess('Блокировка снята')
         closeConfirm()
         await onRefresh()
@@ -334,14 +314,10 @@ export default function ConfigCardsSection({
           return
         }
         if (days >= 3650) {
-          if (isOvpn) await openvpnPermanentBlock(name)
-          else if (isAwg2) await awg2PermanentBlock(name)
-          else await wgPermanentBlock(name)
+          await permanentBlockConfig(confirmTarget)
           onNotifySuccess('Клиент заблокирован до ручной разблокировки')
         } else {
-          if (isOvpn) await openvpnTempBlock(name, days)
-          else if (isAwg2) await awg2TempBlock(name, days)
-          else await wgTempBlock(name, days)
+          await tempBlockConfig(confirmTarget, days)
           onNotifySuccess(`Клиент заблокирован на ${days} дн.`)
         }
         closeConfirm()
@@ -357,11 +333,10 @@ export default function ConfigCardsSection({
 
   const getCardLoading = (
     configId: number,
-  ): 'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy' | null => {
+  ): 'download' | 'block' | 'unblock' | 'delete' | 'portal-copy' | null => {
     if (!loadingAction?.startsWith(`${configId}-`)) return null
     return loadingAction.split('-').slice(1).join('-') as
       | 'download'
-      | 'qr'
       | 'block'
       | 'unblock'
       | 'delete'
@@ -528,39 +503,19 @@ export default function ConfigCardsSection({
         <CardContent className="space-y-4 p-4 sm:p-5">
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as ProtocolTab)}>
             <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <TabsList className="h-auto w-full min-w-0 flex-wrap justify-start gap-1 bg-muted/40 p-1 sm:w-auto">
-                {visibleTabs.includes('openvpn') && (
-                  <TabsTrigger value="openvpn" className="gap-1.5 data-[state=active]:shadow-sm">
-                    OpenVPN
+              <TabsList className="h-auto w-full min-w-0 flex-wrap justify-start gap-1 bg-muted/50 p-1 sm:w-auto">
+                {visibleTabs.map((tab) => (
+                  <TabsTrigger
+                    key={tab}
+                    value={tab}
+                    className="gap-1.5 data-[state=active]:shadow-sm"
+                  >
+                    {tabLabel(tab)}
                     <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                      {tabCounts.openvpn}
+                      {tabCounts[tab]}
                     </Badge>
                   </TabsTrigger>
-                )}
-                {visibleTabs.includes('amneziawg2') && (
-                  <TabsTrigger value="amneziawg2" className="gap-1.5 data-[state=active]:shadow-sm">
-                    AmneziaWG 2.0
-                    <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                      {tabCounts.amneziawg2}
-                    </Badge>
-                  </TabsTrigger>
-                )}
-                {visibleTabs.includes('amneziawg') && (
-                  <TabsTrigger value="amneziawg" className="gap-1.5 data-[state=active]:shadow-sm">
-                    AmneziaWG
-                    <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                      {tabCounts.amneziawg}
-                    </Badge>
-                  </TabsTrigger>
-                )}
-                {visibleTabs.includes('wireguard') && (
-                  <TabsTrigger value="wireguard" className="gap-1.5 data-[state=active]:shadow-sm">
-                    WireGuard
-                    <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-                      {tabCounts.wireguard}
-                    </Badge>
-                  </TabsTrigger>
-                )}
+                ))}
               </TabsList>
 
               {activeTab === 'openvpn' && openvpnTabEnabled && openvpnGroupOptions.length > 0 && (
@@ -741,8 +696,8 @@ export default function ConfigCardsSection({
                     title="Нет клиентов"
                     description={
                       search || filter !== 'all' || presenceFilter !== 'all' || tagFilterIds.length > 0
-                        ? `Нет результатов для «${protocolLabel(tab)}» с текущими фильтрами`
-                        : `В категории ${protocolLabel(tab)} пока нет конфигураций`
+                        ? `Нет результатов для «${tabLabel(tab)}» с текущими фильтрами`
+                        : `В категории ${tabLabel(tab)} пока нет конфигураций`
                     }
                     className="py-10"
                   />
@@ -773,16 +728,18 @@ export default function ConfigCardsSection({
                             : undefined
                         }
                         onDownload={(path, filename) => void handleCardDownload(config, path, filename)}
-                        onQr={(path, filename) => void handleCardQr(config, path, filename)}
                         onBlock={isAdmin && !haReplicaReadonly ? () => openConfirm('block', config) : undefined}
                         onUnblock={isAdmin && !haReplicaReadonly ? () => openConfirm('unblock', config) : undefined}
                         onDelete={
                           !haReplicaReadonly &&
-                          (isAdmin || (userRole === 'user' && currentUserId != null && config.owner_id === currentUserId))
+                          (isAdmin ||
+                            (userRole === 'user' &&
+                              currentUserId != null &&
+                              config.owner_id === currentUserId &&
+                              canManageConfigs))
                             ? () => openConfirm('delete', config)
                             : undefined
                         }
-                        showQrDownloads={qrDownloadsEnabled}
                         showTrafficLink={trafficLinkEnabled}
                         isOnline={isConfigConnected(
                           config.client_name,
@@ -809,16 +766,15 @@ export default function ConfigCardsSection({
         allConfigs={configs}
         userRole={userRole}
         currentUserId={currentUserId}
+        canManageConfigs={canManageConfigs}
         ownerCandidates={ownerCandidates}
         allTags={allTags}
         open={!!selectedConfig}
         onOpenChange={(open) => !open && setSelectedConfig(null)}
         onRefresh={onRefresh}
-        onQr={onQr}
         onDownload={onDownload}
         onNotifySuccess={onNotifySuccess}
         onNotifyError={onNotifyError}
-        showQrDownloads={qrDownloadsEnabled}
       />
 
       <ConfirmDialog

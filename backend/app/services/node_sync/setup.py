@@ -59,6 +59,7 @@ def make_group_setup_callable(group_id: int) -> Callable[..., dict[str, Any]]:
                     db,
                     group,
                     run_apply=True,
+                    apply_replicas=False,
                     progress_callback=_scaled_progress(progress_updater, 2, 40),
                 )
 

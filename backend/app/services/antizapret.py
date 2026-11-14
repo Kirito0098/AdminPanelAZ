@@ -1,7 +1,9 @@
 import io
+import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
 import tarfile
 import tempfile
@@ -9,6 +11,7 @@ import zlib
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from fastapi import HTTPException, status
 
@@ -16,21 +19,86 @@ from app.config import get_settings
 from app.models import VpnType
 from app.schemas import MonitoringService, OpenVpnClient, WireGuardPeer
 from app.services.antizapret_backup import AntizapretBackupService
+from app.services.client_names import CLIENT_NAME_RE
 from app.services.file_editor import EDITABLE_FILES, KRESD_CUSTOM_UNITS
 from app.services.openvpn_management import openvpn_management_service
 from app.services.path_stash import stashed
 from app.services.profile_files import iter_client_profile_paths, profile_filename_matches_client
 
 settings = get_settings()
-CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
+logger = logging.getLogger(__name__)
+# doall.sh budget: full run downloads ~100 MB of host lists, ``ips`` mode only re-parses CIDR.
+APPLY_TIMEOUT_ENV = "ANTIZAPRET_APPLY_TIMEOUT_SECONDS"
+DEFAULT_APPLY_TIMEOUT_SECONDS = 300
+# The panel must outlive the agent request, otherwise it reports a timeout while the agent still works.
+APPLY_AGENT_TIMEOUT_MARGIN_SECONDS = 30
 WIREGUARD_SERVER_INTERFACES = frozenset({"antizapret", "vpn"})
 WIREGUARD_SERVER_CONFIG_DIR = Path("/etc/wireguard")
+WIREGUARD_TEMPLATES_DIR = Path("/etc/wireguard/templates")
+# OpenVPN server conf → systemd unit, which setup.sh restarts after changing the file.
+OPENVPN_TUNING_UNITS: dict[str, str] = {
+    "antizapret-udp.conf": "openvpn-server@antizapret-udp",
+    "antizapret-tcp.conf": "openvpn-server@antizapret-tcp",
+    "vpn-udp.conf": "openvpn-server@vpn-udp",
+    "vpn-tcp.conf": "openvpn-server@vpn-tcp",
+}
+OPENVPN_PROTOCOL_UNITS: tuple[str, ...] = (
+    "openvpn-server@antizapret-udp",
+    "openvpn-server@antizapret-tcp",
+    "openvpn-server@vpn-udp",
+    "openvpn-server@vpn-tcp",
+    "wg-quick@antizapret",
+    "wg-quick@vpn",
+)
 WIREGUARD_CLIENT_PROFILE_DIRS = ("wireguard", "amneziawg")
 OPENVPN_CLIENT_PROFILE_DIR = "openvpn"
+OPENVPN_CCD_DIR = Path("/etc/openvpn/ccd")
 PROFILE_FILE_SUFFIXES = frozenset({".ovpn", ".conf"})
 EASYRSA3_ROOT = Path("/etc/openvpn/easyrsa3")
 EASYRSA_INDEX_PATH = EASYRSA3_ROOT / "pki" / "index.txt"
 
+# EasyRSA refuses to revoke a certificate that is already revoked. Such a client is already dead,
+# so deleting it must clean the leftover files instead of failing the whole operation.
+_ALREADY_REVOKED_MARKERS = (
+    "a conflicting file exists",
+    "already revoked",
+    "already been revoked",
+)
+
+# EasyRSA cannot revoke a CN it has no issued certificate for: the client is already gone.
+_NO_CERTIFICATE_MARKERS = (
+    "unable to revoke as no certificate was found",
+    "no certificate was found",
+)
+
+# AntiZapret's WireGuard script answers this when the peer is not in the server config.
+_WIREGUARD_CLIENT_MISSING_MARKERS = ("please check if client exists",)
+
+
+def apply_timeout_seconds() -> int:
+    """doall.sh budget from ``ANTIZAPRET_APPLY_TIMEOUT_SECONDS`` (default 300)."""
+    try:
+        value = int(os.environ.get(APPLY_TIMEOUT_ENV, ""))
+    except (TypeError, ValueError):
+        return DEFAULT_APPLY_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_APPLY_TIMEOUT_SECONDS
+
+
+def apply_agent_timeout_seconds() -> float:
+    """Panel-side HTTP timeout: the agent must time out first, not the panel."""
+    return float(apply_timeout_seconds() + APPLY_AGENT_TIMEOUT_MARGIN_SECONDS)
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """Kill the whole doall.sh tree: update.sh/parse.sh/curl keep writing config/ after a timeout."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except OSError:
+        logger.warning("doall.sh: cannot kill process group of pid %s", proc.pid, exc_info=True)
+        try:
+            proc.kill()
+        except OSError:
+            logger.warning("doall.sh: cannot kill pid %s", proc.pid, exc_info=True)
 
 
 def _install_staged(src: Path, dst: Path) -> None:
@@ -66,7 +134,8 @@ class AntiZapretService:
         self.client_dir = self.base_path / "client"
         self.config_dir = self.base_path / "config"
         self.knot_resolver_dir = Path("/etc/knot-resolver")
-        self.openvpn_logs = Path("/etc/openvpn/server/logs")
+        self.openvpn_logs = Path(settings.openvpn_socket_dir)
+        self.openvpn_ccd_dir = OPENVPN_CCD_DIR
 
     def _run_client_script(self, *args: str, timeout: int = 120) -> str:
         if not self.client_script.exists():
@@ -116,7 +185,100 @@ class AntiZapretService:
 
     def delete_openvpn_client(self, client_name: str) -> str:
         self.validate_client_name(client_name)
-        return self._run_client_script("2", client_name)
+        try:
+            return self._run_client_script("2", client_name)
+        except HTTPException as exc:
+            if self._openvpn_client_gone(client_name, exc):
+                removed = self._purge_openvpn_client_artifacts(client_name)
+                logger.warning(
+                    "AntiZapret has no certificate for OpenVPN client %s; removed %d leftover file(s)",
+                    client_name,
+                    removed,
+                )
+                return f"Клиент {client_name} уже отсутствует: файлов удалено {removed}"
+            if not self._openvpn_client_cert_only_revoked(client_name, exc):
+                raise
+            removed = self._purge_openvpn_client_artifacts(client_name)
+            logger.warning(
+                "AntiZapret cannot revoke OpenVPN client %s (certificate already revoked); "
+                "removed %d leftover file(s) instead",
+                client_name,
+                removed,
+            )
+            return f"Клиент {client_name} удалён: сертификат уже отозван, файлов удалено {removed}"
+
+    def _openvpn_client_gone(self, client_name: str, exc: HTTPException) -> bool:
+        """True only when EasyRSA has no certificate and no profile is left for the client.
+
+        Same guard as the «already revoked» path: a client with profiles or a still-valid
+        index entry keeps its files and the original error.
+        """
+        detail = str(exc.detail or "").lower()
+        if not any(marker in detail for marker in _NO_CERTIFICATE_MARKERS):
+            return False
+        try:
+            if self.get_profile_files(client_name, VpnType.openvpn):
+                return False
+            from app.services.openvpn_pki import load_easyrsa_index
+
+            entries = load_easyrsa_index(self)
+        except Exception as verify_exc:  # noqa: BLE001 — verification must never mask the delete error
+            logger.warning("Cannot verify PKI state of OpenVPN client %s: %s", client_name, verify_exc)
+            return False
+        return not any(entry.common_name == client_name and entry.status == "V" for entry in entries)
+
+    def _openvpn_client_cert_only_revoked(self, client_name: str, exc: HTTPException) -> bool:
+        """True only when the script failed because every profile cert is already revoked/expired.
+
+        Purging files on any other error would delete a client whose certificate is still valid,
+        so the PKI state is verified before falling back.
+        """
+        detail = str(exc.detail or "").lower()
+        if not any(marker in detail for marker in _ALREADY_REVOKED_MARKERS):
+            return False
+        try:
+            from app.services.openvpn_pki import validate_client_profiles
+
+            result = validate_client_profiles(self, client_name)
+        except Exception as verify_exc:  # noqa: BLE001 — verification must never mask the delete error
+            logger.warning("Cannot verify PKI state of OpenVPN client %s: %s", client_name, verify_exc)
+            return False
+        if result.ready or not result.issues:
+            return False
+        return all(issue.status in {"revoked", "expired"} for issue in result.issues)
+
+    def _purge_openvpn_client_artifacts(self, client_name: str) -> int:
+        """Remove profile files and the ccd entry of a client whose certificate is already dead."""
+        removed = self._purge_profile_files(client_name, VpnType.openvpn)
+        ccd = self.openvpn_ccd_dir / client_name
+        try:
+            if ccd.is_file():
+                ccd.unlink()
+                removed += 1
+        except OSError as exc:
+            logger.warning("Cannot remove %s: %s", ccd, exc)
+        return removed
+
+    def _purge_profile_files(self, client_name: str, vpn_type: VpnType) -> int:
+        """Remove profile files of a client that no longer exists on the node."""
+        try:
+            entries = self.get_profile_files(client_name, vpn_type)
+        except Exception as exc:  # noqa: BLE001 — a broken listing must not block the cleanup
+            logger.warning("Cannot list %s profiles of %s: %s", vpn_type.value, client_name, exc)
+            return 0
+        removed = 0
+        for entry in entries:
+            path = entry.get("path")
+            if not path:
+                continue
+            try:
+                profile = Path(path)
+                if profile.is_file():
+                    profile.unlink()
+                    removed += 1
+            except OSError as exc:
+                logger.warning("Cannot remove %s: %s", path, exc)
+        return removed
 
     def list_openvpn_clients(self) -> list[str]:
         output = self._run_client_script("3")
@@ -133,7 +295,30 @@ class AntiZapretService:
 
     def delete_wireguard_client(self, client_name: str) -> str:
         self.validate_client_name(client_name)
-        return self._run_client_script("5", client_name)
+        try:
+            return self._run_client_script("5", client_name)
+        except HTTPException as exc:
+            if not self._wireguard_client_missing(client_name, exc):
+                raise
+            removed = self._purge_profile_files(client_name, VpnType.wireguard)
+            logger.warning(
+                "AntiZapret has no WireGuard peer %s; removed %d leftover file(s)",
+                client_name,
+                removed,
+            )
+            return f"Клиент {client_name} уже отсутствует: файлов удалено {removed}"
+
+    def _wireguard_client_missing(self, client_name: str, exc: HTTPException) -> bool:
+        """True only when the script reports a missing peer and the live list agrees."""
+        detail = str(exc.detail or "").lower()
+        if not any(marker in detail for marker in _WIREGUARD_CLIENT_MISSING_MARKERS):
+            return False
+        try:
+            clients = {name.strip().lower() for name in self.list_wireguard_clients()}
+        except Exception as verify_exc:  # noqa: BLE001 — verification must never mask the delete error
+            logger.warning("Cannot list WireGuard clients to verify %s: %s", client_name, verify_exc)
+            return False
+        return client_name.strip().lower() not in clients
 
     def list_wireguard_clients(self) -> list[str]:
         output = self._run_client_script("6")
@@ -412,7 +597,7 @@ class AntiZapretService:
         path.write_text(content, encoding="utf-8")
 
     def _write_kresd_custom(self, path: Path, content: str) -> None:
-        """Write custom.lua / custom2.lua and restart its kresd; restore the old file if kresd fails."""
+        """Write custom.lua / custom2.lua / custom3.lua and restart its kresd; restore the old file if kresd fails."""
         previous = path.read_text(encoding="utf-8", errors="replace") if path.exists() else None
         if previous == content:
             return
@@ -427,6 +612,8 @@ class AntiZapretService:
         detail = f"{unit} не запустился с новым {path.name}, прежний файл восстановлен. Ошибка: {error}"
         if rollback_error:
             detail += f". После отката {unit} тоже не запустился: {rollback_error}"
+        if unit == "kresd@3":
+            detail += ". Proxy DNS (третий резолвер kresd@3) есть только в AntiZapret-VPN с 19.10.2026 — обновите AntiZapret на узле"
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
     @staticmethod
@@ -458,8 +645,247 @@ class AntiZapretService:
         tail = (journal.stdout or "").strip()
         return f"{error}\n{tail}" if tail else error
 
+    def _kresd_conf_path(self) -> Path:
+        return self.knot_resolver_dir / "kresd.conf"
+
+    def get_dns_servers(self) -> dict[str, Any]:
+        """Выбор DNS-резолверов: kresd.conf — что применено, setup — что выбрано в установщике."""
+        from app.services.antizapret_settings import read_setup_env_value
+        from app.services.kresd_dns_choice import (
+            VPN_DNS_OPTIONS,
+            allowed_antizapret_dns,
+            allowed_dns_hint,
+            antizapret_dns_options,
+            read_dns_choice,
+            vpn_option_for_choice,
+            with_dns_choice,
+        )
+
+        conf_path = self._kresd_conf_path()
+        content = conf_path.read_text(encoding="utf-8", errors="replace") if conf_path.is_file() else ""
+        applied = read_dns_choice(content)
+        options = antizapret_dns_options(content)
+        allowed = allowed_antizapret_dns(content)
+        warnings: list[str] = []
+        if applied is not None:
+            antizapret, vpn = applied[0], vpn_option_for_choice(applied[0], applied[1])
+        else:
+            antizapret, vpn = 1, 2
+
+        setup_path = self.base_path / "setup"
+        raw_antizapret = read_setup_env_value(setup_path, "ANTIZAPRET_DNS", "")
+        raw_vpn = read_setup_env_value(setup_path, "VPN_DNS", "")
+        if raw_antizapret.isdigit() and raw_vpn.isdigit() and int(raw_vpn) in (1, 2):
+            if int(raw_antizapret) in allowed:
+                antizapret, vpn = int(raw_antizapret), int(raw_vpn)
+                if applied is not None and with_dns_choice(content, antizapret=antizapret, vpn=vpn) != content:
+                    warnings.append(
+                        "В setup выбрано другое значение, чем применяет резолвер — нажмите «Применить», чтобы совпало"
+                    )
+            elif applied is not None:
+                warnings.append(
+                    f"В setup ANTIZAPRET_DNS={raw_antizapret}, но установленный AntiZapret-VPN "
+                    f"поддерживает {allowed_dns_hint(allowed)} — выберите DNS заново"
+                )
+
+        return {
+            "supported": applied is not None,
+            "antizapret": str(antizapret),
+            "vpn": str(vpn),
+            "applied_antizapret": None if applied is None else str(applied[0]),
+            "applied_vpn_dns": None if applied is None else str(applied[1]),
+            "antizapret_options": [{"value": value, "label": label} for value, label in options],
+            "vpn_options": [{"value": value, "label": label} for value, label in VPN_DNS_OPTIONS],
+            "warnings": warnings,
+        }
+
+    def apply_dns_servers(self, *, antizapret: int, vpn: int) -> dict[str, Any]:
+        """Пропатчить kresd.conf, перезапустить резолверы и записать выбор в setup."""
+        from app.services.antizapret_settings import read_setup_env_value
+        from app.services.kresd_dns_choice import (
+            KresdDnsChoiceError,
+            read_dns_choice,
+            with_dns_choice,
+            with_setup_dns_keys,
+        )
+
+        conf_path = self._kresd_conf_path()
+        if not conf_path.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="На узле нет /etc/knot-resolver/kresd.conf — Knot Resolver не установлен",
+            )
+        previous = conf_path.read_text(encoding="utf-8", errors="replace")
+        try:
+            updated = with_dns_choice(previous, antizapret=antizapret, vpn=vpn)
+        except KresdDnsChoiceError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+        before, after = read_dns_choice(previous), read_dns_choice(updated)
+        restarted: list[str] = []
+        warnings: list[str] = []
+        if updated != previous:
+            units = ["kresd@1"]
+            if before is None or after is None or after[1] != before[1]:
+                units.append("kresd@2")
+            conf_path.write_text(updated, encoding="utf-8")
+            error: str | None = None
+            for unit in units:
+                error = self._restart_kresd(unit)
+                if error is not None:
+                    break
+                restarted.append(unit)
+            if error is not None:
+                conf_path.write_text(previous, encoding="utf-8")
+                for unit in units:
+                    self._restart_kresd(unit)
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        f"{units[-1]} не запустился с новым выбором DNS, прежний kresd.conf восстановлен. "
+                        f"Ошибка: {error}"
+                    ),
+                )
+
+        setup_path = self.base_path / "setup"
+        vpn_option_before = read_setup_env_value(setup_path, "VPN_DNS", "")
+        try:
+            setup_path.write_text(
+                with_setup_dns_keys(setup_path.read_text(encoding="utf-8"), antizapret=antizapret, vpn=vpn),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            warnings.append(f"setup не обновлён ({exc}): следующий setup.sh спросит DNS заново")
+
+        # up.sh строит DNAT/DoT-правила по VPN_DNS — их применяет перезапуск antizapret.
+        if vpn_option_before != str(vpn):
+            error = self._restart_antizapret()
+            if error is None:
+                restarted.append("antizapret")
+            else:
+                warnings.append(f"antizapret не перезапустился, правила DNAT/DoT могли остаться прежними: {error}")
+
+        result = self.get_dns_servers()
+        result["restarted"] = restarted
+        result["warnings"] = [*result["warnings"], *warnings]
+        return result
+
+    def apply_client_subnets(
+        self, *, alternative_client_ip: bool, alternative_fake_ip: bool
+    ) -> dict[str, Any]:
+        """Подсети клиентов в kresd.conf, fake-пул в proxy.py и services.env AZ-AWG2.
+
+        Одна запись в setup их не меняет: kresd.conf пишет setup.sh, а fake-cidr живёт
+        в default у proxy.py. При неудачном рестарте резолвера файл возвращается как был.
+        """
+        from app.services.kresd_subnets import (
+            with_awg_services_env,
+            with_client_subnets,
+            with_fake_cidr,
+        )
+
+        warnings: list[str] = []
+        restarted: list[str] = []
+        changed = False
+        units = ("kresd@1", "kresd@2", "kresd@3")
+        conf_path = self.knot_resolver_dir / "kresd.conf"
+        if conf_path.is_file():
+            previous = conf_path.read_text(encoding="utf-8")
+            updated = with_client_subnets(previous, alternative=alternative_client_ip)
+            if updated != previous:
+                changed = True
+                conf_path.write_text(updated, encoding="utf-8")
+                failed: str | None = None
+                for unit in units:
+                    failed = self._restart_kresd(unit)
+                    if failed is not None:
+                        break
+                    restarted.append(unit)
+                if failed is not None:
+                    conf_path.write_text(previous, encoding="utf-8")
+                    for unit in units:
+                        self._restart_kresd(unit)
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=(
+                            f"kresd не запустился с новыми подсетями, прежний kresd.conf восстановлен. "
+                            f"Ошибка: {failed}"
+                        ),
+                    )
+
+        proxy_path = self.base_path / "proxy.py"
+        if proxy_path.is_file():
+            before = proxy_path.read_text(encoding="utf-8")
+            after = with_fake_cidr(before, alternative=alternative_fake_ip)
+            if after != before:
+                changed = True
+                proxy_path.write_text(after, encoding="utf-8")
+                warnings.append(
+                    "proxy.py: --fake-cidr обновлён под новый fake-пул. Обновление AntiZapret "
+                    "скачивает proxy.py заново — после него сохраните настройки ещё раз "
+                    "(или это повторит custom-up.sh)"
+                )
+
+        awg_env = Path("/etc/amnezia/amneziawg/services.env")
+        if awg_env.is_file():
+            before = awg_env.read_text(encoding="utf-8")
+            after = with_awg_services_env(before, alternative=alternative_client_ip)
+            if after != before:
+                changed = True
+                awg_env.write_text(after, encoding="utf-8")
+                for iface in ("antizapret-awg", "vpn-awg"):
+                    error = self._systemctl_restart(f"awg-quick@{iface}")
+                    if error is None:
+                        restarted.append(f"awg-quick@{iface}")
+                    else:
+                        warnings.append(f"awg-quick@{iface} не перезапустился: {error}")
+
+        warnings.append(
+            "Пересоберите профили клиентов («Пересоздать профили» / client.sh 7): в старых "
+            ".ovpn и .conf остались прежние адреса, без пересборки они не подключатся"
+        )
+        warnings.append(
+            "Если в /root/antizapret/custom-up.sh есть правила для 172.29/198.18 — поправьте их под новый режим"
+        )
+        warnings.append("В AZ-WARP после смены подсетей нажмите «Запустить resync»")
+        return {"warnings": warnings, "restarted": restarted, "changed": changed}
+
+    @staticmethod
+    def _systemctl_restart(unit: str) -> str | None:
+        try:
+            result = subprocess.run(
+                ["systemctl", "restart", unit],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            return str(exc)
+        if result.returncode == 0:
+            return None
+        return ((result.stdout or "") + (result.stderr or "")).strip() or f"exit {result.returncode}"
+
+    @staticmethod
+    def _restart_antizapret() -> str | None:
+        """Restart the AntiZapret unit (re-applies up.sh rules); return an error text on failure."""
+        try:
+            result = subprocess.run(
+                ["systemctl", "restart", "antizapret"],
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            return str(exc)
+        if result.returncode == 0:
+            return None
+        return ((result.stdout or "") + (result.stderr or "")).strip() or f"exit {result.returncode}"
+
     def restart_service(self, service_name: str) -> str:
         allowed = {
+            "antizapret",
             "openvpn-server@antizapret-udp",
             "openvpn-server@antizapret-tcp",
             "openvpn-server@vpn-udp",
@@ -556,6 +982,350 @@ class AntiZapretService:
             "missing": missing,
         }
 
+    @staticmethod
+    def _unit_enabled(unit: str) -> bool | None:
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-enabled", unit],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            return None
+        state = (result.stdout or "").strip()
+        return state == "enabled" if state else None
+
+    @staticmethod
+    def _toggle_state(values: dict[str, bool | None]) -> str:
+        known = {value for value in values.values() if value is not None}
+        if not known:
+            return "unknown"
+        if len(known) > 1:
+            return "mixed"
+        return "on" if known.pop() else "off"
+
+    @staticmethod
+    def _int_state(values: dict[str, int | None]) -> int | str | None:
+        known = {value for value in values.values() if value is not None}
+        if not known:
+            return None
+        if len(known) > 1:
+            return "mixed"
+        return known.pop()
+
+    @staticmethod
+    def _openvpn_binary_state() -> dict[str, Any]:
+        """Патч антицензуры ставится в /usr/local: показываем, что реально запускает служба."""
+        unit_exec: str | None = None
+        try:
+            show = subprocess.run(
+                ["systemctl", "show", "-p", "ExecStart", "openvpn-server@antizapret-udp"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            show = None
+        if show is not None and show.returncode == 0:
+            match = re.search(r"path=(\S+?)\s*;", show.stdout or "")
+            unit_exec = match.group(1) if match else None
+        return {
+            "custom_binary": Path("/usr/local/sbin/openvpn").is_file(),
+            "unit_exec": unit_exec,
+            "in_use": bool(unit_exec and unit_exec.startswith("/usr/local/")),
+        }
+
+    def get_openvpn_tuning(self) -> dict[str, Any]:
+        """Состояние того, что setup.sh настраивает в server conf: duplicate-cn, логи, MTU, DCO, патч."""
+        from app.services.openvpn_tuning import (
+            dco_mode,
+            duplicate_cn_enabled,
+            logs_enabled,
+            tun_mtu,
+            wireguard_mtu,
+        )
+
+        confs = {name: self.read_openvpn_server_conf(name) for name in self.list_openvpn_server_confs()}
+        dco_values = {name: dco_mode(text) for name, text in confs.items()}
+        dco_set = set(dco_values.values())
+        if dco_set == {"on"}:
+            dco_state = "on"
+        elif dco_set == {"off"}:
+            dco_state = "off"
+        elif not dco_set:
+            dco_state = "unknown"
+        else:
+            dco_state = "mixed"
+
+        wg_mtus: dict[str, int | None] = {}
+        for path in self._wireguard_mtu_paths():
+            if path.is_file():
+                wg_mtus[path.name] = wireguard_mtu(path.read_text(encoding="utf-8", errors="replace"))
+
+        patch = self._openvpn_binary_state()
+        duplicate_state = self._toggle_state({name: duplicate_cn_enabled(text) for name, text in confs.items()})
+        logs_state = self._toggle_state({name: logs_enabled(text) for name, text in confs.items()})
+
+        warnings: list[str] = []
+        if duplicate_state == "mixed":
+            warnings.append("duplicate-cn включён не во всех конфигах — нажмите «Применить», чтобы выровнять")
+        if logs_state == "mixed":
+            warnings.append("подробные логи включены не во всех конфигах — нажмите «Применить», чтобы выровнять")
+        if patch["custom_binary"] and not patch["in_use"]:
+            warnings.append(
+                "Патч OpenVPN собран в /usr/local/sbin/openvpn, но служба запускает "
+                f"{patch['unit_exec'] or 'системный бинарник'} — патч не действует"
+            )
+
+        return {
+            "duplicate_cn": duplicate_state,
+            "logs": logs_state,
+            "mtu_openvpn": self._int_state({name: tun_mtu(text) for name, text in confs.items()}),
+            "mtu_wireguard": self._int_state(wg_mtus),
+            "dco": dco_state,
+            "patch": patch,
+            "protocols": [{"unit": unit, "enabled": self._unit_enabled(unit)} for unit in OPENVPN_PROTOCOL_UNITS],
+            "update_timer": self._unit_enabled("antizapret-update.timer"),
+            "confs": sorted(confs),
+            "warnings": warnings,
+        }
+
+    def _apply_conf_patch(
+        self,
+        *,
+        patches: dict[str, tuple[str, str]],
+        wg_patches: dict[Path, tuple[str, str]],
+        units: list[str],
+    ) -> list[str]:
+        """Записать конфиги, перезапустить юниты; при провале вернуть файлы и рестартовать обратно."""
+        for name, (_old, new) in patches.items():
+            self.write_openvpn_server_conf(name, new)
+        for path, (_old, new) in wg_patches.items():
+            path.write_text(new, encoding="utf-8")
+        restarted: list[str] = []
+        try:
+            for unit in units:
+                self.restart_service(unit)
+                restarted.append(unit)
+        except HTTPException as exc:
+            for name, (old, _new) in patches.items():
+                self.write_openvpn_server_conf(name, old)
+            for path, (old, _new) in wg_patches.items():
+                path.write_text(old, encoding="utf-8")
+            for unit in restarted:
+                try:
+                    self.restart_service(unit)
+                except HTTPException:
+                    logger.warning("openvpn tuning: rollback restart failed for %s", unit)
+            failed = units[len(restarted)] if len(restarted) < len(units) else "openvpn"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"{failed} не перезапустился, прежние конфиги восстановлены. Ошибка: {exc.detail}",
+            ) from exc
+        return restarted
+
+    def _restart_units_for(self, conf_names: list[str]) -> list[str]:
+        """Юниты, которые нужно перезапустить после правки этих server conf (только включённые)."""
+        return [
+            OPENVPN_TUNING_UNITS[name]
+            for name in conf_names
+            if self._unit_enabled(OPENVPN_TUNING_UNITS[name]) is True
+        ]
+
+    def apply_openvpn_tuning(self, *, duplicate: bool, logs: bool) -> dict[str, Any]:
+        """Патч duplicate-cn и логов в server conf + рестарт включённых юнитов, с откатом."""
+        from app.services.openvpn_tuning import OpenVpnTuningError, with_duplicate_cn, with_logs
+
+        patches: dict[str, tuple[str, str]] = {}
+        try:
+            for name in self.list_openvpn_server_confs():
+                content = self.read_openvpn_server_conf(name)
+                new_content = with_logs(with_duplicate_cn(content, duplicate), logs)
+                if new_content != content:
+                    patches[name] = (content, new_content)
+        except OpenVpnTuningError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+        if not patches:
+            return self.get_openvpn_tuning()
+
+        restarted = self._apply_conf_patch(
+            patches=patches, wg_patches={}, units=self._restart_units_for(list(patches))
+        )
+        result = self.get_openvpn_tuning()
+        result["restarted"] = restarted
+        return result
+
+    def apply_mtu(self, *, openvpn_mtu: int | None = None, wireguard_mtu: int | None = None) -> dict[str, Any]:
+        """MTU отдельно для OpenVPN (`tun-mtu`) и WireGuard (шаблоны + живые server conf)."""
+        from app.services.openvpn_tuning import OpenVpnTuningError, validate_mtu, with_tun_mtu, with_wireguard_mtu
+        from app.services.openvpn_tuning import wireguard_mtu as read_wireguard_mtu
+
+        if openvpn_mtu is None and wireguard_mtu is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Укажите MTU OpenVPN и/или MTU WireGuard",
+            )
+        try:
+            ovpn_value = validate_mtu(openvpn_mtu) if openvpn_mtu is not None else None
+            wg_value = validate_mtu(wireguard_mtu) if wireguard_mtu is not None else None
+        except OpenVpnTuningError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+        patches: dict[str, tuple[str, str]] = {}
+        wg_patches: dict[Path, tuple[str, str]] = {}
+        try:
+            if ovpn_value is not None:
+                for name in self.list_openvpn_server_confs():
+                    content = self.read_openvpn_server_conf(name)
+                    new_content = with_tun_mtu(content, ovpn_value)
+                    if new_content != content:
+                        patches[name] = (content, new_content)
+            if wg_value is not None:
+                for path in self._wireguard_mtu_paths():
+                    if not path.is_file():
+                        continue
+                    content = path.read_text(encoding="utf-8", errors="replace")
+                    if read_wireguard_mtu(content) is None:
+                        continue  # клиентские шаблоны MTU не содержат
+                    new_content = with_wireguard_mtu(content, wg_value)
+                    if new_content != content:
+                        wg_patches[path] = (content, new_content)
+        except OpenVpnTuningError as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+
+        if not patches and not wg_patches:
+            return self.get_openvpn_tuning()
+
+        units = self._restart_units_for(list(patches))
+        if wg_patches:
+            units.extend(unit for unit in ("wg-quick@antizapret", "wg-quick@vpn") if self._unit_enabled(unit) is True)
+        restarted = self._apply_conf_patch(patches=patches, wg_patches=wg_patches, units=units)
+        result = self.get_openvpn_tuning()
+        result["restarted"] = restarted
+        return result
+
+    @staticmethod
+    def _wireguard_mtu_paths() -> list[Path]:
+        """Живые server conf и шаблоны: client.sh рендерит живые из шаблонов, править нужно оба."""
+        paths = [WIREGUARD_SERVER_CONFIG_DIR / name for name in ("antizapret.conf", "vpn.conf")]
+        if WIREGUARD_TEMPLATES_DIR.is_dir():
+            paths += sorted(WIREGUARD_TEMPLATES_DIR.glob("*.conf"))
+        return paths
+
+    def apply_dco(self, enabled: bool) -> dict[str, Any]:
+        """Включить/выключить DCO так же, как openvpn-dco.sh: data-ciphers + disable-dco."""
+        from app.services.openvpn_tuning import with_dco
+
+        patches: dict[str, tuple[str, str]] = {}
+        for name in self.list_openvpn_server_confs():
+            content = self.read_openvpn_server_conf(name)
+            new_content = with_dco(content, enabled)
+            if new_content != content:
+                patches[name] = (content, new_content)
+        if not patches:
+            return self.get_openvpn_tuning()
+
+        restarted = self._apply_conf_patch(
+            patches=patches, wg_patches={}, units=self._restart_units_for(list(patches))
+        )
+        result = self.get_openvpn_tuning()
+        result["restarted"] = restarted
+        return result
+
+    def apply_protocols(self, targets: dict[str, bool]) -> dict[str, Any]:
+        """Включить/выключить протоколы узла (systemctl enable/disable --now)."""
+        applied: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        for unit, enable in targets.items():
+            if unit not in OPENVPN_PROTOCOL_UNITS:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Недопустимая служба: {unit}")
+            args = ["systemctl", "enable", "--now", unit] if enable else ["systemctl", "disable", "--now", unit]
+            try:
+                completed = subprocess.run(args, capture_output=True, text=True, timeout=120, check=False)
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                applied.append({"unit": unit, "enabled": enable, "ok": False, "error": str(exc)})
+                warnings.append(f"{unit}: {exc}")
+                continue
+            output = ((completed.stdout or "") + (completed.stderr or "")).strip()
+            ok = completed.returncode == 0
+            error = None if ok else (output or f"exit {completed.returncode}")
+            applied.append({"unit": unit, "enabled": enable, "ok": ok, "error": error})
+            if error:
+                warnings.append(f"{unit}: {error}")
+
+        state = self.get_openvpn_tuning()
+        state["applied"] = applied
+        state["warnings"] = [*(state.get("warnings") or []), *warnings]
+
+        # Мониторинг и авто-перезапуск читают протоколы из setup, а не из systemd:
+        # выключенный протокол иначе считался бы упавшим, включённый — отсутствующим.
+        from app.services.antizapret_settings import write_protocol_enable_flags
+
+        groups = {
+            "OPENVPN_UDP_ENABLE": ("openvpn-server@antizapret-udp", "openvpn-server@vpn-udp"),
+            "OPENVPN_TCP_ENABLE": ("openvpn-server@antizapret-tcp", "openvpn-server@vpn-tcp"),
+            "WIREGUARD_ENABLE": ("wg-quick@antizapret", "wg-quick@vpn"),
+        }
+        flags: dict[str, str] = {}
+        for env_name, units in groups.items():
+            states = [self._unit_enabled(unit) for unit in units]
+            if any(value is True for value in states):
+                flags[env_name] = "y"
+            elif all(value is False for value in states):
+                flags[env_name] = "n"
+        try:
+            write_protocol_enable_flags(self.base_path / "setup", flags)
+        except OSError as exc:
+            state["warnings"].append(f"setup: не удалось сохранить флаги протоколов: {exc}")
+        return state
+
+    def apply_openvpn_patch(self, algorithm: int) -> dict[str, Any]:
+        """Патч антицензуры OpenVPN: /root/antizapret/patch-openvpn.sh 1|2|3|4 (сборка из исходников)."""
+        if algorithm not in (1, 2, 3, 4):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Вариант патча: 1 — не устанавливать, 2 — Random, 3 — Strong, 4 — Error-Free",
+            )
+        script = self.base_path / "patch-openvpn.sh"
+        if not script.is_file():
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="patch-openvpn.sh не найден на узле — обновите AntiZapret-VPN",
+            )
+        try:
+            completed = subprocess.run(
+                ["bash", str(script), str(algorithm)],
+                capture_output=True,
+                text=True,
+                timeout=1800,
+                check=False,
+                cwd=str(self.base_path),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail="Патч OpenVPN не завершился за 30 минут — проверьте журнал на узле",
+            ) from exc
+        except OSError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Не удалось запустить patch-openvpn.sh: {exc}",
+            ) from exc
+
+        output = ((completed.stdout or "") + (completed.stderr or "")).strip()
+        if completed.returncode != 0:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=output[-2000:] or f"patch-openvpn.sh: exit {completed.returncode}",
+            )
+        state = self.get_openvpn_tuning()
+        state["patch_output"] = output[-2000:]
+        return state
+
     def ensure_openvpn_multihome(self, enabled: bool, *, restart_if_unchanged: bool = True) -> dict:
         """Patch OpenVPN server confs, then restart setup-enabled active units.
 
@@ -616,23 +1386,40 @@ class AntiZapretService:
             "missing": status.get("missing") or [],
         }
 
-    def apply_config_changes(self) -> str:
+    def apply_config_changes(self, *, ips_only: bool = False) -> str:
+        """Run doall.sh; ``ips_only`` skips the hosts download that CIDR-only routes never read."""
         doall = self.base_path / "doall.sh"
         if not doall.exists():
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="doall.sh не найден")
+        args = [str(doall), "ips"] if ips_only else [str(doall)]
+        timeout = apply_timeout_seconds()
+        # Own session: on timeout the whole tree (update.sh, parse.sh, curl, ipset) must die,
+        # otherwise it keeps rewriting config/ and result/ after the panel reported 504.
+        proc = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            cwd=str(self.base_path),
+            start_new_session=True,
+        )
         try:
-            result = subprocess.run(
-                [str(doall)],
-                capture_output=True,
-                text=True,
-                timeout=300,
-                check=False,
-                cwd=str(self.base_path),
-            )
+            stdout, stderr = proc.communicate(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail="Таймаут обновления списков") from exc
-        output = (result.stdout or "") + (result.stderr or "")
-        if result.returncode != 0:
+            _kill_process_group(proc)
+            try:
+                proc.communicate(timeout=5)
+            except (subprocess.TimeoutExpired, OSError):
+                logger.warning("doall.sh: outputs were not closed after SIGKILL (pid %s)", proc.pid)
+            raise HTTPException(
+                status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+                detail=(
+                    f"Таймаут обновления списков ({timeout} с): операция прервана, "
+                    "процессы doall.sh остановлены"
+                ),
+            ) from exc
+        output = (stdout or "") + (stderr or "")
+        if proc.returncode != 0:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=output.strip())
         return output.strip()
 

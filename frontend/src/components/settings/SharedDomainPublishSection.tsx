@@ -71,8 +71,9 @@ function IntegrateToggleRow({
   return (
     <div
       className={cn(
-        'flex items-start justify-between gap-4 rounded-xl border p-4 transition-colors',
-        checked && highlighted ? 'border-primary/30 bg-primary/5' : 'border-border/60 bg-card/40',
+        'flex items-start justify-between gap-4 rounded-lg border p-4 transition-colors',
+        checked ? 'border-primary/30 bg-primary/5' : 'border-border/60 bg-card/40',
+        checked && highlighted && 'ring-1 ring-primary/20',
       )}
     >
       <div className="min-w-0 space-y-1.5">
@@ -105,11 +106,11 @@ export default function SharedDomainPublishSection({
   const origin = host ? formatPublicHttpsOrigin(host, httpsPublicPort) : 'https://ваш-домен'
 
   return (
-    <div className="space-y-4 rounded-xl border bg-muted/15 p-4 sm:col-span-2">
+    <div className="space-y-4 rounded-lg border border-border/70 bg-muted/15 p-4 sm:col-span-2">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 items-start gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15 text-primary">
-            <Globe size={18} />
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+            <Globe size={16} aria-hidden />
           </div>
           <div className="min-w-0 space-y-1">
             <p className="text-sm font-semibold">Общий домен</p>

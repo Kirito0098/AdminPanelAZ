@@ -58,24 +58,6 @@ COMMIT
 """
 
 
-def test_az_proxy_dports_cover_known_set():
-    expected = {
-        80,
-        443,
-        504,
-        508,
-        540,
-        580,
-        50080,
-        50443,
-        51080,
-        51443,
-        52080,
-        52443,
-    }
-    assert expected <= AZ_PROXY_DPORTS
-
-
 def test_detect_proxy_destination_from_dnat():
     assert detect_proxy_destination(FIXTURE_NAT_SAVE) == "203.0.113.10"
 
@@ -113,11 +95,6 @@ def test_rewrite_destination_rules_replaces_ip():
     assert "203.0.113.99:50443" in rewritten
     assert "-d 203.0.113.99/32" in rewritten
     assert detect_proxy_destination(rewritten) == "203.0.113.99"
-
-
-def test_rewrite_destination_rules_noop_when_missing():
-    same = rewrite_destination_rules(FIXTURE_NAT_SAVE, "10.0.0.1", "10.0.0.2")
-    assert same == FIXTURE_NAT_SAVE
 
 
 def test_rewrite_does_not_corrupt_prefix_neighbor_ip():

@@ -4,7 +4,7 @@
  * when the active node is a different one.
  */
 
-export const EXPECTED_NODE_HEADER = 'X-Expected-Node-Id'
+const EXPECTED_NODE_HEADER = 'X-Expected-Node-Id'
 const ACTIVE_NODE_CHANGED_CODE = 'active_node_changed'
 
 const READ_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
@@ -16,7 +16,7 @@ export function getExpectedNodeId(): number | null {
   return expectedNodeId
 }
 
-export function setExpectedNodeId(id: number | null): void {
+function setExpectedNodeId(id: number | null): void {
   expectedNodeId = id
 }
 
@@ -48,7 +48,7 @@ export function notifyActiveNodeChanged(): void {
 }
 
 /** A tab never swaps its node silently: unsaved forms would be applied to another server. */
-export function decideActiveNodeRefresh(
+function decideActiveNodeRefresh(
   shownNodeId: number | null,
   serverNodeId: number | null,
 ): 'show' | 'changed-elsewhere' {

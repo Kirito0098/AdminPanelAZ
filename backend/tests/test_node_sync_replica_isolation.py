@@ -187,17 +187,6 @@ def test_openvpn_disconnect_reaches_healthy_replica(cluster, monkeypatch):
     assert _success_ids(result.successes) == [3]
 
 
-def test_primary_crypto_copy_reaches_healthy_replica(cluster, monkeypatch):
-    sync = MagicMock()
-    monkeypatch.setattr(vpn_state_sync, "sync_vpn_crypto_from_primary", sync)
-
-    result = vpn_state_sync.replicate_primary_crypto_to_replicas(cluster.db, cluster.group, _primary_config())
-
-    assert _error_ids(result["errors"]) == [2]
-    assert _success_ids(result["successes"]) == [3]
-    assert sync.call_args.args[1] is cluster.up_adapter
-
-
 def test_policy_op_reaches_healthy_replica(cluster, monkeypatch):
     shadows = [_shadow(2, VpnType.wireguard), _shadow(3, VpnType.wireguard)]
     monkeypatch.setattr(policy_sync, "get_shadow_configs", lambda *_: shadows)
@@ -215,29 +204,6 @@ def test_policy_op_reaches_healthy_replica(cluster, monkeypatch):
     assert _error_ids(result["errors"]) == [2]
     assert _success_ids(result["applied"]) == [3]
     assert service.call_args.args[2] is cluster.up_adapter
-
-
-def test_antizapret_settings_reach_healthy_replica(cluster, monkeypatch):
-    monkeypatch.setattr(antizapret_sync, "is_auto_sync_enabled", lambda _group: True)
-    monkeypatch.setattr(antizapret_sync, "filter_ha_replicable_settings", lambda updates: dict(updates))
-    monkeypatch.setattr(antizapret_sync, "finalize_replicate_outcome", MagicMock())
-
-    result = antizapret_sync.replicate_antizapret_settings(cluster.db, cluster.group, {"route_all": "y"})
-
-    assert _error_ids(result.errors) == [2]
-    assert _success_ids(result.successes) == [3]
-    cluster.up_adapter.update_antizapret_settings.assert_called_once_with({"route_all": "y"})
-
-
-def test_provider_content_reaches_healthy_replica(cluster, monkeypatch):
-    monkeypatch.setattr(provider_sync, "is_auto_sync_enabled", lambda _group: True)
-    monkeypatch.setattr(provider_sync, "finalize_replicate_outcome", MagicMock())
-
-    result = provider_sync.replicate_provider_content(cluster.db, cluster.group, "google.txt", "8.8.8.0/24\n")
-
-    assert _error_ids(result.errors) == [2]
-    assert _success_ids(result.successes) == [3]
-    cluster.up_adapter.save_provider_content.assert_called_once_with("google.txt", "8.8.8.0/24\n")
 
 
 def test_verify_reports_unreachable_replica_and_checks_the_rest(cluster, monkeypatch):

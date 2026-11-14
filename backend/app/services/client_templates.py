@@ -10,10 +10,10 @@ from app.services.awg2 import require_awg2_installed
 from app.services.client_names import validate_new_client_name
 from app.services.feature_guards import FeatureToggleService, require_vpn_type
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
-from app.services.node_sync.client_sync import maybe_replicate_create
+from app.services.node_sync.client_sync import enqueue_maybe_replicate_create
 from app.services.node_sync.policy_sync import maybe_replicate_policy_op
 from app.services.openvpn_cert import refresh_config_cert_expiry
-from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
+from app.services.openvpn_profile_repair import finalize_openvpn_profiles_after_add
 from app.services.profile_delivery import load_node_remote_hosts
 from app.services.traffic.maintenance import purge_traffic_history_for_reused_name
 from app.services.traffic_limit import parse_traffic_limit_bytes, parse_traffic_limit_period_days
@@ -121,7 +121,7 @@ def apply_template(
     cert_days = template.cert_expire_days or 3650
     if template.vpn_type == VpnType.openvpn:
         adapter.add_openvpn_client(client_name, cert_days)
-        recreate_openvpn_profiles_after_admin_change(
+        finalize_openvpn_profiles_after_add(
             adapter,
             client_names=[client_name],
             hosts=load_node_remote_hosts(db, node.id),
@@ -182,7 +182,12 @@ def apply_template(
                 actor=actor.username,
             )
 
-    maybe_replicate_create(db, node_id=node.id, primary_config=config)
+    enqueue_maybe_replicate_create(
+        db,
+        node_id=node.id,
+        primary_config=config,
+        created_by_username=actor.username,
+    )
     if limit_bytes is not None:
         maybe_replicate_policy_op(
             db,

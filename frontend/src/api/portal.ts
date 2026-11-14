@@ -1,8 +1,8 @@
 import { apiFetch } from './http'
-import type { PortalLinkResponse } from '@/types'
+import type { ClosedAccessView, PortalLinkResponse } from '@/types'
 
 export interface PortalFileMeta {
-  path: string
+  file_id: string
   label: string
   filename: string
   vpn_type: string
@@ -10,7 +10,7 @@ export interface PortalFileMeta {
   openvpn_import_url?: string
 }
 
-export interface PortalStatusMeta {
+interface PortalStatusMeta {
   status: 'active' | 'expired' | 'blocked' | string
   status_label: string
   expires_at: string | null
@@ -34,16 +34,25 @@ export interface PortalNodeEntry {
   clients: PortalClientEntry[]
 }
 
-export interface ClientPortalMetaResponse extends PortalClientEntry {
+interface ClientPortalMetaResponse extends PortalClientEntry {
   kind?: 'client'
   brand_title: string
   unlock_codes_enabled: boolean
 }
 
-export interface UserPortalMetaResponse {
+export interface PortalBanner {
+  text: string
+  created_at: string | null
+}
+
+interface UserPortalMetaResponse {
   kind: 'user'
   brand_title: string
   unlock_codes_enabled: boolean
+  /** Состояние закрытого доступа (спека 7.4); null — доступ открыт. */
+  closed_access: ClosedAccessView | null
+  /** Баннер портала (Stage 4) — уведомление о массовой операции с серверами. */
+  portal_banner: PortalBanner | null
   nodes: PortalNodeEntry[]
 }
 
@@ -92,12 +101,6 @@ export async function rotateUserPortalLink(userId: number) {
   })
 }
 
-export async function revokeUserPortalLink(userId: number) {
-  return apiFetch<{ ok: boolean; user_id: number }>(`/portal/users/${userId}/revoke`, {
-    method: 'POST',
-  })
-}
-
 /** Public portal meta — called from /p/:token without auth. */
 export async function fetchPublicPortalMeta(token: string) {
   const { apiBase } = await import('../lib/panelBase')
@@ -138,4 +141,16 @@ export async function redeemPublicPortalCode(token: string, code: string) {
     throw new Error(detail)
   }
   return (await res.json()) as PortalRedeemResponse
+}
+
+/** Скрыть баннер портала (Stage 4) — уведомление о массовой операции с серверами. */
+export async function dismissPublicPortalBanner(token: string) {
+  const { apiBase } = await import('../lib/panelBase')
+  const res = await fetch(`${apiBase}/public/portal/${encodeURIComponent(token)}/banner/dismiss`, {
+    method: 'POST',
+    headers: { Accept: 'application/json' },
+  })
+  if (!res.ok) {
+    throw new Error('Не удалось скрыть уведомление')
+  }
 }

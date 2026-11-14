@@ -1,0 +1,473 @@
+"""HA client create/delete/renew: no client.sh 7 on create; crypto sync is background + serialized."""
+
+from __future__ import annotations
+
+import threading
+import time
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
+
+from app.database import Base
+from app.models import Node, NodeStatus, User, UserRole, VpnType
+from app.services import config_provisioning
+from app.services.node_sync import client_sync
+from app.services.openvpn_profile_repair import finalize_openvpn_profiles_after_add
+
+
+@pytest.fixture
+def db():
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    yield session
+    session.close()
+
+
+@pytest.fixture
+def node(db):
+    n = Node(
+        name="primary",
+        host="127.0.0.1",
+        port=9100,
+        api_key_hash="",
+        api_key_encrypted="",
+        status=NodeStatus.online,
+        is_local=True,
+        node_metadata="{}",
+    )
+    db.add(n)
+    db.commit()
+    db.refresh(n)
+    return n
+
+
+@pytest.fixture
+def admin(db):
+    u = User(
+        username="admin",
+        password_hash="x",
+        role=UserRole.admin,
+        is_active=True,
+        theme="dark",
+        timezone="",
+        last_client_timezone="",
+        noc_daily_time="",
+        noc_weekly_dow="",
+        noc_weekly_time="",
+        can_create_configs=True,
+        can_manage_configs=True,
+        panel_login_enabled=True,
+        provision_state="unmanaged",
+    )
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
+
+
+class _FeatureService:
+    def is_enabled(self, key: str) -> bool:
+        return True
+
+
+def test_finalize_after_add_never_recreates_profiles():
+    adapter = MagicMock()
+    with (
+        patch(
+            "app.services.openvpn_profile_repair.patch_openvpn_profiles_on_node",
+            return_value={"patched": 0, "warnings": []},
+        ) as patch_hosts,
+        patch(
+            "app.services.openvpn_profile_repair.validate_openvpn_profiles",
+            return_value=SimpleNamespace(ready=True, issues=[]),
+        ),
+        patch(
+            "app.services.openvpn_profile_repair.recreate_openvpn_profiles",
+        ) as recreate,
+    ):
+        result = finalize_openvpn_profiles_after_add(
+            adapter,
+            client_names=["matvey"],
+            hosts=["vpn.example"],
+        )
+
+    assert result.success is True
+    assert result.recreated is False
+    recreate.assert_not_called()
+    adapter.recreate_profiles.assert_not_called()
+    patch_hosts.assert_called_once()
+
+
+def test_provision_openvpn_skips_recreate_and_enqueues_ha(db, node, admin, monkeypatch):
+    adapter = MagicMock()
+    adapter.add_openvpn_client.return_value = None
+    adapter.get_profile_files.return_value = []
+    monkeypatch.setattr(config_provisioning, "get_adapter_for_node", lambda _n: adapter)
+    monkeypatch.setattr(config_provisioning, "get_feature_service", lambda: _FeatureService())
+    monkeypatch.setattr(
+        config_provisioning,
+        "load_node_remote_hosts",
+        lambda *_a, **_k: [],
+    )
+    monkeypatch.setattr(
+        config_provisioning,
+        "refresh_config_cert_expiry",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        config_provisioning,
+        "apply_owner_access_until_to_config",
+        lambda *_a, **_k: {},
+    )
+    monkeypatch.setattr(
+        config_provisioning,
+        "find_sync_group_for_primary",
+        lambda *_a, **_k: SimpleNamespace(id=42, sync_mode="auto"),
+    )
+
+    enqueue = MagicMock(return_value={"task_id": "task-ha-1", "queued": True})
+    replicate_sync = MagicMock()
+    monkeypatch.setattr(config_provisioning, "enqueue_maybe_replicate_create", enqueue)
+    monkeypatch.setattr(client_sync, "replicate_client_create", replicate_sync)
+
+    with patch(
+        "app.services.config_provisioning.finalize_openvpn_profiles_after_add",
+        wraps=finalize_openvpn_profiles_after_add,
+    ) as finalize:
+        config, warning, task_id = config_provisioning.provision_config(
+            db,
+            node=node,
+            client_name="matvey",
+            vpn_type=VpnType.openvpn,
+            owner=admin,
+            actor=admin,
+            notify=False,
+        )
+
+    adapter.add_openvpn_client.assert_called_once()
+    adapter.recreate_profiles.assert_not_called()
+    finalize.assert_called_once()
+    enqueue.assert_called_once()
+    replicate_sync.assert_not_called()
+    assert warning is None
+    assert task_id == "task-ha-1"
+    assert config.client_name == "matvey"
+
+
+def test_ha_group_lock_serializes_same_group(tmp_path, monkeypatch):
+    monkeypatch.setattr(client_sync, "HA_GROUP_LOCK_DIR", tmp_path)
+    order: list[str] = []
+    first_holds = threading.Event()
+    release_first = threading.Event()
+
+    def first() -> None:
+        with client_sync._ha_group_lock(99):
+            order.append("a-enter")
+            first_holds.set()
+            release_first.wait(timeout=2)
+            order.append("a-exit")
+
+    def second() -> None:
+        assert first_holds.wait(timeout=2)
+        with client_sync._ha_group_lock(99):
+            order.append("b-enter")
+            order.append("b-exit")
+
+    t1 = threading.Thread(target=first)
+    t2 = threading.Thread(target=second)
+    t1.start()
+    t2.start()
+    assert first_holds.wait(timeout=1)
+    time.sleep(0.05)
+    release_first.set()
+    t1.join(timeout=2)
+    t2.join(timeout=2)
+
+    assert order == ["a-enter", "a-exit", "b-enter", "b-exit"]
+
+
+def test_enqueue_create_uses_ha_group_subject_key(monkeypatch):
+    group = SimpleNamespace(id=7, sync_mode="auto")
+    config = SimpleNamespace(id=11, client_name="c1")
+    captured: dict = {}
+
+    def fake_enqueue(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(id="bg-99")
+
+    monkeypatch.setattr(client_sync, "find_sync_group_for_primary", lambda *_a, **_k: group)
+    monkeypatch.setattr(client_sync, "is_auto_sync_enabled", lambda _g: True)
+    monkeypatch.setattr(client_sync, "_enqueue_ha_client_sync", fake_enqueue)
+
+    result = client_sync.enqueue_maybe_replicate_create(
+        MagicMock(),
+        node_id=1,
+        primary_config=config,
+        created_by_username="admin",
+    )
+
+    assert result == {"task_id": "bg-99", "queued": True}
+    assert captured["group_id"] == 7
+    assert captured["op"] == "create"
+    assert captured["payload"]["primary_config_id"] == 11
+
+
+def test_ha_client_sync_skips_when_group_pending(db, node, monkeypatch):
+    from app.models import NodeSyncGroup, SyncStatus
+
+    group = NodeSyncGroup(
+        name="g",
+        shared_domain="vpn.example",
+        primary_node_id=node.id,
+        replica_node_ids="[]",
+        sync_mode="auto",
+        sync_status=SyncStatus.pending,
+    )
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+
+    monkeypatch.setattr(client_sync, "SessionLocal", lambda: db)
+
+    with patch.object(client_sync, "replicate_client_create") as replicate:
+        result = client_sync._run_ha_client_sync_payload(
+            {"op": "create", "group_id": group.id, "primary_config_id": 12345}
+        )
+
+    assert result == {"ok": True, "op": "create", "skipped_pending": True}
+    replicate.assert_not_called()
+
+
+def test_try_claim_pending_is_atomic(db, node):
+    from app.models import NodeSyncGroup, SyncStatus
+    from app.services.node_sync.group_status import try_claim_pending
+
+    group = NodeSyncGroup(
+        name="g",
+        shared_domain="vpn.example",
+        primary_node_id=node.id,
+        replica_node_ids="[]",
+        sync_mode="manual_full",
+        sync_status=SyncStatus.synced,
+    )
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+
+    assert try_claim_pending(db, group.id) is True
+    db.commit()
+    db.refresh(group)
+    assert group.sync_status == SyncStatus.pending
+    assert group.last_sync_error is None
+
+    # Повторный claim на уже pending-группе не проходит.
+    assert try_claim_pending(db, group.id) is False
+
+
+
+def test_try_claim_pending_releases_write_lock(tmp_path):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from app.database import Base
+    from app.models import Node, NodeStatus, NodeSyncGroup, SyncStatus
+    from app.services.node_sync.group_status import try_claim_pending
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'lock.db'}")
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+
+    s1 = Session()
+    s2 = Session()
+    try:
+        node = Node(
+            name="n", host="h", port=9100, api_key_hash="", api_key_encrypted="",
+            status=NodeStatus.online, is_local=True, node_metadata="{}",
+        )
+        s1.add(node)
+        s1.commit()
+        s1.refresh(node)
+
+        group = NodeSyncGroup(
+            name="g", shared_domain="d", primary_node_id=node.id,
+            replica_node_ids="[]", sync_mode="manual_full", sync_status=SyncStatus.synced,
+        )
+        s1.add(group)
+        s1.commit()
+        s1.refresh(group)
+
+        assert try_claim_pending(s1, group.id) is True
+
+        # Отдельная сессия (как create_queued_task) должна суметь писать без "database is locked".
+        g2 = s2.get(NodeSyncGroup, group.id)
+        g2.last_sync_error = "ok"
+        s2.commit()
+    finally:
+        s1.close()
+        s2.close()
+
+
+def test_client_create_copies_access_policy_to_shadow(db, node, admin, monkeypatch):
+    import json
+    from datetime import datetime
+
+    from app.models import Node, NodeSyncGroup, OpenVpnAccessPolicy, SyncStatus, VpnConfig
+    from app.services.node_sync import replicate
+
+    replica = Node(
+        name="replica", host="127.0.0.2", port=9100, api_key_hash="", api_key_encrypted="",
+        status=NodeStatus.online, is_local=False, node_metadata="{}",
+    )
+    db.add(replica)
+    db.commit()
+    db.refresh(replica)
+
+    group = NodeSyncGroup(
+        name="g", shared_domain="vpn.example", primary_node_id=node.id,
+        replica_node_ids=json.dumps([replica.id]), sync_mode="auto", sync_status=SyncStatus.synced,
+    )
+    db.add(group)
+    db.commit()
+    db.refresh(group)
+
+    config = VpnConfig(
+        node_id=node.id, client_name="policy_client", vpn_type=VpnType.openvpn,
+        owner_id=admin.id, cert_expire_days=3650,
+    )
+    db.add(config)
+    db.commit()
+    db.refresh(config)
+
+    until = datetime(2036, 1, 1, 12, 0, 0)
+    db.add(OpenVpnAccessPolicy(node_id=node.id, client_name="policy_client", access_until=until))
+    db.commit()
+
+    monkeypatch.setattr(replicate, "sync_vpn_crypto_from_primary", lambda *a, **k: None)
+    monkeypatch.setattr(replicate, "get_adapter_for_node", lambda _n: MagicMock())
+
+    result = replicate._handle_client_create(db, group, {"primary_config": config})
+
+    assert result.successes, result.errors
+
+    shadow = (
+        db.query(VpnConfig)
+        .filter(VpnConfig.node_id == replica.id, VpnConfig.ha_primary_config_id == config.id)
+        .first()
+    )
+    assert shadow is not None
+
+    policy = (
+        db.query(OpenVpnAccessPolicy)
+        .filter_by(node_id=replica.id, client_name="policy_client")
+        .first()
+    )
+    assert policy is not None
+    assert policy.access_until == until
+
+
+def test_client_create_releases_write_lock_during_replica_network(tmp_path, monkeypatch):
+    """Регрессия: создание клиента в HA не держит write-lock SQLite, пока идёт сеть к реплике.
+
+    Раньше shadow-строка (upsert_shadow_config) писалась и не коммитилась до конца цикла,
+    поэтому сетевой вызов к следующей реплике шёл под открытой транзакцией записи — все
+    писатели панели получали ``database is locked``.
+    """
+    import json
+
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.database import Base
+    from app.models import Node, NodeSyncGroup, SyncStatus, VpnConfig
+    from app.services.node_sync import replicate
+
+    engine = create_engine(
+        f"sqlite:///{tmp_path / 'ha.db'}",
+        connect_args={"check_same_thread": False, "timeout": 1},
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine)
+    s1 = Session()
+    s2 = Session()
+
+    def _node(name, host, local=False):
+        n = Node(
+            name=name, host=host, port=9100, api_key_hash="", api_key_encrypted="",
+            status=NodeStatus.online, is_local=local, node_metadata="{}",
+        )
+        s1.add(n)
+        s1.commit()
+        s1.refresh(n)
+        return n
+
+    owner = User(
+        username="owner", password_hash="x", role=UserRole.user, is_active=True,
+        theme="dark", timezone="", last_client_timezone="",
+        noc_daily_time="", noc_weekly_dow="", noc_weekly_time="",
+        can_create_configs=True, can_manage_configs=True,
+        panel_login_enabled=True, provision_state="unmanaged",
+    )
+    s1.add(owner)
+    s1.commit()
+    s1.refresh(owner)
+
+    primary = _node("primary", "127.0.0.1", local=True)
+    replica1 = _node("replica1", "127.0.0.2")
+    replica2 = _node("replica2", "127.0.0.3")
+
+    group = NodeSyncGroup(
+        name="g", shared_domain="vpn.example", primary_node_id=primary.id,
+        replica_node_ids=json.dumps([replica1.id, replica2.id]),
+        sync_mode="auto", sync_status=SyncStatus.synced,
+    )
+    s1.add(group)
+    s1.commit()
+    s1.refresh(group)
+
+    config = VpnConfig(
+        node_id=primary.id, client_name="lock_client", vpn_type=VpnType.wireguard,
+        owner_id=owner.id, cert_expire_days=3650,
+    )
+    s1.add(config)
+    s1.commit()
+    s1.refresh(config)
+
+    entered = threading.Event()
+    release = threading.Event()
+    calls = {"n": 0}
+
+    def fake_sync(*_a, **_k):
+        calls["n"] += 1
+        if calls["n"] == 2:
+            entered.set()
+            release.wait(timeout=5)
+
+    monkeypatch.setattr(replicate, "get_adapter_for_node", lambda _n: MagicMock())
+    monkeypatch.setattr(replicate, "sync_vpn_crypto_from_primary", fake_sync)
+    monkeypatch.setattr(replicate, "copy_single_client_policy", lambda *a, **k: None)
+
+    def run():
+        replicate._handle_client_create(s1, group, {"primary_config": config})
+
+    t = threading.Thread(target=run)
+    t.start()
+    assert entered.wait(timeout=3), "второй сетевой вызов не начался"
+
+    # Пока сеть висит на второй реплике, отдельная сессия обязана уметь писать.
+    g2 = s2.get(NodeSyncGroup, group.id)
+    g2.last_sync_error = "ping"
+    s2.commit()
+
+    release.set()
+    t.join(timeout=5)
+    s1.close()
+    s2.close()

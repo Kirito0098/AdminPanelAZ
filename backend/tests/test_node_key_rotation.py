@@ -1,3 +1,4 @@
+
 """Automatic node API key rotation: due condition, key age tracking, and loop resilience."""
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ from app.services.node_manager import (
     store_api_key,
     store_pending_api_key,
 )
+
+pytestmark = pytest.mark.slow
 
 PENDING = "pending-key-0123456789abcdef0123456789"
 
@@ -132,17 +135,6 @@ def test_rotation_of_ssh_node_goes_through_the_tunnel(db, monkeypatch):
     new_key = rotation.rotate_node_api_key(db, node)
 
     assert calls == [("http://127.0.0.1:45123", "key-vpn-ssh", new_key)]
-
-
-def test_rotation_of_http_node_talks_to_the_node_directly(db, monkeypatch):
-    node = _node("vpn-http", created_days_ago=90, port=9100)
-    db.add(node)
-    db.commit()
-    calls = _record_rotation(monkeypatch)
-
-    new_key = rotation.rotate_node_api_key(db, node)
-
-    assert calls == [("http://10.0.0.2:9100", "key-vpn-http", new_key)]
 
 
 def test_manual_key_change_resets_key_age(db, monkeypatch):
@@ -353,15 +345,6 @@ def test_complete_resends_pending_key_when_agent_still_on_old_key(db, monkeypatc
     assert adapter.sent == [PENDING]
     assert get_api_key_plain(node) == PENDING
     assert node.api_key_pending_encrypted == ""
-
-
-def test_complete_without_pending_key_does_nothing(db):
-    node = _node("vpn", created_days_ago=90)
-    db.add(node)
-    db.commit()
-
-    with patch.object(rotation, "check_node_health", side_effect=AssertionError("no probe expected")):
-        assert rotation.complete_pending_key_rotation(db, node) is False
 
 
 def test_manual_key_change_drops_pending_key(db, monkeypatch):

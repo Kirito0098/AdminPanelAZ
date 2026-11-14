@@ -73,8 +73,13 @@ async def telegram_webhook(
     header_secret = (request.headers.get(TELEGRAM_SECRET_TOKEN_HEADER) or "").strip()
     if not expected or not secrets_match(secret, expected):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-    # Webhooks registered before secret_token was sent have no header; the URL secret still authenticates.
-    if header_secret and not secrets_match(header_secret, expected):
+    # After a successful setWebhook with secret_token, the header is required.
+    # Until then (legacy registrations), the URL secret + Telegram IP allowlist still authenticate.
+    require_header = _get_setting(db, "telegram_webhook_secret_required", "false") == "true"
+    if require_header:
+        if not header_secret or not secrets_match(header_secret, expected):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    elif header_secret and not secrets_match(header_secret, expected):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     client_ip = get_telegram_webhook_client_ip(request)

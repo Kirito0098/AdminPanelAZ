@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -60,7 +61,23 @@ ALWAYS_ALLOWED_PREFIXES = (
 )
 
 WG_ACCESS_PREFIX = "/api/client-access/wireguard"
-CONFIGS_QR_PATH_MARKERS = ("/download", "/qr", "/one-time-link")
+CONFIGS_DOWNLOAD_PATH_MARKERS = ("/download",)
+
+# §8.1: user_provisioning has no broad api_prefixes (user_management owns /api/users).
+# Provisioning routes are gated by explicit path checks only:
+#   POST /api/users/provisioned, /api/users/{id}/provisioning*
+#   POST /api/users/{id}/suspend, /api/users/{id}/resume, /api/users/{id}/extend,
+#   POST /api/users/{id}/grace-cleanup, /api/users/{id}/traffic-counter/reset (Stage 3)
+#   POST /api/users/bulk/nodes* (Stage 4 — массовые операции с серверами)
+# GET /api/users, PATCH /api/users/{id} and /api/tg-mini/me/* are NOT gated here.
+# /api/users/{id}/configs/* are admin config ops (files/download/access/delete) for
+# existing configs and must stay available without user_provisioning.
+_USER_PROVISIONING_PATH_RE = re.compile(r"^/api/users/provisioned(?:/|$)")
+# Stage 4: массовые операции с серверами (/api/users/bulk/nodes*).
+_USER_PROVISIONING_BULK_RE = re.compile(r"^/api/users/bulk/nodes(?:/|$)")
+_USER_PROVISIONING_ITEM_RE = re.compile(
+    r"^/api/users/\d+/(?:provisioning|suspend|resume|extend|grace-cleanup|traffic-counter)(?:/|$)"
+)
 
 PATH_TO_MODULES: dict[str, tuple[str, ...]] = {}
 PREFIX_TO_MODULES: dict[str, tuple[str, ...]] = {}
@@ -93,23 +110,11 @@ def module_disabled_message(module_key: str) -> str:
     return f'Раздел «{_module_label(module_key)}» отключён администратором.'
 
 
-def _configs_qr_modules(path: str) -> tuple[str, ...] | None:
+def _configs_download_modules(path: str) -> tuple[str, ...] | None:
     if not path.startswith("/api/configs/"):
         return None
-    if any(marker in path for marker in CONFIGS_QR_PATH_MARKERS):
+    if any(marker in path for marker in CONFIGS_DOWNLOAD_PATH_MARKERS):
         return ("qr_downloads",)
-    return None
-
-
-def _public_qr_modules(path: str) -> tuple[str, ...] | None:
-    if path.startswith("/api/public/qr-download"):
-        return ("qr_downloads",)
-    return None
-
-
-def _security_public_download_modules(path: str) -> tuple[str, ...] | None:
-    if path == "/api/security/public-download":
-        return ("security",)
     return None
 
 
@@ -125,12 +130,21 @@ def _wg_access_modules(path: str) -> tuple[str, ...] | None:
     return ("wireguard", "amneziawg")
 
 
+def _user_provisioning_modules(path: str) -> tuple[str, ...] | None:
+    if (
+        _USER_PROVISIONING_PATH_RE.match(path)
+        or _USER_PROVISIONING_ITEM_RE.match(path)
+        or _USER_PROVISIONING_BULK_RE.match(path)
+    ):
+        return ("user_provisioning",)
+    return None
+
+
 def _modules_for_path(path: str) -> tuple[str, ...] | None:
     for resolver in (
-        _public_qr_modules,
-        _security_public_download_modules,
+        _user_provisioning_modules,
         _openvpn_group_modules,
-        _configs_qr_modules,
+        _configs_download_modules,
         _wg_access_modules,
     ):
         modules = resolver(path)

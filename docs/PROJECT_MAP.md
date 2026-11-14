@@ -2,7 +2,7 @@
 
 > Справочник для навигации по кодовой базе. Обновлять при значительных архитектурных изменениях.
 
-**AdminPanel AntiZapret** — веб-панель для администрирования VPN-сервера [AntiZapret](https://github.com/GubernievS/AntiZapret-VPN): клиенты (OpenVPN / WireGuard / AmneziaWG), маршрутизация CIDR, мониторинг, бэкапы, Telegram-бот и Mini App.
+**AdminPanel AntiZapret** — веб-панель для администрирования VPN-сервера [AntiZapret](https://github.com/GubernievS/AntiZapret-VPN): клиенты (OpenVPN / WG/AWG 1.5 / AWG 2.0), маршрутизация CIDR, мониторинг, бэкапы, Telegram-бот и Mini App.
 
 **Пользовательские инструкции** (без жаргона, для админов и клиентов VPN): [`docs/README.md`](README.md).
 
@@ -82,7 +82,7 @@
 ├── docs/
 │   ├── README.md                # оглавление пользовательских руководств
 │   ├── konfiguracii.md          # UI: Конфигурации
-│   ├── noc-monitoring.md
+│   ├── monitoring.md
 │   ├── traffic-monitoring.md
 │   ├── routing-cidr.md
 │   ├── antizapret-config.md
@@ -115,7 +115,7 @@
 |-----------|-------------|------------|
 | **Пользователь / админ VPN** | [`docs/README.md`](README.md) | Простые инструкции по каждому разделу меню и настройкам |
 | **Разработчик** | этот файл | Архитектура, роутеры, сервисы, модели |
-| **Контрибьюторы (Cursor)** | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | MCP, skills, границы, что не коммитить |
+| **Контрибьюторы** | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | MCP, skills, границы, что не коммитить |
 | **Безопасность (ops)** | [`SECURITY.md`](../SECURITY.md) | HTTPS, 2FA, rate limit, Redis |
 | **Установка** | [`README.md`](../README.md) | install.sh, первый запуск |
 
@@ -124,19 +124,21 @@
 | Маршрут | Страница | User doc |
 |---------|----------|----------|
 | `/` | `DashboardPage` | [`konfiguracii.md`](konfiguracii.md) |
-| `/monitoring` | `MonitoringPage` | [`noc-monitoring.md`](noc-monitoring.md) |
-| `/traffic` | `TrafficPage` | [`traffic-monitoring.md`](traffic-monitoring.md) |
+| `/users` | `UsersPage` (вкладки **Абоненты** / **Портал и коды**) | [`podpiska.md`](podpiska.md) |
+| `/monitoring` | `MonitoringPage` (вкладки **Подключения · Службы · Трафик · Ресурсы · Журналы**; у «Ресурсов» чипы **Узел · Панель · Хост**) | [`monitoring.md`](monitoring.md), [`traffic-monitoring.md`](traffic-monitoring.md), [`logs.md`](logs.md), [`server-monitor.md`](server-monitor.md) |
 | `/routing` | `RoutingPage` | [`routing-cidr.md`](routing-cidr.md) |
-| `/antizapret` | `AntizapretConfigPage` | [`antizapret-config.md`](antizapret-config.md) |
+| `/protocols/antizapret` | `AntizapretConfigPage` | [`antizapret-config.md`](antizapret-config.md) |
+| `/protocols/openvpn` | `OpenVpnPanelPage` | [`antizapret-config.md`](antizapret-config.md#openvpn-профили-логи-и-состояние-установки) |
+| `/protocols/warper` | `WarperPage` | [`warper.md`](warper.md) |
+| `/protocols/awg2` | `Awg2Page` | [`awg2.md`](awg2.md) |
 | `/proxy` | `ProxyHubPage` | [`proxy-nodes.md`](proxy-nodes.md) |
-| `/warper` | `WarperPage` | [`warper.md`](warper.md) |
-| `/awg2` | `Awg2Page` | [`awg2.md`](awg2.md) |
-| `/telegram` | `TelegramPage` | [`Telegram.md`](Telegram.md) |
-| `/subscription` | `SubscriptionPage` | [`podpiska.md`](podpiska.md) |
+| `/telegram` | `TelegramPage` (вкладки **Бот и авторизация · Приложение · Команды бота · Связь через узел · Уведомления**) | [`Telegram.md`](Telegram.md) |
+| `/subscription` | редирект → `/users?tab=portal` при `user_provisioning`; иначе `SubscriptionPage` | [`podpiska.md`](podpiska.md) |
 | `/p/:token` | `PortalPage` (публичный портал, без входа) | [`podpiska.md`](podpiska.md#клиентский-портал) |
 | `/edit-files` | `EditFilesPage` | [`edit-files.md`](edit-files.md) |
-| `/logs` | `LogsPage` | [`logs.md`](logs.md) |
-| `/server-monitor` | `ServerMonitorPage` | [`server-monitor.md`](server-monitor.md) |
+| `/traffic` | редирект → `/monitoring?tab=traffic` | [`traffic-monitoring.md`](traffic-monitoring.md) |
+| `/logs` | редирект → `/monitoring?tab=logs` | [`logs.md`](logs.md) |
+| `/server-monitor` | редирект → `/monitoring?tab=resources&scope=host` | [`server-monitor.md`](server-monitor.md) |
 | `/nodes` | `NodesPage` | [`uzly.md`](uzly.md) |
 | `/settings` | `SettingsPage` | [`nastrojki/README.md`](nastrojki/README.md) |
 | `/login` | `LoginPage` | [`nastrojki/profil.md`](nastrojki/profil.md) (2FA, passkey) |
@@ -146,17 +148,20 @@
 | `SettingsSection` | Компонент | User doc |
 |-------------------|-----------|----------|
 | `personal` | `PersonalTab`, `TwoFactorTab`, `PasskeysTab`, `NocScheduleCard` (admin) | [`nastrojki/profil.md`](nastrojki/profil.md), [Telegram — расписание NOC](Telegram.md#расписание-noc-сводок) |
-| `users` | `UsersTab` | [`nastrojki/polzovateli.md`](nastrojki/polzovateli.md) |
+| `users` — «Пользователи панели» | `UsersTab` | [`nastrojki/polzovateli.md`](nastrojki/polzovateli.md) |
 | `security` | `SecurityTab`, `SecretsRotationWizard` | [`nastrojki/bezopasnost.md`](nastrojki/bezopasnost.md) |
 | `config_delivery` | `ConfigDeliveryTab` | [`nastrojki/razdacha-konfigov.md`](nastrojki/razdacha-konfigov.md) |
 | `maintenance` | `MaintenanceTab` | [`nastrojki/obsluzhivanie.md`](nastrojki/obsluzhivanie.md) |
 | `vpn_network` | `VpnNetworkTab` | [`nastrojki/set-i-publikaciya.md`](nastrojki/set-i-publikaciya.md) |
 | `backup` | `BackupTab` | [`nastrojki/rezervnye-kopii.md`](nastrojki/rezervnye-kopii.md) |
 | `monitoring` | `MonitoringTab`, `AlertRulesCard` | [`nastrojki/monitoring-i-alerty.md`](nastrojki/monitoring-i-alerty.md) |
+| `panel_notify` — «Уведомления в панели» | `BellNotifyMatrix` | [`nastrojki/monitoring-i-alerty.md`](nastrojki/monitoring-i-alerty.md) |
 | `modules` | `FeatureTogglesTab` | [`nastrojki/moduli.md`](nastrojki/moduli.md) |
 | `updates` | `UpdatesTab` | [`nastrojki/obnovleniya.md`](nastrojki/obnovleniya.md) |
 | `panel_ops` | `PanelOpsTab` | [`nastrojki/perezapusk-i-peresborka.md`](nastrojki/perezapusk-i-peresborka.md) |
 | `tests` | `RunbookTab` | [`nastrojki/diagnostika.md`](nastrojki/diagnostika.md) |
+
+Разделы сгруппированы: **Личное** (`personal`), **Доступ** (`users`, `security`), **VPN** (`config_delivery`, `maintenance`), **Сервер** (`vpn_network`, `backup`, `monitoring`), **Панель** (`panel_notify`, `modules`, `updates`, `panel_ops`, `tests`); список — `components/settings/SettingsNav.tsx`. Раздела `notifications` больше нет: получатели и события Telegram — вкладка «Уведомления» на `/telegram`, матрица колокольчика — `panel_notify`; `/settings/notifications` редиректит на `/settings/panel_notify`.
 
 ---
 
@@ -165,26 +170,30 @@
 | Маршрут | Страница | Feature toggle | User doc | Назначение |
 |---------|----------|----------------|----------|------------|
 | `/` | `DashboardPage` | — | [konfiguracii](konfiguracii.md) | VPN-клиенты, карточки конфигов |
-| `/monitoring` | `MonitoringPage` | `logs_dashboard` | [noc-monitoring](noc-monitoring.md) | NOC: подключения, графики, службы |
-| `/traffic` | `TrafficPage` | `traffic_sync` | [traffic-monitoring](traffic-monitoring.md) | Трафик по клиентам, лимиты |
+| `/users` | `UsersPage` (вкладки **Абоненты** / **Портал и коды**) | `user_provisioning`; вкладка портала — `client_portal` / `unlock_codes` | [podpiska](podpiska.md) | Абоненты VPN, заявки, сроки, портал и unlock-коды |
+| `/messages` | `MessagesPage` | `user_messaging` | — | Чат абонент ↔ администратор |
+| `/monitoring` | `MonitoringPage` (вкладки; `?tab=connections\|services\|traffic\|resources\|logs`, ресурсы — `?scope=node\|panel\|host`, журналы — `?log=…`) | `anyOf(logs_dashboard, traffic_sync, server_monitor, action_logs)` | [monitoring](monitoring.md), [traffic-monitoring](traffic-monitoring.md), [logs](logs.md), [server-monitor](server-monitor.md) | Подключения, службы, трафик, ресурсы, журналы |
+| `/traffic` | редирект → `/monitoring?tab=traffic` (query переносится) | — | [traffic-monitoring](traffic-monitoring.md) | Старый URL |
+| `/logs` | редирект → `/monitoring?tab=logs` (`?tab=` → `?log=`) | — | [logs](logs.md) | Старый URL |
+| `/server-monitor` | редирект → `/monitoring?tab=resources&scope=host` | — | [server-monitor](server-monitor.md) | Старый URL |
 | `/routing` | `RoutingPage` | `routing` | [routing-cidr](routing-cidr.md) | CIDR-провайдеры, pipeline |
-| `/antizapret` | `AntizapretConfigPage` (`AntizapretConfigTab`: секция «Адреса подключения» / список remote OpenVPN) | `antizapret_config` | [antizapret-config](antizapret-config.md) | Конфиг AntiZapret (admin); multi-remote OpenVPN per-node |
+| `/protocols/antizapret` | `AntizapretConfigPage` (`AntizapretConfigTab`: секция «Адреса подключения» / список remote OpenVPN) | `antizapret_config` | [antizapret-config](antizapret-config.md) | Конфиг AntiZapret (admin); multi-remote OpenVPN per-node |
+| `/protocols/openvpn` | `OpenVpnPanelPage` (`OpenVpnPanelTab`) | `openvpn` | [antizapret-config](antizapret-config.md#openvpn-профили-логи-и-состояние-установки) | OpenVPN-панель: адреса, multihome, DNS, тюнинг (бывшая вкладка `/antizapret?tab=openvpn-panel`) |
 | `/proxy` | `ProxyHubPage` (`ProxyHubView`: прокси-узлы + `RemoteHostsCard` + ссылки) | `proxy_nodes` | [proxy-nodes](proxy-nodes.md) | Сводка прокси (admin); DESTINATION / remote / NOC links |
-| `/warper` | `WarperPage` | `warper` | [warper](warper.md) | AZ-WARP / Cloudflare WARP |
-| `/awg2` | `Awg2Page` | `awg2` | [awg2](awg2.md) | AZ-AWG2: health, клиенты, обфускация, мониторинг `amneziawg2` |
-| `/telegram` | `TelegramPage` | `telegram` | [Telegram](Telegram.md) | Настройки бота и Mini App |
-| `/subscription` | `SubscriptionPage` | `client_portal` / `unlock_codes` | [podpiska](podpiska.md) | Клиентский портал, портал пользователей, unlock-ключи (admin) |
+| `/protocols/warper` | `WarperPage` | `warper` | [warper](warper.md) | AZ-WARP / Cloudflare WARP |
+| `/protocols/awg2` | `Awg2Page` | `awg2` | [awg2](awg2.md) | AZ-AWG2: health, клиенты, обфускация, мониторинг `amneziawg2` |
+| `/antizapret`, `/warper`, `/awg2` | редиректы → `/protocols/*` (у `/antizapret` `?tab=openvpn-panel` → `/protocols/openvpn`) | — | — | Старые URL |
+| `/telegram` | `TelegramPage` (вкладки **Бот и авторизация · Приложение · Команды бота · Связь через узел · Уведомления**) | `telegram` | [Telegram](Telegram.md) | Настройки бота, Mini App и Telegram-уведомлений |
+| `/subscription` | `SubscriptionPage` либо редирект → `/users?tab=portal` при `user_provisioning` | `client_portal` / `unlock_codes` | [podpiska](podpiska.md) | Клиентский портал, портал пользователей, unlock-ключи (admin) |
 | `/p/:token` | `PortalPage` | — (API проверяет `client_portal`) | [podpiska](podpiska.md) | Публичный портал `c_…` / `u_…` на хосте портала |
 | `/edit-files` | `EditFilesPage` | `edit_files` | [edit-files](edit-files.md) | Редактор файлов AntiZapret |
-| `/logs` | `LogsPage` | `logs_dashboard` / `action_logs` | [logs](logs.md) | Журналы |
-| `/server-monitor` | `ServerMonitorPage` | `server_monitor` | [server-monitor](server-monitor.md) | vnStat, нагрузка сервера |
 | `/nodes` | `NodesPage` | — (admin); UI прокси при `proxy_nodes` | [proxy-nodes](proxy-nodes.md), [uzly](uzly.md), [proxy-agent](proxy-agent.md) | VPN-узлы, sync groups (HA); при toggle — прокси-узлы (`node_kind=proxy`) |
-| `/settings` | `SettingsPage` | — | [nastrojki](nastrojki/README.md) | Пользователи, бэкапы, безопасность… |
+| `/settings` | `SettingsPage` | — | [nastrojki](nastrojki/README.md) | Пользователи панели, бэкапы, безопасность… |
 | `/login` | `LoginPage` | — | [profil](nastrojki/profil.md) | JWT + 2FA + passkey |
 
 **Ключевые контексты:** `AuthContext`, `NodeContext` (активный узел), `FeatureModulesContext`, `ThemeContext`.
 
-**Навигация:** `frontend/src/components/Layout.tsx` — sidebar, feature guards.
+**Навигация:** модель меню — `frontend/src/components/nav/sidebarNav.ts` (pinned-пункты, группы, футер, фильтрация по роли и feature-флагам), аккордеон группы — `components/nav/SidebarNavGroup.tsx`, вёрстка и бейджи — `components/Layout.tsx`. Вкладки страниц живут в URL через `hooks/usePageTab.ts` (Наблюдение, Абоненты, Telegram, карточка абонента, Routing, AWG2 — `?tab=`, у вложенных — `?scope=` / `?log=`); настройки адресуются путём `/settings/<section>`.
 
 **API-клиент:** `frontend/src/api/` (barrel `client.ts`) → базовый URL `/api`, Bearer token + refresh cookie.
 
@@ -202,6 +211,8 @@
 | `monitoring`, `alert_rules` | NOC: подключения, гео, службы; правила алертов |
 | `openvpn_buffer_guard` | OpenVPN Buffer Guard (`/openvpn-buffer-guard`) |
 | `dns_aaaa` | Переключатель AAAA-ответов резолверов AntiZapret активного узла (`/dns-aaaa`) |
+| `dns_servers` | Выбор upstream DNS для `kresd@1` / `kresd@2`: патч `kresd.conf`, перезапуск резолверов (`/dns-servers`) |
+| `openvpn_tuning` | `duplicate-cn` и подробные логи OpenVPN, состояние установки (MTU, DCO, патч, протоколы) — `/openvpn-tuning` |
 | `traffic` | Сбор и отображение трафика |
 | `routing`, `cidr_db` | CIDR-провайдеры, pipeline, deploy |
 | `warper` | AZ-WARP |
@@ -213,7 +224,7 @@
 | `logs` | Action logs |
 | `feature_toggles` | Включение/выключение модулей (`/feature-toggles`, `/feature-modules`) |
 | `tg_mini`, `telegram_webhook` | Telegram Mini App + бот |
-| `public_download` | Публичная выдача конфигов по QR |
+| `public_download` | Публичная выдача маршрутных файлов (Keenetic / MikroTik / TP-Link) |
 | `tasks` | Фоновые задачи (CIDR pipeline и др.) |
 | `site_diagnostics` | Диагностика «Проверка работы» (`/site-diagnostics`) |
 | `ip_blocked` | Страница блокировки IP (без `/api`) |
@@ -236,7 +247,7 @@
 - `openvpn_multihome.py` — `apply_multihome_to_conf` (директива `multihome` в OpenVPN server conf; restore через панель)
 - `wireguard_endpoint.py` — `apply_wireguard_endpoint_host` (патч `Endpoint` → `WIREGUARD_HOST` при выдаче WG/AWG)
 - `profile_delivery.py` — `read_profile_file_for_delivery` (`.ovpn` multi-remote; WG/AWG Endpoint из setup `WIREGUARD_HOST`, не из OpenVPN-списка); `patch_openvpn_profiles_on_node` (после успешного `recreate_profiles` / `client.sh 7` из панели — multi-remote на диск)
-- `profile_files.py`, `qr_generator.py` — конфиги и QR
+- `profile_files.py` — конфиги
 
 ### Мониторинг и трафик
 - `monitoring_overview.py`, `ip_geo.py`, `geoip_local.py` — NOC-сводка, GeoIP ([`GeoIP.md`](GeoIP.md))
@@ -246,8 +257,10 @@
 - `resource_metrics*.py`, `panel_resource_metrics*.py` — CPU/RAM узлов и панели
 
 ### CIDR / маршрутизация
-- `services/cidr/` — pipeline, scheduler, deploy
-- `services/cidr/pipeline/` — orchestrator, db_pipeline, file_pipeline, csv import
+- `services/cidr/` — pipeline, scheduler, deploy, `route_budget.py` (бюджет маршрутов: оценка → артефакты)
+- `services/cidr/pipeline/` — orchestrator, db_pipeline, file_pipeline (в т.ч. `runtime_backups`), csv import, `provider_sources.py`
+- `services/cidr/cidr_tasks.py` — единый pipeline-lock и фоновые задачи CIDR
+- `services/node_sync/provider_sync.py` — HA-репликация list-файлов, toggle провайдера и deploy на реплики
 
 ### Telegram
 - `telegram_bot.py` + `telegram_bot_handlers/` — команды бота
@@ -297,9 +310,8 @@
 | `ProviderMeta` | Мета CIDR-провайдеров |
 | `AppSetting` | key-value настройки |
 | `UserActionLog` | Аудит действий |
-| `QrDownloadToken` | Публичные ссылки на конфиги |
 
-Всего в `models.py` 43 модели; в таблице — основные.
+Всего в `models.py` 52 модели; в таблице — основные.
 
 **Отдельная БД:** `ProviderCidr` в `cidr_models.py` → `cidr.db`.
 

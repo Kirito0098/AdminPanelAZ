@@ -14,7 +14,6 @@ import {
   Loader2,
   MoreHorizontal,
   Network,
-  QrCode,
   Shield,
   Trash2,
   Unlock,
@@ -55,8 +54,9 @@ import {
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { cn } from '@/lib/utils'
+import { useFeatureModules } from '@/context/FeatureModulesContext'
 
-type ActionKey = 'download' | 'qr' | 'block' | 'unblock' | 'delete' | 'portal-copy'
+type ActionKey = 'download' | 'block' | 'unblock' | 'delete' | 'portal-copy'
 
 interface ConfigCardProps {
   config: VpnConfig
@@ -73,11 +73,9 @@ interface ConfigCardProps {
   onCopyName: () => void
   onCopyPortalLink?: () => void
   onDownload: (path: string, filename: string) => void
-  onQr: (path: string, filename: string) => void
   onBlock?: () => void
   onUnblock?: () => void
   onDelete?: () => void
-  showQrDownloads?: boolean
   showTrafficLink?: boolean
   isOnline?: boolean | null
   /** Live VPN IP from monitoring; falls back to config.local_ip. */
@@ -100,6 +98,8 @@ interface MetaRow {
   tone?: 'default' | 'warning' | 'danger' | 'success'
   wide?: boolean
   mono?: boolean
+  /** Ссылка, если значение должно быть кликабельным (например, владелец → /users/:id). */
+  href?: string
 }
 
 function splitMetaText(text: string): { label: string; value: string } {
@@ -122,8 +122,9 @@ function metaRow(
   tone: MetaRow['tone'] = 'default',
   wide = false,
   mono = false,
+  href?: string,
 ): MetaRow {
-  return { key, icon, label, value, tone, wide, mono }
+  return { key, icon, label, value, tone, wide, mono, href }
 }
 
 function isNoiseMetaLine(
@@ -206,11 +207,12 @@ function buildCompactMeta(
   isAdmin: boolean,
   tone: 'active' | 'expiring' | 'expired',
   isOnline: boolean | null,
+  provisioningOn: boolean,
   openvpnGroup?: string | null,
   localIp?: string | null,
 ): MetaRow[] {
   const rows: MetaRow[] = [
-    metaRow('created', Calendar, 'Создан', formatCreatedAt(config.created_at)),
+    metaRow('created', Calendar, 'Создан', formatCreatedAt(config.created_at), 'default', true),
   ]
 
   if (config.vpn_type === 'openvpn') {
@@ -221,12 +223,24 @@ function buildCompactMeta(
         'Сертификат',
         formatCertExpiry(config),
         tone === 'expired' ? 'danger' : tone === 'expiring' ? 'warning' : 'default',
+        true,
       ),
     )
   }
 
   if (isAdmin && config.owner_username) {
-    rows.push(metaRow('owner', UserRound, 'Владелец', config.owner_username))
+    rows.push(
+      metaRow(
+        'owner',
+        UserRound,
+        'Владелец',
+        config.owner_username,
+        undefined,
+        undefined,
+        undefined,
+        provisioningOn && config.owner_id != null ? `/users/${config.owner_id}` : undefined,
+      ),
+    )
   }
 
   rows.push(formatLocalIpMeta(localIp ?? config.local_ip))
@@ -277,7 +291,13 @@ function MetaLine({ row }: { row: MetaRow }) {
           row.mono && 'font-mono text-[11px]',
         )}
       >
-        {row.value}
+        {row.href ? (
+          <Link to={row.href} className="underline underline-offset-4 hover:text-primary transition-colors" title={row.value}>
+            {row.value}
+          </Link>
+        ) : (
+          row.value
+        )}
       </span>
     </div>
   )
@@ -426,11 +446,9 @@ export default function ConfigCard({
   onCopyName,
   onCopyPortalLink,
   onDownload,
-  onQr,
   onBlock,
   onUnblock,
   onDelete,
-  showQrDownloads = true,
   showTrafficLink = false,
   isOnline = null,
   localIp = null,
@@ -445,6 +463,8 @@ export default function ConfigCard({
   const primaryFile = pickPrimaryFile(config, tab)
   const hasBothProfiles = Boolean(vpnFile && azFile)
   const isAdmin = userRole === 'admin'
+  const { isEnabled } = useFeatureModules()
+  const provisioningOn = isEnabled('user_provisioning')
   const canDelete = Boolean(onDelete)
   const isBlocked = policy?.is_blocked ?? false
   const { fields } = viewPrefs
@@ -458,6 +478,7 @@ export default function ConfigCard({
     isAdmin,
     tone,
     isOnline,
+    provisioningOn,
     openvpnGroup,
     resolvedLocalIp,
   ).filter((row) => {
@@ -471,8 +492,7 @@ export default function ConfigCard({
     return true
   })
   const actionBusy = loadingAction != null
-  const showDownloads = fields.downloadButtons && showQrDownloads
-  const showQr = fields.qrButtons && showQrDownloads
+  const showDownloads = fields.downloadButtons
   const showTraffic = fields.trafficLink && showTrafficLink
   const showDanger = fields.dangerActions
   const displayedTraffic = resolveDisplayedTraffic(policy, trafficGroup)
@@ -683,54 +703,11 @@ export default function ConfigCard({
 
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
-              {primaryFile && showQr && (
-                <>
-                  {hasBothProfiles ? (
-                    <>
-                      <IconActionButton
-                        title={`QR VPN: ${getDownloadFilename(config, vpnFile!)}`}
-                        label="QR VPN"
-                        disabled={actionBusy}
-                        loading={loadingAction === 'qr'}
-                        className={(actionAccent ?? vpnDownloadAccent).className}
-                        style={(actionAccent ?? vpnDownloadAccent).style}
-                        onClick={() => runFileAction(vpnFile, onQr)}
-                      >
-                        <QrCode size={14} className="shrink-0" />
-                      </IconActionButton>
-                      <IconActionButton
-                        title={`QR AntiZapret: ${getDownloadFilename(config, azFile!)}`}
-                        label="QR AZ"
-                        disabled={actionBusy}
-                        loading={loadingAction === 'qr'}
-                        className={(actionAccent ?? azDownloadAccent).className}
-                        style={(actionAccent ?? azDownloadAccent).style}
-                        onClick={() => runFileAction(azFile, onQr)}
-                      >
-                        <QrCode size={14} className="shrink-0" />
-                      </IconActionButton>
-                    </>
-                  ) : (
-                    <IconActionButton
-                      title={`QR: ${getDownloadFilename(config, primaryFile)}`}
-                      label="QR-код"
-                      disabled={actionBusy}
-                      loading={loadingAction === 'qr'}
-                      className={(actionAccent ?? vpnDownloadAccent).className}
-                      style={(actionAccent ?? vpnDownloadAccent).style}
-                      onClick={() => runFileAction(primaryFile, onQr)}
-                    >
-                      <QrCode size={14} className="shrink-0" />
-                    </IconActionButton>
-                  )}
-                </>
-              )}
-
               {showTraffic && (
                 <IconActionLink
                   title="Статистика трафика"
                   label="Трафик"
-                  to={`/traffic?client=${encodeURIComponent(config.client_name)}`}
+                  to={`/monitoring?tab=traffic&client=${encodeURIComponent(config.client_name)}`}
                   className={actionAccent?.className}
                   style={actionAccent?.style}
                 >

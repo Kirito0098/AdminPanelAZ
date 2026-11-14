@@ -8,6 +8,7 @@ import os
 import subprocess
 from typing import Iterable
 
+from app.config import DEFAULT_BACKEND_PORT
 from app.services.shared_helpers import env_bool as _env_bool
 
 logger = logging.getLogger(__name__)
@@ -21,11 +22,11 @@ COMMENT_JUMP_V6_LEGACY = "aa-panel-port-jump-v6"
 
 
 def _panel_port() -> int:
-    raw = (os.getenv("BACKEND_PORT", "8000") or "").strip()
+    raw = (os.getenv("BACKEND_PORT", str(DEFAULT_BACKEND_PORT)) or "").strip()
     try:
         return max(1, min(65535, int(raw)))
     except ValueError:
-        return 8000
+        return DEFAULT_BACKEND_PORT
 
 
 class PanelPortFirewall:

@@ -2,9 +2,10 @@
 
 Writes ``OPENVPN_HOST`` from ``shared_domain`` and ``WIREGUARD_HOST`` from
 ``shared_domain_wireguard`` (falling back to ``shared_domain`` when empty) to
-``/root/antizapret/setup`` on the primary and all replicas, then runs
-``doall.sh`` (apply_config_changes) and ``client.sh 7`` (recreate_profiles) on
-each node so the new hosts land in regenerated client profiles.
+``/root/antizapret/setup`` on the primary and all replicas, replaces each node's OpenVPN remotes list with ``[shared_domain]`` (drops
+foreign hosts left by a bad proxy remotes save), then runs ``doall.sh``
+(apply_config_changes) and ``client.sh 7`` (recreate_profiles) on each node so
+the new host lands alone in regenerated client profiles.
 
 On replicas the locally regenerated ``.ovpn`` files are then replaced with a
 byte-copy from the primary: ``client.sh 7`` rebuilds profiles from the
@@ -23,6 +24,7 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from app.models import Node, NodeSyncGroup, SyncStatus
+from app.services.cidr.apply_pipeline import apply_key_for_adapter, apply_slot
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.group_status import fail_group_on_error
 from app.services.node_sync.groups import (
@@ -33,7 +35,11 @@ from app.services.node_sync.groups import (
 )
 from app.services.node_sync.openvpn_restart import restart_all_openvpn_servers
 from app.services.node_sync.vpn_state_sync import clear_openvpn_restart_pending, copy_openvpn_profiles_from_primary
-from app.services.openvpn_remote_hosts import parse_hosts_json
+from app.services.openvpn_remote_hosts import (
+    align_remote_hosts_to_domain,
+    hosts_to_json,
+    parse_hosts_json,
+)
 from app.services.profile_delivery import patch_openvpn_profiles_on_node
 
 logger = logging.getLogger(__name__)
@@ -61,7 +67,7 @@ def _shared_domain_success_message(result: dict[str, Any]) -> str:
     openvpn = str(result.get("openvpn_host") or "").strip()
     wireguard = str(result.get("wireguard_host") or "").strip()
     if openvpn and wireguard and openvpn != wireguard:
-        domain_part = f"Домены OpenVPN={openvpn}, WG/AWG={wireguard} записаны в setup"
+        domain_part = f"Домены OpenVPN={openvpn}, WG/AWG 1.5={wireguard} записаны в setup"
     else:
         domain_part = f"Домен {domain or openvpn or wireguard} записан в setup"
     nodes = [str(item.get("node_name") or item.get("node_id") or "") for item in result.get("updated") or []]
@@ -86,12 +92,15 @@ def apply_shared_domain_to_members(
     group: NodeSyncGroup,
     *,
     run_apply: bool = True,
+    apply_replicas: bool = True,
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     """Write shared domain hosts to setup on all members, then doall.sh + client.sh 7.
 
-    Errors on one node are recorded but never abort the rest (partial failure is
-    reflected via ``success=False`` and the ``errors`` list).
+    ``apply_replicas=False`` skips the heavy apply (doall / client.sh 7 / .ovpn copy /
+    restart) on replicas — used by the one-shot Setup, where ``push_full`` redoes that
+    work right after. Errors on one node are recorded but never abort the rest (partial
+    failure is reflected via ``success=False`` and the ``errors`` list).
     """
     openvpn_host = effective_openvpn_domain(group)
     wireguard_host = effective_wireguard_domain(group)
@@ -129,23 +138,38 @@ def apply_shared_domain_to_members(
         progress(percent, f"{node.name}: запись хостов в setup…")
         try:
             get_adapter_for_node(node).update_antizapret_settings(updates)
+            # Remotes list wins on disk patch/download — replace with domain only
+            # so foreign hosts from another HA/proxy do not stay in .ovpn.
+            aligned = align_remote_hosts_to_domain(
+                openvpn_host, parse_hosts_json(node.openvpn_remote_hosts)
+            )
+            node.openvpn_remote_hosts = hosts_to_json(aligned)
+            db.add(node)
             result["updated"].append({"node_id": node.id, "node_name": node.name})
         except Exception as exc:
             logger.warning("Shared domain setup write failed on %s: %s", node.name, exc)
             result["errors"].append(
                 {"node_id": node.id, "node_name": node.name, "stage": "setup", "error": str(exc)}
             )
+    try:
+        db.commit()
+    except Exception as exc:
+        logger.warning("Shared domain remotes commit failed: %s", exc)
+        result["errors"].append({"stage": "remotes", "error": str(exc)})
 
     if run_apply:
         primary_adapter = None
         for index, node in enumerate(nodes):
+            is_primary = node.id == group.primary_node_id
+            if not apply_replicas and not is_primary:
+                continue
             percent = 45 + int((index / total) * 50)
             progress(percent, f"{node.name}: doall.sh + client.sh 7…")
-            is_primary = node.id == group.primary_node_id
             try:
                 adapter = get_adapter_for_node(node)
-                doall_output = adapter.apply_config_changes()
-                recreate_output = adapter.recreate_profiles()
+                with apply_slot(node_key=apply_key_for_adapter(adapter)):
+                    doall_output = adapter.apply_config_changes()
+                    recreate_output = adapter.recreate_profiles()
                 hosts = parse_hosts_json(node.openvpn_remote_hosts)
                 if is_primary:
                     primary_adapter = adapter

@@ -1,7 +1,10 @@
+import atexit
+import logging
 import tempfile
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
@@ -18,14 +21,17 @@ from app.config import get_settings
 from app.paths import get_cidr_list_dir
 from app.services.node_mtls import build_node_agent_ssl_context, node_agent_base_scheme
 from app.services.node_mtls_certs import MtlsProvisionBundle
-from app.services.antizapret import AntiZapretService
+from app.services.antizapret import AntiZapretService, apply_agent_timeout_seconds
 from app.services.antizapret_settings import (
     choice_updates_for_agent,
     read_antizapret_settings,
     update_antizapret_settings,
 )
 from app.services.cidr.service import CidrRoutingService
-from app.services.file_editor import FILES_SINCE_AGENT_1_11, KRESD_CUSTOM_UNITS, ConfigFileUnsupportedError
+from app.services.file_editor import AGENT_GATED_FILES, KRESD_CUSTOM_UNITS, ConfigFileUnsupportedError
+from app.services.kresd_dns_choice import DnsServersUnsupportedError
+from app.services.kresd_subnets import ClientSubnetsUnsupportedError
+from app.services.openvpn_tuning import OpenVpnTuningUnsupportedError
 from app.services.node_health import NODE_AGENT_VERSION, build_health_payload
 from app.services.node_update import apply_node_update, check_agent_updates, resolve_repo_root
 from app.services.openvpn_management import openvpn_management_service
@@ -48,6 +54,7 @@ from app.services.warper import WarperService, build_ip_ranges_text_from_items, 
 from app.services.awg2 import Awg2Service, is_awg2_profile_path
 
 _settings = get_settings()
+logger = logging.getLogger(__name__)
 
 HTTP_TIMEOUT = 120.0
 _TELEGRAM_OIDC_RELAY_TIMEOUT = httpx.Timeout(30.0, connect=5.0)
@@ -81,6 +88,141 @@ def _effective_timeout(timeout: float | httpx.Timeout | None) -> float | httpx.T
             pool=_capped(timeout.pool, cap),
         )
     return _capped(timeout, cap)
+
+
+# Requests allowed to run for minutes (patch build, backups, config apply, node update)
+# bypass the per-node slot: holding it for their whole duration would stall the node UI.
+LONG_REQUEST_TIMEOUT_SECONDS = 180.0
+
+# One keep-alive client per node endpoint: every call for the same node reuses the
+# connection pool instead of opening a new TCP/TLS session per request.
+_HTTP_CLIENTS: dict[tuple[str, bool, float], httpx.Client] = {}
+_HTTP_CLIENTS_LOCK = threading.Lock()
+
+
+def shared_http_client(
+    base_url: str,
+    mtls_enabled: bool,
+    verify,
+    *,
+    timeout: float,
+) -> httpx.Client:
+    key = (base_url, mtls_enabled, float(timeout))
+    with _HTTP_CLIENTS_LOCK:
+        client = _HTTP_CLIENTS.get(key)
+        if client is None:
+            kwargs: dict[str, Any] = {}
+            if verify is not None:
+                kwargs["verify"] = verify
+            client = httpx.Client(timeout=timeout, **kwargs)
+            _HTTP_CLIENTS[key] = client
+        return client
+
+
+def close_shared_http_clients() -> None:
+    with _HTTP_CLIENTS_LOCK:
+        clients = list(_HTTP_CLIENTS.values())
+        _HTTP_CLIENTS.clear()
+    for client in clients:
+        try:
+            client.close()
+        except Exception:
+            logger.debug("Failed to close shared node HTTP client", exc_info=True)
+
+
+atexit.register(close_shared_http_clients)
+
+
+def _timeout_seconds(timeout: float | httpx.Timeout | None) -> float:
+    if not isinstance(timeout, httpx.Timeout):
+        return float(timeout or 0)
+    parts = (timeout.connect, timeout.read, timeout.write, timeout.pool)
+    return max((float(p) for p in parts if p is not None), default=0.0)
+
+
+@contextmanager
+def node_request_slot(gate_key: str, timeout: float | httpx.Timeout | None) -> Iterator[None]:
+    # Long admin requests bypass the slot; a full interactive wait becomes node_busy.
+    from app.services.node_http_gate import (
+        NodeHttpTimeout,
+        hold_node_http,
+        node_http_gate_bypass,
+    )
+    from app.services.node_link_errors import CODE_BUSY, raise_link_error
+
+    try:
+        if _timeout_seconds(timeout) >= LONG_REQUEST_TIMEOUT_SECONDS:
+            with node_http_gate_bypass():
+                yield
+            return
+        with hold_node_http(gate_key):
+            yield
+    except NodeHttpTimeout:
+        raise_link_error(CODE_BUSY, "Узел занят другой операцией — повторите через несколько секунд")
+
+
+def node_agent_request(
+    method: str,
+    url: str,
+    *,
+    client: httpx.Client,
+    headers: dict[str, str],
+    timeout: float | httpx.Timeout | None,
+    mtls_enabled: bool,
+    gate_key: str | None = None,
+    raw: bool = False,
+    agent_label: str | None = None,
+    **kwargs: Any,
+) -> Any:
+    """One agent HTTP call with link-error classification.
+
+    ``gate_key`` enables the per-node concurrency slot, ``raw`` returns bytes and
+    ``agent_label`` rewrites «агенту узла» in error texts (proxy_agent).
+    """
+    from app.services.node_link_errors import (
+        classify_http_status,
+        classify_request_error,
+        raise_link_error,
+    )
+
+    slot = node_request_slot(gate_key, timeout) if gate_key is not None else nullcontext()
+    with slot:
+        try:
+            response = client.request(
+                method,
+                url,
+                headers=headers,
+                timeout=timeout,
+                **kwargs,
+            )
+        except httpx.RequestError as exc:
+            code, message = classify_request_error(exc, mtls_enabled=mtls_enabled)
+            if agent_label:
+                message = message.replace("агенту узла", agent_label).replace("агента узла", agent_label)
+            raise_link_error(code, message)
+
+        if response.status_code >= 400:
+            detail = response.text
+            from_agent = False
+            try:
+                data = response.json()
+                detail = data.get("detail", detail)
+                from_agent = True
+            except Exception:
+                pass
+            code, message = classify_http_status(
+                response.status_code,
+                detail,
+                mtls_enabled=mtls_enabled,
+                from_agent=from_agent,
+            )
+            raise_link_error(code, message, upstream_status=response.status_code)
+
+        if raw:
+            return response.content
+        if response.status_code == 204 or not response.content:
+            return None
+        return response.json()
 
 
 class NodeAdapter(ABC):
@@ -168,7 +310,39 @@ class NodeAdapter(ABC):
     def write_config_file(self, filename: str, content: str) -> None: ...
 
     @abstractmethod
-    def apply_config_changes(self) -> str: ...
+    def apply_config_changes(self, *, ips_only: bool = False) -> str: ...
+
+    def get_dns_servers(self) -> dict[str, Any]:
+        """Выбор DNS-резолверов: есть только у VPN-узлов (LocalAdapter / RemoteAdapter)."""
+        raise NotImplementedError("выбор DNS-серверов доступен только на VPN-узле")
+
+    def apply_dns_servers(self, *, antizapret: int, vpn: int) -> dict[str, Any]:
+        raise NotImplementedError("выбор DNS-серверов доступен только на VPN-узле")
+
+    def apply_client_subnets(
+        self, *, alternative_client_ip: bool, alternative_fake_ip: bool
+    ) -> dict[str, Any]:
+        """Подсети клиентов в kresd.conf, fake-IP в proxy.py и services.env AZ-AWG2."""
+        raise NotImplementedError("подсети клиентов доступны только на VPN-узле")
+
+    def get_openvpn_tuning(self) -> dict[str, Any]:
+        """Состояние server conf OpenVPN: дубликаты, логи, MTU, DCO, патч."""
+        raise NotImplementedError("настройки OpenVPN доступны только на VPN-узле")
+
+    def apply_openvpn_tuning(self, *, duplicate: bool, logs: bool) -> dict[str, Any]:
+        raise NotImplementedError("настройки OpenVPN доступны только на VPN-узле")
+
+    def apply_mtu(self, *, openvpn_mtu: int | None = None, wireguard_mtu: int | None = None) -> dict[str, Any]:
+        raise NotImplementedError("MTU доступен только на VPN-узле")
+
+    def apply_dco(self, enabled: bool) -> dict[str, Any]:
+        raise NotImplementedError("DCO доступен только на VPN-узле")
+
+    def apply_protocols(self, targets: dict[str, bool]) -> dict[str, Any]:
+        raise NotImplementedError("протоколы доступны только на VPN-узле")
+
+    def apply_openvpn_patch(self, algorithm: int) -> dict[str, Any]:
+        raise NotImplementedError("патч OpenVPN доступен только на VPN-узле")
 
     @abstractmethod
     def get_server_ip(self) -> str | None: ...
@@ -271,6 +445,12 @@ class NodeAdapter(ABC):
 
     @abstractmethod
     def kill_openvpn_client(self, unit: str, client_name: str) -> dict: ...
+
+    @abstractmethod
+    def kill_openvpn_session(self, unit: str, client_id: int) -> dict: ...
+
+    @abstractmethod
+    def get_openvpn_global_stats(self) -> dict[str, Any]: ...
 
     @abstractmethod
     def disconnect_openvpn_client(self, client_name: str) -> dict: ...
@@ -769,8 +949,40 @@ class LocalNodeAdapter(NodeAdapter):
     def write_config_file(self, filename: str, content: str) -> None:
         return self._service.write_config_file(filename, content)
 
-    def apply_config_changes(self) -> str:
-        return self._service.apply_config_changes()
+    def apply_config_changes(self, *, ips_only: bool = False) -> str:
+        return self._service.apply_config_changes(ips_only=ips_only)
+
+    def get_dns_servers(self) -> dict[str, Any]:
+        return self._service.get_dns_servers()
+
+    def apply_dns_servers(self, *, antizapret: int, vpn: int) -> dict[str, Any]:
+        return self._service.apply_dns_servers(antizapret=antizapret, vpn=vpn)
+
+    def apply_client_subnets(
+        self, *, alternative_client_ip: bool, alternative_fake_ip: bool
+    ) -> dict[str, Any]:
+        return self._service.apply_client_subnets(
+            alternative_client_ip=alternative_client_ip,
+            alternative_fake_ip=alternative_fake_ip,
+        )
+
+    def get_openvpn_tuning(self) -> dict[str, Any]:
+        return self._service.get_openvpn_tuning()
+
+    def apply_openvpn_tuning(self, *, duplicate: bool, logs: bool) -> dict[str, Any]:
+        return self._service.apply_openvpn_tuning(duplicate=duplicate, logs=logs)
+
+    def apply_mtu(self, *, openvpn_mtu: int | None = None, wireguard_mtu: int | None = None) -> dict[str, Any]:
+        return self._service.apply_mtu(openvpn_mtu=openvpn_mtu, wireguard_mtu=wireguard_mtu)
+
+    def apply_dco(self, enabled: bool) -> dict[str, Any]:
+        return self._service.apply_dco(enabled)
+
+    def apply_protocols(self, targets: dict[str, bool]) -> dict[str, Any]:
+        return self._service.apply_protocols(targets)
+
+    def apply_openvpn_patch(self, algorithm: int) -> dict[str, Any]:
+        return self._service.apply_openvpn_patch(algorithm)
 
     def get_server_ip(self) -> str | None:
         return self._service.get_server_ip()
@@ -896,6 +1108,13 @@ class LocalNodeAdapter(NodeAdapter):
     def kill_openvpn_client(self, unit: str, client_name: str) -> dict:
         profile_key = normalize_watch_unit(unit) or unit
         return openvpn_management_service.kill_client(profile_key, client_name)
+
+    def kill_openvpn_session(self, unit: str, client_id: int) -> dict:
+        profile_key = normalize_watch_unit(unit) or unit
+        return openvpn_management_service.kill_client_by_id(profile_key, client_id)
+
+    def get_openvpn_global_stats(self) -> dict[str, Any]:
+        return openvpn_management_service.collect_global_stats()
 
     def disconnect_openvpn_client(self, client_name: str) -> dict:
         return openvpn_management_service.disconnect_client(client_name)
@@ -1153,17 +1372,20 @@ class RemoteNodeAdapter(NodeAdapter):
         self.api_key = api_key
         self._verify = build_node_agent_ssl_context(mtls_enabled=mtls_enabled)
         self._overview_cache_key = monitoring_overview_cache_key(host, port)
-        self._http_client: httpx.Client | None = None
+        from app.services.node_http_gate import node_http_gate_key
+
+        self._http_gate_key = node_http_gate_key(host, port)
 
     def _get_http_client(self) -> httpx.Client:
-        if self._http_client is None:
-            self._http_client = httpx.Client(timeout=HTTP_TIMEOUT, **self._client_kwargs())
-        return self._http_client
+        return shared_http_client(
+            self.base_url,
+            self._mtls_enabled,
+            self._verify,
+            timeout=HTTP_TIMEOUT,
+        )
 
     def close(self) -> None:
-        if self._http_client is not None:
-            self._http_client.close()
-            self._http_client = None
+        """The client is shared per endpoint and closed at process shutdown."""
 
     def _get_monitoring_overview(self) -> dict[str, Any]:
         ttl = max(0, int(_settings.monitoring_overview_cache_ttl_seconds))
@@ -1183,61 +1405,34 @@ class RemoteNodeAdapter(NodeAdapter):
             kwargs["verify"] = self._verify
         return kwargs
 
-    def _format_connection_error(self, exc: httpx.RequestError) -> str:
-        from app.services.node_link_errors import classify_request_error
-
-        _code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
-        return message
-
-    def _request(self, method: str, path: str, **kwargs) -> Any:
-        from app.services.node_link_errors import (
-            classify_http_status,
-            classify_request_error,
-            raise_link_error,
-        )
-
-        url = f"{self.base_url}{path}"
+    def _request(self, method: str, path: str, *, raw: bool = False, **kwargs) -> Any:
         timeout = _effective_timeout(kwargs.pop("timeout", HTTP_TIMEOUT))
-        headers = {**self._headers(), **kwargs.pop("headers", {})}
-        try:
-            client = self._get_http_client()
-            response = client.request(
-                method,
-                url,
-                headers=headers,
-                timeout=timeout,
-                **kwargs,
-            )
-        except httpx.RequestError as exc:
-            code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
-            raise_link_error(code, message)
-
-        if response.status_code >= 400:
-            detail = response.text
-            try:
-                data = response.json()
-                detail = data.get("detail", detail)
-            except Exception:
-                pass
-            code, message = classify_http_status(
-                response.status_code, detail, mtls_enabled=self._mtls_enabled
-            )
-            raise_link_error(code, message, upstream_status=response.status_code)
-
-        if response.status_code == 204 or not response.content:
-            return None
-        return response.json()
+        return node_agent_request(
+            method,
+            f"{self.base_url}{path}",
+            client=self._get_http_client(),
+            headers={**self._headers(), **kwargs.pop("headers", {})},
+            timeout=timeout,
+            mtls_enabled=self._mtls_enabled,
+            gate_key=self._http_gate_key,
+            raw=raw,
+            **kwargs,
+        )
 
     def telegram_bot_api(
         self, token: str, method: str, body: bytes, content_type: str, *, timeout: httpx.Timeout
     ) -> dict:
-        return self._request(
-            "POST",
-            f"/telegram/bot-api/{method}",
-            content=body,
-            headers={"X-Telegram-Bot-Token": token, "Content-Type": content_type},
-            timeout=timeout,
-        )
+        # Relay traffic (including long-poll getUpdates) is not agent VPN work.
+        from app.services.node_http_gate import node_http_gate_bypass
+
+        with node_http_gate_bypass():
+            return self._request(
+                "POST",
+                f"/telegram/bot-api/{method}",
+                content=body,
+                headers={"X-Telegram-Bot-Token": token, "Content-Type": content_type},
+                timeout=timeout,
+            )
 
     def telegram_oidc_token(self, body: bytes, authorization: str) -> dict:
         return self._request(
@@ -1255,39 +1450,7 @@ class RemoteNodeAdapter(NodeAdapter):
         return self._request("GET", "/telegram/oidc/jwks", timeout=_TELEGRAM_OIDC_RELAY_TIMEOUT)
 
     def _request_bytes(self, method: str, path: str, **kwargs) -> bytes:
-        from app.services.node_link_errors import (
-            classify_http_status,
-            classify_request_error,
-            raise_link_error,
-        )
-
-        url = f"{self.base_url}{path}"
-        timeout = _effective_timeout(kwargs.pop("timeout", HTTP_TIMEOUT))
-        try:
-            client = self._get_http_client()
-            response = client.request(
-                method,
-                url,
-                headers=self._headers(),
-                timeout=timeout,
-                **kwargs,
-            )
-        except httpx.RequestError as exc:
-            code, message = classify_request_error(exc, mtls_enabled=self._mtls_enabled)
-            raise_link_error(code, message)
-
-        if response.status_code >= 400:
-            detail = response.text
-            try:
-                data = response.json()
-                detail = data.get("detail", detail)
-            except Exception:
-                pass
-            code, message = classify_http_status(
-                response.status_code, detail, mtls_enabled=self._mtls_enabled
-            )
-            raise_link_error(code, message, upstream_status=response.status_code)
-        return response.content
+        return self._request(method, path, raw=True, **kwargs)
 
     def health_check(self) -> dict[str, Any]:
         return self._request("GET", "/health", timeout=10.0)
@@ -1517,7 +1680,7 @@ class RemoteNodeAdapter(NodeAdapter):
         try:
             yield
         except HTTPException as exc:
-            if exc.status_code == status.HTTP_400_BAD_REQUEST and filename in FILES_SINCE_AGENT_1_11:
+            if exc.status_code == status.HTTP_400_BAD_REQUEST and filename in AGENT_GATED_FILES:
                 raise ConfigFileUnsupportedError(filename) from exc
             raise
 
@@ -1532,9 +1695,98 @@ class RemoteNodeAdapter(NodeAdapter):
         with self._config_file_request(filename):
             self._request("PUT", f"/configs/files/{filename}", json={"content": content}, timeout=timeout)
 
-    def apply_config_changes(self) -> str:
-        data = self._request("POST", "/configs/apply", timeout=300.0)
+    def apply_config_changes(self, *, ips_only: bool = False) -> str:
+        """``ips_only`` asks for a CIDR-only doall; old agents answer 404/422 → full doall.
+
+        The panel timeout outlives the agent timeout, otherwise a slow but alive node is
+        reported as failed while the agent keeps writing its config.
+        """
+        timeout = apply_agent_timeout_seconds()
+        try:
+            data = self._request(
+                "POST", "/configs/apply", json={"ips_only": bool(ips_only)}, timeout=timeout
+            )
+        except HTTPException as exc:
+            if not ips_only or exc.status_code not in (
+                status.HTTP_404_NOT_FOUND,
+                status.HTTP_422_UNPROCESSABLE_ENTITY,
+            ):
+                raise
+            logger.warning(
+                "node agent %s: ips_only не поддерживается (HTTP %s) — выполняется полный doall.sh",
+                self.base_url,
+                exc.status_code,
+            )
+            data = self._request("POST", "/configs/apply", timeout=timeout)
         return data.get("detail") or data.get("message", "ok")
+
+    def _dns_servers_request(self, method: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        try:
+            if method == "GET":
+                return self._request("GET", "/configs/dns-servers")
+            # Два перезапуска kresd плюс возможный перезапуск antizapret.
+            return self._request("PUT", "/configs/dns-servers", json=payload or {}, timeout=180.0)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                raise DnsServersUnsupportedError() from exc
+            raise
+
+    def get_dns_servers(self) -> dict[str, Any]:
+        return self._dns_servers_request("GET")
+
+    def apply_dns_servers(self, *, antizapret: int, vpn: int) -> dict[str, Any]:
+        return self._dns_servers_request("PUT", {"antizapret": antizapret, "vpn": vpn})
+
+    def apply_client_subnets(
+        self, *, alternative_client_ip: bool, alternative_fake_ip: bool
+    ) -> dict[str, Any]:
+        payload = {
+            "alternative_client_ip": alternative_client_ip,
+            "alternative_fake_ip": alternative_fake_ip,
+        }
+        try:
+            # Три резолвера и два awg-quick: перезапуск может занять до минуты.
+            return self._request("PUT", "/configs/client-subnets", json=payload, timeout=240.0)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                raise ClientSubnetsUnsupportedError() from exc
+            raise
+
+    def _openvpn_request(
+        self, method: str, path: str, payload: dict[str, Any] | None = None, *, timeout: float = 60.0
+    ) -> dict[str, Any]:
+        try:
+            return self._request(method, path, json=payload or {}, timeout=timeout)
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_404_NOT_FOUND:
+                raise OpenVpnTuningUnsupportedError() from exc
+            raise
+
+    def get_openvpn_tuning(self) -> dict[str, Any]:
+        return self._openvpn_request("GET", "/openvpn/tuning")
+
+    def apply_openvpn_tuning(self, *, duplicate: bool, logs: bool) -> dict[str, Any]:
+        return self._openvpn_request(
+            "PUT", "/openvpn/tuning", {"duplicate": duplicate, "logs": logs}, timeout=240.0
+        )
+
+    def apply_mtu(self, *, openvpn_mtu: int | None = None, wireguard_mtu: int | None = None) -> dict[str, Any]:
+        return self._openvpn_request(
+            "PUT",
+            "/openvpn/mtu",
+            {"openvpn": openvpn_mtu, "wireguard": wireguard_mtu},
+            timeout=240.0,
+        )
+
+    def apply_dco(self, enabled: bool) -> dict[str, Any]:
+        return self._openvpn_request("PUT", "/openvpn/dco", {"enabled": enabled}, timeout=240.0)
+
+    def apply_protocols(self, targets: dict[str, bool]) -> dict[str, Any]:
+        return self._openvpn_request("PUT", "/openvpn/protocols", {"units": targets}, timeout=300.0)
+
+    def apply_openvpn_patch(self, algorithm: int) -> dict[str, Any]:
+        # Сборка OpenVPN из исходников: до 30 минут, как и в агенте.
+        return self._openvpn_request("POST", "/openvpn/patch", {"algorithm": algorithm}, timeout=1800.0)
 
     def get_server_ip(self) -> str | None:
         try:
@@ -1596,6 +1848,18 @@ class RemoteNodeAdapter(NodeAdapter):
             json=payload,
             timeout=30.0,
         )
+
+    def kill_openvpn_session(self, unit: str, client_id: int) -> dict:
+        payload = {"unit": unit, "client_id": int(client_id)}
+        return self._request(
+            "POST",
+            "/openvpn/management/client-kill",
+            json=payload,
+            timeout=30.0,
+        )
+
+    def get_openvpn_global_stats(self) -> dict[str, Any]:
+        return self._request("GET", "/openvpn/management/global-stats", timeout=30.0)
 
     def parse_wireguard_status(self) -> list[WireGuardPeer]:
         overview = self._get_monitoring_overview()

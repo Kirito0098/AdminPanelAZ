@@ -32,12 +32,15 @@ def main() -> int:
             chat = os.environ.get("WIZ_TELEGRAM_CHAT_ID", "").strip()
             if token:
                 _set(db, "telegram_bot_token", token)
+                # Без токена не включаем уведомления: панель показывала бы «включено» без бота.
+                _set(db, "telegram_notify_enabled", "true")
             if chat:
                 _set(db, "telegram_chat_id", chat)
-            _set(db, "telegram_notify_enabled", "true")
 
-        if os.environ.get("WIZ_AUTO_BACKUP_ENABLED") == "true":
-            _set(db, "backup_auto_enabled", "true")
+        # Мастер всегда выбирает «включить / свой срок / выключить» — пишем решение явно.
+        backup_enabled = os.environ.get("WIZ_AUTO_BACKUP_ENABLED", "").strip().lower()
+        if backup_enabled in {"true", "false"}:
+            _set(db, "backup_auto_enabled", backup_enabled)
             days = os.environ.get("WIZ_AUTO_BACKUP_DAYS", "7").strip() or "7"
             _set(db, "backup_auto_days", days)
 

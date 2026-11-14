@@ -24,10 +24,12 @@ EDITABLE_FILES: dict[str, str] = {
     "exclude_warp_hosts": "exclude-warp-hosts.txt",
     "deny_rpz": "deny-rpz.txt",
     "deny2_rpz": "deny2-rpz.txt",
+    "deny3_rpz": "deny3-rpz.txt",
     "warp_rpz": "warp-rpz.txt",
     "proxy_rpz": "proxy-rpz.txt",
     "kresd_custom": "custom.lua",
     "kresd_custom2": "custom2.lua",
+    "kresd_custom3": "custom3.lua",
 }
 
 FILE_TITLES: dict[str, str] = {
@@ -46,16 +48,20 @@ FILE_TITLES: dict[str, str] = {
     "exclude_warp_hosts": "WARP — исключить домены",
     "deny_rpz": "RPZ — блокировка (AntiZapret)",
     "deny2_rpz": "RPZ — блокировка (полный VPN)",
+    "deny3_rpz": "RPZ — блокировка (Proxy DNS)",
     "warp_rpz": "RPZ — через WARP",
     "proxy_rpz": "RPZ — через AntiZapret",
     "kresd_custom": "DNS-политики (AntiZapret)",
     "kresd_custom2": "DNS-политики (полный VPN)",
+    "kresd_custom3": "DNS-политики (Proxy DNS)",
 }
 
-# Knot Resolver files live in /etc/knot-resolver, not config/; kresd@1 loads custom.lua, kresd@2 custom2.lua.
+# Knot Resolver files live in /etc/knot-resolver, not config/; kresd@1 loads custom.lua,
+# kresd@2 custom2.lua, kresd@3 custom3.lua (Proxy DNS, AntiZapret-VPN с 19.10.2026).
 KRESD_CUSTOM_UNITS: dict[str, str] = {
     "custom.lua": "kresd@1",
     "custom2.lua": "kresd@2",
+    "custom3.lua": "kresd@3",
 }
 
 # Node agents before 1.11.0 reject these names: their allowlist predates the files.
@@ -67,18 +73,31 @@ FILES_SINCE_AGENT_1_11: frozenset[str] = frozenset(
         "deny2-rpz.txt",
         "warp-rpz.txt",
         "proxy-rpz.txt",
-        *KRESD_CUSTOM_UNITS,
+        "custom.lua",
+        "custom2.lua",
     }
 )
+
+# Proxy DNS (третий резолвер kresd@3 и его RPZ) — AntiZapret-VPN с 19.10.2026.
+# Агент старше 1.14.0 отвечает на эти имена 400: в его allowlist файлов их нет.
+FILES_SINCE_AGENT_1_14: frozenset[str] = frozenset({"custom3.lua", "deny3-rpz.txt"})
+
+# Каждое имя с планкой → версия node agent, которая его впервые принимает.
+MIN_AGENT_VERSION_FOR_FILE: dict[str, str] = {
+    **dict.fromkeys(FILES_SINCE_AGENT_1_11, "1.11.0"),
+    **dict.fromkeys(FILES_SINCE_AGENT_1_14, "1.14.0"),
+}
+AGENT_GATED_FILES: frozenset[str] = frozenset(MIN_AGENT_VERSION_FOR_FILE)
 
 
 class ConfigFileUnsupportedError(HTTPException):
     """The node agent is too old to read or write this file."""
 
     def __init__(self, filename: str):
+        version = MIN_AGENT_VERSION_FOR_FILE.get(filename, "1.14.0")
         super().__init__(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Обновите node agent панели на узле — файл {filename} поддерживается с node agent 1.11.0",
+            detail=f"Обновите node agent панели на узле — файл {filename} поддерживается с node agent {version}",
         )
         self.filename = filename
 

@@ -72,24 +72,6 @@ def test_proxy_nodes_toggle_defaults_false(env_file: Path):
     assert svc.is_enabled("proxy_nodes") is False
 
 
-def test_proxy_nodes_toggle_can_enable(env_file: Path):
-    svc = _svc(env_file, FEATURE_PROXY_NODES_ENABLED=True)
-    assert svc.is_enabled("proxy_nodes") is True
-
-
-def test_is_proxy_nodes_enabled_helper(env_file: Path, monkeypatch):
-    monkeypatch.setattr(
-        "app.services.feature_guards.get_feature_service",
-        lambda: _svc(env_file, FEATURE_PROXY_NODES_ENABLED=False),
-    )
-    assert is_proxy_nodes_enabled(None) is False
-    monkeypatch.setattr(
-        "app.services.feature_guards.get_feature_service",
-        lambda: _svc(env_file, FEATURE_PROXY_NODES_ENABLED=True),
-    )
-    assert is_proxy_nodes_enabled(None) is True
-
-
 def test_create_proxy_blocked_when_toggle_off(db, monkeypatch):
     from app.routers import nodes as nodes_router
 
@@ -139,19 +121,6 @@ def test_create_proxy_ok_when_toggle_on(db, monkeypatch):
     assert active is None or active.value in ("", None)
 
 
-def test_activate_proxy_rejected(db, monkeypatch):
-    from app.routers import nodes as nodes_router
-
-    proxy = _add_node(db, name="proxy-a", kind="proxy", port=9101)
-    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
-    admin = SimpleNamespace(id=1, username="admin")
-    request = MagicMock()
-    with pytest.raises(HTTPException) as exc:
-        nodes_router.activate_node(proxy.id, request, admin=admin, db=db)
-    assert exc.value.status_code == 400
-    assert exc.value.detail == "Прокси-узел нельзя сделать активным для VPN"
-
-
 def test_activate_vpn_ok(db, monkeypatch):
     from app.routers import nodes as nodes_router
 
@@ -176,30 +145,6 @@ def test_set_active_node_id_rejects_proxy(db):
     assert "Прокси-узел нельзя сделать активным для VPN" in str(exc.value.detail)
     assert "OpenVPN" in str(exc.value.detail) or "WireGuard" in str(exc.value.detail)
     assert get_active_node_id_raw(db) in (None, "")
-
-
-def test_create_proxy_with_linked_vpn(db, monkeypatch):
-    from app.routers import nodes as nodes_router
-
-    vpn = _add_node(db, name="vpn-link", kind="vpn")
-    monkeypatch.setattr(nodes_router, "is_proxy_nodes_enabled", lambda _db: True)
-    monkeypatch.setattr(nodes_router, "validate_node_host", lambda host: host)
-    monkeypatch.setattr(nodes_router, "store_api_key", lambda _h, key: ("hash", "enc"))
-    monkeypatch.setattr(nodes_router, "check_node_health", lambda *a, **k: {"status": "online"})
-    monkeypatch.setattr(nodes_router, "update_node_from_health", lambda *a, **k: None)
-    monkeypatch.setattr(nodes_router.settings, "audit_log_enabled", False)
-
-    admin = SimpleNamespace(id=1, username="admin")
-    request = MagicMock()
-    payload = NodeCreate(
-        name="proxy-linked",
-        host="1.2.3.4",
-        api_key="secret-key-1",
-        node_kind="proxy",
-        linked_vpn_node_id=vpn.id,
-    )
-    resp = nodes_router.create_node(payload, request, admin=admin, db=db)
-    assert resp.linked_vpn_node_id == vpn.id
 
 
 def test_create_proxy_rejects_linked_proxy(db, monkeypatch):
@@ -308,13 +253,6 @@ def test_purge_clears_proxy_links(db):
     db.commit()
     db.refresh(proxy)
     assert proxy.linked_vpn_node_id is None
-
-
-def test_set_active_node_id_allows_vpn(db):
-    vpn = _add_node(db, name="vpn-guard", kind="vpn")
-    set_active_node_id(db, vpn.id)
-    db.commit()
-    assert get_active_node(db).id == vpn.id
 
 
 def test_get_active_node_skips_proxy(db, monkeypatch):

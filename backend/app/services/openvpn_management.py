@@ -8,6 +8,7 @@ import re
 import socket
 import time
 from pathlib import Path
+from typing import Any
 
 from app.config import get_settings
 from app.schemas import OpenVpnClient
@@ -16,6 +17,8 @@ OPENVPN_PROFILES = ("antizapret-tcp", "antizapret-udp", "vpn-tcp", "vpn-udp")
 # One whitespace-free token: a newline would start another management command.
 KILL_CLIENT_NAME_PATTERN = r"^[^\s\x00-\x1f\x7f]+$"
 KILL_CLIENT_NAME_RE = re.compile(KILL_CLIENT_NAME_PATTERN)
+# OpenVPN session id used by ``client-kill``: digits only, so it cannot inject a command.
+CLIENT_ID_RE = re.compile(r"^\d{1,10}$")
 
 _CLIENT_PATTERN = re.compile(
     r"CLIENT_LIST,([^,\n]+),([^,\n]+),([^,\n]*),([^,\n]*),(\d+),(\d+),([^,\n]+),(\d+),([^,\n]*),([^,\n]*),([^,\n]*),([^,\n\r ]+)"
@@ -25,6 +28,40 @@ _CLIENT_PATTERN_TAB = re.compile(
     r"(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(\d+)\s+(\S+)\s+(\d+)\s+(\d+)\s+(\S+)",
     re.MULTILINE,
 )
+
+
+def _status_cell(row: list[str], index: dict[str, int], name: str) -> str:
+    """Column value by header name; empty string when the column is absent/short."""
+    position = index.get(name, -1)
+    return row[position] if 0 <= position < len(row) else ""
+
+
+# GLOBAL_STATS rows report daemon-wide counters: DCO state and the bcast/mcast queue.
+_GLOBAL_STATS_KEYS = {
+    "dco_enabled": "dco_enabled",
+    "max bcast/mcast queue length": "max_bcast_mcast_queue",
+}
+
+
+def parse_global_stats(raw: str) -> dict[str, Any]:
+    """``GLOBAL_STATS`` rows of a status reply → ``{dco_enabled, max_bcast_mcast_queue}``.
+
+    The same rows come comma-separated from status files and tab-separated from the
+    management socket, so both separators are accepted.
+    """
+    stats: dict[str, Any] = {"dco_enabled": None, "max_bcast_mcast_queue": None}
+    for line in (raw or "").splitlines():
+        if not line.startswith("GLOBAL_STATS"):
+            continue
+        cells = [cell.strip() for cell in re.split(r"[\t,]", line)]
+        if len(cells) < 3:
+            continue
+        key = _GLOBAL_STATS_KEYS.get(cells[1].lower())
+        value = cells[2]
+        if key is None or not value.isdigit():
+            continue
+        stats[key] = bool(int(value)) if key == "dco_enabled" else int(value)
+    return stats
 
 
 class OpenVpnManagementService:
@@ -284,6 +321,9 @@ class OpenVpnManagementService:
                     bytes_sent=int(match.group(6) or 0),
                     connected_since=match.group(7).strip(),
                     connected_since_ts=int(match.group(8) or 0),
+                    client_id=(match.group(10) or "").strip() or None,
+                    peer_id=(match.group(11) or "").strip() or None,
+                    cipher=(match.group(12) or "").strip() or None,
                     profile=profile_key,
                     data_source=data_source,
                 )
@@ -302,6 +342,9 @@ class OpenVpnManagementService:
                     bytes_sent=int(match.group(6) or 0),
                     connected_since=match.group(7).strip(),
                     connected_since_ts=int(match.group(8) or 0),
+                    client_id=(match.group(10) or "").strip() or None,
+                    peer_id=(match.group(11) or "").strip() or None,
+                    cipher=(match.group(12) or "").strip() or None,
                     profile=profile_key,
                     data_source=data_source,
                 )
@@ -317,36 +360,43 @@ class OpenVpnManagementService:
 
         clients: list[OpenVpnClient] = []
         reader = csv.reader(io.StringIO(content))
-        in_client_list = False
+        index: dict[str, int] = {}
         for row in reader:
             if not row:
                 continue
-            if row[0] == "HEADER" and len(row) > 1 and row[1] == "CLIENT_LIST":
-                in_client_list = True
-                continue
             if row[0] == "HEADER":
-                in_client_list = False
+                # Columns follow the OpenVPN status version; map them by name so a
+                # version bump cannot silently shift bytes/since into the wrong field.
+                # Header cell N describes data cell N-1 (HEADER,CLIENT_LIST,<cols...>).
+                index = (
+                    {name: position for position, name in enumerate(row[2:], start=1)}
+                    if len(row) > 1 and row[1] == "CLIENT_LIST"
+                    else {}
+                )
                 continue
-            if row[0] == "END":
-                in_client_list = False
+            if row[0] != "CLIENT_LIST" or not index:
                 continue
-            if in_client_list and row[0] == "CLIENT_LIST" and len(row) >= 9:
-                try:
-                    clients.append(
-                        OpenVpnClient(
-                            common_name=row[1],
-                            real_address=row[2],
-                            virtual_address=row[3],
-                            bytes_received=int(row[6] or 0),
-                            bytes_sent=int(row[7] or 0),
-                            connected_since=row[8],
-                            connected_since_ts=int(row[8]) if str(row[8]).isdigit() else 0,
-                            profile=profile_key,
-                            data_source="status_log",
-                        )
+            try:
+                clients.append(
+                    OpenVpnClient(
+                        common_name=_status_cell(row, index, "Common Name"),
+                        real_address=_status_cell(row, index, "Real Address"),
+                        virtual_address=_status_cell(row, index, "Virtual Address"),
+                        bytes_received=int(_status_cell(row, index, "Bytes Received") or 0),
+                        bytes_sent=int(_status_cell(row, index, "Bytes Sent") or 0),
+                        connected_since=_status_cell(row, index, "Connected Since"),
+                        connected_since_ts=int(
+                            _status_cell(row, index, "Connected Since (time_t)") or 0
+                        ),
+                        client_id=_status_cell(row, index, "Client ID") or None,
+                        peer_id=_status_cell(row, index, "Peer ID") or None,
+                        cipher=_status_cell(row, index, "Data Channel Cipher") or None,
+                        profile=profile_key,
+                        data_source="status_log",
                     )
-                except (ValueError, IndexError):
-                    continue
+                )
+            except ValueError:
+                continue
         return clients
 
     def collect_clients(self, status_log_dir: Path | str | None = None) -> tuple[list[OpenVpnClient], str]:
@@ -370,11 +420,17 @@ class OpenVpnManagementService:
                 continue
 
             if log_dir:
-                log_file = log_dir / f"{profile_key}-status.log"
-                parsed = self.parse_clients_from_status_log_file(log_file, profile_key)
-                if parsed:
-                    used_logs = True
-                    clients.extend(parsed)
+                # systemd writes ``status-<profile>.log`` (%t/openvpn-server);
+                # older installs used ``<profile>-status.log`` in logs/.
+                for candidate in (
+                    log_dir / f"status-{profile_key}.log",
+                    log_dir / f"{profile_key}-status.log",
+                ):
+                    parsed = self.parse_clients_from_status_log_file(candidate, profile_key)
+                    if parsed:
+                        used_logs = True
+                        clients.extend(parsed)
+                        break
 
         if used_socket:
             return clients, "management_socket"
@@ -427,6 +483,30 @@ class OpenVpnManagementService:
             "raw": raw[:500],
         }
 
+    def kill_client_by_id(self, profile_key: str, client_id: str | int) -> dict:
+        """Force-disconnect ONE OpenVPN session (``client-kill <CID>``, OpenVPN 2.6+).
+
+        ``kill_client`` kills every session of a client name (all devices); this one
+        targets a single connected device.
+        """
+        socket_path = self.openvpn_socket_path(profile_key)
+        value = str(client_id if client_id is not None else "").strip()
+        if not CLIENT_ID_RE.fullmatch(value):
+            return {"success": False, "client_id": value, "message": "Недопустимый Client ID"}
+        if not socket_path.exists():
+            return {"success": False, "message": f"Сокет {profile_key} недоступен"}
+        raw = self.query_openvpn_management_socket(socket_path, f"client-kill {value}")
+        lines = [line.strip() for line in raw.splitlines()]
+        success = any(line.startswith("SUCCESS:") for line in lines)
+        error = next((line for line in lines if line.startswith("ERROR:")), "")
+        return {
+            "success": success,
+            "profile": profile_key,
+            "client_id": int(value),
+            "message": "Устройство отключено" if success else (error or "Не удалось отключить устройство"),
+            "raw": raw[:500],
+        }
+
     def disconnect_client(self, client_name: str) -> dict:
         """Try kill on all profiles where client is connected."""
         for profile_key in OPENVPN_PROFILES:
@@ -439,6 +519,21 @@ class OpenVpnManagementService:
                 if result.get("success"):
                     return result
         return {"success": False, "message": f"Клиент {client_name} не найден среди подключённых"}
+
+    def collect_global_stats(self) -> dict[str, Any]:
+        """``GLOBAL_STATS`` across live profiles: DCO state and the bcast/mcast queue."""
+        merged: dict[str, Any] = {"dco_enabled": None, "max_bcast_mcast_queue": None}
+        for profile_key in OPENVPN_PROFILES:
+            socket_path = self.openvpn_socket_path(profile_key)
+            if not socket_path.exists():
+                continue
+            stats = parse_global_stats(self.query_openvpn_management_socket(socket_path, "status 3"))
+            if stats["dco_enabled"] is not None:
+                merged["dco_enabled"] = bool(merged["dco_enabled"]) or stats["dco_enabled"]
+            queue = stats["max_bcast_mcast_queue"]
+            if queue is not None and (merged["max_bcast_mcast_queue"] is None or queue > merged["max_bcast_mcast_queue"]):
+                merged["max_bcast_mcast_queue"] = queue
+        return merged
 
     def get_socket_status(self) -> list[dict]:
         rows: list[dict] = []

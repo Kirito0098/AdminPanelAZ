@@ -14,13 +14,19 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import User, UserRole
-from app.services.app_setting_store import _get_setting
+from app.services.admin_panel_notifications import (
+    bell_title,
+    humanize_bell_message,
+    write_admin_panel_notification,
+)
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.admin_notify_settings_text import (
     parse_mini_details_kv,
     user_action_tg_action_line,
 )
 from app.services.feature_guards import get_feature_service
 from app.services.notify_time import format_notify_when, resolve_notify_timezone
+from app.services.protocols import CANONICAL_PROTOCOLS, normalize_protocol, protocol_label
 from app.services.notify_backends import dispatch_admin_notify, register_notify_backend
 from app.services.telegram import send_tg_message
 from app.services.telegram_recipients import filter_notify_recipients
@@ -29,9 +35,23 @@ from app.services.user_agent_format import format_user_agent_label, is_mobile_us
 from app.services.traffic_limit import (
     format_traffic_limit_period_label,
     format_traffic_limit_unblock_at,
+    human_bytes,
 )
 
 logger = logging.getLogger(__name__)
+
+# Действия админа в панели: автору они не приходят как новые — ни в колокол, ни в Telegram.
+# Ошибки, входы, напоминания и результаты фоновых задач сюда не входят: их автору видно.
+SELF_ACTION_EVENTS = frozenset(
+    {
+        "config_create",
+        "config_delete",
+        "user_create",
+        "user_delete",
+        "client_ban",
+        "settings_change",
+    }
+)
 
 TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("login_success", "Успешный вход"),
@@ -58,18 +78,32 @@ TG_NOTIFY_EVENT_LABELS: list[tuple[str, str]] = [
     ("node_sync_drift", "HA: расхождение основного узла и реплики"),
     ("cidr_deploy_failed", "Ошибка развёртывания CIDR"),
     ("cidr_ingest_partial", "Частичное обновление CIDR БД"),
+    ("cidr_rollback_failed", "Ошибка отката CIDR"),
     ("noc_report", "NOC: ежедневная/еженедельная сводка"),
     ("alert_rule", "Alert rule: срабатывание порога"),
     ("openvpn_buffer_guard_triggered", "OpenVPN Buffer Guard"),
+    ("bulk_user_nodes", "Массовая операция с серверами"),
+    ("access_request", "Заявки на доступ"),
+    ("user_message", "Сообщения в чат"),
+    ("unlock_redeem", "Активация unlock-ключа"),
 ]
 
 TG_NOTIFY_EVENT_GROUPS: list[tuple[str, str, str, tuple[str, ...]]] = [
     ("login", "Входы", "🔐", ("login_success", "login_failed", "tg_unlinked")),
+    ("requests", "Заявки и сообщения", "📨", ("access_request", "user_message", "unlock_redeem")),
     (
         "clients",
         "Клиенты и пользователи",
         "👥",
-        ("config_create", "config_delete", "user_create", "user_delete", "client_ban", "traffic_limit"),
+        (
+            "config_create",
+            "config_delete",
+            "user_create",
+            "user_delete",
+            "client_ban",
+            "traffic_limit",
+            "bulk_user_nodes",
+        ),
     ),
     (
         "reminders",
@@ -91,7 +125,7 @@ TG_NOTIFY_EVENT_GROUPS: list[tuple[str, str, str, tuple[str, ...]]] = [
     ("settings", "Настройки", "⚙️", ("settings_change",)),
     ("load", "Нагрузка", "📊", ("high_cpu", "high_ram")),
     ("nodes_ha", "Узлы и HA", "🖥️", ("node_offline", "node_sync_drift")),
-    ("cidr", "CIDR", "🌐", ("cidr_deploy_failed", "cidr_ingest_partial")),
+    ("cidr", "CIDR", "🌐", ("cidr_deploy_failed", "cidr_ingest_partial", "cidr_rollback_failed")),
     (
         "reports",
         "Отчёты и алерты",
@@ -217,16 +251,7 @@ _PREF_KEY_MAP = {
 
 
 def _mini_protocol_label(raw_value: str | None) -> str:
-    value = (raw_value or "").strip().lower()
-    if value in {"openvpn", "ovpn"}:
-        return "OpenVPN"
-    if value in {"wireguard", "wg"}:
-        return "WireGuard"
-    if value in {"amneziawg", "amnezia"}:
-        return "AmneziaWG"
-    if value in {"amneziawg2", "awg2"}:
-        return "AmneziaWG 2.0"
-    return "неизвестно"
+    return protocol_label(raw_value)
 
 
 def _fmt_code(value: str | None) -> str:
@@ -235,24 +260,19 @@ def _fmt_code(value: str | None) -> str:
 
 
 def _fmt_protocol(target_type: str | None) -> str:
-    kind = str(target_type or "").strip().lower()
-    if kind in {"wireguard", "wg", "amneziawg", "amnezia"}:
-        if kind in {"wireguard", "wg"}:
-            return _mini_protocol_label("wg")
-        return _mini_protocol_label("amneziawg")
-    label = _mini_protocol_label(kind)
-    if label != "неизвестно":
-        return label
-    return ""
+    kind = normalize_protocol(target_type)
+    if kind not in CANONICAL_PROTOCOLS:
+        return ""
+    return protocol_label(kind)
 
 
 def _protocol_emoji(target_type: str | None) -> str:
-    kind = str(target_type or "").strip().lower()
-    if kind in {"openvpn", "ovpn"}:
+    kind = normalize_protocol(target_type)
+    if kind == "openvpn":
         return "🔐"
-    if kind in {"wireguard", "wg"}:
+    if kind == "wireguard":
         return "🛡️"
-    if kind in {"amneziawg", "amnezia", "amneziawg2", "awg2"}:
+    if kind in {"amneziawg", "amneziawg2"}:
         return "🌀"
     return "📄"
 
@@ -379,13 +399,7 @@ def _human_bytes_from_details(raw_value: str | None) -> str:
         size = float(raw_value or 0)
     except (TypeError, ValueError):
         return "0 B"
-    units = ["B", "KB", "MB", "GB", "TB"]
-    idx = 0
-    while size >= 1024 and idx < len(units) - 1:
-        size /= 1024
-        idx += 1
-    precision = 0 if idx == 0 else (2 if size < 10 else 1)
-    return f"{size:.{precision}f} {units[idx]}"
+    return human_bytes(size, small_digits=2) or "0 B"
 
 
 def _build_traffic_limit_message(
@@ -491,14 +505,97 @@ def _build_node_sync_drift_message(details: str | None, when: str) -> str:
     return _format_notify_card("🟠 <b>HA: расхождение</b>", when, detail_lines=detail_lines)
 
 
+_UNLINKED_STATE_KEY = "tg_unlinked_login_notify_state"
+
+
+def _open_notify_state_session() -> Session:
+    """Own short-lived session: the caller's request transaction is never committed here."""
+    from app.database import SessionLocal
+
+    return SessionLocal()
+
+
+def _parse_state_ts(raw: object) -> datetime | None:
+    try:
+        value = datetime.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        return None
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _trim_cooldowns(cooldowns: dict[str, datetime], max_ids: int) -> dict[str, datetime]:
+    """Bound the app_settings key: keep only the newest MAX_IDS telegram ids."""
+    if len(cooldowns) <= max_ids:
+        return cooldowns
+    newest = sorted(cooldowns.items(), key=lambda item: item[1])[-max_ids:]
+    return dict(newest)
+
+
+def _load_unlinked_state(
+    db: Session,
+    *,
+    now: datetime,
+    cooldown_ttl: timedelta,
+    max_ids: int,
+    mini_window: timedelta,
+) -> tuple[dict[str, datetime], list[datetime]]:
+    try:
+        data = json.loads(_get_setting(db, _UNLINKED_STATE_KEY, "{}"))
+    except (TypeError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+
+    cooldowns: dict[str, datetime] = {}
+    raw_cooldowns = data.get("cooldowns")
+    if isinstance(raw_cooldowns, dict):
+        for key, value in raw_cooldowns.items():
+            ts = _parse_state_ts(value)
+            if ts is not None and (now - ts) < cooldown_ttl:
+                cooldowns[str(key)] = ts
+    cooldowns = _trim_cooldowns(cooldowns, max_ids)
+    recent: list[datetime] = []
+    raw_recent = data.get("mini")
+    if isinstance(raw_recent, list):
+        for value in raw_recent:
+            ts = _parse_state_ts(value)
+            if ts is not None and (now - ts) < mini_window:
+                recent.append(ts)
+    return cooldowns, recent
+
+
+def _save_unlinked_state(
+    db: Session,
+    cooldowns: dict[str, datetime],
+    recent: list[datetime],
+) -> None:
+    _set_setting(
+        db,
+        _UNLINKED_STATE_KEY,
+        json.dumps(
+            {
+                "cooldowns": {tg_id: ts.isoformat() for tg_id, ts in cooldowns.items()},
+                "mini": [ts.isoformat() for ts in recent],
+            }
+        ),
+        commit=True,
+    )
+
+
 class AdminNotifyService:
     # Suppress duplicate unlinked-login alerts from double Mini App /auth calls.
     _UNLINKED_NOTIFY_COOLDOWN = timedelta(seconds=60)
+    # Cooldowns live in app_settings, so a restart must not reset them. The key is
+    # bounded: entries older than the TTL are dropped, and at most MAX_IDS survive.
+    _UNLINKED_COOLDOWN_TTL = timedelta(days=1)
+    _UNLINKED_COOLDOWN_MAX_IDS = 200
+    # Global breaker: a stream of distinct accounts must not flood admins and the bell.
+    _UNLINKED_MINI_WINDOW = timedelta(minutes=10)
+    _UNLINKED_MINI_LIMIT = 5
 
     def __init__(self, *, logger_instance: logging.Logger | None = None):
         self.logger = logger_instance or logger
         self._resource_alert_cooldowns: dict[tuple[str, int | None], datetime] = {}
-        self._unlinked_login_cooldowns: dict[str, datetime] = {}
         self._monitor_lock = threading.Lock()
 
     def send_tg_login_unlinked(
@@ -513,12 +610,8 @@ class AdminNotifyService:
         tg_id = (telegram_id or "").strip()
         if not tg_id:
             return
-        now = datetime.now(timezone.utc)
-        with self._monitor_lock:
-            last = self._unlinked_login_cooldowns.get(tg_id)
-            if last is not None and (now - last) < self._UNLINKED_NOTIFY_COOLDOWN:
-                return
-            self._unlinked_login_cooldowns[tg_id] = now
+        if not self._reserve_unlinked_notify(tg_id, mini=mini):
+            return
         event_type = "tg_mini_login_unlinked" if mini else "tg_login_unlinked"
         self.send(
             db,
@@ -527,6 +620,43 @@ class AdminNotifyService:
             remote_addr=remote_addr,
             client_timezone=client_timezone,
         )
+
+    def _reserve_unlinked_notify(self, tg_id: str, *, mini: bool) -> bool:
+        """Persistently claim a notify slot; False when the alert must be suppressed."""
+        now = datetime.now(timezone.utc)
+        state_db: Session | None = None
+        try:
+            state_db = _open_notify_state_session()
+            cooldowns, recent = _load_unlinked_state(
+                state_db,
+                now=now,
+                cooldown_ttl=self._UNLINKED_COOLDOWN_TTL,
+                max_ids=self._UNLINKED_COOLDOWN_MAX_IDS,
+                mini_window=self._UNLINKED_MINI_WINDOW,
+            )
+
+            last = cooldowns.get(tg_id)
+            if last is not None and (now - last) < self._UNLINKED_NOTIFY_COOLDOWN:
+                allowed = False
+            elif mini and len(recent) >= self._UNLINKED_MINI_LIMIT:
+                allowed = False
+            else:
+                allowed = True
+                cooldowns[tg_id] = now
+                cooldowns = _trim_cooldowns(cooldowns, self._UNLINKED_COOLDOWN_MAX_IDS)
+                if mini:
+                    recent.append(now)
+
+            _save_unlinked_state(state_db, cooldowns, recent)
+            return allowed
+        except Exception as exc:
+            # Без персистентного состояния лучше промолчать, чем залить админов
+            # дублями: сам вход в панель уведомление не блокирует.
+            self.logger.warning("unlinked login notify gate error: %s", exc)
+            return False
+        finally:
+            if state_db is not None:
+                state_db.close()
 
     def send(
         self,
@@ -544,7 +674,38 @@ class AdminNotifyService:
         node_name: str | None = None,
         user_agent: str | None = None,
         login_via: str | None = None,
+        read_for_author: bool | None = None,
     ) -> None:
+        # Своё действие автору не показываем новым. По умолчанию — по списку событий,
+        # результат фоновой задачи передаёт флаг сам: успех — да, с ошибками — нет.
+        author_action = (
+            event_type in SELF_ACTION_EVENTS if read_for_author is None else read_for_author
+        )
+        # Bell first — must run even when Telegram is off; never blocks Telegram delivery.
+        try:
+            context = " · ".join(
+                part
+                for part in (
+                    f"Кто: {actor_username}" if actor_username else "",
+                    f"Объект: {target_name}" if target_name else "",
+                    f"Узел: {node_name}" if node_name else "",
+                )
+                if part
+            )
+            write_admin_panel_notification(
+                db,
+                event_type=event_type,
+                title=bell_title(event_type)[:200],
+                message="\n".join(
+                    part for part in (context, humanize_bell_message(details)) if part
+                )[:2000],
+                level="error" if "fail" in event_type or event_type.endswith("_failed") else "info",
+                action_payload={"node_id": node_id} if node_id is not None else None,
+                read_for_username=actor_username if author_action else None,
+            )
+        except Exception as exc:
+            self.logger.warning("bell notify error: %s", exc)
+
         try:
             if not get_feature_service().is_enabled("telegram"):
                 return
@@ -568,6 +729,9 @@ class AdminNotifyService:
                 notify_users,
                 lambda key, default="": _get_setting(db, key, default),
             )
+            if author_action and actor_username:
+                # Своё действие не дублируем автору в личку; остальным админам — по-прежнему.
+                notify_users = [u for u in notify_users if u.username != actor_username]
             if not notify_users:
                 return
 
@@ -764,6 +928,7 @@ class AdminNotifyService:
         node_id: int | None = None,
         node_name: str | None = None,
         client_timezone: str | None = None,
+        read_for_author: bool | None = None,
     ) -> None:
         self.send(
             db,
@@ -776,6 +941,7 @@ class AdminNotifyService:
             node_id=node_id,
             node_name=node_name,
             client_timezone=client_timezone,
+            read_for_author=read_for_author,
         )
 
     def send_traffic_limit_block(
@@ -919,7 +1085,7 @@ class AdminNotifyService:
     ) -> None:
         self.send(
             db,
-            "settings_cidr_rollback_queued",
+            "cidr_rollback_failed",
             actor_username=actor_username,
             details=details,
         )
@@ -1067,6 +1233,18 @@ class AdminNotifyService:
             return _format_notify_card(
                 "🚫 <b>TG ID не привязан</b>",
                 when,
+                detail_lines=detail_lines,
+            )
+
+        if event_type == "unlock_redeem":
+            detail_lines = [
+                _line_code("🎟", "Ключ", target_name),
+                _line_text("📅", "Продление", target_type or "—"),
+            ]
+            return _format_notify_card(
+                "🎟 <b>Абонент активировал ключ</b>",
+                when,
+                actor_line=actor_user,
                 detail_lines=detail_lines,
             )
 
@@ -1246,6 +1424,19 @@ class AdminNotifyService:
                 detail_lines=detail_lines,
             )
 
+        if event_type == "bulk_user_nodes":
+            detail_lines = []
+            if target_name:
+                detail_lines.append(_line_text("🗄️", "Операция", target_name))
+            if details:
+                detail_lines.append(_line_text("📋", "Детали", details))
+            return _format_notify_card(
+                "📦 <b>Массовая операция с серверами</b>",
+                when,
+                actor_line=_fmt_actor(actor_username, as_admin=True) if actor_username else None,
+                detail_lines=detail_lines,
+            )
+
         if event_type == "cidr_deploy_failed":
             detail_lines = [_line_text("📋", "Детали", details or "Развёртывание CIDR завершилось с ошибкой")]
             return _format_notify_card(
@@ -1259,6 +1450,15 @@ class AdminNotifyService:
             detail_lines = [_line_text("📋", "Детали", details or "Обновление CIDR БД завершилось частично")]
             return _format_notify_card(
                 "⚠️ <b>Частичное обновление CIDR БД</b>",
+                when,
+                actor_line=_fmt_actor(actor_username, as_admin=True) if actor_username else None,
+                detail_lines=detail_lines,
+            )
+
+        if event_type == "cidr_rollback_failed":
+            detail_lines = [_line_text("📋", "Детали", details or "Откат CIDR завершился с ошибкой")]
+            return _format_notify_card(
+                "❌ <b>Ошибка отката CIDR</b>",
                 when,
                 actor_line=_fmt_actor(actor_username, as_admin=True) if actor_username else None,
                 detail_lines=detail_lines,
@@ -1501,6 +1701,11 @@ def _preview_event_build_kwargs(event_key: str, *, actor_username: str) -> dict 
             "event_type": "cidr_ingest_partial",
             "actor_username": actor_username,
             "details": "Обновлено: 3, ошибок: 1 · Проблемные: antifilter",
+        },
+        "cidr_rollback_failed": {
+            "event_type": "cidr_rollback_failed",
+            "actor_username": actor_username,
+            "details": "Резервная копия 20260101T000000Z не найдена",
         },
         "alert_rule": {
             "event_type": "alert_rule",

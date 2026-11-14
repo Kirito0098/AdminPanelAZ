@@ -1,9 +1,10 @@
 import html
 import json
+import logging
 import secrets
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth import require_admin
@@ -40,11 +41,10 @@ from app.services.telegram import send_tg_message
 from app.services.telegram_api import (
     delete_webhook_sync,
     reset_chat_menu_button_sync,
-    set_my_commands_sync,
     set_webhook_sync,
 )
 from app.services.telegram_bot_command_rate_limit import get_bot_command_rate_limits, set_bot_command_rate_limits
-from app.services.telegram_link import notify_telegram_unlinked
+from app.services.telegram_link import notify_telegram_unlinked, release_telegram_of_pending_deletion
 from app.services.telegram_transport import (
     RELAY_CHECK_TIMEOUT,
     RELAY_NODES_SETTING,
@@ -83,12 +83,42 @@ def _webhook_url(request: Request, secret: str) -> str:
     return f"{root}/api/telegram/webhook/{secret}"
 
 
-def _configure_bot_menu(token: str) -> None:
-    from app.services.telegram_bot_handlers.menu import build_bot_commands
+def _configure_bot_menu(db: Session, token: str) -> None:
+    from app.services.telegram_bot_commands import sync_bot_commands
 
-    for ok, error in (set_my_commands_sync(token, build_bot_commands()), reset_chat_menu_button_sync(token)):
-        if not ok:
-            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
+    synced = sync_bot_commands(db, token)
+    if not synced["default"]:
+        detail = synced["errors"][0] if synced["errors"] else "Не удалось настроить команды бота"
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=detail)
+    ok, error = reset_chat_menu_button_sync(token)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
+
+
+def _register_webhook(db: Session, request: Request, bot_token: str) -> None:
+    secret = _ensure_webhook_secret(db)
+    ok, error = set_webhook_sync(bot_token, _webhook_url(request, secret), secret_token=secret)
+    if not ok:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
+    _configure_bot_menu(db, bot_token)
+    _set_setting(db, "telegram_webhook_set_at", datetime.now(timezone.utc).isoformat())
+    _set_setting(db, "telegram_webhook_secret_required", "true")
+
+
+def _sync_bot_commands_best_effort(token: str) -> None:
+    """Пере-синхронизировать меню команд после сохранения настроек (фоном, не ломает сохранение)."""
+    from app.database import SessionLocal
+    from app.services.telegram_bot_commands import sync_bot_commands
+
+    if not token:
+        return
+    session = SessionLocal()
+    try:
+        sync_bot_commands(session, token)
+    except Exception:  # noqa: BLE001 — сеть/Telegram не должны ломать сохранение настроек
+        logging.getLogger(__name__).warning("bot commands sync failed", exc_info=True)
+    finally:
+        session.close()
 
 
 def _telegram_settings_response(db: Session, request: Request) -> TelegramSettingsResponse:
@@ -143,6 +173,8 @@ def _telegram_settings_response(db: Session, request: Request) -> TelegramSettin
         relay_last_ok_at=_get_setting(db, "telegram_relay_last_ok_at"),
         relay_last_error=_get_setting(db, "telegram_relay_last_error"),
         relay_last_node=_get_setting(db, "telegram_relay_last_node"),
+        accept_access_requests=_get_setting(db, "telegram_accept_access_requests", "false") == "true",
+        pending_request_cap=int(_get_setting(db, "telegram_new_user_request_pending_cap", "50") or 50),
     )
 
 
@@ -159,6 +191,7 @@ def get_telegram_settings(
 def update_telegram_settings(
     payload: TelegramSettingsUpdate,
     request: Request,
+    background: BackgroundTasks,
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
@@ -212,7 +245,15 @@ def update_telegram_settings(
             max_requests=payload.bot_command_rate_max,
             window_seconds=payload.bot_command_rate_window_seconds,
         )
+    if payload.accept_access_requests is not None:
+        _set_setting(db, "telegram_accept_access_requests", "true" if payload.accept_access_requests else "false")
+    if payload.pending_request_cap is not None:
+        _set_setting(db, "telegram_new_user_request_pending_cap", str(payload.pending_request_cap))
     db.commit()
+    bot_token = _get_setting(db, "telegram_bot_token")
+    bot_enabled = _get_setting(db, "telegram_bot_interactive_enabled", "false") == "true"
+    if bot_token and bot_enabled:
+        background.add_task(_sync_bot_commands_best_effort, bot_token)
     admin_notify_service.send_settings_change(
         db,
         actor_username=admin.username,
@@ -297,7 +338,16 @@ def update_admin_notify_settings(
     if payload.telegram_id is not None:
         tg_id = payload.telegram_id.strip()
         if tg_id:
-            existing = db.query(User).filter(User.telegram_id == tg_id, User.id != admin.id).first()
+            release_telegram_of_pending_deletion(db, tg_id, keep_user_id=admin.id)
+            existing = (
+                db.query(User)
+                .filter(
+                    User.telegram_id == tg_id,
+                    User.id != admin.id,
+                    User.provision_state != "pending_deletion",
+                )
+                .first()
+            )
             if existing:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -451,12 +501,15 @@ def test_noc_weekly_image_preview(db: Session = Depends(get_db), admin: User = D
     return MessageResponse(message=f"NOC weekly изображение отправлено ({sent} из {len(recipients)})")
 
 
-@router.post("/settings/telegram/test", response_model=MessageResponse)
-def test_telegram(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def send_test_telegram_message(
+    db: Session,
+    *,
+    missing_recipients_detail: str = "Укажите токен бота и получателей бэкапа",
+) -> MessageResponse:
     bot_token = _get_setting(db, "telegram_bot_token")
     chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
     if not bot_token or not chat_ids:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Укажите токен бота и получателей бэкапа")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=missing_recipients_detail)
     sent = 0
     for chat_id in chat_ids:
         if send_tg_message(
@@ -469,6 +522,11 @@ def test_telegram(db: Session = Depends(get_db), _: User = Depends(require_admin
     if sent == 0:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Не удалось отправить сообщение в Telegram")
     return MessageResponse(message=f"Тестовое сообщение отправлено ({sent} из {len(chat_ids)})")
+
+
+@router.post("/settings/telegram/test", response_model=MessageResponse)
+def test_telegram(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    return send_test_telegram_message(db)
 
 
 @router.post("/settings/telegram/webhook/register", response_model=TelegramSettingsResponse)
@@ -489,14 +547,7 @@ def register_telegram_webhook(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Включена связь через узел: webhook не нужен"
         )
 
-    secret = _ensure_webhook_secret(db)
-    url = _webhook_url(request, secret)
-    ok, error = set_webhook_sync(bot_token, url, secret_token=secret)
-    if not ok:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
-
-    _configure_bot_menu(bot_token)
-    _set_setting(db, "telegram_webhook_set_at", datetime.now(timezone.utc).isoformat())
+    _register_webhook(db, request, bot_token)
     db.commit()
     admin_notify_service.send_settings_change(
         db,
@@ -560,7 +611,19 @@ def update_telegram_relay(
 ):
     checks: list[TelegramRelayCheck] = []
     if not payload.node_ids:
+        previous = _get_setting(db, RELAY_NODES_SETTING)
         _set_setting(db, RELAY_NODES_SETTING, "")
+        token = _get_setting(db, "telegram_bot_token")
+        if token and _get_setting(db, "telegram_bot_interactive_enabled", "false") == "true":
+            db.commit()
+            try:
+                _register_webhook(db, request, token)
+            except HTTPException:
+                _set_setting(db, RELAY_NODES_SETTING, previous)
+                db.commit()
+                raise
+        else:
+            _set_setting(db, "telegram_webhook_set_at", "")
     else:
         nodes = []
         for node_id in payload.node_ids:
@@ -590,12 +653,12 @@ def update_telegram_relay(
                 ok, error = delete_webhook_sync(token)
                 if not ok:
                     raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error)
-                _configure_bot_menu(token)
+                _configure_bot_menu(db, token)
         except HTTPException:
             _set_setting(db, RELAY_NODES_SETTING, previous)
             db.commit()
             raise
-    _set_setting(db, "telegram_webhook_set_at", "")
+        _set_setting(db, "telegram_webhook_set_at", "")
     db.commit()
     admin_notify_service.send_settings_change(
         db,

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import {
   AlertTriangle,
@@ -25,12 +25,18 @@ import {
 } from 'lucide-react'
 import { ApiError, closeIpAccess, runSiteDiagnostics } from '@/api/client'
 import SettingsAlert from '@/components/settings/SettingsAlert'
+import {
+  SettingsCard as Card,
+  SettingsCardContent as CardContent,
+  SettingsCardDescription as CardDescription,
+  SettingsCardHeader as CardHeader,
+  SettingsCardTitle as CardTitle,
+} from '@/components/settings/SettingsCard'
 import { SettingsCollapsible, SettingsMetaLine, SettingsToolbar } from '@/components/settings/SettingsChrome'
 import { replaceDiagnosticsCheck } from '@/components/settings/siteDiagnosticsReport'
 import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { useNotifications } from '@/context/NotificationContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
 import type {
@@ -187,8 +193,8 @@ function StepCard({
       <div className="min-w-0 flex-1 pb-6">
         <div
           className={cn(
-            'overflow-hidden rounded-xl border transition-colors',
-            done && meta ? meta.rowClass : 'border-border/80 bg-card/60',
+            'overflow-hidden rounded-lg border transition-colors',
+            done && meta ? meta.rowClass : 'border-border/70 bg-card/60',
           )}
         >
           <button
@@ -250,7 +256,7 @@ function StepCard({
                         </p>
                       )}
                       {check.hint_ru && (
-                        <p className="rounded-md border border-dashed bg-background/60 px-3 py-2.5 text-sm leading-relaxed text-muted-foreground">
+                        <p className="rounded-lg border border-dashed border-border/80 bg-background/60 px-3 py-2.5 text-sm leading-relaxed text-muted-foreground">
                           <span className="font-medium text-foreground">Что можно сделать: </span>
                           {check.hint_ru}
                         </p>
@@ -277,6 +283,36 @@ function StepCard({
         </div>
       </div>
     </div>
+  )
+}
+
+/** Card header with the shared settings icon chip. */
+function CardHead({
+  icon: Icon,
+  title,
+  description,
+  aside,
+}: {
+  icon: LucideIcon
+  title: string
+  description?: string
+  aside?: ReactNode
+}) {
+  return (
+    <CardHeader>
+      <div className="flex items-start gap-3">
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <Icon size={18} aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <CardTitle>{title}</CardTitle>
+            {aside}
+          </div>
+          {description ? <CardDescription className="mt-1">{description}</CardDescription> : null}
+        </div>
+      </div>
+    </CardHeader>
   )
 }
 
@@ -407,7 +443,6 @@ export default function RunbookTab() {
     <div className="space-y-4">
       <ConfirmDialogHost dialogProps={dialogProps} />
       <SettingsToolbar
-        title="Диагностика запуска"
         meta={
           report ? (
             <SettingsMetaLine
@@ -464,18 +499,19 @@ export default function RunbookTab() {
         Диагностика запускается на сервере панели. Для VPN-узлов и WARP используйте соответствующие разделы NOC.
       </SettingsAlert>
 
-      <Card className="shadow-sm">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Шаги проверки</CardTitle>
-          <CardDescription>
-            {report
+      <Card>
+        <CardHead
+          icon={ClipboardList}
+          title="Шаги проверки"
+          description={
+            report
               ? 'Раскройте шаг с ошибкой или предупреждением — там будут подсказки, что исправить'
-              : 'После запуска здесь появятся результаты по каждому этапу'}
-          </CardDescription>
-        </CardHeader>
+              : 'После запуска здесь появятся результаты по каждому этапу'
+          }
+        />
         <CardContent>
           {!report && !running ? (
-            <div className="flex flex-col items-center gap-4 rounded-xl border border-dashed bg-muted/10 px-6 py-12 text-center">
+            <div className="flex flex-col items-center gap-4 rounded-lg border border-dashed border-border bg-muted/10 px-6 py-12 text-center">
               <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10 text-primary">
                 <Stethoscope size={32} />
               </div>
@@ -517,7 +553,7 @@ export default function RunbookTab() {
           {report.recommended_commands.map((cmd) => (
             <div
               key={cmd}
-              className="flex items-start gap-2 rounded-lg border bg-card/60 p-3 font-mono text-xs sm:text-sm"
+              className="flex items-start gap-2 rounded-lg border border-border/70 bg-card/60 p-3 font-mono text-xs sm:text-sm"
             >
               <code className="min-w-0 flex-1 whitespace-pre-wrap break-all leading-relaxed text-foreground">
                 {cmd}
@@ -538,12 +574,12 @@ export default function RunbookTab() {
       )}
 
       {showJson && report && (
-        <Card className="overflow-hidden shadow-sm">
+        <Card className="overflow-hidden">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium">JSON-отчёт</CardTitle>
+            <CardTitle>JSON-отчёт</CardTitle>
           </CardHeader>
           <CardContent>
-            <pre className="max-h-96 overflow-auto rounded-xl border bg-muted/30 p-4 font-mono text-xs leading-relaxed">
+            <pre className="max-h-96 overflow-auto rounded-lg border border-border/70 bg-muted/30 p-4 font-mono text-xs leading-relaxed">
               {JSON.stringify(report, null, 2)}
             </pre>
           </CardContent>

@@ -1,7 +1,10 @@
 """Thin wrapper over BackgroundTaskService for CIDR pipeline tasks."""
 
+import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
+
+from fastapi import HTTPException
 
 from app.services.background_tasks import background_task_service
 
@@ -16,6 +19,25 @@ ACTIVE_PIPELINE_TASK_TYPES = (
     "cidr_deploy",
     "cidr_rollback",
 )
+
+CIDR_TASK_CANCELLED_MESSAGE = "Операция отменена: превышено время выполнения"
+
+# Serializes "pipeline is idle" check with task creation: two tabs can otherwise
+# both pass the check and start two pipelines. One uvicorn process == one lock.
+_PIPELINE_LOCK = threading.Lock()
+
+# Cooperative cancel flags: a stale task keeps writing until the runner notices.
+_CANCEL_LOCK = threading.Lock()
+_CANCEL_REQUESTED: set[str] = set()
+
+
+class CidrTaskCancelled(BaseException):
+    """Cooperative cancel signal.
+
+    Derives from BaseException on purpose: the pipeline wraps progress callbacks
+    in ``except Exception`` guards, which must not swallow a cancel request.
+    """
+
 
 CIDR_TASK_STALE_SECONDS: dict[str, int] = {
     "antifilter_refresh": 720,
@@ -96,11 +118,70 @@ def get_cidr_task(task_id: str) -> dict[str, Any] | None:
 
 
 def find_any_active_pipeline_task() -> dict[str, Any] | None:
+    return find_active_pipeline_task()
+
+
+def find_active_pipeline_task(*, exclude_task_type: str | None = None) -> dict[str, Any] | None:
+    """Return any unfinished CIDR pipeline task, optionally skipping one type."""
     for task_type in ACTIVE_PIPELINE_TASK_TYPES:
+        if exclude_task_type and task_type == exclude_task_type:
+            continue
         task = find_active_cidr_task(task_type)
         if task:
             return task
     return None
+
+
+def _pipeline_busy_error(active: dict[str, Any]) -> HTTPException:
+    task_type = str(active.get("task_type") or "unknown")
+    return HTTPException(
+        status_code=409,
+        detail=f"Другая операция с CIDR уже выполняется: {task_type}",
+    )
+
+
+def assert_pipeline_idle() -> None:
+    """Reject the call with 409 when any CIDR pipeline task is still running."""
+    active = find_active_pipeline_task()
+    if active:
+        raise _pipeline_busy_error(active)
+
+
+def start_pipeline_task(
+    task_type: str,
+    message: str,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """Atomically check the pipeline and create the task.
+
+    Returns ``(task_id, active_task)``. ``active_task`` is the running task of
+    the same type (callers keep answering ``queued: true`` with its id); a task
+    of another type raises 409. Holding ``_PIPELINE_LOCK`` makes the
+    check-then-create pair race-free inside one uvicorn process.
+    """
+    with _PIPELINE_LOCK:
+        active = find_active_pipeline_task(exclude_task_type=task_type)
+        if active:
+            raise _pipeline_busy_error(active)
+        same_type = find_active_cidr_task(task_type)
+        if same_type:
+            return None, same_type
+        return create_cidr_task(task_type, message), None
+
+
+def request_cancel(task_id: str) -> None:
+    """Ask the runner of ``task_id`` to stop at its next checkpoint."""
+    with _CANCEL_LOCK:
+        _CANCEL_REQUESTED.add(str(task_id))
+
+
+def is_cancel_requested(task_id: str) -> bool:
+    with _CANCEL_LOCK:
+        return str(task_id) in _CANCEL_REQUESTED
+
+
+def clear_cancel(task_id: str) -> None:
+    with _CANCEL_LOCK:
+        _CANCEL_REQUESTED.discard(str(task_id))
 
 
 def _parse_task_datetime(value: Any) -> datetime | None:
@@ -133,6 +214,7 @@ def fail_stale_cidr_task(task: dict[str, Any], *, max_age_seconds: int) -> bool:
     task_id = str(task.get("task_id") or task.get("id") or "")
     if not task_id:
         return False
+    request_cancel(task_id)
     update_cidr_task(
         task_id,
         status="failed",
@@ -202,7 +284,51 @@ def serialize_cidr_task(task: dict[str, Any]) -> dict[str, Any]:
     return background_task_service.serialize_background_task(task)
 
 
+def _cancellable_progress(task_id: str, progress_callback: Callable) -> Callable:
+    """Abort the runner with ``CidrTaskCancelled`` once cancel is requested.
+
+    Only the runner thread raises: heartbeat threads inside the ingest loop may
+    call the same callback and must not die with an unhandled exception.
+    """
+    owner = threading.get_ident()
+
+    def _callback(percent: int, stage: str) -> None:
+        if is_cancel_requested(task_id) and threading.get_ident() == owner:
+            raise CidrTaskCancelled(task_id)
+        progress_callback(percent, stage)
+
+    return _callback
+
+
+def _guarded_runner(task_id: str, runner: Callable) -> Callable:
+    """Make ``runner`` stop at the next progress checkpoint after a cancel."""
+
+    def _run(progress_callback: Callable) -> dict[str, Any]:
+        try:
+            return runner(_cancellable_progress(task_id, progress_callback)) or {}
+        except CidrTaskCancelled:
+            update_cidr_task(
+                task_id,
+                status="failed",
+                progress_percent=100,
+                progress_stage="Операция отменена",
+                message=CIDR_TASK_CANCELLED_MESSAGE,
+                error=CIDR_TASK_CANCELLED_MESSAGE,
+                finished_at=_now_utc(),
+            )
+            return {
+                "success": False,
+                "cancelled": True,
+                "message": CIDR_TASK_CANCELLED_MESSAGE,
+            }
+        finally:
+            clear_cancel(task_id)
+
+    return _run
+
+
 def start_cidr_task(task_id: str, runner: Callable) -> None:
+    runner = _guarded_runner(task_id, runner)
     if _use_memory_backend():
         def _progress_callback(percent: int, stage: str) -> None:
             update_cidr_task(
@@ -223,6 +349,18 @@ def start_cidr_task(task_id: str, runner: Callable) -> None:
             )
             try:
                 result = runner(_progress_callback) or {}
+                if result.get("cancelled"):
+                    update_cidr_task(
+                        task_id,
+                        status="failed",
+                        progress_percent=100,
+                        progress_stage="Операция отменена",
+                        message=CIDR_TASK_CANCELLED_MESSAGE,
+                        error=CIDR_TASK_CANCELLED_MESSAGE,
+                        result=result,
+                        finished_at=_now_utc(),
+                    )
+                    return
                 if not bool(result.get("success")):
                     update_cidr_task(
                         task_id,
@@ -255,8 +393,6 @@ def start_cidr_task(task_id: str, runner: Callable) -> None:
                     error=str(exc),
                     finished_at=_now_utc(),
                 )
-
-        import threading
 
         threading.Thread(target=_worker, daemon=True).start()
         return

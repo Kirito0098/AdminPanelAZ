@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.auth import require_admin
 from app.database import SessionLocal, get_db
 from app.models import User
-from app.schemas import LatestChangelogResponse, MessageResponse
+from app.schemas import LatestChangelogResponse, MessageResponse, ServerConfigApplyRequest
 from app.services.action_log import log_action
 from app.services import server_config
 from app.services.background_tasks import background_task_service
@@ -134,9 +134,9 @@ def apply_update(db: Session = Depends(get_db), user: User = Depends(require_adm
 
 
 @router.get("/update/server-config")
-def server_config_preview(user: User = Depends(require_admin)):
+def server_config_preview(db: Session = Depends(get_db), user: User = Depends(require_admin)):
     try:
-        return server_config.preview()
+        return server_config.preview(db)
     except (RuntimeError, subprocess.TimeoutExpired) as exc:
         return JSONResponse(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -145,17 +145,30 @@ def server_config_preview(user: User = Depends(require_admin)):
 
 
 @router.post("/update/server-config", status_code=status.HTTP_202_ACCEPTED)
-def server_config_apply(db: Session = Depends(get_db), user: User = Depends(require_admin)):
+def server_config_apply(
+    payload: ServerConfigApplyRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    try:
+        steps = server_config.validate_steps(payload.steps)
+    except ValueError as exc:
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"detail": str(exc)})
     if conflict := _busy_conflict():
         return conflict
     user_id, username = user.id, user.username
+    steps_label = ",".join(steps)
 
     def _callable(progress_updater=None):
-        result = server_config.apply(progress_updater)
+        result = server_config.apply(steps, progress_updater)
         errors = sum(row["status"] == "ошибка" for row in result["rows"])
         with SessionLocal() as log_db:
             log_action(
-                log_db, action="server_config_done", user_id=user_id, username=username, details=f"errors={errors}"
+                log_db,
+                action="server_config_done",
+                user_id=user_id,
+                username=username,
+                details=f"errors={errors} steps={steps_label}",
             )
         return result
 
@@ -165,7 +178,13 @@ def server_config_apply(db: Session = Depends(get_db), user: User = Depends(requ
         created_by_username=username,
         queued_message="Обновление настроек сервера поставлено в очередь",
     )
-    log_action(db, action="server_config_queued", user_id=user_id, username=username, details=f"task_id={task.id}")
+    log_action(
+        db,
+        action="server_config_queued",
+        user_id=user_id,
+        username=username,
+        details=f"task_id={task.id} steps={steps_label}",
+    )
     return background_task_service.build_accepted_payload(task, "Настройки сервера обновляются в фоне.")
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -71,7 +72,8 @@ def test_view_grant_cannot_manage_portal_link(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         portal_router._assert_can_manage_client(SimpleNamespace(id=OTHER, role=UserRole.user), MagicMock(), "alice")
 
-    assert exc.value.status_code == 403
+    assert exc.value.status_code == 404
+    assert exc.value.detail == "Клиент не найден"
 
 
 def test_owner_and_admin_can_manage_portal_link(monkeypatch):
@@ -200,3 +202,107 @@ def test_deleted_admin_links_survive(factory, monkeypatch):
         users_router.delete_user(ADMIN2, MagicMock(), db=db, current_user=db.get(User, ADMIN))
 
         assert _active_tokens(db) == {"c_alice", "c_dave"}
+
+
+def test_owner_without_manage_flag_keeps_portal_access(factory, monkeypatch):
+    configs = [SimpleNamespace(owner_id=OWNER, client_name="alice")]
+    monkeypatch.setattr(portal_router, "_configs_for_client", lambda _db, _name: configs)
+    owner = SimpleNamespace(id=OWNER, role=UserRole.user, can_manage_configs=False)
+
+    portal_router._assert_can_manage_client(owner, MagicMock(), "alice")
+
+    with factory() as db:
+        _config(db, "alice", owner_id=OWNER)
+        _link(db, "alice", "c_alice", creator_id=OWNER)
+        db.get(User, OWNER).can_manage_configs = False
+        db.commit()
+
+        assert revoke_creator_portal_links(db, OWNER, keep_accessible=True) == 0
+        db.commit()
+
+        assert _active_tokens(db) == {"c_alice"}
+
+
+def _aged_link(db, token: str, *, days_old: int) -> ClientPortalToken:
+    from datetime import datetime, timedelta, timezone
+
+    row = ClientPortalToken(
+        token=token,
+        node_id=1,
+        client_name="alice",
+        created_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days_old),
+    )
+    db.add(row)
+    db.commit()
+    return row
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def test_fresh_client_link_resolves(factory):
+    from app.services.client_portal import get_valid_portal_token
+
+    with factory() as db:
+        _aged_link(db, "c_fresh", days_old=1)
+
+        resolved = get_valid_portal_token(db, "c_fresh")
+
+    assert resolved.kind == "client"
+
+
+def test_expired_client_link_is_indistinguishable_from_unknown(factory):
+    from app.services.client_portal import get_valid_portal_token
+
+    with factory() as db:
+        _aged_link(db, "c_old", days_old=31)
+
+        with pytest.raises(HTTPException) as exc:
+            get_valid_portal_token(db, "c_old")
+        with pytest.raises(HTTPException) as unknown:
+            get_valid_portal_token(db, "c_missing")
+
+    assert exc.value.status_code == 404
+    assert unknown.value.status_code == 404
+    assert exc.value.detail == unknown.value.detail == "Ссылка недействительна"
+
+
+def test_revoked_client_link_is_indistinguishable_from_unknown(factory):
+    from app.services.client_portal import get_valid_portal_token
+
+    with factory() as db:
+        _aged_link(db, "c_revoked", days_old=1).revoked_at = _utc_now()
+        db.commit()
+
+        with pytest.raises(HTTPException) as revoked:
+            get_valid_portal_token(db, "c_revoked")
+        with pytest.raises(HTTPException) as unknown:
+            get_valid_portal_token(db, "c_missing")
+
+    assert revoked.value.status_code == unknown.value.status_code == 404
+    assert revoked.value.detail == unknown.value.detail == "Ссылка недействительна"
+
+
+def test_zero_ttl_makes_client_link_permanent(factory):
+    from app.models import AppSetting
+    from app.services.client_portal import get_valid_portal_token
+
+    with factory() as db:
+        db.add(AppSetting(key="portal_link_ttl_days", value="0"))
+        db.commit()
+        _aged_link(db, "c_old", days_old=400)
+
+        resolved = get_valid_portal_token(db, "c_old")
+
+    assert resolved.kind == "client"
+
+
+def test_portal_link_ttl_normalization():
+    from app.services.portal_link_settings import normalize_portal_link_ttl_days
+
+    assert normalize_portal_link_ttl_days("45") == 45
+    assert normalize_portal_link_ttl_days(0) == 0
+    assert normalize_portal_link_ttl_days("-5") == 30
+    assert normalize_portal_link_ttl_days("garbage") == 30
+    assert normalize_portal_link_ttl_days("99999") == 3650

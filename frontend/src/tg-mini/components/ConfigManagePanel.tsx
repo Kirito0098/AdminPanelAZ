@@ -15,18 +15,17 @@ import { Label } from '@/components/ui/label'
 import { formatBlockStatus, formatCertExpiry } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
 import {
-  deleteTgPanelConfig,
-  getTgClientPolicy,
-  getTgPanelConfig,
-  getTgPanelUsers,
-  tgOpenvpnPermanentBlock,
-  tgOpenvpnTempBlock,
-  tgOpenvpnUnblock,
-  tgWgPermanentBlock,
-  tgWgTempBlock,
-  tgWgUnblock,
-  updateTgPanelConfig,
-} from '@/tg-mini/api'
+  getClientPolicies,
+  openvpnPermanentBlock,
+  openvpnTempBlock,
+  openvpnUnblock,
+  wgPermanentBlock,
+  wgTempBlock,
+  wgUnblock,
+} from '@/api/vpnAccess'
+import { deleteConfig, updateConfig } from '@/api/configs'
+import { getUsers } from '@/api/settings'
+import { getTgConfig } from '@/tg-mini/api'
 import type { ClientAccessPolicy, TgMiniConfig, User, VpnType } from '@/types'
 import type { ReactNode } from 'react'
 
@@ -55,18 +54,29 @@ function policyForConfig(policy: ClientAccessPolicy | null) {
 }
 
 async function blockClient(vpnType: VpnType, clientName: string, days: number) {
-  if (vpnType === 'openvpn') await tgOpenvpnTempBlock(clientName, days)
-  else if (vpnType === 'wireguard') await tgWgTempBlock(clientName, days)
+  if (vpnType === 'openvpn') await openvpnTempBlock(clientName, days)
+  else if (vpnType === 'wireguard') await wgTempBlock(clientName, days)
 }
 
 async function permanentBlockClient(vpnType: VpnType, clientName: string) {
-  if (vpnType === 'openvpn') await tgOpenvpnPermanentBlock(clientName)
-  else if (vpnType === 'wireguard') await tgWgPermanentBlock(clientName)
+  if (vpnType === 'openvpn') await openvpnPermanentBlock(clientName)
+  else if (vpnType === 'wireguard') await wgPermanentBlock(clientName)
 }
 
 async function unblockClient(vpnType: VpnType, clientName: string) {
-  if (vpnType === 'openvpn') await tgOpenvpnUnblock(clientName)
-  else if (vpnType === 'wireguard') await tgWgUnblock(clientName)
+  if (vpnType === 'openvpn') await openvpnUnblock(clientName)
+  else if (vpnType === 'wireguard') await wgUnblock(clientName)
+}
+
+async function fetchClientPolicy(
+  clientName: string,
+  vpnType: VpnType,
+): Promise<ClientAccessPolicy | null> {
+  const entry = (await getClientPolicies(clientName))[clientName]
+  if (!entry) return null
+  if (vpnType === 'openvpn') return entry.openvpn
+  if (vpnType === 'amneziawg2') return entry.amneziawg2 ?? null
+  return entry.wireguard
 }
 
 function ManageSection({
@@ -127,7 +137,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
   const reloadPolicy = async () => {
     if (!isAdmin) return
     try {
-      setPolicy(await getTgClientPolicy(config.client_name, vpnType))
+      setPolicy(await fetchClientPolicy(config.client_name, vpnType))
     } catch {
       setPolicy(null)
     }
@@ -139,16 +149,16 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
     setConfirmPermBlock(false)
     setFeedback(null)
     void Promise.all([
-      getTgPanelConfig(config.id),
-      isAdmin ? getTgClientPolicy(config.client_name, vpnType) : Promise.resolve(null),
-      isAdmin ? getTgPanelUsers() : Promise.resolve([] as User[]),
+      getTgConfig(config.id),
+      isAdmin ? fetchClientPolicy(config.client_name, vpnType) : Promise.resolve(null),
+      isAdmin ? getUsers() : Promise.resolve([] as User[]),
     ])
       .then(([details, policyData, panelUsers]) => {
         setDescription(details.description ?? '')
         setCertDays(String(details.cert_expire_days ?? 3650))
         setCertExpiry(formatCertExpiry(details))
         setOwnerId(details.owner_id)
-        setOwnerUsername(details.owner_username)
+        setOwnerUsername(details.owner_username ?? undefined)
         setPolicy(policyData)
         setUsers(panelUsers)
       })
@@ -165,7 +175,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
     setBusy('save')
     setFeedback(null)
     try {
-      await updateTgPanelConfig(config.id, { description: description.trim() || '' })
+      await updateConfig(config.id, { description: description.trim() || '' })
       setFeedback({ tone: 'success', text: 'Описание сохранено' })
       onUpdated()
     } catch (err) {
@@ -183,7 +193,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
     setBusy('owner')
     setFeedback(null)
     try {
-      await updateTgPanelConfig(config.id, { owner_id: ownerId })
+      await updateConfig(config.id, { owner_id: ownerId })
       setFeedback({ tone: 'success', text: 'Владелец изменён' })
       onUpdated()
     } catch (err) {
@@ -194,7 +204,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
   }
 
   const handleRenewCert = async () => {
-    const days = Number(certDays)
+    const days = isAdmin ? Number(certDays) : 3650
     if (!Number.isFinite(days) || days < 1 || days > 3650) {
       setFeedback({ tone: 'error', text: 'Срок сертификата: от 1 до 3650 дней' })
       return
@@ -202,7 +212,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
     setBusy('renew')
     setFeedback(null)
     try {
-      const updated = await updateTgPanelConfig(config.id, { cert_expire_days: days })
+      const updated = await updateConfig(config.id, { cert_expire_days: days })
       setCertExpiry(formatCertExpiry(updated))
       setFeedback({ tone: 'success', text: 'Сертификат обновлён' })
       onUpdated()
@@ -277,7 +287,7 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
     setBusy('delete')
     setFeedback(null)
     try {
-      await deleteTgPanelConfig(config.id)
+      await deleteConfig(config.id)
       window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
       onDeleted()
     } catch (err) {
@@ -361,18 +371,24 @@ export default function ConfigManagePanel({ config, isAdmin, onDeleted, onUpdate
       {config.vpn_type === 'openvpn' && (
         <ManageSection title="Сертификат" summary={certExpiry ?? '—'} defaultOpen={false}>
           <div className="space-y-3">
-            <div className="space-y-2">
-              <Label htmlFor="tg-mini-renew-cert">Новый срок (дней)</Label>
-              <Input
-                id="tg-mini-renew-cert"
-                type="number"
-                min={1}
-                max={3650}
-                value={certDays}
-                onChange={(e) => setCertDays(e.target.value)}
-                disabled={busy != null}
-              />
-            </div>
+            {isAdmin ? (
+              <div className="space-y-2">
+                <Label htmlFor="tg-mini-renew-cert">Новый срок (дней)</Label>
+                <Input
+                  id="tg-mini-renew-cert"
+                  type="number"
+                  min={1}
+                  max={3650}
+                  value={certDays}
+                  onChange={(e) => setCertDays(e.target.value)}
+                  disabled={busy != null}
+                />
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Сертификат будет обновлён на максимальный срок (3650 дней)
+              </p>
+            )}
             <Button
               type="button"
               variant="secondary"

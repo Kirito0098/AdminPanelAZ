@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.config import Settings, get_settings
 from app.models import AppSetting, Node, User
+from app.config import DEFAULT_NODE_AGENT_KEY, DEFAULT_SECRET_KEY
 from app.services.crypto import decrypt_secret, encrypt_secret
 from app.services.env_file import EnvFileService
 from app.services.node_agent_env import resolve_node_agent_env_file
@@ -28,8 +29,6 @@ logger = logging.getLogger(__name__)
 
 CONFIRM_PHRASE = "ROTATE"
 PREVIEW_TTL_SECONDS = 600
-_DEFAULT_SECRET_KEY = "change-me-in-production-use-long-random-string"
-_DEFAULT_NODE_AGENT_KEY = "change-me-node-agent-key"
 _TG_TOKEN_RE = re.compile(r"^\d+:[A-Za-z0-9_-]{20,}$")
 
 
@@ -133,12 +132,12 @@ def _validate_value(defn: SecretDefinition, value: str, *, production: bool) -> 
         raise ValueError("Значение не может быть пустым")
 
     if defn.secret_id == "secret_key":
-        if production and (value == _DEFAULT_SECRET_KEY or len(value) < 32):
+        if production and (value == DEFAULT_SECRET_KEY or len(value) < 32):
             raise ValueError("SECRET_KEY: минимум 32 символа в production")
         if not production and len(value) < 16:
             raise ValueError("SECRET_KEY: минимум 16 символов")
     elif defn.secret_id == "node_agent_api_key":
-        if production and (value == _DEFAULT_NODE_AGENT_KEY or len(value) < 24):
+        if production and (value == DEFAULT_NODE_AGENT_KEY or len(value) < 24):
             raise ValueError("NODE_AGENT_API_KEY: минимум 24 символа в production")
         if not production and len(value) < 16:
             raise ValueError("NODE_AGENT_API_KEY: минимум 16 символов")
@@ -164,9 +163,9 @@ def _is_configured(defn: SecretDefinition, current: str, settings: Settings) -> 
     if not current:
         return False
     if defn.secret_id == "secret_key":
-        return current != _DEFAULT_SECRET_KEY and len(current) >= 32
+        return current != DEFAULT_SECRET_KEY and len(current) >= 32
     if defn.secret_id == "node_agent_api_key":
-        return current != _DEFAULT_NODE_AGENT_KEY and len(current) >= 24
+        return current != DEFAULT_NODE_AGENT_KEY and len(current) >= 24
     return bool(current.strip())
 
 

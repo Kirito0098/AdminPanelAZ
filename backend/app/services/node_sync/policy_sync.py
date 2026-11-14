@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any, Literal
 
 from sqlalchemy.orm import Session
@@ -18,9 +17,9 @@ from app.models import (
     VpnType,
     WgAccessPolicy,
 )
-from app.services.access_policy import AccessPolicyService, is_node_default_policy_client
+from app.services.access_policy import AccessPolicyService, is_node_default_policy_client, policy_service_for_node
 from app.services.access_until import set_access_until as set_policy_access_until
-from app.services.node_manager import get_adapter_for_node, node_metadata_dict
+from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes, is_auto_sync_enabled
 from app.services.node_sync.replicate import ReplicateOperation, ReplicateResult, finalize_replicate_outcome, get_shadow_configs
 from app.services.policy_import import copy_access_policies_from_node, copy_single_client_policy
@@ -35,27 +34,21 @@ PolicyOp = Literal[
     "clear_traffic_limit",
     "set_wg_expiry",
     "set_access_until",
+    "set_block_reason",
+    "lift_block_reason",
 ]
 
 _COPY_OPS = frozenset({"set_traffic_limit", "clear_traffic_limit", "set_access_until"})
 
-
-def _antizapret_path_for_node(node: Node) -> Path:
-    meta = node_metadata_dict(node)
-    raw = meta.get("antizapret_path")
-    if raw:
-        return Path(str(raw))
-    return get_settings().antizapret_path
+_PROTOCOL_BY_VPN_TYPE = {
+    VpnType.openvpn: "openvpn",
+    VpnType.wireguard: "wireguard",
+    VpnType.amneziawg2: "amneziawg2",
+}
 
 
 def _policy_service(db: Session, node: Node, adapter) -> AccessPolicyService:
-    return AccessPolicyService(
-        db,
-        antizapret_path=_antizapret_path_for_node(node),
-        node_id=node.id,
-        node_name=node.name,
-        adapter=adapter,
-    )
+    return policy_service_for_node(db, node, adapter=adapter)
 
 
 def _apply_policy_op(
@@ -66,6 +59,12 @@ def _apply_policy_op(
 ) -> dict:
     client_name = primary_config.client_name
     actor = kwargs.get("actor")
+    protocol = _PROTOCOL_BY_VPN_TYPE[primary_config.vpn_type]
+
+    if op == "set_block_reason":
+        return svc.set_reason_block(protocol, client_name, kwargs["reason"], actor=actor)
+    if op == "lift_block_reason":
+        return svc.lift_reason_block(protocol, client_name, kwargs["reason"], actor=actor)
 
     if primary_config.vpn_type == VpnType.openvpn:
         if op == "block_temp":

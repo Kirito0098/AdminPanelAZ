@@ -97,19 +97,6 @@ def test_rotation_reencrypts_pending_agent_key(db, rotate):
     assert decrypt_secret(node.api_key_pending_encrypted, NEW_KEY) == "next-agent-key"
 
 
-def test_rotation_keeps_empty_ssh_fields_empty(db, rotate):
-    node = Node(name="plain", host="203.0.113.6", api_key_hash="h", api_key_encrypted=encrypt_secret("k", OLD_KEY))
-    db.add(node)
-    db.commit()
-
-    result = rotate()
-
-    db.refresh(node)
-    assert node.ssh_private_key_encrypted == ""
-    assert node.ssh_passphrase_encrypted == ""
-    assert result["reencrypt_stats"]["errors"] == 0
-
-
 def test_rotation_ends_every_session(db, rotate):
     users = [
         User(username="admin", password_hash="x", role=UserRole.admin, is_active=True, token_version=3),

@@ -75,10 +75,16 @@ def group_member_node_ids(group: NodeSyncGroup) -> set[int]:
 
 def find_group_for_node(db: Session, node_id: int, *, exclude_group_id: int | None = None) -> NodeSyncGroup | None:
     groups = db.query(NodeSyncGroup).all()
+    # Primary is the common case: answer without parsing the replica JSON.
     for group in groups:
         if exclude_group_id is not None and group.id == exclude_group_id:
             continue
-        if node_id in group_member_node_ids(group):
+        if group.primary_node_id == node_id:
+            return group
+    for group in groups:
+        if exclude_group_id is not None and group.id == exclude_group_id:
+            continue
+        if node_id in parse_replica_node_ids(group.replica_node_ids):
             return group
     return None
 
@@ -250,6 +256,15 @@ def require_ha_primary_for_config_ops(db: Session, *, node: Node | None = None) 
         db,
         node_id=node.id,
         operation_hint="Редактируйте файлы, маршрутизацию и настройки",
+    )
+
+
+def require_ha_primary_for_node_activation(db: Session, *, node: Node) -> None:
+    """Reject making an HA replica the active VPN node."""
+    _raise_ha_replica_forbidden(
+        db,
+        node_id=node.id,
+        operation_hint="Переключайте активный узел",
     )
 
 

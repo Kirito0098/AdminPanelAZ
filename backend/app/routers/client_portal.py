@@ -9,6 +9,7 @@ from app.auth import get_current_user, require_admin
 from app.database import get_db
 from app.models import User, UserRole, VpnConfig
 from app.services.client_portal import (
+    _active_user_token,
     ensure_portal_user,
     get_or_create_portal_token,
     get_or_create_user_portal_token,
@@ -23,7 +24,7 @@ from app.services.client_portal import (
 from app.services.feature_guards import get_feature_service, module_disabled_message
 from app.services.node_manager import get_active_node
 from app.services.node_sync.groups import find_sync_group_containing_node
-from app.services.config_access import can_mutate_config
+from app.services.config_access import is_config_owner
 
 router = APIRouter(prefix="/portal", tags=["portal"])
 
@@ -69,8 +70,9 @@ def _assert_can_manage_client(user: User, db: Session, client_name: str) -> None
         raise HTTPException(status_code=404, detail="Клиент не найден")
     if user.role == UserRole.admin:
         return
-    if not any(can_mutate_config(user, c) for c in configs):
-        raise HTTPException(status_code=403, detail="Недостаточно прав")
+    if not any(is_config_owner(user, c) for c in configs):
+        # Same 404 as missing — avoid probing client names via 403 vs 404.
+        raise HTTPException(status_code=404, detail="Клиент не найден")
 
 
 @router.post("/clients/{client_name}/link")
@@ -115,12 +117,14 @@ def revoke_portal_link(
 def get_user_portal_link(
     user_id: int,
     db: Session = Depends(get_db),
-    admin: User = Depends(require_admin),
+    _: User = Depends(require_admin),
 ):
     _require_portal_enabled()
     _require_portal_domain(db)
     ensure_portal_user(db, user_id)
-    row = get_or_create_user_portal_token(db, user_id=user_id, creator=admin)
+    row = _active_user_token(db, user_id=user_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Ссылка портала ещё не создана")
     return user_link_response(db, row)
 
 

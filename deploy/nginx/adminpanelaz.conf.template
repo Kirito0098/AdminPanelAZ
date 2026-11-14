@@ -34,6 +34,7 @@ server {
     ssl_session_tickets off;
 
     client_max_body_size 32m;
+    access_log /var/log/nginx/adminpanelaz.access.log adminpanelaz_privacy;
 
 __PANEL_LOCATION_BLOCKS__
 }

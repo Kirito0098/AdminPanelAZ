@@ -4,30 +4,36 @@ import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin, tg_mini_token_allowed
 from app.database import get_db
-from app.models import AppSetting, User, UserRole, VpnConfig, VpnType
+from app.models import Node, User, UserRole, VpnConfig, VpnType
 from app.schemas import (
     ConfigTagResponse,
     EffectiveVisibleVpnProfilesResponse,
     MessageResponse,
     SelfServiceQuotaResponse,
     VisibleVpnProfilesPolicy,
+    VpnConfigAssignableItem,
     VpnConfigCreate,
     VpnConfigHaInfo,
     VpnConfigResponse,
     VpnConfigUpdate,
 )
-from app.services.self_service import build_quota_payload, enforce_user_can_create_config
-from app.services.user_subscription import apply_owner_access_until_to_config, replicate_inherited_access_until
-from app.services.client_portal import cleanup_deleted_client_records, revoke_client_portal_links
+from app.services.self_service import (
+    awg2_ttl_for_actor,
+    build_quota_payload,
+    enforce_user_can_create_config,
+    openvpn_cert_days_for_actor,
+)
+from app.services.client_portal import revoke_client_portal_links
 from app.services.config_access import can_mutate_config, can_view_config, list_accessible_configs
 from app.services.client_names import validate_new_client_name
-from app.services.admin_notify import admin_notify_service
+from app.services.config_provisioning import deprovision_config, provision_config
+from app.services.user_provisioning import is_in_plan_config, user_has_plan
 from app.services.background_tasks import background_task_service
 from app.services.config_csv_ops import (
     enqueue_config_csv_import,
@@ -43,38 +49,24 @@ from app.services.client_local_ip import build_client_local_ip_map
 from app.services.config_import import format_config_disk_sync_message, import_clients_from_disk
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.node_sync.client_sync import (
-    format_ha_replicate_errors,
-    maybe_replicate_cert_renew,
-    maybe_replicate_create,
-    maybe_replicate_delete,
+    enqueue_maybe_replicate_cert_renew,
     maybe_replicate_config_metadata,
-    purge_ha_shadow_configs,
 )
 from app.services.node_sync.groups import (
     build_ha_metadata,
     find_sync_group_containing_node,
-    find_sync_group_for_primary,
     require_ha_primary_for_client_ops,
 )
 from app.services.openvpn_cert import days_remaining_until, refresh_config_cert_expiry
-from app.services.traffic.maintenance import purge_traffic_history_for_reused_name
-from app.services.openvpn_profile_repair import recreate_openvpn_profiles_after_admin_change
+from app.services.openvpn_profile_repair import finalize_openvpn_profiles_after_add
 from app.services.openvpn_group import (
     filter_openvpn_profile_files,
     list_openvpn_groups,
     set_user_openvpn_group,
 )
-from app.services.notify_time import get_client_timezone_from_request
-from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
-from app.services.file_download import attachment_response
-from app.services.profile_download_name import build_profile_download_filename, enrich_profile_files
+from app.services.profile_delivery import load_node_remote_hosts
+from app.services.profile_download_name import enrich_profile_files
 from app.services.profile_files import profile_files_batch_key
-from app.services.panel_publish_info import resolve_public_base_url
-from app.services.qr_download import QrDownloadService
-from app.services.qr_generator import generate_qr_png, prefers_download_link_qr
-from app.services.access_policy import forget_deleted_openvpn_client
-from app.services.awg2 import compute_expires_at, require_awg2_installed
-from app.services.security import SecurityService
 from app.services.vpn_profile_visibility import (
     POLICY_GROUP_TO_SETTING,
     allowed_openvpn_group_options,
@@ -105,21 +97,6 @@ def _local_ip_for_config(db: Session, config: VpnConfig, adapter: NodeAdapter | 
         return mapping.get(config.client_name.strip().lower())
     except Exception:
         return None
-
-
-def _qr_download_service(db: Session, request: Request) -> QrDownloadService:
-    sec = SecurityService().get_settings(db)
-    pin_row = db.query(AppSetting).filter(AppSetting.key == "qr_download_pin").first()
-    from app.services.client_portal import resolve_portal_base_url
-
-    base_url = resolve_portal_base_url(db) or resolve_public_base_url(request)
-    return QrDownloadService(
-        db,
-        base_url=base_url,
-        ttl_seconds=sec["qr_download_ttl_seconds"],
-        max_downloads=sec["qr_download_max_downloads"],
-        pin=pin_row.value if pin_row else "",
-    )
 
 
 def _active_node_id(db: Session) -> int:
@@ -181,6 +158,21 @@ def _can_mutate_config(user: User, config: VpnConfig) -> bool:
     return can_mutate_config(user, config)
 
 
+def _raise_if_cannot_mutate(user: User, config: VpnConfig) -> None:
+    if _can_mutate_config(user, config):
+        return
+    if (
+        user.role == UserRole.user
+        and config.owner_id == user.id
+        and not bool(getattr(user, "can_manage_configs", False))
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Управление конфигурациями отключено администратором",
+        )
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+
+
 def _to_response(
     config: VpnConfig,
     db: Session,
@@ -191,10 +183,17 @@ def _to_response(
     profile_files: list[dict[str, str]] | None = None,
     tags: list[ConfigTagResponse] | None = None,
     ha_replicate_warning: str | None = None,
+    ha_sync_task_id: str | None = None,
     visibility_policy: dict | None = None,
     local_ip: str | None = None,
+    viewer: User | None = None,
 ) -> VpnConfigResponse:
     owner = db.query(User).filter(User.id == config.owner_id).first()
+    # C7: owner id/username only for admin or the owner (grantee sees neither).
+    # No viewer (internal callers) → keep fields; API paths always pass current_user.
+    show_owner = viewer is None or (
+        viewer.role == UserRole.admin or (owner is not None and owner.id == viewer.id)
+    )
     files: list[dict[str, str]] = []
     if include_files:
         if profile_files is not None:
@@ -212,8 +211,8 @@ def _to_response(
         id=config.id,
         client_name=config.client_name,
         vpn_type=config.vpn_type,
-        owner_id=config.owner_id,
-        owner_username=owner.username if owner else None,
+        owner_id=config.owner_id if show_owner else None,
+        owner_username=(owner.username if owner else None) if show_owner else None,
         cert_expire_days=config.cert_expire_days,
         cert_expires_at=config.cert_expires_at,
         expires_at=config.expires_at,
@@ -225,6 +224,7 @@ def _to_response(
         tags=tags or [],
         ha=_ha_info_for_config(db, config),
         ha_replicate_warning=ha_replicate_warning,
+        ha_sync_task_id=ha_sync_task_id,
         local_ip=local_ip,
     )
 
@@ -307,6 +307,7 @@ def _require_profile_path_allowed(
         protocol=match.get("protocol", ""),
         variant=match.get("variant", ""),
         path=match.get("path", path),
+        kind=match.get("kind", ""),
     ):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Файл профиля недоступен")
 
@@ -334,6 +335,38 @@ def get_visible_vpn_profiles(
         policy=VisibleVpnProfilesPolicy(**policy),
         inherited=inherited,
     )
+
+
+@router.get("/assignable", response_model=list[VpnConfigAssignableItem])
+def list_assignable_configs(
+    db: Session = Depends(get_db),
+    _admin: User = Depends(require_admin),
+):
+    """Все primary-конфиги по всем узлам — для привязки при создании абонента."""
+    rows = (
+        db.query(VpnConfig, Node, User)
+        .outerjoin(Node, Node.id == VpnConfig.node_id)
+        .outerjoin(User, User.id == VpnConfig.owner_id)
+        .filter(VpnConfig.ha_primary_config_id.is_(None))
+        .order_by(VpnConfig.client_name.asc(), VpnConfig.node_id.asc(), VpnConfig.vpn_type.asc())
+        .all()
+    )
+    out: list[VpnConfigAssignableItem] = []
+    for config, node, owner in rows:
+        out.append(
+            VpnConfigAssignableItem(
+                id=config.id,
+                client_name=config.client_name,
+                vpn_type=config.vpn_type,
+                node_id=config.node_id,
+                node_name=(node.name if node is not None else f"node-{config.node_id}"),
+                owner_id=config.owner_id,
+                owner_username=owner.username if owner is not None else None,
+                owner_is_admin=bool(owner is not None and owner.role == UserRole.admin),
+                description=config.description,
+            )
+        )
+    return out
 
 
 @router.get("", response_model=list[VpnConfigResponse])
@@ -388,6 +421,7 @@ def list_configs(
                 for t in tags_map.get(c.id, [])
             ],
             local_ip=local_ip_map.get(c.client_name.strip().lower()),
+            viewer=current_user,
         )
         for c in configs
     ]
@@ -518,6 +552,15 @@ def create_config(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    # D3: пользователь с планом создаёт конфиги только через «Мои конфиги»
+    # (Mini App / /me/plan-configs) или через администратора.
+    if current_user.role != UserRole.admin and user_has_plan(current_user):
+        provisioning_enabled = get_feature_service().is_enabled("user_provisioning")
+        if provisioning_enabled:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Добавьте конфиг через Мои конфиги или запросите у админа",
+            )
     enforce_user_can_create_config(db, current_user)
     require_ha_primary_for_client_ops(db)
     owner_id = payload.owner_id if current_user.role == UserRole.admin and payload.owner_id else current_user.id
@@ -538,91 +581,46 @@ def create_config(
     if existing:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Конфигурация уже существует")
     try:
-        validate_new_client_name(db, node_id=node_id, client_name=payload.client_name)
+        validate_new_client_name(
+            db, node_id=node_id, client_name=payload.client_name, owner_id=owner_id
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     require_vpn_type(payload.vpn_type.value, service=get_feature_service())
     enforce_can_create_vpn_type(db, current_user, payload.vpn_type)
-    adapter = get_active_adapter(db)
-    awg2_expires_at = None
-    if payload.vpn_type == VpnType.openvpn:
-        adapter.add_openvpn_client(payload.client_name, payload.cert_expire_days or 3650)
-        recreate_openvpn_profiles_after_admin_change(
-            adapter,
-            client_names=[payload.client_name],
-            hosts=load_node_remote_hosts(db, node_id),
-        )
-    elif payload.vpn_type == VpnType.wireguard:
-        adapter.add_wireguard_client(payload.client_name)
-    elif payload.vpn_type == VpnType.amneziawg2:
-        require_awg2_installed(adapter)
-        try:
-            awg2_expires_at = compute_expires_at(payload.ttl)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-        if payload.ttl:
-            adapter.awg2_add_client(payload.client_name, ttl=payload.ttl)
-        else:
-            adapter.awg2_add_client(payload.client_name)
-    else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неизвестный тип VPN")
-
-    config = VpnConfig(
-        node_id=node_id,
-        client_name=payload.client_name,
-        vpn_type=payload.vpn_type,
-        owner_id=owner_id,
-        cert_expire_days=payload.cert_expire_days,
-        expires_at=awg2_expires_at,
-        description=payload.description,
-    )
-    refresh_config_cert_expiry(config, adapter)
-    purge_traffic_history_for_reused_name(db, node_id=node_id, client_name=payload.client_name)
-    db.add(config)
-    db.commit()
-    db.refresh(config)
-
-    inherit = apply_owner_access_until_to_config(
-        db,
-        config,
-        actor=current_user.username,
-        commit=True,
-        replicate=False,
-    )
-
-    ha_replicate_warning = None
-    group = find_sync_group_for_primary(db, node_id)
-    if group:
-        replicate_result = maybe_replicate_create(db, node_id=node_id, primary_config=config)
-        ha_replicate_warning = format_ha_replicate_errors(replicate_result)
-        inherit = replicate_inherited_access_until(db, config, inherit, actor=current_user.username)
-
-    if inherit.get("warning"):
-        if ha_replicate_warning:
-            ha_replicate_warning = f"{ha_replicate_warning}; {inherit['warning']}"
-        else:
-            ha_replicate_warning = inherit["warning"]
+    cert_days = openvpn_cert_days_for_actor(current_user, payload.cert_expire_days)
+    ttl = awg2_ttl_for_actor(current_user, payload.ttl)
 
     node = get_active_node(db)
-    admin_notify_service.send_config_create(
-        db,
-        actor_username=current_user.username,
-        target_name=config.client_name,
-        target_type=config.vpn_type.value,
-        node_id=node.id,
-        node_name=node.name,
-        client_timezone=get_client_timezone_from_request(request),
-    )
+    adapter = get_active_adapter(db)
+    try:
+        config, ha_replicate_warning, ha_sync_task_id = provision_config(
+            db,
+            node=node,
+            client_name=payload.client_name,
+            vpn_type=payload.vpn_type,
+            owner=owner,
+            actor=current_user,
+            notify=True,
+            cert_expire_days=cert_days if payload.vpn_type == VpnType.openvpn else payload.cert_expire_days,
+            ttl=ttl,
+            description=payload.description,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
     return _to_response(
         config,
         db,
         include_files=True,
         adapter=adapter,
         ha_replicate_warning=ha_replicate_warning,
+        ha_sync_task_id=ha_sync_task_id,
         visibility_policy=_viewer_visibility_policy(db, current_user),
         openvpn_group=resolve_openvpn_group_for_user(db, current_user),
         local_ip=_local_ip_for_config(db, config, adapter),
+        viewer=current_user,
     )
 
 
@@ -635,10 +633,8 @@ def get_config(
     current_user: User = Depends(get_current_user),
 ):
     config = _get_config_for_active_node(db, config_id)
-    if not config:
+    if not config or not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config, db):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
     return _to_response(
         config,
         db,
@@ -646,6 +642,7 @@ def get_config(
         visibility_policy=_viewer_visibility_policy(db, current_user),
         openvpn_group=resolve_openvpn_group_for_user(db, current_user),
         local_ip=_local_ip_for_config(db, config),
+        viewer=current_user,
     )
 
 
@@ -658,10 +655,14 @@ def update_config(
     current_user: User = Depends(get_current_user),
 ):
     config = _get_config_for_active_node(db, config_id)
-    if not config:
+    if not config or not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_mutate_config(current_user, config):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+    if current_user.role != UserRole.admin and is_in_plan_config(db, current_user, config):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Конфиг из плана нельзя менять напрямую — удалите конфиг целиком в Мои конфиги или обратитесь к администратору",
+        )
+    _raise_if_cannot_mutate(current_user, config)
 
     require_ha_primary_for_client_ops(db)
 
@@ -685,28 +686,33 @@ def update_config(
         metadata_changed = True
     if payload.cert_expire_days is not None and config.vpn_type == VpnType.openvpn:
         adapter = get_active_adapter(db)
-        adapter.add_openvpn_client(config.client_name, payload.cert_expire_days)
-        recreate_openvpn_profiles_after_admin_change(
+        days = openvpn_cert_days_for_actor(current_user, payload.cert_expire_days)
+        adapter.add_openvpn_client(config.client_name, days)
+        finalize_openvpn_profiles_after_add(
             adapter,
             client_names=[config.client_name],
             hosts=load_node_remote_hosts(db, config.node_id),
         )
-        config.cert_expire_days = payload.cert_expire_days
+        config.cert_expire_days = days
         refresh_config_cert_expiry(config, adapter)
         cert_renewed = True
-        renewed_days = payload.cert_expire_days
+        renewed_days = days
 
     db.commit()
     db.refresh(config)
 
     node = get_active_node(db)
+    ha_sync_task_id: str | None = None
     if cert_renewed and renewed_days is not None:
-        maybe_replicate_cert_renew(
+        queued = enqueue_maybe_replicate_cert_renew(
             db,
             node_id=node.id,
             primary_config=config,
             cert_expire_days=renewed_days,
+            created_by_username=current_user.username,
         )
+        if queued:
+            ha_sync_task_id = str(queued.get("task_id") or "") or None
     if metadata_changed:
         maybe_replicate_config_metadata(db, node_id=node.id, primary_config=config)
 
@@ -717,6 +723,8 @@ def update_config(
         visibility_policy=_viewer_visibility_policy(db, current_user),
         openvpn_group=resolve_openvpn_group_for_user(db, current_user),
         local_ip=_local_ip_for_config(db, config),
+        viewer=current_user,
+        ha_sync_task_id=ha_sync_task_id,
     )
 
 
@@ -729,133 +737,24 @@ def delete_config(
     current_user: User = Depends(get_current_user),
 ):
     config = _get_config_for_active_node(db, config_id)
-    if not config:
+    if not config or not _can_access_config(current_user, config, db):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_mutate_config(current_user, config):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
+    if current_user.role != UserRole.admin and is_in_plan_config(db, current_user, config):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Конфиг из плана нельзя удалять напрямую — удалите конфиг целиком в Мои конфиги или обратитесь к администратору",
+        )
+    _raise_if_cannot_mutate(current_user, config)
 
     require_ha_primary_for_client_ops(db)
-    adapter = get_active_adapter(db)
-    if config.vpn_type == VpnType.openvpn:
-        adapter.delete_openvpn_client(config.client_name)
-        forget_deleted_openvpn_client(db, adapter, node_id=config.node_id, client_name=config.client_name)
-    elif config.vpn_type == VpnType.amneziawg2:
-        adapter.awg2_delete_client(config.client_name)
-    else:
-        adapter.delete_wireguard_client(config.client_name)
-
     client_name = config.client_name
-    vpn_type = config.vpn_type.value
-    node = get_active_node(db)
-
-    sync_group = find_sync_group_for_primary(db, node.id)
-    if sync_group:
-        maybe_replicate_delete(db, node_id=node.id, primary_config=config)
-
-    purge_ha_shadow_configs(db, config.id)
-    db.delete(config)
-    cleanup_deleted_client_records(db, config)
-    db.commit()
-    admin_notify_service.send_config_delete(
-        db,
-        actor_username=current_user.username,
-        target_name=client_name,
-        target_type=vpn_type,
-        node_id=node.id,
-        node_name=node.name,
-        client_timezone=get_client_timezone_from_request(request),
-    )
+    owner = db.get(User, config.owner_id)
+    was_in_plan = owner is not None and is_in_plan_config(db, owner, config)
+    deprovision_config(db, config=config, actor=current_user, notify=True, request=request)
+    if was_in_plan:
+        owner.provision_state = "pending"
+        db.commit()
     return MessageResponse(message=f"Клиент '{client_name}' удалён")
-
-
-@router.get("/{config_id}/download")
-def download_profile(
-    config_id: int,
-    path: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    config = _get_config_for_active_node(db, config_id)
-    if not config:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config, db):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
-
-    adapter = get_active_adapter(db)
-    _require_profile_path_allowed(db, current_user, config, path, adapter=adapter)
-    hosts = load_node_remote_hosts(db, config.node_id)
-    content = read_profile_file_for_delivery(adapter, path, hosts)
-    filename = build_profile_download_filename(config.client_name, path=path)
-    return attachment_response(content, filename)
-
-
-@router.get("/{config_id}/qr")
-def generate_qr(
-    config_id: int,
-    path: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    config = _get_config_for_active_node(db, config_id)
-    if not config:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config, db):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
-
-    adapter = get_active_adapter(db)
-    _require_profile_path_allowed(db, current_user, config, path, adapter=adapter)
-    hosts = load_node_remote_hosts(db, config.node_id)
-    content = read_profile_file_for_delivery(adapter, path, hosts)
-    if prefers_download_link_qr(path=path, content=content):
-        link = _qr_download_service(db, request).create_token(
-            file_path=path,
-            config_type=config.vpn_type.value,
-            config_name=build_profile_download_filename(config.client_name, path=path),
-            node_id=config.node_id,
-            creator_id=current_user.id,
-            creator_username=current_user.username,
-            remote_addr=request.client.host if request.client else None,
-        )
-        png = generate_qr_png(link["url"])
-        headers = {
-            "X-Qr-Content": "download-link",
-            "X-Qr-Download-Url": link["url"],
-            "Access-Control-Expose-Headers": "X-Qr-Content, X-Qr-Download-Url",
-        }
-        return Response(content=png, media_type="image/png", headers=headers)
-
-    png = generate_qr_png(content)
-    headers = {
-        "X-Qr-Content": "profile",
-        "Access-Control-Expose-Headers": "X-Qr-Content, X-Qr-Download-Url",
-    }
-    return Response(content=png, media_type="image/png", headers=headers)
-
-
-@router.post("/{config_id}/one-time-link")
-def create_one_time_link(
-    config_id: int,
-    path: str,
-    request: Request,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    config = _get_config_for_active_node(db, config_id)
-    if not config:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
-    if not _can_access_config(current_user, config, db):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Недостаточно прав")
-    _require_profile_path_allowed(db, current_user, config, path)
-    return _qr_download_service(db, request).create_token(
-        file_path=path,
-        config_type=config.vpn_type.value,
-        config_name=build_profile_download_filename(config.client_name, path=path),
-        node_id=config.node_id,
-        creator_id=current_user.id,
-        creator_username=current_user.username,
-        remote_addr=request.client.host if request.client else None,
-    )
 
 
 @router.post("/sync", response_model=MessageResponse)

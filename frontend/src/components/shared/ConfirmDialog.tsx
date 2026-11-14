@@ -17,7 +17,7 @@ import { cn } from '@/lib/utils'
 
 type AlertVariant = 'warning' | 'danger' | 'info'
 
-export interface ConfirmDialogAlert {
+interface ConfirmDialogAlert {
   variant: AlertVariant
   title?: string
   children: React.ReactNode

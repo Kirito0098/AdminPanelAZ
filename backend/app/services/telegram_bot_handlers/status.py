@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from html import escape
 
+from app.services.telegram_api import send_message
 from app.services.telegram_bot_data import build_dashboard_summary, build_server_status_block
 from app.services.telegram_bot_handlers.base import BotContext, inline_button, is_admin, unlinked_message
 from app.services.telegram_bot_handlers.ui import format_bot_timestamp, nav_footer_keyboard, send_or_edit
@@ -10,9 +11,13 @@ from app.services import telegram_bot_i18n as i18n
 
 async def handle_status(ctx: BotContext, *, message_id: int | None = None) -> None:
     if ctx.user is None:
-        from app.services.telegram_api import send_message
-
         await send_message(ctx.bot_token, ctx.chat_id, unlinked_message())
+        return
+
+    # «Статус панели» показывает узел, число конфигов, подключения и IP сервера —
+    # это админские данные, абоненту их видеть не нужно.
+    if not is_admin(ctx.user):
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.ADMIN_ONLY)
         return
 
     summary = build_dashboard_summary(ctx.db, ctx.user)

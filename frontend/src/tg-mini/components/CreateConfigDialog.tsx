@@ -19,25 +19,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { CLIENT_NAME_HINT, isValidClientName } from '@/lib/clientName'
+import { endOfDayIso } from '@/lib/datetime'
+import { createConfig } from '@/api/configs'
+import { getUsers } from '@/api/settings'
+import { setClientAccessUntil } from '@/api/unlockCodes'
 import {
-  createTgPanelConfig,
-  getTgPanelUsers,
-  setTgClientAccessUntil,
-  tgAwg2SetTrafficLimit,
-  tgOpenvpnSetTrafficLimit,
-  tgWgSetTrafficLimit,
-} from '@/tg-mini/api'
+  awg2SetTrafficLimit,
+  openvpnSetTrafficLimit,
+  wgSetTrafficLimit,
+} from '@/api/vpnAccess'
 import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
+import { PROTOCOL_ORDER, protocolLabel } from '@/lib/vpnTypes'
 import { cn } from '@/lib/utils'
 import type { SelfServiceQuota, User, VpnType } from '@/types'
-
-const PROTOCOL_ORDER: VpnType[] = ['openvpn', 'wireguard', 'amneziawg2']
-
-function vpnLabel(type: VpnType): string {
-  if (type === 'openvpn') return 'OpenVPN'
-  if (type === 'wireguard') return 'WG/AWG 1.5'
-  return 'AWG 2.0'
-}
 
 async function setTrafficLimitForProtocol(
   protocol: VpnType,
@@ -47,14 +42,14 @@ async function setTrafficLimitForProtocol(
   periodDays: number | null,
 ) {
   if (protocol === 'openvpn') {
-    await tgOpenvpnSetTrafficLimit(clientName, value, unit, periodDays)
+    await openvpnSetTrafficLimit(clientName, value, unit, periodDays)
     return
   }
   if (protocol === 'amneziawg2') {
-    await tgAwg2SetTrafficLimit(clientName, value, unit, periodDays)
+    await awg2SetTrafficLimit(clientName, value, unit, periodDays)
     return
   }
-  await tgWgSetTrafficLimit(clientName, value, unit, periodDays)
+  await wgSetTrafficLimit(clientName, value, unit, periodDays)
 }
 
 interface CreateConfigDialogProps {
@@ -120,7 +115,7 @@ export default function CreateConfigDialog({
 
   useEffect(() => {
     if (!open || !isAdmin) return
-    void getTgPanelUsers()
+    void getUsers()
       .then(setUsers)
       .catch(() => setUsers([]))
   }, [open, isAdmin])
@@ -146,19 +141,11 @@ export default function CreateConfigDialog({
   }
 
   const validateClientName = (trimmedName: string): string | null => {
-    if (!trimmedName) return 'Укажите имя клиента'
-    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(trimmedName)) {
-      return 'Имя: латиница, цифры, _ и -, до 32 символов'
+    if (!trimmedName) return 'Укажите имя конфига'
+    if (!isValidClientName(trimmedName)) {
+      return CLIENT_NAME_HINT
     }
     return null
-  }
-
-  const dateInputToIso = (value: string) => {
-    if (!value) return null
-    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-    if (!match) return null
-    const next = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
-    return next.toISOString()
   }
 
   const applyAccessUntilAfterCreate = async (
@@ -167,13 +154,10 @@ export default function CreateConfigDialog({
     dateValue: string,
   ): Promise<string | null> => {
     if (!isAdmin || !dateValue) return null
-    if (protocol !== 'openvpn' && protocol !== 'wireguard' && protocol !== 'amneziawg2') {
-      return 'дата доступа не применена для этого протокола'
-    }
-    const iso = dateInputToIso(dateValue)
+    const iso = endOfDayIso(dateValue)
     if (!iso) return 'некорректная дата доступа'
     try {
-      await setTgClientAccessUntil(protocol, name, iso)
+      await setClientAccessUntil(protocol, name, iso)
       return null
     } catch (err) {
       return err instanceof ApiError ? err.message : 'срок доступа не сохранён'
@@ -209,6 +193,7 @@ export default function CreateConfigDialog({
     }
     const parsedCertDays = Number(certDays)
     if (
+      isAdmin &&
       selectedProtocols.includes('openvpn') &&
       (!Number.isFinite(parsedCertDays) || parsedCertDays < 1 || parsedCertDays > 3650)
     ) {
@@ -239,13 +224,13 @@ export default function CreateConfigDialog({
     try {
       for (const vpnType of ordered) {
         try {
-          await createTgPanelConfig({
+          await createConfig({
             client_name: trimmedName,
             vpn_type: vpnType,
-            cert_expire_days: vpnType === 'openvpn' ? parsedCertDays : undefined,
+            cert_expire_days: isAdmin && vpnType === 'openvpn' ? parsedCertDays : undefined,
             description: description.trim() || undefined,
             owner_id: isAdmin && ownerId ? ownerId : undefined,
-            ttl: vpnType === 'amneziawg2' && ttl !== 'none' ? ttl : undefined,
+            ttl: isAdmin && vpnType === 'amneziawg2' && ttl !== 'none' ? ttl : undefined,
           })
           created.push(vpnType)
           const nextAccessErr = await applyAccessUntilAfterCreate(
@@ -259,7 +244,7 @@ export default function CreateConfigDialog({
         } catch (err) {
           if (created.length === 0) throw err
           setError(
-            `Создано: ${created.map(vpnLabel).join(', ')}. Не удалось: ${vpnLabel(vpnType)} — ${
+            `Создано: ${created.map(protocolLabel).join(', ')}. Не удалось: ${protocolLabel(vpnType)} — ${
               err instanceof ApiError ? err.message : 'ошибка'
             }`,
           )
@@ -280,7 +265,7 @@ export default function CreateConfigDialog({
             )
           } catch (err) {
             failed.push(
-              `${vpnLabel(protocol)}: ${err instanceof ApiError ? err.message : 'ошибка'}`,
+              `${protocolLabel(protocol)}: ${err instanceof ApiError ? err.message : 'ошибка'}`,
             )
           }
         }
@@ -308,7 +293,7 @@ export default function CreateConfigDialog({
 
         <form onSubmit={(e) => void handleSubmit(e)} className="tg-mini-config-sheet-form">
           <DialogHeader className="shrink-0 space-y-2 px-4 pb-3 pt-2 text-left">
-            <DialogTitle className="text-base font-semibold">Новый профиль</DialogTitle>
+            <DialogTitle className="text-base font-semibold">Новый конфиг</DialogTitle>
             <DialogDescription className="text-xs leading-relaxed">
               Одно имя — несколько конфигураций на активном узле.
             </DialogDescription>
@@ -323,7 +308,7 @@ export default function CreateConfigDialog({
             )}
 
             <div className="space-y-2">
-              <Label htmlFor="tg-mini-client-name">Имя профиля</Label>
+              <Label htmlFor="tg-mini-client-name">Имя конфига</Label>
               <Input
                 id="tg-mini-client-name"
                 value={clientName}
@@ -354,7 +339,7 @@ export default function CreateConfigDialog({
                         checked ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-muted/50',
                       )}
                     >
-                      <span className="block font-medium">{vpnLabel(type)}</span>
+                      <span className="block font-medium">{protocolLabel(type)}</span>
                       <span className="text-xs text-muted-foreground">
                         {checked ? 'Выбрано' : 'Не выбрано'}
                       </span>
@@ -364,7 +349,7 @@ export default function CreateConfigDialog({
               </div>
             </div>
 
-            {selectedProtocols.includes('openvpn') && (
+            {isAdmin && selectedProtocols.includes('openvpn') && (
               <div className="space-y-2">
                 <Label htmlFor="tg-mini-cert-days">Срок сертификата OpenVPN (дней)</Label>
                 <Input
@@ -379,9 +364,9 @@ export default function CreateConfigDialog({
               </div>
             )}
 
-            {selectedProtocols.includes('amneziawg2') && (
+            {isAdmin && selectedProtocols.includes('amneziawg2') && (
               <div className="space-y-2">
-                <Label htmlFor="tg-mini-awg2-ttl">TTL AWG 2.0</Label>
+                <Label htmlFor="tg-mini-awg2-ttl">TTL {protocolLabel('amneziawg2')}</Label>
                 <Select value={ttl} onValueChange={setTtl} disabled={busy || quotaReached}>
                   <SelectTrigger id="tg-mini-awg2-ttl">
                     <SelectValue />
@@ -496,7 +481,7 @@ export default function CreateConfigDialog({
                 value={ownerId}
                 onChange={setOwnerId}
                 disabled={busy || quotaReached}
-                description="Владелец увидит все конфигурации профиля"
+                description="Владелец увидит все конфиги"
               />
             )}
 

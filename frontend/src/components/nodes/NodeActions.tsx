@@ -6,6 +6,7 @@ import {
   Pencil,
   Power,
   RefreshCw,
+  Server,
   Trash2,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -27,6 +28,8 @@ type NodeActionsProps = {
   onTransportChange: (transport: NodeTransportId) => void
   onEdit: () => void
   onDelete: () => void
+  /** Stage 4: выдать сервер пользователям (показывается только для доступных серверов). */
+  onAssignToUsers?: () => void
   compact?: boolean
 }
 
@@ -44,6 +47,7 @@ export default function NodeActions({
   onTransportChange,
   onEdit,
   onDelete,
+  onAssignToUsers,
   compact = false,
 }: NodeActionsProps) {
   const btnSize = compact ? 'icon' : 'sm'
@@ -122,6 +126,17 @@ export default function NodeActions({
             </Button>
           )}
         </>
+      )}
+      {onAssignToUsers && (
+        <Button
+          variant={compact ? 'ghost' : 'outline'}
+          size={btnSize}
+          title="Выдать этот сервер пользователям"
+          onClick={onAssignToUsers}
+        >
+          <Server size={iconSize} />
+          {!compact && 'Выдать пользователям'}
+        </Button>
       )}
       <Button
         variant={compact ? 'ghost' : 'outline'}

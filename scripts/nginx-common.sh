@@ -4,6 +4,8 @@
 nginx_common_init() {
   : "${ROOT_DIR:?ROOT_DIR не задан}"
   : "${ENV_FILE:?ENV_FILE не задан}"
+  # shellcheck source=scripts/env-file.sh
+  source "${ROOT_DIR}/scripts/env-file.sh"
   NGINX_TEMPLATE_DIR="${ROOT_DIR}/deploy/nginx"
   NGINX_SELF_SIGNED_CERT="/etc/ssl/certs/adminpanelaz.crt"
   NGINX_SELF_SIGNED_KEY="/etc/ssl/private/adminpanelaz.key"
@@ -29,6 +31,22 @@ nginx_require_root() {
 
 nginx_is_non_interactive() {
   [[ "$NON_INTERACTIVE" == "true" || "$NON_INTERACTIVE" == "1" ]] || [[ ! -t 0 ]]
+}
+
+# Перезапуск панели после правки .env или vhost. SKIP_PANEL_RESTART=true|1 — отложить: перезапуск
+# сделает фоновая задача панели после завершения публикации.
+nginx_restart_panel_if_needed() {
+  local service="${SERVICE_NAME:-adminpanelaz}"
+  if [[ "${SKIP_PANEL_RESTART:-false}" == "true" || "${SKIP_PANEL_RESTART:-false}" == "1" ]]; then
+    nginx_log "Перезапуск панели отложен (SKIP_PANEL_RESTART)"
+    return 0
+  fi
+  if systemctl is-enabled "$service" >/dev/null 2>&1 \
+    || systemctl cat "$service" >/dev/null 2>&1; then
+    systemctl restart "$service" 2>/dev/null || nginx_warn "Не удалось перезапустить $service"
+  else
+    nginx_warn "Перезапустите панель вручную: systemctl restart $service"
+  fi
 }
 
 nginx_validate_port() {
@@ -127,8 +145,7 @@ nginx_assert_domain_not_az_vpn_host() {
 }
 
 nginx_env_get() {
-  local key="$1"
-  grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true
+  env_file_get "$ENV_FILE" "$1"
 }
 
 # Первый IPv4 сервера (для CN самоподписанного cert, если домен не задан).
@@ -201,6 +218,15 @@ nginx_resolve_existing_ssl_paths() {
   return 1
 }
 
+# Формат домена (FQDN) для публикации панели: буква/цифра, затем буквы, цифры, точки и дефисы, TLD ≥2 букв.
+nginx_is_valid_domain() {
+  [[ "${1:-}" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$ ]]
+}
+
+nginx_validate_domain() {
+  nginx_is_valid_domain "${1:-}" || nginx_die "Неверный формат домена: ${1:-}"
+}
+
 # Домен или IPv4 для server_name, CN сертификата и .env: только буквы, цифры, точки и дефисы.
 nginx_is_safe_host() {
   [[ "$1" =~ ^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$ ]]
@@ -212,24 +238,12 @@ nginx_is_safe_file_path() {
 }
 
 nginx_env_set() {
-  local key="$1"
-  local value="$2"
-  local escaped
-  [[ "$value" != *$'\n'* && "$value" != *$'\r'* ]] || nginx_die "${key}: перевод строки в значении недопустим"
-  mkdir -p "$(dirname "$ENV_FILE")"
-  touch "$ENV_FILE"
-  escaped=$(printf '%s' "$value" | sed 's/[\\&|]/\\&/g')
-  if grep -q "^${key}=" "$ENV_FILE" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "$ENV_FILE"
-  else
-    printf '%s=%s\n' "$key" "$value" >>"$ENV_FILE"
-  fi
+  [[ "$2" != *$'\n'* && "$2" != *$'\r'* ]] || nginx_die "$1: перевод строки в значении недопустим"
+  env_file_set "$ENV_FILE" "$1" "$2"
 }
 
 nginx_env_unset() {
-  local key="$1"
-  [ -f "$ENV_FILE" ] || return 0
-  sed -i "/^${key}=/d" "$ENV_FILE"
+  env_file_unset "$ENV_FILE" "$1"
 }
 
 nginx_conf_basename() {
@@ -380,6 +394,55 @@ nginx_ensure_server_names_hash() {
     NGINX_HASH_SNIPPET_CHANGED=true
   fi
   nginx_log "Snippet server_names_hash: ${dest}"
+}
+
+nginx_privacy_log_dest() {
+  printf '%s/adminpanelaz-privacy-log.conf' "$(nginx_conf_d_dir)"
+}
+
+nginx_ensure_privacy_log() {
+  local src dest dir
+  src="${NGINX_TEMPLATE_DIR}/adminpanelaz-privacy-log.conf"
+  dir="$(nginx_conf_d_dir)"
+  dest="$(nginx_privacy_log_dest)"
+  [[ -f "$src" ]] || nginx_die "Нет шаблона privacy-log: ${src}"
+  mkdir -p "$dir"
+  NGINX_PRIVACY_LOG_DEST="$dest"
+  NGINX_PRIVACY_LOG_BAK=""
+  NGINX_PRIVACY_LOG_CHANGED=false
+  if [[ -f "$dest" ]]; then
+    if cmp -s "$src" "$dest"; then
+      return 0
+    fi
+    NGINX_PRIVACY_LOG_BAK="${dest}.apaz-privacy.bak.$$"
+    cp -a "$dest" "$NGINX_PRIVACY_LOG_BAK"
+    cp "$src" "$dest"
+    NGINX_PRIVACY_LOG_CHANGED=true
+  else
+    cp "$src" "$dest"
+    NGINX_PRIVACY_LOG_CHANGED=true
+  fi
+  nginx_log "Snippet privacy access log: ${dest}"
+}
+
+nginx_rollback_privacy_log() {
+  local dest="${NGINX_PRIVACY_LOG_DEST:-}"
+  [[ -n "$dest" ]] || return 0
+  [[ "${NGINX_PRIVACY_LOG_CHANGED:-false}" == "true" ]] || return 0
+  if [[ -n "${NGINX_PRIVACY_LOG_BAK:-}" && -f "$NGINX_PRIVACY_LOG_BAK" ]]; then
+    mv -f "$NGINX_PRIVACY_LOG_BAK" "$dest"
+  else
+    rm -f "$dest"
+  fi
+  NGINX_PRIVACY_LOG_CHANGED=false
+  NGINX_PRIVACY_LOG_BAK=""
+}
+
+nginx_cleanup_privacy_log_bak() {
+  if [[ -n "${NGINX_PRIVACY_LOG_BAK:-}" && -f "$NGINX_PRIVACY_LOG_BAK" ]]; then
+    rm -f "$NGINX_PRIVACY_LOG_BAK"
+  fi
+  NGINX_PRIVACY_LOG_BAK=""
 }
 
 nginx_rollback_server_names_hash() {
@@ -553,6 +616,7 @@ nginx_install_temp_acme_http_vhost() {
   http_port="${http_port:-80}"
 
   nginx_ensure_server_names_hash
+  nginx_ensure_privacy_log
   mkdir -p "$(nginx_acme_webroot)/.well-known/acme-challenge"
   base="$(nginx_acme_temp_site_basename "$domain")"
   available_dir="$(nginx_sites_available_dir)"
@@ -590,10 +654,12 @@ EOF
     rm -f "$enabled_link" "$conf_file"
     nginx_acme_restore_enabled_default "$base"
     nginx_rollback_server_names_hash
+    nginx_rollback_privacy_log
     nginx_warn "Временный ACME vhost для ${domain} не прошёл nginx -t — пробуем без webroot"
     return 1
   fi
   nginx_cleanup_server_names_hash_bak
+  nginx_cleanup_privacy_log_bak
   if systemctl is-active --quiet nginx 2>/dev/null; then
     systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1 || true
   else
@@ -953,6 +1019,7 @@ $(nginx_origin_lock_include_line)
 
     # Telegram Mini App — без X-Frame-Options (WebView Telegram блокируется SAMEORIGIN)
     location ^~ /api/tg-mini {
+        client_max_body_size 32k;
 $(nginx_realip_include_line)
 $(nginx_origin_lock_include_line)
         proxy_pass http://127.0.0.1:${backend_port};
@@ -1942,6 +2009,7 @@ nginx_rollback_site_install() {
     rm -f "$NGINX_CONF_FILE"
   fi
   nginx_rollback_server_names_hash
+  nginx_rollback_privacy_log
   nginx_install_txn_rollback
 }
 
@@ -1958,6 +2026,7 @@ nginx_install_site() {
     return 1
   fi
   nginx_ensure_server_names_hash
+  nginx_ensure_privacy_log
   nginx_conf_paths "$domain"
   available_dir="$(nginx_sites_available_dir)"
   enabled_dir="$(nginx_sites_enabled_dir)"
@@ -1985,6 +2054,7 @@ nginx_install_site() {
   fi
   [[ -n "$bak" && -f "$bak" ]] && rm -f "$bak"
   nginx_cleanup_server_names_hash_bak
+  nginx_cleanup_privacy_log_bak
   nginx_install_txn_commit
   nginx_install_default_deny
 

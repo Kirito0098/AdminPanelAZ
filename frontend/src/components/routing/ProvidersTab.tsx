@@ -1,6 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Route, Search, Pencil, Play } from 'lucide-react'
 import ProviderEditorDialog from '@/components/routing/ProviderEditorDialog'
+import ProviderFilterBar, { type ProviderFilterStatusOption } from '@/components/routing/ProviderFilterBar'
+import { filterProviders, type ProviderQuickFilter } from '@/components/routing/providerFilters'
 import { ROUTING_TAB_UPDATE, STAGE_BUILD, STAGE_DEPLOY } from '@/components/routing/routingLabels'
 import type { RoutingTab, RoutingWorkflowState } from '@/components/routing/routingWorkflow'
 import { hasControllerArtifact, providerNeedsCompile, providerNeedsDeploy } from '@/components/routing/routingWorkflow'
@@ -8,15 +10,7 @@ import StatusPanel from '@/components/noc/StatusPanel'
 import EmptyState from '@/components/ui/EmptyState'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import type { CidrDbStatus, CidrProviderInfo, Node } from '@/types'
@@ -26,7 +20,8 @@ interface ProvidersTabProps {
   providers: CidrProviderInfo[]
   cidrDb: CidrDbStatus | null
   activeNode: Node | null
-  isAdmin: boolean
+  /** HA replica: маршрутизация только для чтения, действия недоступны. */
+  readonly?: boolean
   actionLoading: boolean
   onToggle: (filename: string, enabled: boolean, name: string) => void
   pipelineBusy?: boolean
@@ -35,7 +30,13 @@ interface ProvidersTabProps {
   workflow?: RoutingWorkflowState
 }
 
-type QuickFilter = 'all' | 'enabled' | 'disabled' | 'errors' | 'needs_deploy' | 'needs_compile'
+const STATUS_OPTIONS: readonly ProviderFilterStatusOption[] = [
+  { value: 'all', label: 'Все статусы' },
+  { value: 'ok', label: 'OK' },
+  { value: 'partial', label: 'Частично' },
+  { value: 'error', label: 'Ошибка' },
+  { value: 'never', label: 'Нет данных' },
+]
 
 function controllerCidrCount(cidrDb: CidrDbStatus | null, filename: string): number | null {
   const artifact = cidrDb?.compile_artifacts?.[filename]
@@ -83,7 +84,7 @@ function CidrCountsGrid({
 interface ProviderListItemProps {
   provider: CidrProviderInfo
   cidrDb: CidrDbStatus | null
-  isAdmin: boolean
+  readonly: boolean
   actionLoading: boolean
   pipelineBusy: boolean
   onToggle: (filename: string, enabled: boolean, name: string) => void
@@ -93,7 +94,7 @@ interface ProviderListItemProps {
 function ProviderListItem({
   provider: p,
   cidrDb,
-  isAdmin,
+  readonly,
   actionLoading,
   pipelineBusy,
   onToggle,
@@ -102,7 +103,7 @@ function ProviderListItem({
   const dbMeta = cidrDb?.providers?.[p.filename]
   const onController = hasControllerArtifact(cidrDb, p.filename)
   const enableBlocked = !p.has_source && !p.enabled
-  const toggleDisabled = !isAdmin || actionLoading || enableBlocked
+  const toggleDisabled = readonly || actionLoading || enableBlocked
   const switchId = `provider-enabled-${providerSlug(p.filename)}`
   const rowHint = !p.has_source
     ? onController
@@ -157,11 +158,11 @@ function ProviderListItem({
           aria-label={`${p.name}: ${p.enabled ? 'включён' : 'выключен'}`}
           className={p.enabled ? 'bg-emerald-600' : undefined}
           onCheckedChange={(next) => {
-            if (!isAdmin || next === p.enabled) return
+            if (readonly || next === p.enabled) return
             onToggle(p.filename, next, p.name)
           }}
         />
-        {isAdmin && (
+        {!readonly && (
           <Button
             size="sm"
             variant="ghost"
@@ -193,7 +194,7 @@ export default function ProvidersTab({
   providers,
   cidrDb,
   activeNode,
-  isAdmin,
+  readonly = false,
   actionLoading,
   onToggle,
   pipelineBusy = false,
@@ -201,10 +202,10 @@ export default function ProvidersTab({
   onApplyRouting,
   workflow,
 }: ProvidersTabProps) {
-  const [search, setSearch] = useState('')
+  const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [categoryFilter, setCategoryFilter] = useState('all')
-  const [quickFilter, setQuickFilter] = useState<QuickFilter>('all')
+  const [quickFilter, setQuickFilter] = useState<ProviderQuickFilter>('all')
   const [editorFilename, setEditorFilename] = useState<string | null>(null)
   const [editorName, setEditorName] = useState('')
 
@@ -212,6 +213,14 @@ export default function ProvidersTab({
     () => [...new Set(providers.map((p) => p.category))].sort(),
     [providers],
   )
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const provider of providers) {
+      counts[provider.category] = (counts[provider.category] ?? 0) + 1
+    }
+    return counts
+  }, [providers])
 
   const needsCompile = (workflow?.pendingCompileCount ?? 0) > 0
   const needsDeploy = (workflow?.pendingDeployCount ?? 0) > 0
@@ -233,31 +242,20 @@ export default function ProvidersTab({
     return { enabled, disabled, errors, needsDeployCount, needsCompileCount }
   }, [providers, cidrDb])
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    return providers.filter((p) => {
-      const dbMeta = cidrDb?.providers?.[p.filename]
-      const dbStatus = dbMeta?.refresh_status ?? 'never'
-
-      if (statusFilter !== 'all' && dbStatus !== statusFilter) return false
-      if (categoryFilter !== 'all' && p.category !== categoryFilter) return false
-
-      if (quickFilter === 'enabled' && !p.enabled) return false
-      if (quickFilter === 'disabled' && p.enabled) return false
-      if (quickFilter === 'errors' && dbStatus !== 'error') return false
-      if (quickFilter === 'needs_deploy' && !providerNeedsDeploy(cidrDb, p)) return false
-      if (quickFilter === 'needs_compile' && !providerNeedsCompile(cidrDb, p)) return false
-
-      if (!q) return true
-      const slug = providerSlug(p.filename)
-      return (
-        p.name.toLowerCase().includes(q) ||
-        slug.includes(q) ||
-        p.category.toLowerCase().includes(q) ||
-        providerCategoryLabel(p.category).toLowerCase().includes(q)
-      )
-    })
-  }, [providers, cidrDb, search, statusFilter, categoryFilter, quickFilter])
+  const filtered = useMemo(
+    () =>
+      filterProviders(providers, {
+        query,
+        category: categoryFilter,
+        status: statusFilter,
+        quickFilter,
+        statusOf: (provider) => cidrDb?.providers?.[provider.filename]?.refresh_status,
+        tagsOf: (provider) => cidrDb?.providers?.[provider.filename]?.tags,
+        needsCompile: (provider) => providerNeedsCompile(cidrDb, provider),
+        needsDeploy: (provider) => providerNeedsDeploy(cidrDb, provider),
+      }),
+    [providers, cidrDb, query, statusFilter, categoryFilter, quickFilter],
+  )
 
   if (providers.length === 0) {
     return (
@@ -272,9 +270,9 @@ export default function ProvidersTab({
   const nodeLabel = activeNode?.name ?? 'активном узле'
   const onNodeCount = workflow?.onNodeCount ?? providers.filter((p) => p.has_source).length
   const enabledCount = workflow?.enabledCount ?? providers.filter((p) => p.enabled).length
-  const showApplySection = isAdmin && onNodeCount > 0 && !needsDeploy
+  const showApplySection = !readonly && onNodeCount > 0 && !needsDeploy
 
-  const quickFilters: Array<{ id: QuickFilter; label: string; count?: number }> = [
+  const quickFilters: Array<{ id: ProviderQuickFilter; label: string; count?: number }> = [
     { id: 'all', label: 'Все', count: providers.length },
     { id: 'enabled', label: 'Включённые', count: quickFilterCounts.enabled },
     { id: 'disabled', label: 'Выключенные', count: quickFilterCounts.disabled },
@@ -287,7 +285,7 @@ export default function ProvidersTab({
     <>
       <StatusPanel title="CIDR-провайдеры" icon={Route}>
         <div className="space-y-4">
-          {needsCompile && isAdmin && !workflow?.optionalCompileRemaining && (
+          {needsCompile && !readonly && !workflow?.optionalCompileRemaining && (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-950 dark:text-amber-100">
               Данные провайдеров уже в БД (этап 1), но файлы списков ещё не собраны на контроллере.{' '}
               {onNavigateTab ? (
@@ -305,7 +303,7 @@ export default function ProvidersTab({
               )}
             </div>
           )}
-          {needsCompile && isAdmin && workflow?.optionalCompileRemaining && (
+          {needsCompile && !readonly && workflow?.optionalCompileRemaining && (
             <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-900 dark:text-amber-100">
               Сборка завершена.{' '}
               {workflow.pendingCompileNames.length === 1 ? (
@@ -343,7 +341,7 @@ export default function ProvidersTab({
               .
             </div>
           )}
-          {needsDeploy && !needsCompile && isAdmin && (
+          {needsDeploy && !needsCompile && !readonly && (
             <div className="rounded-md border border-sky-500/40 bg-sky-500/10 px-4 py-3 text-sm text-sky-950 dark:text-sky-100">
               Списки собраны на контроллере.{' '}
               {onNavigateTab ? (
@@ -429,43 +427,19 @@ export default function ProvidersTab({
             })}
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-            <div className="relative w-full min-w-0 sm:max-w-sm sm:flex-1">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Поиск по имени или категории…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full sm:w-[160px]">
-                <SelectValue placeholder="Статус БД" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все статусы</SelectItem>
-                <SelectItem value="ok">OK</SelectItem>
-                <SelectItem value="partial">Частично</SelectItem>
-                <SelectItem value="error">Ошибка</SelectItem>
-                <SelectItem value="never">Нет данных</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-full sm:w-[160px]">
-                <SelectValue placeholder="Категория" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Все категории</SelectItem>
-                {categories.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {providerCategoryLabel(c)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <span className="text-xs text-muted-foreground">Показано: {filtered.length}</span>
-          </div>
+          <ProviderFilterBar
+            query={query}
+            onQueryChange={setQuery}
+            category={categoryFilter}
+            onCategoryChange={setCategoryFilter}
+            categories={categories}
+            categoryCounts={categoryCounts}
+            status={statusFilter}
+            onStatusChange={setStatusFilter}
+            statusOptions={STATUS_OPTIONS}
+            resultCount={filtered.length}
+            totalCount={providers.length}
+          />
 
           <p className="text-[11px] text-muted-foreground">
             CIDR: <strong>БД</strong> — SQLite на контроллере · <strong>Контр.</strong> — собранный
@@ -473,9 +447,11 @@ export default function ProvidersTab({
           </p>
 
           {filtered.length === 0 ? (
-            <div className="rounded-md border px-4 py-10 text-center text-sm text-muted-foreground">
-              Нет провайдеров по выбранным фильтрам
-            </div>
+            <EmptyState
+              icon={Search}
+              title="Нет провайдеров по выбранным фильтрам"
+              className="py-10"
+            />
           ) : (
             <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
               {filtered.map((p) => (
@@ -483,7 +459,7 @@ export default function ProvidersTab({
                   key={p.filename}
                   provider={p}
                   cidrDb={cidrDb}
-                  isAdmin={isAdmin}
+                  readonly={readonly}
                   actionLoading={actionLoading}
                   pipelineBusy={pipelineBusy}
                   onToggle={onToggle}

@@ -1,19 +1,43 @@
 # Участие в разработке AdminPanelAZ
 
-Гайд для тех, кто помогает с панелью в **Cursor**: какие MCP и skills использует мейнтейнер, **зачем** каждый из них, и договорённости по коду.
+Гайд для тех, кто помогает с панелью: какие MCP и skills использует мейнтейнер, **зачем** каждый из них, и договорённости по коду. Работают два клиента — **Zoo Code** (DSH-профиль) и **Cursor**: правила и каталог скиллов лежат в репозитории и читаются как обычные файлы, а MCP-серверы каждый клиент подключает по-своему (настройки MCP клиента или локальный `.cursor/mcp.json`).
 
-Пользовательские инструкции (для админов VPN): [`docs/README.md`](docs/README.md).  
-Карта кода: [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md).  
+Пользовательские инструкции (для админов VPN): [`docs/README.md`](docs/README.md).
+Карта кода: [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md).
 Безопасность: [`SECURITY.md`](SECURITY.md).
+Выжимка правил для агента: [`AGENTS.md`](AGENTS.md).
 
 ---
 
-## Важно: локальные настройки Cursor не в git
+## Agent starter pack (уже в git)
 
-Каталог **`.cursor/`** (MCP, rules, hooks) и **`.codebase-memory/`** в репозиторий **не коммитятся**.  
-Skills мейнтейнера лежат вне репо (`~/.agents/skills/`, `~/.cursor/skills-cursor`, плагины в `~/.cursor/plugins/cache/` и т.п.).
+| Путь | Что |
+| ------ | ----- |
+| `.cursor/rules/` | `use-skills`, `lean-code`, `release-train-branching`, `telegram-release-post`. Это просто markdown-правила, их читают оба клиента — и Zoo Code, и Cursor |
+| `.cursor/skills/` | project skills: `brainstorming`, `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
+| `.agents/skills/` | симлинки на `.cursor/skills/` для скиллов, нужных в любом режиме Zoo Code |
+| `.agents/skills-code/` | те же симлинки, активны только в Code: React, UI, tui, tdd, браузерные проверки |
+| `.agents/skills-architect/` | симлинк `split-design-spec`, активен только в Architect |
+| `.agents/skills-lock.json` | провенанс скиллов: `karpathy-ponytail`, `tui-design` (хеши), вендорные Vercel и локальные |
+| `.cursor/mcp.json.example` | шаблон MCP **без** секретов |
+| `.agents/mcp_config.json.example` | тот же шаблон для обёртки `.agents/bin/mcp` (симлинк на файл выше) |
+| `.agents/AGENTS.md` | краткая карта для агентов, которые смотрят в `.agents/` |
 
-Подключайте инструменты **у себя локально** по этому файлу — не копируйте чужие токены и `mcp.json` с секретами в PR.
+**Не в git (локально):** `.cursor/mcp.json`, `.cursor/settings.json`, `.cursor/rules/gitea-agent-sync.mdc`, `.agents/mcp_config.json`, `.agents/bin/`, `.codebase-memory/`, `docs/plans/`, `docs/superpowers/`, `.env`, `*.db`.
+
+Токены и личные MCP-конфиги в PR не кладём: пути, ключи и авторизация живут только на машине оператора.
+
+---
+
+## MCP в двух клиентах
+
+**Cursor** берёт MCP из локального `.cursor/mcp.json` (шаблон — `.cursor/mcp.json.example`), правила — из `.cursor/rules/`, скиллы — из `.cursor/skills/`.
+
+**Zoo Code** подключает те же серверы в своих настройках MCP; файл `.cursor/mcp.json` там не читается, если не настроен явно.
+
+Ни то, ни другое в репозиторий не попадает: пути команд, ключи и токены — только локально. Формат — `{"mcpServers": {...}}`, как в шаблоне.
+
+Личная синхронизация с Gitea (адрес, pre-push хук, снимок агентских каталогов) настраивается только на сервере: правило `.cursor/rules/gitea-agent-sync.mdc` не коммитится и в GitHub не попадает.
 
 ---
 
@@ -21,55 +45,20 @@ Skills мейнтейнера лежат вне репо (`~/.agents/skills/`, `
 
 MCP даёт агенту доступ к внешним сервисам и индексам. Без них остаётся только чтение файлов и shell.
 
-### codebase-memory
+| Сервер (`serverName`) | Зачем | Когда |
+| --- | --- | --- |
+| `codebase_memory` | Граф символов: функции, классы, вызовы, HTTP-роуты, импорты. `search_graph`, `trace_path`, `get_code_snippet`, `get_architecture` | Навигация по незнакомому коду. После крупных рефакторингов и удаления модулей — переиндексация, иначе граф ссылается на удалённые файлы |
+| `github` | PR, issues, GitHub Actions и комментарии прямо из чата | Посмотреть PR, статус CI, triage комментариев. Только чтение |
+| `context7` | Актуальная документация библиотек | Правите интеграцию с FastAPI / React / Recharts / webauthn / redis — не гадаете API по памяти модели |
+| `playwright` | Браузер: клики, ввод, снимки DOM и экрана, логи консоли | UI-правки: логин, 2FA, NOC, Mini App, мастера настроек. В jsdom порталы и Radix-меню не воспроизводятся |
+| `siteaudit` | Audit публичного URL: HTTPS, HSTS, CSP, cookies, SSL | После смены CSP/HSTS и публикации домена |
+| `lazyweb` | Подбор референсов UI | Только когда нужны примеры интерфейсов |
 
-**Зачем:** AdminPanelAZ большой (~десятки роутеров, сотни сервисов). Обычный `grep` часто не видит связи «роут → сервис → адаптер узла».
+`codebase_memory`, `github`, `playwright` и `siteaudit` запускаются **по SSH на тот же хост, где лежит код**, поэтому граф и индексы — серверные, а не по локальному зеркалу.
 
-**Что делает:** держит граф символов (функции, классы, вызовы, HTTP-роуты, импорты). Агент ищет по графу, смотрит архитектуру, пути между сущностями.
+`siteaudit` и `lazyweb` тяжёлые и в обычной работе висят в каждом запросе зря: держите их выключенными в профиле и включайте на время аудита сайта и подбора референсов.
 
-**Когда:** навигация по незнакомому коду; после крупных рефакторингов / удаления модулей — переиндексация («Обнови граф» / `index_repository`), иначе граф ссылается на удалённые файлы.
-
-### github
-
-**Зачем:** PR, Issues, GitHub Actions и комментарии из чата без ручного копирования URL.
-
-**Что делает:** официальный GitHub MCP (у мейнтейнера — stdio + `gh auth token`; на обычной машине можно hosted URL + PAT).
-
-**Когда:** открыть/посмотреть PR, статус CI, triage комментариев вместе со skills `babysit` / `review-*`.
-
-**Замечание (Cursor Remote/SSH):** `${env:GITHUB_PERSONAL_ACCESS_TOKEN}` из `~/.bashrc` часто **не** виден extension host → пустой Bearer и ошибка вроде `SSE ... 400`. Надёжнее обёртка, которая сама вызывает `gh auth token`, либо PAT в локальном (не коммитимом) конфиге.
-
-### context7
-
-**Зачем:** не гадать API FastAPI / React / Recharts / webauthn / redis по устаревшей «памяти» модели.
-
-**Что делает:** подтягивает актуальную документацию библиотек по запросу.
-
-**Когда:** пишете или правите интеграцию с внешней библиотекой, миграции API, нестандартные опции.
-
-### siteaudit
-
-**Зачем:** быстро проверить, что **публичная** панель отдаёт нормальные security-заголовки после публикации HTTPS / смены nginx.
-
-**Что делает:** audit URL (HTTPS, HSTS, CSP, cookies, SSL). SEO/competitor-функции для этого продукта не нужны.
-
-**Когда:** после `Настройки → Адрес сайта и HTTPS`, смены CSP/HSTS, перед релизом на домен.
-
-### cursor-ide-browser (встроенный)
-
-**Зачем:** UI панели нельзя надёжно проверить только по коду (логин, 2FA, NOC, Mini App, мастера настроек).
-
-**Что делает:** открывает страницу, клики, ввод, снимки DOM/экрана.
-
-**Когда:** регрессии UI, проверка копирайта/флоу после правок фронта.
-
-### cursor-app-control (встроенный)
-
-**Зачем:** служебные действия самого Cursor (корень workspace, диалоги, открытие ресурсов/автоматизаций). Для продуктового кода панели почти не нужен — просто есть в среде.
-
----
-
-### Пример локального `mcp.json`
+### Шаблон `mcp.json`
 
 Подставьте свои пути. **Секреты в git не класть.**
 
@@ -93,7 +82,7 @@ MCP даёт агенту доступ к внешним сервисам и и�
 }
 ```
 
-Альтернатива GitHub (hosted), если Cursor видит env:
+Для GitHub с токеном в заголовке:
 
 ```json
 "github": {
@@ -105,116 +94,112 @@ MCP даёт агенту доступ к внешним сервисам и и�
 ```
 
 ```bash
-gh auth login
-# Context7: Settings → MCP → context7 → OAuth
+gh auth login        # github-mcp-stdio берёт токен из gh
 ```
 
-После правок: Reload Window, зелёные точки в **Settings → MCP**.
+### Проверить сервер из терминала
 
----
-
-## Skills Cursor (встроенные) — зачем каждый
-
-Это playbooks самого Cursor (`~/.cursor/skills-cursor/`). Агент читает skill и следует процессу.
-
-| Skill | Зачем используется |
-|-------|--------------------|
-| **review-security** | Security-ревью **диффа** ветки: auth, 2FA/passkey, CSP, rate limit, whitelist, публичная раздача конфигов, node agent, webhook Telegram. Перед merge чувствительных изменений. |
-| **review-bugbot** | Автоматический bug-oriented review диффа (логика, регрессии), отдельно от security. |
-| **review** | Выбор между Bugbot и Security, если нужен один из двух. |
-| **babysit** | Довести открытый PR до merge-ready: конфликты, комментарии, красный CI в цикле (нужен `gh` / github MCP). |
-| **canvas** | Отдать результат анализа **визуально** (архитектура, метрики, таблицы) рядом с чатом, а не простынёй markdown. |
-| **split-to-prs** | Большая ветка/чат → несколько маленьких reviewable PR без потери работы. |
-| **shell** (`/shell`) | Выполнить команду **буквально** (install/systemd/firewall), без «улучшений» агентом. |
-| **create-rule** | Локальные правила проекта (`.cursor/rules/`) — постоянный контекст агента; в git AdminPanelAZ не коммитим. |
-| **create-hook** | Хуки на события агента (например напоминание обновить docs после правок UI). |
-| **automate** | Создать **Cursor Automation** (расписание/триггеры в Cursor), не GitHub Actions репо. |
-| **loop** | Повторять проверку по интервалу (`/loop 5m …`) — удобно для CI/smoke. |
-
-Обычно **не** нужны для работы над панелью: `sdk`, `statusline`, `update-cli-config`, `update-cursor-settings`, `onboard`, `migrate-to-builds`, `create-subagent`, `create-skill` (мета-инструменты Cursor/IDE).
-
----
-
-## Superpowers ([obra/superpowers](https://github.com/obra/superpowers)) — зачем каждый
-
-**Что это:** методология *как вести разработку с агентом* (не security-библиотека). ~14 skills. Ставится глобально, не в git репо — **плагином Cursor** `superpowers` из Marketplace (**Settings → Plugins**). Плагин обновляется вместе с Cursor и кладёт skills в `~/.cursor/plugins/cache/…`.
-
-Если плагин уже стоит, **не** ставьте пакет ещё и через `npx skills add obra/superpowers`: каждый skill окажется в списке агента дважды, и он хуже выбирает нужный. Остался старый дубль в `~/.agents/skills/` — удалите его:
+Обёртка `.agents/bin/mcp` (локальная, не в git) поднимает сервер на один вызов и печатает ответ:
 
 ```bash
-npx skills remove -g -y brainstorming dispatching-parallel-agents executing-plans \
-  finishing-a-development-branch receiving-code-review requesting-code-review \
-  subagent-driven-development systematic-debugging test-driven-development \
-  using-git-worktrees using-superpowers verification-before-completion \
-  writing-plans writing-skills
+.agents/bin/mcp servers                        # список серверов из конфига
+.agents/bin/mcp tools codebase_memory          # инструменты сервера
+.agents/bin/mcp tools codebase_memory search_graph   # JSON-схема аргументов
+.agents/bin/mcp call codebase_memory search_graph '{"query": "node_sync"}'
 ```
 
-Без плагина (другой агент, не Cursor) — `npx skills add obra/superpowers -g -a cursor -s '*' -y`, но только один из двух способов.
+Конфиг ищется по порядку: `$MCP_CONFIG` → `.agents/mcp_config.json` → `.cursor/mcp.json` → `.cursor/mcp.json.example`.
 
-**Зачем пакет в целом:** чтобы агент не прыгал сразу в код, а проходил цикл: понять задачу → дизайн → план → TDD → ревью → доказательства → закрытие ветки. Для крупных фич AdminPanelAZ (HA, HTTPS, Telegram, multi-node) это снижает «сломали соседний модуль».
+---
+
+## Skills — где лежат и что вызывать
+
+| Где | Что |
+| ----- | ----- |
+| `.cursor/skills/<name>/` | скиллы этого репозитория: `karpathy-ponytail`, `tdd`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
+| `.agents/skills*/` | относительные симлинки на `.cursor/skills/`, разложенные по режимам Zoo Code |
+
+Внешних каталогов скиллов нет: если скилла нет в `.cursor/skills/`, значит его нет.
+
+Скилл — это каталог с `SKILL.md` и frontmatter (`name`, `description`); `name` совпадает с именем каталога, иначе агент скилл не увидит.
+
+**Маршрутизация «ситуация → skill»** — [`use-skills.mdc`](.cursor/rules/use-skills.mdc) (always-on правило), короткая таблица — в [`AGENTS.md`](AGENTS.md).
+
+### Скиллы в репозитории
 
 | Skill | Зачем |
-|-------|--------|
-| **using-superpowers** | Точка входа: сначала проверить, какой skill подходит, и вызвать его до действий. Без этого остальные Superpowers skills часто игнорируются. |
-| **brainstorming** | До кода: уточнить цель, ограничения, 2–3 подхода, получить апрув дизайна. Нужен, чтобы не начать пилить не ту фичу. |
-| **writing-plans** | Разбить одобренный дизайн на мелкие задачи с путями файлов и шагами проверки — план для «младшего инженера без контекста». |
-| **executing-plans** | Выполнить уже написанный план в сессии с checkpoint’ами и отчётом. |
-| **subagent-driven-development** | Гнать план через свежих субагентов на задачу + ревью соответствия спеке и качества кода; держать координацию в основном чате. |
-| **test-driven-development** | RED → GREEN → REFACTOR: сначала падающий тест, потом минимальный код. Для панели — особенно backend (pytest) и критичная логика лимитов/auth. |
-| **systematic-debugging** | Баг/красный тест: сначала root cause, не «подкрутить симптом». Полезно на гонках узлов, nginx/HTTPS, sync. |
-| **verification-before-completion** | Запрет говорить «готово» без реальных команд проверки (ruff, тесты, health). Совпадает с духом CI проекта. |
-| **requesting-code-review** | Между задачами/перед merge: структурированный запрос ревью по плану и критериям. |
-| **receiving-code-review** | Разбор чужого ревью: проверять замечания по существу, не соглашаться вслепую и не игнорировать валидное. |
-| **dispatching-parallel-agents** | Независимые куски работы (например фронт-копирайт и backend-схема) параллельно, без общей порчи контекста. |
-| **using-git-worktrees** | Изолированная ветка/worktree, чтобы не мешать основному дереву и параллельным экспериментам. |
-| **finishing-a-development-branch** | Когда задачи и тесты зелёные: выбор merge / PR / оставить / выбросить и аккуратный cleanup. |
-| **writing-skills** | Писать или править собственные skills по дисциплине TDD для процессов (редко нужно контрибьютору панели). |
+| ------- | -------- |
+| `karpathy-ponytail` | Думать до кода, ладдер простоты, хирургические правки, root cause вместо симптома |
+| `tdd` | Точечная регрессия на критическом узле; только когда тест дешёвый и путь ясен |
+| `react-best-practices` | Perf React для Vite SPA: правила `server-*` и `rendering-hydration-*` неприменимы |
+| `vercel-composition-patterns` | Компонент оброс boolean-пропсами (4+ флагов режима) |
+| `web-design-guidelines` | Чеклист UI и a11y по коду |
+| `ui-ux-pro-max` | Навигация, сайдбар, иерархия разделов, адаптив: 120 UX-правил локальным поиском |
+| `frontend-design` | Визуальное направление нового экрана: палитра, типографика, тексты |
+| `webapp-testing` | Проверить UI в браузере через Playwright |
+| `split-design-spec` | Разбить большой design-спек по папкам |
+| `tui-design` | `install.sh`, консольное меню, CLI |
+| `cli-toolbox` | Чем заменить `find`/`grep`/`cat`/`sed`: `fd`, `rg`, `bat -r`, `sd`, `yq`/`jaq`, `delta`, `ruff`/`uv`, `biome` |
 
-Типичный поток: `brainstorming` → `writing-plans` → (`using-git-worktrees`) → `subagent-driven-development` / `executing-plans` + `test-driven-development` → `verification-before-completion` → `finishing-a-development-branch`.
+### Поток работы
+
+```text
+Новая фича / новый экран / эндпоинт / схема данных
+  → план в чате (2–5 пунктов) → «да» пользователя
+  → реализация
+  → прогоны из раздела «Команды проверок» (+ security, если дифф трогает критичное)
+  → коммит в ветку release/X.Y.Z
+
+Баг / «не работает» / красный CI
+  → root cause: общий вызов через grep/граф, фикс один раз
+  → дешёвый локальный тест → project tdd (если путь теста ясен)
+
+Мелочь: 1–2 файла без нового поведения (пункт меню, вкладки, подписи, вёрстка, мелкий баг)
+  → план в чате на 2–5 пунктов → прогоны
+```
+
+Процессные скиллы (`brainstorming`, `writing-plans`, `systematic-debugging`, `verification-before-completion` и т. п.) в репозитории не лежат: эти шаги описаны текстом в [`AGENTS.md`](AGENTS.md) и в [`use-skills.mdc`](.cursor/rules/use-skills.mdc).
 
 ---
 
-## Anthropic Cybersecurity Skills ([mukul975/…](https://github.com/mukul975/Anthropic-Cybersecurity-Skills)) — зачем
+## Security-скиллы
 
-**Что это:** ~817 узких security-playbooks (agentskills.io), community-проект с маппингом на MITRE ATT&CK, NIST CSF, ATLAS, D3FEND, AI RMF, F3. **Не** замена `review-security` Cursor.
+Пак в [`Anthropic Cybersecurity Skills`](https://github.com/mukul975/Anthropic-Cybersecurity-Skills) — узкие playbooks с маппингом на MITRE ATT&CK, NIST CSF, ATLAS, D3FEND. Это **не** замена security-ревью диффа.
 
-```bash
-npx skills add mukul975/Anthropic-Cybersecurity-Skills -g -a cursor -s '*' -y
-npx skills update -g -y   # обновление
-```
+Пак не входит в репозиторий и в автопоиске скиллов отключён: у контрибьютора он лежит в `~/.agents/skill-packs/` (ставится `npx skills add`, затем каталог переименовывается из `skills`). При точечном аудите агент читает нужный `SKILL.md` файловым инструментом — описания не висят в каждом запросе.
 
-Файлы: `~/.agents/skills/`. Только для **авторизованного** тестирования и hardening **своей** панели.
+Только для **своей** панели и авторизованного тестирования. Точечный аудит поверхности: JWT → `testing-jwt-token-security`; подпись и верификация → `implementing-jwt-signing-and-verification`; CORS → `testing-cors-misconfiguration`; CSRF → `performing-csrf-attack-simulation`; WebSocket → `testing-websocket-api-security`; обход путей → `performing-directory-traversal-testing`; Host → `testing-for-host-header-injection`; XSS → `testing-for-xss-vulnerabilities`; BAC/IDOR → `testing-for-broken-access-control`; заголовки → `performing-security-headers-audit`; API auth → `testing-api-authentication-weaknesses`; OWASP API → `testing-api-security-with-owasp-top-10`; CI → `securing-github-actions-workflows`; секреты → `implementing-secret-scanning-with-gitleaks`; харденинг хоста → `hardening-linux-endpoint-with-cis-benchmark`; passkey → `implementing-passwordless-authentication-with-fido2`; лимиты → `implementing-api-rate-limiting-and-throttling`.
 
-**Зачем пакет в целом:** дать агенту пошаговые методики аналитика (JWT, SSRF, secrets, TLS, rate limit, OWASP API…), которых нет в общем чате. Агент выбирает skill по description и идёт по workflow.
+### Какие группы полезны именно здесь
 
-**Зачем не тащить всё в каждый PR:** большинство доменов (AD, OT/ICS, мобилка, malware sandbox) к AdminPanelAZ не относятся. Для обычных PR достаточно `review-security` + `SECURITY.md`. Cyber-skills — точечно, когда явно тестируете/усиливаете security-поверхность.
+| Группа | Зачем для AdminPanelAZ |
+| -------- | ------------------------ |
+| JWT / OAuth / сессии | Панель на JWT + refresh cookie, Telegram OAuth, passkeys рядом с сессиями |
+| API abuse / rate limit | В проекте есть auth и global API rate limit (memory/Redis) — сверять дизайн и обходы |
+| Web/API OWASP (CSRF, SSRF, XSS) | Публичная раздача конфигов, webhook’и, SSRF-риски к node agent и внешним URL |
+| Secrets / supply chain | Не допустить токены и ключи в git; аудит зависимостей рядом с pip-audit/npm audit в CI |
+| TLS / HTTPS | Публикация через nginx/Let’s Encrypt — согласовать с `siteaudit` и `SECURITY.md` |
+| AI/MCP (tool poisoning, prompt injection) | У контрибьюторов MCP и скиллы с полными правами агента — понимать риски tooling |
 
-### Какие группы skills полезны именно здесь
-
-| Группа (примеры имён) | Зачем для AdminPanelAZ |
-|------------------------|-------------------------|
-| JWT / OAuth / session (`testing-jwt-token-security`, `exploiting-jwt-…`, `testing-oauth2-…`) | Панель на JWT + refresh cookie, Telegram OAuth, passkeys рядом с сессиями. |
-| API abuse / rate limit (`implementing-api-rate-limiting-…`, `performing-api-rate-limiting-bypass`) | В проекте есть auth и global API rate limit (memory/Redis) — сверять дизайн и обходы. |
-| Web/API OWASP (`conducting-api-security-testing`, CSRF/SSRF/XSS skills) | Публичная раздача конфигов, webhook’и, SSRF-риски к node agent / внешним URL. |
-| Secrets / supply chain (`implementing-secret-scanning-…`, SBOM, dependency confusion) | Не допустить токены/ключи в git; аудит зависимостей рядом с pip-audit/npm audit в CI. |
-| TLS / HTTPS (`performing-ssl-tls-security-assessment`, TLS 1.3 skills) | Публикация через nginx/Let’s Encrypt — согласовать с `siteaudit` и `SECURITY.md`. |
-| AI/MCP (`auditing-mcp-servers-for-tool-poisoning`, prompt-injection skills) | У контрибьюторов сами MCP/skills с полными правами агента — понимать риски tooling. |
-
-Остальные сотни skills (cloud IAM чужих провайдеров, ICS, red-team C2 и т.д.) можно не вызывать без явной задачи. Dual-use/offensive skills — **только** против систем с правом на тест.
+Остальные сотни скиллов (чужие cloud IAM, ICS, red-team C2) без явной задачи не вызываем. Dual-use/offensive — только против систем с правом на тест.
 
 ---
 
 ## Как это стыкуется
 
 ```text
-Навигация по коду          → codebase-memory
+Навигация по коду          → codebase_memory
 Доки библиотеки            → context7
-PR / CI / GitHub           → github + babysit / review-*
-UI глазами                 → browser
+PR / CI / GitHub           → github
+UI глазами                 → playwright
 HTTPS заголовки домена     → siteaudit
-Процесс фичи/бага          → Superpowers (brainstorm → plan → TDD → verify)
-Security диффа PR          → review-security
-Глубокий security playbook → Anthropic Cybersecurity Skills (точечно)
+Референсы интерфейсов      → lazyweb
+Фича (план)                → план в чате 2–5 пунктов → «да»
+Баг                        → root cause, потом фикс (+ project tdd)
+Перед «готово»             → реальные прогоны, вывод в чате
+Свой новый код             → karpathy-ponytail
+Security диффа             → security-пак, точечно
+Проверить UI после правок  → webapp-testing / playwright
 ```
 
 ---
@@ -230,16 +215,17 @@ Security диффа PR          → review-security
 7. **Ключ NodeSource:** `install.sh` принимает ключ репозитория NodeSource только с отпечатком `NODESOURCE_KEY_FINGERPRINT`. Если NodeSource сменит ключ, установка Node.js остановится с ошибкой «Ключ NodeSource не совпал». Тогда сверить новый отпечаток с [инструкцией NodeSource](https://github.com/nodesource/distributions) и обновить `NODESOURCE_KEY_FINGERPRINT` в `install.sh` и `NODESOURCE_FPR` в `scripts/test-install-nodejs-lts.sh`.
 8. **Ветки релиза и Dependabot:** изменения идут в `release/X.Y.Z`, в `main` — одним PR, когда релиз готов. Создав новую `release/X.Y.Z`, первым коммитом в ней переключите `target-branch` в `.github/dependabot.yml` на эту ветку. Dependabot читает файл только из `main`, поэтому новое значение заработает после merge этой ветки в `main`; до этого его PR в старую ветку релиза закрывайте без merge.
 
-Security-критичные зоны (auth, middleware, public download, telegram webhook, rate limit): перед «готово» — **review-security**.
+Security-критичные зоны (auth, middleware, public download, telegram webhook, rate limit): перед «готово» — security-скилл из пака.
 
 ---
 
 ## Быстрый старт для разработчика
 
 1. Клон репозитория, Python/Node как в README / `install.sh` (или локальный venv + `frontend` npm).
-2. Прочитать [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md) и [`SECURITY.md`](SECURITY.md).
-3. Подключить MCP и skills из разделов выше (локально).
-4. Не коммитить `.cursor/`, `.env`, БД, граф памяти, `~/.agents/skills/`.
-5. PR: понятное описание, зелёный CI; крупные изменения — через **split-to-prs** / Superpowers finish-branch.
+2. Открыть `/opt/AdminPanelAZ` в Zoo Code или Cursor и прочитать [`AGENTS.md`](AGENTS.md) + [`use-skills.mdc`](.cursor/rules/use-skills.mdc) — оттуда берётся выбор скилла и команды проверок.
+3. MCP: скопировать `.cursor/mcp.json.example` → `.cursor/mcp.json`, поправить пути команд под свою ОС; в Zoo Code те же серверы добавить в настройках MCP. Один раз — `gh auth login`.
+4. Проверить серверы: `.agents/bin/mcp servers` (список) и `mcp tools <server>` (инструменты).
+5. Команды прогонов — в [`AGENTS.md`](AGENTS.md), раздел «Команды проверок»: ruff, точечный pytest, `npm run typecheck && npm run lint`, для UI — `npm run build:all`.
+6. PR: понятное описание, зелёный CI. Крупные изменения — отдельными reviewable коммитами, ветка — активная `release/X.Y.Z`.
 
 Вопросы и идеи по продукту: [Fider](https://claymore0098.fider.io/). Баги безопасности — см. [`SECURITY.md`](SECURITY.md).

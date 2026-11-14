@@ -260,15 +260,23 @@ def test_awg2_restore_route_calls_runtime_and_ha_sync():
         patch.object(awg2_router, "get_active_adapter", return_value=adapter),
         patch.object(
             awg2_router,
-            "_ha_sync_awg2_from_active",
-            return_value={"attempted": True, "errors": [{"node_name": "replica-1", "error": "down"}]},
+            "_enqueue_ha_awg2_from_active",
+            return_value={
+                "attempted": True,
+                "errors": [],
+                "queued": True,
+                "task_id": "awg2-ha-1",
+            },
         ),
     ):
-        result = awg2_router.awg2_restore(archive=upload, db=MagicMock(), _=SimpleNamespace())
+        result = awg2_router.awg2_restore(
+            archive=upload, db=MagicMock(), admin=SimpleNamespace(username="admin")
+        )
 
     assert result["message"] == "AZ-AWG2 восстановлен из бэкапа"
     assert result["runtime"]["success"] is True
-    assert result["ha"]["errors"][0]["node_name"] == "replica-1"
+    assert result["ha"]["queued"] is True
+    assert result["ha"]["task_id"] == "awg2-ha-1"
     assert result["node_id"] == 1
     adapter.restore_awg2_backup.assert_called_once_with(b"payload", "narrow-backup.tar.gz")
 
@@ -287,10 +295,12 @@ def test_awg2_restore_route_raises_when_runtime_fails():
     with (
         patch.object(awg2_router, "get_active_node", return_value=node),
         patch.object(awg2_router, "get_active_adapter", return_value=adapter),
-        patch.object(awg2_router, "_ha_sync_awg2_from_active", ha_mock),
+        patch.object(awg2_router, "_enqueue_ha_awg2_from_active", ha_mock),
     ):
         try:
-            awg2_router.awg2_restore(archive=upload, db=MagicMock(), _=SimpleNamespace())
+            awg2_router.awg2_restore(
+                archive=upload, db=MagicMock(), admin=SimpleNamespace(username="admin")
+            )
             raise AssertionError("expected HTTPException")
         except HTTPException as exc:
             assert exc.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR

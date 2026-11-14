@@ -6,32 +6,30 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { ApiError } from '@/api/client'
 import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
-import { createTgUnlockCode, getTgUnlockCodes, revokeTgUnlockCode, type UnlockCodeProtocol } from '@/tg-mini/api'
+import { createUnlockCode, getUnlockCodes, revokeUnlockCode, type UnlockCodeProtocol } from '@/api/unlockCodes'
 import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
-import { formatDateTime } from '@/lib/datetime'
+import { endOfDayIso, formatDateTime } from '@/lib/datetime'
 import {
   isUnlockCodeExhausted,
   unlockCodeRedeemedCount,
   unlockCodeStatusLabel,
 } from '@/lib/unlockCodeStatus'
 import { cn } from '@/lib/utils'
-import { vpnTypeBadgeClass, vpnTypeLabel } from '@/tg-mini/lib/vpnLabels'
+import { PROTOCOL_ORDER, protocolLabel } from '@/lib/vpnTypes'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import type { UnlockCodeRecord } from '@/types'
 import { Ban, CalendarClock, Copy, KeyRound, Loader2, RefreshCw, ShieldCheck, Trash2, Users } from 'lucide-react'
-import { Navigate } from 'react-router-dom'
 
-const ALL_PROTOCOLS: UnlockCodeProtocol[] = ['openvpn', 'wireguard', 'amneziawg2']
+const ALL_PROTOCOLS: UnlockCodeProtocol[] = [...PROTOCOL_ORDER]
 
-function protocolLabel(protocol: UnlockCodeProtocol) {
-  return vpnTypeLabel(protocol)
+/** Человеческие подписи режима выдачи вместо сырых single/multi. */
+const UNLOCK_MODE_LABELS: Record<string, string> = {
+  single: 'одноразовый',
+  multi: 'многоразовый',
 }
 
-function toEndOfDayIso(value: string) {
-  if (!value) return null
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-  if (!match) return null
-  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
-  return date.toISOString()
+function unlockModeLabel(mode: string): string {
+  return UNLOCK_MODE_LABELS[mode] ?? mode
 }
 
 type Feedback = { tone: 'success' | 'error' | 'info'; text: string }
@@ -63,14 +61,8 @@ function FeedbackBanner({ feedback }: { feedback: Feedback }) {
   )
 }
 
-function ProtocolPill({ protocol }: { protocol: UnlockCodeProtocol }) {
-  return (
-    <span className={cn('tg-mini-protocol-badge', vpnTypeBadgeClass(protocol))}>{protocolLabel(protocol)}</span>
-  )
-}
-
 export default function UnlockCodes() {
-  const { isAdmin, features } = useTgAuth()
+  const { features } = useTgAuth()
   const [codes, setCodes] = useState<UnlockCodeRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -113,7 +105,7 @@ export default function UnlockCodes() {
     }
     setError(null)
     try {
-      setCodes(await getTgUnlockCodes())
+      setCodes(await getUnlockCodes())
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Ошибка загрузки unlock-кодов')
     } finally {
@@ -123,9 +115,8 @@ export default function UnlockCodes() {
   }, [])
 
   useEffect(() => {
-    if (!isAdmin) return
     void load()
-  }, [isAdmin, load])
+  }, [load])
 
   const toggleProtocol = (protocol: UnlockCodeProtocol) => {
     setSelectedProtocols((prev) => {
@@ -160,12 +151,12 @@ export default function UnlockCodes() {
         .split(/[,;\n]+/)
         .map((item) => item.trim())
         .filter(Boolean)
-      const created = await createTgUnlockCode({
+      const created = await createUnlockCode({
         grant_days: parsedGrantDays,
         protocols: selectedProtocols,
         mode,
         max_redemptions: mode === 'single' ? 1 : parsedMaxRedemptions,
-        code_expires_at: toEndOfDayIso(codeExpiresAt),
+        code_expires_at: endOfDayIso(codeExpiresAt),
         allowed_client_names,
       })
       setCreatedCode(created)
@@ -196,7 +187,7 @@ export default function UnlockCodes() {
     setRevokingId(code.id)
     setFeedback(null)
     try {
-      await revokeTgUnlockCode(code.id)
+      await revokeUnlockCode(code.id)
       window.Telegram?.WebApp.HapticFeedback?.notificationOccurred('success')
       setFeedback({ tone: 'info', text: `Код «${code.code}» отозван` })
       await load({ silent: true })
@@ -205,10 +196,6 @@ export default function UnlockCodes() {
     } finally {
       setRevokingId(null)
     }
-  }
-
-  if (!isAdmin) {
-    return <Navigate to="/" replace />
   }
 
   if (loading) {
@@ -260,11 +247,11 @@ export default function UnlockCodes() {
               </div>
               <div className="flex flex-wrap gap-2">
                 <Badge variant="outline">{createdCode.grant_days} дн.</Badge>
-                <Badge variant="outline">{createdCode.mode}</Badge>
+                <Badge variant="outline">{unlockModeLabel(createdCode.mode)}</Badge>
                 <Badge variant="outline">Активаций: {createdCode.max_redemptions}</Badge>
                 <Badge variant="outline">Истекает: {formatDateTime(createdCode.code_expires_at)}</Badge>
                 {createdCode.protocols.map((protocol) => (
-                  <ProtocolPill key={protocol} protocol={protocol as UnlockCodeProtocol} />
+                  <ProtocolBadge key={protocol} protocol={protocol as UnlockCodeProtocol} />
                 ))}
               </div>
             </div>
@@ -432,7 +419,7 @@ export default function UnlockCodes() {
                     <div className="min-w-0 space-y-1.5">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="break-all font-mono text-sm font-semibold">{code.code}</p>
-                        <Badge variant={code.mode === 'multi' ? 'default' : 'secondary'}>{code.mode}</Badge>
+                        <Badge variant={code.mode === 'multi' ? 'default' : 'secondary'}>{unlockModeLabel(code.mode)}</Badge>
                         {statusLabel === 'Отозван' && <Badge variant="destructive">Отозван</Badge>}
                         {statusLabel === 'Активирован' && <Badge variant="success">Активирован</Badge>}
                         {statusLabel === 'Исчерпан' && <Badge variant="warning">Исчерпан</Badge>}
@@ -441,21 +428,28 @@ export default function UnlockCodes() {
                       <p className="text-xs text-muted-foreground">
                         {code.grant_days} дн. · активаций {redeemed} / {code.max_redemptions}
                       </p>
-                      <p className="text-xs text-muted-foreground">
-                        Протоколы:{' '}
-                        {code.protocols
-                          .map((protocol) => protocolLabel(protocol as UnlockCodeProtocol))
-                          .join(', ') || '—'}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <span className="text-xs text-muted-foreground">Протоколы:</span>
+                        {code.protocols.length > 0 ? (
+                          code.protocols.map((protocol) => (
+                            <ProtocolBadge key={protocol} protocol={protocol} />
+                          ))
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground">
                         Создан: {formatDateTime(code.created_at)} · Истекает:{' '}
                         {formatDateTime(code.code_expires_at)}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Клиенты:{' '}
-                        {(code.allowed_client_names?.length ?? 0) > 0
-                          ? code.allowed_client_names!.join(', ')
-                          : 'любой'}
+                        {code.target_user_id
+                          ? `Абонент: ${code.target_user_name ?? code.target_user_id}`
+                          : `Клиенты: ${
+                              (code.allowed_client_names?.length ?? 0) > 0
+                                ? code.allowed_client_names!.join(', ')
+                                : 'любой'
+                            }`}
                       </p>
                       {redemptions.length > 0 && (
                         <div className="space-y-1 pt-1">

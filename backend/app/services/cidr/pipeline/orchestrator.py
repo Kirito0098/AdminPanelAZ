@@ -6,6 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.models import Node, NodeStatus
+from app.services.cidr.apply_pipeline import apply_routing_changes
 from app.services.cidr.cidr_notify import (
     maybe_notify_deploy_failed,
     maybe_notify_ingest_partial,
@@ -17,8 +18,6 @@ from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.cidr.pipeline.file_pipeline import rollback_from_runtime_backup
 from app.services.node_adapter import NodeAdapter, RemoteNodeAdapter
 from app.services.node_manager import is_vpn_node, get_active_node, get_adapter_for_node
-from app.services.openvpn_remote_hosts import parse_hosts_json
-from app.services.profile_delivery import patch_openvpn_profiles_on_node
 
 logger = logging.getLogger(__name__)
 
@@ -54,25 +53,88 @@ def run_compile(*, progress_callback=None, **kwargs) -> dict[str, Any]:
     return result
 
 
-def run_deploy(adapter: NodeAdapter, files: list[str] | list[dict] | None = None) -> dict[str, Any]:
+def run_deploy(
+    adapter: NodeAdapter,
+    files: list[str] | list[dict] | None = None,
+    *,
+    db: Session | None = None,
+    node: Node | None = None,
+    deployed_node_ids: set[int] | None = None,
+) -> dict[str, Any]:
     """Deploy compiled artifacts to a node.
 
     Local adapter: sync list → config via ``sync_cidr_providers``.
     Remote adapter: push LIST_DIR artifacts, then sync on the node.
+
+    ``db`` + ``node`` enable the HA step: a deploy to the primary is replicated to the
+    replicas of its sync group, so a failover does not serve stale lists.
     """
     if isinstance(adapter, RemoteNodeAdapter):
         push_result = push_cidr_artifacts(adapter, filenames=files)
         sync_result = adapter.sync_cidr_providers()
-        return {
+        result: dict[str, Any] = {
             "mode": "remote",
             "pushed": push_result["pushed"],
             "failed": push_result["failed"],
             "skipped": push_result["skipped"],
             "sync": sync_result,
         }
+    else:
+        sync_result = adapter.sync_cidr_providers()
+        inner = sync_result.get("sync") or {}
+        result = {
+            "mode": "local",
+            # ``pushed`` stays "really changed"; ``synced`` is the deploy volume for the UI.
+            "pushed": list(inner.get("updated") or []),
+            "synced": list(inner.get("synced") or []),
+            "skipped": list(inner.get("missing_sources") or []),
+            "sync": sync_result,
+        }
 
-    sync_result = adapter.sync_cidr_providers()
-    return {"mode": "local", "sync": sync_result}
+    if db is not None and node is not None:
+        ha = _replicate_deploy_to_ha(
+            db,
+            node,
+            adapter,
+            skip_node_ids=set(deployed_node_ids or ()) | {node.id},
+        )
+        if ha is not None:
+            result["ha_replicas"] = ha
+    return result
+
+
+def _replicate_deploy_to_ha(
+    db: Session,
+    node: Node,
+    adapter: NodeAdapter,
+    *,
+    skip_node_ids: set[int],
+) -> dict[str, Any] | None:
+    """Replicate a primary deploy to HA replicas; replica errors never fail the deploy."""
+    from app.services.node_sync.groups import (
+        find_sync_group_for_primary,
+        get_replica_nodes,
+        is_auto_sync_enabled,
+    )
+
+    group = find_sync_group_for_primary(db, node.id)
+    if group is None or not is_auto_sync_enabled(group):
+        return None
+    replica_ids = {replica.id for replica in get_replica_nodes(db, group)}
+    if not replica_ids:
+        return None
+    if replica_ids & skip_node_ids:
+        # Replicas are already in this deploy target: pushing twice only doubles the traffic.
+        logger.info("CIDR deploy: replicas already targeted, HA replication skipped")
+        return None
+
+    from app.services.node_sync.provider_sync import deploy_compiled_providers_to_replicas
+
+    try:
+        return deploy_compiled_providers_to_replicas(db, group, adapter)
+    except Exception as exc:
+        logger.warning("CIDR deploy: HA replica replication failed: %s", exc)
+        return {"skipped": False, "success": False, "error": str(exc), "filenames": []}
 
 
 def run_apply(
@@ -80,27 +142,16 @@ def run_apply(
     *,
     sync_after: bool = True,
     apply_after: bool = False,
-    recreate_profiles_after: bool = False,
-    hosts: list[str] | None = None,
     ensure_openvpn_multihome: bool = False,
 ) -> dict[str, Any]:
-    """Sync CIDR providers, optionally run doall and recreate client profiles (client.sh 7)."""
-    result: dict[str, Any] = {}
-    if sync_after:
-        result["sync"] = adapter.sync_cidr_providers()
-    if apply_after:
-        result["doall_output"] = adapter.apply_config_changes()
-    if recreate_profiles_after:
-        result["recreate_profiles_output"] = adapter.recreate_profiles()
-        if hosts:
-            result["remote_hosts_patch"] = patch_openvpn_profiles_on_node(adapter, hosts)
-    if ensure_openvpn_multihome and (apply_after or recreate_profiles_after):
-        from app.services.openvpn_multihome import maybe_ensure_openvpn_multihome
-
-        mh = maybe_ensure_openvpn_multihome(adapter, enabled=True, restart_if_unchanged=False)
-        if mh is not None:
-            result["openvpn_multihome"] = mh
-    return result
+    """Sync CIDR providers and optionally run doall.sh (profiles via Providers → doall + 7)."""
+    return apply_routing_changes(
+        adapter,
+        sync=sync_after,
+        doall=apply_after,
+        ips_only=True,
+        ensure_multihome=ensure_openvpn_multihome,
+    )
 
 
 def resolve_deploy_targets(
@@ -187,7 +238,8 @@ def _deploy_single_node(
     files: list[str] | list[dict] | None,
     sync_after: bool,
     apply_after: bool,
-    recreate_profiles_after: bool = False,
+    db: Session | None = None,
+    deployed_node_ids: set[int] | None = None,
 ) -> dict[str, Any]:
     """Push artifacts to one node, then optional sync/apply."""
     entry: dict[str, Any] = {
@@ -197,7 +249,13 @@ def _deploy_single_node(
         "failed": [],
     }
     try:
-        deploy_result = run_deploy(adapter, files=files)
+        deploy_result = run_deploy(
+            adapter,
+            files=files,
+            db=db,
+            node=node,
+            deployed_node_ids=deployed_node_ids,
+        )
     except Exception as exc:
         entry["status"] = "failed"
         entry["error"] = str(exc)
@@ -206,26 +264,33 @@ def _deploy_single_node(
 
     failed = deploy_result.get("failed") or []
     pushed = deploy_result.get("pushed") or []
+    synced = deploy_result.get("synced") or []
+    skipped = deploy_result.get("skipped") or []
     entry["pushed_files"] = pushed
+    entry["synced_files"] = synced
+    entry["updated_files"] = pushed
     entry["failed"] = failed
     if deploy_result.get("sync") is not None:
         entry["sync"] = deploy_result["sync"]
+    if deploy_result.get("ha_replicas") is not None:
+        entry["ha_replicas"] = deploy_result["ha_replicas"]
 
     if failed:
         entry["status"] = "failed"
         entry["error"] = f"Ошибка развёртывания: {len(failed)} файл(ов)"
         return entry
 
-    if apply_after or recreate_profiles_after:
-        hosts = (
-            parse_hosts_json(node.openvpn_remote_hosts) if recreate_profiles_after else None
-        )
+    if not pushed and not synced and skipped:
+        # Nothing compiled for enabled providers: that is a real problem, not a success.
+        entry["status"] = "skipped"
+        entry["error"] = "Нечего разворачивать: нет собранных файлов для включённых провайдеров"
+        return entry
+
+    if apply_after:
         apply_result = run_apply(
             adapter,
             sync_after=False,
-            apply_after=apply_after,
-            recreate_profiles_after=recreate_profiles_after,
-            hosts=hosts,
+            apply_after=True,
             ensure_openvpn_multihome=bool(node.openvpn_multihome),
         )
         entry.update(apply_result)
@@ -234,7 +299,23 @@ def _deploy_single_node(
         entry.update(apply_result)
 
     entry["status"] = "success"
+    entry["noop"] = len(pushed) == 0
     return entry
+
+
+def _ha_replica_warnings(entry: dict[str, Any]) -> list[str]:
+    """Replica failures from ``ha_replicas`` as human-readable warnings, without failing the deploy."""
+    ha = entry.get("ha_replicas")
+    if not isinstance(ha, dict) or ha.get("skipped") or ha.get("success"):
+        return []
+    if ha.get("error"):
+        return [f"HA-реплики не обновлены: {ha['error']}"]
+    warnings: list[str] = []
+    for item in (ha.get("deploy") or {}).get("per_node") or []:
+        error = str(item.get("error") or "").strip()
+        if error and item.get("status") != "success":
+            warnings.append(f"HA-реплика «{item.get('node_name') or item.get('node_id')}»: {error}")
+    return warnings
 
 
 def run_multi_deploy(
@@ -246,7 +327,6 @@ def run_multi_deploy(
     files: list[str] | list[dict] | None = None,
     sync_after: bool = True,
     apply_after: bool = False,
-    recreate_profiles_after: bool = False,
     triggered_by: str | None = None,
 ) -> dict[str, Any]:
     """Deploy CIDR artifacts to one or more nodes; offline nodes are skipped and logged."""
@@ -259,6 +339,7 @@ def run_multi_deploy(
     per_node: list[dict[str, Any]] = list(skipped)
     all_pushed: list[str] = []
     all_failed: list[dict[str, str]] = []
+    deployed_node_ids = {node.id for node in nodes}
 
     for node in nodes:
         try:
@@ -283,7 +364,8 @@ def run_multi_deploy(
             files=files,
             sync_after=sync_after,
             apply_after=apply_after,
-            recreate_profiles_after=recreate_profiles_after,
+            db=db,
+            deployed_node_ids=deployed_node_ids,
         )
         per_node.append(entry)
         all_pushed.extend(entry.get("pushed_files") or [])
@@ -292,18 +374,30 @@ def run_multi_deploy(
     success_nodes = [e for e in per_node if e.get("status") == "success"]
     failed_nodes = [e for e in per_node if e.get("status") == "failed"]
     skipped_nodes = [e for e in per_node if e.get("status") == "skipped"]
+    warnings = [warning for entry in per_node for warning in _ha_replica_warnings(entry)]
+    pushed_total = len(all_pushed)
+    synced_total = sum(
+        len(entry.get("synced_files") or entry.get("pushed_files") or []) for entry in success_nodes
+    )
+    node_count = len(success_nodes)
 
     if failed_nodes:
         message = f"Развёртывание завершено с ошибками: {len(failed_nodes)} узел(ов)"
-    elif skipped_nodes and not success_nodes:
+    elif skipped_nodes and not success_nodes and not nodes:
         message = f"Нет online-узлов для развёртывания ({len(skipped_nodes)} пропущено)"
+    elif synced_total == 0:
+        message = "Нечего разворачивать: файлы не собраны (выполните сборку — этап 2)"
+    elif pushed_total == 0:
+        message = f"Развёрнуто на {node_count} узел(ов): файлов {synced_total}, изменений нет"
     else:
-        pushed_total = len(all_pushed)
-        node_count = len(success_nodes)
-        message = f"Развёрнуто на {node_count} узел(ов), файлов: {pushed_total}"
+        message = (
+            f"Развёрнуто на {node_count} узел(ов), файлов: {synced_total} "
+            f"(изменено {pushed_total})"
+        )
 
     result = {
-        "success": len(failed_nodes) == 0 and len(success_nodes) > 0,
+        "success": len(failed_nodes) == 0 and node_count > 0 and synced_total > 0,
+        "noop": pushed_total == 0 and not failed_nodes,
         "message": message,
         "artifact_stamp": compute_artifact_stamp(),
         "per_node": per_node,
@@ -311,10 +405,13 @@ def run_multi_deploy(
             "pushed": all_pushed,
             "failed": all_failed,
         },
-        "nodes_deployed": len(success_nodes),
+        "nodes_deployed": node_count,
         "nodes_failed": len(failed_nodes),
         "nodes_skipped": len(skipped_nodes),
     }
+    # Replica problems are reported, not fatal: the primary deploy already succeeded.
+    if warnings:
+        result["warnings"] = warnings
     maybe_notify_deploy_failed(db, result, triggered_by=triggered_by)
     return result
 

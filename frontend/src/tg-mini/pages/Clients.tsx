@@ -1,0 +1,866 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  Ban,
+  CalendarPlus,
+  Clock,
+  Gauge,
+  Loader2,
+  Play,
+  Plus,
+  Search,
+  Shield,
+  Trash2,
+  UserRound,
+} from 'lucide-react'
+import { ApiError } from '@/api/client'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import MiniPageHeader from '@/tg-mini/components/MiniPageHeader'
+import MiniPlanFields from '@/tg-mini/components/MiniPlanFields'
+import {
+  createProvisionedUser,
+  deleteProvisionedUser,
+  extendUserAccess,
+  getUserHistory,
+  getUserStats,
+  listPresets,
+  resetUserTrafficCounter,
+  resumeUser,
+  setUserTrafficLimit,
+  suspendUser,
+} from '@/api/users'
+import { getUsers, updateUser } from '@/api/settings'
+import { getTgNodes } from '@/tg-mini/api'
+import { formatDate, formatDateTime } from '@/lib/datetime'
+import { formatBytes } from '@/lib/trafficFormat'
+import { selectablePlanNodes } from '@/tg-mini/lib/planNodes'
+import { featureEnabledProtocols } from '@/tg-mini/lib/vpnVisibility'
+import { useTgAuth } from '@/tg-mini/context/TgAuthContext'
+import { protocolLabel } from '@/lib/vpnTypes'
+import { cn } from '@/lib/utils'
+import type {
+  PresetResponse,
+  TgMiniNode,
+  User,
+  UserHistoryEntry,
+  UserStatsResponse,
+  UserUpdatePayload,
+} from '@/types'
+
+type StatusFilter = 'all' | 'active' | 'suspended' | 'expired'
+
+const STATUS_FILTERS: Array<{ value: StatusFilter; label: string }> = [
+  { value: 'all', label: 'Все' },
+  { value: 'active', label: 'Активные' },
+  { value: 'suspended', label: 'Блок' },
+  { value: 'expired', label: 'Истекли' },
+]
+
+function isExpired(user: User): boolean {
+  if (!user.access_until) return false
+  const until = new Date(user.access_until).getTime()
+  return Number.isFinite(until) && until < Date.now()
+}
+
+function statusOf(user: User): StatusFilter {
+  if (user.suspended_at) return 'suspended'
+  if (isExpired(user)) return 'expired'
+  return 'active'
+}
+
+function statusBadge(user: User) {
+  const status = statusOf(user)
+  if (status === 'suspended') {
+    return <Badge variant="destructive">Заблокирован</Badge>
+  }
+  if (status === 'expired') {
+    return <Badge variant="warning">Истёк</Badge>
+  }
+  return <Badge variant="success">Активен</Badge>
+}
+
+function accessLabel(user: User): string {
+  if (!user.access_until) return 'бессрочно'
+  return `до ${formatDate(user.access_until)}`
+}
+
+/** Admin «Клиенты» — аккаунты абонентов (паритет с веб «Пользователи», без CSV). */
+export default function Clients() {
+  const [users, setUsers] = useState<User[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [status, setStatus] = useState<StatusFilter>('all')
+  const [selected, setSelected] = useState<User | null>(null)
+  const [createOpen, setCreateOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [feedback, setFeedback] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await getUsers()
+      setUsers(data)
+      setSelected((prev) => (prev ? data.find((item) => item.id === prev.id) ?? prev : prev))
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Ошибка загрузки')
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void load()
+  }, [load])
+
+  const subscribers = useMemo(() => users.filter((user) => user.role !== 'admin'), [users])
+
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    return subscribers.filter((user) => {
+      if (status !== 'all' && statusOf(user) !== status) return false
+      if (!query) return true
+      return (
+        user.username.toLowerCase().includes(query) ||
+        (user.client_base_name ?? '').toLowerCase().includes(query) ||
+        (user.telegram_id ?? '').includes(query)
+      )
+    })
+  }, [search, status, subscribers])
+
+  const run = async (action: () => Promise<unknown>, done: string) => {
+    setBusy(true)
+    setFeedback(null)
+    try {
+      await action()
+      setFeedback(done)
+      await load()
+    } catch (err) {
+      setFeedback(err instanceof ApiError ? err.message : 'Ошибка')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="tg-mini-dashboard space-y-3">
+      <MiniPageHeader
+        title="Клиенты"
+        subtitle={`${subscribers.length} абонент${subscribers.length === 1 ? '' : 'ов'}`}
+        onRefresh={() => void load()}
+        refreshing={loading}
+      />
+
+      <Button type="button" className="w-full gap-2" onClick={() => setCreateOpen(true)}>
+        <Plus size={18} aria-hidden />
+        Создать клиента
+      </Button>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      <div className="tg-mini-search-wrap">
+        <Search size={15} className="tg-mini-search-icon" aria-hidden />
+        <Input
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Имя, базовое имя или Telegram ID…"
+          className="tg-mini-search-input"
+          aria-label="Поиск клиентов"
+        />
+      </div>
+
+      <div className="tg-mini-segmented" role="tablist" aria-label="Фильтр статуса">
+        {STATUS_FILTERS.map((filter) => (
+          <button
+            key={filter.value}
+            type="button"
+            role="tab"
+            aria-selected={status === filter.value}
+            className={cn('tg-mini-segment', status === filter.value && 'is-active')}
+            onClick={() => setStatus(filter.value)}
+          >
+            {filter.label}
+          </button>
+        ))}
+      </div>
+
+      {loading && users.length === 0 ? (
+        <div className="tg-mini-skeleton tg-mini-skeleton-section" aria-busy="true" />
+      ) : filtered.length === 0 ? (
+        <div className="tg-mini-filter-empty">
+          <UserRound size={22} className="text-muted-foreground" aria-hidden />
+          <p className="text-sm font-medium">Нет клиентов</p>
+          <p className="text-xs text-muted-foreground">Измените фильтр или создайте абонента</p>
+        </div>
+      ) : (
+        filtered.map((user) => (
+          <Card key={user.id} className="tg-mini-config-card">
+            <CardContent className="p-0">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-3 p-3 text-left hover:bg-muted/50"
+                onClick={() => {
+                  setSelected(user)
+                  setFeedback(null)
+                }}
+              >
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate font-medium">{user.username}</span>
+                    {statusBadge(user)}
+                    {user.online && <Badge variant="success">онлайн</Badge>}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {user.client_base_name ?? '—'} · {accessLabel(user)}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Трафик: {formatBytes(user.traffic_consumed_bytes ?? 0)}
+                    {user.traffic_limit_bytes
+                      ? ` из ${formatBytes(user.traffic_limit_bytes)}`
+                      : ' · без лимита'}
+                  </p>
+                </div>
+              </button>
+            </CardContent>
+          </Card>
+        ))
+      )}
+
+      <ClientActionsDialog
+        user={selected}
+        busy={busy}
+        feedback={feedback}
+        onClose={() => setSelected(null)}
+        onUpdated={() => void load()}
+        onSuspend={(reason) =>
+          selected && void run(() => suspendUser(selected.id, { reason }), 'Клиент заблокирован')
+        }
+        onResume={() => selected && void run(() => resumeUser(selected.id), 'Клиент разблокирован')}
+        onExtend={(days) =>
+          selected &&
+          void run(() => extendUserAccess(selected.id, days), `Доступ продлён на ${days} дн.`)
+        }
+        onLimit={(bytes) =>
+          selected &&
+          void run(
+            () => setUserTrafficLimit(selected.id, bytes),
+            bytes == null ? 'Лимит снят' : 'Лимит сохранён',
+          )
+        }
+        onResetTraffic={() =>
+          selected && void run(() => resetUserTrafficCounter(selected.id), 'Счётчик трафика сброшен')
+        }
+        onDelete={() =>
+          selected &&
+          void run(async () => {
+            await deleteProvisionedUser(selected.id)
+            setSelected(null)
+          }, 'Клиент удалён')
+        }
+      />
+
+      <CreateClientDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onCreated={() => {
+          setCreateOpen(false)
+          void load()
+        }}
+      />
+    </div>
+  )
+}
+
+interface ClientActionsDialogProps {
+  user: User | null
+  busy: boolean
+  feedback: string | null
+  onClose: () => void
+  onUpdated: () => void
+  onSuspend: (reason: string | null) => void
+  onResume: () => void
+  onExtend: (days: number) => void
+  onLimit: (bytes: number | null) => void
+  onResetTraffic: () => void
+  onDelete: () => void
+}
+
+type ClientTab = 'actions' | 'history' | 'stats' | 'rights'
+
+const CLIENT_TABS: Array<{ id: ClientTab; label: string }> = [
+  { id: 'actions', label: 'Действия' },
+  { id: 'history', label: 'История' },
+  { id: 'stats', label: 'Статистика' },
+  { id: 'rights', label: 'Права' },
+]
+
+function ClientActionsDialog({
+  user,
+  busy,
+  feedback,
+  onClose,
+  onUpdated,
+  onSuspend,
+  onResume,
+  onExtend,
+  onLimit,
+  onResetTraffic,
+  onDelete,
+}: ClientActionsDialogProps) {
+  const { features } = useTgAuth()
+  const availableProtocols = useMemo(() => featureEnabledProtocols(features), [features])
+  const [tab, setTab] = useState<ClientTab>('actions')
+  const [reason, setReason] = useState('Заблокирован администратором')
+  const [limitGb, setLimitGb] = useState('')
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const [history, setHistory] = useState<UserHistoryEntry[]>([])
+  const [stats, setStats] = useState<UserStatsResponse | null>(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState<string | null>(null)
+  const [rightsBusy, setRightsBusy] = useState(false)
+  const [rightsError, setRightsError] = useState<string | null>(null)
+  const [canCreate, setCanCreate] = useState(false)
+  const [canManage, setCanManage] = useState(false)
+  const [panelLogin, setPanelLogin] = useState(false)
+  const [quota, setQuota] = useState('')
+  const [visibility, setVisibility] = useState<string[]>([])
+
+  useEffect(() => {
+    setTab('actions')
+    setReason('Заблокирован администратором')
+    setConfirmDelete(false)
+    setLimitGb(
+      user?.traffic_limit_bytes ? String(Math.round(user.traffic_limit_bytes / 1024 ** 3)) : '',
+    )
+    setHistory([])
+    setStats(null)
+    setDetailError(null)
+    setRightsError(null)
+    setCanCreate(Boolean(user?.can_create_configs))
+    setCanManage(Boolean(user?.can_manage_configs))
+    setPanelLogin(Boolean(user?.panel_login_enabled))
+    setQuota(user?.config_quota != null ? String(user.config_quota) : '')
+    setVisibility(user?.visible_vpn_profiles?.protocols ?? [])
+  }, [user])
+
+  const loadHistory = (userId: number) => {
+    setDetailLoading(true)
+    setDetailError(null)
+    void getUserHistory(userId)
+      .then(setHistory)
+      .catch((err) => setDetailError(err instanceof ApiError ? err.message : 'Ошибка загрузки'))
+      .finally(() => setDetailLoading(false))
+  }
+
+  const loadStats = (userId: number) => {
+    setDetailLoading(true)
+    setDetailError(null)
+    void getUserStats(userId, 30)
+      .then(setStats)
+      .catch((err) => setDetailError(err instanceof ApiError ? err.message : 'Ошибка загрузки'))
+      .finally(() => setDetailLoading(false))
+  }
+
+  const openTab = (next: ClientTab) => {
+    setTab(next)
+    if (!user) return
+    if (next === 'history' && history.length === 0) loadHistory(user.id)
+    if (next === 'stats' && stats == null) loadStats(user.id)
+  }
+
+  const saveRights = async () => {
+    if (!user) return
+    setRightsBusy(true)
+    setRightsError(null)
+    try {
+      const payload: UserUpdatePayload = {
+        can_create_configs: canCreate,
+        can_manage_configs: canManage,
+        panel_login_enabled: panelLogin,
+      }
+      const parsedQuota = Number.parseInt(quota, 10)
+      if (Number.isFinite(parsedQuota)) payload.config_quota = parsedQuota
+      if (user.visible_vpn_profiles) {
+        payload.visible_vpn_profiles = {
+          ...user.visible_vpn_profiles,
+          protocols: visibility,
+        }
+      }
+      await updateUser(user.id, payload)
+      onUpdated()
+      onClose()
+    } catch (err) {
+      setRightsError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
+    } finally {
+      setRightsBusy(false)
+    }
+  }
+
+  const suspended = Boolean(user?.suspended_at)
+  const canEditVisibility = Boolean(user?.visible_vpn_profiles)
+
+  return (
+    <Dialog open={Boolean(user)} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogTitle>{user?.username}</DialogTitle>
+        <DialogDescription>
+          {user ? `${user.client_base_name ?? '—'} · ${accessLabel(user)}` : ''}
+        </DialogDescription>
+
+        <div className="tg-mini-segmented pt-2" role="tablist" aria-label="Разделы клиента">
+          {CLIENT_TABS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              className={cn('tg-mini-segment', tab === item.id && 'is-active')}
+              onClick={() => openTab(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="space-y-3 pt-2">
+          {feedback && tab === 'actions' && (
+            <p className="text-sm text-muted-foreground">{feedback}</p>
+          )}
+
+          {tab === 'actions' && (
+            <>
+              {suspended ? (
+                <Button type="button" className="w-full gap-2" disabled={busy} onClick={onResume}>
+                  {busy ? <Loader2 size={16} className="animate-spin" /> : <Play size={16} />}
+                  Разблокировать
+                </Button>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label htmlFor="suspend-reason">Причина блокировки</Label>
+                  <Input
+                    id="suspend-reason"
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value)}
+                  />
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    className="w-full gap-2"
+                    disabled={busy}
+                    onClick={() => onSuspend(reason.trim() || null)}
+                  >
+                    {busy ? <Loader2 size={16} className="animate-spin" /> : <Ban size={16} />}
+                    Заблокировать все конфиги
+                  </Button>
+                </div>
+              )}
+
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 gap-1.5"
+                  disabled={busy}
+                  onClick={() => onExtend(30)}
+                >
+                  <CalendarPlus size={15} /> +30 дн.
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="flex-1 gap-1.5"
+                  disabled={busy}
+                  onClick={() => onExtend(60)}
+                >
+                  <CalendarPlus size={15} /> +60 дн.
+                </Button>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="traffic-limit">Лимит трафика, ГБ</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="traffic-limit"
+                    inputMode="numeric"
+                    value={limitGb}
+                    onChange={(e) => setLimitGb(e.target.value)}
+                    placeholder="без лимита"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={busy}
+                    onClick={() => {
+                      const gb = Number.parseInt(limitGb, 10)
+                      onLimit(Number.isFinite(gb) && gb > 0 ? gb * 1024 ** 3 : null)
+                    }}
+                  >
+                    <Gauge size={15} /> ОК
+                  </Button>
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy}
+                  onClick={onResetTraffic}
+                >
+                  Сбросить счётчик трафика
+                </Button>
+              </div>
+
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full gap-2 text-destructive"
+                disabled={busy}
+                onClick={() => {
+                  if (!confirmDelete) {
+                    setConfirmDelete(true)
+                    return
+                  }
+                  onDelete()
+                }}
+              >
+                <Trash2 size={15} /> {confirmDelete ? 'Точно удалить?' : 'Удалить клиента'}
+              </Button>
+            </>
+          )}
+
+          {tab === 'history' && (
+            <div className="space-y-2">
+              {detailLoading && <p className="text-sm text-muted-foreground">Загрузка…</p>}
+              {detailError && <p className="text-sm text-destructive">{detailError}</p>}
+              {!detailLoading && history.length === 0 && !detailError && (
+                <p className="text-sm text-muted-foreground">Записей нет</p>
+              )}
+              {history.map((entry) => (
+                <div key={entry.id} className="rounded-md border border-border/70 p-2">
+                  <div className="flex items-center gap-1.5 text-sm font-medium">
+                    <Clock size={14} className="text-muted-foreground" aria-hidden />
+                    {entry.action}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {entry.actor_username ?? 'система'} · {formatDateTime(entry.created_at)}
+                  </p>
+                  {entry.details && (
+                    <p className="mt-1 text-xs text-muted-foreground">{entry.details}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === 'stats' && (
+            <div className="space-y-2">
+              {detailLoading && <p className="text-sm text-muted-foreground">Загрузка…</p>}
+              {detailError && <p className="text-sm text-destructive">{detailError}</p>}
+              {stats && (
+                <>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div className="rounded-md border border-border/70 p-2">
+                      <p className="text-xs text-muted-foreground">Всего</p>
+                      <p className="font-medium">{formatBytes(stats.totals.bytes)}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 p-2">
+                      <p className="text-xs text-muted-foreground">Сессий</p>
+                      <p className="font-medium">{stats.totals.sessions}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 p-2">
+                      <p className="text-xs text-muted-foreground">Получено</p>
+                      <p className="font-medium">{formatBytes(stats.totals.received)}</p>
+                    </div>
+                    <div className="rounded-md border border-border/70 p-2">
+                      <p className="text-xs text-muted-foreground">Отправлено</p>
+                      <p className="font-medium">{formatBytes(stats.totals.sent)}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Период: {stats.period_days} дн.</p>
+                  {stats.rows.map((row) => (
+                    <div
+                      key={`${row.node_id}-${row.client_name}-${row.vpn_type}`}
+                      className="rounded-md border border-border/70 p-2 text-xs"
+                    >
+                      <p className="font-medium">
+                        {row.client_name} · {protocolLabel(row.vpn_type)}
+                      </p>
+                      <p className="text-muted-foreground">
+                        {formatBytes(row.total_bytes)} · сессий: {row.total_sessions} · узел {row.node_id}
+                      </p>
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+
+          {tab === 'rights' && (
+            <div className="space-y-3">
+              <label className="flex items-center justify-between gap-2 text-sm">
+                Создавать конфиги
+                <input
+                  type="checkbox"
+                  checked={canCreate}
+                  onChange={(e) => setCanCreate(e.target.checked)}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2 text-sm">
+                Управлять конфигами
+                <input
+                  type="checkbox"
+                  checked={canManage}
+                  onChange={(e) => setCanManage(e.target.checked)}
+                />
+              </label>
+              <label className="flex items-center justify-between gap-2 text-sm">
+                Вход в панель
+                <input
+                  type="checkbox"
+                  checked={panelLogin}
+                  onChange={(e) => setPanelLogin(e.target.checked)}
+                />
+              </label>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="rights-quota">Квота конфигов</Label>
+                <Input
+                  id="rights-quota"
+                  inputMode="numeric"
+                  value={quota}
+                  onChange={(e) => setQuota(e.target.value)}
+                  placeholder="без изменений"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label>Видимые протоколы</Label>
+                {canEditVisibility ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {availableProtocols.map((protocol) => (
+                      <button
+                        key={protocol}
+                        type="button"
+                        className={cn(
+                          'rounded-md border px-2 py-1 text-xs',
+                          visibility.includes(protocol)
+                            ? 'border-primary bg-primary/10'
+                            : 'border-border',
+                        )}
+                        onClick={() =>
+                          setVisibility((prev) =>
+                            prev.includes(protocol)
+                              ? prev.filter((item) => item !== protocol)
+                              : [...prev, protocol],
+                          )
+                        }
+                      >
+                        {protocolLabel(protocol)}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Наследует общие настройки панели — меняется в веб-панели.
+                  </p>
+                )}
+              </div>
+
+              {rightsError && <p className="text-sm text-destructive">{rightsError}</p>}
+
+              <Button
+                type="button"
+                className="w-full gap-2"
+                disabled={rightsBusy}
+                onClick={() => void saveRights()}
+              >
+                {rightsBusy ? <Loader2 size={16} className="animate-spin" /> : <Shield size={16} />}
+                Сохранить права
+              </Button>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+interface CreateClientDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCreated: () => void
+}
+
+function CreateClientDialog({ open, onOpenChange, onCreated }: CreateClientDialogProps) {
+  const { features } = useTgAuth()
+  const availableProtocols = useMemo(() => featureEnabledProtocols(features), [features])
+  const defaultProtocols = useMemo(() => {
+    const preferred = availableProtocols.filter((protocol) => protocol !== 'amneziawg2')
+    return preferred.length > 0 ? preferred : availableProtocols
+  }, [availableProtocols])
+  // Сброс формы при открытии берёт актуальные фичи, но не срабатывает на их фоновое обновление.
+  const defaultProtocolsRef = useRef(defaultProtocols)
+  defaultProtocolsRef.current = defaultProtocols
+  const [username, setUsername] = useState('')
+  const [baseName, setBaseName] = useState('')
+  const [presets, setPresets] = useState<PresetResponse[]>([])
+  const [presetId, setPresetId] = useState('')
+  const [nodes, setNodes] = useState<TgMiniNode[]>([])
+  const [nodeIds, setNodeIds] = useState<number[]>([])
+  const [protocols, setProtocols] = useState<string[]>([])
+  const [count, setCount] = useState('1')
+  const [panelLogin, setPanelLogin] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    setUsername('')
+    setBaseName('')
+    setPresetId('')
+    setProtocols(defaultProtocolsRef.current)
+    setCount('1')
+    setPanelLogin(false)
+    setError(null)
+    void listPresets().then(setPresets).catch(() => setPresets([]))
+    void getTgNodes()
+      .then((data) => {
+        const available = selectablePlanNodes(data.nodes)
+        setNodes(available)
+        setNodeIds(available.filter((node) => node.is_active).map((node) => node.id))
+      })
+      .catch(() => setNodes([]))
+  }, [open])
+
+  useEffect(() => {
+    const preset = presets.find((item) => String(item.id) === presetId)
+    if (!preset) return
+    setNodeIds(preset.node_ids)
+    setProtocols(preset.protocols.filter((protocol) => availableProtocols.some((item) => item === protocol)))
+    setCount(String(preset.config_count))
+  }, [presetId, presets, availableProtocols])
+
+  const submit = async () => {
+    const name = username.trim()
+    if (!name) {
+      setError('Укажите логин')
+      return
+    }
+    if (nodeIds.length === 0) {
+      setError('Выберите хотя бы один узел')
+      return
+    }
+    if (protocols.length === 0) {
+      setError('Выберите хотя бы один протокол')
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      await createProvisionedUser({
+        username: name,
+        client_base_name: baseName.trim() || name,
+        node_ids: nodeIds,
+        protocols,
+        config_count: Math.max(1, Number.parseInt(count, 10) || 1),
+        config_quota: null,
+        access_until: null,
+        panel_login_enabled: panelLogin,
+        password: null,
+        telegram_id: null,
+      })
+      onCreated()
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Ошибка создания')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogTitle>Создать клиента</DialogTitle>
+        <DialogDescription>Логин и план конфигов</DialogDescription>
+
+        <div className="space-y-3 pt-2">
+          {presets.length > 0 && (
+            <div className="space-y-1.5">
+              <Label htmlFor="client-preset">Пресет</Label>
+              <select
+                id="client-preset"
+                value={presetId}
+                onChange={(e) => setPresetId(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+              >
+                <option value="">Вручную</option>
+                {presets.map((preset) => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="client-username">Логин</Label>
+            <Input
+              id="client-username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              autoComplete="off"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="client-base-name">Базовое имя конфигов</Label>
+            <Input
+              id="client-base-name"
+              value={baseName}
+              onChange={(e) => setBaseName(e.target.value)}
+              placeholder="по умолчанию = логин"
+              autoComplete="off"
+            />
+          </div>
+
+          <MiniPlanFields
+            idPrefix="client"
+            nodes={nodes}
+            nodeIds={nodeIds}
+            onNodeIdsChange={setNodeIds}
+            protocols={protocols}
+            onProtocolsChange={setProtocols}
+            count={count}
+            onCountChange={setCount}
+            availableProtocols={availableProtocols}
+          />
+
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={panelLogin}
+              onChange={(e) => setPanelLogin(e.target.checked)}
+            />
+            Вход в панель
+          </label>
+
+          {error && <p className="text-sm text-destructive">{error}</p>}
+
+          <Button type="button" className="w-full" disabled={busy} onClick={() => void submit()}>
+            {busy ? <Loader2 size={16} className="animate-spin" /> : 'Создать'}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}

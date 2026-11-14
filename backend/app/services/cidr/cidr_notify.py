@@ -67,6 +67,11 @@ def _format_ingest_partial_details(result: dict[str, Any]) -> str:
     return " · ".join(parts) if parts else "Обновление CIDR БД завершилось частично"
 
 
+def _format_ingest_failure_details(result: dict[str, Any]) -> str:
+    details = _format_ingest_partial_details(result)
+    return f"Все провайдеры недоступны · {details}"
+
+
 def maybe_notify_ingest_partial(
     db: Session,
     result: dict[str, Any],
@@ -75,7 +80,15 @@ def maybe_notify_ingest_partial(
 ) -> None:
     if result.get("dry_run"):
         return
-    if str(result.get("status") or "") != "partial":
+    status = str(result.get("status") or "")
+    if status == "error":
+        admin_notify_service.send_cidr_ingest_partial(
+            db,
+            details=_format_ingest_failure_details(result),
+            actor_username=triggered_by,
+        )
+        return
+    if status != "partial":
         return
     admin_notify_service.send_cidr_ingest_partial(
         db,

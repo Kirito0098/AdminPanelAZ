@@ -1,5 +1,7 @@
 import type { MonitoringOverview } from '@/types'
 
+export { protocolLabel } from '@/lib/vpnTypes'
+
 export function formatBytes(n: number) {
   if (!Number.isFinite(n) || n < 0) return '—'
   const unit = '\u00A0'

@@ -55,6 +55,26 @@ def test_kill_sends_valid_names(service, client_name):
     assert sent == [f"kill {client_name}"]
 
 
+@pytest.mark.parametrize("client_id", ["", "1041\nkill all", "abc", "-1", "10 41", "0x10"])
+def test_client_kill_by_id_rejects_bad_ids(service, client_id):
+    svc, sent = service
+
+    result = svc.kill_client_by_id("antizapret-udp", client_id)
+
+    assert result["success"] is False
+    assert sent == []
+
+
+@pytest.mark.parametrize("client_id", ["1041", 1041])
+def test_client_kill_by_id_sends_the_session_command(service, client_id):
+    svc, sent = service
+
+    result = svc.kill_client_by_id("antizapret-udp", client_id)
+
+    assert result["success"] is True
+    assert sent == [f"client-kill {client_id}"]
+
+
 BANNER = ">INFO:OpenVPN Management Interface Version 5 -- type 'help' for more info\r\n"
 
 
@@ -108,13 +128,17 @@ def agent(monkeypatch):
     import node_agent.main as agent_main
 
     kill = MagicMock(return_value={"success": True})
+    kill_by_id = MagicMock(return_value={"success": True})
     monkeypatch.setattr(agent_main.openvpn_management_service, "kill_client", kill)
-    return TestClient(agent_main.app), {"X-Node-Key": agent_main.NODE_AGENT_API_KEY}, kill
+    monkeypatch.setattr(agent_main.openvpn_management_service, "kill_client_by_id", kill_by_id)
+    client = TestClient(agent_main.app)
+    headers = {"X-Node-Key": agent_main.NODE_AGENT_API_KEY}
+    return client, headers, kill, kill_by_id
 
 
 @pytest.mark.parametrize("client_name", INJECTIONS)
 def test_agent_kill_endpoint_rejects_injected_names(agent, client_name):
-    client, headers, kill = agent
+    client, headers, kill, _kill_by_id = agent
 
     response = client.post(
         "/openvpn/management/kill",
@@ -127,7 +151,7 @@ def test_agent_kill_endpoint_rejects_injected_names(agent, client_name):
 
 
 def test_agent_kill_endpoint_passes_valid_names(agent):
-    client, headers, kill = agent
+    client, headers, kill, _kill_by_id = agent
 
     response = client.post(
         "/openvpn/management/kill",
@@ -137,3 +161,30 @@ def test_agent_kill_endpoint_passes_valid_names(agent):
 
     assert response.status_code == 200
     kill.assert_called_once_with("antizapret-udp", "bob")
+
+
+@pytest.mark.parametrize("client_id", ["abc", "-1", "1041;kill all", None])
+def test_agent_client_kill_endpoint_rejects_bad_ids(agent, client_id):
+    client, headers, _kill, kill_by_id = agent
+
+    response = client.post(
+        "/openvpn/management/client-kill",
+        json={"unit": "antizapret-udp", "client_id": client_id},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+    kill_by_id.assert_not_called()
+
+
+def test_agent_client_kill_endpoint_passes_the_session_id(agent):
+    client, headers, _kill, kill_by_id = agent
+
+    response = client.post(
+        "/openvpn/management/client-kill",
+        json={"unit": "antizapret-udp", "client_id": 1041},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    kill_by_id.assert_called_once_with("antizapret-udp", 1041)

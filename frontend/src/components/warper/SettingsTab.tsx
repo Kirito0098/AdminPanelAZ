@@ -68,7 +68,6 @@ import WarperSection, { WarperStatTile } from './WarperSection'
 import WarperUpdatesSection from './WarperUpdatesSection'
 import {
   DEFAULT_FAKE_SUBNET,
-  donorLinkMode,
   extractProxyLink,
   formatOutboundMode,
   isWarperDisabled,
@@ -159,7 +158,6 @@ export default function SettingsTab({ health }: SettingsTabProps) {
   const [warpKeySource, setWarpKeySource] = useState<WarperWarpKeySource>('auto')
   const [modeDraft, setModeDraft] = useState<WarperOutboundMode>('warp')
   const [slaveLink, setSlaveLink] = useState('')
-  const [slaveManual, setSlaveManual] = useState(false)
   const [slaveHost, setSlaveHost] = useState('')
   const [slavePort, setSlavePort] = useState('8444')
   const [slaveKey, setSlaveKey] = useState('')
@@ -188,16 +186,14 @@ export default function SettingsTab({ health }: SettingsTabProps) {
       ? `MTU должен быть целым числом от ${MTU_MIN} до ${MTU_MAX}`
       : null
   const subnetError = subnet.trim() && !CIDR_RE.test(subnet.trim()) ? `Укажите подсеть в формате ${DEFAULT_FAKE_SUBNET}` : null
-  const slaveLinkError = linkError(slaveLink, ['ss', 'vless', 'hy2', 'hysteria2'])
-  const slaveLinkMode = slaveLinkError ? null : donorLinkMode(extractProxyLink(slaveLink))
+  const slaveLinkError = linkError(slaveLink, ['ss'])
   const slavePortError = slavePort.trim() && !isValidPort(slavePort) ? 'Порт 1–65535' : null
   const vlessError = linkError(vlessLink, ['vless'])
   const hy2Error = linkError(hy2Link, ['hy2', 'hysteria2'])
   const ovpnPasswordMissing = Boolean(ovpnUser.trim()) && !ovpnPassword
 
-  const slaveReady = slaveManual
-    ? Boolean(slaveHost.trim() && slaveKey.trim()) && isValidPort(slavePort)
-    : Boolean(slaveLink.trim()) && !slaveLinkError
+  const slaveManualReady = Boolean(slaveHost.trim() && slaveKey.trim()) && isValidPort(slavePort)
+  const slaveReady = (Boolean(slaveLink.trim()) && !slaveLinkError) || slaveManualReady
   const wgReady = Boolean(wgConfigPath.trim())
   const vlessReady = Boolean(vlessLink.trim()) && !vlessError
   const hy2Ready = Boolean(hy2Link.trim()) && !hy2Error
@@ -336,14 +332,8 @@ export default function SettingsTab({ health }: SettingsTabProps) {
   }
 
   function applySlaveMode() {
-    if (!slaveManual) {
-      const link = extractProxyLink(slaveLink)
-      if (!link) return
-      if (slaveLinkMode === 'vless') return runAction(() => setWarperModeVless(link), 'Режим VLESS применён', 'Не удалось переключить VLESS')
-      if (slaveLinkMode === 'hy2') {
-        return runAction(() => setWarperModeHy2(link), 'Режим Hysteria2 применён', 'Не удалось переключить Hysteria2')
-      }
-      return runAction(() => setWarperModeSlaveLink(link), 'Режим Slave применён', 'Не удалось переключить Slave')
+    if (slaveLink.trim() && !slaveLinkError) {
+      return runAction(() => setWarperModeSlaveLink(extractProxyLink(slaveLink)), 'Режим Slave применён', 'Не удалось переключить Slave')
     }
     const port = Number(slavePort)
     if (!slaveHost.trim() || !slaveKey.trim() || !Number.isFinite(port)) return
@@ -601,75 +591,64 @@ export default function SettingsTab({ health }: SettingsTabProps) {
 
           {modeDraft === 'slave' && (
             <div className="space-y-4">
-              {!slaveManual ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="slave-link">Ссылка донора</Label>
+                <Input
+                  id="slave-link"
+                  className="font-mono text-sm"
+                  placeholder="ss://…"
+                  value={slaveLink}
+                  disabled={controlsDisabled}
+                  aria-invalid={Boolean(slaveLinkError)}
+                  onChange={(e) => setSlaveLink(e.target.value)}
+                />
+                <FieldError message={slaveLinkError} />
+                <p className="text-xs text-muted-foreground">
+                  Выполните <code>warperslave link</code> на доноре и вставьте ссылку или всю строку вывода.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="slave-link">Ссылка донора</Label>
+                  <Label htmlFor="slave-host">Host</Label>
                   <Input
-                    id="slave-link"
-                    className="font-mono text-sm"
-                    placeholder="ss://… · vless://… · hy2://…"
-                    value={slaveLink}
+                    id="slave-host"
+                    placeholder="1.2.3.4"
+                    value={slaveHost}
                     disabled={controlsDisabled}
-                    aria-invalid={Boolean(slaveLinkError)}
-                    onChange={(e) => setSlaveLink(e.target.value)}
+                    onChange={(e) => setSlaveHost(e.target.value)}
                   />
-                  <FieldError message={slaveLinkError} />
-                  <p className="text-xs text-muted-foreground">
-                    Выполните <code>warperslave link</code> на доноре и вставьте ссылку или всю строку вывода.
-                    Ссылка vless:// или hy2:// включит режим VLESS или Hysteria2.
-                  </p>
                 </div>
-              ) : (
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="slave-host">Host</Label>
-                    <Input
-                      id="slave-host"
-                      placeholder="1.2.3.4"
-                      value={slaveHost}
-                      disabled={controlsDisabled}
-                      onChange={(e) => setSlaveHost(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="slave-port">Port</Label>
-                    <Input
-                      id="slave-port"
-                      type="number"
-                      placeholder="8444"
-                      value={slavePort}
-                      disabled={controlsDisabled}
-                      aria-invalid={Boolean(slavePortError)}
-                      onChange={(e) => setSlavePort(e.target.value)}
-                    />
-                    <FieldError message={slavePortError} />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="slave-key">SS-key</Label>
-                    <Input
-                      id="slave-key"
-                      placeholder="ss-key"
-                      value={slaveKey}
-                      disabled={controlsDisabled}
-                      onChange={(e) => setSlaveKey(e.target.value)}
-                    />
-                  </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="slave-port">Port</Label>
+                  <Input
+                    id="slave-port"
+                    type="number"
+                    placeholder="8444"
+                    value={slavePort}
+                    disabled={controlsDisabled}
+                    aria-invalid={Boolean(slavePortError)}
+                    onChange={(e) => setSlavePort(e.target.value)}
+                  />
+                  <FieldError message={slavePortError} />
                 </div>
-              )}
-              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <Button variant="link" size="sm" className="px-0" onClick={() => setSlaveManual((value) => !value)}>
-                  {slaveManual ? 'Вставить ссылку донора' : 'Ввести host, port и ключ вручную'}
-                </Button>
+                <div className="space-y-1.5">
+                  <Label htmlFor="slave-key">SS-key</Label>
+                  <Input
+                    id="slave-key"
+                    placeholder="ss-key"
+                    value={slaveKey}
+                    disabled={controlsDisabled}
+                    onChange={(e) => setSlaveKey(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end">
                 <Button
                   className="w-full sm:w-auto"
                   disabled={controlsDisabled || !slaveReady}
                   onClick={() => void applySlaveMode()}
                 >
-                  {!slaveManual && slaveLinkMode === 'vless'
-                    ? 'Применить VLESS'
-                    : !slaveManual && slaveLinkMode === 'hy2'
-                      ? 'Применить Hysteria2'
-                      : 'Применить Slave'}
+                  Применить Slave
                 </Button>
               </div>
             </div>

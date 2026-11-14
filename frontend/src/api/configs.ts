@@ -1,18 +1,15 @@
-import {
-  apiFetch,
-  apiFetchResponse,
-} from './http'
+import { apiFetch, apiFetchResponse } from './http'
 import type {
   VpnConfig,
   SelfServiceQuota,
   SelfServiceLimits,
   EffectiveVisibleVpnProfilesResponse,
+  UserGraceSettings,
   VisibleVpnProfilesDefaultResponse,
   VisibleVpnProfilesPolicy,
   VpnType,
   ConfigTag,
   ConfigCsvImportResponse,
-  OneTimeLinkResponse,
 } from '../types'
 
 export async function getConfigs(includeFiles = false, tagIds?: number[]) {
@@ -21,6 +18,23 @@ export async function getConfigs(includeFiles = false, tagIds?: number[]) {
   if (tagIds?.length) tagIds.forEach((id) => params.append('tag_ids', String(id)))
   const query = params.toString() ? `?${params.toString()}` : ''
   return apiFetch<VpnConfig[]>(`/configs${query}`)
+}
+
+/** Admin: primary configs on all nodes (create-user «привязать существующие»). */
+type AssignableConfig = {
+  id: number
+  client_name: string
+  vpn_type: string
+  node_id: number
+  node_name: string
+  owner_id: number | null
+  owner_username?: string | null
+  owner_is_admin: boolean
+  description?: string | null
+}
+
+export async function getAssignableConfigs() {
+  return apiFetch<AssignableConfig[]>('/configs/assignable')
 }
 
 export async function getConfigQuota() {
@@ -55,6 +69,18 @@ export async function updateSelfServiceLimits(data: Partial<SelfServiceLimits>) 
   return apiFetch<SelfServiceLimits>('/settings/self-service', {
     method: 'PATCH',
     body: JSON.stringify(data),
+  })
+}
+
+/** Срок удержания конфигов после истечения доступа (месяцы; 0 — выключено). */
+export async function getUserGraceSettings() {
+  return apiFetch<UserGraceSettings>('/settings/user-grace')
+}
+
+export async function updateUserGraceSettings(graceMonths: number) {
+  return apiFetch<UserGraceSettings>('/settings/user-grace', {
+    method: 'PATCH',
+    body: JSON.stringify({ grace_months: graceMonths }),
   })
 }
 
@@ -133,10 +159,6 @@ export async function bulkConfigOp(data: {
   })
 }
 
-export function downloadProfile(configId: number, path: string) {
-  return apiFetchResponse(`/configs/${configId}/download?path=${encodeURIComponent(path)}`)
-}
-
 export function downloadConfigsExport() {
   return apiFetchResponse('/configs/export')
 }
@@ -148,29 +170,4 @@ export async function importConfigsCsv(file: File) {
     method: 'POST',
     body: form,
   })
-}
-
-export async function createOneTimeLink(configId: number, path: string) {
-  const params = new URLSearchParams({ path })
-  return apiFetch<OneTimeLinkResponse>(
-    `/configs/${configId}/one-time-link?${params}`,
-    { method: 'POST' },
-  )
-}
-
-export type QrContentMode = 'profile' | 'download-link'
-
-type QrBlobResult = {
-  blob: Blob
-  contentMode: QrContentMode
-  downloadUrl?: string
-}
-
-export async function fetchQrBlob(configId: number, path: string): Promise<QrBlobResult> {
-  const params = new URLSearchParams({ path })
-  const response = await apiFetchResponse(`/configs/${configId}/qr?${params}`)
-  const contentMode: QrContentMode =
-    response.headers.get('X-Qr-Content') === 'download-link' ? 'download-link' : 'profile'
-  const downloadUrl = response.headers.get('X-Qr-Download-Url') ?? undefined
-  return { blob: await response.blob(), contentMode, downloadUrl }
 }

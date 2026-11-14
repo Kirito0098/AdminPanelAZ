@@ -88,6 +88,25 @@ def normalize_number(param: Mapping[str, Any], value: Any) -> str:
     return str(int(s))
 
 
+def normalize_string(param: Mapping[str, Any], value: Any) -> str:
+    """Validate a string param; a value without ``pattern`` must stay one setup line."""
+    s = "" if value is None else str(value).strip()
+    if not s:
+        return s
+    pattern = param.get("pattern")
+    if not pattern:
+        # setup is KEY=VALUE read by root scripts: a newline would inject a foreign line.
+        if re.fullmatch(r"\S+", s) is None:
+            raise ValueError(f"{param['env']}: недопустимые символы")
+        return s
+    if re.fullmatch(pattern, s) is None:
+        raise ValueError(f"{param['env']}: {param.get('pattern_hint', 'недопустимое значение')}")
+    port = s.rsplit(":", 1)[-1]
+    if port.isdigit() and not 1 <= int(port) <= 65535:
+        raise ValueError(f"{param['env']}: порт должен быть от 1 до 65535")
+    return s
+
+
 def normalize_choice_settings(settings: Mapping[str, str]) -> dict[str, str]:
     """Map legacy y/n of choice params (e.g. from an old node agent) to numeric values."""
     result = dict(settings)
@@ -124,9 +143,35 @@ def setting_write_mismatch_warnings(requested: Mapping[str, Any], actual: Mappin
     actual = normalize_choice_settings(actual)
     for p in ANTIZAPRET_PARAMS:
         key = p["key"]
-        if p["type"] not in VERIFIED_WRITE_TYPES or key not in requested:
+        if p["type"] not in VERIFIED_WRITE_TYPES and not p.get("verify_write"):
+            continue
+        if key not in requested:
             continue
         env = p["env"]
+        if p["type"] == "string":
+            try:
+                wanted = normalize_string(p, requested[key])
+            except ValueError:
+                continue
+            if not wanted:
+                continue
+            got = actual.get(key)
+            if got != wanted:
+                warnings.append(
+                    f"{env}: на узле записано «{got or '—'}» вместо «{wanted}». "
+                    "Обновите node agent панели на узле и сохраните ещё раз."
+                )
+            continue
+        if p["type"] == "flag":
+            wanted = normalize_flag(requested[key])
+            got = actual.get(key)
+            # An old agent drops the unknown key entirely; that only matters when the user turns it on.
+            if got != wanted and not (got is None and wanted == "n"):
+                warnings.append(
+                    f"{env}: на узле записано «{got or 'нет'}» вместо «{wanted}». "
+                    "Обновите node agent панели на узле и сохраните ещё раз."
+                )
+            continue
         if p["type"] == "number":
             try:
                 wanted = normalize_number(p, requested[key])
@@ -155,6 +200,9 @@ def setting_write_mismatch_warnings(requested: Mapping[str, Any], actual: Mappin
 def build_schema() -> list[dict[str, Any]]:
     schema: list[dict[str, Any]] = []
     for p in ANTIZAPRET_PARAMS:
+        if p.get("hidden"):
+            # Служебные ключи setup: пишет панель из своей карточки, в разделе «Конфиг AntiZapret» их нет.
+            continue
         item: dict[str, Any] = {
             "key": p["key"],
             "html_id": p["html_id"],
@@ -164,12 +212,16 @@ def build_schema() -> list[dict[str, Any]]:
             "title": p.get("title", ""),
             "description": p.get("description", ""),
         }
+        if p.get("verify_write"):
+            item["verify_write"] = True
         if p["type"] == "choice":
             item["options"] = [dict(opt) for opt in p.get("options", [])]
         elif p["type"] == "number":
             item["min"] = p["min"]
             item["max"] = p["max"]
             item["placeholder"] = p.get("placeholder", "")
+        elif p["type"] == "string" and p.get("placeholder"):
+            item["placeholder"] = p["placeholder"]
         schema.append(item)
     return schema
 
@@ -231,6 +283,45 @@ def read_protocol_enable_flags(setup_path: Path) -> dict[str, str]:
     return flags
 
 
+_PROTOCOL_FLAG_LINE = re.compile(
+    rf"^({'|'.join(_PROTOCOL_ENABLE_ENVS)})=.*$", re.MULTILINE
+)
+
+
+def write_protocol_enable_flags(setup_path: Path, flags: Mapping[str, str]) -> None:
+    """Persist OPENVPN_UDP/TCP_ENABLE / WIREGUARD_ENABLE after the protocol card toggles units.
+
+    ``setup.sh`` не читает эти ключи при обновлении, но панель читает их для мониторинга и
+    авто-перезапуска OpenVPN: без записи выключенный протокол считался бы упавшим, а включённый
+    на реплике — отсутствующим.
+    """
+    wanted = {
+        key: "y" if normalize_flag(value) == "y" else "n"
+        for key, value in flags.items()
+        if key in _PROTOCOL_ENABLE_ENVS
+    }
+    if not wanted:
+        return
+    try:
+        content = setup_path.read_text(encoding="utf-8")
+    except OSError:
+        content = ""
+
+    def _replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        return f"{key}={wanted[key]}" if key in wanted else match.group(0)
+
+    updated = _PROTOCOL_FLAG_LINE.sub(_replace, content)
+    for key, value in wanted.items():
+        if not re.search(rf"^{key}=", updated, re.MULTILINE):
+            if updated and not updated.endswith("\n"):
+                updated += "\n"
+            updated += f"{key}={value}\n"
+    if updated != content:
+        setup_path.parent.mkdir(parents=True, exist_ok=True)
+        setup_path.write_text(updated, encoding="utf-8")
+
+
 def read_antizapret_settings(setup_path: Path) -> dict[str, str]:
     """Read setup file and return {key: value} for all ANTIZAPRET_PARAMS."""
     try:
@@ -253,6 +344,12 @@ def read_antizapret_settings(setup_path: Path) -> dict[str, str]:
         else:
             m = re.search(rf"^{re.escape(env)}=([yn])$", content, re.M | re.I)
             settings[key] = m.group(1).lower() if m else default
+            # AntiZapret до 26.10.2026 держал часть флагов числом (DNS_WARP=1|2): показываем y/n.
+            legacy_numeric = p.get("legacy_numeric_flag")
+            if m is None and legacy_numeric:
+                raw = re.search(rf"^{re.escape(env)}=(\S+)\s*(#.*)?$", content, re.M | re.I)
+                if raw and raw.group(1) in legacy_numeric:
+                    settings[key] = legacy_numeric[raw.group(1)]
 
     # Legacy BLOCK_ADS → ANTIZAPRET_ADBLOCK (AntiZapret update.sh migrates the same way).
     if not re.search(r"^ANTIZAPRET_ADBLOCK=", content, re.M | re.I):
@@ -263,6 +360,13 @@ def read_antizapret_settings(setup_path: Path) -> dict[str, str]:
     # Protocol enable flags (monitoring / incidents; not in ANTIZAPRET_PARAMS UI schema).
     settings.update(read_protocol_enable_flags(setup_path))
     return settings
+
+
+def _has_numeric_marker(content: str, markers: Sequence[str]) -> bool:
+    """Новый setup хранит режимы WARP числами; в старом там y/n, и y/n никто не прочитает."""
+    return any(
+        re.search(rf"^{re.escape(env)}=[1-9]\s*(#.*)?$", content, re.M | re.I) for env in markers
+    )
 
 
 def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -> dict[str, Any]:
@@ -289,6 +393,20 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
         v = new_settings[key]
         env = p["env"]
         if p["type"] == "flag":
+            legacy_numeric = p.get("legacy_numeric_flag")
+            if legacy_numeric:
+                raw_legacy = re.search(rf"^{re.escape(env)}=(\S+)\s*(#.*)?$", content, re.M | re.I)
+                if raw_legacy and raw_legacy.group(1) in legacy_numeric:
+                    raise ValueError(
+                        f"{env}: в setup старый формат ({env}={raw_legacy.group(1)}). "
+                        "Обновите AntiZapret-VPN на узле — панель записывает y/n."
+                    )
+            markers = p.get("numeric_markers") or ()
+            if markers and not _has_numeric_marker(content, markers):
+                raise ValueError(
+                    f"{env}: setup узла в старом формате AntiZapret-VPN (нет числовых {', '.join(markers)}). "
+                    "Обновите AntiZapret-VPN на узле — панель записывает y/n."
+                )
             desired[env] = normalize_flag(v)
         elif p["type"] == "choice":
             legacy = re.search(rf"^{re.escape(env)}=[yn]\s*(#.*)?$", content, re.M | re.I) is not None
@@ -296,7 +414,7 @@ def update_antizapret_settings(setup_path: Path, new_settings: dict[str, Any]) -
         elif p["type"] == "number":
             desired[env] = normalize_number(p, v)
         else:
-            desired[env] = str(v).strip()
+            desired[env] = normalize_string(p, v)
 
     if not desired:
         return {

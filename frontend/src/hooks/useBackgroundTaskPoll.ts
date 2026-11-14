@@ -6,7 +6,7 @@ const DEFAULT_INTERVAL_MS = 1500
 const DEFAULT_TIMEOUT_MS = 900_000
 const MAX_CONSECUTIVE_ERRORS = 3
 
-export type BackgroundTaskFetcher = (taskId: string) => Promise<BackgroundTask>
+type BackgroundTaskFetcher = (taskId: string) => Promise<BackgroundTask>
 
 export interface BackgroundTaskPollOptions {
   intervalMs?: number

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
 from dataclasses import dataclass
 from typing import Any
@@ -15,7 +16,21 @@ logger = logging.getLogger(__name__)
 _API_BASE = "https://api.telegram.org/bot{token}/{method}"
 _TIMEOUT = httpx.Timeout(15.0, connect=5.0)
 _TELEGRAM_API_HOST = "api.telegram.org"
-ALLOWED_UPDATES = ["message", "callback_query", "inline_query", "chosen_inline_result"]
+_BOT_TOKEN_IN_URL_RE = re.compile(r"/bot[^/\s]+/")
+
+
+def redact_bot_token(text: str) -> str:
+    """Mask bot tokens that appear in Telegram API URLs inside exception text."""
+    return _BOT_TOKEN_IN_URL_RE.sub("/bot<redacted>/", text or "")
+ALLOWED_UPDATES = [
+    "message",
+    "callback_query",
+    "inline_query",
+    "chosen_inline_result",
+    "my_chat_member",
+    "widget_query",
+    "shared_widget_query",
+]
 
 
 def bot_api_url(token: str, method: str) -> str:
@@ -46,12 +61,20 @@ def reset_bot_api_client_for_tests() -> None:
         _bot_api_client = None
     if client is None:
         return
+    # Клиент мог быть создан в уже закрытом event loop (несколько asyncio.run
+    # подряд в синхронном коде) — закрытие не должно ронять вызывающего.
+    async def _close() -> None:
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
-        asyncio.run(client.aclose())
+        asyncio.run(_close())
     else:
-        loop.create_task(client.aclose())
+        loop.create_task(_close())
 
 
 def _get_bot_api_client() -> httpx.AsyncClient:
@@ -177,10 +200,10 @@ async def call_bot_api_result(
             )
         return BotApiResult(ok=True, result=data.get("result"))
     except Exception as exc:
-        logger.warning("Telegram API %s error: %s", method, exc)
+        logger.warning("Telegram API %s error: %s", method, redact_bot_token(str(exc)))
         return BotApiResult(
             ok=False,
-            error=format_telegram_connect_error(str(exc), operation=operation),
+            error=format_telegram_connect_error(redact_bot_token(str(exc)), operation=operation),
         )
 
 
@@ -206,6 +229,26 @@ async def get_webhook_info_result(bot_token: str) -> BotApiResult:
     return BotApiResult(ok=True, result=info)
 
 
+async def send_message_result(
+    bot_token: str,
+    chat_id: str | int,
+    text: str,
+    *,
+    parse_mode: str = "HTML",
+    reply_markup: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Отправить сообщение и вернуть объект Message из ответа Telegram (``None`` при ошибке)."""
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": parse_mode,
+        "link_preview_options": {"is_disabled": True},
+    }
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    return await call_bot_api(bot_token, "sendMessage", payload=payload)
+
+
 async def send_message(
     bot_token: str,
     chat_id: str | int,
@@ -214,14 +257,142 @@ async def send_message(
     parse_mode: str = "HTML",
     reply_markup: dict[str, Any] | None = None,
 ) -> bool:
+    result = await send_message_result(
+        bot_token, chat_id, text, parse_mode=parse_mode, reply_markup=reply_markup
+    )
+    return result is not None
+
+
+async def send_widget(
+    bot_token: str,
+    chat_id: str | int,
+    *,
+    html: str,
+    caption: str,
+    chat_data: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
+    allow_queries: bool = True,
+    reply_markup: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    """Bot API 10.4: сообщение с интерактивным HTML-виджетом (только личка в проде)."""
     payload: dict[str, Any] = {
         "chat_id": chat_id,
-        "text": text,
-        "parse_mode": parse_mode,
+        "html": html,
+        "caption": caption,
+        "parse_mode": "HTML",
+        "allow_queries": allow_queries,
     }
+    if chat_data is not None:
+        payload["chat_data"] = chat_data
+    if width is not None:
+        payload["width"] = int(width)
+    if height is not None:
+        payload["height"] = int(height)
     if reply_markup is not None:
         payload["reply_markup"] = reply_markup
-    return (await call_bot_api(bot_token, "sendMessage", payload=payload)) is not None
+    return await call_bot_api(bot_token, "sendWidget", payload=payload)
+
+
+async def edit_widget_data(
+    bot_token: str,
+    chat_id: str | int,
+    message_id: int,
+    *,
+    chat_data: str,
+) -> bool:
+    """Обновить состояние виджета; ``message is not modified`` — не ошибка."""
+    res = await call_bot_api_result(
+        bot_token,
+        "editMessageWidgetData",
+        payload={"chat_id": chat_id, "message_id": message_id, "chat_data": chat_data},
+        operation="обновить виджет",
+    )
+    if res.ok:
+        return True
+    return "not modified" in (res.error or "").lower()
+
+
+async def edit_message_caption(
+    bot_token: str,
+    chat_id: str | int,
+    message_id: int,
+    *,
+    caption: str,
+    parse_mode: str = "HTML",
+) -> bool:
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "caption": caption,
+        "parse_mode": parse_mode,
+    }
+    return (await call_bot_api(bot_token, "editMessageCaption", payload=payload)) is not None
+
+
+async def delete_message(bot_token: str, chat_id: str | int, message_id: int) -> bool:
+    payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id}
+    return (await call_bot_api(bot_token, "deleteMessage", payload=payload)) is not None
+
+
+async def send_photo(
+    bot_token: str,
+    chat_id: str | int,
+    photo: str,
+    *,
+    caption: str | None = None,
+    parse_mode: str = "HTML",
+    reply_markup: dict[str, Any] | None = None,
+) -> bool:
+    """Отправить фото по Telegram file_id (байты не скачиваются панелью)."""
+    payload: dict[str, Any] = {
+        "chat_id": chat_id,
+        "photo": photo,
+        "parse_mode": parse_mode,
+        "link_preview_options": {"is_disabled": True},
+    }
+    if caption:
+        payload["caption"] = caption
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    return (await call_bot_api(bot_token, "sendPhoto", payload=payload)) is not None
+
+
+async def get_file(bot_token: str, file_id: str) -> dict[str, Any] | None:
+    """Telegram getFile → {file_id, file_unique_id, file_size, file_path} or None."""
+    return await call_bot_api(bot_token, "getFile", payload={"file_id": file_id})
+
+
+MAX_FILE_BYTES = 5 * 1024 * 1024
+
+
+async def download_file_bytes(bot_token: str, file_path: str) -> bytes:
+    """Скачать файл из Telegram по file_path с жёстким лимитом 5 МБ."""
+    url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        async with client.stream("GET", url) as response:
+            response.raise_for_status()
+            total = 0
+            chunks: list[bytes] = []
+            async for chunk in response.aiter_bytes():
+                total += len(chunk)
+                if total > MAX_FILE_BYTES:
+                    raise ValueError("файл превышает лимит 5 МБ")
+                chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def edit_message_reply_markup(
+    bot_token: str,
+    chat_id: str | int,
+    message_id: int,
+    *,
+    reply_markup: dict[str, Any] | None = None,
+) -> bool:
+    payload: dict[str, Any] = {"chat_id": chat_id, "message_id": message_id}
+    if reply_markup is not None:
+        payload["reply_markup"] = reply_markup
+    return (await call_bot_api(bot_token, "editMessageReplyMarkup", payload=payload)) is not None
 
 
 async def edit_message_text(
@@ -251,6 +422,8 @@ async def answer_inline_query(
     *,
     cache_time: int = 0,
     is_personal: bool = True,
+    switch_pm_text: str | None = None,
+    switch_pm_parameter: str | None = None,
 ) -> bool:
     payload: dict[str, Any] = {
         "inline_query_id": inline_query_id,
@@ -258,6 +431,9 @@ async def answer_inline_query(
         "cache_time": max(0, int(cache_time)),
         "is_personal": is_personal,
     }
+    if switch_pm_text and switch_pm_parameter:
+        payload["switch_pm_text"] = switch_pm_text
+        payload["switch_pm_parameter"] = switch_pm_parameter
     return (await call_bot_api(bot_token, "answerInlineQuery", payload=payload)) is not None
 
 
@@ -273,6 +449,19 @@ async def answer_callback_query(
         payload["text"] = text
         payload["show_alert"] = show_alert
     return (await call_bot_api(bot_token, "answerCallbackQuery", payload=payload)) is not None
+
+
+async def answer_widget_query(
+    bot_token: str,
+    widget_query_id: str,
+    *,
+    data: str | None = None,
+) -> bool:
+    """Ответить на запрос виджета (обязательно в пределах 15 секунд)."""
+    payload: dict[str, Any] = {"widget_query_id": widget_query_id}
+    if data is not None:
+        payload["data"] = data[:1024]
+    return (await call_bot_api(bot_token, "answerWidgetQuery", payload=payload)) is not None
 
 
 def _ok_or_error(data: dict[str, Any], method: str, operation: str) -> tuple[bool, str]:
@@ -322,8 +511,27 @@ async def delete_webhook(bot_token: str) -> tuple[bool, str]:
     )
 
 
+async def leave_chat(bot_token: str, chat_id: str | int) -> bool:
+    return (await call_bot_api(bot_token, "leaveChat", payload={"chat_id": chat_id})) is not None
+
+
 def delete_webhook_sync(bot_token: str) -> tuple[bool, str]:
     return _post_checked_sync(bot_token, "deleteWebhook", {"drop_pending_updates": True}, "отключить бота от панели")
+
+
+def get_webhook_info_sync(bot_token: str) -> tuple[bool, dict[str, Any] | str]:
+    """Return (ok, info_dict) or (False, error_message)."""
+    from app.services.telegram_transport import bot_api_post_sync
+
+    try:
+        data = bot_api_post_sync(bot_token, "getWebhookInfo", json={})
+    except Exception as exc:
+        return False, format_telegram_connect_error(str(exc), operation="получить статус webhook")
+    ok, err = _ok_or_error(data, "getWebhookInfo", "получить статус webhook")
+    if not ok:
+        return False, err
+    result = data.get("result") if isinstance(data, dict) else None
+    return True, result if isinstance(result, dict) else {}
 
 
 def set_webhook_sync(bot_token: str, url: str, *, secret_token: str | None = None) -> tuple[bool, str]:
@@ -332,8 +540,28 @@ def set_webhook_sync(bot_token: str, url: str, *, secret_token: str | None = Non
     )
 
 
-def set_my_commands_sync(bot_token: str, commands: list[dict[str, str]]) -> tuple[bool, str]:
-    return _post_checked_sync(bot_token, "setMyCommands", {"commands": commands}, "настроить команды бота")
+async def set_my_commands(
+    bot_token: str,
+    commands: list[dict[str, str]],
+    *,
+    scope: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    payload: dict[str, Any] = {"commands": commands}
+    if scope is not None:
+        payload["scope"] = scope
+    return await _post_checked(bot_token, "setMyCommands", payload, "настроить команды бота")
+
+
+def set_my_commands_sync(
+    bot_token: str,
+    commands: list[dict[str, str]],
+    *,
+    scope: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    payload: dict[str, Any] = {"commands": commands}
+    if scope is not None:
+        payload["scope"] = scope
+    return _post_checked_sync(bot_token, "setMyCommands", payload, "настроить команды бота")
 
 
 def reset_chat_menu_button_sync(bot_token: str) -> tuple[bool, str]:

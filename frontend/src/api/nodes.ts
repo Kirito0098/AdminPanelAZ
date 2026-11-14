@@ -157,10 +157,13 @@ export async function putNodeRemoteHosts(
 }
 
 export async function allowFirstRemoteHost(nodeId: number) {
-  return apiFetch<{ added: boolean; host: string; detail?: string; warnings?: string[] }>(
-    `/nodes/${nodeId}/remote-hosts/allow-first`,
-    { method: 'POST' },
-  )
+  return apiFetch<{
+    added: boolean
+    host: string
+    detail?: string
+    warnings?: string[]
+    apply_task_id?: string | null
+  }>(`/nodes/${nodeId}/remote-hosts/allow-first`, { method: 'POST' })
 }
 
 export async function getNodeOpenVpnMultihome(nodeId: number) {

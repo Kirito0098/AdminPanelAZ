@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_admin
 from app.database import get_db
-from app.models import QrDownloadAuditLog, User, UserActionLog
+from app.models import User, UserActionLog
 from app.services.node_manager import get_active_adapter
 
 ACTION_LOG_CSV_HEADERS = ("id", "username", "action", "details", "remote_addr", "created_at")
@@ -72,26 +72,6 @@ def export_action_logs(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
-
-
-@router.get("/qr-downloads")
-def qr_audit_logs(
-    limit: int = Query(default=50, ge=1, le=200),
-    db: Session = Depends(get_db),
-    _: User = Depends(require_admin),
-):
-    rows = db.query(QrDownloadAuditLog).order_by(QrDownloadAuditLog.created_at.desc()).limit(limit).all()
-    return [
-        {
-            "id": r.id,
-            "event_type": r.event_type,
-            "actor_username": r.actor_username,
-            "remote_addr": r.remote_addr,
-            "details": r.details,
-            "created_at": r.created_at.isoformat(),
-        }
-        for r in rows
-    ]
 
 
 @router.get("/connections")

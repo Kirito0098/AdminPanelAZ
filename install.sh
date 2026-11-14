@@ -62,7 +62,7 @@ git_url="${INSTALL_FROM_GIT}"
 target="${INSTALL_TARGET}"
 mkdir -p "$(dirname "$target")"
 if [[ -d "$target/.git" ]]; then
-  git -C "$target" pull --ff-only || true
+  git -C "$target" -c core.fileMode=false pull --ff-only || true
 elif [[ -d "$target" ]]; then
   echo "[install] ОШИБКА: $target существует, но это не git-репозиторий AdminPanelAZ" >&2
   exit 1
@@ -79,7 +79,7 @@ BOOTSTRAP
   mkdir -p "$(dirname "$target")"
   if [[ -d "$target/.git" ]]; then
     echo "[install] Репозиторий уже существует, обновление (git pull)..."
-    git -C "$target" pull --ff-only || echo "[install] ВНИМАНИЕ: git pull не удался, используем существующую копию" >&2
+    git -C "$target" -c core.fileMode=false pull --ff-only || echo "[install] ВНИМАНИЕ: git pull не удался, используем существующую копию" >&2
   elif [[ -d "$target" ]]; then
     echo "[install] ОШИБКА: $target существует, но это не git-репозиторий AdminPanelAZ" >&2
     exit 1
@@ -116,7 +116,13 @@ ENV_EXAMPLE="$BACKEND_DIR/.env.example"
 NODE_ENV_FILE="$BACKEND_DIR/node_agent.env"
 NODE_ENV_EXAMPLE="$BACKEND_DIR/node_agent.env.example"
 PROXY_ENV_FILE="$BACKEND_DIR/proxy_agent.env"
+
+# shellcheck source=scripts/env-file.sh
+source "$ROOT_DIR/scripts/env-file.sh"
 PROXY_ENV_EXAMPLE="$BACKEND_DIR/proxy_agent.env.example"
+# Сборка интерфейса — одна реализация для установщика и консольного меню (panel_build_frontend).
+# shellcheck source=scripts/adminpanel-menu.sh
+source "$ROOT_DIR/scripts/adminpanel-menu.sh"
 
 WITH_DAEMON=false
 WITH_SYSTEMD=false
@@ -877,6 +883,7 @@ ensure_backend_data_dirs() {
     "$BACKEND_DIR/data" \
     "$BACKEND_DIR/data/cidr/list" \
     "$BACKEND_DIR/data/cidr/staging" \
+    "$BACKEND_DIR/data/geoip" \
     "${WIZ_BACKUP_ROOT:-/var/backups/adminpanelaz}"
 }
 
@@ -972,7 +979,7 @@ resolve_project_dir() {
     mkdir -p "$(dirname "$INSTALL_TARGET")"
     if [[ -d "$INSTALL_TARGET/.git" ]]; then
       log "Репозиторий уже существует, обновление (git pull)..."
-      git -C "$INSTALL_TARGET" pull --ff-only || warn "git pull не удался, используем существующую копию"
+      git -C "$INSTALL_TARGET" -c core.fileMode=false pull --ff-only || warn "git pull не удался, используем существующую копию"
     elif [[ -d "$INSTALL_TARGET" ]]; then
       die "Каталог $INSTALL_TARGET существует, но это не git-репозиторий AdminPanelAZ"
     else
@@ -1002,28 +1009,8 @@ ensure_executable_scripts() {
 }
 
 env_get() {
-  local key="$1"
-  if [[ ! -f "$ENV_FILE" ]]; then
-    return 1
-  fi
-  grep -E "^${key}=" "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2- || true
-}
-
-env_escape_for_sed() {
-  printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'
-}
-
-env_file_set() {
-  local file="$1"
-  local key="$2"
-  local value="$3"
-  local escaped
-  escaped="$(env_escape_for_sed "$value")"
-  if grep -qE "^${key}=" "$file" 2>/dev/null; then
-    sed -i "s|^${key}=.*|${key}=${escaped}|" "$file"
-  else
-    printf '%s=%s\n' "$key" "$value" >>"$file"
-  fi
+  [[ -f "$ENV_FILE" ]] || return 1
+  env_file_get "$ENV_FILE" "$1"
 }
 
 env_set() {
@@ -1039,9 +1026,7 @@ proxy_env_set() {
 }
 
 agent_env_value() {
-  local file="$1" key="$2"
-  [[ -f "$file" ]] || return 0
-  sed -n "s/^${key}=//p" "$file" | tail -1
+  env_file_get "$1" "$2"
 }
 
 # Сертификат агента не истёк, подписан этим CA и соответствует ключу.
@@ -1202,17 +1187,17 @@ _wiz_should_apply() {
   [[ "$WIZARD_RAN" == true || -n "${!wiz_var:-}" ]]
 }
 
-apply_wiz_resource_profile() {
-  local profile="${1:-standard}"
-  local script="$ROOT_DIR/scripts/apply-resource-profile.py"
+apply_wiz_scenario_preset() {
+  local preset="${1:-home}"
+  local script="$ROOT_DIR/scripts/apply-scenario-preset.py"
   if [[ ! -f "$script" ]]; then
     die "Не найден $script"
   fi
   if [[ ! -f "$ENV_FILE" ]]; then
-    die "Не найден $ENV_FILE для профиля ресурсов"
+    die "Не найден $ENV_FILE для сценария"
   fi
-  log "Применение resource profile: $profile (scripts/apply-resource-profile.py)"
-  PYTHONPATH="$BACKEND_DIR" "$(ap_require_python)" "$script" "$profile" --env "$ENV_FILE"
+  log "Применение scenario preset: $preset (scripts/apply-scenario-preset.py)"
+  PYTHONPATH="$BACKEND_DIR" "$(ap_require_python)" "$script" "$preset" --env "$ENV_FILE"
 }
 
 apply_wiz_env_settings() {
@@ -1299,10 +1284,10 @@ apply_wiz_env_settings() {
   if _wiz_should_apply WIZ_REDIS_URL; then
     env_set REDIS_URL "$WIZ_REDIS_URL"
   fi
-  if [[ "$WIZARD_RAN" == true && -n "${WIZ_RESOURCE_PROFILE:-}" ]] \
-    || _wiz_should_apply WIZ_RESOURCE_PROFILE; then
-    apply_wiz_resource_profile "${WIZ_RESOURCE_PROFILE:-standard}"
-    if [[ "$WIZARD_RAN" == true && "${WIZ_RESOURCE_PROFILE:-standard}" != "minimal" ]]; then
+  if [[ "$WIZARD_RAN" == true && -n "${WIZ_SCENARIO_PRESET:-}" ]] \
+    || _wiz_should_apply WIZ_SCENARIO_PRESET; then
+    apply_wiz_scenario_preset "${WIZ_SCENARIO_PRESET:-home}"
+    if [[ "$WIZARD_RAN" == true && "${WIZ_SCENARIO_PRESET:-home}" != "panel_only" ]]; then
       if [[ -n "${WIZ_TRAFFIC_SYNC_ENABLED:-}" ]]; then
         env_set TRAFFIC_SYNC_ENABLED "$WIZ_TRAFFIC_SYNC_ENABLED"
       fi
@@ -1310,6 +1295,10 @@ apply_wiz_env_settings() {
         env_set CIDR_DB_REFRESH_ENABLED "$WIZ_CIDR_DB_REFRESH_ENABLED"
       fi
     fi
+  fi
+  if [[ "$WIZARD_RAN" == true && -n "${WIZ_TELEGRAM_ENABLED:-}" ]] \
+    || _wiz_should_apply WIZ_TELEGRAM_ENABLED; then
+    env_set FEATURE_TELEGRAM_ENABLED "$WIZ_TELEGRAM_ENABLED"
   fi
   if [[ "${WIZ_NODE_AGENT_MTLS_ENABLED:-false}" == "true" ]] \
     && { [[ "$WIZARD_RAN" == true ]] || _wiz_should_apply WIZ_NODE_AGENT_MTLS_ENABLED; }; then
@@ -1406,8 +1395,8 @@ setup_env() {
   fi
 
   if [[ "$NON_INTERACTIVE" == true ]] && ! wiz_config_active; then
-    if [[ -f "$ROOT_DIR/scripts/apply-resource-profile.py" ]]; then
-      apply_wiz_resource_profile "minimal"
+    if [[ -f "$ROOT_DIR/scripts/apply-scenario-preset.py" ]]; then
+      apply_wiz_scenario_preset "panel_only"
     fi
     env_set LOCAL_ANTIZAPRET_ENABLED "false"
   fi
@@ -1553,10 +1542,6 @@ seed_wizard_db_settings() {
   if ! wiz_config_active || ! install_controller_selected; then
     return 0
   fi
-  if [[ "${WIZ_TELEGRAM_ENABLED:-false}" != true && "${WIZ_AUTO_BACKUP_ENABLED:-true}" != true ]]; then
-    return 0
-  fi
-
   log "Применение настроек мастера в БД (Telegram, auto-backup)..."
   (
     cd "$BACKEND_DIR" || exit 1
@@ -1569,6 +1554,20 @@ seed_wizard_db_settings() {
   ) || warn "Не удалось записать настройки в БД"
 }
 
+# scenario preset пишется только в .env; без AppSetting панель показывает «Кастомный», grace = 0.
+sync_scenario_db_settings() {
+  local script="$ROOT_DIR/scripts/sync-scenario-db.py"
+  if ! install_controller_selected || [[ ! -f "$script" ]]; then
+    return 0
+  fi
+  if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+    return 0
+  fi
+  log "Синхронизация сценария с БД (grace-период неактивных)..."
+  (cd "$BACKEND_DIR" && "$VENV_DIR/bin/python" "$script") \
+    || warn "Не удалось синхронизировать сценарий с БД — примените пресет из настроек"
+}
+
 setup_frontend() {
   if ! install_controller_selected; then
     log "Режим без панели (node/proxy agent): пропуск сборки frontend"
@@ -1576,16 +1575,8 @@ setup_frontend() {
   fi
 
   install_set_step "Настройка frontend (npm ci / build)"
-  ui_progress_start "Настройка frontend (npm ci)"
-  if [[ ! -d "$FRONTEND_DIR/node_modules" ]]; then
-    (cd "$FRONTEND_DIR" && npm ci)
-  else
-    print_info "node_modules уже существует, npm ci пропущен (удалите node_modules для полной переустановки)"
-  fi
-  ui_progress_done "Frontend (npm ci)"
-
-  ui_progress_start "Сборка frontend (npm run build:all)"
-  (cd "$FRONTEND_DIR" && npm run build:all)
+  ui_progress_start "Сборка frontend (npm ci / npm run build:all)"
+  panel_build_frontend reuse-deps
   ui_progress_done "Frontend собран: $FRONTEND_DIR/dist + tg_mini"
 }
 
@@ -1774,6 +1765,22 @@ setup_nginx_if_selected() {
     return 0
   fi
 
+  # Режим установщика → команда nginx-setup.sh: публикация настраивается одним скриптом.
+  local flag soft=false
+  case "$mode" in
+    http_direct) flag="--http" ;;
+    uvicorn_le) flag="--uvicorn-le" soft=true ;;
+    uvicorn_custom) flag="--uvicorn-custom" ;;
+    uvicorn_selfsigned) flag="--uvicorn-selfsigned" ;;
+    le) flag="--nginx-le" soft=true ;;
+    selfsigned) flag="--nginx-selfsigned" ;;
+    nginx_custom) flag="--nginx-custom" ;;
+    *)
+      warn "Неизвестный режим публикации: $mode — пропуск"
+      return 0
+      ;;
+  esac
+
   install_set_step "Настройка публикации HTTPS ($mode)"
   log "Настройка публикации (HTTPS): $mode"
 
@@ -1781,166 +1788,35 @@ setup_nginx_if_selected() {
   source "$ROOT_DIR/scripts/nginx-common.sh"
   nginx_common_init
 
-  local backend_port="${WIZ_BACKEND_PORT:-8000}"
-  local domain="${WIZ_NGINX_DOMAIN:-}"
-  local https_port="${WIZ_HTTPS_PUBLIC_PORT:-443}"
-  local http_port="${WIZ_HTTP_ACME_PORT:-80}"
   local enforce_https="true"
-  local path_sfx="/"
   if [[ "$WIZ_APP_ENV" != "production" ]]; then
     enforce_https="false"
   fi
 
-  ACCESS_PATH="$(nginx_normalize_access_path "${WIZ_ACCESS_PATH:-}")"
-  export ACCESS_PATH
-  export NGINX_SUBPATH_INTEGRATE="${WIZ_NGINX_SUBPATH_INTEGRATE:-false}"
-  if [[ -n "$ACCESS_PATH" ]]; then
-    path_sfx="${ACCESS_PATH}/"
+  # Firewall и перезапуск панели делает установщик, поэтому в nginx-setup.sh они отключены.
+  local rc=0
+  NGINX_FAIL_SOFT="$soft" \
+  NGINX_SKIP_FIREWALL=true \
+  SKIP_PANEL_RESTART=true \
+  ENFORCE_HTTPS="$enforce_https" \
+  ENV_FILE="$ENV_FILE" \
+  DOMAIN="${WIZ_NGINX_DOMAIN:-}" \
+  EMAIL="${WIZ_NGINX_EMAIL:-}" \
+  BACKEND_PORT="${WIZ_BACKEND_PORT:-8000}" \
+  HTTPS_PUBLIC_PORT="${WIZ_HTTPS_PUBLIC_PORT:-443}" \
+  HTTP_ACME_PORT="${WIZ_HTTP_ACME_PORT:-80}" \
+  SSL_CERT="${WIZ_SSL_CERT:-}" \
+  SSL_KEY="${WIZ_SSL_KEY:-}" \
+  ACCESS_PATH="${WIZ_ACCESS_PATH:-}" \
+  NGINX_SUBPATH_INTEGRATE="${WIZ_NGINX_SUBPATH_INTEGRATE:-false}" \
+    "$ROOT_DIR/scripts/nginx-setup.sh" --non-interactive "$flag" || rc=$?
+
+  # 3 — Let's Encrypt не выдан (NGINX_FAIL_SOFT): установка продолжается без HTTPS.
+  if [[ "$rc" -eq 3 ]]; then
+    warn "Let's Encrypt не выдан (DNS/порт 80). Продолжаем без HTTPS — позже: sudo ./scripts/nginx-setup.sh $flag"
+    return 0
   fi
-
-  _install_nginx_panel_site() {
-    local site_domain="$1"
-    local site_backend="$2"
-    local site_cert="$3"
-    local site_key="$4"
-    local site_https="$5"
-    local site_http="$6"
-    local conf
-    if nginx_finalize_nginx_site "$site_domain" "$site_backend"; then
-      nginx_apply_behind_proxy_env "$site_domain" "$site_backend" "https" "$site_https" "$site_http"
-      return 0
-    fi
-    conf="$(nginx_render_template \
-      "$NGINX_TEMPLATE_DIR/adminpanelaz.conf.template" \
-      "$site_domain" "$site_backend" "$site_cert" "$site_key" "$site_https" "$site_http")" \
-      || die "Не удалось сформировать конфигурацию nginx"
-    nginx_install_site "$conf" "$site_domain"
-    nginx_apply_behind_proxy_env "$site_domain" "$site_backend" "https" "$site_https" "$site_http"
-  }
-
-  case "$mode" in
-    http_direct)
-      ACCESS_PATH=""
-      NGINX_SUBPATH_INTEGRATE="false"
-      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
-      nginx_apply_direct_http_env "$backend_port"
-      nginx_remove_site "$(nginx_env_get DOMAIN)"
-      log "HTTP без nginx: http://<IP>:${backend_port}/ (HTTPS — в панели)"
-      ;;
-    uvicorn_le)
-      ACCESS_PATH=""
-      NGINX_SUBPATH_INTEGRATE="false"
-      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
-      [[ -n "$domain" ]] || die "Для Let's Encrypt нужен домен"
-      NGINX_FAIL_SOFT=true
-      if ! nginx_obtain_letsencrypt_cert "$domain" "${WIZ_NGINX_EMAIL:-}"; then
-        unset NGINX_FAIL_SOFT
-        warn "Let's Encrypt не выдан (DNS/порт 80). Позже: sudo ./scripts/nginx-setup.sh --uvicorn-le"
-        return 0
-      fi
-      unset NGINX_FAIL_SOFT
-      nginx_remove_site "$(nginx_env_get DOMAIN)"
-      nginx_apply_direct_https_env "$domain" "$backend_port" \
-        "/etc/letsencrypt/live/${domain}/fullchain.pem" \
-        "/etc/letsencrypt/live/${domain}/privkey.pem" "$enforce_https"
-      systemctl enable --now snap.certbot.renew.timer 2>/dev/null || \
-        systemctl enable --now certbot.timer 2>/dev/null || true
-      log "HTTPS на uvicorn + Let's Encrypt: https://${domain}:${backend_port}/"
-      ;;
-    uvicorn_custom)
-      ACCESS_PATH=""
-      NGINX_SUBPATH_INTEGRATE="false"
-      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
-      [[ -n "$domain" ]] || die "Для HTTPS нужен домен"
-      [[ -n "${WIZ_SSL_CERT:-}" && -n "${WIZ_SSL_KEY:-}" ]] || die "Укажите WIZ_SSL_CERT и WIZ_SSL_KEY"
-      [[ -f "${WIZ_SSL_CERT}" && -f "${WIZ_SSL_KEY}" ]] || die "Файлы сертификата не найдены"
-      nginx_remove_site "$(nginx_env_get DOMAIN)"
-      nginx_apply_direct_https_env "$domain" "$backend_port" "${WIZ_SSL_CERT}" "${WIZ_SSL_KEY}" "$enforce_https"
-      log "HTTPS на uvicorn + собственные сертификаты: https://${domain}:${backend_port}/"
-      ;;
-    uvicorn_selfsigned)
-      ACCESS_PATH=""
-      NGINX_SUBPATH_INTEGRATE="false"
-      export ACCESS_PATH NGINX_SUBPATH_INTEGRATE
-      domain="$(nginx_resolve_selfsigned_cn "$domain")"
-      mkdir -p /etc/ssl/private
-      if [[ ! -f "$NGINX_SELF_SIGNED_CERT" ]]; then
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-          -keyout "$NGINX_SELF_SIGNED_KEY" \
-          -out "$NGINX_SELF_SIGNED_CERT" \
-          -subj "/CN=${domain}" >/dev/null 2>&1
-      fi
-      nginx_remove_site "$(nginx_env_get DOMAIN)"
-      nginx_apply_direct_https_env "$domain" "$backend_port" \
-        "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" "$enforce_https"
-      log "HTTPS на uvicorn + самоподписанный SSL: https://${domain}:${backend_port}/"
-      ;;
-    le)
-      [[ -n "$domain" ]] || die "Для Let's Encrypt нужен домен (запустите install.sh заново или ./scripts/nginx-setup.sh)"
-      nginx_ensure_nginx || die "Не удалось установить nginx"
-      NGINX_FAIL_SOFT=true
-      if ! nginx_obtain_letsencrypt_cert "$domain" "${WIZ_NGINX_EMAIL:-}"; then
-        unset NGINX_FAIL_SOFT
-        warn "Let's Encrypt не выдан (DNS/порт 80). Продолжаем без HTTPS — позже: sudo ./scripts/nginx-setup.sh"
-        return 0
-      fi
-      unset NGINX_FAIL_SOFT
-      local cert="/etc/letsencrypt/live/${domain}/fullchain.pem"
-      local key="/etc/letsencrypt/live/${domain}/privkey.pem"
-      _install_nginx_panel_site "$domain" "$backend_port" "$cert" "$key" "$https_port" "$http_port"
-      if [[ "$WIZ_APP_ENV" == "production" ]]; then
-        nginx_env_set ENFORCE_HTTPS "true"
-      fi
-      systemctl enable --now snap.certbot.renew.timer 2>/dev/null || \
-        systemctl enable --now certbot.timer 2>/dev/null || true
-      if [[ "$https_port" == "443" ]]; then
-        log "Nginx + Let's Encrypt: https://${domain}${path_sfx}"
-      else
-        log "Nginx + Let's Encrypt: https://${domain}:${https_port}${path_sfx}"
-      fi
-      ;;
-    selfsigned)
-      domain="$(nginx_resolve_selfsigned_cn "$domain")"
-      nginx_ensure_nginx || die "Не удалось установить nginx"
-      mkdir -p /etc/ssl/private
-      if [[ ! -f "$NGINX_SELF_SIGNED_CERT" ]]; then
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-          -keyout "$NGINX_SELF_SIGNED_KEY" \
-          -out "$NGINX_SELF_SIGNED_CERT" \
-          -subj "/CN=${domain}" >/dev/null 2>&1
-      fi
-      _install_nginx_panel_site "$domain" "$backend_port" \
-        "$NGINX_SELF_SIGNED_CERT" "$NGINX_SELF_SIGNED_KEY" "$https_port" "$http_port"
-      if [[ "$WIZ_APP_ENV" == "production" ]]; then
-        nginx_env_set ENFORCE_HTTPS "true"
-      fi
-      if [[ "$https_port" == "443" ]]; then
-        log "Nginx + самоподписанный SSL: https://${domain}${path_sfx}"
-      else
-        log "Nginx + самоподписанный SSL: https://${domain}:${https_port}${path_sfx}"
-      fi
-      ;;
-    nginx_custom)
-      [[ -n "$domain" ]] || die "Для HTTPS нужен домен"
-      [[ -n "${WIZ_SSL_CERT:-}" && -n "${WIZ_SSL_KEY:-}" ]] || die "Укажите пути к сертификату и ключу"
-      [[ -f "${WIZ_SSL_CERT}" && -f "${WIZ_SSL_KEY}" ]] || die "Файлы сертификата не найдены"
-      nginx_ensure_nginx || die "Не удалось установить nginx"
-      _install_nginx_panel_site "$domain" "$backend_port" \
-        "${WIZ_SSL_CERT}" "${WIZ_SSL_KEY}" "$https_port" "$http_port"
-      if [[ "$WIZ_APP_ENV" == "production" ]]; then
-        nginx_env_set ENFORCE_HTTPS "true"
-      fi
-      if [[ "$https_port" == "443" ]]; then
-        log "Nginx + пользовательские сертификаты: https://${domain}${path_sfx}"
-      else
-        log "Nginx + пользовательские сертификаты: https://${domain}:${https_port}${path_sfx}"
-      fi
-      ;;
-    *)
-      warn "Неизвестный режим публикации: $mode — пропуск"
-      return 0
-      ;;
-  esac
+  [[ "$rc" -eq 0 ]] || die "Не удалось настроить публикацию ($mode), код $rc"
 }
 
 is_direct_public_http_mode() {
@@ -2389,6 +2265,7 @@ run_install_flow() {
   setup_backend
   seed_admin_user_from_env
   seed_wizard_db_settings
+  sync_scenario_db_settings
   setup_frontend
   setup_runtime_dirs
 

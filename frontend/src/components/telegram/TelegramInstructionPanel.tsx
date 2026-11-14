@@ -29,7 +29,7 @@ export default function TelegramInstructionPanel({
       >
         {Icon && <Icon size={16} className="mt-0.5 shrink-0 text-muted-foreground" />}
         <div className="min-w-0 flex-1 space-y-1">
-          <p className="text-sm font-medium">{title}</p>
+          <p className="text-sm font-semibold">{title}</p>
           {description && <p className="text-xs text-muted-foreground">{description}</p>}
         </div>
         <ChevronDown

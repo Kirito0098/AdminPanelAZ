@@ -26,6 +26,7 @@ from app.models import (
 )
 from app.services.shared_helpers import as_utc as _as_utc
 from app.services.shared_helpers import normalize_client_name as _normalize_client_name
+from app.services.access_policy import USER_LEVEL_BLOCK_REASONS
 from app.services.access_until import _policy_service_for_node, _reconcile_access_until, get_access_until, set_access_until
 from app.services.feature_guards import get_feature_service, module_disabled_message
 
@@ -39,18 +40,31 @@ _PROTOCOL_VPN_TYPE = {
 }
 _CODE_CHARS = string.ascii_uppercase + string.digits
 _CUSTOM_CODE_RE = re.compile(r"^[A-Z0-9-]+$")
-_REDEEM_INVALID_MESSAGE = "Неверный unlock-ключ"
-_REDEEM_REVOKED_MESSAGE = "Unlock-ключ отозван"
-_REDEEM_EXPIRED_MESSAGE = "Срок действия unlock-ключа истёк"
-_REDEEM_LIMIT_MESSAGE = "Лимит активаций unlock-ключа исчерпан"
-_REDEEM_ALREADY_USED_MESSAGE = "Этот unlock-ключ уже использован вами"
-_REDEEM_CLIENT_NOT_ALLOWED_MESSAGE = "Этот unlock-ключ не предназначен для вашего клиента"
-_REDEEM_PROTOCOL_MISMATCH_MESSAGE = "Нет пересечения протоколов клиента и unlock-ключа"
-_REDEEM_MANUAL_BLOCK_MESSAGE = (
-    "Данный пользователь заблокирован администратором вручную. Обратитесь к администратору."
+_REDEEM_INVALID_MESSAGE = (
+    "Неверный ключ. Проверьте, что скопировали его целиком: обычно он вида XXXX-XXXX-XXXX."
 )
-_REDEEM_GENERIC_ERROR_MESSAGE = "Не удалось активировать unlock-ключ"
-_REDEEM_NOTHING_TO_EXTEND_MESSAGE = "Срок ваших профилей не ограничен — продлевать нечего"
+_REDEEM_REVOKED_MESSAGE = "Ключ отозван администратором — попросите новый."
+_REDEEM_EXPIRED_MESSAGE = "Срок действия ключа истёк — попросите новый у администратора."
+_REDEEM_LIMIT_MESSAGE = "Ключ уже активировали максимальное число раз — попросите новый."
+_REDEEM_ALREADY_USED_MESSAGE = "Этот ключ вы уже активировали."
+_REDEEM_CLIENT_NOT_ALLOWED_MESSAGE = (
+    "Ключ выдан для другого конфига. Проверьте, тот ли конфиг продлеваете."
+)
+_REDEEM_PROTOCOL_MISMATCH_MESSAGE = (
+    "Ключ не подходит к протоколам вашего конфига. Напишите администратору."
+)
+_REDEEM_MANUAL_BLOCK_MESSAGE = (
+    "Аккаунт заблокирован администратором — продление ключом недоступно. "
+    "Напишите администратору."
+)
+_REDEEM_SUSPENDED_MESSAGE = (
+    "Доступ приостановлен администратором. Сначала снимите приостановку — напишите администратору."
+)
+_REDEEM_GENERIC_ERROR_MESSAGE = (
+    "Не удалось активировать ключ. Попробуйте ещё раз или напишите администратору."
+)
+_REDEEM_NOTHING_TO_EXTEND_MESSAGE = "Продлевать нечего: срок ваших конфигов не ограничен."
+_REDEEM_WRONG_USER_MESSAGE = "Этот ключ выдан другому абоненту."
 
 
 def _now() -> datetime:
@@ -144,7 +158,7 @@ def _serialize_redemption(row: UnlockCodeRedemption) -> dict:
     }
 
 
-def _serialize_code(code: UnlockCode) -> dict:
+def _serialize_code(code: UnlockCode, *, target_user_name: str | None = None) -> dict:
     redemptions = sorted(code.redemptions, key=lambda item: item.id, reverse=True)
     redemption_count = code.redemption_count
     max_redemptions = code.max_redemptions
@@ -159,6 +173,9 @@ def _serialize_code(code: UnlockCode) -> dict:
         "redemption_count": redemption_count,
         "exhausted": exhausted,
         "allowed_client_names": _parse_allowed_client_names(code.allowed_client_names),
+        "target_user_id": code.target_user_id,
+        "target_user_name": target_user_name,
+        "comment": code.comment,
         "redemptions": [_serialize_redemption(item) for item in redemptions],
         "code_expires_at": _as_utc(code.code_expires_at).isoformat() if code.code_expires_at else None,
         "created_by_user_id": code.created_by_user_id,
@@ -167,8 +184,8 @@ def _serialize_code(code: UnlockCode) -> dict:
     }
 
 
-def serialize_unlock_code(code: UnlockCode) -> dict:
-    return _serialize_code(code)
+def serialize_unlock_code(code: UnlockCode, *, target_user_name: str | None = None) -> dict:
+    return _serialize_code(code, target_user_name=target_user_name)
 
 
 def generate_code_value() -> str:
@@ -191,6 +208,8 @@ def create_unlock_code(
     creator: User | None,
     code: str | None = None,
     allowed_client_names: list[str] | None = None,
+    target_user_id: int | None = None,
+    comment: str | None = None,
 ) -> UnlockCode:
     if int(grant_days) < 1:
         raise ValueError("grant_days must be at least 1")
@@ -206,6 +225,13 @@ def create_unlock_code(
 
     normalized_protocols = _normalize_protocols(protocols)
     normalized_clients = _normalize_allowed_client_names(allowed_client_names)
+    if target_user_id is not None:
+        if db.get(User, int(target_user_id)) is None:
+            raise ValueError("Абонент не найден")
+        if normalized_clients:
+            raise ValueError("Нельзя совмещать привязку к абоненту и список клиентов")
+        if normalized_mode != "single" or int(max_redemptions) != 1:
+            raise ValueError("Ключ для абонента создаётся в режиме single")
     code_value = _validate_custom_code(code) if code is not None and _normalize_code(code) else ""
     if not code_value:
         for _ in range(32):
@@ -226,8 +252,10 @@ def create_unlock_code(
         max_redemptions=int(max_redemptions),
         redemption_count=0,
         allowed_client_names=json.dumps(normalized_clients, ensure_ascii=False),
+        target_user_id=int(target_user_id) if target_user_id is not None else None,
         code_expires_at=_to_db_datetime(code_expires_at),
         created_by_user_id=creator.id if creator is not None else None,
+        comment=(comment or "").strip() or None,
     )
     db.add(row)
     db.commit()
@@ -244,14 +272,52 @@ def revoke_unlock_code(db: Session, code_id: int) -> None:
         db.commit()
 
 
-def list_unlock_codes(db: Session, *, include_revoked: bool = False) -> list[dict]:
+def revoke_user_bound_unlock_codes(db: Session, user_id: int, *, commit: bool = False) -> int:
+    """Отозвать невыкупленные ключи абонента (вызывается при удалении абонента)."""
+    rows = (
+        db.query(UnlockCode)
+        .filter(
+            UnlockCode.target_user_id == user_id,
+            UnlockCode.revoked_at.is_(None),
+            UnlockCode.redemption_count == 0,
+        )
+        .all()
+    )
+    now_db = _to_db_datetime(_now())
+    for row in rows:
+        row.revoked_at = now_db
+        db.add(row)
+    if commit:
+        db.commit()
+    return len(rows)
+
+
+def list_unlock_codes(
+    db: Session, *, include_revoked: bool = False, comment_query: str | None = None
+) -> list[dict]:
     query = db.query(UnlockCode).options(
         joinedload(UnlockCode.redemptions).joinedload(UnlockCodeRedemption.node)
     )
     if not include_revoked:
         query = query.filter(UnlockCode.revoked_at.is_(None))
+    if comment_query:
+        needle = comment_query.strip().casefold()
+        if needle:
+            # SQLite ILIKE is ASCII-only; casefold the needle in Python and match
+            # against lower(column) so Latin is case-insensitive; Cyrillic comments
+            # are typically stored lowercase and match the casefolded needle.
+            query = query.filter(func.lower(UnlockCode.comment).like(f"%{needle}%"))
     rows = query.order_by(UnlockCode.created_at.desc(), UnlockCode.id.desc()).all()
-    return [_serialize_code(row) for row in rows]
+    target_ids = {row.target_user_id for row in rows if row.target_user_id is not None}
+    target_names: dict[int, str] = {}
+    if target_ids:
+        target_names = dict(
+            db.query(User.id, User.username).filter(User.id.in_(target_ids)).all()
+        )
+    return [
+        _serialize_code(row, target_user_name=target_names.get(row.target_user_id))
+        for row in rows
+    ]
 
 
 def _policy_rows_for_client(db: Session, node_id: int, client_name: str) -> dict[str, object | None]:
@@ -317,6 +383,23 @@ def _client_config_name_and_protocols(db: Session, node_id: int, client_name: st
         for (_name, vpn_type) in rows
     }
     return canonical_name, protocols
+
+
+def _owner_user_id_for_client(db: Session, node_id: int, client_name: str) -> int | None:
+    """Владелец клиента на узле: нужен, чтобы проверить абонентский ключ в портале клиента."""
+    client_key = _normalize_client_name(client_name)
+    row = (
+        db.query(VpnConfig.owner_id)
+        .filter(
+            VpnConfig.node_id == node_id,
+            func.lower(VpnConfig.client_name) == client_key,
+            VpnConfig.ha_primary_config_id.is_(None),
+        )
+        .first()
+    )
+    if row is None or row[0] is None:
+        return None
+    return int(row[0])
 
 
 def _vpn_config_client_name_for_protocol(
@@ -406,14 +489,38 @@ def _clear_policy_block(row, *, actor: str) -> None:
 def _is_manual_admin_block(row) -> bool:
     if row is None:
         return False
-    if row.is_permanent_blocked:
-        return True
     reason = (row.block_reason or "").strip().lower()
-    if reason in ("manual_permanent", "manual_temp"):
+    if reason in {"manual_permanent", "manual_temp", "user_suspended"}:
         return True
+    if reason in USER_LEVEL_BLOCK_REASONS:
+        # user_traffic_limit — не админский бан: owner продлевает через unlock-код,
+        # хук продления (on_user_access_extended) снимает блок и сбрасывает счётчик.
+        # user_suspended обработан выше — такая активация запрещена.
+        return reason == "user_suspended"
+    if row.is_permanent_blocked:
+        # user_traffic_limit и per-config traffic_limit — это не админский бан:
+        # owner-код может продлить через них, а хук продления снимет user_traffic_limit.
+        # access_expired и прочие permanent остаются «ручными» — отказ без изменений.
+        return reason not in {"user_traffic_limit", "traffic_limit"}
     if row.is_temp_blocked and reason.startswith("manual"):
         return True
     return False
+
+
+def _redeem_block_message(rows) -> str | None:
+    """Сообщение об отказе по блокировке (None — активация разрешена).
+
+    Приостановка администратором (``user_suspended``) отличается от прочих
+    ручных блокировок — для неё свой текст.
+    """
+    rows = [row for row in rows if row is not None]
+    for row in rows:
+        if (row.block_reason or "").strip().lower() == "user_suspended":
+            return _REDEEM_SUSPENDED_MESSAGE
+    for row in rows:
+        if _is_manual_admin_block(row):
+            return _REDEEM_MANUAL_BLOCK_MESSAGE
+    return None
 
 
 def _require_unlock_codes_enabled() -> None:
@@ -441,6 +548,25 @@ def _is_duplicate_redemption_error(exc: IntegrityError) -> bool:
             and "unique" in message
         )
     )
+
+
+def _notify_unlock_redeemed(
+    db: Session, *, user_id: int | None, client_name: str, code: str, grant_days: int
+) -> None:
+    """Белл + Telegram: абонент активировал ключ продления. Продление не роняет."""
+    try:
+        from app.services.admin_notify import admin_notify_service
+
+        user = db.get(User, user_id) if user_id is not None else None
+        admin_notify_service.send(
+            db,
+            "unlock_redeem",
+            actor_username=user.username if user is not None else client_name,
+            target_name=code,
+            target_type=f"{grant_days} дн.",
+        )
+    except Exception:  # noqa: BLE001 — уведомление не должно ломать выдачу доступа
+        logger.warning("unlock redeem notify failed", exc_info=True)
 
 
 def redeem_unlock_code(
@@ -483,7 +609,16 @@ def redeem_unlock_code(
             raise ValueError(_REDEEM_EXPIRED_MESSAGE)
 
         allowed_clients = _parse_allowed_client_names(row.allowed_client_names)
-        if allowed_clients and client_key not in allowed_clients:
+        if row.target_user_id is not None:
+            # Ключ выдан конкретному абоненту: активировать может только он.
+            redeemer_id = (
+                user_id if user_id is not None else _owner_user_id_for_client(db, node_id, client_key)
+            )
+            if redeemer_id != row.target_user_id:
+                raise ValueError(_REDEEM_WRONG_USER_MESSAGE)
+            user_id = row.target_user_id
+            allowed_clients = []
+        elif allowed_clients and client_key not in allowed_clients:
             raise ValueError(_REDEEM_CLIENT_NOT_ALLOWED_MESSAGE)
 
         canonical_client_name, client_protocols = _client_config_name_and_protocols(db, node_id, client_key)
@@ -506,7 +641,7 @@ def redeem_unlock_code(
         code_protocols = _parse_code_protocols(row.protocols)
         # Client-bound codes extend the whole profile (all protocols the client has on this node).
         # Unrestricted codes still apply only the protocols stored on the code.
-        if allowed_clients:
+        if allowed_clients or row.target_user_id is not None:
             protocols_applied = [protocol for protocol in ("openvpn", "wireguard", "amneziawg2") if protocol in client_protocols]
         else:
             protocols_applied = [protocol for protocol in code_protocols if protocol in client_protocols]
@@ -518,8 +653,11 @@ def redeem_unlock_code(
             "wireguard": _policy_rows_for_client(db, node_id, canonical_client_name.lower())["wireguard"],
             "amneziawg2": _policy_rows_for_client(db, node_id, canonical_client_name.lower())["amneziawg2"],
         }
-        if any(_is_manual_admin_block(policy_rows.get(protocol)) for protocol in protocols_applied):
-            raise ValueError(_REDEEM_MANUAL_BLOCK_MESSAGE)
+        block_message = _redeem_block_message(
+            policy_rows.get(protocol) for protocol in protocols_applied
+        )
+        if block_message is not None:
+            raise ValueError(block_message)
 
         # Atomic slot reservation — works on SQLite (page write lock) and Postgres.
         reserved = db.execute(
@@ -546,15 +684,17 @@ def redeem_unlock_code(
         grant_days = row.grant_days
         grant_until_base = now
         granted_until_by_protocol = {}
+        previous_access_until: datetime | None = None
         if owner_user is not None:
             from app.services import user_subscription as user_subscription
 
+            previous_access_until = user_subscription.get_user_access_until(owner_user)
             user_access_until, user_changes = user_subscription.extend_owned_clients_for_redeem(
                 db,
                 owner_user,
                 now=grant_until_base,
                 days=grant_days,
-                protocols=set(_ALLOWED_PROTOCOLS) if allowed_clients else set(code_protocols),
+                protocols=set(_ALLOWED_PROTOCOLS) if (allowed_clients or row.target_user_id is not None) else set(code_protocols),
                 actor="unlock_codes",
                 client_names=set(allowed_clients) if allowed_clients else None,
             )
@@ -623,6 +763,25 @@ def redeem_unlock_code(
     if owner_user is not None and user_subscription is not None:
         user_subscription.reconcile_owned_clients_access_until(db, owner_user)
         user_subscription.replicate_access_until_changes(db, user_changes, actor="unlock_codes")
+        # Task 7: owner redeem is an extension — reset traffic counter, lift
+        # user_traffic_limit, auto-apply creations, notify owner.
+        from app.services.user_access_extend import on_user_access_extended
+
+        owned = (
+            db.query(VpnConfig)
+            .filter(
+                VpnConfig.owner_id == owner_user.id,
+                VpnConfig.ha_primary_config_id.is_(None),
+            )
+            .all()
+        )
+        on_user_access_extended(
+            db,
+            owner_user,
+            actor="unlock_codes",
+            previous_access_until=previous_access_until,
+            configs_were_kept=len(owned) > 0,
+        )
 
     if owner_user is None:
         for protocol in protocols_applied:
@@ -641,3 +800,31 @@ def redeem_unlock_code(
         "protocols_applied": protocols_applied,
         "access_until_by_protocol": access_until_by_protocol,
     }
+
+
+def redeem_unlock_code_for_user(db: Session, *, code: str, user: User) -> dict:
+    """Owner-scope redeem: anchor on first owned primary config (lowest node_id, name)."""
+    configs = (
+        db.query(VpnConfig)
+        .filter(VpnConfig.owner_id == user.id, VpnConfig.ha_primary_config_id.is_(None))
+        .order_by(VpnConfig.node_id.asc(), VpnConfig.client_name.asc(), VpnConfig.id.asc())
+        .all()
+    )
+    if not configs:
+        raise ValueError("Нет конфигураций для продления — обратитесь к администратору")
+    anchor = configs[0]
+    result = redeem_unlock_code(
+        db,
+        code=code,
+        client_name=anchor.client_name,
+        node_id=anchor.node_id,
+        user_id=user.id,
+    )
+    _notify_unlock_redeemed(
+        db,
+        user_id=user.id,
+        client_name=anchor.client_name,
+        code=code,
+        grant_days=int(result.get("grant_days") or 0),
+    )
+    return result

@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
+
+# OPENVPN_HOST / WIREGUARD_HOST: hostname, FQDN, IPv4 or bracketed IPv6 — no scheme, port or path.
+AZ_VPN_HOST_PATTERN = (
+    r"(?:"
+    r"(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"|\[[0-9A-Fa-f:.]+\]"
+    r")"
+)
 
 ANTIZAPRET_PARAMS = [
     {
@@ -21,7 +31,7 @@ ANTIZAPRET_PARAMS = [
         "default": "n",
         "html_id": "discord-toggle",
         "title": "Discord",
-        "description": "Перенаправляет трафик Discord через antizapret, включая голосовые каналы и обмен сообщениями",
+        "description": "Список голосовых IP Discord устарел: в установщике AntiZapret-VPN с 30.04.2026 этот вопрос отключён. Тумблер по-прежнему скачивает download/discord-ips.txt, но полагаться на него не стоит",
     },
     {
         "key": "cloudflare_include",
@@ -78,6 +88,60 @@ ANTIZAPRET_PARAMS = [
         "description": "Перенаправляет трафик Roblox через Antizapret, включая игровой контент, платежи и социальные функции.",
     },
     {
+        "key": "amazon_include",
+        "env": "AMAZON_INCLUDE",
+        "type": "flag",
+        "default": "n",
+        "html_id": "amazon-toggle",
+        "title": "Amazon",
+        "description": "Список IP Amazon (download/amazon-ips.txt). В установщике AntiZapret-VPN вопрос отключён: список не обновляется с 2025 года — включайте, только если поддерживаете файл сами. Нужно «Применить (doall.sh)»",
+    },
+    {
+        "key": "hetzner_include",
+        "env": "HETZNER_INCLUDE",
+        "type": "flag",
+        "default": "n",
+        "html_id": "hetzner-toggle",
+        "title": "Hetzner",
+        "description": "Список IP Hetzner (download/hetzner-ips.txt). В установщике AntiZapret-VPN вопрос отключён: список не обновляется с 2025 года. Нужно «Применить (doall.sh)»",
+    },
+    {
+        "key": "digitalocean_include",
+        "env": "DIGITALOCEAN_INCLUDE",
+        "type": "flag",
+        "default": "n",
+        "html_id": "digitalocean-toggle",
+        "title": "DigitalOcean",
+        "description": "Список IP DigitalOcean (download/digitalocean-ips.txt). В установщике AntiZapret-VPN вопрос отключён: список не обновляется с 2025 года. Нужно «Применить (doall.sh)»",
+    },
+    {
+        "key": "ovh_include",
+        "env": "OVH_INCLUDE",
+        "type": "flag",
+        "default": "n",
+        "html_id": "ovh-toggle",
+        "title": "OVH",
+        "description": "Список IP OVH (download/ovh-ips.txt). В установщике AntiZapret-VPN вопрос отключён: список не обновляется с 2025 года. Нужно «Применить (doall.sh)»",
+    },
+    {
+        "key": "google_include",
+        "env": "GOOGLE_INCLUDE",
+        "type": "flag",
+        "default": "n",
+        "html_id": "google-toggle",
+        "title": "Google",
+        "description": "Список IP Google (download/google-ips.txt). В установщике AntiZapret-VPN вопрос отключён: список не обновляется с февраля 2026 года. Нужно «Применить (doall.sh)»",
+    },
+    {
+        "key": "akamai_include",
+        "env": "AKAMAI_INCLUDE",
+        "type": "flag",
+        "default": "n",
+        "html_id": "akamai-toggle",
+        "title": "Akamai",
+        "description": "Список IP Akamai (download/akamai-ips.txt). В установщике AntiZapret-VPN вопрос отключён: список не обновляется с 2025 года. Нужно «Применить (doall.sh)»",
+    },
+    {
         "key": "OPENVPN_BACKUP_TCP",
         "env": "OPENVPN_BACKUP_TCP",
         "type": "flag",
@@ -102,8 +166,8 @@ ANTIZAPRET_PARAMS = [
         "type": "flag",
         "default": "n",
         "html_id": "WIREGUARD_540_580-toggle",
-        "title": "WireGuard/AmneziaWG",
-        "description": "Включает резервные порты WireGuard/AmneziaWG (540,580) для обхода блокировок провайдеров, если стандартный порт заблокирован.",
+        "title": "WG/AWG 1.5",
+        "description": "Включает резервные порты WG/AWG 1.5 (540,580) для обхода блокировок провайдеров, если стандартный порт заблокирован.",
     },
     {
         "key": "ANTIZAPRET_WARP",
@@ -129,11 +193,13 @@ ANTIZAPRET_PARAMS = [
         "default": "1",
         "html_id": "VPN_WARP-select",
         "title": "Cloudflare WARP for VPN outbound",
-        "description": "Исходящий трафик полного VPN (vpn-*) через встроенный Cloudflare WARP AntiZapret",
+        "description": "Исходящий трафик полного VPN (vpn-*) через встроенный Cloudflare WARP AntiZapret. Режим Custom — только домены из config/include-warp-hosts.txt (минус exclude-warp-hosts.txt); нужен AntiZapret-VPN с 26.10.2026",
         "options": [
             {"value": "1", "label": "None — не использовать"},
             {"value": "2", "label": "All — весь трафик (домены и IP)"},
+            {"value": "3", "label": "Custom — только домены списка WARP"},
         ],
+        # Старый AntiZapret-VPN: y/n. Режим 3 в y/n не выражается — панель откажет с просьбой обновить AntiZapret.
         "legacy_flag": {"y": "2", "n": "1"},
     },
     {
@@ -146,17 +212,52 @@ ANTIZAPRET_PARAMS = [
         "description": "Блокировать трафик AntiZapret VPN и полного VPN, если встроенный WARP не подключился (иначе — выход напрямую)",
     },
     {
+        "key": "warp_endpoint",
+        "env": "WARP_ENDPOINT",
+        "type": "string",
+        "default": "",
+        "html_id": "warp_endpoint-input",
+        "title": "Custom Cloudflare WARP endpoint",
+        "description": "host:port, по умолчанию 162.159.192.1:500. Пусто — endpoint из API Cloudflare. Действует, пока ключи WARP не заданы вручную: AntiZapret генерирует их сам при старте. Применяется сразу — служба antizapret перезапускается",
+        "placeholder": "162.159.192.1:500",
+        "pattern": r"[^:\s]+:\d{1,5}",
+        "pattern_hint": "ожидается host:port, например 162.159.192.1:500",
+        "verify_write": True,
+    },
+    {
         "key": "WARP_MTU",
         "env": "WARP_MTU",
         "type": "number",
         "default": "",
         # AntiZapret up.sh uses ${WARP_MTU:-1280}: an empty value means 1280.
         "placeholder": "1280",
-        "min": 576,
-        "max": 1500,
+        "min": 1280,
+        "max": 1420,
         "html_id": "WARP_MTU-input",
         "title": "MTU WARP",
-        "description": "MTU интерфейсов встроенного WARP. Пусто — 1280. Уменьшайте, если через WARP не открываются часть сайтов или обрываются загрузки",
+        "description": "MTU интерфейсов встроенного WARP, 1280–1420. Пусто — 1280. Уменьшайте, если через WARP не открываются часть сайтов или обрываются загрузки",
+    },
+    {
+        "key": "DNS_WARP",
+        "env": "DNS_WARP",
+        "type": "flag",
+        "default": "n",
+        # AntiZapret до 26.10.2026 хранил этот флаг как 1/2 — такие значения панель не перезаписывает.
+        "legacy_numeric_flag": {"1": "n", "2": "y"},
+        # Числовые ANTIZAPRET_WARP / VPN_WARP есть только в новом setup: иначе y/n никто не прочитает.
+        "numeric_markers": ("ANTIZAPRET_WARP", "VPN_WARP"),
+        "html_id": "DNS_WARP-toggle",
+        "title": "DNS через Cloudflare WARP",
+        "description": "Весь исходящий DNS уходит через встроенный WARP — включите, если выбранные DNS-серверы заблокированы или недоступны с этого сервера. Нужен AntiZapret-VPN с 26.10.2026: на старом setup (DNS_WARP=1|2) панель значение не меняет",
+    },
+    {
+        "key": "reconnect_warp",
+        "env": "RECONNECT_WARP",
+        "type": "flag",
+        "default": "n",
+        "html_id": "reconnect_warp-toggle",
+        "title": "Переподключать WARP",
+        "description": "При обновлении списков AntiZapret (doall.sh) и каждую ночь переподключает встроенный WARP, если сервер работает больше минуты — помогает, когда WARP «отвалился» и домены идут напрямую. Нужно «Применить (doall.sh)»",
     },
     {
         "key": "ssh_protection",
@@ -186,6 +287,15 @@ ANTIZAPRET_PARAMS = [
         "description": "Скрывает сервер от простого сканирования: отключает ответ на ping и на запросы к закрытым портам.",
     },
     {
+        "key": "flood_protection",
+        "env": "FLOOD_PROTECTION",
+        "type": "flag",
+        "default": "n",
+        "html_id": "flood_protection-toggle",
+        "title": "Защита от флуда",
+        "description": "Ограничивает с одного клиентского адреса поток новых соединений (100/сек, всплеск до 1000), общее число соединений (1000) и подключения к локальному DNS. Не жёстко, но вредонос в сети утихомирит. Применяется сразу — служба antizapret перезапускается",
+    },
+    {
         "key": "torrent_guard",
         "env": "TORRENT_GUARD",
         "type": "flag",
@@ -202,7 +312,34 @@ ANTIZAPRET_PARAMS = [
         "default": "n",
         "html_id": "restrict_forward-toggle",
         "title": "Ограничение форвардинга",
-        "description": "Включить ограничение форвардинга — через AntiZapret VPN будет маршрутизироваться только трафик к IP-адресам, которые явно указаны в файлах config/forward-ips.txt и result/route-ips.txt",
+        "description": "Трафик клиентов AntiZapret VPN только к адресам из config/forward-ips.txt и result/route-ips.txt: остальное блокируется. Сами списки AntiZapret применяет всегда — флаг включает запрет на остальные адреса",
+    },
+    {
+        "key": "client_isolation",
+        "env": "CLIENT_ISOLATION",
+        "type": "flag",
+        "default": "y",
+        "html_id": "client_isolation-toggle",
+        "title": "Изоляция клиентов и сервера",
+        "description": "Блокирует входящие соединения с клиентских адресов на сервер и к другим клиентам, кроме DNS (порт 53). С 31.10.2026 AntiZapret больше не блокирует форвардинг между клиентами",
+    },
+    {
+        "key": "alternative_client_ip",
+        "env": "ALTERNATIVE_CLIENT_IP",
+        "type": "flag",
+        "default": "y",
+        "html_id": "alternative_client_ip-toggle",
+        "title": "Подсети клиентов 172.x",
+        "description": "Включено — клиенты получают 172.29.8.x / 172.28.8.x, DNS 172.29.8.1 (как в текущих профилях). Выключено — 10.29.8.x / 10.28.8.x: меняются адреса у всех клиентов, старые профили перестают работать. Панель перепишет kresd.conf и профили нужно пересобрать",
+    },
+    {
+        "key": "alternative_fake_ip",
+        "env": "ALTERNATIVE_FAKE_IP",
+        "type": "flag",
+        "default": "y",
+        "html_id": "alternative_fake_ip-toggle",
+        "title": "Fake-IP 198.18",
+        "description": "Включено — fake-IP пул 198.18.0.0/15. Выключено — 10.30.0.0/15: панель дополнительно правит --fake-cidr в proxy.py, иначе resolver продолжит выдавать 198.18. После смены клиентам нужно переподключиться",
     },
     {
         "key": "clear_hosts",
@@ -213,11 +350,70 @@ ANTIZAPRET_PARAMS = [
         "title": "Очистка хостов: казино, VPN и прокси",
         "description": "При авто-обновлении списков удаляет домены казино и букмекеров, а также все домены со словами vpn и proxy — в том числе из вашего include-hosts.txt. Сокращает список и нагрузку.",
     },
-    {"key": "openvpn_host", "env": "OPENVPN_HOST", "type": "string", "default": "", "html_id": "openvpn-host-input"},
-    {"key": "wireguard_host", "env": "WIREGUARD_HOST", "type": "string", "default": "", "html_id": "wireguard-host-input"},
+    {
+        "key": "clear_dns_cache",
+        "env": "CLEAR_DNS_CACHE",
+        "type": "flag",
+        "default": "n",
+        "html_id": "clear-dns-cache-toggle",
+        "title": "Очистка DNS-кеша",
+        "description": "После обновления списков (doall.sh) и каждую ночь очищать кеш Knot Resolver. Помогает, когда домен уже переехал на новый IP, а клиенты видят старый. Нужно «Применить (doall.sh)»; на AntiZapret-VPN до 09.11.2026 опция не читается",
+        "verify_write": True,
+    },
+    {
+        "key": "openvpn_host",
+        "env": "OPENVPN_HOST",
+        "type": "string",
+        "default": "",
+        "html_id": "openvpn-host-input",
+        "pattern": AZ_VPN_HOST_PATTERN,
+        "pattern_hint": "ожидается домен или IP-адрес без схемы, порта и пути",
+    },
+    {
+        "key": "wireguard_host",
+        "env": "WIREGUARD_HOST",
+        "type": "string",
+        "default": "",
+        "html_id": "wireguard-host-input",
+        "pattern": AZ_VPN_HOST_PATTERN,
+        "pattern_hint": "ожидается домен или IP-адрес без схемы, порта и пути",
+    },
+    # Только для записи в setup из карточки OpenVPN: своих переключателей в разделе «Конфиг» у них нет.
+    {"key": "OPENVPN_DUPLICATE", "env": "OPENVPN_DUPLICATE", "type": "flag", "default": "y", "html_id": "openvpn-duplicate-env", "hidden": True},
+    {"key": "OPENVPN_LOG", "env": "OPENVPN_LOG", "type": "flag", "default": "n", "html_id": "openvpn-log-env", "hidden": True},
 ]
 
 KNOWN_SETTING_KEYS = frozenset(p["key"] for p in ANTIZAPRET_PARAMS)
+
+# up.sh читает эти ключи при старте службы antizapret: запись в setup без
+# `systemctl restart antizapret` не меняет ни iptables, ни WARP-интерфейсы.
+RUNTIME_RESTART_KEYS: frozenset[str] = frozenset(
+    {
+        "ssh_protection",
+        "attack_protection",
+        "scan_protection",
+        "flood_protection",
+        "torrent_guard",
+        "restrict_forward",
+        "client_isolation",
+        "alternative_client_ip",
+        "alternative_fake_ip",
+        "ANTIZAPRET_WARP",
+        "VPN_WARP",
+        "WARP_PROTECTION",
+        "WARP_MTU",
+        "warp_endpoint",
+        "DNS_WARP",
+        "OPENVPN_BACKUP_TCP",
+        "OPENVPN_BACKUP_UDP",
+        "WIREGUARD_BACKUP",
+    }
+)
+
+
+def needs_antizapret_restart(updates: Mapping[str, Any]) -> bool:
+    """Whether the saved setup keys only take effect after restarting the antizapret unit."""
+    return bool(RUNTIME_RESTART_KEYS.intersection(updates))
 
 # Setup keys excluded from HA auto-replication (node-local only).
 # ANTIZAPRET_WARP / VPN_WARP are built-in AntiZapret Cloudflare WARP flags (not AZ-WARP /

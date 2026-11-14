@@ -1,4 +1,4 @@
-import type { PanelResourceCurrent, PanelResourceHistoryPoint, ResourceProfileItem } from '@/types'
+import type { PanelResourceCurrent, PanelResourceHistoryPoint, ScenarioPresetItem } from '@/types'
 
 export interface PanelResourceSummary {
   hasData: boolean
@@ -24,7 +24,13 @@ interface ProfileLiveCopy {
   note: string
 }
 
-const PROFILE_ORDER = ['minimal', 'standard', 'full'] as const
+const PRESET_ORDER = ['panel_only', 'home', 'commercial'] as const
+
+const PRESET_LABELS: Record<(typeof PRESET_ORDER)[number], string> = {
+  panel_only: 'Только панель',
+  home: 'Домашнее',
+  commercial: 'Коммерческое',
+}
 
 function mbToGb(mb: number): number {
   return Math.round((mb / 1024) * 10) / 10
@@ -129,42 +135,42 @@ export function formatMeasuredSubtitle(summary: PanelResourceSummary): string | 
 }
 
 export function formatComparedProfileHint(
-  profile: Pick<ResourceProfileItem, 'key' | 'label' | 'panel_mb_delta'>,
+  preset: Pick<ScenarioPresetItem, 'key' | 'label' | 'panel_mb_delta'>,
   summary: PanelResourceSummary | null,
-  currentProfileKey: string,
+  currentPresetKey: string,
 ): string | null {
-  if (profile.key === currentProfileKey) return null
+  if (preset.key === currentPresetKey) return null
   if (!summary?.stackMbNow || !summary.panelMbNow) {
-    return profile.key === 'minimal'
+    return preset.key === 'panel_only'
       ? 'меньше фоновых задач AdminPanelAZ'
-      : profile.key === 'standard'
+      : preset.key === 'home'
         ? 'без CIDR scheduler'
         : null
   }
 
-  const delta = profile.panel_mb_delta ?? 0
+  const delta = preset.panel_mb_delta ?? 0
   const projectedStack = Math.max(0, summary.panelMbNow + delta) + (summary.nodeMbNow ?? 0)
-  const currentLabel = PROFILE_ORDER.includes(currentProfileKey as (typeof PROFILE_ORDER)[number])
-    ? currentProfileKey
+  const currentLabel = PRESET_ORDER.includes(currentPresetKey as (typeof PRESET_ORDER)[number])
+    ? PRESET_LABELS[currentPresetKey as (typeof PRESET_ORDER)[number]]
     : 'текущий'
 
   if (delta < 0) {
     return `сейчас ${currentLabel}: ~${summary.stackMbNow} MB · здесь обычно ~${projectedStack} MB`
   }
-  if (profile.key === 'full') {
-    return `сейчас ${currentLabel}: ~${summary.stackMbNow} MB · Full — все collectors`
+  if (preset.key === 'commercial') {
+    return `сейчас ${currentLabel}: ~${summary.stackMbNow} MB · Коммерческое — все collectors`
   }
   return null
 }
 
 export function buildProfileLiveCopy(
-  profile: Pick<ResourceProfileItem, 'description' | 'impact'>,
+  preset: Pick<ScenarioPresetItem, 'description' | 'impact'>,
   summary: PanelResourceSummary,
 ): ProfileLiveCopy {
   const stackLine = formatMeasuredSubtitle(summary) ?? 'замер недоступен'
   const subtitle = stackLine
 
-  const descBase = stripPresetRamLine(profile.description)
+  const descBase = stripPresetRamLine(preset.description)
   const description = `${descBase}. ${stackLine}.`
 
   const avgPart =
@@ -175,7 +181,7 @@ export function buildProfileLiveCopy(
   const disk = summary.hostDiskNow != null ? `${Math.round(summary.hostDiskNow)}%` : '—'
   const cpuDisk = `CPU хоста ${cpu}, диск занято ${disk}`
 
-  let note = profile.impact?.note ?? ''
+  let note = preset.impact?.note ?? ''
   if (summary.stackMbNow != null) {
     note = 'Стек: AdminPanelAZ + локальная нода и её VPN-сервисы (OpenVPN, ANTIZAPRET_PATH). Сторонние проекты на VDS не учитываются.'
   }

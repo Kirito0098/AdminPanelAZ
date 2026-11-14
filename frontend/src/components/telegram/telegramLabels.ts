@@ -4,11 +4,6 @@ export const TELEGRAM_TAB_META: Record<
   TelegramSection,
   { label: string; shortLabel: string; description: string }
 > = {
-  setup: {
-    label: 'С чего начать',
-    shortLabel: 'Старт',
-    description: 'Пошаговая инструкция: создайте бота, настройте вход и проверьте авторизацию',
-  },
   bot: {
     label: 'Бот и авторизация',
     shortLabel: 'Бот',
@@ -22,7 +17,7 @@ export const TELEGRAM_TAB_META: Record<
   interactive: {
     label: 'Команды бота',
     shortLabel: 'Команды',
-    description: 'Webhook, команды /start и /status, привязка аккаунта через /link',
+    description: 'Webhook, команды /start и /status, заявки на доступ из Telegram',
   },
   relay: {
     label: 'Связь через узел',
@@ -32,6 +27,6 @@ export const TELEGRAM_TAB_META: Record<
   notify: {
     label: 'Уведомления',
     shortLabel: 'Увед.',
-    description: 'Получатели, переключатели, типы событий и NOC-сводки',
+    description: 'Telegram: получатели, типы событий и NOC-сводки',
   },
 }

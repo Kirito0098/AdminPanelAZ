@@ -46,6 +46,9 @@ backend/app/data/
 *.tar
 .tmp_*
 
+# --- Локальные планы агента (не часть продукта) ---
+/plans/
+
 # --- Python ---
 backend/.venv/
 **/__pycache__/
@@ -82,11 +85,40 @@ pnpm-debug.log*
 # --- IDE / OS ---
 .idea/
 .vscode/
-.cursor/
 *.swp
 *~
 .DS_Store
 Thumbs.db
+
+# --- Cline: .clineignore — локальная настройка автозагрузки контекста (не коммитить) ---
+.clineignore
+
+# --- Cursor: curated pack in git; local secrets/settings out ---
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+!.cursor/skills/
+!.cursor/skills/**
+.cursor/skills/**/__pycache__/
+!.cursor/mcp.json.example
+# Личная синхронизация с Gitea — только на сервере, в репозиторий не попадает
+.cursor/rules/gitea-agent-sync.mdc
+
+# --- Zoo Code: локальный MCP-конфиг (пути, токены, настройки машины) ---
+.roo/mcp.json
+.roo/mcp_settings.json
+
+# --- Agents: AGENTS.md + relative skill links; local MCP/bin out ---
+.agents/*
+!.agents/AGENTS.md
+!.agents/skills/
+!.agents/skills/**
+!.agents/skills-*/
+!.agents/skills-*/**
+!.agents/skills-lock.json
+!.agents/mcp_config.json.example
+.agents/bin/
+.agents/**/__pycache__/
 
 # --- Local screenshot tooling (credentials / panel URL — not for repo) ---
 scripts/capture-readme-screenshots.mjs
@@ -101,8 +133,7 @@ docs/superpowers/
 # --- OpenCode agent workspace (local config, memory, plans; not for repo) ---
 .opencode/
 
-# --- Agent skills installed via `npx skills` (local; not for repo) ---
-.agents/
+# Root-level skills lock from global `npx skills` (project lock is .agents/skills-lock.json)
 /skills-lock.json
 
 # --- Local implementation plans (owner-only; not for public repo) ---

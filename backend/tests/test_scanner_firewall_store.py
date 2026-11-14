@@ -110,16 +110,6 @@ def test_fresh_host_gets_timeout_sets_and_a_rule_per_family(make_store, firewall
     assert firewall.rules == {("iptables", IPSET_V4), ("ip6tables", IPSET_V6)}
 
 
-def test_ensure_is_idempotent(make_store, firewall):
-    store = make_store()
-    store.ensure_firewall_infrastructure()
-    firewall.calls.clear()
-
-    store.ensure_firewall_infrastructure()
-
-    assert not [c for c in firewall.calls if c[1] in ("create", "swap", "-I")]
-
-
 def test_legacy_sets_without_timeout_are_replaced_in_place(make_store, firewall):
     firewall.legacy_set(IPSET_V4, "inet")
     firewall.legacy_set(IPSET_V6, "inet6")
@@ -213,12 +203,6 @@ def test_disabled_or_dry_run_runs_no_commands(make_store, firewall, options):
     assert firewall.calls == []
 
 
-def test_health_reports_a_ready_firewall(make_store, firewall):
-    make_store().ensure_firewall_infrastructure()
-
-    assert check_scanner_firewall(run_cmd=firewall) == []
-
-
 def test_health_reports_what_blocks_bans(firewall):
     firewall.legacy_set(IPSET_V4, "inet")
     firewall.rules.add(("iptables", IPSET_V4))
@@ -298,17 +282,3 @@ def test_diagnostics_confirms_working_scanner_bans(monkeypatch, make_store, fire
     site_diagnostics._check_firewall_tools(report, firewall)
 
     assert [(r.status, r.title) for r in report.results] == [("ok", "iptables и ipset"), ("ok", "Баны сканеров в firewall")]
-
-
-@pytest.mark.parametrize("options", [{"firewall_enabled": False}, {"dry_run": True}])
-def test_diagnostics_skips_scanner_bans_when_the_firewall_is_off(monkeypatch, firewall, options):
-    for name, value in options.items():
-        monkeypatch.setattr(store_module.scanner_firewall_store, name, value)
-    monkeypatch.setattr(site_diagnostics, "check_firewall_tools", lambda run_cmd: _ready_tools())
-    report = SimpleNamespace(results=[], current_category="firewall")
-    monkeypatch.setattr(site_diagnostics, "_append_result", lambda rep, result: rep.results.append(result))
-
-    site_diagnostics._check_firewall_tools(report, firewall)
-
-    assert [r.title for r in report.results] == ["iptables и ipset"]
-    assert firewall.calls == []

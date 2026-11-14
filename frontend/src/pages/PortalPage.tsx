@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   ArrowLeftRight,
@@ -13,8 +13,10 @@ import {
   UserRound,
 } from 'lucide-react'
 import {
+  dismissPublicPortalBanner,
   fetchPublicPortalMeta,
   redeemPublicPortalCode,
+  type PortalBanner,
   type PortalClientEntry,
   type PortalFileMeta,
   type PortalMetaResponse,
@@ -22,9 +24,12 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import Spinner from '@/components/ui/Spinner'
+import { closedAccessCopy } from '@/lib/closedAccess'
 import { parseTimestamp } from '@/lib/datetime'
 import { normalizePortalNodes, pickPortalSelection, portalClientKey, portalProfileLabel } from '@/lib/portalNodes'
 import { cn } from '@/lib/utils'
+import { protocolLabel } from '@/lib/vpnTypes'
+import type { ClosedAccessView } from '@/types'
 
 type OsId = 'windows' | 'android' | 'ios' | 'mac' | 'linux'
 type KitStep = 'install' | 'profile' | 'connect'
@@ -78,14 +83,6 @@ const APP_DOWNLOADS: Record<string, Partial<Record<OsId, { label: string; url: s
     android: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
     ios: { label: 'AmneziaWG', url: 'https://apps.apple.com/app/amneziawg/id6478942365' },
   },
-}
-
-function protocolTitle(vpnType: string): string {
-  if (vpnType === 'openvpn') return 'OpenVPN'
-  if (vpnType === 'wireguard') return 'WireGuard'
-  if (vpnType === 'amneziawg') return 'AmneziaWG'
-  if (vpnType === 'amneziawg2') return 'AmneziaWG 2.0'
-  return vpnType
 }
 
 function detectOs(): OsId {
@@ -404,7 +401,7 @@ function ProfileFileList({
   return (
     <>
       {files.map((file) => (
-        <div key={file.path} className="space-y-3 rounded-xl border border-white/10 bg-black/20 p-3.5">
+        <div key={file.file_id} className="space-y-3 rounded-xl border border-white/10 bg-black/20 p-3.5">
           <div className="min-w-0">
             <p className="truncate text-sm font-medium text-slate-100">{file.label}</p>
             <p className="truncate text-xs text-slate-400">{file.filename}</p>
@@ -421,6 +418,83 @@ function preferredClientProtocol(client: PortalClientEntry | null | undefined): 
   return preferredProtocol(client.protocols.length ? client.protocols : client.files.map((file) => file.vpn_type))
 }
 
+/** Баннер закрытого доступа (спека 7.4): конфиги остаются доступны. */
+function ClosedAccessBanner({
+  view,
+  onRedeem,
+  redeemAvailable,
+}: {
+  view: ClosedAccessView
+  onRedeem: () => void
+  redeemAvailable: boolean
+}) {
+  const copy = closedAccessCopy(view)
+  if (!copy) return null
+  const danger = copy.tone === 'danger'
+  return (
+    <section
+      role="status"
+      className={cn(
+        'space-y-3 rounded-3xl border p-4 backdrop-blur-sm sm:p-5',
+        danger
+          ? 'border-rose-400/40 bg-rose-500/10'
+          : 'border-amber-400/40 bg-amber-500/10',
+      )}
+    >
+      <div>
+        <h2 className={cn('text-base font-semibold', danger ? 'text-rose-200' : 'text-amber-200')}>
+          {copy.title}
+        </h2>
+        {copy.description && <p className="mt-1 text-xs text-slate-300">{copy.description}</p>}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {copy.canRedeem && redeemAvailable && (
+          <Button type="button" size="sm" onClick={onRedeem}>
+            {copy.redeemLabel}
+          </Button>
+        )}
+        {copy.canRequest && view.contact_url && (
+          <Button type="button" size="sm" variant="outline" asChild>
+            <a href={view.contact_url} target="_blank" rel="noreferrer">
+              Запросить продление
+            </a>
+          </Button>
+        )}
+        {copy.canContact && view.contact_url && (
+          <Button type="button" size="sm" variant="outline" asChild>
+            <a href={view.contact_url} target="_blank" rel="noreferrer">
+              Написать администратору
+            </a>
+          </Button>
+        )}
+      </div>
+    </section>
+  )
+}
+
+/** Баннер портала (Stage 4): уведомление о массовой операции с серверами. */
+function PortalBannerCard({ banner, onDismiss }: { banner: PortalBanner; onDismiss: () => void }) {
+  return (
+    <section
+      role="status"
+      className="flex items-start gap-3 rounded-3xl border border-cyan-400/40 bg-cyan-500/10 p-4 backdrop-blur-sm sm:p-5"
+    >
+      <div className="min-w-0 flex-1">
+        <p className="whitespace-pre-line text-sm text-slate-100">{banner.text}</p>
+      </div>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="shrink-0 border-white/15 bg-white/[0.03] text-slate-100 hover:bg-white/10"
+        onClick={onDismiss}
+      >
+        Понятно
+      </Button>
+    </section>
+  )
+}
+
 export default function PortalPage() {
   const { token = '' } = useParams()
   const [data, setData] = useState<PortalMetaResponse | null>(null)
@@ -435,6 +509,9 @@ export default function PortalPage() {
   const [redeemCode, setRedeemCode] = useState('')
   const [redeeming, setRedeeming] = useState(false)
   const [redeemError, setRedeemError] = useState<string | null>(null)
+  const [bannerDismissed, setBannerDismissed] = useState(false)
+  const redeemSectionRef = useRef<HTMLElement | null>(null)
+  const redeemInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     if (!token) {
@@ -484,15 +561,7 @@ export default function PortalPage() {
         .sort()
       const appliedLatest = appliedDates.length > 0 ? appliedDates[appliedDates.length - 1] : null
       const protocolNames = applied
-        .map((protocol) =>
-          protocol === 'openvpn'
-            ? 'OpenVPN'
-            : protocol === 'wireguard'
-              ? 'WireGuard'
-              : protocol === 'amneziawg2'
-                ? 'AmneziaWG 2.0'
-                : protocol,
-        )
+        .map((protocol) => protocolLabel(protocol))
         .join(', ')
       if (appliedLatest && result.access_until && appliedLatest.slice(0, 10) !== result.access_until.slice(0, 10)) {
         setToast(
@@ -528,6 +597,25 @@ export default function PortalPage() {
 
   const appLink = protocol ? APP_DOWNLOADS[protocol]?.[os] : undefined
   const status = activeClient?.status
+  const closedAccess: ClosedAccessView | null =
+    data && data.kind === 'user' ? (data.closed_access ?? null) : null
+
+  const portalBanner: PortalBanner | null =
+    data && data.kind === 'user' && !bannerDismissed ? (data.portal_banner ?? null) : null
+
+  const handleDismissBanner = async () => {
+    setBannerDismissed(true)
+    try {
+      await dismissPublicPortalBanner(token)
+    } catch {
+      /* баннер скрыт локально — повторная попытка не нужна */
+    }
+  }
+
+  const focusRedeem = () => {
+    redeemSectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    redeemInputRef.current?.focus()
+  }
 
   if (loading) {
     return (
@@ -595,6 +683,18 @@ export default function PortalPage() {
             <Link2 size={16} />
           </Button>
         </header>
+
+        {portalBanner && (
+          <PortalBannerCard banner={portalBanner} onDismiss={() => void handleDismissBanner()} />
+        )}
+
+        {closedAccess && (
+          <ClosedAccessBanner
+            view={closedAccess}
+            onRedeem={focusRedeem}
+            redeemAvailable={data.unlock_codes_enabled}
+          />
+        )}
 
         <section className="grid grid-cols-2 gap-3">
           <StatCard
@@ -702,13 +802,17 @@ export default function PortalPage() {
         )}
 
         {data.unlock_codes_enabled && (
-          <section className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5">
+          <section
+            ref={redeemSectionRef}
+            className="space-y-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm sm:p-5"
+          >
             <div>
               <h2 className="text-base font-semibold">Активировать ключ</h2>
               <p className="text-xs text-slate-400">Введите unlock-код, чтобы продлить доступ к порталу и подключению.</p>
             </div>
             <form className="flex flex-col gap-3 sm:flex-row" onSubmit={handleRedeem}>
               <Input
+                ref={redeemInputRef}
                 value={redeemCode}
                 onChange={(event) => {
                   setRedeemCode(event.target.value)
@@ -764,7 +868,7 @@ export default function PortalPage() {
                           : 'border-white/10 text-slate-300 hover:bg-white/5',
                       )}
                     >
-                      {protocolTitle(p)}
+                      {protocolLabel(p)}
                     </button>
                   ))}
                 </div>
@@ -798,7 +902,7 @@ export default function PortalPage() {
               >
                 <p className="text-sm text-slate-300">
                   Установите официальный клиент для {OS_OPTIONS.find((o) => o.id === os)?.label} и{' '}
-                  {protocolTitle(protocol || preferredClientProtocol(activeClient) || 'openvpn')}.
+                  {protocolLabel(protocol || preferredClientProtocol(activeClient) || 'openvpn')}.
                 </p>
                 {appLink ? (
                   <Button asChild className="gap-1.5 bg-cyan-400 text-slate-950 hover:bg-cyan-300">

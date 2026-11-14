@@ -77,8 +77,8 @@ const EDITOR_TEXTAREA_CLASS =
 
 type FileGroup = 'hosts' | 'ips' | 'adblock' | 'warp' | 'dns'
 
-/** custom.lua / custom2.lua: сохранение перезапускает kresd, doall.sh не нужен. */
-const KRESD_CUSTOM_KEYS = new Set(['kresd_custom', 'kresd_custom2'])
+/** custom.lua / custom2.lua / custom3.lua: сохранение перезапускает kresd, doall.sh не нужен. */
+const KRESD_CUSTOM_KEYS = new Set(['kresd_custom', 'kresd_custom2', 'kresd_custom3'])
 
 type FileMeta = {
   description: string
@@ -132,8 +132,8 @@ const FILE_META: Record<string, FileMeta> = {
     group: 'ips',
   },
   drop_ips: {
-    description: 'Заблокировать исходящие подключения на эти адреса',
-    hint: 'Трафик на эти IP не уйдёт с сервера',
+    description: 'Запретить форвардинг на эти адреса через AntiZapret и полный VPN',
+    hint: 'Трафик к этим IP не пойдёт через VPN — например, подсети Max, VK, Telegram',
     placeholder: '0.0.0.0/0\n\nОдин адрес или диапазон — одна строка',
     icon: ShieldBan,
     group: 'ips',
@@ -147,7 +147,7 @@ const FILE_META: Record<string, FileMeta> = {
   },
   deny_ips: {
     description: 'Запретить входящие подключения с этих адресов',
-    hint: 'Защита от нежелательных клиентов',
+    hint: 'Сканеры и нежелательные клиенты не смогут подключиться',
     placeholder: '198.51.100.0/24\n\nОдин адрес или диапазон — одна строка',
     icon: Ban,
     group: 'ips',
@@ -194,6 +194,13 @@ const FILE_META: Record<string, FileMeta> = {
     icon: ShieldBan,
     group: 'dns',
   },
+  deny3_rpz: {
+    description: 'Заблокировать сайты в DNS прокси (Proxy DNS)',
+    hint: 'Формат RPZ: example.com CNAME . — ответ 0.0.0.0 · нужен AntiZapret-VPN с kresd@3',
+    placeholder: 'example.com CNAME .\n*.example.com CNAME .',
+    icon: ShieldBan,
+    group: 'dns',
+  },
   warp_rpz: {
     description: 'Направить сайты через WARP правилом RPZ',
     hint: 'Формат RPZ: example.com CNAME .',
@@ -218,6 +225,13 @@ const FILE_META: Record<string, FileMeta> = {
   kresd_custom2: {
     description: 'Свои правила Knot Resolver для полного VPN (Lua)',
     hint: 'Например, свой DNS для отдельных доменов · сохранение перезапускает kresd@2',
+    placeholder: "policy.add(policy.suffix(policy.STUB({'8.8.8.8'}), {todname('example.com')}))",
+    icon: FileCode,
+    group: 'dns',
+  },
+  kresd_custom3: {
+    description: 'Свои правила Knot Resolver для прокси (Proxy DNS, Lua)',
+    hint: 'Например, свой DNS для отдельных доменов · сохранение перезапускает kresd@3',
     placeholder: "policy.add(policy.suffix(policy.STUB({'8.8.8.8'}), {todname('example.com')}))",
     icon: FileCode,
     group: 'dns',
@@ -253,7 +267,7 @@ export default function EditFilesPage() {
   const { user } = useAuth()
   const { activeNode, activeNodeHa, nodes, loading: nodeLoading } = useNode()
   const { success, error: notifyError } = useNotifications()
-  const { startGlobal, doneGlobal, withInline } = useProgress()
+  const { startGlobal, doneGlobal, withInline, trackBackgroundTask } = useProgress()
   const { confirm, dialogProps } = useConfirmDialog()
   const haReplicaReadonly = useHaReplicaReadonly()
   const [searchParams] = useSearchParams()
@@ -441,13 +455,21 @@ export default function EditFilesPage() {
     if (!activeKey || !isAdmin || !editorInSync) return
     setSaving(true)
     try {
-      await withInline(
+      const resp = await withInline(
         () => saveEditFilesBatch({ [activeKey]: content }, false),
         'Сохранение файла...',
       )
       setSavedContent(content)
       resetDiffBaseline()
-      success('Список сохранён на сервере')
+      if (resp.task_id) {
+        trackBackgroundTask(resp.task_id, {
+          onComplete: () => success('Список сохранён, фоновое применение завершено'),
+          onError: (task, message) => notifyError(task?.error || task?.message || message),
+        })
+        success('Список сохранён — применение в фоне')
+      } else {
+        success('Список сохранён на сервере')
+      }
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
     } finally {
@@ -460,16 +482,27 @@ export default function EditFilesPage() {
     setConfirmApply(false)
     setSaving(true)
     try {
-      await withInline(
+      const resp = await withInline(
         () => saveEditFile(activeKey, content),
-        activeIsKresd ? 'Сохранение и перезапуск DNS...' : 'Сохранение и doall.sh...',
+        activeIsKresd ? 'Сохранение...' : 'Сохранение (doall в фоне)...',
       )
       setSavedContent(content)
       resetDiffBaseline()
+      if (resp.task_id) {
+        trackBackgroundTask(resp.task_id, {
+          onComplete: () =>
+            success(
+              activeIsKresd
+                ? 'HA-репликация DNS-файла завершена'
+                : 'doall.sh завершён — правила маршрутизации обновлены',
+            ),
+          onError: (task, message) => notifyError(task?.error || task?.message || message),
+        })
+      }
       success(
         activeIsKresd
-          ? 'Сохранено — DNS-резолвер перезапущен с новыми правилами'
-          : 'Изменения применены — VPN обновил правила маршрутизации',
+          ? 'Сохранено — DNS обновлён, HA в фоне'
+          : 'Сохранено — doall.sh запущен в фоне',
       )
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')

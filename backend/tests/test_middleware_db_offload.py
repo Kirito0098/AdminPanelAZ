@@ -30,6 +30,16 @@ def _app_with(middleware_setup) -> tuple[FastAPI, list[int]]:
         loop_threads.append(threading.get_ident())
         return {"ok": True}
 
+    @app.get(f"{main_module._API_PREFIX}/tg-mini/auth")
+    async def tg_mini_auth():
+        loop_threads.append(threading.get_ident())
+        return {"ok": True}
+
+    @app.get(f"{main_module._API_PREFIX}/tg-mini/assets/app.js")
+    async def tg_mini_asset():
+        loop_threads.append(threading.get_ident())
+        return {"ok": True}
+
     return app, loop_threads
 
 
@@ -133,3 +143,31 @@ def test_ip_restriction_allowed_ip_passes(ip_service):
 
     assert response.status_code == 200
     assert ip_service.recorded == []
+
+
+def test_tg_mini_hard_deny_applies_to_banned_ip(ip_service):
+    ip_service.hard_deny = True
+
+    response = ip_service.client.get(f"{main_module._API_PREFIX}/tg-mini/auth")
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Доступ заблокирован на уровне сервера"}
+
+
+def test_tg_mini_ignores_panel_allowlist(ip_service):
+    ip_service.enabled = True
+    ip_service.allowed = False
+
+    response = ip_service.client.get(f"{main_module._API_PREFIX}/tg-mini/auth")
+
+    assert response.status_code == 200
+    assert ip_service.recorded == []
+
+
+def test_tg_mini_assets_skip_ip_checks(ip_service):
+    ip_service.hard_deny = True
+
+    response = ip_service.client.get(f"{main_module._API_PREFIX}/tg-mini/assets/app.js")
+
+    assert response.status_code == 200
+    assert ip_service.db_threads == []

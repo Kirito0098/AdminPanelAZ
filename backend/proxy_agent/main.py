@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -88,7 +89,8 @@ class ProxyAgentIpAllowlistMiddleware(BaseHTTPMiddleware):
         try:
             addr = ipaddress.ip_address(client_ip)
         except ValueError:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён") from None
+            # BaseHTTPMiddleware turns a raised HTTPException into 500.
+            return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": "Доступ запрещён"})
         for entry in PROXY_AGENT_ALLOWED_IPS:
             try:
                 if "/" in entry:
@@ -98,7 +100,7 @@ class ProxyAgentIpAllowlistMiddleware(BaseHTTPMiddleware):
                     return await call_next(request)
             except ValueError:
                 continue
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Доступ запрещён с вашего IP")
+        return JSONResponse(status_code=status.HTTP_403_FORBIDDEN, content={"detail": "Доступ запрещён с вашего IP"})
 
 
 app.add_middleware(ProxyAgentIpAllowlistMiddleware)

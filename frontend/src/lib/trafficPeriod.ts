@@ -3,7 +3,7 @@
 import { getActiveTimeZone } from '@/lib/datetime'
 
 /** YYYY-MM-DD for `instant` in `timeZone` (falls back to browser local on bad zone). */
-export function calendarDateInZone(instant: Date, timeZone: string): string {
+function calendarDateInZone(instant: Date, timeZone: string): string {
   try {
     return new Intl.DateTimeFormat('en-CA', {
       timeZone,

@@ -1,7 +1,11 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { ApiError } from '@/api/client'
-import { Button } from '@/components/ui/button'
+import SelfServiceLimitsForm, {
+  parseSelfServiceLimits,
+  windowMinutesFromSeconds,
+  type SelfServiceLimitsValues,
+} from '@/components/shared/SelfServiceLimitsForm'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { parseBoundedInt } from '@/lib/boundedInt'
@@ -46,18 +50,22 @@ function LimitField({ id, label, value, onChange, min, max, disabled }: FieldSpe
 
 export default function MiniLimitsForm({ telegram, onTelegramSaved, onFeedback }: MiniLimitsFormProps) {
   const [limits, setLimits] = useState<SelfServiceLimits | null>(null)
-  const [quota, setQuota] = useState('')
-  const [rateMax, setRateMax] = useState('')
-  const [rateMinutes, setRateMinutes] = useState('')
+  const [limitsValues, setLimitsValues] = useState<SelfServiceLimitsValues>({
+    quota: '',
+    rateMax: '',
+    windowMinutes: '',
+  })
   const [botMax, setBotMax] = useState(String(telegram.bot_command_rate_max))
   const [botWindow, setBotWindow] = useState(String(telegram.bot_command_rate_window_seconds))
   const [saving, setSaving] = useState(false)
 
   const applyLimits = (data: SelfServiceLimits) => {
     setLimits(data)
-    setQuota(String(data.quota_default))
-    setRateMax(String(data.create_rate_max))
-    setRateMinutes(String(Math.max(1, Math.round(data.create_rate_window_seconds / 60))))
+    setLimitsValues({
+      quota: String(data.quota_default),
+      rateMax: String(data.create_rate_max),
+      windowMinutes: windowMinutesFromSeconds(data.create_rate_window_seconds),
+    })
   }
 
   useEffect(() => {
@@ -82,17 +90,18 @@ export default function MiniLimitsForm({ telegram, onTelegramSaved, onFeedback }
     setBotWindow(String(telegram.bot_command_rate_window_seconds))
   }, [telegram.bot_command_rate_max, telegram.bot_command_rate_window_seconds])
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault()
+  const handleSave = async () => {
     if (!limits) return
-    const values = {
-      quota: parseBoundedInt(quota, 0, 1000),
-      rateMax: parseBoundedInt(rateMax, 0, 100),
-      rateMinutes: parseBoundedInt(rateMinutes, 1, 1440),
-      botMax: parseBoundedInt(botMax, 0, 1000),
-      botWindow: parseBoundedInt(botWindow, 10, 3600),
-    }
-    if (Object.values(values).some((v) => v === null)) {
+    const parsed = parseSelfServiceLimits(limitsValues)
+    const botMaxValue = parseBoundedInt(botMax, 0, 1000)
+    const botWindowValue = parseBoundedInt(botWindow, 10, 3600)
+    if (
+      parsed.quota === null ||
+      parsed.rateMax === null ||
+      parsed.windowMinutes === null ||
+      botMaxValue === null ||
+      botWindowValue === null
+    ) {
       onFeedback({
         tone: 'error',
         text: 'Проверьте значения: квота 0–1000, созданий 0–100, окно 1–1440 мин, команд 0–1000, окно бота 10–3600 с',
@@ -100,19 +109,21 @@ export default function MiniLimitsForm({ telegram, onTelegramSaved, onFeedback }
       return
     }
     const selfServicePayload: Partial<SelfServiceLimits> = {
-      quota_default: values.quota as number,
-      create_rate_max: values.rateMax as number,
+      quota_default: parsed.quota,
+      create_rate_max: parsed.rateMax,
     }
-    if (rateMinutes.trim() !== String(Math.max(1, Math.round(limits.create_rate_window_seconds / 60)))) {
-      selfServicePayload.create_rate_window_seconds = (values.rateMinutes as number) * 60
+    if (
+      limitsValues.windowMinutes.trim() !== windowMinutesFromSeconds(limits.create_rate_window_seconds)
+    ) {
+      selfServicePayload.create_rate_window_seconds = parsed.windowMinutes * 60
     }
     setSaving(true)
     try {
       const [updatedLimits, updatedTelegram] = await Promise.all([
         updateTgSelfServiceLimits(selfServicePayload),
         updateTgTelegramSettings({
-          bot_command_rate_max: values.botMax as number,
-          bot_command_rate_window_seconds: values.botWindow as number,
+          bot_command_rate_max: botMaxValue,
+          bot_command_rate_window_seconds: botWindowValue,
         }),
       ])
       applyLimits(updatedLimits)
@@ -134,28 +145,19 @@ export default function MiniLimitsForm({ telegram, onTelegramSaved, onFeedback }
     )
   }
 
-  const selfServiceFields: FieldSpec[] = [
-    { id: 'limit-quota', label: 'Квота по умолчанию', value: quota, onChange: setQuota, min: 0, max: 1000 },
-    { id: 'limit-rate-max', label: 'Созданий за окно', value: rateMax, onChange: setRateMax, min: 0, max: 100 },
-    { id: 'limit-rate-window', label: 'Окно создания, мин', value: rateMinutes, onChange: setRateMinutes, min: 1, max: 1440 },
-  ]
   const botFields: FieldSpec[] = [
     { id: 'limit-bot-max', label: 'Команд бота за окно', value: botMax, onChange: setBotMax, min: 0, max: 1000 },
     { id: 'limit-bot-window', label: 'Окно бота, сек', value: botWindow, onChange: setBotWindow, min: 10, max: 3600 },
   ]
 
   return (
-    <form className="space-y-4" onSubmit={(e) => void handleSubmit(e)}>
-      <div className="space-y-3">
-        <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-3">
-          {selfServiceFields.map((field) => (
-            <LimitField key={field.id} {...field} disabled={saving} />
-          ))}
-        </div>
-        <p className="text-xs leading-relaxed text-muted-foreground">
-          Создание конфигов обычными пользователями. 0 — без лимита.
-        </p>
-      </div>
+    <SelfServiceLimitsForm
+      compact
+      values={limitsValues}
+      onChange={setLimitsValues}
+      onSave={() => void handleSave()}
+      disabled={saving}
+    >
       <div className="space-y-3">
         <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
           {botFields.map((field) => (
@@ -168,13 +170,6 @@ export default function MiniLimitsForm({ telegram, onTelegramSaved, onFeedback }
             : 'Лимит команд выключен в .env (TELEGRAM_BOT_COMMAND_RATE_LIMIT_ENABLED=false) — значения не применяются.'}
         </p>
       </div>
-      <p className="text-xs leading-relaxed text-muted-foreground">
-        Счётчики хранятся в памяти панели и обнуляются при перезапуске.
-      </p>
-      <Button type="submit" className="gap-1.5" disabled={saving}>
-        {saving ? <Loader2 size={16} className="animate-spin" aria-hidden /> : null}
-        Сохранить лимиты
-      </Button>
-    </form>
+    </SelfServiceLimitsForm>
   )
 }

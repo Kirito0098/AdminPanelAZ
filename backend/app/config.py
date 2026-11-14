@@ -4,7 +4,12 @@ from pathlib import Path
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_DEFAULT_SECRET_KEY = "change-me-in-production-use-long-random-string"
+DEFAULT_SECRET_KEY = "change-me-in-production-use-long-random-string"
+DEFAULT_NODE_AGENT_KEY = "change-me-node-agent-key"
+DEFAULT_ADMIN_PASSWORD = "admin"
+
+# Порт, который слушает uvicorn и на который смотрит nginx, если BACKEND_PORT не задан.
+DEFAULT_BACKEND_PORT = 8000
 
 
 class Settings(BaseSettings):
@@ -12,7 +17,7 @@ class Settings(BaseSettings):
 
     app_name: str = "AdminPanel AntiZapret"
     app_env: str = "development"
-    secret_key: str = _DEFAULT_SECRET_KEY
+    secret_key: str = DEFAULT_SECRET_KEY
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
@@ -56,7 +61,7 @@ class Settings(BaseSettings):
     antizapret_path: Path = Path("/root/antizapret")
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
     default_admin_username: str = "admin"
-    default_admin_password: str = "admin"
+    default_admin_password: str = DEFAULT_ADMIN_PASSWORD
     default_admin_must_change_password: bool = True
     allow_internal_nodes: bool = False
     local_antizapret_enabled: bool = True
@@ -144,12 +149,18 @@ class Settings(BaseSettings):
     nightly_idle_restart_cron: str = "0 4 * * *"
     admin_panel_az_service_name: str = "adminpanelaz.service"
     uvicorn_workers: int = 1
-    resource_profile: str = "standard"
+    # Stage 5 (§8.2): scenario preset label (last applied). Legacy RESOURCE_PROFILE
+    # is accepted as an alias and mapped (minimal/standard/full → panel_only/home/commercial).
+    scenario_preset: str = Field(
+        default="home",
+        validation_alias=AliasChoices("scenario_preset", "resource_profile"),
+    )
     retention_enabled: bool = True
     retention_interval_hours: int = 24
     traffic_sample_retention_days: int = 90
     traffic_session_retention_days: int = 30
     action_log_retention_days: int = 365
+    user_messages_retention_days: int = 180
     retention_batch_size: int = 5000
     health_deep_node_ping: bool = True
     bulk_config_op_max_workers: int = 4
@@ -213,6 +224,20 @@ class Settings(BaseSettings):
         if normalized not in {"development", "production"}:
             raise ValueError("APP_ENV must be 'development' or 'production'")
         return normalized
+
+    @field_validator("scenario_preset", mode="before")
+    @classmethod
+    def normalize_scenario_preset(cls, value: str) -> str:
+        from app.services.feature_toggles import (
+            VALID_SCENARIO_PRESETS,
+            map_legacy_resource_profile,
+        )
+
+        normalized = (value or "").strip().lower()
+        if normalized in VALID_SCENARIO_PRESETS:
+            return normalized
+        mapped = map_legacy_resource_profile(normalized)
+        return mapped or "home"
 
     @field_validator("cidr_db_deploy_target")
     @classmethod

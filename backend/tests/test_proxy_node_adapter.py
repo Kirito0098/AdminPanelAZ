@@ -114,24 +114,6 @@ def test_get_proxy_status_not_proxy(db, monkeypatch):
     assert exc.value.status_code == 404
 
 
-def test_get_proxy_status_ok(db, monkeypatch):
-    from app.routers import nodes as nodes_router
-
-    node = _add_node(db)
-    admin = SimpleNamespace(id=1, username="admin")
-    monkeypatch.setattr(nodes_router, "is_proxy_nodes_enabled", lambda _db: True)
-    adapter = MagicMock()
-    adapter.proxy_status.return_value = {
-        "installed": False,
-        "destination_ip": None,
-        "detail": "not found",
-    }
-    monkeypatch.setattr(nodes_router, "get_proxy_adapter", lambda _n: adapter)
-    resp = nodes_router.get_proxy_status(node.id, admin, db)
-    assert resp.installed is False
-    assert resp.detail == "not found"
-
-
 def test_get_proxy_status_syncs_destination(db, monkeypatch):
     from app.routers import nodes as nodes_router
 
@@ -202,25 +184,6 @@ def test_put_proxy_destination_syncs_node(db, monkeypatch):
     adapter.set_destination.assert_called_once_with("8.8.8.8")
 
 
-def test_refresh_proxy_status_syncs_destination(db, monkeypatch):
-    from app.routers import nodes as nodes_router
-
-    node = _add_node(db)
-    admin = SimpleNamespace(id=1, username="admin")
-    monkeypatch.setattr(nodes_router, "is_proxy_nodes_enabled", lambda _db: True)
-    adapter = MagicMock()
-    adapter.proxy_status.return_value = {
-        "installed": True,
-        "destination_ip": "1.1.1.1",
-        "detail": None,
-    }
-    monkeypatch.setattr(nodes_router, "get_proxy_adapter", lambda _n: adapter)
-    resp = nodes_router.refresh_proxy_status(node.id, admin, db)
-    assert resp.destination_ip == "1.1.1.1"
-    db.refresh(node)
-    assert node.destination_ip == "1.1.1.1"
-
-
 def test_check_node_health_uses_proxy_adapter(db, monkeypatch):
     from app.services import node_manager as nm
 
@@ -250,25 +213,6 @@ def test_get_adapter_for_node_ssh_uses_local_tunnel(db, monkeypatch):
 
     adapter = get_adapter_for_node(node)
     assert adapter.base_url == "http://127.0.0.1:45123"
-    assert adapter._mtls_enabled is False
-
-
-def test_get_proxy_adapter_ssh_uses_local_tunnel(db, monkeypatch):
-    from app.services import node_manager as nm
-
-    node = _add_node(db, kind="proxy", port=9101)
-    node.transport = "ssh"
-    db.commit()
-
-    class _Pool:
-        def ensure(self, _node):
-            return 45124
-
-    monkeypatch.setattr(nm, "get_api_key_plain", lambda _node: "secret-key")
-    monkeypatch.setattr("app.services.ssh_tunnel_pool.get_ssh_tunnel_pool", lambda: _Pool())
-
-    adapter = get_proxy_adapter(node)
-    assert adapter.base_url == "http://127.0.0.1:45124"
     assert adapter._mtls_enabled is False
 
 

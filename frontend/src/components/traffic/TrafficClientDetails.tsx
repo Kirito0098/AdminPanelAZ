@@ -24,6 +24,7 @@ import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import { MONITORING_PROTOCOL_COLORS } from '@/components/monitoring/monitoringChartTheme'
 import { getTrafficClientSessions } from '@/api/client'
 import { formatBytes } from '@/lib/trafficFormat'
+import { protocolLabel } from '@/lib/vpnTypes'
 import TrafficPeriodControls, {
   CHART_PERIOD_PRESETS,
   type TrafficPeriodPreset,
@@ -31,6 +32,7 @@ import TrafficPeriodControls, {
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/badge'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import { Button } from '@/components/ui/button'
 import {
   Table,
@@ -47,35 +49,16 @@ import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
 import { COL_VPN_IP } from '@/lib/uiLabels'
 import type { ClientAccessPolicy, TrafficChartData, TrafficClientRow, TrafficClientSessions } from '@/types'
 
-const CHART_VPN = 'hsl(187, 72%, 45%)'
-const CHART_ANTIZAPRET = 'hsl(38, 92%, 50%)'
+// VPN/AntiZapret — классы трафика, не протоколы: нейтральная пара,
+// чтобы не читались как OpenVPN/AWG 2.0.
+const CHART_VPN = '#8A94A6'
+const CHART_ANTIZAPRET = '#5D8AA8'
 
 const RANGE_LABELS: Record<TrafficPeriodPreset, string> = {
   '1h': '1 час',
   '1d': '24 часа',
   '7d': '7 дней',
   '30d': '30 дней',
-}
-
-function getProtocolLabel(protocol: string) {
-  const p = protocol.toLowerCase()
-  if (p === 'wireguard') return 'WireGuard'
-  if (p === 'openvpn') return 'OpenVPN'
-  if (p === 'amneziawg2') return 'AWG 2.0'
-  return protocol
-}
-
-function getProtocolVariant(protocol: string): 'default' | 'secondary' | 'outline' {
-  const p = protocol.toLowerCase()
-  if (p === 'openvpn') return 'default'
-  if (p === 'wireguard') return 'secondary'
-  if (p === 'amneziawg2') return 'outline'
-  return 'outline'
-}
-
-function formatLastSeen(value?: string | null) {
-  if (!value) return '—'
-  return formatDateTime(value)
 }
 
 function formatTrafficChartLabel(ts: string | undefined, fallback: string, bucket: string) {
@@ -87,6 +70,12 @@ function formatTrafficChartLabel(ts: string | undefined, fallback: string, bucke
     return formatDate(ts, { day: '2-digit', month: '2-digit' })
   }
   return formatDate(ts, { year: 'numeric', month: '2-digit' })
+}
+
+function seriesLabel(key: string) {
+  if (key === 'vpn') return 'VPN'
+  if (key === 'antizapret') return 'AntiZapret'
+  return protocolLabel(key)
 }
 
 type SourceSortKey = 'sessions' | 'last_seen'
@@ -176,7 +165,7 @@ function SplitBar({ label, value, total, variant }: SplitBarProps) {
         value={value}
         max={total}
         className="h-2"
-        barClassName={variant === 'vpn' ? 'fill-[hsl(187,72%,45%)]' : 'fill-[hsl(38,92%,50%)]'}
+        barClassName={variant === 'vpn' ? 'fill-[#8A94A6]' : 'fill-[#5D8AA8]'}
       />
     </div>
   )
@@ -293,7 +282,7 @@ export default function TrafficClientDetails({
         </TableCell>
         <TableCell className="text-right font-mono text-xs">{formatBytes(source.total_bytes)}</TableCell>
         <TableCell className="font-mono text-xs">{source.virtual_addresses.join(', ') || '—'}</TableCell>
-        <TableCell className="text-xs text-muted-foreground">{formatLastSeen(source.last_seen_at)}</TableCell>
+        <TableCell className="text-xs text-muted-foreground">{formatDateTime(source.last_seen_at)}</TableCell>
         <TableCell>
           <Badge variant={source.is_active ? 'success' : 'secondary'} className="text-[10px]">
             {source.is_active ? 'Сейчас' : 'Был'}
@@ -321,14 +310,6 @@ export default function TrafficClientDetails({
 
   const showProtocolSeries = showAwg2
 
-  const SERIES_LABELS: Record<string, string> = {
-    vpn: 'VPN',
-    antizapret: 'AntiZapret',
-    openvpn: 'OpenVPN',
-    wireguard: 'WireGuard',
-    amneziawg2: 'AWG 2.0',
-  }
-
   const limitPercent =
     policy?.traffic_limit_bytes && policy.traffic_limit_bytes > 0
       ? Math.min(((policy.traffic_consumed_bytes ?? 0) / policy.traffic_limit_bytes) * 100, 100)
@@ -347,7 +328,7 @@ export default function TrafficClientDetails({
           <UserRound size={16} />
           Мониторинг клиента
         </p>
-        <Badge variant={getProtocolVariant(row.protocol_type)}>{getProtocolLabel(row.protocol_type)}</Badge>
+        <ProtocolBadge protocol={row.protocol_type} />
         <Badge variant={row.is_active ? 'success' : 'secondary'}>
           {row.is_active ? 'Онлайн' : 'Офлайн'}
         </Badge>
@@ -444,11 +425,11 @@ export default function TrafficClientDetails({
             </span>
             <span className="inline-flex items-center gap-1">
               <Clock size={12} />
-              Последний раз: <strong className="text-foreground">{formatLastSeen(row.last_seen_at)}</strong>
+              Последний раз: <strong className="text-foreground">{formatDateTime(row.last_seen_at)}</strong>
             </span>
             {row.first_seen_at && (
               <span className="col-span-2">
-                Первое появление: <strong className="text-foreground">{formatLastSeen(row.first_seen_at)}</strong>
+                Первое появление: <strong className="text-foreground">{formatDateTime(row.first_seen_at)}</strong>
               </span>
             )}
             {sessionHint && (
@@ -679,11 +660,11 @@ export default function TrafficClientDetails({
                   <Tooltip
                     formatter={(v, name) => {
                       const key = String(name)
-                      return [formatBytes(Number(v ?? 0)), SERIES_LABELS[key] ?? key]
+                      return [formatBytes(Number(v ?? 0)), seriesLabel(key)]
                     }}
                     labelFormatter={(label) => `Период: ${label}`}
                   />
-                  <Legend formatter={(value) => SERIES_LABELS[value] ?? value} />
+                  <Legend formatter={(value) => seriesLabel(String(value))} />
                   {showProtocolSeries ? (
                     <>
                       {/* Unstacked: stacked areas put the top series stroke at the total

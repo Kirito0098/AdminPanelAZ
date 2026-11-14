@@ -10,7 +10,7 @@ function docsUrl(path: string): string {
 export const DOCS = {
   index: docsUrl('README.md'),
   configurations: docsUrl('konfiguracii.md'),
-  noc: docsUrl('noc-monitoring.md'),
+  monitoring: docsUrl('monitoring.md'),
   traffic: docsUrl('traffic-monitoring.md'),
   routing: docsUrl('routing-cidr.md'),
   antizapretConfig: docsUrl('antizapret-config.md'),

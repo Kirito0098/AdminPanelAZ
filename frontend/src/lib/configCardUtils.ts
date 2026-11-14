@@ -1,5 +1,5 @@
 import type { ClientAccessPolicy, ClientPoliciesResponseEntry, OpenVpnClient, VpnConfig, WireGuardPeer } from '@/types'
-import { formatDate } from '@/lib/datetime'
+import { formatDate, parseTimestamp } from '@/lib/datetime'
 import { getProfileDownloadFilename } from '@/lib/profileDownloadName'
 import { isWireGuardOnline } from '@/lib/wireguardStatus'
 
@@ -68,13 +68,6 @@ export function pickVpnFile(config: VpnConfig, tab?: ProtocolTab): ProfileFile |
   return preferPrimaryConf(files.filter(isVpnProfile))
 }
 
-export function protocolLabel(tab: ProtocolTab): string {
-  if (tab === 'openvpn') return 'OpenVPN'
-  if (tab === 'amneziawg') return 'AmneziaWG'
-  if (tab === 'amneziawg2') return 'AmneziaWG 2.0'
-  return 'WireGuard'
-}
-
 function hasProtocolProfiles(
   config: VpnConfig,
   protocol: 'amneziawg' | 'amneziawg2' | 'wireguard' | 'openvpn',
@@ -94,21 +87,8 @@ export function configMatchesTab(config: VpnConfig, tab: ProtocolTab): boolean {
   return hasProtocolProfiles(config, 'wireguard')
 }
 
-function parseAccessExpiresAt(value?: string | null): Date | null {
-  if (!value) return null
-  const raw = value.trim()
-  if (!raw) return null
-  const normalized = raw.endsWith(' UTC')
-    ? `${raw.slice(0, -4).replace(' ', 'T')}Z`
-    : raw.includes('T')
-      ? raw
-      : `${raw.replace(' ', 'T')}Z`
-  const parsed = Date.parse(normalized)
-  return Number.isNaN(parsed) ? null : new Date(parsed)
-}
-
 function formatAccessRemaining(accessExpiresAt?: string | null): string | null {
-  const expiresAt = parseAccessExpiresAt(accessExpiresAt)
+  const expiresAt = parseTimestamp(accessExpiresAt)
   if (!expiresAt) return null
 
   const totalSeconds = Math.floor((expiresAt.getTime() - Date.now()) / 1000)
@@ -127,7 +107,7 @@ function formatAccessRemaining(accessExpiresAt?: string | null): string | null {
 
 function formatDateShort(value?: string | null): string {
   if (!value) return 'не ограничено'
-  const d = parseAccessExpiresAt(value)
+  const d = parseTimestamp(value)
   if (!d) return value.split(' ')[0] || value
   return formatDate(d, undefined, value.split(' ')[0] || value)
 }
@@ -139,19 +119,9 @@ export function formatAccessExpiryBadge(accessExpiresAt?: string | null): string
   return remaining === 'срок истёк' ? 'истёк' : `истекает ${remaining}`
 }
 
-/** Backend sends naive UTC timestamps; without a zone suffix Date.parse would read them as local. */
-export function parseCertExpiresAt(value?: string | null): Date | null {
-  if (!value) return null
-  const raw = value.trim()
-  if (!raw) return null
-  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw)
-  const parsed = Date.parse(`${raw.replace(' ', 'T')}${hasZone ? '' : 'Z'}`)
-  return Number.isNaN(parsed) ? null : new Date(parsed)
-}
-
 /** Days left on the real certificate, or null while the node has not been read yet. */
-export function certDaysLeft(config: VpnConfig): number | null {
-  const expiresAt = parseCertExpiresAt(config.cert_expires_at)
+function certDaysLeft(config: VpnConfig): number | null {
+  const expiresAt = parseTimestamp(config.cert_expires_at)
   if (!expiresAt) return config.cert_days_left ?? null
   const ms = expiresAt.getTime() - Date.now()
   return ms <= 0 ? 0 : Math.floor(ms / 86400000)
@@ -162,7 +132,7 @@ export function formatCertExpiry(config: VpnConfig): string {
   if (daysLeft == null) {
     return config.cert_expire_days != null ? `выпущен на ${config.cert_expire_days} дн.` : '—'
   }
-  const expiresAt = parseCertExpiresAt(config.cert_expires_at)
+  const expiresAt = parseTimestamp(config.cert_expires_at)
   const until = expiresAt ? formatDate(expiresAt, undefined, '') : ''
   if (daysLeft <= 0) return until ? `истёк ${until}` : 'истёк'
   return until ? `${daysLeft} дн. (до ${until})` : `${daysLeft} дн.`
@@ -292,7 +262,7 @@ export function buildAccessMeta(
   } else if (policy?.access_days_left != null && policy.access_days_left <= 30) {
     tone = 'expiring'
   } else if (accessExpiresAt) {
-    const expiresAt = parseAccessExpiresAt(accessExpiresAt)
+    const expiresAt = parseTimestamp(accessExpiresAt)
     if (formatAccessRemaining(accessExpiresAt) === 'срок истёк') {
       tone = 'expired'
     } else if (expiresAt) {
@@ -406,17 +376,13 @@ export function getDownloadFilename(config: VpnConfig, file: ProfileFile): strin
   return getProfileDownloadFilename(config.client_name, file)
 }
 
-export function getProtocolBadgeVariant(tab: ProtocolTab): 'default' | 'secondary' | 'outline' {
-  if (tab === 'openvpn') return 'default'
-  if (tab === 'amneziawg' || tab === 'amneziawg2') return 'secondary'
-  return 'outline'
-}
-
-export type ClientConnectionEntry = {
+type ClientConnectionEntry = {
   openvpn: boolean
   openvpnUdp: boolean
   openvpnTcp: boolean
   wireguard: boolean
+  /** Live AWG 2.0 peer (separate from stock WG/Amnezia dump). */
+  amneziawg2: boolean
   /** Issued/live tunnel IP (OpenVPN virtual_address / WG AllowedIPs). */
   localIp?: string | null
 }
@@ -424,10 +390,20 @@ export type ClientConnectionEntry = {
 export type ClientConnectionMap = Record<string, ClientConnectionEntry>
 
 /** Derive OpenVPN transport from a live status profile (e.g. antizapret-udp). */
-export function openvpnTransportFromProfile(profile?: string | null): 'udp' | 'tcp' | null {
+function openvpnTransportFromProfile(profile?: string | null): 'udp' | 'tcp' | null {
   const name = (profile || '').trim().toLowerCase()
   if (name.endsWith('-udp')) return 'udp'
   if (name.endsWith('-tcp')) return 'tcp'
+  return null
+}
+
+/** Profile first; else OpenVPN status `udp4:` / `tcp4:` real_address prefix. */
+export function openvpnTransportFromClient(client: Pick<OpenVpnClient, 'profile' | 'real_address'>): 'udp' | 'tcp' | null {
+  const fromProfile = openvpnTransportFromProfile(client.profile)
+  if (fromProfile) return fromProfile
+  const addr = (client.real_address || '').trim().toLowerCase()
+  if (addr.startsWith('udp')) return 'udp'
+  if (addr.startsWith('tcp')) return 'tcp'
   return null
 }
 
@@ -457,12 +433,30 @@ function mergeLocalIp(prev: string | null | undefined, next: string | null): str
 }
 
 function emptyConnectionEntry(): ClientConnectionEntry {
-  return { openvpn: false, openvpnUdp: false, openvpnTcp: false, wireguard: false, localIp: null }
+  return {
+    openvpn: false,
+    openvpnUdp: false,
+    openvpnTcp: false,
+    wireguard: false,
+    amneziawg2: false,
+    localIp: null,
+  }
 }
 
+/**
+ * Build presence for Clients cards. Pass federated overview lists (scope=all)
+ * so HA sessions on any member light the card.
+ *
+ * | Tab          | Source                         | Flag        |
+ * | openvpn      | openvpn_clients                | openvpn*    |
+ * | wireguard    | wireguard_peers (wg dump)      | wireguard   |
+ * | amneziawg    | same dump (awg interfaces)     | wireguard   |
+ * | amneziawg2   | amneziawg2_peers (AZ-AWG2)     | amneziawg2  |
+ */
 export function buildClientConnectionMap(
   openvpnClients: OpenVpnClient[],
   wireguardPeers: WireGuardPeer[],
+  amneziawg2Peers: WireGuardPeer[] = [],
 ): ClientConnectionMap {
   const map: ClientConnectionMap = {}
 
@@ -470,7 +464,7 @@ export function buildClientConnectionMap(
     const key = client.common_name.trim().toLowerCase()
     if (!key) continue
     const prev = map[key] ?? emptyConnectionEntry()
-    const transport = openvpnTransportFromProfile(client.profile)
+    const transport = openvpnTransportFromClient(client)
     map[key] = {
       ...prev,
       openvpn: true,
@@ -489,6 +483,18 @@ export function buildClientConnectionMap(
     map[key] = {
       ...prev,
       wireguard: wireguardOnline,
+      localIp: mergeLocalIp(prev.localIp, normalizeTunnelIp(peer.allowed_ips)),
+    }
+  }
+
+  for (const peer of amneziawg2Peers) {
+    const name = (peer.client_name || '').trim()
+    if (!name) continue
+    const key = name.toLowerCase()
+    const prev = map[key] ?? emptyConnectionEntry()
+    map[key] = {
+      ...prev,
+      amneziawg2: isWireGuardOnline(peer) || prev.amneziawg2,
       localIp: mergeLocalIp(prev.localIp, normalizeTunnelIp(peer.allowed_ips)),
     }
   }
@@ -515,10 +521,26 @@ export function isConfigConnected(
   if (!connectionMap) return null
   const entry = connectionMap[clientName.trim().toLowerCase()]
   if (!entry) return false
-  if (tab !== 'openvpn') return entry.wireguard
-  if (openvpnGroup === 'GROUP_UDP') return entry.openvpnUdp
-  if (openvpnGroup === 'GROUP_TCP') return entry.openvpnTcp
-  return entry.openvpn
+  if (tab === 'openvpn') {
+    // Live in status ⇒ online. Prefer transport flags when known; if profile/
+    // real_address did not reveal udp/tcp, still count the session for GROUP_*.
+    if (!entry.openvpn) return false
+    if (openvpnGroup === 'GROUP_UDP') {
+      if (entry.openvpnUdp) return true
+      if (entry.openvpnTcp && !entry.openvpnUdp) return false
+      return true
+    }
+    if (openvpnGroup === 'GROUP_TCP') {
+      if (entry.openvpnTcp) return true
+      if (entry.openvpnUdp && !entry.openvpnTcp) return false
+      return true
+    }
+    return true
+  }
+  // amneziawg2 = AZ-AWG2 peers; wireguard + stock amneziawg share wg/awg dump.
+  if (tab === 'amneziawg2') return entry.amneziawg2
+  if (tab === 'wireguard' || tab === 'amneziawg') return entry.wireguard
+  return false
 }
 
 export function formatBlockStatus(policy?: ClientAccessPolicy): {

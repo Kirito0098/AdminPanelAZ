@@ -17,11 +17,18 @@ import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Iterator, Literal
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any, Iterator, Literal
+
+if TYPE_CHECKING:
+    from app.models import Node
 
 from fastapi import HTTPException, status
 
+from app.config import get_settings
+from app.services.client_names import CLIENT_NAME_RE
 from app.services.ip_geo import is_local_geoip_loaded, parse_client_endpoint
+from app.services.shared_helpers import read_kv_file as _read_kv_file
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +62,6 @@ AWG2_UPDATE_CMD = (
     "bash <(curl -fsSL https://raw.githubusercontent.com/blindtechnique/az-awg2/main/install.sh) --update"
 )
 
-_CLIENT_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,32}$")
 _TTL_RE = re.compile(r"^(?P<value>[1-9]\d*)\s*(?P<unit>[smhdSMHD])$")
 
 
@@ -260,7 +266,7 @@ def build_install_argv(
 
 
 def base_installed() -> bool:
-    base_root = Path("/root/antizapret")
+    base_root = get_settings().antizapret_path
     return any((base_root / name).is_file() for name in ("client.sh", "up.sh"))
 
 
@@ -338,19 +344,6 @@ def iter_install_stream_events(
             proc.kill()
         if lock_handle is not None:
             lock_handle.close()
-
-
-def _read_kv_file(path: Path) -> dict[str, str]:
-    data: dict[str, str] = {}
-    if not path.is_file():
-        return data
-    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        data[key.strip()] = value.strip().strip('"').strip("'")
-    return data
 
 
 def _read_services_env() -> dict[str, str]:
@@ -469,7 +462,8 @@ def _replace_awg2_snapshot(
 ) -> None:
     if not _tree_has_files(source_amnezia) or not _tree_has_files(source_clients):
         raise ValueError(
-            "AWG2 archive must contain both amneziawg/ and clients/ files before import"
+            "На primary нет состояния AZ-AWG2 (пустые конфиги сервера или клиентов). "
+            "Создайте клиентов или дождитесь завершения установки на primary и повторите синхронизацию."
         )
 
     _replace_tree_from_snapshot(source_amnezia, AWG2_AMNEZIA_DIR)
@@ -771,7 +765,7 @@ class Awg2Service:
 
     def validate_client_name(self, name: str) -> str:
         value = (name or "").strip()
-        if not _CLIENT_NAME_RE.match(value):
+        if not CLIENT_NAME_RE.match(value):
             raise ValueError("Некорректное имя клиента")
         return value
 
@@ -1194,7 +1188,10 @@ class Awg2Service:
 
     def import_state_archive(self, data: bytes) -> None:
         if not data:
-            raise ValueError("empty AWG2 archive")
+            raise ValueError(
+                "На primary нет состояния AZ-AWG2 (пустые конфиги сервера или клиентов). "
+                "Создайте клиентов или дождитесь завершения установки на primary и повторите синхронизацию."
+            )
         _ensure_replica_installed()
 
         with tempfile.TemporaryDirectory(prefix="awg2-import-") as temp_dir:
@@ -1336,3 +1333,38 @@ class Awg2Service:
         finally:
             if temp_path:
                 Path(temp_path).unlink(missing_ok=True)
+
+
+def assert_awg2_available_on_nodes(nodes: Sequence[Node]) -> None:
+    """Live-check AZ-AWG2 on each VPN node; 409 listing nodes that lack install."""
+    from app.services.node_manager import NODE_KIND_VPN, _node_kind, get_adapter_for_node
+
+    missing: list[str] = []
+    install_cmd = AWG2_INSTALL_CMD
+    for node in nodes:
+        if _node_kind(node) != NODE_KIND_VPN:
+            continue
+        health: dict[str, Any] | None = None
+        try:
+            health = get_adapter_for_node(node).get_awg2_health()
+            installed = bool(health.get("installed"))
+        except Exception as exc:
+            logger.warning("awg2 probe failed on node %s: %s", node.id, exc)
+            installed = False
+        if not installed:
+            missing.append(node.name)
+            if len(missing) == 1:
+                if health is not None:
+                    install_cmd = health.get("install_command") or AWG2_INSTALL_CMD
+                else:
+                    install_cmd = AWG2_INSTALL_CMD
+    if not missing:
+        return
+    names = ", ".join(missing)
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "message": f"AZ-AWG2 не установлен на: {names}",
+            "install_command": install_cmd,
+        },
+    )

@@ -1,4 +1,5 @@
 import { FormEvent, Fragment, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Activity,
   BellOff,
@@ -41,6 +42,7 @@ import {
   getNodeMeta,
   getSelectedNodes,
   isWrongVersionSslError,
+  nodeTransportId,
 } from '@/components/nodes/nodeHelpers'
 import { isProxyNode, PROXY_DEFAULT_PORT, VPN_DEFAULT_PORT } from '@/components/nodes/nodeKind'
 import ProxyLinkBadge from '@/components/proxy/ProxyLinkBadge'
@@ -111,7 +113,7 @@ import { DOCS } from '@/lib/docsUrls'
 export { isProxyNode }
 
 /** User guide for SSH node transport (GitHub). */
-export const NODE_SSH_TRANSPORT_DOCS_URL = DOCS.nodeSsh
+const NODE_SSH_TRANSPORT_DOCS_URL = DOCS.nodeSsh
 
 type ConfirmAction = 'delete' | 'rotate-key' | 'enable-mtls' | 'switch-http' | 'restart-agent' | null
 type BulkConfirmAction = 'delete' | 'enable-mtls' | null
@@ -134,6 +136,7 @@ const EMPTY_SSH_FORM: SshTransportFormState = {
 
 export default function NodesPage() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const {
     activeNode,
     nodes,
@@ -150,6 +153,7 @@ export default function NodesPage() {
   // Default-off toggle: treat missing key as disabled (isEnabled() falls back to true).
   const proxyNodesEnabled = features.proxy_nodes === true
   const telegramEnabled = isEnabled('telegram')
+  const provisioningOn = isEnabled('user_provisioning')
   const { success, warning, error: notifyError } = useNotifications()
   const [loading, setLoading] = useState(true)
   const [showDialog, setShowDialog] = useState(false)
@@ -191,6 +195,15 @@ export default function NodesPage() {
     const membership = findNodeHaMembership(node.id, syncGroups)
     if (!membership) return null
     return nodeDeleteBlockedMessage(node, membership)
+  }
+
+  // Stage 4: выдать сервер пользователям можно только standalone VPN или primary HA-группы.
+  const canAssignToUsers = (node: Node): boolean => {
+    if (!provisioningOn) return false
+    if (isProxyNode(node)) return false
+    const membership = findNodeHaMembership(node.id, syncGroups)
+    if (!membership) return true
+    return syncGroups.some((group) => group.primary_node_id === node.id)
   }
 
   const showHaDeleteBlockedDialog = (blockedNodes: Node[]) => {
@@ -474,7 +487,7 @@ export default function NodesPage() {
   }
 
   const handleTransportChange = (node: Node, transport: NodeTransportId) => {
-    const current = (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase()
+    const current = nodeTransportId(node)
     if (transport === current) return
     if (transport === 'ssh') {
       if (current === 'mtls') {
@@ -626,7 +639,7 @@ export default function NodesPage() {
           setHealthLoading(null)
         }
       } else if (action === 'switch-http') {
-        const wasMtls = (target.transport || (target.mtls_enabled ? 'mtls' : 'http')).toLowerCase() === 'mtls'
+        const wasMtls = nodeTransportId(target) === 'mtls'
         const preflight = await preflightNodeTransport(target.id, 'http')
         if (!preflight.ok) {
           const detail = [preflight.message, preflight.hint, preflight.probe_error]
@@ -810,7 +823,7 @@ export default function NodesPage() {
     if (action === 'enable-mtls') {
       const mtlsCandidates = selected.filter((node) => {
         if (node.is_local || isProxyNode(node)) return false
-        const transport = (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase()
+        const transport = nodeTransportId(node)
         return transport === 'http'
       })
       if (mtlsCandidates.length === 0) {
@@ -873,7 +886,7 @@ export default function NodesPage() {
       } else if (action === 'enable-mtls') {
         const mtlsCandidates = selected.filter((node) => {
           if (node.is_local || isProxyNode(node)) return false
-          const transport = (node.transport || (node.mtls_enabled ? 'mtls' : 'http')).toLowerCase()
+          const transport = nodeTransportId(node)
           return transport === 'http'
         })
         let enabled = 0
@@ -1162,6 +1175,11 @@ export default function NodesPage() {
                     onTransportChange={(transport) => handleTransportChange(node, transport)}
                     onEdit={() => openEdit(node)}
                     onDelete={() => handleDelete(node)}
+                    onAssignToUsers={
+                      canAssignToUsers(node)
+                        ? () => void navigate(`/users?bulkAddNode=${node.id}`)
+                        : undefined
+                    }
                     onProxyUpdated={() => void load()}
                   />
                 ))}
@@ -1468,9 +1486,14 @@ export default function NodesPage() {
               )}
 
               {!editing && nodeKind === 'vpn' && createTransport === 'http' && (
-                <p className="text-xs text-muted-foreground">
-                  Агент на VPN должен слушать публичный IP · порт {VPN_DEFAULT_PORT} · тот же API-ключ.
-                </p>
+                <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-900 dark:text-amber-100">
+                  <p className="font-medium">HTTP — связь открытым текстом</p>
+                  <p className="mt-1">
+                    API-ключ и данные узла идут без шифрования. Агент должен быть доступен панели на
+                    порту {VPN_DEFAULT_PORT}. После добавления переключите узел на «HTTPS + mTLS» —
+                    панель сама выдаст сертификаты, — или выберите SSH-туннель.
+                  </p>
+                </div>
               )}
               {!editing && nodeKind === 'vpn' && createTransport === 'mtls' && (
                 <p className="text-xs text-muted-foreground">
@@ -1831,9 +1854,7 @@ export default function NodesPage() {
                   ? 'Отметить mTLS?'
                   : 'Включить mTLS?'
                 : confirmAction === 'switch-http'
-                  ? confirmTarget &&
-                    (confirmTarget.transport || (confirmTarget.mtls_enabled ? 'mtls' : 'http')).toLowerCase() ===
-                      'ssh'
+                  ? confirmTarget && nodeTransportId(confirmTarget) === 'ssh'
                     ? 'Переключить на HTTP?'
                     : 'Сбросить mTLS в панели?'
                   : confirmAction === 'restart-agent'
@@ -1889,9 +1910,7 @@ export default function NodesPage() {
                         'Будет сгенерирован сертификат, node agent перезапустится ~5–30 сек. Связь может кратковременно прерваться.',
                     }
                 : confirmAction === 'switch-http'
-                  ? confirmTarget &&
-                    (confirmTarget.transport || (confirmTarget.mtls_enabled ? 'mtls' : 'http')).toLowerCase() ===
-                      'ssh'
+                  ? confirmTarget && nodeTransportId(confirmTarget) === 'ssh'
                     ? {
                         variant: 'info',
                         title: 'SSH-туннель будет закрыт',
@@ -1925,9 +1944,7 @@ export default function NodesPage() {
                   ? 'Отметить mTLS'
                   : 'Включить mTLS'
                 : confirmAction === 'switch-http'
-                  ? confirmTarget &&
-                    (confirmTarget.transport || (confirmTarget.mtls_enabled ? 'mtls' : 'http')).toLowerCase() ===
-                      'ssh'
+                  ? confirmTarget && nodeTransportId(confirmTarget) === 'ssh'
                     ? 'Переключить на HTTP'
                     : 'Сбросить mTLS'
                   : confirmAction === 'restart-agent'
@@ -1953,7 +1970,7 @@ export default function NodesPage() {
                     (n) =>
                       !n.is_local &&
                       !isProxyNode(n) &&
-                      (n.transport || (n.mtls_enabled ? 'mtls' : 'http')) !== 'mtls',
+                      nodeTransportId(n) !== 'mtls',
                   ).length
                 } узл(ах)?`
               : ''

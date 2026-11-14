@@ -32,7 +32,7 @@ import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import DocsLink from '@/components/shared/DocsLink'
-import { parseTimestamp } from '@/lib/datetime'
+import { formatDateTime } from '@/lib/datetime'
 import { DOCS } from '@/lib/docsUrls'
 import {
   DropdownMenu,
@@ -69,6 +69,7 @@ import {
 } from '@/components/ui/table'
 import { useNotifications } from '@/context/NotificationContext'
 import { HA_PRIMARY, HA_PUSH_FULL, HA_REPLICA, nodeStatusRu } from '@/lib/uiLabels'
+import { protocolLabel } from '@/lib/vpnTypes'
 import HaSyncResultDialog from '@/components/nodes/HaSyncResultDialog'
 import HaVerifyResultDialog from '@/components/nodes/HaVerifyResultDialog'
 import { effectiveHaWireguardDomain, formatHaSharedDomains } from '@/lib/haBadgeLabel'
@@ -88,8 +89,8 @@ const AUTO_SYNC_POLL_MS = 30_000
 
 /** Target auto-sync scope (roadmap §3). */
 const AUTO_SYNC_OPERATIONS = [
-  'Создание / удаление VPN-клиентов (копия WG conf + профилей и PKI OVPN с основного; shadow VpnConfig в режиме auto)',
-  'Продление сертификата, блокировки (временные/постоянные), разблокировка, лимиты трафика, срок WG',
+  `Создание / удаление VPN-клиентов (копия конфигов ${protocolLabel('wireguard')} + профилей и PKI OpenVPN с основного; shadow VpnConfig в режиме auto)`,
+  `Продление сертификата, блокировки (временные/постоянные), разблокировка, лимиты трафика, срок ${protocolLabel('wireguard')}`,
   'Отключение OpenVPN, метаданные клиента (описание, владелец)',
   'Массовая блокировка / продление / разблокировка, импорт CSV, шаблоны клиентов',
   'Файлы конфигурации AntiZapret: настройки (списки), редактор, файлы маршрутизации + doall',
@@ -98,10 +99,8 @@ const AUTO_SYNC_OPERATIONS = [
   'Политика узла по умолчанию (редактирование только на основном узле)',
 ] as const
 
-function formatTimestamp(value?: string | null): string | null {
-  const date = parseTimestamp(value)
-  if (!date) return null
-  return date.toLocaleString()
+function formatTimestamp(value?: string | null): string {
+  return formatDateTime(value, undefined, '')
 }
 
 type ReadinessBadge = { label: string; variant: 'default' | 'secondary' | 'destructive' | 'outline' }
@@ -326,7 +325,7 @@ function SyncGroupCard({
                     {ovpn}
                   </div>
                   <div>
-                    <span className="text-xs text-muted-foreground">WG/AWG: </span>
+                    <span className="text-xs text-muted-foreground">{protocolLabel('wireguard')}: </span>
                     {wg}
                   </div>
                 </div>
@@ -951,11 +950,11 @@ export default function NodeSyncGroupSection({
                             return (
                               <div className="space-y-0.5 text-sm">
                                 <div>
-                                  <span className="text-xs text-muted-foreground">OVPN: </span>
+                                  <span className="text-xs text-muted-foreground">{protocolLabel('openvpn')}: </span>
                                   {ovpn}
                                 </div>
                                 <div>
-                                  <span className="text-xs text-muted-foreground">WG/AWG: </span>
+                                  <span className="text-xs text-muted-foreground">{protocolLabel('wireguard')}: </span>
                                   {wg}
                                 </div>
                               </div>
@@ -1018,7 +1017,7 @@ export default function NodeSyncGroupSection({
               <DialogDescription>
                 {editing
                   ? 'Узлы в сети, одинаковая версия AntiZapret.'
-                  : 'Основной + реплика, отдельные домены для OpenVPN и WG/AWG (как в setup.sh). DNS настраивается отдельно.'}
+                  : `Основной + реплика, отдельные домены для ${protocolLabel('openvpn')} и ${protocolLabel('wireguard')} (как в setup.sh). DNS настраивается отдельно.`}
               </DialogDescription>
             </DialogHeader>
             <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
@@ -1047,7 +1046,7 @@ export default function NodeSyncGroupSection({
                   </p>
                 </div>
                 <div className="grid gap-1.5">
-                  <Label htmlFor="sync-domain-wg">Домен WireGuard / AmneziaWG</Label>
+                  <Label htmlFor="sync-domain-wg">Домен {protocolLabel('wireguard')}</Label>
                   <Input
                     id="sync-domain-wg"
                     value={sharedDomainWireguard}
@@ -1254,7 +1253,7 @@ export default function NodeSyncGroupSection({
                   OpenVPN: <code>{dnsTarget.shared_domain}</code>
                 </p>
                 <p className="mb-1">
-                  WireGuard/AmneziaWG: <code>{effectiveHaWireguardDomain(dnsTarget)}</code>
+                  {protocolLabel('wireguard')}: <code>{effectiveHaWireguardDomain(dnsTarget)}</code>
                 </p>
                 На <strong>каждый</strong> домен создайте A-запись на каждый IP выше. Для
                 автоматического переключения используйте DNS с проверкой доступности (failover).

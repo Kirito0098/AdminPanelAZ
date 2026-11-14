@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 ACTIVE_TASK_STATUSES = ("queued", "running")
 ERROR_MAX_LEN = 1000
 REPLICA_DRIFT_HINT = (
-    "Файлы на реплику скопированы, но WireGuard / AZ-AWG2 их не применил: "
+    "Файлы на реплику скопированы, но WireGuard / AWG 2.0 их не применил: "
     "проверьте реплику и нажмите «Синхронизировать»"
 )
 
@@ -40,6 +40,31 @@ def group_is_pending(db: Session, group: NodeSyncGroup) -> bool:
     """Committed status, not the loaded copy: a setup / Push full may have started meanwhile."""
     status = db.query(NodeSyncGroup.sync_status).filter(NodeSyncGroup.id == group.id).scalar()
     return status == SyncStatus.pending
+
+
+def try_claim_pending(db: Session, group_id: int) -> bool:
+    """Atomically move a group to ``pending``; False when another sync already claimed it.
+
+    Closes the read-then-write race in the router: two concurrent Setup / Push full
+    requests both read ``sync_status != pending``, but only one UPDATE matches the row.
+    Commits immediately so the SQLite write lock is released before the caller enqueues
+    its background task in a separate session (a bare ``flush`` would hold the lock and
+    make that INSERT fail with ``database is locked``).
+    """
+    claimed = (
+        db.query(NodeSyncGroup)
+        .filter(
+            NodeSyncGroup.id == group_id,
+            NodeSyncGroup.sync_status != SyncStatus.pending,
+        )
+        .update(
+            {"sync_status": SyncStatus.pending, "last_sync_error": None},
+            synchronize_session=False,
+        )
+    )
+    if claimed:
+        db.commit()
+    return bool(claimed)
 
 
 def notify_replica_drift(db: Session, group: NodeSyncGroup, drifts: list[dict[str, Any]]) -> None:

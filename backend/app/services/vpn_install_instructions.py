@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Callable, Literal
 
+from app.services.protocols import normalize_protocol
+
 InstallPlatform = Literal["ios", "mac", "windows", "android", "linux"]
 
 PLATFORM_LABELS: dict[str, str] = {
@@ -14,22 +16,6 @@ PLATFORM_LABELS: dict[str, str] = {
     "linux": "Linux",
 }
 
-_PROTOCOL_ALIASES = {
-    "openvpn": "openvpn",
-    "ovpn": "openvpn",
-    "wireguard": "wireguard",
-    "wg": "wireguard",
-    "amneziawg": "amneziawg",
-    "awg": "amneziawg",
-    "amneziawg2": "amneziawg2",
-    "awg2": "amneziawg2",
-    "awg 2.0": "amneziawg2",
-}
-
-
-def normalize_protocol(protocol: str) -> str:
-    key = (protocol or "").strip().lower()
-    return _PROTOCOL_ALIASES.get(key, key)
 
 
 def _openvpn_ios(client_name: str) -> str:
@@ -100,7 +86,7 @@ def _wireguard_ios(client_name: str) -> str:
         f"<b>📱 Установка WireGuard на iOS</b>\n"
         f"Профиль: <code>{client_name}</code>\n\n"
         "1. Установите <b>WireGuard</b> из App Store.\n"
-        "2. Откройте файл конфига из чата или отсканируйте QR (если есть).\n"
+        "2. Откройте файл конфига из чата.\n"
         "3. Нажмите «Добавить туннель» / «Import from file».\n"
         "4. Разрешите добавление VPN (Face ID / пароль).\n"
         "5. Включите туннель переключателем."
@@ -112,7 +98,7 @@ def _wireguard_android(client_name: str) -> str:
         f"<b>📱 Установка WireGuard на Android</b>\n"
         f"Профиль: <code>{client_name}</code>\n\n"
         "1. Установите <b>WireGuard</b> из Google Play.\n"
-        "2. «+» → «Сканировать QR» или «Импорт из файла».\n"
+        "2. «+» → «Импорт из файла».\n"
         "3. Выберите конфиг из загрузок / из Telegram.\n"
         "4. Сохраните туннель.\n"
         "5. Включите переключатель для подключения."

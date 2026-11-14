@@ -17,6 +17,7 @@ import type { RoutingTab } from '@/components/routing/routingWorkflow'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 import type {
@@ -26,7 +27,7 @@ import type {
   DpiAnalysisResult,
   DpiAnalysisTriggerNode,
 } from '@/types'
-import { formatCompactCount, providerCategoryLabel } from './utils'
+import { formatCompactCount, providerCategoryLabel, type StatusBadgeVariant } from './utils'
 
 const DPI_CHECKER_URL = 'https://hyperion-cs.github.io/dpi-checkers/ru/tcp-16-20/'
 
@@ -67,21 +68,49 @@ const CONFIDENCE_META: Record<
   inconclusive: { label: 'неоднозначно', variant: 'outline' },
 }
 
-const SEVERITY_META: Record<
-  string,
-  { label: string; badge: 'destructive' | 'secondary' | 'outline' | 'default' }
-> = {
-  detected: { label: 'detected', badge: 'destructive' },
-  possible_detected: { label: 'possible', badge: 'secondary' },
-  unlikely: { label: 'unlikely', badge: 'outline' },
-  not_detected: { label: 'not detected', badge: 'default' },
-  unknown: { label: 'unknown', badge: 'outline' },
+const SEVERITY_META: Record<string, { label: string; badge: StatusBadgeVariant }> = {
+  detected: { label: 'обнаружено', badge: 'destructive' },
+  possible_detected: { label: 'возможно обнаружено', badge: 'secondary' },
+  unlikely: { label: 'маловероятно', badge: 'outline' },
+  not_detected: { label: 'не обнаружено', badge: 'default' },
+  unknown: { label: 'неизвестно', badge: 'outline' },
 }
 
 const ALIVE_LABELS: Record<string, string> = {
-  yes: 'alive: yes',
-  no: 'alive: no',
-  unknown: 'alive: unknown',
+  yes: 'отвечает',
+  no: 'не отвечает',
+  unknown: 'неизвестно',
+}
+
+function aliveLabel(value?: string | null): string | null {
+  if (!value) return null
+  return ALIVE_LABELS[value] ?? 'неизвестно'
+}
+
+interface RouteState {
+  /** Короткая подпись для колонки «Маршрут». */
+  label: string
+  /** Расширенная подсказка для бейджа в рекомендациях. */
+  hint: string
+  badge: StatusBadgeVariant
+}
+
+const ROUTE_STATE: Record<'enabled' | 'disabled' | 'missing' | 'unmatched', RouteState> = {
+  enabled: { label: 'включён', hint: 'уже включён', badge: 'default' },
+  disabled: { label: 'выключен', hint: 'выключен', badge: 'secondary' },
+  missing: { label: 'нет на узле', hint: 'нет на узле — нужно развёртывание', badge: 'outline' },
+  unmatched: { label: 'не сопоставлен', hint: 'нет в каталоге', badge: 'outline' },
+}
+
+interface DpiLogRow {
+  node: DpiAnalysisNode
+  provider?: CidrProviderInfo
+  providerName: string
+  url: string | null
+  severity: { label: string; badge: StatusBadgeVariant }
+  aliveLabel: string | null
+  route: RouteState
+  cidrLabel: string | null
 }
 
 interface AnalysisTabProps {
@@ -92,6 +121,42 @@ interface AnalysisTabProps {
 function hostUrl(host?: string | null) {
   if (!host) return null
   return `https://${host}/`
+}
+
+function providerRouteState(provider?: CidrProviderInfo): RouteState {
+  if (!provider) return ROUTE_STATE.unmatched
+  if (provider.enabled) return ROUTE_STATE.enabled
+  if (provider.has_source) return ROUTE_STATE.disabled
+  return ROUTE_STATE.missing
+}
+
+function providerDisplayName(
+  file: string,
+  providerByFile: ReadonlyMap<string, CidrProviderInfo>,
+  fallback?: string,
+): string {
+  return providerByFile.get(file)?.name ?? fallback ?? file
+}
+
+/** Одна модель строки DPI-лога: таблица и карточка — два рендера одних данных. */
+function buildDpiLogRow(
+  node: DpiAnalysisNode,
+  providerByFile: ReadonlyMap<string, CidrProviderInfo>,
+): DpiLogRow {
+  const provider = node.file ? providerByFile.get(node.file) : undefined
+  return {
+    node,
+    provider,
+    providerName: node.file ? providerDisplayName(node.file, providerByFile) : '—',
+    url: hostUrl(node.host),
+    severity: SEVERITY_META[node.severity] ?? SEVERITY_META.unknown,
+    aliveLabel: aliveLabel(node.alive),
+    route: providerRouteState(provider),
+    cidrLabel:
+      provider?.has_source && provider.cidr_count > 0
+        ? `${formatCompactCount(provider.cidr_count)} CIDR`
+        : null,
+  }
 }
 
 function NodeChip({ node }: { node: DpiAnalysisTriggerNode }) {
@@ -107,12 +172,12 @@ function NodeChip({ node }: { node: DpiAnalysisTriggerNode }) {
         </Badge>
         {node.dpi_method != null && (
           <Badge variant="outline" className="text-[10px]">
-            method {node.dpi_method}
+            метод {node.dpi_method}
           </Badge>
         )}
         {node.alive && (
           <Badge variant="outline" className="text-[10px]">
-            {ALIVE_LABELS[node.alive] ?? node.alive}
+            {aliveLabel(node.alive)}
           </Badge>
         )}
       </div>
@@ -139,26 +204,15 @@ function NodeChip({ node }: { node: DpiAnalysisTriggerNode }) {
   )
 }
 
-function DpiLogNodeCard({
-  node,
-  provider,
-  providerName,
-  routeLabel,
-}: {
-  node: DpiAnalysisNode
-  provider?: CidrProviderInfo
-  providerName: string
-  routeLabel: string
-}) {
-  const severity = SEVERITY_META[node.severity] ?? SEVERITY_META.unknown
-  const url = hostUrl(node.host)
+function DpiLogNodeCard({ row }: { row: DpiLogRow }) {
+  const { node, provider, providerName, url, severity, aliveLabel, route, cidrLabel } = row
 
   return (
     <Card className="p-4">
       <div className="font-mono text-xs font-medium">{node.node_id}</div>
       <dl className="mt-3 grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
         <div>
-          <dt className="text-muted-foreground">Хост checker</dt>
+          <dt className="text-muted-foreground">Хост проверки</dt>
           <dd className="mt-0.5">
             {node.host ? (
               <>
@@ -193,11 +247,11 @@ function DpiLogNodeCard({
           </dd>
         </div>
         <div>
-          <dt className="text-muted-foreground">Alive</dt>
+          <dt className="text-muted-foreground">Доступность</dt>
           <dd className="mt-0.5">
-            {node.alive ? (
+            {aliveLabel ? (
               <Badge variant="outline" className="text-[10px]">
-                {ALIVE_LABELS[node.alive] ?? node.alive}
+                {aliveLabel}
               </Badge>
             ) : (
               <span className="text-muted-foreground">—</span>
@@ -209,7 +263,7 @@ function DpiLogNodeCard({
           <dd className="mt-0.5">
             <Badge variant={severity.badge}>{severity.label}</Badge>
             {node.dpi_method != null && (
-              <div className="mt-1 text-[11px] text-muted-foreground">method {node.dpi_method}</div>
+              <div className="mt-1 text-[11px] text-muted-foreground">метод {node.dpi_method}</div>
             )}
             <div className="mt-1 text-[11px] text-muted-foreground">{node.status_text}</div>
           </dd>
@@ -217,17 +271,9 @@ function DpiLogNodeCard({
         <div className="sm:col-span-2">
           <dt className="text-muted-foreground">Маршрут</dt>
           <dd className="mt-0.5">
-            <Badge
-              variant={
-                provider?.enabled ? 'default' : provider?.has_source ? 'secondary' : provider ? 'outline' : 'outline'
-              }
-            >
-              {routeLabel}
-            </Badge>
-            {provider?.has_source && provider.cidr_count > 0 && (
-              <div className="mt-1 text-[11px] text-muted-foreground tabular-nums">
-                {formatCompactCount(provider.cidr_count)} CIDR
-              </div>
+            <Badge variant={route.badge}>{route.label}</Badge>
+            {provider?.has_source && cidrLabel && (
+              <div className="mt-1 text-[11px] text-muted-foreground tabular-nums">{cidrLabel}</div>
             )}
           </dd>
         </div>
@@ -266,6 +312,11 @@ export default function AnalysisTab({ providers, onNavigateTab }: AnalysisTabPro
     })
   }, [result, providerByFile])
 
+  const logRows = useMemo(
+    () => (result?.nodes ?? []).map((node) => buildDpiLogRow(node, providerByFile)),
+    [result?.nodes, providerByFile],
+  )
+
   async function handleAnalyze() {
     const text = logText.trim()
     if (!text) {
@@ -290,18 +341,6 @@ export default function AnalysisTab({ providers, onNavigateTab }: AnalysisTabPro
     }
   }
 
-  function providerLabel(file: string, fallback?: string) {
-    return providerByFile.get(file)?.name ?? fallback ?? file
-  }
-
-  function providerStatusHint(file: string) {
-    const provider = providerByFile.get(file)
-    if (!provider) return 'нет в каталоге'
-    if (!provider.has_source) return 'нет на узле — deploy'
-    if (provider.enabled) return 'уже включён'
-    return 'выключен'
-  }
-
   return (
     <div className="space-y-6">
       <StatusPanel title="Анализ лога DPI checker" icon={FlaskConical}>
@@ -321,8 +360,8 @@ export default function AnalysisTab({ providers, onNavigateTab }: AnalysisTabPro
             маршрутизации CIDR — checker нужно запускать <strong className="font-medium text-foreground">без VPN</strong>.
           </p>
           <p>
-            «Detected» означает таймаут POST ~64 KB, а не «сайт не открывается». Для каждого списка показываем узел checker
-            и hostname.
+            «Обнаружено» означает таймаут POST ~64 KB, а не «сайт не открывается». Для каждого списка показываем
+            узел проверки и hostname.
           </p>
         </div>
       </StatusPanel>
@@ -332,7 +371,7 @@ export default function AnalysisTab({ providers, onNavigateTab }: AnalysisTabPro
           <div>
             <div className="text-sm font-medium">Лог проверки</div>
             <div className="text-xs text-muted-foreground">
-              Консоль checker, таблица 6 колонок или 4 колонки (ID · провайдер · alive · DPI)
+              Консоль проверки, таблица 6 колонок или 4 колонки (ID · провайдер · доступность · DPI)
             </div>
           </div>
           <Button variant="outline" size="sm" asChild>
@@ -416,21 +455,21 @@ export default function AnalysisTab({ providers, onNavigateTab }: AnalysisTabPro
               value={result.summary.actionable_files ?? 0}
               icon={ShieldAlert}
               accent="red"
-              sub="high/medium, must или should"
+              sub="высокая/средняя уверенность, обязательно или рекомендуется"
             />
             <MetricCard
               label="Слабых сигналов"
               value={result.summary.weak_signals ?? 0}
               icon={AlertTriangle}
               accent="amber"
-              sub="weak / inconclusive"
+              sub="слабый или неоднозначный сигнал"
             />
             <MetricCard
               label="Можно не включать"
               value={result.recommendations.filter((item) => item.level === 'skip').length}
               icon={CheckCircle2}
               accent="green"
-              sub="not detected на узлах"
+              sub="не обнаружено на узлах"
             />
           </div>
 
@@ -464,6 +503,7 @@ export default function AnalysisTab({ providers, onNavigateTab }: AnalysisTabPro
                         {items.map((item) => {
                           const provider = providerByFile.get(item.file)
                           const confidence = CONFIDENCE_META[item.confidence]
+                          const route = providerRouteState(provider)
                           return (
                             <article
                               key={item.file}
@@ -471,7 +511,7 @@ export default function AnalysisTab({ providers, onNavigateTab }: AnalysisTabPro
                             >
                               <div className="flex flex-wrap items-start justify-between gap-2">
                                 <div className="min-w-0">
-                                  <div className="font-medium">{providerLabel(item.file, item.name)}</div>
+                                  <div className="font-medium">{providerDisplayName(item.file, providerByFile, item.name)}</div>
                                   <div className="text-[11px] text-muted-foreground">{item.file}</div>
                                 </div>
                                 <div className="flex flex-wrap items-center gap-1.5">
@@ -484,16 +524,10 @@ export default function AnalysisTab({ providers, onNavigateTab }: AnalysisTabPro
                                     </Badge>
                                   )}
                                   <Badge
-                                    variant={
-                                      provider?.enabled
-                                        ? 'default'
-                                        : provider?.has_source
-                                          ? 'secondary'
-                                          : 'outline'
-                                    }
+                                    variant={route.badge}
                                     className="text-[10px]"
                                   >
-                                    {providerStatusHint(item.file)}
+                                    {route.hint}
                                   </Badge>
                                 </div>
                               </div>
@@ -554,113 +588,85 @@ export default function AnalysisTab({ providers, onNavigateTab }: AnalysisTabPro
             </div>
             <div className="p-4">
               <ResponsiveDataView
-                mobile={result.nodes.map((node) => {
-                  const provider = node.file ? providerByFile.get(node.file) : undefined
-                  const routeLabel = provider?.enabled
-                    ? 'включён'
-                    : provider?.has_source
-                      ? 'выключен'
-                      : provider
-                        ? 'нет на узле'
-                        : '—'
-                  return (
-                    <DpiLogNodeCard
-                      key={node.node_id}
-                      node={node}
-                      provider={provider}
-                      providerName={node.file ? providerLabel(node.file) : '—'}
-                      routeLabel={routeLabel}
-                    />
-                  )
-                })}
+                mobile={logRows.map((row) => (
+                  <DpiLogNodeCard key={row.node.node_id} row={row} />
+                ))}
                 desktop={
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="border-b bg-muted/30 text-left text-xs text-muted-foreground">
-                          <th className="px-4 py-2 font-medium">Узел</th>
-                          <th className="px-4 py-2 font-medium">Хост checker</th>
-                          <th className="px-4 py-2 font-medium">CIDR-список</th>
-                          <th className="px-4 py-2 font-medium">Alive</th>
-                          <th className="px-4 py-2 font-medium">tcp 16-20</th>
-                          <th className="px-4 py-2 font-medium">Маршрут</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {result.nodes.map((node) => {
-                          const provider = node.file ? providerByFile.get(node.file) : undefined
-                          const severity = SEVERITY_META[node.severity] ?? SEVERITY_META.unknown
-                          const url = hostUrl(node.host)
-                          return (
-                            <tr key={node.node_id} className="border-b last:border-0 align-top">
-                              <td className="px-4 py-2.5 font-mono text-xs">{node.node_id}</td>
-                              <td className="px-4 py-2.5">
-                                {node.host ? (
-                                  <div>
-                                    <a
-                                      href={url ?? '#'}
-                                      target="_blank"
-                                      rel="noopener noreferrer"
-                                      className="font-mono text-xs text-primary hover:underline"
-                                    >
-                                      {node.host}
-                                    </a>
-                                    {node.checker_country && (
-                                      <div className="text-[11px] text-muted-foreground">{node.checker_country}</div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-muted-foreground">—</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-2.5">
-                                {node.file ? (
-                                  <>
-                                    <div>{providerLabel(node.file)}</div>
-                                    <div className="text-[11px] text-muted-foreground">{node.file}</div>
-                                  </>
-                                ) : (
-                                  <span className="text-muted-foreground">не сопоставлен</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-2.5">
-                                {node.alive ? (
-                                  <Badge variant="outline" className="text-[10px]">
-                                    {ALIVE_LABELS[node.alive] ?? node.alive}
-                                  </Badge>
-                                ) : (
-                                  <span className="text-muted-foreground">—</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-2.5">
-                                <Badge variant={severity.badge}>{severity.label}</Badge>
-                                {node.dpi_method != null && (
-                                  <div className="mt-1 text-[11px] text-muted-foreground">method {node.dpi_method}</div>
-                                )}
-                                <div className="mt-1 text-[11px] text-muted-foreground">{node.status_text}</div>
-                              </td>
-                              <td className="px-4 py-2.5">
-                                {provider?.enabled ? (
-                                  <Badge variant="default">включён</Badge>
-                                ) : provider?.has_source ? (
-                                  <Badge variant="secondary">выключен</Badge>
-                                ) : provider ? (
-                                  <Badge variant="outline">нет на узле</Badge>
-                                ) : (
-                                  <span className="text-muted-foreground">—</span>
-                                )}
-                                {provider?.has_source && provider.cidr_count > 0 && (
-                                  <div className="mt-1 text-[11px] text-muted-foreground tabular-nums">
-                                    {formatCompactCount(provider.cidr_count)} CIDR
-                                  </div>
-                                )}
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-muted/30">
+                        <TableHead className="h-9 px-4 text-xs">Узел</TableHead>
+                        <TableHead className="h-9 px-4 text-xs">Хост проверки</TableHead>
+                        <TableHead className="h-9 px-4 text-xs">CIDR-список</TableHead>
+                        <TableHead className="h-9 px-4 text-xs">Доступность</TableHead>
+                        <TableHead className="h-9 px-4 text-xs">tcp 16-20</TableHead>
+                        <TableHead className="h-9 px-4 text-xs">Маршрут</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {logRows.map((row) => {
+                        const { node, provider, providerName, url, severity, aliveLabel, route, cidrLabel } = row
+                        return (
+                          <TableRow key={node.node_id} className="align-top">
+                            <TableCell className="px-4 py-2.5 font-mono text-xs">{node.node_id}</TableCell>
+                            <TableCell className="px-4 py-2.5">
+                              {node.host ? (
+                                <div>
+                                  <a
+                                    href={url ?? '#'}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="font-mono text-xs text-primary hover:underline"
+                                  >
+                                    {node.host}
+                                  </a>
+                                  {node.checker_country && (
+                                    <div className="text-[11px] text-muted-foreground">{node.checker_country}</div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="px-4 py-2.5">
+                              {node.file ? (
+                                <>
+                                  <div>{providerName}</div>
+                                  <div className="text-[11px] text-muted-foreground">{node.file}</div>
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">не сопоставлен</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="px-4 py-2.5">
+                              {aliveLabel ? (
+                                <Badge variant="outline" className="text-[10px]">
+                                  {aliveLabel}
+                                </Badge>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="px-4 py-2.5">
+                              <Badge variant={severity.badge}>{severity.label}</Badge>
+                              {node.dpi_method != null && (
+                                <div className="mt-1 text-[11px] text-muted-foreground">метод {node.dpi_method}</div>
+                              )}
+                              <div className="mt-1 text-[11px] text-muted-foreground">{node.status_text}</div>
+                            </TableCell>
+                            <TableCell className="px-4 py-2.5">
+                              <Badge variant={route.badge}>{route.label}</Badge>
+                              {provider?.has_source && cidrLabel && (
+                                <div className="mt-1 text-[11px] text-muted-foreground tabular-nums">
+                                  {cidrLabel}
+                                </div>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
                 }
                 mobileClassName="space-y-3"
               />

@@ -264,7 +264,8 @@ async def handle_maintenance_callback(ctx: BotContext, data: str, *, message_id:
 
             result = recreate_profiles(_make_bot_request(ctx), ctx.db, ctx.user)
             _log_bot_action(ctx, "settings_recreate_profiles", "action=recreate_profiles")
-            await send_message(ctx.bot_token, ctx.chat_id, f"✅ {result.message}")
+            msg = result["message"] if isinstance(result, dict) else getattr(result, "message", "OK")
+            await send_message(ctx.bot_token, ctx.chat_id, f"✅ {msg}")
             return
 
         if rest.startswith("cfrm:rst:"):

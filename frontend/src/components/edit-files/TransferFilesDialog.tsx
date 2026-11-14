@@ -25,6 +25,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import type { EditFileTransferResult } from '@/api/client'
+import { pluralRu } from '@/lib/plural'
 import { ALL_NODES_ONLINE_PHRASE, NODES_ONLINE_PHRASE } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import type { EditFileEntry, Node } from '@/types'
@@ -155,11 +156,8 @@ export default function TransferFilesDialog({
 
   const summaryText = useMemo(() => {
     if (!canSubmit) return null
-    const fileWord =
-      selectedFileKeys.length === 1
-        ? '1 файл'
-        : `${selectedFileKeys.length} файла`
-    const nodeWord = targetCount === 1 ? '1 узел' : `${targetCount} узлов`
+    const fileWord = `${selectedFileKeys.length} ${pluralRu(selectedFileKeys.length, ['файл', 'файла', 'файлов'])}`
+    const nodeWord = `${targetCount} ${pluralRu(targetCount, ['узел', 'узла', 'узлов'])}`
     return `${fileWord} → ${nodeWord}`
   }, [canSubmit, selectedFileKeys.length, targetCount])
 

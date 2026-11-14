@@ -109,7 +109,7 @@ export default function WarperAlerts({ health, activeNode, loadError, onToggled 
         <SettingsAlert variant="danger" title="Устаревший node agent на узле">
           Агент узла блокирует AZ-WARP при <strong>ANTIZAPRET_WARP=y</strong>. С AZ-WARP 1.5.0 этот запрет
           снят — обновите node agent панели на узле или отключите встроенный WARP в{' '}
-          <Link to="/antizapret" className="font-medium text-primary underline-offset-4 hover:underline">
+          <Link to="/protocols/antizapret" className="font-medium text-primary underline-offset-4 hover:underline">
             Конфиг AntiZapret
           </Link>
           .

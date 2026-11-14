@@ -3,8 +3,8 @@
 Веб-панель для администрирования VPN-сервера [AntiZapret](https://github.com/GubernievS/AntiZapret-VPN)
 
 [![GitHub](https://img.shields.io/badge/GitHub-Kirito0098%2FAdminPanelAZ-181717?style=for-the-badge&logo=github)](https://github.com/Kirito0098/AdminPanelAZ)
-[![Version](https://img.shields.io/badge/Панель-2.26.5-blue?style=for-the-badge)](CHANGELOG.md)
-[![Node agent](https://img.shields.io/badge/Node_agent-1.13.0-555?style=for-the-badge)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Панель-2.27.0-blue?style=for-the-badge)](CHANGELOG.md)
+[![Node agent](https://img.shields.io/badge/Node_agent-1.18.0-555?style=for-the-badge)](CHANGELOG.md)
 [![FastAPI](https://img.shields.io/badge/Backend-FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)](backend/)
 [![React](https://img.shields.io/badge/Frontend-React-61DAFB?style=for-the-badge&logo=react&logoColor=black)](frontend/)
 
@@ -71,7 +71,7 @@ wget -qO /tmp/install.sh https://raw.githubusercontent.com/Kirito0098/AdminPanel
 sudo bash /tmp/install.sh
 ```
 
-Мастер спросит: тип установки, порты, логин/пароль администратора, ключ node agent (если ставите узел) и каталог бэкапов.
+Мастер задаёт 5 шагов: что ставим, порт панели, сценарий (**Домашняя** по умолчанию или **Коммерческая**), сервисы (модуль Telegram, авто-бэкап) и логин/пароль администратора. Каталог бэкапов — `/var/backups/adminpanelaz`, меняется в панели. Ключ node agent спрашивается только для узла или прокси.
 
 На **RU-прокси** (репозиторий уже на машине, `proxy.sh` установлен вручную):
 
@@ -87,7 +87,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
 - **Настройки → Адрес сайта и HTTPS** — DDNS, домен, Let's Encrypt. **Рекомендуем сразу перейти на HTTPS** — так доступ к панели защищён (шифрование трафика, безопасный вход).
 - **Telegram** — bot token / chat (раздел уже в меню)
 
-Подробнее: [после установки](#-после-установки) · [DDNS](#-бесплатный-адрес-для-панели-ddns) · [Production](#️-production-vds-redis-и-профили)
+Подробнее: [после установки](#-после-установки) · [DDNS](#-бесплатный-адрес-для-панели-ddns) · [Production](#️-production-vds-redis-и-сценарии)
 
 ## 📑 Содержание
 
@@ -101,7 +101,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
 - [📖 Руководства пользователя](#-руководства-пользователя)
 - [🌐 Бесплатный адрес (DDNS)](#-бесплатный-адрес-для-панели-ddns)
 - [🔗 StatusOpenVPN на одном домене](#-statusopenvpn-на-одном-домене)
-- [⚙️ Production: VDS, Redis и профили](#️-production-vds-redis-и-профили)
+- [⚙️ Production: VDS, Redis и сценарии](#️-production-vds-redis-и-сценарии)
 - [🔐 Безопасность](#-безопасность)
 - [💻 Полезные команды](#-полезные-команды-на-сервере)
 - [📝 История изменений](#-история-изменений)
@@ -116,7 +116,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
 | | | |
 | --- | --- | --- |
 | [<img src="docs/assets/telegram-promo/10-configurations.png" alt="Конфигурации" width="400">](docs/konfiguracii.md) | [<img src="docs/assets/telegram-promo/09-nodes.png" alt="Узлы VPN" width="400">](docs/uzly.md) | [<img src="docs/assets/telegram-promo/07-routing-cidr.png" alt="Маршрутизация CIDR" width="400">](docs/routing-cidr.md) |
-| [<img src="docs/assets/telegram-promo/08-routing-az-warp.png" alt="AZ-WARP" width="400">](docs/warper.md) | [<img src="docs/assets/telegram-promo/04-monitoring-noc.png" alt="Мониторинг и NOC" width="400">](docs/noc-monitoring.md) | [<img src="docs/assets/telegram-promo/03-telegram-integration.png" alt="Telegram" width="400">](docs/Telegram.md) |
+| [<img src="docs/assets/telegram-promo/08-routing-az-warp.png" alt="AZ-WARP" width="400">](docs/warper.md) | [<img src="docs/assets/telegram-promo/04-monitoring-noc.png" alt="Мониторинг и NOC" width="400">](docs/monitoring.md) | [<img src="docs/assets/telegram-promo/03-telegram-integration.png" alt="Telegram" width="400">](docs/Telegram.md) |
 | [<img src="docs/assets/telegram-promo/11-client-portal.png" alt="Клиентский портал" width="400">](docs/podpiska.md) | [<img src="docs/assets/telegram-promo/12-unlock-keys.png" alt="Unlock-ключи" width="400">](docs/podpiska.md) | |
 
 ## ✨ Возможности
@@ -127,7 +127,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
   <img src="docs/assets/telegram-promo/10-configurations.png" alt="Конфигурации — VPN-клиенты" width="900">
 </p>
 
-- OpenVPN, WireGuard, AmneziaWG — создание, скачивание, QR-коды ([инструкция](docs/konfiguracii.md))
+- OpenVPN, WG/AWG 1.5, AWG 2.0 — создание, скачивание, QR-коды ([инструкция](docs/konfiguracii.md))
 - Блокировка, срок действия, лимиты трафика
 - **Подписка** — отдельный раздел меню (`/subscription`): unlock-коды и доступ до даты, настройка клиентского портала ([инструкция](docs/podpiska.md))
 - **Срок доступа на пользователе** — поле «Доступ до» в **Настройки → Пользователи** продлевает или ограничивает сразу все его VPN-профили ([подписка](docs/podpiska.md#срок-доступа-пользователя))
@@ -161,6 +161,8 @@ sudo ./install.sh --proxy-only --with-systemd -y
 - AZ-WARP — точечная маршрутизация через Cloudflare WARP ([инструкция](docs/warper.md))
 - **OpenVPN Buffer Guard** — защита OpenVPN от шторма ENOBUFS: от уведомления до отключения клиента, перезапуска OpenVPN и временного бана (по умолчанию выкл.) ([инструкция](docs/antizapret-config.md#openvpn-buffer-guard-enobufs))
 - **DNS: ответ на AAAA** — NODATA вместо `::` для AntiZapret и полного VPN, чтобы клиенты не подключались к `[::]` ([инструкция](docs/antizapret-config.md#dns-ответ-на-aaaa))
+- **DNS-серверы** — выбор upstream DNS для AntiZapret и полного VPN прямо в `kresd.conf` с перезапуском резолверов ([инструкция](docs/antizapret-config.md#dns-серверы))
+- **OpenVPN: профили, логи и состояние установки** — `duplicate-cn` (несколько устройств с одним профилем), подробные логи, а также чтение MTU, DCO, патча антицензуры, включённых протоколов и таймера обновления ([инструкция](docs/antizapret-config.md#openvpn-профили-логи-и-состояние-установки))
 
 <p align="center">
   <img src="docs/assets/telegram-promo/08-routing-az-warp.png" alt="AZ-WARP — интеграция с github.com/Liafanx/AZ-WARP" width="900">
@@ -174,7 +176,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
 
 - **NOC** — кто подключён, откуда (город и провайдер), графики, состояние служб;
   **Telegram-сводки** — ежедневный/еженедельный текст и еженедельный PNG-дашборд
-  ([инструкция](docs/noc-monitoring.md))
+  ([инструкция](docs/monitoring.md))
 - **Трафик** — расход по клиентам и доля в общем объёме, лимиты, окна 1д / 7д / 30д ([инструкция](docs/traffic-monitoring.md))
 - **Сервер** — live CPU/RAM/диск, **история ресурсов** за 1 / 7 / 30 дней, vnStat ([инструкция](docs/server-monitor.md))
 - **Локальная GeoIP** — MaxMind GeoLite2 в `backend/data/geoip/` ([инструкция](docs/GeoIP.md))
@@ -216,7 +218,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
 6. В разделе **Клиенты** нажмите **Синхронизировать** — [инструкция](docs/konfiguracii.md)
 7. **Подписка** — unlock-коды и **клиентский портал** (поддомен + «Настроить под текущую публикацию»)
 8. **Telegram** — раздел уже в меню; укажите bot token в UI — [инструкция](docs/Telegram.md)
-9. Для **HA** (два сервера на один домен): создайте группу синхронизации на **Узлах**, нажмите **Синхронизировать** (домен → Push full → verify) — [Node Sync](docs/NodeSync.md). После обновления панели обновите **node agent** на VPN-узлах (**Узлы** → «Обновить», агент перезапустится сам), чтобы в «Узлах» отображалась версия **1.13.0**
+9. Для **HA** (два сервера на один домен): создайте группу синхронизации на **Узлах**, нажмите **Синхронизировать** (домен → Push full → verify) — [Node Sync](docs/NodeSync.md). После обновления панели обновите **node agent** на VPN-узлах (**Узлы** → «Обновить», агент перезапустится сам), чтобы в «Узлах» отображалась версия **1.18.0**
 
 > [!NOTE]
 > **Авто-бэкап** после install включён (каждые **7** дней) — изменить в [Настройки → Резервные копии](docs/nastrojki/rezervnye-kopii.md).
@@ -259,7 +261,7 @@ AntiZapret и VPN-конфиги при удалении панели **не т�
 - **Подписка и клиентский портал** — [docs/podpiska.md](docs/podpiska.md): срок доступа на пользователе, unlock-коды, постоянные ссылки `/p/c_…` и `/p/u_…`
 - **Несколько серверов и HA** — [docs/uzly.md](docs/uzly.md) · [docs/NodeSync.md](docs/NodeSync.md) · [docs/node-ssh-transport.md](docs/node-ssh-transport.md)
 - **Прокси AntiZapret** — [docs/proxy-nodes.md](docs/proxy-nodes.md) · [docs/proxy-agent.md](docs/proxy-agent.md)
-- **NOC и трафик** — [docs/noc-monitoring.md](docs/noc-monitoring.md) · [docs/traffic-monitoring.md](docs/traffic-monitoring.md)
+- **NOC и трафик** — [docs/monitoring.md](docs/monitoring.md) · [docs/traffic-monitoring.md](docs/traffic-monitoring.md)
 - **Настройки и бэкапы** — [docs/nastrojki/README.md](docs/nastrojki/README.md)
 - **Адрес сайта, HTTPS, StatusOpenVPN** — [docs/nastrojki/set-i-publikaciya.md](docs/nastrojki/set-i-publikaciya.md)
 - **Telegram** — [docs/Telegram.md](docs/Telegram.md)
@@ -300,18 +302,18 @@ CLI (если нужно вручную): `sudo ./scripts/ddns-update.sh update|
 
 Подробно: [docs/nastrojki/set-i-publikaciya.md](docs/nastrojki/set-i-publikaciya.md#совместно-со-statusopenvpn-на-одном-домене)
 
-## ⚙️ Production: VDS, Redis и профили
+## ⚙️ Production: VDS, Redis и сценарии
 
-После установки: профиль **Full**, `UVICORN_WORKERS=1`. Профиль и модули меняются в **Настройки → Разделы панели** ([инструкция](docs/nastrojki/moduli.md)), затем `sudo systemctl restart adminpanelaz`.
+После установки: сценарий из мастера (`SCENARIO_PRESET=home` по умолчанию), `UVICORN_WORKERS=1`. Сценарий и модули меняются в **Настройки → Разделы панели** ([инструкция](docs/nastrojki/moduli.md)), затем `sudo systemctl restart adminpanelaz`.
 
-**Ориентир по RAM** (Full, панель + локальная нода): ~**411 MB** стек (ср. ~148 MB за 7 дней). Для одного VDS с VPN — **1–2 GB**; только панель на Minimal — **1 GB** + swap.
+**Ориентир по RAM** (панель + локальная нода): ~**411 MB** стек (ср. ~148 MB за 7 дней) в сценарии «Коммерческое». Для одного VDS с VPN — **1–2 GB**; только панель в сценарии «Только панель» — **1 GB** + swap.
 
 **Workers > 1:** в `backend/.env` задайте `UVICORN_WORKERS=N` и Redis (`AUTH_RATE_LIMIT_BACKEND=redis`, `API_RATE_LIMIT_BACKEND=redis`, `REDIS_URL=redis://127.0.0.1:6379/0`), затем перезапустите панель. См. [SECURITY.md](SECURITY.md).
 
 **LAN-ноды / mTLS / SSH:** приватные IP узлов — `ALLOW_INTERNAL_NODES=true` в `.env`; mTLS и SSH — per-node в UI **Узлы** (SSH — модуль **SSH transport узлов**). Подробнее: [docs/uzly.md](docs/uzly.md) · [docs/node-ssh-transport.md](docs/node-ssh-transport.md).
 
 - **Health** — `GET /api/health`, `GET /api/health/deep` (только с сервера или с JWT админа)
-- **Node agent** — **1.13.0** (для HA: ≥ 1.3.0; byte-copy `.ovpn` при Push full: ≥ 1.5.0; сроки сертификатов: ≥ 1.6.0; AZ-AWG2 / reboot: ≥ 1.7.0; uptime / `listen_tls` в `/health`: ≥ 1.8.0; AZ-WARP 1.5, файлы WARP/RPZ/Lua, OpenVPN Buffer Guard, `block-batch`: ≥ 1.11.0; без лишнего перезапуска OpenVPN после doall при multihome: ≥ 1.11.1; отказ запуска и отказ обновления при mTLS без сертификатов, `403` по allowlist IP, импорт/восстановление без блокировки агента, новый ключ сначала в `node_agent.env`: ≥ 1.12.0; связь с Telegram через узел для панели в РФ: ≥ 1.13.0)
+- **Node agent** — **1.18.0** (для HA: ≥ 1.3.0; byte-copy `.ovpn` при Push full: ≥ 1.5.0; сроки сертификатов: ≥ 1.6.0; AZ-AWG2 / reboot: ≥ 1.7.0; uptime / `listen_tls` в `/health`: ≥ 1.8.0; AZ-WARP 1.5, файлы WARP/RPZ/Lua, OpenVPN Buffer Guard, `block-batch`: ≥ 1.11.0; без лишнего перезапуска OpenVPN после doall при multihome: ≥ 1.11.1; отказ запуска и отказ обновления при mTLS без сертификатов, `403` по allowlist IP, импорт/восстановление без блокировки агента, новый ключ сначала в `node_agent.env`: ≥ 1.12.0; связь с Telegram через узел для панели в РФ: ≥ 1.13.0; файлы Proxy DNS `deny3-rpz.txt` / `custom3.lua`: ≥ 1.14.0; выбор DNS-серверов `GET/PUT /configs/dns-servers`: ≥ 1.15.0; настройки OpenVPN `GET/PUT /openvpn/tuning`: ≥ 1.16.0; MTU, DCO, протоколы и патч OpenVPN: ≥ 1.17.0)
 
 ## 🔐 Безопасность
 
@@ -350,9 +352,9 @@ sudo ./scripts/nginx-repair.sh      # восстановить nginx (напри
   <img src="docs/assets/telegram-promo/05-whats-new.png" alt="Последние обновления AdminPanel AntiZapret" width="900">
 </p>
 
-**Текущая версия: панель 2.26.5 · node agent 1.13.0** (2026-10-14)
+**Текущая версия: панель 2.27.0 · node agent 1.18.0** (2026-11-15)
 
-> **В 2.26.5:** связь с Telegram через зарубежные VPN-узлы для панели в РФ (с переходом на следующий узел при отказе); смена пароля при первом входе, проверяемая сервером; экран «что изменится» перед полным обновлением; исправлены Mini App и окно unlock-ключа на телефоне; node agent 1.13.0 — [CHANGELOG 2.26.5](CHANGELOG.md#2265---2026-10-14)
+> **В 2.27.0:** абоненты, выдача доступа и заявки; уведомления и лимиты трафика; клиентский портал и unlock-коды; сценарии модулей; надёжность CIDR/HA и улучшения Telegram; node agent 1.18.0 — [CHANGELOG 2.27.0](CHANGELOG.md#2270---2026-11-15)
 
 > **В 2.26.4:** консольное меню `sudo adminpanelaz` и полное обновление `install.sh --update`; выбор сервера в портале пользователя; лимиты самообслуживания в интерфейсе; 2FA для всех ролей и усиление входа; нейтральная страница входа; node agent 1.12.0 — [CHANGELOG 2.26.4](CHANGELOG.md#2264---2026-10-12)
 

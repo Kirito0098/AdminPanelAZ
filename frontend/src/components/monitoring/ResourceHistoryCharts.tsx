@@ -1,60 +1,45 @@
 import { useMemo } from 'react'
 import { Activity, Cpu, HardDrive, MemoryStick } from 'lucide-react'
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { CartesianGrid, Line, LineChart, Tooltip, YAxis } from 'recharts'
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { formatDate, formatDateTime, formatTime } from '@/lib/datetime'
+import {
+  CHART_COLORS,
+  CHART_GRID,
+  CHART_MARGIN,
+  PercentAreaChart,
+  RANGE_LABELS,
+  TimeXAxis,
+  formatChartLabel,
+  type PercentAreaSeries,
+  type ResourceChartPeriod,
+} from '@/components/monitoring/resourceChartShared'
 import type { ResourceHistory, ResourceHistoryPoint } from '@/types'
 
-const CHART_CPU = 'hsl(187, 72%, 45%)'
-const CHART_RAM = 'hsl(142, 71%, 45%)'
-const CHART_DISK = 'hsl(38, 92%, 50%)'
-const CHART_LOAD = 'hsl(217, 33%, 55%)'
+const PERCENT_SERIES: PercentAreaSeries[] = [
+  { key: 'cpu', color: CHART_COLORS.cpu, name: 'cpu', gradientId: 'resCpu' },
+  { key: 'memory', color: CHART_COLORS.ram, name: 'memory', gradientId: 'resRam' },
+  { key: 'disk', color: CHART_COLORS.disk, name: 'disk', gradientId: 'resDisk' },
+]
 
-const RANGE_LABELS: Record<'1d' | '7d' | '30d', string> = {
-  '1d': '1 день',
-  '7d': '7 дней',
-  '30d': '30 дней',
-}
-
-type Period = '1d' | '7d' | '30d'
+const PERCENT_LEGEND_LABELS: Record<string, string> = { cpu: 'CPU', memory: 'RAM', disk: 'Диск' }
 
 type ResourceHistoryChartsProps = {
   data: ResourceHistory | null
   loading: boolean
-  period: Period
-  onPeriodChange: (period: Period) => void
+  period: ResourceChartPeriod
+  onPeriodChange: (period: ResourceChartPeriod) => void
   showLatestSummary?: boolean
   title?: string
   description?: string
 }
 
-function formatLabel(ts: string, period: Period) {
-  if (period === '1d') {
-    return formatTime(ts, { hour: '2-digit', minute: '2-digit' })
-  }
-  if (period === '7d') {
-    return formatDateTime(ts, { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-  }
-  return formatDate(ts, { day: '2-digit', month: '2-digit' })
-}
-
-function buildChartRows(points: ResourceHistoryPoint[], period: Period) {
+function buildChartRows(points: ResourceHistoryPoint[], period: ResourceChartPeriod) {
   return points.map((p) => ({
-    label: formatLabel(p.timestamp, period),
+    label: formatChartLabel(p.timestamp, period),
     cpu: p.cpu_percent,
     memory: p.memory_percent,
     disk: p.disk_percent,
@@ -155,87 +140,15 @@ export default function ResourceHistoryCharts({
 
               <div>
                 <p className="mb-2 text-sm font-medium">Загрузка CPU / RAM / Диск (%)</p>
-                <ChartResponsive height={280}>
-                  {({ width, height }) => (
-                <AreaChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="resCpu" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={CHART_CPU} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={CHART_CPU} stopOpacity={0.02} />
-                      </linearGradient>
-                      <linearGradient id="resRam" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={CHART_RAM} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={CHART_RAM} stopOpacity={0.02} />
-                      </linearGradient>
-                      <linearGradient id="resDisk" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor={CHART_DISK} stopOpacity={0.3} />
-                        <stop offset="95%" stopColor={CHART_DISK} stopOpacity={0.02} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
-                    <XAxis
-                      dataKey="label"
-                      tick={{ fontSize: 11 }}
-                      tickLine={false}
-                      axisLine={false}
-                      interval="preserveStartEnd"
-                    />
-                    <YAxis
-                      domain={[0, 100]}
-                      tick={{ fontSize: 11 }}
-                      tickLine={false}
-                      axisLine={false}
-                      unit="%"
-                      width={44}
-                    />
-                    <Tooltip
-                      cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }}
-                      formatter={(value, name) => {
-                        const labels: Record<string, string> = {
-                          cpu: 'CPU',
-                          memory: 'RAM',
-                          disk: 'Диск',
-                        }
-                        const key = String(name)
-                        return [`${Number(value ?? 0).toFixed(1)}%`, labels[key] ?? key]
-                      }}
-                      labelFormatter={(label) => `Время: ${label}`}
-                    />
-                    <Legend
-                      formatter={(value) =>
-                        value === 'cpu' ? 'CPU' : value === 'memory' ? 'RAM' : 'Диск'
-                      }
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="cpu"
-                      name="cpu"
-                      stroke={CHART_CPU}
-                      fill="url(#resCpu)"
-                      strokeWidth={2}
-                      activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="memory"
-                      name="memory"
-                      stroke={CHART_RAM}
-                      fill="url(#resRam)"
-                      strokeWidth={2}
-                      activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="disk"
-                      name="disk"
-                      stroke={CHART_DISK}
-                      fill="url(#resDisk)"
-                      strokeWidth={2}
-                      activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}
-                    />
-                  </AreaChart>
-                  )}
-                </ChartResponsive>
+                <PercentAreaChart
+                  data={chartData}
+                  height={280}
+                  series={PERCENT_SERIES}
+                  unit="%"
+                  domain={[0, 100]}
+                  legendLabels={PERCENT_LEGEND_LABELS}
+                  hoverHighlight
+                />
               </div>
 
               {chartData.some((p) => p.load_1 != null) && (
@@ -243,15 +156,9 @@ export default function ResourceHistoryCharts({
                   <p className="mb-2 text-sm font-medium">Load average (1 мин)</p>
                   <ChartResponsive height={180}>
                     {({ width, height }) => (
-                  <LineChart width={width} height={height} data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.15} vertical={false} />
-                      <XAxis
-                        dataKey="label"
-                        tick={{ fontSize: 11 }}
-                        tickLine={false}
-                        axisLine={false}
-                        interval="preserveStartEnd"
-                      />
+                  <LineChart width={width} height={height} data={chartData} margin={CHART_MARGIN}>
+                      <CartesianGrid {...CHART_GRID} />
+                      <TimeXAxis />
                       <YAxis tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={44} />
                       <Tooltip
                         cursor={{ stroke: 'hsl(var(--muted-foreground))', strokeWidth: 1, strokeDasharray: '4 4' }}
@@ -262,7 +169,7 @@ export default function ResourceHistoryCharts({
                         type="monotone"
                         dataKey="load_1"
                         name="load_1"
-                        stroke={CHART_LOAD}
+                        stroke={CHART_COLORS.load}
                         strokeWidth={2}
                         dot={false}
                         activeDot={{ r: 5, strokeWidth: 2, stroke: 'hsl(var(--background))' }}

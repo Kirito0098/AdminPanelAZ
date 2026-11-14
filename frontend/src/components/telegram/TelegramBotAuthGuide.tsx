@@ -61,7 +61,7 @@ export default function TelegramBotAuthGuide({
       description="Токен и username бота — основа для входа, команд, Mini App и уведомлений в Telegram."
     >
       <div className="space-y-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">С чего начать</p>
+        <p className="text-sm font-semibold">С чего начать</p>
         <GuideStep step={1} title="Создайте бота в @BotFather">
           Команда <code>/newbot</code> → сохраните <strong>токен</strong> и <strong>username</strong> (латиницей, без
           @). Эти же данные вставьте в форму ниже.
@@ -94,10 +94,10 @@ export default function TelegramBotAuthGuide({
         <GuideStep step={5} title="Привяжите Telegram ID администратора">
           Вход через Telegram сработает только если у пользователя панели указан{' '}
           <code>telegram_id</code> — через{' '}
-          <Link to="/telegram?tab=interactive" className="font-medium text-primary underline-offset-4 hover:underline">
-            /link в боте
+          <Link to="/settings/personal" className="font-medium text-primary underline-offset-4 hover:underline">
+            карточку Telegram в «Моём профиле»
           </Link>{' '}
-          или в «Настройки → Пользователи».
+          или в «Настройки → Пользователи панели».
         </GuideStep>
         <GuideStep step={6} title="Проверьте вход">
           Откройте <Link to="/login">страницу входа</Link> → «Войти через Telegram». Нужен HTTPS.
@@ -226,8 +226,8 @@ export default function TelegramBotAuthGuide({
           <li className="flex gap-2">
             <span className="text-muted-foreground/60">•</span>
             <span>
-              <Link to="/telegram?tab=notify" className="font-medium text-primary underline-offset-4 hover:underline">
-                Уведомления
+              <Link to="/settings/notifications" className="font-medium text-primary underline-offset-4 hover:underline">
+                Настройки → Уведомления
               </Link>{' '}
               — алерты и бэкапы в Telegram.
             </span>

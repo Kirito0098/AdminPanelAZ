@@ -33,7 +33,7 @@ function defaultStatusMessage(status: number, fallback: string): string {
   return STATUS_MESSAGES[status] || `${fallback} (код ${status})`
 }
 
-export function normalizeHttpErrorDetail(
+function normalizeHttpErrorDetail(
   detail: string,
   status: number,
   fallback = 'Ошибка запроса',

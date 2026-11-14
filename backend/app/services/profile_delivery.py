@@ -22,20 +22,29 @@ def load_node_remote_hosts(db: Session, node_id: int | None) -> list[str]:
     return parse_hosts_json(node.openvpn_remote_hosts)
 
 
-def patch_openvpn_profiles_on_node(adapter, hosts: list[str]) -> dict:
-    """Rewrite remote lines in on-disk .ovpn files after client.sh 7.
+def patch_openvpn_profiles_on_node(
+    adapter,
+    hosts: list[str],
+    *,
+    client_names: list[str] | None = None,
+) -> dict:
+    """Rewrite remote lines in on-disk .ovpn files (after add or client.sh 7).
 
-    Empty ``hosts`` is a no-op. Failures on individual files are collected in
-    ``warnings``; they never undo a completed recreate.
+    Empty ``hosts`` is a no-op. When ``client_names`` is set, only those
+    clients are patched. Failures on individual files are collected in
+    ``warnings``; they never undo a completed create/recreate.
     """
     if not hosts:
         return {"patched": 0, "warnings": []}
     patched = 0
     warnings: list[str] = []
-    try:
-        names = adapter.list_openvpn_clients()
-    except Exception as exc:  # noqa: BLE001
-        return {"patched": 0, "warnings": [str(exc)]}
+    if client_names is not None:
+        names = list(client_names)
+    else:
+        try:
+            names = adapter.list_openvpn_clients()
+        except Exception as exc:  # noqa: BLE001
+            return {"patched": 0, "warnings": [str(exc)]}
     seen_paths: set[str] = set()
     for name in names:
         try:
@@ -86,8 +95,9 @@ def read_profile_file_for_delivery(adapter, path: str, hosts: list[str]) -> str:
     if name.lower().endswith(".ovpn"):
         return apply_openvpn_remote_hosts(raw, hosts)
     proto = protocol_key_from_file(protocol="", path=path)
-    if proto in ("wireguard", "amneziawg"):
-        # GubernievS: Endpoint host is WIREGUARD_HOST, never the OpenVPN remote list.
-        # Proxy for AWG is opt-in (remotes save with apply_to_wireguard writes WIREGUARD_HOST).
+    if proto in ("wireguard", "amneziawg", "amneziawg2"):
+        # GubernievS / AZ-AWG2: Endpoint host is WIREGUARD_HOST, never the OpenVPN remote list.
+        # Proxy is opt-in (remotes save with apply_to_wireguard writes WIREGUARD_HOST).
+        # Port stays from the profile (stock AWG ports or az-awg2 random UDP from services.env).
         return apply_wireguard_endpoint_host(raw, wireguard_host_from_adapter(adapter))
     return raw

@@ -26,7 +26,7 @@ import {
 } from 'recharts'
 import { ChartResponsive } from '@/components/monitoring/ChartResponsive'
 import ResourceHistoryCharts from '@/components/monitoring/ResourceHistoryCharts'
-import DocsLink from '@/components/shared/DocsLink'
+import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import { DOCS } from '@/lib/docsUrls'
 import { Navigate } from 'react-router-dom'
 import {
@@ -63,8 +63,9 @@ import type { BandwidthChart, ResourceHistory, ServerMetrics } from '@/types'
 
 import { apiBase as API_BASE } from '@/lib/panelBase'
 
-const CHART_RX = 'hsl(187, 72%, 45%)'
-const CHART_TX = 'hsl(38, 92%, 50%)'
+// RX/TX — нейтральная пара bandwidth, не цвета протоколов.
+const CHART_RX = '#5D8AA8'
+const CHART_TX = '#8A94A6'
 
 const RANGE_LABELS: Record<'1d' | '7d' | '30d', string> = {
   '1d': '1 день',
@@ -77,7 +78,7 @@ const GROUP_LABELS: Record<string, string> = {
   vpn: 'VPN',
   antizapret: 'AntiZapret',
   openvpn: 'OpenVPN',
-  wireguard: 'WireGuard / AWG',
+  wireguard: 'WG/AWG 1.5',
 }
 
 function interfaceTransport(name: string): 'UDP' | 'TCP' | null {
@@ -133,14 +134,14 @@ function formatInterfaceLabel(
     return `${scope} · ${proto} (${name})`
   }
   if (scope && protocol === 'wireguard') {
-    return `${scope} · WireGuard / AWG (${name})`
+    return `${scope} · WG/AWG 1.5 (${name})`
   }
   if (protocol === 'openvpn') {
     const proto = transport ? `OpenVPN (${transport})` : 'OpenVPN'
     return `${proto} (${name})`
   }
   if (protocol === 'wireguard') {
-    return `WireGuard / AWG (${name})`
+    return `WG/AWG 1.5 (${name})`
   }
   return name
 }
@@ -236,8 +237,14 @@ function LiveMetricCard({ label, value, icon: Icon, direction }: LiveMetricProps
   )
 }
 
-export default function ServerMonitorPage() {
+type ServerMonitorPageProps = {
+  /** Внутри «Наблюдения» (чип «Хост»): без своего заголовка, права проверяет родитель. */
+  embedded?: boolean
+}
+
+export default function ServerMonitorPage({ embedded = false }: ServerMonitorPageProps) {
   const { user } = useAuth()
+  const canLoad = embedded || user?.role === 'admin'
   const { activeNode, loading: nodeLoading } = useNode()
   const { error: notifyError, success } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
@@ -315,27 +322,27 @@ export default function ServerMonitorPage() {
   )
 
   useEffect(() => {
-    if (user?.role !== 'admin' || nodeLoading) return
+    if (!canLoad || nodeLoading) return
     startGlobal()
     loadMetrics()
       .finally(() => {
         setLoading(false)
         doneGlobal()
       })
-  }, [user?.role, nodeLoading, loadMetrics, activeNode?.id, startGlobal, doneGlobal])
+  }, [canLoad, nodeLoading, loadMetrics, activeNode?.id, startGlobal, doneGlobal])
 
   useEffect(() => {
-    if (user?.role !== 'admin' || !iface) return
+    if (!canLoad || !iface) return
     loadBandwidth(iface, range)
-  }, [user?.role, iface, range, loadBandwidth, activeNode?.id])
+  }, [canLoad, iface, range, loadBandwidth, activeNode?.id])
 
   useEffect(() => {
-    if (user?.role !== 'admin' || nodeLoading) return
+    if (!canLoad || nodeLoading) return
     loadResourceHistory(resourcePeriod)
-  }, [user?.role, nodeLoading, loadResourceHistory, resourcePeriod, activeNode?.id])
+  }, [canLoad, nodeLoading, loadResourceHistory, resourcePeriod, activeNode?.id])
 
   useEffect(() => {
-    if (user?.role !== 'admin' || !iface) return
+    if (!canLoad || !iface) return
 
     let ws: WebSocket | null = null
     let attempt = 0
@@ -413,12 +420,12 @@ export default function ServerMonitorPage() {
     }
   }
 
-  if (user?.role !== 'admin') {
+  if (!embedded && user?.role !== 'admin') {
     return <Navigate to="/" replace />
   }
 
   if (loading) {
-    return <Spinner label="Загрузка метрик сервера..." className="py-16" />
+    return <Spinner label="Загрузка метрик сервера..." className={embedded ? 'py-8' : 'py-16'} />
   }
 
   const nodeOffline = activeNode?.status === 'offline'
@@ -453,15 +460,21 @@ export default function ServerMonitorPage() {
   const selectedGroups = getInterfaceGroups(iface, interfaceGroups)
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Cpu size={22} />
-          </div>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-2xl font-bold tracking-tight">Сервер</h2>
+    <div className={embedded ? 'space-y-4' : 'space-y-6'}>
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+            Обновить
+          </Button>
+        </div>
+      ) : (
+        <PageSectionHeader
+          card
+          icon={Cpu}
+          title="Сервер"
+          titleAddon={
+            <>
               <NodeBadge name={activeNode?.name ?? metrics?.node_name} status={activeNode?.status} />
               {wsConnected ? (
                 <Badge variant="success" className="gap-1 text-[10px]">
@@ -474,21 +487,23 @@ export default function ServerMonitorPage() {
                   WS
                 </Badge>
               )}
-            </div>
-            <p className="text-sm text-muted-foreground">
+            </>
+          }
+          description={
+            <>
               CPU, RAM, диск и трафик vnStat · Live RX/TX через WebSocket
               {metrics?.hostname ? ` · ${metrics.hostname}` : ''}
-            </p>
-          </div>
-        </div>
-        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-          <DocsLink href={DOCS.serverMonitor} variant="button" />
-          <Button variant="outline" className="w-full sm:w-auto" onClick={handleRefresh} disabled={refreshing}>
-            <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-            Обновить
-          </Button>
-        </div>
-      </div>
+            </>
+          }
+          docsHref={DOCS.serverMonitor}
+          actions={
+            <Button variant="outline" className="w-full sm:w-auto" onClick={handleRefresh} disabled={refreshing}>
+              <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
+              Обновить
+            </Button>
+          }
+        />
+      )}
 
       <SettingsAlert variant="info" title="Данные активного узла">
         Метрики собираются с <strong>{activeNode?.name ?? metrics?.node_name ?? 'активного узла'}</strong>

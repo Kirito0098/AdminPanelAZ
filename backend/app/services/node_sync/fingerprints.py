@@ -6,6 +6,7 @@ import hashlib
 from collections.abc import Iterable
 from pathlib import Path
 
+from app.config import get_settings
 from app.services import wg_runtime
 
 # HA-local config files under {antizapret}/config/ — excluded from parity verify and
@@ -96,9 +97,9 @@ def collect_config_file_fingerprints(
     return result
 
 
-def collect_antizapret_fingerprints(install_dir: str | Path = "/root/antizapret") -> dict[str, str]:
+def collect_antizapret_fingerprints(install_dir: str | Path | None = None) -> dict[str, str]:
     """Return stable path keys → sha256 hex for parity verify."""
-    base = Path(install_dir or "/root/antizapret").resolve()
+    base = Path(install_dir or get_settings().antizapret_path).resolve()
     entries: list[tuple[str, Path]] = [
         ("easyrsa3/pki/ca.crt", Path("/etc/openvpn/easyrsa3/pki/ca.crt")),
         ("easyrsa3/pki/crl.pem", Path("/etc/openvpn/easyrsa3/pki/crl.pem")),

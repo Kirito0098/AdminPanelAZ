@@ -8,19 +8,19 @@
 
 - **Sync Group** — primary + 1+ replica, shared domains (`shared_domain` → `OPENVPN_HOST`, `shared_domain_wireguard` → `WIREGUARD_HOST`; пустой WG-домен = тот же, что OpenVPN)
 - **Push full** — `client.sh 8` на primary → transfer → **HA restore** на replica (`?ha_replica=true`): **wipe-and-replace** VPN/crypto (PKI `easyrsa3`, server WireGuard `.conf`, каталоги профилей OVPN/WG/AWG) — **без `client.sh 7`**. Каталог `config/` — **merge** (как раньше). Дополнительно копирует непустые `OPENVPN_HOST` / `WIREGUARD_HOST` из `setup` primary на каждую replica **перед** restore. После restore — **байт-копия `.ovpn`** с primary, **prune** VPN-клиентов only-on-replica, restart OpenVPN + apply WireGuard runtime. Если на primary установлен слой AZ-AWG2 — overlay копируется на replica (`sync_amneziawg2_state_from_primary`). Ошибки copy/prune/restart/AWG2 → `sync_status=failed` (не warning).
-- **Блокировки WireGuard / AWG2 на replica** — `wg syncconf` из конфигов primary возвращает peer'ов, убранных из runtime блокировкой. Поэтому после копирования политик доступа в Push full и после каждой HA crypto sync (create/delete/renew, heal) панель заново блокирует на replica всех заблокированных по её политикам клиентов: node agent 1.11.0 — пакетно (`…/runtime/block-batch`), старый агент — по одному клиенту. Если синхронизация упала после применения состояния primary, блокировки всё равно возвращаются, а исходная ошибка сообщается. Сбой блокировки одного клиента не останавливает остальных; синхронизация помечается неуспешной с именами клиентов.
+- **Блокировки WG/AWG 1.5 / AWG 2.0 на replica** — `wg syncconf` из конфигов primary возвращает peer'ов, убранных из runtime блокировкой. Поэтому после копирования политик доступа в Push full и после каждой HA crypto sync (create/delete/renew, heal) панель заново блокирует на replica всех заблокированных по её политикам клиентов: node agent 1.11.0 — пакетно (`…/runtime/block-batch`), старый агент — по одному клиенту. Если синхронизация упала после применения состояния primary, блокировки всё равно возвращаются, а исходная ошибка сообщается. Сбой блокировки одного клиента не останавливает остальных; синхронизация помечается неуспешной с именами клиентов.
 - **Verify** — списки OVPN/WG клиентов + checksums PKI/WG/config/**`.ovpn`** + **read-only проверка сертификатов в `.ovpn`**
 
 ### OpenVPN-профили и HA
 
 - Один `.ovpn` и один сертификат должны работать на **обоих** IP за общим доменом. HA копирует **PKI** (`easyrsa3`, включая `crl.pem`) и **байт-идентичные файлы `.ovpn`** с primary на replica — без перевыпуска сертификатов.
 - **Push full** и **HA crypto sync** не вызывают `client.sh 1`. На replica при Push full / crypto sync **не** выполняется `client.sh 7` — только wipe + import PKI + copy `.ovpn` с primary. **HA crypto sync** перед import `easyrsa3` делает `rmtree` каталога PKI; WireGuard server `.conf` — mirror-sync (лишние `.conf` на replica удаляются).
-- **Create** и **renew** на primary (явное действие админа) вызывают `client.sh 1` на primary, затем `client.sh 7` и crypto sync на replica.
-- **Download / QR / Telegram** читают `.ovpn` с диска без repair; при выдаче панель может подставить multi-remote из списка узла в БД (диск и HA-копия остаются стоковыми). Список remote **не** реплицируется Push full — задаётся на каждом узле отдельно ([antizapret-config.md](antizapret-config.md#несколько-адресов-подключения)).
+- **Create** и **renew** на primary: `client.sh 1` (+ точечный patch remote hosts, без `client.sh 7`); HA crypto — фон `ha_client_sync` с локом на группу.
+- **Download / Telegram** читают `.ovpn` с диска без repair; при выдаче панель может подставить multi-remote из списка узла в БД (диск и HA-копия остаются стоковыми). Список remote **не** реплицируется Push full — задаётся на каждом узле отдельно ([antizapret-config.md](antizapret-config.md#несколько-адресов-подключения)).
 - **Verify** сравнивает fingerprint `openvpn/client_profiles` и блок `openvpn_profile_certs` (read-only). При расхождении — **Push full**, не автоматический renew.
 - **Verify** сравнивает и то, что реплика реально запустила: peer WireGuard на интерфейсах `antizapret`/`vpn` (`wg show`, расхождение `wireguard_peers`) и клиентов AZ-AWG2, если он установлен на primary (`awg2_clients`).
 
-### AWG2 HA crypto-sync
+### AWG 2.0 HA crypto-sync
 
 - Для AZ-AWG2 в HA используется crypto-sync через byte-copy, а не `awg-client add` на replica.
 - Архивируются пути `/etc/amnezia/amneziawg` и `/opt/antizapret-awg/clients`; из архива исключаются `stats.db`, `venv/` и `__pycache__/`. Локальный `stats.db` на узле остаётся для мониторинга и в HA не копируется.
@@ -39,7 +39,7 @@
 | POST | `/api/nodes/sync-groups/{id}/verify` |
 | GET | `/api/nodes/sync-groups/{id}/status` |
 
-Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backups/antizapret/restore?ha_replica=true`, `GET /backups/antizapret/download`, `GET /backups/antizapret/fingerprints`, `GET/POST /profiles/openvpn/export|import`, `GET /openvpn/easyrsa3/index`, `GET /wireguard/server-config-files`, `DELETE /wireguard/server-config-file/{filename}`. Пакетная переблокировка WireGuard/AWG2, файлы WARP/RPZ/Lua и запись режимов WARP 3/4 и `WARP_MTU` на replica требуют node agent **1.11.0** — обновление агента: [uzly.md](uzly.md#обновление-агента-на-узле).
+Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backups/antizapret/restore?ha_replica=true`, `GET /backups/antizapret/download`, `GET /backups/antizapret/fingerprints`, `GET/POST /profiles/openvpn/export|import`, `GET /openvpn/easyrsa3/index`, `GET /wireguard/server-config-files`, `DELETE /wireguard/server-config-file/{filename}`. Пакетная переблокировка WG/AWG 1.5 / AWG 2.0, файлы WARP/RPZ/Lua и запись режимов WARP 3/4 и `WARP_MTU` на replica требуют node agent **1.11.0** — обновление агента: [uzly.md](uzly.md#обновление-агента-на-узле).
 
 ## Ограничения
 
@@ -81,7 +81,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 
 | Операция | Replica |
 |----------|---------|
-| Create / delete client | Копия crypto-состояния primary: `/etc/wireguard/antizapret.conf` и `vpn.conf` (WARP-аккаунты `warp-*.conf` у каждого узла свои и не копируются) + **те же файлы профилей** WG/AWG (PrivateKey/PSK) или `/etc/openvpn/easyrsa3/` + **байт-копия `.ovpn`** с primary + restart OpenVPN (OVPN); shadow `VpnConfig` |
+| Create / delete client | Копия crypto-состояния primary: `/etc/wireguard/antizapret.conf` и `vpn.conf` (WARP-аккаунты `warp-*.conf` у каждого узла свои и не копируются) + **те же файлы профилей** WG/AWG 1.5 (PrivateKey/PSK) или `/etc/openvpn/easyrsa3/` + **байт-копия `.ovpn`** с primary + restart OpenVPN (OVPN); shadow `VpnConfig` |
 | Renew OpenVPN cert | Копия easyrsa3 + `.ovpn` с primary после явного `client.sh 1` на primary; тот же `client_name`, новый срок |
 | Temp / permanent block, unblock | Та же политика в БД + runtime (iptables/WG) |
 | Set / clear traffic limit | Те же `traffic_limit_*` + reconcile runtime |
@@ -101,12 +101,13 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 
 | Операция | Replica |
 |----------|---------|
-| Списки в «Настройках» (домены/IP) | Те же файлы + опционально `doall.sh` |
-| Редактор файлов (один / batch) | Изменённые файлы + опционально `doall.sh` |
+| Списки в «Настройках» (домены/IP) | Те же файлы + фон `config_apply` (`doall.sh` без `client.sh 7` + replicate) |
+| Редактор файлов (один / batch) | То же: запись на primary сразу, `doall`/HA — фон `config_apply` |
+| AZ-AWG2 restore / obfuscation | Overlay на primary сразу; реплики — фон `ha_awg2_sync` (лок группы) |
 | Routing UI (route files: include/exclude/forward/drop IPs) | Те же файлы на replica без `doall.sh` по умолчанию |
-| Routing UI (provider files) | Аналогично, если файл в scope HA |
+| Routing UI (provider files) | Тот же list-файл на реплике; включение/выключение провайдера тоже реплицируется, `AP-*-include-ips.txt` строится на каждой реплике |
 | Редактор: файлы WARP и RPZ (`include-warp-hosts.txt`, `exclude-warp-hosts.txt`, `*-rpz.txt`) | Те же файлы + опционально `doall.sh` |
-| Редактор: `custom.lua` / `custom2.lua` (`/etc/knot-resolver`) | Тот же файл, перезапуск `kresd@1` / `kresd@2` на replica без `doall.sh`; если резолвер не поднялся — прежний файл возвращается |
+| Редактор: `custom.lua` / `custom2.lua` / `custom3.lua` (`/etc/knot-resolver`) | Тот же файл, перезапуск `kresd@1` / `kresd@2` / `kresd@3` на replica без `doall.sh`; если резолвер не поднялся — прежний файл возвращается |
 | **DNS: ответ на AAAA** | Помеченный блок в `custom.lua` / `custom2.lua` — как при правке Lua |
 
 Файлы WARP, RPZ и Lua поддерживаются с node agent **1.11.0**. При правке на primary реплика со старым агентом получает ошибку («Обновите node agent панели на узле…», группа → `failed`). Фоновое auto-heal такие файлы на старом агенте пропускает, не помечая реплику ошибкой.
@@ -118,7 +119,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 | Операция | Replica |
 |----------|---------|
 | `PUT /routing/antizapret-settings` | Те же ключи `setup` (см. исключения ниже) |
-| `POST /routing/apply` | Фоновый apply (`doall.sh`) на каждой replica |
+| `POST /routing/apply` | Фоновый apply (`doall.sh ips`) на каждой replica — **только** при `sync_mode=auto` и наличии группы; профили на реплике не пересоздаются |
 
 Режимы встроенного WARP None / All уходят на replica как `n` / `y` — их понимает и старый (до 1.11.0) node agent. Режимы Domain / Custom (`ANTIZAPRET_WARP` 3 / 4) и `WARP_MTU` старый агент записать не может: после записи панель перечитывает setup реплики и при расхождении помечает синхронизацию ошибкой (`sync_status=failed`, «Обновите node agent панели на узле и сохраните ещё раз»), а не оставляет реплику молча без WARP.
 
@@ -128,8 +129,11 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 
 | Операция | Replica |
 |----------|---------|
-| Ручное редактирование provider file | Файл `AP-*-include-ips.txt` |
-| `POST /routing/sync` (compile) | Deploy скомпилированных файлов на replica группы |
+| Ручное редактирование provider file | Тот же **list-файл** (`*-ips.txt`) на реплике; `AP-*-include-ips.txt` создаётся только когда провайдер включён на узле |
+| Toggle провайдера (`POST /routing/providers/{filename}/enabled`) | Тот же флаг на всех репликах (`replicate_provider_enabled`): `AP-*-include-ips.txt` появляется или удаляется на каждой реплике |
+| `POST /routing/sync` (compile) | Deploy скомпилированных list-файлов на replica группы; apply на репликах — отдельными задачами |
+
+Панель реплицирует только свои `AP-*-include-ips.txt` и list-файлы провайдеров; встроенные списки AntiZapret (`download/*ips.txt`) на репликах обновляет сам AntiZapret-VPN.
 
 ### Исключения (не копировать / не перезаписывать)
 
@@ -146,7 +150,7 @@ Node agent **≥ 1.5.0** (для byte-copy `.ovpn` и HA restore): `POST /backup
 - `shared_domain` → `OPENVPN_HOST`
 - `shared_domain_wireguard` → `WIREGUARD_HOST` (если пусто — тот же host, что `shared_domain`)
 
-Так же, как в оригинальном AntiZapret `setup.sh`, можно задать **разные** домены для OpenVPN и WireGuard/AmneziaWG. Затем на каждом узле выполняется `doall.sh` (apply_config_changes) + `client.sh 7` (recreate_profiles), чтобы новые хосты попали в перегенерированные профили клиентов. Фоновая задача `node_sync_shared_domain`; ошибка на одном узле не прерывает остальные (partial failure → `sync_status=failed`, детали в `last_sync_error`). Вызывается при **HA Setup** (если при создании включён переключатель «Сразу настроить группу»), при изменении доменов в группе, а также вручную кнопкой «Домен». Создание группы **без** Setup **не** применяет домены автоматически.
+Так же, как в оригинальном AntiZapret `setup.sh`, можно задать **разные** домены для OpenVPN и WG/AWG 1.5. Затем на каждом узле: список **Адреса подключения** **заменяется** на `[shared_domain]` (чужие remote от другого HA/прокси сбрасываются — иначе они оставались 2–3-й строкой в `.ovpn`); `doall.sh` + `client.sh 7`. Прокси и запасные remote для этой группы снова задаются вручную в «Адреса подключения». Фоновая задача `node_sync_shared_domain`; ошибка на одном узле не прерывает остальные (partial failure → `sync_status=failed`, детали в `last_sync_error`). Вызывается при **HA Setup** (если при создании включён переключатель «Сразу настроить группу»), при изменении доменов в группе, а также вручную кнопкой «Домен». Создание группы **без** Setup **не** применяет домены автоматически.
 
 ### Partial failure
 

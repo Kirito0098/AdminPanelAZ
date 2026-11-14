@@ -1,40 +1,46 @@
 import * as React from 'react'
-import { Check } from 'lucide-react'
+import { Check, Minus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 interface CheckboxProps extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, 'onChange'> {
-  checked?: boolean
+  checked?: boolean | 'indeterminate'
   onCheckedChange?: (checked: boolean) => void
 }
 
 const Checkbox = React.forwardRef<HTMLButtonElement, CheckboxProps>(
   ({ className, checked = false, disabled, onCheckedChange, onClick, ...props }, ref) => {
+    const isChecked = checked === true
+    const isIndeterminate = checked === 'indeterminate'
     return (
       <button
         type="button"
         role="checkbox"
-        aria-checked={checked}
+        aria-checked={isIndeterminate ? 'mixed' : isChecked}
         disabled={disabled}
         ref={ref}
         onClick={(e) => {
           e.stopPropagation()
           onClick?.(e)
           if (!e.defaultPrevented) {
-            onCheckedChange?.(!checked)
+            onCheckedChange?.(!isChecked)
           }
         }}
         className={cn(
           'inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-md border-2 transition-colors',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
           'disabled:cursor-not-allowed disabled:opacity-50',
-          checked
+          isChecked || isIndeterminate
             ? 'border-primary bg-primary text-primary-foreground'
             : 'border-muted-foreground/50 bg-background hover:border-primary/60',
           className,
         )}
         {...props}
       >
-        {checked ? <Check size={12} strokeWidth={3} className="shrink-0" /> : null}
+        {isIndeterminate ? (
+          <Minus size={12} strokeWidth={3} className="shrink-0" />
+        ) : isChecked ? (
+          <Check size={12} strokeWidth={3} className="shrink-0" />
+        ) : null}
       </button>
     )
   },

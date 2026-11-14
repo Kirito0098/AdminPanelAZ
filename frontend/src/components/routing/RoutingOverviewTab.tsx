@@ -6,22 +6,22 @@ import StatusPanel from '@/components/noc/StatusPanel'
 import type { RoutingWorkflowState } from '@/components/routing/routingWorkflow'
 import { PercentBar } from '@/components/ui/percent-bar'
 import { Badge } from '@/components/ui/badge'
-import type { AntifilterStatus, CidrDbStatus, RouteBudgetInfo, RoutingOverview } from '@/types'
-import { STAGE_DEPLOY } from './routingLabels'
-import { formatDt, pluralProviders, statusBadgeVariant, statusLabel } from './utils'
+import type { AntifilterStatus, RouteBudgetInfo, RoutingOverview } from '@/types'
+import { formatDt } from './utils'
 
 interface RoutingOverviewTabProps {
   data: RoutingOverview
-  cidrDb: CidrDbStatus | null
   antifilter: AntifilterStatus | null
   workflow: RoutingWorkflowState
+  /** Меняется после сборки/развёртывания (например, finished_at из cidrDb) — по нему перезапрашивается бюджет. */
+  budgetVersion?: string | number
 }
 
 export default function RoutingOverviewTab({
   data,
-  cidrDb,
   antifilter,
   workflow,
+  budgetVersion,
 }: RoutingOverviewTabProps) {
   const stats = data.route_stats
   const [routeBudget, setRouteBudget] = useState<RouteBudgetInfo | null>(null)
@@ -30,7 +30,30 @@ export default function RoutingOverviewTab({
     void getRouteBudget()
       .then(setRouteBudget)
       .catch(() => setRouteBudget(null))
-  }, [])
+  }, [budgetVersion])
+
+  const budgetFromArtifacts = routeBudget?.source === 'artifacts'
+  const budgetFromNode = routeBudget?.source === 'node'
+  const budgetSourceLabel = budgetFromNode
+    ? 'По фактическим маршрутам узла'
+    : budgetFromArtifacts
+      ? 'По собранным файлам на контроллере'
+      : 'По последней оценке обновления CIDR'
+  const budgetSourceHint = budgetFromNode
+    ? 'route-ips.txt на узле: включённые AP-*, свой include-ips.txt и встроенные списки'
+    : budgetFromArtifacts
+      ? 'Лимит и занятость посчитаны по AP-*-include-ips.txt на контроллере'
+      : 'Значения из последней задачи оценки (dry-run) обновления CIDR'
+  const budgetSourceTone = budgetFromNode
+    ? 'border-sky-500/40 text-sky-700 dark:text-sky-300'
+    : budgetFromArtifacts
+      ? 'border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+      : 'text-muted-foreground'
+  const budgetSourceBadge = budgetFromNode ? 'узел' : budgetFromArtifacts ? 'артефакты' : 'оценка'
+  const budgetOverLimit =
+    routeBudget?.limit != null && (routeBudget.used ?? 0) > routeBudget.limit
+  const budgetPanelDiffers =
+    routeBudget?.panel_used != null && routeBudget.panel_used !== routeBudget.used
 
   return (
     <div className="space-y-6">
@@ -39,14 +62,35 @@ export default function RoutingOverviewTab({
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <div>
               <div className="text-sm font-medium">Бюджет маршрутов OpenVPN</div>
+              {budgetFromNode && (
+                <div className="text-sm">
+                  на узле {routeBudget.used} из {routeBudget.limit}, свободно{' '}
+                  {routeBudget.remaining ?? 0}
+                </div>
+              )}
               <div className="text-xs text-muted-foreground">
-                По последней оценке обновления CIDR
+                {budgetSourceLabel}
                 {routeBudget.finished_at ? ` · ${formatDt(routeBudget.finished_at)}` : ''}
               </div>
+              {budgetPanelDiffers && (
+                <div className="text-xs text-muted-foreground">
+                  панель собрала {routeBudget.panel_used}
+                </div>
+              )}
             </div>
-            <Badge variant={routeBudget.remaining === 0 ? 'destructive' : 'secondary'}>
-              осталось {routeBudget.remaining ?? 0} из {routeBudget.limit}
-            </Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className={`text-[10px] ${budgetSourceTone}`} title={budgetSourceHint}>
+                {budgetSourceBadge}
+              </Badge>
+              {budgetOverLimit && (
+                <Badge variant="destructive" title="Фактическое число маршрутов больше лимита OpenVPN">
+                  лимит превышен
+                </Badge>
+              )}
+              <Badge variant={routeBudget.remaining === 0 ? 'destructive' : 'secondary'}>
+                осталось {routeBudget.remaining ?? 0} из {routeBudget.limit}
+              </Badge>
+            </div>
           </div>
           <PercentBar
             value={routeBudget.used ?? 0}
@@ -90,90 +134,38 @@ export default function RoutingOverviewTab({
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-2">
-        <StatusPanel title="Статистика маршрутов" icon={Route}>
-          <div className="space-y-3 text-sm">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Каталог списков</span>
-              <span className="mono truncate max-w-[60%] text-right text-xs">{data.list_dir}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Каталог config</span>
-              <span className="mono truncate max-w-[60%] text-right text-xs">{data.config_dir}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Обновлено</span>
-              <span>{formatDt(data.timestamp)}</span>
-            </div>
-            {Object.keys(stats.config_include_per_file).length > 0 && (
-              <div className="border-t pt-3 space-y-2">
-                <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Записей по файлам
-                </div>
-                {Object.entries(stats.config_include_per_file)
-                  .sort(([, a], [, b]) => b - a)
-                  .slice(0, 8)
-                  .map(([file, count]) => (
-                    <div key={file} className="flex justify-between gap-2">
-                      <span className="truncate text-xs text-muted-foreground">{file}</span>
-                      <span className="mono text-xs font-medium">{count}</span>
-                    </div>
-                  ))}
-              </div>
-            )}
+      <StatusPanel title="Статистика маршрутов" icon={Route}>
+        <div className="space-y-3 text-sm">
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Каталог списков</span>
+            <span className="mono truncate max-w-[60%] text-right text-xs">{data.list_dir}</span>
           </div>
-        </StatusPanel>
-
-        <StatusPanel title="Обновление CIDR" icon={GitBranch}>
-          <p className="mb-3 text-xs text-muted-foreground">
-            Данные и списки сначала на контроллере; на узлы уходит только {STAGE_DEPLOY.toLowerCase()} (этап 3).
-          </p>
-          <div className="space-y-3 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-muted-foreground">Статус БД</span>
-              <Badge variant={statusBadgeVariant(cidrDb?.last_refresh_status)}>
-                {statusLabel(cidrDb?.last_refresh_status)}
-              </Badge>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">CIDR в SQLite</span>
-              <span className="mono font-medium">{cidrDb?.total_cidrs ?? 0}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Последняя загрузка</span>
-              <span>{formatDt(cidrDb?.last_refresh_finished)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Antifilter подсетей</span>
-              <span className="mono font-medium">{antifilter?.cidr_count ?? 0}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Antifilter обновлён</span>
-              <span>{formatDt(antifilter?.last_refreshed_at)}</span>
-            </div>
-            {(workflow.pendingCompileCount > 0 || workflow.pendingDeployCount > 0) && (
-              <div className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-800 dark:text-amber-200 space-y-1">
-                {workflow.pendingCompileCount > 0 && !workflow.optionalCompileRemaining && (
-                  <div>{pluralProviders(workflow.pendingCompileCount)} ждут сборки (этап 2)</div>
-                )}
-                {workflow.optionalCompileRemaining && (
-                  <div>
-                    Сборка завершена ·{' '}
-                    {workflow.pendingCompileNames.length === 1
-                      ? `«${workflow.pendingCompileNames[0]}» без файла`
-                      : `${pluralProviders(workflow.pendingCompileCount)} без файла`}
-                    {' '}
-                    — необязательно
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Каталог config</span>
+            <span className="mono truncate max-w-[60%] text-right text-xs">{data.config_dir}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-muted-foreground">Обновлено</span>
+            <span>{formatDt(data.timestamp)}</span>
+          </div>
+          {Object.keys(stats.config_include_per_file).length > 0 && (
+            <div className="border-t pt-3 space-y-2">
+              <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Записей по файлам
+              </div>
+              {Object.entries(stats.config_include_per_file)
+                .sort(([, a], [, b]) => b - a)
+                .slice(0, 8)
+                .map(([file, count]) => (
+                  <div key={file} className="flex justify-between gap-2">
+                    <span className="truncate text-xs text-muted-foreground">{file}</span>
+                    <span className="mono text-xs font-medium">{count}</span>
                   </div>
-                )}
-                {workflow.pendingDeployCount > 0 && (
-                  <div>{pluralProviders(workflow.pendingDeployCount)} ждут {STAGE_DEPLOY.toLowerCase()} (этап 3)</div>
-                )}
-              </div>
-            )}
-          </div>
-        </StatusPanel>
-      </div>
+                ))}
+            </div>
+          )}
+        </div>
+      </StatusPanel>
     </div>
   )
 }

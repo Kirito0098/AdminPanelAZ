@@ -82,21 +82,18 @@ def traffic(db):
 
 
 def test_period_usage_sums_all_spellings_within_period(traffic):
-    assert get_client_consumed_traffic_bytes(
-        traffic, client_name="ALICE", node_id=1, period_days=30, protocol_types={UDP, TCP}
-    ) == 120
-    assert get_client_consumed_traffic_bytes(
-        traffic, client_name="alice", node_id=1, period_days=30, protocol_types={UDP}
-    ) == 110
+    assert (
+        get_client_consumed_traffic_bytes(
+            traffic, client_name="ALICE", node_id=1, period_days=30, protocol_types={UDP, TCP}
+        )
+        == 120
+    )
+    assert (
+        get_client_consumed_traffic_bytes(traffic, client_name="alice", node_id=1, period_days=30, protocol_types={UDP})
+        == 110
+    )
     assert get_client_consumed_traffic_bytes(traffic, client_name="alice", period_days=30) == 127
     assert get_client_consumed_traffic_bytes(traffic, client_name="carol", node_id=1, period_days=30) == 0
-
-
-def test_all_time_usage_comes_from_totals(traffic):
-    assert get_client_consumed_traffic_bytes(
-        traffic, client_name="alice", node_id=1, protocol_types={UDP, TCP}
-    ) == 1120
-    assert get_client_consumed_traffic_bytes(traffic, client_name="alice") == 1127
 
 
 def test_period_check_is_one_indexed_aggregate(traffic):

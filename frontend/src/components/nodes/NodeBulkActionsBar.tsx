@@ -15,7 +15,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import type { Node } from '@/types'
-import { getSelectedNodes } from './nodeHelpers'
+import { getSelectedNodes, nodeTransportId } from './nodeHelpers'
 import { isProxyNode } from './nodeKind'
 
 type NodeBulkActionsBarProps = {
@@ -48,7 +48,7 @@ export default function NodeBulkActionsBar({
   const selected = getSelectedNodes(nodes, selectedNodeIds)
   const remoteSelected = selected.filter((node) => !node.is_local)
   const mtlsCandidates = remoteSelected.filter(
-    (node) => !isProxyNode(node) && (node.transport || (node.mtls_enabled ? 'mtls' : 'http')) !== 'mtls',
+    (node) => !isProxyNode(node) && nodeTransportId(node) !== 'mtls',
   )
   const allSelected = nodes.length > 0 && selectedNodeIds.length === nodes.length
   const busy = bulkBusy || rollingUpdating || rollPolling

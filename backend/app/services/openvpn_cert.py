@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 import re
-import subprocess
 from datetime import datetime, timezone
+
+from cryptography import x509
 
 logger = logging.getLogger(__name__)
 
@@ -14,26 +15,6 @@ _CERT_BLOCK_RE = re.compile(
     re.DOTALL,
 )
 
-_ENDDATE_RE = re.compile(
-    r"notAfter\s*=\s*"
-    r"(?P<mon>[A-Za-z]{3})\s+(?P<day>\d{1,2})\s+"
-    r"(?P<time>\d{2}:\d{2}:\d{2})\s+(?P<year>\d{4})\s+GMT"
-)
-
-_MONTHS = {
-    "Jan": 1,
-    "Feb": 2,
-    "Mar": 3,
-    "Apr": 4,
-    "May": 5,
-    "Jun": 6,
-    "Jul": 7,
-    "Aug": 8,
-    "Sep": 9,
-    "Oct": 10,
-    "Nov": 11,
-    "Dec": 12,
-}
 
 
 def extract_pem_from_ovpn(content: str) -> str | None:
@@ -45,36 +26,10 @@ def cert_not_after_utc(pem: str) -> datetime | None:
     if not pem:
         return None
     try:
-        result = subprocess.run(
-            ["openssl", "x509", "-noout", "-enddate"],
-            input=pem,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    if result.returncode != 0:
-        return None
-    match = _ENDDATE_RE.search(result.stdout or "")
-    if not match:
-        return None
-    month = _MONTHS.get(match.group("mon"))
-    if not month:
-        return None
-    hour, minute, second = (int(part) for part in match.group("time").split(":"))
-    try:
-        return datetime(
-            int(match.group("year")),
-            month,
-            int(match.group("day")),
-            hour,
-            minute,
-            second,
-            tzinfo=timezone.utc,
-        )
-    except ValueError:
+        cert = x509.load_pem_x509_certificate(pem.encode())
+        return cert.not_valid_after_utc
+    except Exception as exc:
+        logger.debug("cert notAfter parse failed: %s", exc)
         return None
 
 

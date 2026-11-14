@@ -12,6 +12,7 @@ from app.services.env_file import EnvFileService
 from app.services.firewall_tools_check import cached_firewall_tools_status
 from app.services.panel_port_firewall import panel_port_firewall
 from app.services.panel_publish_info import is_whitelist_port_firewall_applicable
+from app.services.portal_link_settings import get_portal_link_ttl_days, set_portal_link_ttl_days
 from app.services.public_download_settings import is_public_download_enabled, set_public_download_enabled
 
 logger = logging.getLogger(__name__)
@@ -84,12 +85,10 @@ class SecurityService:
             "block_ip_blocked_dwell": _get(db, "security_block_ip_blocked_dwell", "true") == "true",
             "ip_blocked_dwell_seconds": int(_get(db, "security_ip_blocked_dwell_seconds", "120") or "120"),
             "temp_whitelist": active_temp,
-            "qr_download_ttl_seconds": int(_get(db, "qr_download_ttl_seconds", "600") or "600"),
-            "qr_download_max_downloads": int(_get(db, "qr_download_max_downloads", "1") or "1"),
-            "qr_download_pin_set": bool(_get(db, "qr_download_pin", "")),
             "public_download_enabled": is_public_download_enabled(db),
             "portal_domain": _get(db, "portal_domain", ""),
             "portal_title": _get(db, "portal_title", ""),
+            "portal_link_ttl_days": get_portal_link_ttl_days(db),
             "whitelist_firewall": whitelist_firewall,
             "whitelist_firewall_applicable": applicable,
             "whitelist_firewall_active": False,
@@ -138,16 +137,6 @@ class SecurityService:
                 "security_ip_blocked_dwell_seconds",
                 str(max(30, min(3600, int(payload["ip_blocked_dwell_seconds"])))),
             )
-        if "qr_download_ttl_seconds" in payload:
-            _set(db, "qr_download_ttl_seconds", str(max(60, min(86400, int(payload["qr_download_ttl_seconds"])))))
-        if "qr_download_max_downloads" in payload:
-            val = int(payload["qr_download_max_downloads"])
-            _set(db, "qr_download_max_downloads", str(val if val in (1, 3, 5) else 1))
-        if "qr_download_pin" in payload:
-            pin = (payload["qr_download_pin"] or "").strip()
-            if pin and len(pin) < 4:
-                raise ValueError("PIN для QR-ссылок должен быть не короче 4 символов")
-            _set(db, "qr_download_pin", pin)
         if "public_download_enabled" in payload:
             set_public_download_enabled(db, bool(payload["public_download_enabled"]))
         if "portal_domain" in payload:
@@ -156,6 +145,8 @@ class SecurityService:
             set_portal_domain(db, payload.get("portal_domain"))
         if "portal_title" in payload:
             _set(db, "portal_title", (payload["portal_title"] or "").strip())
+        if "portal_link_ttl_days" in payload:
+            set_portal_link_ttl_days(db, payload["portal_link_ttl_days"])
         if "whitelist_firewall" in payload:
             requested = bool(payload["whitelist_firewall"])
             if requested and not self.is_whitelist_port_firewall_applicable():

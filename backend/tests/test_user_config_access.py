@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from app.models import UserRole
 from app.services.config_access import (
     can_mutate_config,
+    is_config_owner,
     can_view_config,
     matches_user_config_grant,
 )
@@ -83,7 +84,7 @@ class _FakeVpnCountQuery:
 
 
 def test_can_view_owned_without_grant():
-    user = SimpleNamespace(id=1, role=UserRole.user)
+    user = SimpleNamespace(id=1, role=UserRole.user, can_manage_configs=True)
     config = SimpleNamespace(owner_id=1, client_name="alice")
     db = _FakeDb(grants=[])
     assert can_view_config(user, config, db) is True
@@ -98,10 +99,11 @@ def test_can_view_grant_but_not_mutate():
     assert can_mutate_config(user, config) is False
 
 
-def test_grant_prefix_match():
-    db = _FakeDb(grants=["team-"])
+def test_grant_prefix_match_requires_explicit_star():
+    db = _FakeDb(grants=["team-*"])
     assert matches_user_config_grant(db, 1, "team-alice") is True
     assert matches_user_config_grant(db, 1, "other") is False
+    assert matches_user_config_grant(_FakeDb(grants=["team-"]), 1, "team-alice") is False
 
 
 def test_no_access_without_owner_or_grant():
@@ -195,6 +197,58 @@ def test_admin_is_exempt_from_expired_subscription_gate():
     enforce_user_can_create_config(db, user)
 
 
+def test_admin_can_create_even_without_flag_and_plan():
+    """Админ создаёт конфиги без плана и тарифа: флаг can_create_configs на него не действует."""
+    admin = SimpleNamespace(
+        id=7, role=UserRole.admin, can_create_configs=False, config_quota=None
+    )
+    db = _FakeDb(setting_value="5")
+
+    assert build_quota_payload(db, admin)["can_create"] is True
+    enforce_user_can_create_config(db, admin)
+
+
+def test_new_user_cannot_create_configs_by_default():
+    """Новый абонент создаётся без права создавать конфиги — право выдаётся явно."""
+    from app.models import User
+
+    assert User.__table__.c.can_create_configs.default.arg is False
+
+
 def test_user_role_enum_has_no_viewer():
     assert set(UserRole.__members__) == {"admin", "user"}
     assert "viewer" not in UserRole.__members__
+
+
+def test_owner_cannot_mutate_when_manage_disabled():
+    user = SimpleNamespace(id=1, role=UserRole.user, can_manage_configs=False)
+    config = SimpleNamespace(owner_id=1)
+    assert can_mutate_config(user, config) is False
+
+
+def test_owner_can_mutate_when_manage_enabled():
+    user = SimpleNamespace(id=1, role=UserRole.user, can_manage_configs=True)
+    config = SimpleNamespace(owner_id=1)
+    assert can_mutate_config(user, config) is True
+
+
+def test_admin_mutates_regardless_of_manage_flag():
+    user = SimpleNamespace(id=9, role=UserRole.admin, can_manage_configs=False)
+    config = SimpleNamespace(owner_id=1)
+    assert can_mutate_config(user, config) is True
+
+
+def test_quota_payload_includes_can_manage():
+    user = SimpleNamespace(
+        id=3, role=UserRole.user, can_create_configs=True, can_manage_configs=False, config_quota=None
+    )
+    db = _FakeDb(setting_value="5")
+    payload = build_quota_payload(db, user)
+    assert payload["can_manage"] is False
+
+
+def test_is_config_owner_ignores_manage_flag():
+    user = SimpleNamespace(id=1, role=UserRole.user, can_manage_configs=False)
+    config = SimpleNamespace(owner_id=1)
+    assert is_config_owner(user, config) is True
+    assert can_mutate_config(user, config) is False

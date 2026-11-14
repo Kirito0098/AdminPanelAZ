@@ -2,20 +2,28 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from typing import Literal
 
 from sqlalchemy.orm import Session
 
-from app.models import User, VpnConfig, VpnType
-from app.services.node_manager import get_active_adapter
+from app.models import Node, User, VpnConfig, VpnType
+from app.services.node_manager import get_adapter_for_node
 from app.services.profile_delivery import load_node_remote_hosts, read_profile_file_for_delivery
 from app.services.profile_download_name import build_profile_download_filename
 from app.services.telegram_profile_ui import file_caption
 from app.services.telegram import send_tg_document_result, send_tg_message
 from app.services.vpn_install_instructions import InstallPlatform, build_install_instruction_message
 from app.services.vpn_profile_visibility import filter_profile_files, resolve_effective_visible_vpn_profiles
+
+logger = logging.getLogger(__name__)
+
+EMPTY_PROFILE_FILE_ERROR = (
+    "файл профиля на сервере пустой — пересоздайте профили "
+    "(Настройки → Обслуживание → Пересоздать профили)"
+)
 
 
 def _download_name(config: VpnConfig, file_item: dict, selected_path: str) -> str:
@@ -45,7 +53,12 @@ def send_config_files_to_chat(
     if not chat_id:
         return 0, "Chat ID не задан"
 
-    adapter = get_active_adapter(db)
+    # Файлы ищем на узле самого конфига, а не на активном: у пользователя
+    # могут быть конфиги на нескольких серверах одновременно.
+    node = db.get(Node, config.node_id)
+    if node is None:
+        return 0, "Узел конфигурации не найден"
+    adapter = get_adapter_for_node(node)
     files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
     files = filter_profile_files(files, visible_policy)
     if not files:
@@ -71,6 +84,10 @@ def send_config_files_to_chat(
             content = read_profile_file_for_delivery(adapter, selected_path, hosts)
         except Exception as exc:
             return sent, str(exc) if sent == 0 else None
+        if not (content or "").strip():
+            # Telegram отвечает «file must be non-empty» — понятнее сказать причину самим.
+            logger.warning("empty profile file node=%s path=%s", config.node_id, selected_path)
+            return sent, EMPTY_PROFILE_FILE_ERROR if sent == 0 else None
 
         download_name = _download_name(config, file_item, selected_path)
         caption = file_caption(client_name=config.client_name, file_item=file_item)
@@ -118,16 +135,13 @@ def send_config_for_user(
     *,
     bot_token: str,
     path: str | None = None,
-    destination: Literal["self", "chat", "owner"] = "self",
+    destination: Literal["self", "owner"] = "self",
     chat_id_override: str | int | None = None,
     send_all: bool = False,
     run_async: bool = False,
     install_platform: InstallPlatform | None = None,
 ) -> tuple[int, str | None]:
-    """Resolve destination chat and send config files."""
-    from app.services.app_setting_store import _get_setting
-    from app.services.telegram_recipients import get_setting_chat_ids
-
+    """Resolve destination chat and send config files (personal telegram_id only)."""
     if chat_id_override is not None:
         chat_ids = [str(chat_id_override).strip()]
     elif destination == "owner":
@@ -140,19 +154,10 @@ def send_config_for_user(
         if not chat_id:
             return 0, "У пользователя не привязан Telegram"
         chat_ids = [chat_id]
-    elif destination == "chat":
-        if user.role.value != "admin":
-            return 0, "Только admin может отправлять в общий chat"
-        chat_ids = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
-        if not chat_ids:
-            return 0, "Получатели бэкапов не настроены"
     else:
         chat_id = (user.telegram_id or "").strip()
-        if not chat_id and user.role.value == "admin":
-            fallback = get_setting_chat_ids(lambda key, default="": _get_setting(db, key, default))
-            chat_id = fallback[0] if fallback else ""
         if not chat_id:
-            return 0, "Telegram ID не привязан к вашему аккаунту"
+            return 0, "Привяжите Telegram"
         chat_ids = [chat_id]
 
     visible_policy = resolve_effective_visible_vpn_profiles(db, user)

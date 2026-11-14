@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import Node, NodeStatus, UserTrafficSample
+from app.paths import resolve_sqlite_db_path
 
 settings = get_settings()
 
@@ -47,8 +48,13 @@ def assert_health_deep_access(request) -> None:
     )
 
 
+def app_started_at() -> str:
+    """Process start time: for admins and deep health only, not the public health response."""
+    return _APP_STARTED_AT
+
+
 def build_light_health() -> dict[str, Any]:
-    return {"status": "ok", "started_at": _APP_STARTED_AT}
+    return {"status": "ok"}
 
 
 def _sqlite_ok(engine, label: str) -> dict[str, Any]:
@@ -60,19 +66,13 @@ def _sqlite_ok(engine, label: str) -> dict[str, Any]:
         return {"status": "error", "label": label, "error": str(exc)}
 
 
-def _db_path_from_url(db_url: str, app_root: Path) -> Path:
-    db_path = Path(db_url.replace("sqlite:///", ""))
-    if not db_path.is_absolute():
-        db_path = app_root / db_path
-    return db_path
-
-
 def build_deep_health(db: Session, *, app_root: Path) -> dict[str, Any]:
     payload: dict[str, Any] = {
         **build_light_health(),
+        "started_at": _APP_STARTED_AT,
         "app": settings.app_name,
         "env": settings.app_env,
-        "resource_profile": settings.resource_profile,
+        "scenario_preset": settings.scenario_preset,
         "checks": {},
         "timestamp": _utcnow_iso(),
     }
@@ -81,7 +81,7 @@ def build_deep_health(db: Session, *, app_root: Path) -> dict[str, Any]:
     main_db = _sqlite_ok(db.get_bind(), "main_db")
     checks["main_db"] = main_db
 
-    cidr_path = _db_path_from_url(settings.cidr_database_url, app_root)
+    cidr_path = resolve_sqlite_db_path(settings.cidr_database_url, default_relative="data/cidr/cidr.db")
     cidr_check: dict[str, Any] = {"status": "ok", "label": "cidr_db", "path": str(cidr_path)}
     if not cidr_path.is_file():
         cidr_check["status"] = "error"
@@ -116,12 +116,17 @@ def build_deep_health(db: Session, *, app_root: Path) -> dict[str, Any]:
             if node.status == NodeStatus.online:
                 online += 1
                 try:
+                    from app.services.node_http_gate import NodeHttpBusy, node_http_gate_nonblocking
                     from app.services.node_manager import check_node_health
 
-                    health = check_node_health(node)
+                    with node_http_gate_nonblocking():
+                        health = check_node_health(node)
                     entry["reachable"] = bool(health.get("online"))
                     if not entry["reachable"]:
                         entry["error"] = health.get("error") or "unreachable"
+                except NodeHttpBusy:
+                    entry["reachable"] = None
+                    entry["skipped"] = "node_busy"
                 except Exception as exc:
                     entry["reachable"] = False
                     entry["error"] = str(exc)

@@ -189,5 +189,37 @@ check '[[ -f "$NGX/sites-available/panel_example_com" && -f "$NGX/snippets/cloud
 check '[[ ! -e "$TMP/systemctl.log" ]]' "nginx не трогается"
 printf 'DOMAIN=panel.example.com\n' >"$FAKE_ROOT/backend/.env"
 
+echo "[test] drop-in'ы установщика в conf.d удаляются, если их никто не использует"
+reset
+mkdir -p "$FAKE_ROOT/deploy/nginx"
+cp "$ROOT_DIR/deploy/nginx/adminpanelaz-privacy-log.conf" \
+  "$ROOT_DIR/deploy/nginx/adminpanelaz-server-names-hash.conf" "$FAKE_ROOT/deploy/nginx/"
+cp "$FAKE_ROOT/deploy/nginx/adminpanelaz-privacy-log.conf" "$NGX/conf.d/adminpanelaz-privacy-log.conf"
+cp "$FAKE_ROOT/deploy/nginx/adminpanelaz-server-names-hash.conf" "$NGX/conf.d/adminpanelaz-server-names-hash.conf"
+run_uninstall
+check '[[ ! -e "$NGX/conf.d/adminpanelaz-privacy-log.conf" ]]' "privacy-log удалён"
+check '[[ ! -e "$NGX/conf.d/adminpanelaz-server-names-hash.conf" ]]' "server_names_hash удалён"
+check 'live_nginx_ok' "настоящий nginx принимает конфигурацию без drop-in'ов"
+
+echo "[test] чужой сайт пишет privacy-лог-форматом: privacy-log остаётся, server_names_hash удаляется"
+reset
+cp "$FAKE_ROOT/deploy/nginx/adminpanelaz-privacy-log.conf" "$NGX/conf.d/adminpanelaz-privacy-log.conf"
+cp "$FAKE_ROOT/deploy/nginx/adminpanelaz-server-names-hash.conf" "$NGX/conf.d/adminpanelaz-server-names-hash.conf"
+printf 'server { listen 127.0.0.1:18517; server_name keep.example;\n    access_log %s/keep.log adminpanelaz_privacy;\n}\n' \
+  "$TMP" >"$NGX/sites-available/keep"
+ln -sf "$NGX/sites-available/keep" "$NGX/sites-enabled/keep"
+run_uninstall
+check '[[ -f "$NGX/conf.d/adminpanelaz-privacy-log.conf" ]]' "privacy-log оставлен"
+check 'grep -q "snippet privacy access log .* оставлен, его использует: .*keep" "$TMP/out.log"' "предупреждение называет сайт"
+check '[[ ! -e "$NGX/conf.d/adminpanelaz-server-names-hash.conf" ]]' "server_names_hash удалён"
+check 'live_nginx_ok' "настоящий nginx принимает конфигурацию с оставшимся privacy-log"
+
+echo "[test] server_names_hash правили руками: файл остаётся"
+reset
+cp "$FAKE_ROOT/deploy/nginx/adminpanelaz-server-names-hash.conf" "$NGX/conf.d/adminpanelaz-server-names-hash.conf"
+printf '# свой размер под длинные имена\nserver_names_hash_bucket_size 256;\n' >"$NGX/conf.d/adminpanelaz-server-names-hash.conf"
+run_uninstall
+check '[[ -f "$NGX/conf.d/adminpanelaz-server-names-hash.conf" ]]' "правленый server_names_hash оставлен"
+
 echo "Passed: $pass  Failed: $fail"
 [[ "$fail" -eq 0 ]]

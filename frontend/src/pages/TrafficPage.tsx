@@ -30,10 +30,13 @@ import {
 } from '@/api/client'
 import { getRetentionSettings } from '@/api/settings'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
-import { formatBytes } from '@/lib/trafficFormat'
+import { formatBytes, protocolLabel } from '@/lib/trafficFormat'
 import TrafficPeriodControls, {
   type TrafficPeriodPreset,
 } from '@/components/traffic/TrafficPeriodControls'
+import TrafficUsersView from '@/components/traffic/TrafficUsersView'
+import ShareBar from '@/components/shared/ShareBar'
+import ViewModeToggle from '@/components/shared/ViewModeToggle'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import { NodeBadge } from '@/components/NodeSelector'
 import SettingsAlert from '@/components/settings/SettingsAlert'
@@ -44,6 +47,7 @@ import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import Spinner from '@/components/ui/Spinner'
 import { InlineProgressBar } from '@/components/ui/ProgressBar'
 import { Badge } from '@/components/ui/badge'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -68,7 +72,6 @@ import { useNode } from '@/context/NodeContext'
 import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useIntervalWhenVisible } from '@/hooks/useIntervalWhenVisible'
-import { PercentBar } from '@/components/ui/percent-bar'
 import { formatDateTime } from '@/lib/datetime'
 import {
   isAppliedCustomValid,
@@ -78,6 +81,8 @@ import {
   validateCustomRange,
 } from '@/lib/trafficPeriod'
 import { cn } from '@/lib/utils'
+import { groupTrafficRowsByUser } from '@/lib/userGrouping'
+import type { TrafficUserGroup } from '@/lib/userGrouping'
 import type { TrafficClientDetailsProps } from '@/components/traffic/TrafficClientDetails'
 import type {
   ClientAccessPolicy,
@@ -107,33 +112,24 @@ function isPageReload() {
 type OverviewPreset = '1d' | '7d' | '30d'
 type SortKey = 'total_bytes' | 'traffic_period' | 'total_received' | 'total_sent' | 'common_name'
 
+type TrafficViewMode = 'configs' | 'users'
+const VIEW_MODE_STORAGE_KEY = 'traffic-monitoring:view-mode'
+
+function readStoredViewMode(): TrafficViewMode {
+  if (typeof window === 'undefined') return 'configs'
+  try {
+    return window.localStorage.getItem(VIEW_MODE_STORAGE_KEY) === 'users' ? 'users' : 'configs'
+  } catch {
+    return 'configs'
+  }
+}
+
 const SORT_LABELS: Record<SortKey, string> = {
   total_bytes: 'Общий объём',
   traffic_period: 'За период',
   total_received: 'RX',
   total_sent: 'TX',
   common_name: 'Имя клиента',
-}
-
-function getProtocolLabel(protocol: string) {
-  const p = protocol.toLowerCase()
-  if (p === 'wireguard') return 'WireGuard'
-  if (p === 'openvpn') return 'OpenVPN'
-  if (p === 'amneziawg2') return 'AWG 2.0'
-  return protocol
-}
-
-function getProtocolVariant(protocol: string): 'default' | 'secondary' | 'outline' {
-  const p = protocol.toLowerCase()
-  if (p === 'openvpn') return 'default'
-  if (p === 'wireguard') return 'secondary'
-  if (p === 'amneziawg2') return 'outline'
-  return 'outline'
-}
-
-function formatLastSeen(value?: string | null) {
-  if (!value) return '—'
-  return formatDateTime(value)
 }
 
 type SummaryCardProps = {
@@ -158,22 +154,6 @@ function SummaryCard({ label, value, icon: Icon, sub, accent }: SummaryCardProps
         {sub && <p className="mt-1 text-xs text-muted-foreground">{sub}</p>}
       </CardContent>
     </Card>
-  )
-}
-
-type TrafficShareBarProps = {
-  value: number
-  max: number
-}
-
-function TrafficShareBar({ value, max }: TrafficShareBarProps) {
-  return (
-    <div className="flex items-center gap-2">
-      <PercentBar value={value} max={max} className="h-1.5 min-w-0 flex-1" />
-      <span className="mono w-10 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
-        {max > 0 ? Math.min((value / max) * 100, 100).toFixed(0) : '0'}%
-      </span>
-    </div>
   )
 }
 
@@ -217,13 +197,11 @@ function TrafficClientCard({
             />
             <div className="min-w-0">
               <p className="truncate font-medium">{row.common_name}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">{formatLastSeen(row.last_seen_at)}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{formatDateTime(row.last_seen_at)}</p>
             </div>
           </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant={getProtocolVariant(row.protocol_type)} className="text-[10px]">
-            {getProtocolLabel(row.protocol_type)}
-          </Badge>
+          <ProtocolBadge protocol={row.protocol_type} />
           <Badge variant={row.is_active ? 'success' : 'secondary'} className="text-[10px]">
             {row.is_active ? 'Онлайн' : 'Офлайн'}
           </Badge>
@@ -253,7 +231,7 @@ function TrafficClientCard({
         </div>
       </div>
       <div className="mt-3">
-        <TrafficShareBar value={row.total_bytes} max={totalBytes} />
+        <ShareBar value={row.total_bytes} max={totalBytes} />
       </div>
       </button>
       {expanded && children && (
@@ -272,13 +250,11 @@ function NeverConnectedCard({ row }: NeverConnectedCardProps) {
     <div className="rounded-lg border border-border/80 bg-card p-4">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <p className="min-w-0 truncate font-medium">{row.common_name}</p>
-        <Badge variant={getProtocolVariant(row.protocol_type)} className="text-[10px]">
-          {getProtocolLabel(row.protocol_type)}
-        </Badge>
+        <ProtocolBadge protocol={row.protocol_type} />
       </div>
       <p className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
         <Clock size={12} className="shrink-0" />
-        Конфиг создан: {formatLastSeen(row.created_at)}
+        Конфиг создан: {formatDateTime(row.created_at)}
       </p>
     </div>
   )
@@ -300,7 +276,7 @@ function DeletedTrafficCard({ row, onDelete, disabled }: DeletedTrafficCardProps
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate font-medium">{row.common_name}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{getProtocolLabel(row.protocol_type)}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{protocolLabel(row.protocol_type)}</p>
           <p className="mono mt-2 text-sm font-medium tabular-nums">{formatBytes(row.total_bytes)}</p>
         </div>
         <Button
@@ -318,7 +294,12 @@ function DeletedTrafficCard({ row, onDelete, disabled }: DeletedTrafficCardProps
   )
 }
 
-export default function TrafficPage() {
+type TrafficPageProps = {
+  /** Внутри «Наблюдения»: без своего заголовка и отступов страницы. */
+  embedded?: boolean
+}
+
+export default function TrafficPage({ embedded = false }: TrafficPageProps) {
   const { activeNode, loading: nodeLoading } = useNode()
   const { user } = useAuth()
   const isAdmin = user?.role === 'admin'
@@ -358,6 +339,7 @@ export default function TrafficPage() {
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [countdown, setCountdown] = useState(REFRESH_INTERVAL)
   const [search, setSearch] = useState('')
+  const [viewMode, setViewMode] = useState<TrafficViewMode>(() => readStoredViewMode())
   const [sortKey, setSortKey] = useState<SortKey>('total_bytes')
   const [resetting, setResetting] = useState(false)
   const [resetScope, setResetScope] = useState<'all' | 'openvpn' | 'wireguard' | 'amneziawg2'>('all')
@@ -710,6 +692,14 @@ export default function TrafficPage() {
   const nodeOffline = activeNode?.status === 'offline'
   const nodeUnknown = activeNode?.status === 'unknown'
 
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(VIEW_MODE_STORAGE_KEY, viewMode)
+    } catch {
+      /* ignore quota / privacy mode */
+    }
+  }, [viewMode])
+
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase()
     const rows = [...(data?.rows ?? [])]
@@ -717,7 +707,9 @@ export default function TrafficPage() {
       ? rows.filter(
           (r) =>
             r.common_name.toLowerCase().includes(q) ||
-            getProtocolLabel(r.protocol_type).toLowerCase().includes(q),
+            protocolLabel(r.protocol_type).toLowerCase().includes(q) ||
+            (r.owner_username || '').toLowerCase().includes(q) ||
+            (r.owner_id != null && String(r.owner_id) === q),
         )
       : rows
 
@@ -729,6 +721,18 @@ export default function TrafficPage() {
     })
     return filtered
   }, [data?.rows, search, sortKey])
+
+  const userGroups = useMemo(
+    () => (viewMode === 'users' ? groupTrafficRowsByUser(filteredRows) : []),
+    [filteredRows, viewMode],
+  )
+
+  const trafficViewMaxBytes = useMemo(() => {
+    if (viewMode !== 'users') return 0
+    const rowMax = filteredRows.reduce((max, row) => Math.max(max, row.total_bytes), 0)
+    const groupMax = userGroups.reduce((max, group) => Math.max(max, group.totalBytes), 0)
+    return Math.max(rowMax, groupMax)
+  }, [viewMode, filteredRows, userGroups])
 
   const selectedRow = useMemo(
     () =>
@@ -801,6 +805,16 @@ export default function TrafficPage() {
     if (!rows.length) return null
     return [...rows].sort((a, b) => b.traffic_period - a.traffic_period)[0]
   }, [data?.rows])
+
+  const topUser =
+    viewMode === 'users'
+      ? userGroups.reduce<TrafficUserGroup | null>(
+          (best, group) => (!best || group.trafficPeriod > best.trafficPeriod ? group : best),
+          null,
+        )
+      : null
+  const topPeriod = viewMode === 'users' ? (topUser?.trafficPeriod ?? 0) : (topConsumer?.traffic_period ?? 0)
+  const topName = viewMode === 'users' ? (topUser?.username ?? null) : (topConsumer?.common_name ?? null)
 
   const handleRefresh = () => load(false, true)
 
@@ -916,7 +930,7 @@ export default function TrafficPage() {
         await loadDeletedClients()
         await loadNeverConnectedClients()
       }, 'Сброс статистики трафика...')
-      success(`Статистика сброшена (${resetScope})`)
+      success(`Статистика сброшена (${resetScope === 'all' ? 'всё' : protocolLabel(resetScope)})`)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка сброса')
     } finally {
@@ -939,8 +953,29 @@ export default function TrafficPage() {
     }
   }
 
+  const renderTrafficDetails = (row: TrafficClientRow) => (
+    <TrafficClientDetails
+      row={row}
+      chartData={chartData}
+      chartLoading={chartLoading}
+      retentionDays={retentionDays}
+      chartMode={chartMode}
+      chartPreset={chartPreset}
+      chartCustomFrom={chartDraftFrom}
+      chartCustomTo={chartDraftTo}
+      chartAppliedFrom={chartAppliedFrom}
+      chartAppliedTo={chartAppliedTo}
+      onChartPresetChange={handleChartPresetChange}
+      onChartCustomChange={handleChartCustomChange}
+      onChartApplyCustom={handleChartApplyCustom}
+      onNotifyError={notifyError}
+      policy={clientPolicy}
+      policyLoading={policyLoading}
+    />
+  )
+
   if (loading && !data) {
-    return <Spinner label="Загрузка статистики трафика..." className="py-16" />
+    return <Spinner label="Загрузка статистики трафика..." className={embedded ? 'py-8' : 'py-16'} />
   }
 
   const hasRows = (data?.rows?.length ?? 0) > 0
@@ -952,67 +987,75 @@ export default function TrafficPage() {
     appliedTo,
   )
 
-  return (
-    <div className="space-y-6">
-      <PageSectionHeader
-        icon={Network}
-        title="Мониторинг трафика"
-        docsHref={DOCS.traffic}
-        titleAddon={
-          <>
-            <NodeBadge name={activeNode?.name ?? data?.node_name} status={activeNode?.status} />
-            {liveLoading && (
-              <Badge variant="secondary" className="gap-1 text-[10px]">
-                <Loader2 size={10} className="animate-spin" />
-                Live-статус
-              </Badge>
-            )}
-            {summary?.db_is_stale && (
-              <Badge variant="warning" className="gap-1 text-[10px]">
-                <Database size={10} />
-                БД устарела ({summary.db_age_seconds}с)
-              </Badge>
-            )}
-          </>
-        }
-        description={
-          <>
-            Накопленная статистика RX/TX по клиентам VPN и AntiZapret
-            {data?.timestamp && <> · обновлено {formatDateTime(data.timestamp)}</>}
-          </>
-        }
-        actions={
-          <>
-            <AutoRefreshControl
-              enabled={autoRefresh}
-              onToggle={() => setAutoRefresh((v) => !v)}
-              countdown={countdown}
-              intervalSec={REFRESH_INTERVAL}
-              refreshing={refreshing}
-              onManualRefresh={handleRefresh}
-            />
-            {isAdmin && (
-              <>
-                <Select value={resetScope} onValueChange={(v) => setResetScope(v as typeof resetScope)}>
-                  <SelectTrigger className="h-9 w-full text-xs sm:w-[160px]">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Сброс: всё</SelectItem>
-                    <SelectItem value="openvpn">Сброс: OpenVPN</SelectItem>
-                    <SelectItem value="wireguard">Сброс: WG/AWG</SelectItem>
-                    {awg2Enabled && <SelectItem value="amneziawg2">Сброс: AWG 2.0</SelectItem>}
-                  </SelectContent>
-                </Select>
-                <Button variant="outline" size="sm" onClick={handleReset} disabled={resetting}>
-                  {resetting ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
-                  Сбросить
-                </Button>
-              </>
-            )}
-          </>
-        }
+  const headerActions = (
+    <>
+      <AutoRefreshControl
+        enabled={autoRefresh}
+        onToggle={() => setAutoRefresh((v) => !v)}
+        countdown={countdown}
+        intervalSec={REFRESH_INTERVAL}
+        refreshing={refreshing}
+        onManualRefresh={handleRefresh}
       />
+      {isAdmin && (
+        <>
+          <Select value={resetScope} onValueChange={(v) => setResetScope(v as typeof resetScope)}>
+            <SelectTrigger className="h-9 w-full text-xs sm:w-[160px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Сброс: всё</SelectItem>
+              <SelectItem value="openvpn">Сброс: {protocolLabel('openvpn')}</SelectItem>
+              <SelectItem value="wireguard">Сброс: {protocolLabel('wireguard')}</SelectItem>
+              {awg2Enabled && (
+                <SelectItem value="amneziawg2">Сброс: {protocolLabel('amneziawg2')}</SelectItem>
+              )}
+            </SelectContent>
+          </Select>
+          <Button variant="outline" size="sm" onClick={handleReset} disabled={resetting}>
+            {resetting ? <Loader2 size={14} className="animate-spin" /> : <RotateCcw size={14} />}
+            Сбросить
+          </Button>
+        </>
+      )}
+    </>
+  )
+
+  return (
+    <div className={embedded ? 'space-y-4' : 'space-y-6'}>
+      {embedded ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">{headerActions}</div>
+      ) : (
+        <PageSectionHeader
+          icon={Network}
+          title="Мониторинг трафика"
+          docsHref={DOCS.traffic}
+          titleAddon={
+            <>
+              <NodeBadge name={activeNode?.name ?? data?.node_name} status={activeNode?.status} />
+              {liveLoading && (
+                <Badge variant="secondary" className="gap-1 text-[10px]">
+                  <Loader2 size={10} className="animate-spin" />
+                  Live-статус
+                </Badge>
+              )}
+              {summary?.db_is_stale && (
+                <Badge variant="warning" className="gap-1 text-[10px]">
+                  <Database size={10} />
+                  БД устарела ({summary.db_age_seconds}с)
+                </Badge>
+              )}
+            </>
+          }
+          description={
+            <>
+              Накопленная статистика RX/TX по клиентам VPN и AntiZapret
+              {data?.timestamp && <> · обновлено {formatDateTime(data.timestamp)}</>}
+            </>
+          }
+          actions={headerActions}
+        />
+      )}
 
       {data?.ha_context ? (
         <SettingsAlert variant="info" title="Суммарный трафик HA-группы">
@@ -1069,10 +1112,14 @@ export default function TrafficPage() {
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <SummaryCard
-              label="Клиентов"
-              value={String(summary?.users_count ?? 0)}
+              label={viewMode === 'users' ? 'Пользователей' : 'Клиентов'}
+              value={String(viewMode === 'users' ? userGroups.length : (summary?.users_count ?? 0))}
               icon={Users}
-              sub={`активных: ${summary?.active_users_count ?? 0}`}
+              sub={
+                viewMode === 'users'
+                  ? `конфигов: ${filteredRows.length} · активных: ${userGroups.filter((group) => group.isActive).length}`
+                  : `активных: ${summary?.active_users_count ?? 0}`
+              }
             />
             <SummaryCard
               label="Получено (RX)"
@@ -1088,9 +1135,9 @@ export default function TrafficPage() {
             />
             <SummaryCard
               label="Топ за период"
-              value={topConsumer ? formatBytes(topConsumer.traffic_period) : '—'}
+              value={topPeriod > 0 ? formatBytes(topPeriod) : '—'}
               icon={TrendingUp}
-              sub={topConsumer ? topConsumer.common_name : 'нет данных'}
+              sub={topName ?? 'нет данных'}
             />
           </div>
 
@@ -1098,12 +1145,14 @@ export default function TrafficPage() {
             <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <HardDrive size={18} />
-                  Клиенты
+                  {viewMode === 'users' ? <Users size={18} /> : <HardDrive size={18} />}
+                  {viewMode === 'users' ? 'Пользователи' : 'Клиенты'}
                 </CardTitle>
                 <CardDescription>
                   {hasRows
-                    ? `${filteredRows.length} из ${data?.rows.length ?? 0} клиентов · сортировка: ${SORT_LABELS[sortKey]}${selectedClient ? ` · раскрыт: ${selectedClient}` : ''}`
+                    ? viewMode === 'users'
+                      ? `${userGroups.length} пользователей · ${filteredRows.length} конфигов${selectedClient ? ` · раскрыт: ${selectedClient}` : ''}`
+                      : `${filteredRows.length} из ${data?.rows.length ?? 0} клиентов · сортировка: ${SORT_LABELS[sortKey]}${selectedClient ? ` · раскрыт: ${selectedClient}` : ''}`
                     : 'Накопленные RX/TX и трафик за выбранный период'}
                   {summary?.latest_sample_at && (
                     <> · последний снимок {formatDateTime(summary.latest_sample_at)}</>
@@ -1111,6 +1160,15 @@ export default function TrafficPage() {
                 </CardDescription>
               </div>
               <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+                <ViewModeToggle
+                  value={viewMode}
+                  onChange={setViewMode}
+                  ariaLabel="Группировка статистики трафика"
+                  options={[
+                    { value: 'configs', label: 'Конфиги', icon: HardDrive },
+                    { value: 'users', label: 'Пользователи', icon: Users },
+                  ]}
+                />
                 <TrafficPeriodControls
                   retentionDays={retentionDays}
                   mode={overviewMode}
@@ -1133,22 +1191,28 @@ export default function TrafficPage() {
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     onKeyDown={handleSearchKeyDown}
-                    placeholder="Поиск по имени... (Enter — раскрыть)"
+                    placeholder={
+                      viewMode === 'users'
+                        ? 'Поиск по пользователю или конфигу...'
+                        : 'Поиск по имени... (Enter — раскрыть)'
+                    }
                     className="h-9 pl-9 text-xs"
                   />
                 </div>
-                <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
-                  <SelectTrigger className="h-9 w-full text-xs sm:w-44">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
-                      <SelectItem key={key} value={key}>
-                        {SORT_LABELS[key]}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {viewMode === 'configs' && (
+                  <Select value={sortKey} onValueChange={(v) => setSortKey(v as SortKey)}>
+                    <SelectTrigger className="h-9 w-full text-xs sm:w-44">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+                        <SelectItem key={key} value={key}>
+                          {SORT_LABELS[key]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             </CardHeader>
             <CardContent>
@@ -1165,6 +1229,16 @@ export default function TrafficPage() {
                   title="Нет совпадений"
                   description="Измените поисковый запрос или сбросьте фильтр"
                   className="py-8"
+                />
+              ) : viewMode === 'users' ? (
+                <TrafficUsersView
+                  groups={userGroups}
+                  maxTotalBytes={trafficViewMaxBytes}
+                  periodLabel={periodColumnSubtitle}
+                  selectedClient={selectedClient}
+                  selectedProtocol={selectedProtocol}
+                  onToggleClient={toggleClient}
+                  renderDetails={renderTrafficDetails}
                 />
               ) : (
                 <ResponsiveDataView
@@ -1248,9 +1322,7 @@ export default function TrafficPage() {
                                 </TableCell>
                                 <TableCell className="font-medium">{r.common_name}</TableCell>
                             <TableCell>
-                              <Badge variant={getProtocolVariant(r.protocol_type)} className="text-[10px]">
-                                {getProtocolLabel(r.protocol_type)}
-                              </Badge>
+                              <ProtocolBadge protocol={r.protocol_type} />
                             </TableCell>
                             <TableCell className="whitespace-nowrap text-right font-mono text-xs">
                               {formatBytes(r.total_received)}
@@ -1262,7 +1334,7 @@ export default function TrafficPage() {
                               {formatBytes(r.total_bytes)}
                             </TableCell>
                             <TableCell>
-                              <TrafficShareBar value={r.total_bytes} max={totalBytes} />
+                              <ShareBar value={r.total_bytes} max={totalBytes} />
                             </TableCell>
                             <TableCell className="whitespace-nowrap text-right font-mono text-xs">
                               {formatBytes(r.traffic_period)}
@@ -1270,7 +1342,7 @@ export default function TrafficPage() {
                             <TableCell className="text-xs text-muted-foreground">
                               <span className="inline-flex items-center gap-1">
                                 <Clock size={12} className="shrink-0" />
-                                {formatLastSeen(r.last_seen_at)}
+                                {formatDateTime(r.last_seen_at)}
                               </span>
                             </TableCell>
                                 <TableCell>
@@ -1369,14 +1441,12 @@ export default function TrafficPage() {
                             <TableRow key={`${row.common_name}-${row.protocol_type}-${row.config_id ?? 'na'}`}>
                               <TableCell className="font-medium">{row.common_name}</TableCell>
                               <TableCell>
-                                <Badge variant={getProtocolVariant(row.protocol_type)} className="text-[10px]">
-                                  {getProtocolLabel(row.protocol_type)}
-                                </Badge>
+                                <ProtocolBadge protocol={row.protocol_type} />
                               </TableCell>
                               <TableCell className="text-xs text-muted-foreground">
                                 <span className="inline-flex items-center gap-1">
                                   <Clock size={12} className="shrink-0" />
-                                  {formatLastSeen(row.created_at)}
+                                  {formatDateTime(row.created_at)}
                                 </span>
                               </TableCell>
                             </TableRow>
@@ -1435,7 +1505,7 @@ export default function TrafficPage() {
                             {deletedRows.map((row) => (
                               <TableRow key={`${row.common_name}-${row.protocol_type}`}>
                                 <TableCell>{row.common_name}</TableCell>
-                                <TableCell>{getProtocolLabel(row.protocol_type)}</TableCell>
+                                <TableCell>{protocolLabel(row.protocol_type)}</TableCell>
                                 <TableCell className="text-right font-mono text-xs">{formatBytes(row.total_bytes)}</TableCell>
                                 <TableCell>
                                   <Button

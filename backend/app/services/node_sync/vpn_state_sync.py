@@ -11,8 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.models import Node, VpnType
-from app.services.awg2 import AWG2_INSTALL_CMD
-from app.services.access_policy import AccessPolicyService
+from app.services.access_policy import AccessPolicyService, policy_service_for_node
 from app.services.node_sync.openvpn_pki_state import (
     PkiState,
     newly_revoked_clients,
@@ -29,6 +28,42 @@ WIREGUARD_INTERFACES = ("antizapret", "vpn")
 
 class Awg2NotInstalledError(RuntimeError):
     """AZ-AWG2 is missing on the replica; its state was not touched."""
+
+
+class Awg2EmptyStateError(RuntimeError):
+    """Primary AZ-AWG2 is installed but has no exportable amneziawg/ + clients/ files."""
+
+
+AWG2_REPLICA_NOT_INSTALLED_MSG = (
+    "AWG 2.0 установлен на primary, но не установлен на реплике. "
+    "Установите AWG 2.0 на реплике и повторите синхронизацию."
+)
+AWG2_PRIMARY_EMPTY_STATE_MSG = (
+    "На primary нет состояния AWG 2.0 (пустые конфиги сервера или клиентов). "
+    "Создайте клиентов или дождитесь завершения установки на primary и повторите синхронизацию."
+)
+
+
+def _archive_has_awg2_state_files(data: bytes) -> bool:
+    if not data:
+        return False
+    try:
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+            has_amnezia = False
+            has_clients = False
+            for member in archive.getmembers():
+                if not member.isfile():
+                    continue
+                name = member.name
+                if name.startswith("amneziawg/") and name != "amneziawg/":
+                    has_amnezia = True
+                elif name.startswith("clients/") and name != "clients/":
+                    has_clients = True
+                if has_amnezia and has_clients:
+                    return True
+            return False
+    except tarfile.TarError:
+        return False
 
 
 class ReplicaRuntimeError(RuntimeError):
@@ -104,7 +139,7 @@ def _copy_all_wireguard_profiles_from_primary(
     raise HTTPException(
         status_code=500,
         detail=(
-            "На primary нет файлов профилей WireGuard/AmneziaWG для копирования на replica. "
+            "На primary нет файлов профилей WG/AWG 1.5 для копирования на replica. "
             "Проверьте node agent и каталог client/wireguard на основном узле."
         ),
     )
@@ -198,7 +233,7 @@ def sync_wireguard_state_from_primary(
     if reblock:
         _reapply_blocked_wireguard_policies(db, replica_node, replica_adapter)
     if runtime_error is not None:
-        raise ReplicaRuntimeError(f"WireGuard на реплике не применён (файлы скопированы): {runtime_error}")
+        raise ReplicaRuntimeError(f"WG/AWG 1.5 на реплике не применён (файлы скопированы): {runtime_error}")
 
 
 def copy_openvpn_profiles_from_primary(primary_adapter, replica_adapter) -> None:
@@ -346,12 +381,11 @@ def sync_openvpn_pki_from_primary(
 
 
 def _replica_policy_service(db: Session, replica_node: Node, replica_adapter) -> AccessPolicyService:
-    return AccessPolicyService(
+    return policy_service_for_node(
         db,
-        antizapret_path=get_settings().antizapret_path,
-        node_id=replica_node.id,
-        node_name=replica_node.name,
+        replica_node,
         adapter=replica_adapter,
+        antizapret_path=get_settings().antizapret_path,
     )
 
 
@@ -365,12 +399,12 @@ def _raise_reblock_errors(results: list[dict], protocol: str, replica_node: Node
 
 def _reapply_blocked_awg2_policies(db: Session, replica_node: Node, replica_adapter) -> None:
     results = _replica_policy_service(db, replica_node, replica_adapter)._reapply_all_blocked_awg2_runtime()
-    _raise_reblock_errors(results, "AWG2", replica_node)
+    _raise_reblock_errors(results, "AWG 2.0", replica_node)
 
 
 def _reapply_blocked_wireguard_policies(db: Session, replica_node: Node, replica_adapter) -> None:
     results = _replica_policy_service(db, replica_node, replica_adapter)._reapply_all_blocked_runtime()
-    _raise_reblock_errors(results, "WireGuard", replica_node)
+    _raise_reblock_errors(results, "WG/AWG 1.5", replica_node)
 
 
 def _reapply_blocks_after_failure(reapply, db: Session, replica_node: Node, replica_adapter) -> None:
@@ -403,12 +437,11 @@ def sync_amneziawg2_state_from_primary(
     """Copy AZ-AWG2 state archive from primary to replica and apply runtime."""
     health = replica_adapter.get_awg2_health()
     if not health.get("installed"):
-        cmd = health.get("install_command") or AWG2_INSTALL_CMD
-        raise Awg2NotInstalledError(f"AZ-AWG2 не установлен на replica. Установите: {cmd}")
+        raise Awg2NotInstalledError(AWG2_REPLICA_NOT_INSTALLED_MSG)
 
     archive = primary_adapter.export_awg2_state_archive()
-    if not archive:
-        raise RuntimeError("Пустой архив состояния AZ-AWG2 с primary")
+    if not _archive_has_awg2_state_files(archive):
+        raise Awg2EmptyStateError(AWG2_PRIMARY_EMPTY_STATE_MSG)
 
     reblock = db is not None and replica_node is not None
     try:
@@ -420,12 +453,12 @@ def sync_amneziawg2_state_from_primary(
         raise
     runtime_error: str | None = None
     if not runtime.get("success"):
-        runtime_error = "; ".join(str(entry) for entry in runtime.get("errors") or []) or "AWG2 runtime apply failed"
+        runtime_error = "; ".join(str(entry) for entry in runtime.get("errors") or []) or "AWG 2.0 runtime apply failed"
         logger.warning("HA AWG2 runtime apply partial: %s", runtime_error)
     if reblock:
         _reapply_blocked_awg2_policies(db, replica_node, replica_adapter)
     if runtime_error is not None:
-        raise ReplicaRuntimeError(f"AZ-AWG2 на реплике не применён (файлы скопированы): {runtime_error}")
+        raise ReplicaRuntimeError(f"AWG 2.0 на реплике не применён (файлы скопированы): {runtime_error}")
 
 
 def sync_vpn_crypto_from_primary(
@@ -506,6 +539,8 @@ def sync_all_vpn_crypto_from_primary(
             )
         except Awg2NotInstalledError as exc:
             logger.warning("HA full crypto: AWG2 skipped: %s", exc)
+        except Awg2EmptyStateError as exc:
+            runtime_errors.append(str(exc))
         except ReplicaRuntimeError as exc:
             runtime_errors.append(str(exc))
     if runtime_errors:

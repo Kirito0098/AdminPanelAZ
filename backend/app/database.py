@@ -14,7 +14,7 @@ from sqlalchemy.orm import DeclarativeBase, sessionmaker
 from sqlalchemy.pool import SingletonThreadPool, StaticPool
 
 from app.config import get_settings
-from app.paths import BACKEND_ROOT
+from app.paths import resolve_sqlite_db_path
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -45,13 +45,7 @@ class Base(DeclarativeBase):
 
 
 def resolve_main_db_path() -> Path:
-    db_url = get_settings().database_url
-    if db_url.startswith("sqlite:///"):
-        db_path = Path(db_url.replace("sqlite:///", ""))
-        if not db_path.is_absolute():
-            db_path = BACKEND_ROOT / db_path
-        return db_path.resolve()
-    return (BACKEND_ROOT / "data" / "adminpanel.db").resolve()
+    return resolve_sqlite_db_path(get_settings().database_url, default_relative="data/adminpanel.db")
 
 
 @contextmanager
@@ -419,6 +413,7 @@ def _migrate_unlock_codes_tables() -> None:
                         max_redemptions INTEGER NOT NULL,
                         redemption_count INTEGER NOT NULL DEFAULT 0,
                         allowed_client_names TEXT NOT NULL DEFAULT '[]',
+                        target_user_id INTEGER,
                         code_expires_at DATETIME,
                         created_by_user_id INTEGER,
                         created_at DATETIME,
@@ -469,6 +464,13 @@ def _migrate_unlock_codes_tables() -> None:
                     )
                 )
             logger.info("DB migration: added unlock_codes.allowed_client_names")
+
+        inspector = inspect(engine)
+        unlock_cols = {col["name"] for col in inspector.get_columns("unlock_codes")}
+        if "target_user_id" not in unlock_cols:
+            with _migration_transaction() as conn:
+                conn.execute(text("ALTER TABLE unlock_codes ADD COLUMN target_user_id INTEGER"))
+            logger.info("DB migration: added unlock_codes.target_user_id")
 
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
@@ -1627,6 +1629,7 @@ def _migrate_nodes_columns() -> None:
     _migrate_nodes_wireguard_use_first_remote()
     _migrate_nodes_openvpn_multihome()
     _migrate_nodes_openvpn_restart_pending()
+    _migrate_nodes_openvpn_tuning_intent()
     _migrate_nodes_proxy_fields()
     _migrate_nodes_portal_label()
     _migrate_nodes_api_key_pending()
@@ -1635,6 +1638,10 @@ def _migrate_nodes_columns() -> None:
 
 def _run_db_migrations() -> None:
     _migrate_nodes_columns()
+    _migrate_admin_panel_notification_states()
+    _migrate_users_bell_notify_categories()
+    _migrate_user_access_requests_cooldown_waived()
+    _migrate_user_messages_attachment()
     _migrate_alert_rules_table()
     _migrate_openvpn_buffer_guard_tables()
     _migrate_openvpn_buffer_guard_factory_thresholds()
@@ -1662,7 +1669,7 @@ def _run_db_migrations() -> None:
     _migrate_traffic_session_state_active_index()
     _migrate_user_traffic_sample_name_index()
     _migrate_user_traffic_sample_node_client_index()
-    _migrate_qr_download_tokens_columns()
+    _migrate_drop_qr_download_tables()
     inspector = inspect(engine)
     migrations = {
         "wg_access_policy": [
@@ -1718,6 +1725,7 @@ def _run_db_migrations() -> None:
             ("tg_notify_events", "TEXT"),
             ("config_quota", "INTEGER"),
             ("can_create_configs", "INTEGER DEFAULT 1"),
+            ("can_manage_configs", "INTEGER DEFAULT 0"),
             ("visible_vpn_profiles", "TEXT"),
             ("timezone", "VARCHAR(64) DEFAULT ''"),
             ("last_client_timezone", "VARCHAR(64) DEFAULT ''"),
@@ -1745,8 +1753,702 @@ def _run_db_migrations() -> None:
     _migrate_viewer_role_to_user()
     _migrate_user_telegram_backfill()
     _migrate_user_access_until_backfill()
+    _migrate_users_provisioning()
+    _migrate_user_provisioning_stage2()
+    _migrate_users_stage3()
+    _migrate_users_commercial()
+    _migrate_user_action_logs_user_id_index()
+    _migrate_user_traffic_sample_name_norm_index()
+    _migrate_config_quota_floor()
+    _migrate_user_messages()
+    _migrate_user_messages_read_by_user()
+    _migrate_user_message_cards()
+    _migrate_telegram_widgets()
+    _migrate_user_portal_banner()
     _migrate_revoke_unmanaged_client_portal_links()
     _seed_client_templates_for_nodes()
+
+
+def _migrate_users_provisioning() -> None:
+    """Add user provisioning columns, subject_key, and user_node_assignments."""
+    with _migration_transaction() as conn:
+        tables = {r[0] for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))}
+        if "users" in tables:
+            cols = _table_columns(conn, "users")
+            alters = [
+                ("client_base_name", "VARCHAR(28)"),
+                ("plan_config_indexes", "TEXT"),
+                ("desired_protocols", "TEXT"),
+                ("panel_login_enabled", "BOOLEAN DEFAULT 1"),
+                ("provision_state", "VARCHAR(16) DEFAULT 'unmanaged'"),
+            ]
+            for name, typ in alters:
+                if name not in cols:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {typ}"))
+                    logger.info("DB migration: added users.%s", name)
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_client_base_name_lower "
+                    "ON users (lower(client_base_name)) WHERE client_base_name IS NOT NULL"
+                )
+            )
+
+        if "background_task" in tables:
+            bt = _table_columns(conn, "background_task")
+            if "subject_key" not in bt:
+                conn.execute(text("ALTER TABLE background_task ADD COLUMN subject_key VARCHAR(64)"))
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_background_task_subject_key "
+                        "ON background_task (subject_key)"
+                    )
+                )
+                logger.info("DB migration: added background_task.subject_key")
+
+        if "user_node_assignments" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE user_node_assignments (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        node_id INTEGER NOT NULL REFERENCES nodes(id),
+                        UNIQUE (user_id, node_id)
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_node_assignments_user_id "
+                    "ON user_node_assignments (user_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_node_assignments_node_id "
+                    "ON user_node_assignments (node_id)"
+                )
+            )
+            logger.info("DB migration: created user_node_assignments table")
+
+
+def _migrate_user_provisioning_stage2() -> None:
+    """Stage 2: admin_panel_notifications, provisioning_presets, user_access_requests,
+    telegram_request_bans, telegram_user_archive; users.last_read_notification_id."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    with _migration_transaction() as conn:
+        if "admin_panel_notifications" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE admin_panel_notifications (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        category VARCHAR(16) NOT NULL,
+                        level VARCHAR(16) NOT NULL DEFAULT 'info',
+                        event_type VARCHAR(64) NOT NULL,
+                        title VARCHAR(200) NOT NULL,
+                        message TEXT NOT NULL DEFAULT '',
+                        action_payload TEXT,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_admin_panel_notifications_category "
+                    "ON admin_panel_notifications (category)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_admin_panel_notifications_event_type "
+                    "ON admin_panel_notifications (event_type)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_admin_panel_notifications_created_at "
+                    "ON admin_panel_notifications (created_at)"
+                )
+            )
+            logger.info("DB migration: created admin_panel_notifications table")
+
+        if "provisioning_presets" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE provisioning_presets (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        name VARCHAR(64) NOT NULL UNIQUE,
+                        node_ids TEXT NOT NULL DEFAULT '[]',
+                        protocols TEXT NOT NULL DEFAULT '[]',
+                        config_count INTEGER NOT NULL DEFAULT 1,
+                        config_quota INTEGER,
+                        traffic_limit_bytes BIGINT,
+                        access_days INTEGER,
+                        is_default INTEGER NOT NULL DEFAULT 0,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_provisioning_presets_name "
+                    "ON provisioning_presets (name)"
+                )
+            )
+            logger.info("DB migration: created provisioning_presets table")
+
+        if "user_access_requests" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE user_access_requests (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        request_type VARCHAR(16) NOT NULL,
+                        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                        telegram_id VARCHAR(32) NOT NULL,
+                        telegram_username VARCHAR(64),
+                        telegram_name VARCHAR(128),
+                        requested_count INTEGER NOT NULL DEFAULT 1,
+                        user_note VARCHAR(256),
+                        status VARCHAR(16) NOT NULL DEFAULT 'pending',
+                        admin_message_refs TEXT,
+                        reviewed_by_id INTEGER REFERENCES users(id),
+                        reviewed_at DATETIME,
+                        reject_reason VARCHAR(256),
+                        delivered_at DATETIME,
+                        receipt_file_id VARCHAR(256),
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_access_requests_request_type "
+                    "ON user_access_requests (request_type)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_access_requests_user_id "
+                    "ON user_access_requests (user_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_access_requests_telegram_id "
+                    "ON user_access_requests (telegram_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_access_requests_status "
+                    "ON user_access_requests (status)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_access_requests_created_at "
+                    "ON user_access_requests (created_at)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_request_per_tg_type "
+                    "ON user_access_requests (telegram_id, request_type) WHERE status = 'pending'"
+                )
+            )
+            logger.info("DB migration: created user_access_requests table")
+
+        if "telegram_request_bans" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE telegram_request_bans (
+                        telegram_id VARCHAR(32) NOT NULL PRIMARY KEY,
+                        banned_by_id INTEGER REFERENCES users(id),
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        note VARCHAR(256)
+                    )
+                    """
+                )
+            )
+            logger.info("DB migration: created telegram_request_bans table")
+
+        if "telegram_user_archive" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE telegram_user_archive (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        telegram_id VARCHAR(32) NOT NULL,
+                        username VARCHAR(64) NOT NULL,
+                        created_at DATETIME,
+                        deleted_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        last_access_until DATETIME,
+                        last_term_days INTEGER
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_telegram_user_archive_telegram_id "
+                    "ON telegram_user_archive (telegram_id)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_telegram_user_archive_deleted_at "
+                    "ON telegram_user_archive (deleted_at)"
+                )
+            )
+            logger.info("DB migration: created telegram_user_archive table")
+
+    if "users" in tables:
+        with _migration_transaction() as conn:
+            if "last_read_notification_id" not in _table_columns(conn, "users"):
+                conn.execute(
+                    text(
+                        "ALTER TABLE users ADD COLUMN last_read_notification_id INTEGER"
+                    )
+                )
+                logger.info("DB migration: added users.last_read_notification_id")
+
+    # access_request_* писались с category=tasks из‑за неверных ключей EVENT_CATEGORY.
+    if "admin_panel_notifications" in tables:
+        with _migration_transaction() as conn:
+            result = conn.execute(
+                text(
+                    "UPDATE admin_panel_notifications SET category = 'requests' "
+                    "WHERE event_type LIKE 'access_request_%' AND category != 'requests'"
+                )
+            )
+            fixed = result.rowcount or 0
+            if fixed:
+                logger.info(
+                    "DB migration: reclassified %s access_request notifications → requests",
+                    fixed,
+                )
+
+    # Заголовки и категории событий, которых не было в BELL_TITLES / EVENT_CATEGORY.
+    if "admin_panel_notifications" in tables:
+        with _migration_transaction() as conn:
+            titles = {
+                "user_provision_applied": "Выдача конфигов",
+                "openvpn_buffer_guard": "OpenVPN: перегрузка буфера",
+            }
+            fixed = 0
+            for event_type, title in titles.items():
+                result = conn.execute(
+                    text(
+                        "UPDATE admin_panel_notifications SET title = :title "
+                        "WHERE event_type = :event_type AND title <> :title"
+                    ),
+                    {"title": title, "event_type": event_type},
+                )
+                fixed += result.rowcount or 0
+            result = conn.execute(
+                text(
+                    "UPDATE admin_panel_notifications SET category = 'services' "
+                    "WHERE event_type = 'openvpn_buffer_guard' AND category <> 'services'"
+                )
+            )
+            fixed += result.rowcount or 0
+            if fixed:
+                logger.info("DB migration: refreshed %s notification titles", fixed)
+
+
+def _migrate_users_bell_notify_categories() -> None:
+    """Личная подписка админа на категории уведомлений в панели (колокольчик и лента)."""
+    with _migration_transaction() as conn:
+        if "bell_notify_categories" not in _table_columns(conn, "users"):
+            conn.execute(text("ALTER TABLE users ADD COLUMN bell_notify_categories TEXT"))
+            logger.info("DB migration: added users.bell_notify_categories")
+
+
+def _migrate_user_messages_attachment() -> None:
+    """Фото в переписке (чек оплаты) — Telegram file_id вложения."""
+    with _migration_transaction() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_messages'")
+        ).fetchone()
+        if not exists:
+            return
+        if "attachment_file_id" not in _table_columns(conn, "user_messages"):
+            conn.execute(text("ALTER TABLE user_messages ADD COLUMN attachment_file_id TEXT"))
+            logger.info("DB migration: added user_messages.attachment_file_id")
+
+
+def _migrate_user_access_requests_cooldown_waived() -> None:
+    """Признак «админ снял кулдаун после отказа»."""
+    with _migration_transaction() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_access_requests'")
+        ).fetchone()
+        if not exists:
+            return
+        if "cooldown_waived" not in _table_columns(conn, "user_access_requests"):
+            conn.execute(
+                text(
+                    "ALTER TABLE user_access_requests ADD COLUMN cooldown_waived BOOLEAN NOT NULL DEFAULT 0"
+                )
+            )
+            logger.info("DB migration: added user_access_requests.cooldown_waived")
+
+
+def _migrate_admin_panel_notification_states() -> None:
+    """Личное состояние уведомлений админа (прочитано / скрыто / отложено)."""
+    with _migration_transaction() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS admin_panel_notification_states (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    notification_id INTEGER NOT NULL
+                        REFERENCES admin_panel_notifications(id) ON DELETE CASCADE,
+                    read_at DATETIME,
+                    hidden_at DATETIME,
+                    snoozed_until DATETIME,
+                    CONSTRAINT uq_apns_user_notification UNIQUE (user_id, notification_id)
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_apns_user_hidden "
+                "ON admin_panel_notification_states (user_id, hidden_at)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_apns_user_snooze "
+                "ON admin_panel_notification_states (user_id, snoozed_until)"
+            )
+        )
+    logger.info("DB migration: ensured admin_panel_notification_states table")
+
+
+def _migrate_user_portal_banner() -> None:
+    """Stage 4: users.portal_banner_text / portal_banner_at (баннер портала)."""
+    inspector = inspect(engine)
+    if "users" not in inspector.get_table_names():
+        return
+    with _migration_transaction() as conn:
+        cols = _table_columns(conn, "users")
+        for name, typ in [("portal_banner_text", "TEXT"), ("portal_banner_at", "DATETIME")]:
+            if name not in cols:
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {typ}"))
+                logger.info("DB migration: added users.%s", name)
+
+
+def _migrate_users_stage3() -> None:
+    """Stage 3: user suspend/traffic-limit columns and unlock_codes.comment."""
+    inspector = inspect(engine)
+    # get_table_names() returns list[str] — must use set(...), not {r[0] for r in ...}
+    # (r[0] would be the first character of each name, so "users" never matches).
+    tables = set(inspector.get_table_names())
+
+    with _migration_transaction() as conn:
+        if "users" in tables:
+            cols = _table_columns(conn, "users")
+            for name, typ in [
+                ("suspended_at", "DATETIME"),
+                ("suspend_reason", "VARCHAR(200)"),
+                ("suspend_reason_visible", "BOOLEAN DEFAULT 0"),
+                ("traffic_limit_bytes", "BIGINT"),
+                ("traffic_counter_reset_at", "DATETIME"),
+                ("traffic_limit_blocked", "BOOLEAN DEFAULT 0"),
+            ]:
+                if name not in cols:
+                    conn.execute(text(f"ALTER TABLE users ADD COLUMN {name} {typ}"))
+                    logger.info("DB migration: added users.%s", name)
+        if "unlock_codes" in tables:
+            cols = _table_columns(conn, "unlock_codes")
+            if "comment" not in cols:
+                conn.execute(text("ALTER TABLE unlock_codes ADD COLUMN comment VARCHAR(128)"))
+                logger.info("DB migration: added unlock_codes.comment")
+        if "provisioning_presets" in tables:
+            cols = _table_columns(conn, "provisioning_presets")
+            if "traffic_limit_bytes" not in cols:
+                conn.execute(text("ALTER TABLE provisioning_presets ADD COLUMN traffic_limit_bytes BIGINT"))
+                logger.info("DB migration: added provisioning_presets.traffic_limit_bytes")
+        if "background_task" in tables:
+            cols = _table_columns(conn, "background_task")
+            if "input" not in cols:
+                conn.execute(text("ALTER TABLE background_task ADD COLUMN input TEXT"))
+                logger.info("DB migration: added background_task.input")
+
+
+def _migrate_users_commercial() -> None:
+    """Stage 5: users.note + user_action_logs.target_user_id (история по абоненту)."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    with _migration_transaction() as conn:
+        if "users" in tables:
+            cols = _table_columns(conn, "users")
+            if "note" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN note TEXT"))
+                logger.info("DB migration: added users.note")
+        if "user_action_logs" in tables:
+            cols = _table_columns(conn, "user_action_logs")
+            if "target_user_id" not in cols:
+                conn.execute(
+                    text(
+                        "ALTER TABLE user_action_logs ADD COLUMN target_user_id "
+                        "INTEGER REFERENCES users(id)"
+                    )
+                )
+                conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_user_action_logs_target_user_id "
+                        "ON user_action_logs (target_user_id)"
+                    )
+                )
+                logger.info("DB migration: added user_action_logs.target_user_id")
+
+
+def _migrate_user_action_logs_user_id_index() -> None:
+    """Индекс на user_action_logs.user_id: без него обнуление истории при удалении
+    абонента (purge_user_before_delete) делает full-scan под write-локом SQLite и
+    на минуты блокирует всех писателей панели (``database is locked``)."""
+    inspector = inspect(engine)
+    if "user_action_logs" not in inspector.get_table_names():
+        return
+    indexes = {idx.get("name") for idx in inspector.get_indexes("user_action_logs")}
+    if "ix_user_action_logs_user_id" in indexes:
+        return
+    with _migration_transaction() as conn:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_user_action_logs_user_id "
+                "ON user_action_logs (user_id)"
+            )
+        )
+    logger.info("DB migration: added user_action_logs.user_id index")
+
+
+def _migrate_user_traffic_sample_name_norm_index() -> None:
+    """Индекс по lower(trim(common_name)): очистка статистики при переиспользовании
+    имени (purge_traffic_history_for_reused_name) иначе сканирует всю таблицу
+    трафика под write-локом SQLite."""
+    inspector = inspect(engine)
+    if "user_traffic_sample" not in inspector.get_table_names():
+        return
+    indexes = {idx.get("name") for idx in inspector.get_indexes("user_traffic_sample")}
+    if "ix_user_traffic_sample_node_name_norm" in indexes:
+        return
+    with _migration_transaction() as conn:
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_user_traffic_sample_node_name_norm "
+                "ON user_traffic_sample (node_id, lower(trim(common_name)))"
+            )
+        )
+    logger.info("DB migration: added user_traffic_sample node/name-norm index")
+
+
+def _plan_index_count(raw: str | None) -> int:
+    """Сколько имён в плане: длина ``plan_config_indexes`` (невалидные элементы пропускаем)."""
+    try:
+        data = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return 0
+    if not isinstance(data, list):
+        return 0
+    count = 0
+    for item in data:
+        try:
+            int(item)
+        except (TypeError, ValueError):
+            continue
+        count += 1
+    return count
+
+
+def _migrate_config_quota_floor() -> None:
+    """Stage 6: «лимит имён» не ниже числа имён плана.
+
+    Одобрение «ещё один конфиг» расширяло план, но не квоту — у абонента
+    получалось ``3 / 2`` и самосервис блокировался. Явную квоту (>0) поднимаем
+    до размера плана; ``None``/0 — «общий лимит панели», их не трогаем.
+    """
+    inspector = inspect(engine)
+    if "users" not in set(inspector.get_table_names()):
+        return
+    with _migration_transaction() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT id, plan_config_indexes FROM users "
+                "WHERE config_quota IS NOT NULL AND config_quota > 0"
+            )
+        ).fetchall()
+        raised = 0
+        for user_id, raw in rows:
+            names = _plan_index_count(raw)
+            if names <= 0:
+                continue
+            result = conn.execute(
+                text(
+                    "UPDATE users SET config_quota = :names "
+                    "WHERE id = :user_id AND config_quota < :names"
+                ),
+                {"names": names, "user_id": user_id},
+            )
+            raised += result.rowcount or 0
+        if raised:
+            logger.info("DB migration: raised config_quota to plan size for %s user(s)", raised)
+
+
+def _migrate_user_messages() -> None:
+    """Stage 7: user_messages (чат абонент ↔ админ) + users.chat_mode_since."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    with _migration_transaction() as conn:
+        if "user_messages" not in tables:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE user_messages (
+                        id INTEGER NOT NULL PRIMARY KEY,
+                        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                        direction VARCHAR(8) NOT NULL,
+                        admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                        text TEXT NOT NULL,
+                        telegram_message_id BIGINT,
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                        read_by_admin_at DATETIME
+                    )
+                    """
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_messages_user_created "
+                    "ON user_messages (user_id, created_at)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_user_messages_unread "
+                    "ON user_messages (user_id) "
+                    "WHERE direction = 'in' AND read_by_admin_at IS NULL"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_messages_tg "
+                    "ON user_messages (user_id, telegram_message_id) "
+                    "WHERE telegram_message_id IS NOT NULL"
+                )
+            )
+            logger.info("DB migration: created user_messages table")
+        if "users" in tables:
+            cols = _table_columns(conn, "users")
+            if "chat_mode_since" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN chat_mode_since DATETIME"))
+                logger.info("DB migration: added users.chat_mode_since")
+
+
+def _migrate_user_messages_read_by_user() -> None:
+    """Отметка «абонент прочитал ответ администратора» (Mini App)."""
+    with _migration_transaction() as conn:
+        exists = conn.execute(
+            text("SELECT 1 FROM sqlite_master WHERE type='table' AND name='user_messages'")
+        ).fetchone()
+        if not exists:
+            return
+        if "read_by_user_at" not in _table_columns(conn, "user_messages"):
+            conn.execute(text("ALTER TABLE user_messages ADD COLUMN read_by_user_at DATETIME"))
+            logger.info("DB migration: added user_messages.read_by_user_at")
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_user_messages_unread_for_user "
+                "ON user_messages (user_id) "
+                "WHERE direction = 'out' AND read_by_user_at IS NULL"
+            )
+        )
+
+
+def _migrate_user_message_cards() -> None:
+    """Stage 8: user_message_cards (ответы админа реплаем из Telegram)."""
+    inspector = inspect(engine)
+    if "user_message_cards" in set(inspector.get_table_names()):
+        return
+    with _migration_transaction() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE user_message_cards (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    admin_chat_id VARCHAR(32) NOT NULL,
+                    message_id INTEGER NOT NULL,
+                    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_user_message_cards_tg "
+                "ON user_message_cards (admin_chat_id, message_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_user_message_cards_user "
+                "ON user_message_cards (user_id)"
+            )
+        )
+        logger.info("DB migration: created user_message_cards table")
+
+
+def _migrate_telegram_widgets() -> None:
+    """Bot API 10.4: сообщения-виджеты и их владелец."""
+    inspector = inspect(engine)
+    if "telegram_widgets" in set(inspector.get_table_names()):
+        return
+    with _migration_transaction() as conn:
+        conn.execute(
+            text(
+                """
+                CREATE TABLE telegram_widgets (
+                    id INTEGER NOT NULL PRIMARY KEY,
+                    chat_id VARCHAR(32) NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    telegram_id VARCHAR(32) NOT NULL,
+                    kind VARCHAR(32) NOT NULL,
+                    ref_id INTEGER,
+                    last_state VARCHAR(1024),
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_telegram_widgets_message "
+                "ON telegram_widgets (chat_id, message_id)"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE INDEX IF NOT EXISTS ix_telegram_widgets_tg_kind "
+                "ON telegram_widgets (telegram_id, kind)"
+            )
+        )
+        logger.info("DB migration: created telegram_widgets table")
 
 
 def _migrate_user_config_access_table() -> None:
@@ -1939,6 +2641,26 @@ def _migrate_nodes_openvpn_multihome() -> None:
         logger.info("DB migration: added nodes.openvpn_multihome")
 
 
+def _migrate_nodes_openvpn_tuning_intent() -> None:
+    """Намерение панели по OpenVPN-тюнингу (duplicate-cn / подробные логи).
+
+    AntiZapret хранит OPENVPN_DUPLICATE / OPENVPN_LOG в setup, но применяет их только при
+    установке. Панель правит server conf напрямую, поэтому ей нужно помнить выбор, чтобы
+    вернуть его после повторного setup.sh.
+    """
+    inspector = inspect(engine)
+    if "nodes" not in inspector.get_table_names():
+        return
+    cols = {c["name"] for c in inspector.get_columns("nodes")}
+    missing = [name for name in ("openvpn_duplicate_cn", "openvpn_detailed_logs") if name not in cols]
+    if not missing:
+        return
+    with _migration_transaction() as conn:
+        for name in missing:
+            conn.execute(text(f"ALTER TABLE nodes ADD COLUMN {name} BOOLEAN"))
+            logger.info("DB migration: added nodes.%s", name)
+
+
 def _migrate_nodes_openvpn_restart_pending() -> None:
     """Add HA replica flag: OpenVPN restart still owed after a server identity change."""
     inspector = inspect(engine)
@@ -2010,23 +2732,17 @@ def _migrate_nodes_client_templates_seeded() -> None:
         logger.info("DB migration: added nodes.client_templates_seeded")
 
 
-def _migrate_qr_download_tokens_columns() -> None:
-    """Bind one-time links to their node and count wrong PIN attempts."""
+def _migrate_drop_qr_download_tables() -> None:
+    """Drop tables of the removed QR one-time links feature."""
     inspector = inspect(engine)
-    if "qr_download_tokens" not in inspector.get_table_names():
-        return
-    cols = {col["name"] for col in inspector.get_columns("qr_download_tokens")}
-    if {"node_id", "pin_failures"} <= cols:
+    tables = set(inspector.get_table_names())
+    dropped = [name for name in ("qr_download_audit_logs", "qr_download_tokens") if name in tables]
+    if not dropped:
         return
     with _migration_transaction() as conn:
-        if "node_id" not in cols:
-            conn.execute(text("ALTER TABLE qr_download_tokens ADD COLUMN node_id INTEGER"))
-            logger.info("DB migration: added qr_download_tokens.node_id")
-        if "pin_failures" not in cols:
-            conn.execute(
-                text("ALTER TABLE qr_download_tokens ADD COLUMN pin_failures INTEGER NOT NULL DEFAULT 0")
-            )
-            logger.info("DB migration: added qr_download_tokens.pin_failures")
+        for name in dropped:
+            conn.execute(text(f"DROP TABLE IF EXISTS {name}"))
+            logger.info("DB migration: dropped table %s", name)
 
 
 _POLICY_DEADLINE_BY_VPN_TYPE = {

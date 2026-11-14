@@ -60,7 +60,7 @@ export default function PipelineStatusBar({ cidrDb, antifilter }: PipelineStatus
           </div>
           <div className="min-w-0">
             <div className="text-xs text-muted-foreground">
-              <span className="sm:hidden">Загрузка</span>
+              <span className="sm:hidden">{STAGE_LOAD}</span>
               <span className="hidden sm:inline">Последняя {STAGE_LOAD.toLowerCase()}</span>
             </div>
             <div className="text-sm font-medium">{formatDt(cidrDb?.last_refresh_finished)}</div>
@@ -76,7 +76,7 @@ export default function PipelineStatusBar({ cidrDb, antifilter }: PipelineStatus
           </div>
           <div className="min-w-0">
             <div className="text-xs text-muted-foreground">
-              <span className="sm:hidden">Сборка</span>
+              <span className="sm:hidden">{STAGE_BUILD}</span>
               <span className="hidden sm:inline">Последняя {STAGE_BUILD.toLowerCase()}</span>
             </div>
             {lastCompile ? (
@@ -102,7 +102,7 @@ export default function PipelineStatusBar({ cidrDb, antifilter }: PipelineStatus
           </div>
           <div className="min-w-0">
             <div className="text-xs text-muted-foreground">
-              <span className="sm:hidden">Deploy</span>
+              <span className="sm:hidden">{STAGE_DEPLOY}</span>
               <span className="hidden sm:inline">Последнее {STAGE_DEPLOY.toLowerCase()}</span>
             </div>
             {lastDeploy ? (

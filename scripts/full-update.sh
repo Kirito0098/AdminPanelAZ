@@ -23,6 +23,8 @@ source "$FU_DIR/update-preview.sh"
 FU_FW_ARGS=()
 
 FU_STEPS=(backup code apt pip frontend systemd nginx firewall ddns restart)
+# Шаги, которые можно выбрать для --server-only (веб-обновление): ключи уходят в FU_ONLY/--only.
+FU_SELECTABLE_STEPS=" apt systemd nginx firewall ddns "
 declare -A FU_LABELS=(
   [backup]=Бэкап [code]=Код [apt]=Пакеты [pip]=Python [frontend]=Интерфейс
   [systemd]=systemd [nginx]=nginx [firewall]=firewall [ddns]=DDNS [restart]=Перезапуск
@@ -218,6 +220,13 @@ fu_step_apt() {
   fu_row apt ошибка "не доустановлено: ${missing[*]}"
 }
 
+fu_sync_scenario_db() {
+  # install.sh пишет scenario только в .env: без AppSetting панель покажет «Кастомный», grace = 0.
+  [[ -x "$VENV_PATH/bin/python" && -f "$INSTALL_DIR/scripts/sync-scenario-db.py" ]] || return 0
+  "$VENV_PATH/bin/python" "$INSTALL_DIR/scripts/sync-scenario-db.py" \
+    || ui_warn "Сценарий не синхронизирован с БД — grace-период останется прежним"
+}
+
 fu_step_pip() {
   local pip="$VENV_PATH/bin/pip"
   if [[ ! -x "$pip" ]]; then
@@ -227,6 +236,9 @@ fu_step_pip() {
   fi
   ui_info "pip install -r backend/requirements.txt…"
   "$pip" install -q -r "$INSTALL_DIR/backend/requirements.txt"
+  # Каталог локальной GeoIP (docs/GeoIP.md): mmdb кладут руками, но mkdir делает обновление.
+  mkdir -p "$INSTALL_DIR/backend/data/geoip"
+  fu_sync_scenario_db
   ui_ok "Python-зависимости обновлены"
   fu_row pip ok
 }
@@ -337,9 +349,15 @@ fu_step_nginx() {
     fu_row nginx пропущен "нет своего vhost в $(nginx_sites_available_dir) — nginx не менялся"
     return 0
   fi
+  # Как nginx_install_site на свежей установке: vhost ссылается на log_format и длинные
+  # server_name, снипеты должны лежать в conf.d до nginx -t — иначе «unknown log format».
+  nginx_ensure_server_names_hash
+  nginx_ensure_privacy_log
   for i in "${!files[@]}"; do
     if ! confs[i]="$(fu_nginx_render "${kinds[i]}" "${hosts[i]}" "${files[i]}")"; then
       nginx_install_txn_rollback
+      nginx_rollback_server_names_hash
+      nginx_rollback_privacy_log
       ui_fail "Не удалось собрать vhost ${hosts[i]} — nginx не менялся"
       fu_row nginx ошибка "не удалось собрать vhost ${hosts[i]} — nginx не менялся"
       return 1
@@ -355,6 +373,8 @@ fu_step_nginx() {
   done
   if err="$(nginx -t 2>&1)"; then
     nginx_install_txn_commit
+    nginx_cleanup_server_names_hash_bak
+    nginx_cleanup_privacy_log_bak
     if ! systemctl reload nginx; then
       ui_fail "systemctl reload nginx не прошёл"
       fu_row nginx ошибка "конфиг обновлён, но systemctl reload nginx не прошёл"
@@ -369,6 +389,8 @@ fu_step_nginx() {
     cp -a -- "$file.bak-$stamp" "$file"
   done
   nginx_install_txn_rollback
+  nginx_rollback_server_names_hash
+  nginx_rollback_privacy_log
   if ! nginx -t >/dev/null 2>&1; then
     ui_warn "nginx -t не проходит и со старым конфигом — проверьте: sudo nginx -t"
   fi
@@ -549,12 +571,36 @@ full_update_apply() {
 }
 
 # Веб: то, что обновление из панели не делает. Код, сборку и перезапуск панель уже выполнила сама.
+# FU_STEPS здесь — выбранные шаги (--only/FU_ONLY) или все пять по умолчанию.
 full_update_server_only() {
-  fu_run apt fu_step_apt
-  fu_run systemd fu_step_systemd
-  fu_run nginx fu_step_nginx
-  fu_run firewall fu_step_firewall
-  fu_run ddns fu_step_ddns
+  local step
+  fu_sync_scenario_db
+  for step in "${FU_STEPS[@]}"; do
+    fu_run "$step" "fu_step_$step"
+  done
+}
+
+# --only/FU_ONLY: список ключей через запятую. Пустой или чужой ключ — ошибка до любых изменений.
+fu_select_steps() {
+  local raw="$1" item
+  local -a items=()
+  IFS=',' read -r -a items <<<"$raw"
+  FU_STEPS=()
+  for item in "${items[@]}"; do
+    item="${item//[[:space:]]/}"
+    [[ -n "$item" ]] || continue
+    if [[ "$FU_SELECTABLE_STEPS" != *" $item "* ]]; then
+      ui_fail "Неизвестный шаг: $item (доступны: apt, systemd, nginx, firewall, ddns)"
+      return 1
+    fi
+    if [[ " ${FU_STEPS[*]} " != *" $item "* ]]; then
+      FU_STEPS+=("$item")
+    fi
+  done
+  if [[ "${#FU_STEPS[@]}" -eq 0 ]]; then
+    ui_fail "Пустой список шагов (доступны: apt, systemd, nginx, firewall, ddns)"
+    return 1
+  fi
 }
 
 full_update_run() {
@@ -652,7 +698,7 @@ fu_show_preview() {
 FU_ASSUME_YES=false
 
 full_update_main() {
-  local resume="" preview=false preview_rev="" server_only=false
+  local resume="" preview=false preview_rev="" server_only=false only="" only_set=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --yes) FU_ASSUME_YES=true ;;
@@ -665,6 +711,16 @@ full_update_main() {
         shift
         ;;
       --server-only) server_only=true ;;
+      --only)
+        if [[ $# -lt 2 ]]; then
+          ui_fail "--only: нужен список шагов (apt,systemd,nginx,firewall,ddns)"
+          return 2
+        fi
+        only="$2"
+        only_set=true
+        shift
+        ;;
+      --only=*) only="${1#--only=}"; only_set=true ;;
       --report)
         if [[ $# -lt 2 ]]; then
           ui_fail "--report: нужен файл"
@@ -689,6 +745,14 @@ full_update_main() {
     esac
     shift
   done
+  if [[ "$only_set" == true || -n "${FU_ONLY:-}" ]]; then
+    if [[ "$server_only" != true ]]; then
+      ui_fail "--only/FU_ONLY: выборочное обновление работает только с --server-only"
+      return 2
+    fi
+    [[ "$only_set" == true ]] || only="$FU_ONLY"
+    fu_select_steps "$only" || return 2
+  fi
   require_root
   if [[ "$(menu_mode)" == none ]]; then
     ui_fail "AdminPanelAZ не установлена: используйте обычную установку (sudo ./install.sh)"
@@ -700,7 +764,9 @@ full_update_main() {
     return 0
   fi
   if [[ "$server_only" == true ]]; then
-    FU_STEPS=(apt systemd nginx firewall ddns)
+    if [[ -z "$only" ]]; then
+      FU_STEPS=(apt systemd nginx firewall ddns)
+    fi
     FU_STATE="$(mktemp "$(fu_state_dir)/adminpanelaz-update.XXXXXX")"
     full_update_server_only
     fu_finish

@@ -1,8 +1,8 @@
+import { CLIENT_NAME_RE } from '@/lib/clientName'
 import type { VpnConfig } from '@/types'
 
 type ProfileFile = VpnConfig['profile_files'][number]
 
-const CLIENT_NAME_RE = /^[a-zA-Z0-9_-]{1,32}$/
 const AZ_PROFILE_DIR = /\/(?:openvpn|wireguard|amneziawg)\/antizapret(?:[-/]|$)/
 
 function sanitizeClientName(clientName: string): string {

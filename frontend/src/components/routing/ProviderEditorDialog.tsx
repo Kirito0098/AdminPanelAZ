@@ -10,6 +10,9 @@ import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { useNotifications } from '@/context/NotificationContext'
+import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
+
+const READONLY_HINT = 'HA replica: файл провайдера можно изменить только на primary.'
 
 interface ProviderEditorDialogProps {
   filename: string | null
@@ -27,6 +30,7 @@ export default function ProviderEditorDialog({
   onSaved,
 }: ProviderEditorDialogProps) {
   const { success, error: notifyError } = useNotifications()
+  const readonly = useHaReplicaReadonly()
   const [content, setContent] = useState('')
   const [cidrCount, setCidrCount] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
@@ -82,13 +86,18 @@ export default function ProviderEditorDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Отмена
           </Button>
-          <Button onClick={() => void handleSave()} disabled={loading || saving || !filename}>
+          <Button onClick={() => void handleSave()} disabled={readonly || loading || saving || !filename} title={readonly ? READONLY_HINT : undefined}>
             <Save size={14} className="mr-1" />
             {saving ? 'Сохранение...' : 'Сохранить'}
           </Button>
         </>
       }
     >
+      {readonly && (
+        <p className="mb-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          {READONLY_HINT}
+        </p>
+      )}
       {loading ? (
         <Spinner label="Загрузка содержимого..." className="py-12" />
       ) : (

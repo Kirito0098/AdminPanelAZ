@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.services.cidr.cidr_tasks import find_any_active_pipeline_task
 from app.services.cidr.pipeline.deploy import list_compile_artifacts
+from app.services.cidr.task_summary import summarize_last_compile, summarize_last_deploy
 from app.services.node_manager import get_active_adapter, get_active_node
 
 logger = logging.getLogger(__name__)
@@ -221,18 +222,6 @@ def build_warper_status_payload(db: Session) -> dict:
     }
 
 
-def _summarize_last_compile() -> dict | None:
-    from app.routers.cidr_db import _summarize_last_compile
-
-    return _summarize_last_compile()
-
-
-def _summarize_last_deploy() -> dict | None:
-    from app.routers.cidr_db import _summarize_last_deploy
-
-    return _summarize_last_deploy()
-
-
 def _cidr_task_type_label(task_type: str) -> str:
     labels = {
         "cidr_db_refresh": "Загрузка провайдеров",
@@ -286,8 +275,8 @@ def build_cidr_status_payload(db: Session) -> dict:
     )
     alerts = status_data.get("alerts") if isinstance(status_data.get("alerts"), list) else []
 
-    compile_row = _summarize_last_compile() if list_compile_artifacts() else None
-    deploy_row = _summarize_last_deploy()
+    compile_row = summarize_last_compile() if list_compile_artifacts() else None
+    deploy_row = summarize_last_deploy()
 
     return {
         "total_cidrs": total_cidrs,

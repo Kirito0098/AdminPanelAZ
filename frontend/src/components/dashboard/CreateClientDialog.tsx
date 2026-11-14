@@ -2,11 +2,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Loader2, Plus } from 'lucide-react'
 import {
   ApiError,
-  awg2SetTrafficLimit,
   createConfig,
-  openvpnSetTrafficLimit,
   setClientAccessUntil,
-  wgSetTrafficLimit,
 } from '@/api/client'
 import { AWG2_TTL_OPTIONS } from '@/components/awg2/utils'
 import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
@@ -22,7 +19,11 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import DatePickerField from '@/components/ui/DatePickerField'
+import { CLIENT_NAME_HINT, isValidClientName } from '@/lib/clientName'
+import { endOfDayIso } from '@/lib/datetime'
+import { setProfileTrafficLimits } from '@/lib/profileTrafficLimit'
 import { panelToday } from '@/lib/trafficPeriod'
+import { protocolLabel } from '@/lib/vpnTypes'
 import {
   Select,
   SelectContent,
@@ -35,42 +36,10 @@ import type { User, VpnType } from '@/types'
 
 const PROTOCOL_ORDER: VpnType[] = ['openvpn', 'wireguard', 'amneziawg2']
 
-function vpnLabel(type: VpnType): string {
-  if (type === 'openvpn') return 'OpenVPN'
-  if (type === 'wireguard') return 'WireGuard / AmneziaWG'
-  return 'AmneziaWG 2.0'
-}
-
 function vpnHint(type: VpnType): string {
   if (type === 'openvpn') return 'Сертификат + .ovpn'
-  if (type === 'wireguard') return 'WG / AWG профиль'
+  if (type === 'wireguard') return 'Профиль WG/AWG 1.5'
   return 'AWG 2.0 peer'
-}
-
-function dateInputToIso(value: string): string | null {
-  if (!value) return null
-  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
-  if (!match) return null
-  const next = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), 23, 59, 59, 999)
-  return next.toISOString()
-}
-
-async function setTrafficLimitForProtocol(
-  protocol: VpnType,
-  clientName: string,
-  value: number,
-  unit: string,
-  periodDays: number | null,
-) {
-  if (protocol === 'openvpn') {
-    await openvpnSetTrafficLimit(clientName, value, unit, periodDays)
-    return
-  }
-  if (protocol === 'amneziawg2') {
-    await awg2SetTrafficLimit(clientName, value, unit, periodDays)
-    return
-  }
-  await wgSetTrafficLimit(clientName, value, unit, periodDays)
 }
 
 interface CreateClientDialogProps {
@@ -79,6 +48,7 @@ interface CreateClientDialogProps {
   openvpnEnabled: boolean
   wireguardEnabled: boolean
   awg2CreateEnabled: boolean
+  awg2Installed?: boolean
   isAdmin: boolean
   currentUserId?: number
   panelUsers: User[]
@@ -87,6 +57,7 @@ interface CreateClientDialogProps {
   onSuccess: (message: string) => void
   onError: (message: string) => void
   onWarning: (message: string) => void
+  onInfo?: (message: string) => void
   withProgress: <T>(fn: () => Promise<T>, label: string) => Promise<T>
 }
 
@@ -96,6 +67,7 @@ export default function CreateClientDialog({
   openvpnEnabled,
   wireguardEnabled,
   awg2CreateEnabled,
+  awg2Installed = false,
   isAdmin,
   currentUserId,
   panelUsers,
@@ -104,6 +76,7 @@ export default function CreateClientDialog({
   onSuccess,
   onError,
   onWarning,
+  onInfo,
   withProgress,
 }: CreateClientDialogProps) {
   const availableProtocols = useMemo(
@@ -111,10 +84,12 @@ export default function CreateClientDialog({
       PROTOCOL_ORDER.filter((type) => {
         if (type === 'openvpn') return openvpnEnabled
         if (type === 'wireguard') return wireguardEnabled
-        return awg2CreateEnabled
+        return awg2CreateEnabled && awg2Installed
       }),
-    [openvpnEnabled, wireguardEnabled, awg2CreateEnabled],
+    [openvpnEnabled, wireguardEnabled, awg2CreateEnabled, awg2Installed],
   )
+
+  const showAwg2MissingHint = awg2CreateEnabled && !awg2Installed
 
   const [clientName, setClientName] = useState('')
   const [description, setDescription] = useState('')
@@ -162,7 +137,7 @@ export default function CreateClientDialog({
 
   const applyAccessUntil = async (name: string, protocol: VpnType, dateValue: string) => {
     if (!isAdmin || !dateValue) return
-    const iso = dateInputToIso(dateValue)
+    const iso = endOfDayIso(dateValue)
     if (!iso) {
       onWarning(`Клиент «${name}» создан, но дата доступа некорректна — задайте её в карточке`)
       return
@@ -172,8 +147,8 @@ export default function CreateClientDialog({
     } catch (err) {
       onWarning(
         err instanceof ApiError
-          ? `Клиент создан, но срок доступа не сохранён (${vpnLabel(protocol)}): ${err.message}`
-          : `Клиент «${name}» создан, но срок доступа не сохранён (${vpnLabel(protocol)})`,
+          ? `Клиент создан, но срок доступа не сохранён (${protocolLabel(protocol)}): ${err.message}`
+          : `Клиент «${name}» создан, но срок доступа не сохранён (${protocolLabel(protocol)})`,
       )
     }
   }
@@ -188,21 +163,19 @@ export default function CreateClientDialog({
     if (period != null && ![1, 7, 30].includes(period)) {
       return 'период лимита: 1, 7 или 30 дней'
     }
-    const failed: string[] = []
-    for (const protocol of created) {
-      try {
-        await setTrafficLimitForProtocol(protocol, name, value, limitUnit, period)
-      } catch (err) {
-        failed.push(
-          `${vpnLabel(protocol)}: ${err instanceof ApiError ? err.message : 'ошибка'}`,
-        )
-      }
+    const { applied, failed } = await setProfileTrafficLimits(
+      name,
+      created,
+      value,
+      limitUnit,
+      period,
+    )
+    const failures = failed.map((item) => `${protocolLabel(item.protocol)}: ${item.message}`)
+    if (applied.length === 0) {
+      return `лимит трафика не применён (${failures.join('; ')})`
     }
-    if (failed.length === created.length) {
-      return `лимит трафика не применён (${failed.join('; ')})`
-    }
-    if (failed.length > 0) {
-      return `лимит частично не применён (${failed.join('; ')})`
+    if (failures.length > 0) {
+      return `лимит частично не применён (${failures.join('; ')})`
     }
     return null
   }
@@ -215,8 +188,8 @@ export default function CreateClientDialog({
       onError('Укажите имя клиента')
       return
     }
-    if (!/^[a-zA-Z0-9_-]{1,32}$/.test(trimmedName)) {
-      onError('Имя: латиница, цифры, _ и -, до 32 символов')
+    if (!isValidClientName(trimmedName)) {
+      onError(CLIENT_NAME_HINT)
       return
     }
     if (selectedProtocols.length === 0) {
@@ -224,6 +197,7 @@ export default function CreateClientDialog({
       return
     }
     if (
+      isAdmin &&
       selectedProtocols.includes('openvpn') &&
       (!Number.isFinite(certDays) || certDays < 1 || certDays > 3650)
     ) {
@@ -248,6 +222,7 @@ export default function CreateClientDialog({
     const accessDateSnapshot = accessUntilDate
     const created: VpnType[] = []
     let lastHaWarning: string | undefined
+    let haSyncQueued = false
     let trafficWarning: string | null = null
 
     try {
@@ -257,13 +232,14 @@ export default function CreateClientDialog({
             const result = await createConfig({
               client_name: trimmedName,
               vpn_type: vpnType,
-              cert_expire_days: vpnType === 'openvpn' ? certDays : undefined,
-              ttl: vpnType === 'amneziawg2' && awg2Ttl !== 'none' ? awg2Ttl : undefined,
+              cert_expire_days: isAdmin && vpnType === 'openvpn' ? certDays : undefined,
+              ttl: isAdmin && vpnType === 'amneziawg2' && awg2Ttl !== 'none' ? awg2Ttl : undefined,
               description: description || undefined,
               owner_id: isAdmin && ownerId ? ownerId : undefined,
             })
             created.push(vpnType)
             if (result.ha_replicate_warning) lastHaWarning = result.ha_replicate_warning
+            if (result.ha_sync_task_id) haSyncQueued = true
             await applyAccessUntil(trimmedName, vpnType, accessDateSnapshot)
           } catch (err) {
             if (created.length === 0) {
@@ -271,7 +247,7 @@ export default function CreateClientDialog({
             }
             const detail = err instanceof ApiError ? err.message : 'ошибка создания'
             onWarning(
-              `Создано: ${created.map(vpnLabel).join(', ')}. Не удалось: ${vpnLabel(vpnType)} — ${detail}`,
+              `Создано: ${created.map(protocolLabel).join(', ')}. Не удалось: ${protocolLabel(vpnType)} — ${detail}`,
             )
             break
           }
@@ -296,16 +272,19 @@ export default function CreateClientDialog({
       if (created.length === ordered.length && created.length > 0) {
         onSuccess(
           created.length === 1
-            ? `Клиент «${trimmedName}» создан (${vpnLabel(created[0])})${limitNote}`
-            : `Профиль «${trimmedName}»: ${created.map(vpnLabel).join(', ')}${limitNote}`,
+            ? `Клиент «${trimmedName}» создан (${protocolLabel(created[0])})${limitNote}`
+            : `Профиль «${trimmedName}»: ${created.map(protocolLabel).join(', ')}${limitNote}`,
         )
       } else if (created.length > 0) {
-        onSuccess(`Профиль «${trimmedName}»: создано ${created.map(vpnLabel).join(', ')}${limitNote}`)
+        onSuccess(`Профиль «${trimmedName}»: создано ${created.map(protocolLabel).join(', ')}${limitNote}`)
       }
       if (trafficWarning) {
         onWarning(`Профиль создан, но ${trafficWarning}`)
       }
       if (lastHaWarning) onWarning(lastHaWarning)
+      else if (haSyncQueued) {
+        ;(onInfo ?? onSuccess)('HA-синхронизация запущена в фоне')
+      }
     } catch (err) {
       onError(err instanceof ApiError ? err.message : 'Ошибка создания клиента')
     } finally {
@@ -364,7 +343,7 @@ export default function CreateClientDialog({
                 className={fieldClass}
                 value={clientName}
                 onChange={(e) => setClientName(e.target.value)}
-                placeholder="my-client"
+                placeholder="ivan"
                 autoFocus
                 disabled={submitting}
               />
@@ -396,7 +375,7 @@ export default function CreateClientDialog({
                         checked ? 'border-primary bg-primary/10 text-primary' : 'hover:bg-muted/50',
                       )}
                     >
-                      <span className="block font-medium leading-tight">{vpnLabel(type)}</span>
+                      <span className="block font-medium leading-tight">{protocolLabel(type)}</span>
                       <span className="mt-0.5 block text-xs text-muted-foreground lg:mt-1 lg:text-sm">
                         {checked ? vpnHint(type) : 'Не выбрано'}
                       </span>
@@ -404,12 +383,15 @@ export default function CreateClientDialog({
                   )
                 })}
               </div>
+              {showAwg2MissingHint && (
+                <p className={hintClass}>AWG 2.0 не установлен на активном узле.</p>
+              )}
               {availableProtocols.length === 0 && (
                 <p className="text-xs text-destructive lg:text-sm">Нет доступных протоколов на этом узле.</p>
               )}
             </div>
 
-            {(showOpenVpnOpts || showAwg2Opts) && (
+            {isAdmin && (showOpenVpnOpts || showAwg2Opts) && (
               <div
                 className={cn(
                   'grid gap-4',
@@ -436,7 +418,7 @@ export default function CreateClientDialog({
                 {showAwg2Opts && (
                   <div className="space-y-2">
                     <Label htmlFor="createAwg2Ttl" className="lg:text-base">
-                      TTL AmneziaWG 2.0
+                      TTL {protocolLabel('amneziawg2')}
                     </Label>
                     <Select value={awg2Ttl} onValueChange={setAwg2Ttl} disabled={submitting}>
                       <SelectTrigger id="createAwg2Ttl" className={fieldClass}>

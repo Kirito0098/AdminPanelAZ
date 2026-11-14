@@ -29,7 +29,6 @@ NOINDEX_PATH_PREFIXES = expand_paths_for_access(
         "/edit-files",
         "/feature-disabled",
         "/tg-mini",
-        "/api/public/qr-download/",
         "/api/public/route-download/",
         "/api/auth/",
         "/api/ip-blocked",
@@ -81,15 +80,12 @@ def get_panel_branding(environ: Mapping[str, str] | None = None) -> dict[str, An
     from app.services.panel_publish_info import public_https_origin_url
 
     getter = environ if environ is not None else os.environ
-    domain = (getter.get("DOMAIN", "") or "").strip()
+    panel = get_settings()
+    domain = (panel.domain or "").strip()
     brand = (getter.get("PANEL_BRAND_NAME", "") or "").strip() or "Admin Panel"
     panel_base_url = None
     if domain:
-        try:
-            https_public_port = int((getter.get("HTTPS_PUBLIC_PORT", "") or "443").strip() or "443")
-        except ValueError:
-            https_public_port = 443
-        panel_base_url = public_https_origin_url(domain, https_public_port) or None
+        panel_base_url = public_https_origin_url(domain, panel.https_public_port) or None
     return {
         "panel_brand_name": brand,
         "panel_host": domain or None,
@@ -100,12 +96,7 @@ def get_panel_branding(environ: Mapping[str, str] | None = None) -> dict[str, An
 def build_security_txt(branding: Mapping[str, Any] | None = None) -> str:
     info = dict(branding or get_panel_branding())
     panel_url = info.get("panel_base_url") or "https://localhost"
-    return (
-        f"Contact: {panel_url}\n"
-        "Preferred-Languages: ru, en\n"
-        f"Canonical: {panel_url}\n"
-        "Policy: Private administration panel. Authorized access only. Not a bank or email login.\n"
-    )
+    return f"Contact: {panel_url}\n"
 
 
 def is_tg_mini_path(path: str) -> bool:
@@ -203,7 +194,10 @@ class HttpSecurityMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         if not tg_mini:
             response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
-        response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        if path.startswith("/p/") or "/api/public/" in path:
+            response.headers["Referrer-Policy"] = "no-referrer"
+        else:
+            response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         if not tg_mini:
             response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
         if HttpSecurityMiddleware._is_secure(request):

@@ -11,8 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import SessionLocal
-from app.models import AppSetting
-from app.services.app_setting_store import _get_setting
+from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.noc_report import send_noc_report, send_weekly_image_report
 from app.services.noc_schedule import (
     local_now_for_user,
@@ -33,15 +32,6 @@ def _is_telegram_enabled() -> bool:
 
 def _last_run_key(period: str, user_id: int) -> str:
     return f"noc_report_{period}_last_run:{user_id}"
-
-
-def _set_setting(db: Session, key: str, value: str) -> None:
-    row = db.query(AppSetting).filter(AppSetting.key == key).first()
-    if row:
-        row.value = value
-    else:
-        db.add(AppSetting(key=key, value=value))
-    db.commit()
 
 
 def _already_ran_local_minute(db: Session, key: str, local_now: datetime) -> bool:
@@ -90,7 +80,7 @@ def process_user_noc_tick(
             result = send_noc_report(db, period="daily", recipients=[user])
             # Only stamp dedup on real delivery — skipped/zero-sent remain retryable.
             if _actually_delivered(result):
-                _set_setting(db, key, now.isoformat())
+                _set_setting(db, key, now.isoformat(), commit=True)
             results.append({"user_id": user.id, "period": "daily", **result})
 
     if should_run_weekly(user, now_utc=now, env_weekly_cron=settings.noc_report_weekly_cron):
@@ -102,7 +92,7 @@ def process_user_noc_tick(
                 result["image"] = img
             # Stamp if text OR weekly image was actually sent.
             if _actually_delivered(result) or _actually_delivered(result.get("image")):
-                _set_setting(db, key, now.isoformat())
+                _set_setting(db, key, now.isoformat(), commit=True)
             results.append({"user_id": user.id, "period": "weekly", **result})
 
     return results

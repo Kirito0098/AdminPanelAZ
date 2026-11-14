@@ -1,8 +1,9 @@
 import { GitBranch, Play, RefreshCw } from 'lucide-react'
+import { useEffect, useState } from 'react'
 import AutoRefreshControl from '@/components/noc/AutoRefreshControl'
 import { NodeBadge } from '@/components/NodeSelector'
 import { Button } from '@/components/ui/button'
-import DocsLink from '@/components/shared/DocsLink'
+import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import { DOCS } from '@/lib/docsUrls'
 import { REFRESH_INTERVAL } from './useRoutingPage'
 import type { NodeStatus } from '@/types'
@@ -10,76 +11,93 @@ import type { NodeStatus } from '@/types'
 interface RoutingPageHeaderProps {
   nodeName?: string | null
   nodeStatus?: NodeStatus
-  isAdmin: boolean
   autoRefresh: boolean
-  countdown: number
+  /** When the next auto-refresh fires; the hook keeps the deadline, not the ticking counter. */
+  nextRefreshAt: number | null
   refreshing: boolean
   pipelineBusy: boolean
+  /** HA replica: routing data is shown read-only, mutations are refused by the hook. */
+  readonly: boolean
   onToggleAutoRefresh: () => void
   onRefresh: () => void
   onSyncProviders: () => void
   onApplyDoall: () => void
 }
 
+function remainingSeconds(nextRefreshAt: number | null): number {
+  if (nextRefreshAt === null) return REFRESH_INTERVAL
+  const left = Math.ceil((nextRefreshAt - Date.now()) / 1000)
+  return Math.min(REFRESH_INTERVAL, Math.max(0, left))
+}
+
+/** Second-by-second display only: re-renders the header alone, not the routing page tree. */
+function useCountdown(nextRefreshAt: number | null, enabled: boolean): number {
+  const [seconds, setSeconds] = useState(() => remainingSeconds(nextRefreshAt))
+
+  useEffect(() => {
+    setSeconds(remainingSeconds(nextRefreshAt))
+    if (!enabled) return
+    const id = window.setInterval(() => setSeconds(remainingSeconds(nextRefreshAt)), 1000)
+    return () => window.clearInterval(id)
+  }, [nextRefreshAt, enabled])
+
+  return seconds
+}
+
 export default function RoutingPageHeader({
   nodeName,
   nodeStatus,
-  isAdmin,
   autoRefresh,
-  countdown,
+  nextRefreshAt,
   refreshing,
   pipelineBusy,
+  readonly,
   onToggleAutoRefresh,
   onRefresh,
   onSyncProviders,
   onApplyDoall,
 }: RoutingPageHeaderProps) {
-  return (
-    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between lg:gap-4">
-      <div className="flex items-start gap-3">
-        <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <GitBranch size={22} />
-        </div>
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-2xl font-bold tracking-tight">Маршрутизация / CIDR</h2>
-            <NodeBadge name={nodeName} status={nodeStatus} />
-          </div>
-          <p className="text-sm text-muted-foreground">
-            CIDR-списки провайдеров, обновление списков и маршруты AntiZapret
-          </p>
-        </div>
-      </div>
+  const countdown = useCountdown(nextRefreshAt, autoRefresh)
 
-      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-        <DocsLink href={DOCS.routing} variant="button" />
-        <AutoRefreshControl
-          enabled={autoRefresh}
-          countdown={countdown}
-          intervalSec={REFRESH_INTERVAL}
-          refreshing={refreshing}
-          onToggle={onToggleAutoRefresh}
-          onManualRefresh={onRefresh}
-        />
-        {isAdmin && (
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full sm:w-auto"
-              disabled={pipelineBusy}
-              onClick={onSyncProviders}
-            >
-              <RefreshCw size={14} className="mr-1.5" />
-              Синхронизировать
-            </Button>
-            <Button size="sm" className="w-full sm:w-auto" disabled={pipelineBusy} onClick={onApplyDoall}>
-              <Play size={14} className="mr-1.5" />
-              Применить doall + client.sh 7
-            </Button>
-          </>
-        )}
-      </div>
-    </div>
+  return (
+    <PageSectionHeader
+      card
+      icon={GitBranch}
+      title="Маршрутизация / CIDR"
+      titleAddon={<NodeBadge name={nodeName} status={nodeStatus} />}
+      description="CIDR-списки провайдеров, обновление списков и маршруты AntiZapret"
+      docsHref={DOCS.routing}
+      actions={
+        <>
+          <AutoRefreshControl
+            enabled={autoRefresh}
+            countdown={countdown}
+            intervalSec={REFRESH_INTERVAL}
+            refreshing={refreshing}
+            onToggle={onToggleAutoRefresh}
+            onManualRefresh={onRefresh}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="w-full sm:w-auto"
+            disabled={pipelineBusy || readonly}
+            onClick={onSyncProviders}
+          >
+            <RefreshCw size={14} className="mr-1.5" />
+            Синхронизировать
+          </Button>
+          <Button
+            size="sm"
+            className="w-full sm:w-auto"
+            disabled={pipelineBusy || readonly}
+            onClick={onApplyDoall}
+          >
+            <Play size={14} className="mr-1.5" />
+            Применить doall + client.sh 7
+          </Button>
+        </>
+      }
+    />
   )
 }

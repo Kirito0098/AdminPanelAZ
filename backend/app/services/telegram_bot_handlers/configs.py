@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from html import escape
 
-from app.models import VpnConfig, VpnType
-from app.services.node_manager import get_active_adapter, get_active_node
+from app.models import Node, VpnConfig, VpnType
+from app.services.node_manager import get_adapter_for_node
 from app.services.profile_download_name import enrich_profile_files
 from app.services.telegram_api import send_message
+from app.services.telegram_bot_handlers.base import is_admin
 from app.services.telegram_bot_handlers.ui import nav_footer_keyboard, send_or_edit
-from app.services.telegram_bot_data import find_config_by_name, list_user_configs
+from app.services.telegram_bot_data import (
+    config_node_label,
+    find_configs_by_name,
+    list_user_configs,
+    node_labels,
+)
 from app.services.telegram_bot_handlers.base import BotContext, inline_button, inline_keyboard, unlinked_message
 from app.services.telegram_config_send import send_config_for_user
 from app.services.profile_files import profile_files_batch_key
@@ -26,6 +33,7 @@ from app.services.telegram_profile_ui import (
 from app.services import telegram_bot_i18n as i18n
 from app.services.vpn_profile_visibility import (
     EMPTY_CATALOG_MESSAGE,
+    EMPTY_CATALOG_MESSAGE_USER,
     filter_profile_files,
     resolve_effective_visible_vpn_profiles,
 )
@@ -34,32 +42,40 @@ logger = logging.getLogger(__name__)
 _PAGE_SIZE = 12
 _COLUMNS = 2
 _NAME_MAX_LEN = 20
-_VALID_FILTERS = frozenset({"all", "ovpn", "wg", "awg"})
+_VALID_FILTERS = frozenset({"all", "ovpn", "wg_awg", "awg2"})
+# Старые callback-данные: wg и awg схлопываются в общий WG/AWG 1.5.
+_LEGACY_FILTERS = {"wg": "wg_awg", "awg": "wg_awg"}
 _FILTER_LABELS = {
     "all": i18n.CONFIGS_FILTER_ALL,
     "ovpn": i18n.CONFIGS_FILTER_OVPN,
-    "wg": i18n.CONFIGS_FILTER_WG,
-    "awg": i18n.CONFIGS_FILTER_AWG,
+    "wg_awg": i18n.CONFIGS_FILTER_WG_AWG,
+    "awg2": i18n.CONFIGS_FILTER_AWG2,
 }
 
 
-def parse_configs_callback(data: str) -> tuple[int, str]:
+def _coerce_filter_key(value: str | None) -> str:
+    key = (value or "all").strip().lower()
+    key = _LEGACY_FILTERS.get(key, key)
+    return key if key in _VALID_FILTERS else "all"
+
+
+def parse_configs_callback(data: str) -> tuple[int, str, int]:
     parts = data.split(":")
     page = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-    filter_key = parts[2] if len(parts) > 2 and parts[2] in _VALID_FILTERS else "all"
-    return page, filter_key
+    filter_key = _coerce_filter_key(parts[2] if len(parts) > 2 else None)
+    node_id = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else 0
+    return page, filter_key, node_id
 
 
 def parse_config_callback(data: str) -> tuple[int, str]:
     parts = data.split(":")
     config_id = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
-    filter_key = parts[2] if len(parts) > 2 and parts[2] in _VALID_FILTERS else "all"
+    filter_key = _coerce_filter_key(parts[2] if len(parts) > 2 else None)
     return config_id, filter_key
 
 
 def _normalize_filter_key(filter_key: str | None) -> str:
-    value = (filter_key or "all").strip().lower()
-    return value if value in _VALID_FILTERS else "all"
+    return _coerce_filter_key(filter_key)
 
 
 def _cfg_callback(config_id: int, filter_key: str = "all") -> str:
@@ -69,35 +85,63 @@ def _cfg_callback(config_id: int, filter_key: str = "all") -> str:
     return f"cfg:{config_id}:{filter_key}"
 
 
-def _configs_list_callback(page: int, filter_key: str) -> str:
-    return f"configs:{page}:{_normalize_filter_key(filter_key)}"
+def _configs_list_callback(page: int, filter_key: str, node_id: int = 0) -> str:
+    return f"configs:{page}:{_normalize_filter_key(filter_key)}:{max(0, node_id)}"
+
+
+def _node_adapter(db, node_id: int):
+    """Адаптер узла конфига; ``None``, если узел удалён или недоступен."""
+    node = db.get(Node, node_id)
+    if node is None:
+        return None
+    try:
+        return get_adapter_for_node(node)
+    except Exception:  # noqa: BLE001 — узел без ключа/прокси не должен ронять список
+        logger.debug("bot configs: node adapter unavailable node=%s", node_id, exc_info=True)
+        return None
+
+
+def _node_label(db, config: VpnConfig) -> str:
+    return config_node_label(db, config)
 
 
 def _load_config_protocol_map(ctx: BotContext, configs: list[VpnConfig]) -> dict[int, frozenset[str]]:
     if not configs:
         return {}
 
-    adapter = get_active_adapter(ctx.db)
     policy = resolve_effective_visible_vpn_profiles(ctx.db, ctx.user)
-    clients = [(config.client_name, config.vpn_type) for config in configs]
-    try:
-        files_by_key: dict[str, list[dict[str, str]]] = adapter.get_profile_files_batch(clients)
-    except Exception:
-        logger.debug("bot configs: profile files batch failed", exc_info=True)
-        files_by_key = {}
+    by_node: dict[int, list[VpnConfig]] = defaultdict(list)
+    for config in configs:
+        by_node[config.node_id].append(config)
 
     protocol_map: dict[int, frozenset[str]] = {}
-    for config in configs:
-        key = profile_files_batch_key(config.client_name, config.vpn_type)
-        files = files_by_key.get(key)
-        if files is None:
-            try:
-                files = adapter.get_profile_files(config.client_name, config.vpn_type)
-            except Exception:
-                logger.debug("bot configs: profile files failed client=%s", config.client_name, exc_info=True)
-                files = []
-        files = filter_profile_files(files or [], policy)
-        protocol_map[config.id] = classify_config_profile_groups(files, config.vpn_type)
+    for node_id, node_configs in by_node.items():
+        adapter = _node_adapter(ctx.db, node_id)
+        if adapter is None:
+            continue
+        clients = [(config.client_name, config.vpn_type) for config in node_configs]
+        try:
+            files_by_key: dict[str, list[dict[str, str]]] = adapter.get_profile_files_batch(clients)
+        except Exception:
+            logger.debug("bot configs: profile files batch failed node=%s", node_id, exc_info=True)
+            files_by_key = {}
+
+        for config in node_configs:
+            key = profile_files_batch_key(config.client_name, config.vpn_type)
+            files = files_by_key.get(key)
+            if files is None:
+                try:
+                    files = adapter.get_profile_files(config.client_name, config.vpn_type)
+                except Exception:
+                    logger.debug(
+                        "bot configs: profile files failed node=%s client=%s",
+                        node_id,
+                        config.client_name,
+                        exc_info=True,
+                    )
+                    files = []
+            filtered = filter_profile_files(files or [], policy)
+            protocol_map[config.id] = classify_config_profile_groups(filtered, config.vpn_type)
     return protocol_map
 
 
@@ -118,11 +162,11 @@ def _config_button_label(
 
 
 def _count_by_protocol(protocol_map: dict[int, frozenset[str]]) -> dict[str, int]:
-    counts = {"ovpn": 0, "wg": 0, "awg": 0}
+    counts = {"ovpn": 0, "wg_awg": 0, "awg2": 0}
     for groups in protocol_map.values():
-        for key in groups:
-            if key in counts:
-                counts[key] += 1
+        key = next((item for item in ("ovpn", "wg_awg", "awg2") if item in groups), None)
+        if key is not None:
+            counts[key] += 1
     return counts
 
 
@@ -140,8 +184,6 @@ def _filter_configs(
 ) -> list[VpnConfig]:
     if filter_key == "all":
         return configs
-    if filter_key == "ovpn":
-        return [config for config in configs if "ovpn" in protocol_map.get(config.id, frozenset())]
     return [config for config in configs if filter_key in protocol_map.get(config.id, frozenset())]
 
 
@@ -152,24 +194,64 @@ def _chunk_buttons(buttons: list[dict], columns: int = _COLUMNS) -> list[list[di
     return rows
 
 
-def _build_filter_rows(counts: dict[str, int], current: str) -> list[list[dict]]:
-    active_types = [key for key in ("ovpn", "wg", "awg") if counts.get(key, 0) > 0]
+def _build_filter_rows(counts: dict[str, int], current: str, *, node_id: int = 0) -> list[list[dict]]:
+    active_types = [key for key in ("ovpn", "wg_awg", "awg2") if counts.get(key, 0) > 0]
     if len(active_types) < 2:
         return []
 
     buttons: list[dict] = []
     if current == "all":
-        buttons.append(inline_button("✓ 📁 Все", callback_data="configs:0:all"))
+        buttons.append(
+            inline_button("✓ 📁 Все", callback_data=_configs_list_callback(0, "all", node_id))
+        )
     else:
-        buttons.append(inline_button("📁 Все", callback_data="configs:0:all"))
+        buttons.append(inline_button("📁 Все", callback_data=_configs_list_callback(0, "all", node_id)))
 
     for key in active_types:
         emoji, _title = GROUP_META[key]
         tag = PROTOCOL_BUTTON_TAG.get(key, key.upper())
         count = counts[key]
         label = f"✓ {emoji}{tag} {count}" if current == key else f"{emoji}{tag} {count}"
-        buttons.append(inline_button(label, callback_data=f"configs:0:{key}"))
+        buttons.append(inline_button(label, callback_data=_configs_list_callback(0, key, node_id)))
     return _chunk_buttons(buttons, columns=3)
+
+
+def _build_node_rows(
+    configs: list[VpnConfig],
+    labels: dict[int, str],
+    *,
+    readable_node_ids: set[int] | None = None,
+    current_node_id: int = 0,
+    filter_key: str = "all",
+) -> list[list[dict]]:
+    """Переключатель узлов: показываем, только если конфиги есть на нескольких.
+
+    Узлы, у которых в базе конфиги есть, а файлов профилей нет (не пересозданы,
+    узел без связи), помечаются ⚠️ — иначе они молча исчезали из списка.
+    """
+    node_ids = sorted({config.node_id for config in configs}, key=lambda value: labels.get(value, ""))
+    if len(node_ids) < 2:
+        return []
+
+    counts: dict[int, int] = defaultdict(int)
+    for config in configs:
+        counts[config.node_id] += 1
+    readable = readable_node_ids if readable_node_ids is not None else set(node_ids)
+
+    buttons: list[dict] = [
+        inline_button(
+            "✓ 🌍 Все узлы" if current_node_id == 0 else "🌍 Все узлы",
+            callback_data=_configs_list_callback(0, filter_key, 0),
+        )
+    ]
+    for node_id in node_ids:
+        title = _short_name(labels.get(node_id, str(node_id)), max_len=14)
+        mark = "" if node_id in readable else "⚠️ "
+        label = f"{mark}{title} ({counts[node_id]})"
+        if current_node_id == node_id:
+            label = f"✓ {label}"
+        buttons.append(inline_button(label, callback_data=_configs_list_callback(0, filter_key, node_id)))
+    return _chunk_buttons(buttons, columns=2)
 
 
 def _configs_preview(
@@ -178,12 +260,17 @@ def _configs_preview(
     protocol_map: dict[int, frozenset[str]],
     *,
     filter_key: str = "all",
+    labels: dict[int, str] | None = None,
 ) -> str:
+    labels = labels or {}
     lines = []
     for offset, config in enumerate(chunk):
         groups = protocol_map.get(config.id, frozenset())
         emoji, tag = format_config_protocol_badge_for_filter(groups, filter_key)
-        lines.append(f"{start_index + offset}. {emoji}{tag} <code>{escape(config.client_name)}</code>")
+        node_suffix = f" · {escape(labels[config.node_id])}" if len(labels) > 1 else ""
+        lines.append(
+            f"{start_index + offset + 1}. {emoji}{tag} <code>{escape(config.client_name)}</code>{node_suffix}"
+        )
     return "\n".join(lines)
 
 
@@ -193,9 +280,14 @@ def _configs_keyboard(
     page: int,
     filter_key: str,
     protocol_map: dict[int, frozenset[str]],
+    node_labels: dict[int, str] | None = None,
+    node_id: int = 0,
+    all_configs: list[VpnConfig] | None = None,
 ) -> dict:
     filter_key = _normalize_filter_key(filter_key)
-    filtered = _filter_configs(configs, filter_key, protocol_map)
+    labels = node_labels or {}
+    scoped = [config for config in configs if node_id in (0, config.node_id)]
+    filtered = _filter_configs(scoped, filter_key, protocol_map)
     counts = _count_by_protocol(protocol_map)
     total_pages = max(1, (len(filtered) + _PAGE_SIZE - 1) // _PAGE_SIZE)
     page = max(0, min(page, total_pages - 1))
@@ -203,7 +295,16 @@ def _configs_keyboard(
     chunk = filtered[start : start + _PAGE_SIZE]
 
     rows: list[list[dict]] = []
-    rows.extend(_build_filter_rows(counts, filter_key))
+    rows.extend(
+        _build_node_rows(
+            all_configs if all_configs is not None else configs,
+            labels,
+            readable_node_ids={config.node_id for config in configs},
+            current_node_id=node_id,
+            filter_key=filter_key,
+        )
+    )
+    rows.extend(_build_filter_rows(counts, filter_key, node_id=node_id))
 
     config_buttons = [
         inline_button(
@@ -221,13 +322,15 @@ def _configs_keyboard(
     if total_pages > 1:
         nav: list[dict] = []
         if page > 0:
-            nav.append(inline_button("◀️", callback_data=_configs_list_callback(page - 1, filter_key)))
-        nav.append(inline_button(f"· {page + 1}/{total_pages} ·", callback_data=_configs_list_callback(page, filter_key)))
+            nav.append(inline_button("◀️", callback_data=_configs_list_callback(page - 1, filter_key, node_id)))
+        nav.append(
+            inline_button(f"· {page + 1}/{total_pages} ·", callback_data=_configs_list_callback(page, filter_key, node_id))
+        )
         if start + _PAGE_SIZE < len(filtered):
-            nav.append(inline_button("▶️", callback_data=_configs_list_callback(page + 1, filter_key)))
+            nav.append(inline_button("▶️", callback_data=_configs_list_callback(page + 1, filter_key, node_id)))
         rows.append(nav)
 
-    return nav_footer_keyboard(refresh=f"configs:{page}:{filter_key}", extra_rows=rows)
+    return nav_footer_keyboard(refresh=_configs_list_callback(page, filter_key, node_id), extra_rows=rows)
 
 
 def _back_to_configs_row(filter_key: str = "all") -> list:
@@ -236,7 +339,7 @@ def _back_to_configs_row(filter_key: str = "all") -> list:
 
 def _narrow_profile_groups(groups: list[ProfileFileGroup], filter_key: str) -> list[ProfileFileGroup]:
     filter_key = _normalize_filter_key(filter_key)
-    if filter_key in ("ovpn", "wg", "awg"):
+    if filter_key in ("ovpn", "wg_awg", "awg2"):
         matched = [group for group in groups if group.key == filter_key]
         if matched:
             return matched
@@ -264,17 +367,17 @@ def _config_group_keyboard(
     group: ProfileFileGroup,
     *,
     filter_key: str = "all",
+    show_protocols: bool = True,
 ) -> dict:
     rows: list[list] = [
         [inline_button(file_button_label(entry.file, index=offset), callback_data=f"cfgf:{config_id}:{entry.index}")]
         for offset, entry in enumerate(group.files, start=1)
     ]
-    rows.append(
-        [
-            inline_button(i18n.BTN_CONFIG_BACK, callback_data=_cfg_callback(config_id, filter_key)),
-            inline_button(i18n.BTN_ALL_CONFIGS, callback_data=_configs_list_callback(0, filter_key)),
-        ]
-    )
+    back_row: list[dict] = []
+    if show_protocols:
+        back_row.append(inline_button(i18n.BTN_CONFIG_BACK, callback_data=_cfg_callback(config_id, filter_key)))
+    back_row.append(inline_button(i18n.BTN_ALL_CONFIGS, callback_data=_configs_list_callback(0, filter_key)))
+    rows.append(back_row)
     rows.append([inline_button(i18n.BTN_MENU_HOME, callback_data="nav:home")])
     return inline_keyboard(rows)
 
@@ -291,10 +394,9 @@ def _after_send_keyboard(config_id: int, *, filter_key: str = "all") -> dict:
 async def _get_accessible_config(ctx: BotContext, config_id: int) -> VpnConfig | None:
     from app.services.config_access import can_view_config
 
-    node = get_active_node(ctx.db)
     config = (
         ctx.db.query(VpnConfig)
-        .filter(VpnConfig.id == config_id, VpnConfig.node_id == node.id)
+        .filter(VpnConfig.id == config_id, VpnConfig.ha_primary_config_id.is_(None))
         .first()
     )
     if not config:
@@ -305,7 +407,9 @@ async def _get_accessible_config(ctx: BotContext, config_id: int) -> VpnConfig |
 
 
 def _load_profile_groups(ctx: BotContext, config: VpnConfig) -> list[ProfileFileGroup]:
-    adapter = get_active_adapter(ctx.db)
+    adapter = _node_adapter(ctx.db, config.node_id)
+    if adapter is None:
+        return []
     raw_files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
     policy = resolve_effective_visible_vpn_profiles(ctx.db, ctx.user)
     raw_files = filter_profile_files(raw_files, policy)
@@ -319,6 +423,7 @@ async def _show_config_group_picker(
     *,
     filter_key: str = "all",
     message_id: int | None = None,
+    show_protocols: bool = True,
 ) -> None:
     if len(group.files) == 1:
         await handle_config_file_send(
@@ -335,11 +440,12 @@ async def _show_config_group_picker(
         name=escape(config.client_name),
         protocol=f"{group.emoji} <b>{group.title}</b>",
         preview=preview,
+        node=escape(_node_label(ctx.db, config)),
     )
     await send_or_edit(
         ctx,
         text,
-        markup=_config_group_keyboard(config.id, group, filter_key=filter_key),
+        markup=_config_group_keyboard(config.id, group, filter_key=filter_key, show_protocols=show_protocols),
         message_id=message_id,
     )
 
@@ -354,7 +460,11 @@ async def _show_config_picker(
     filter_key = _normalize_filter_key(filter_key)
     groups = _load_profile_groups(ctx, config)
     if not groups:
-        await send_message(ctx.bot_token, ctx.chat_id, EMPTY_CATALOG_MESSAGE)
+        await send_message(
+            ctx.bot_token,
+            ctx.chat_id,
+            EMPTY_CATALOG_MESSAGE if is_admin(ctx.user) else EMPTY_CATALOG_MESSAGE_USER,
+        )
         return
 
     active_groups = _narrow_profile_groups(groups, filter_key)
@@ -366,12 +476,14 @@ async def _show_config_picker(
             active_groups[0],
             filter_key=filter_key,
             message_id=message_id,
+            show_protocols=len(groups) > 1,
         )
         return
 
     text = i18n.CONFIG_PICK_PROTOCOL.format(
         name=escape(config.client_name),
-        vpn_type=config.vpn_type.value,
+        vpn_type=i18n.vpn_type_label(config.vpn_type.value),
+        node=escape(_node_label(ctx.db, config)),
     )
     await send_or_edit(
         ctx,
@@ -386,6 +498,7 @@ async def handle_configs(
     *,
     page: int = 0,
     filter_key: str = "all",
+    node_id: int = 0,
     message_id: int | None = None,
 ) -> None:
     if ctx.user is None:
@@ -394,17 +507,38 @@ async def handle_configs(
 
     configs = list_user_configs(ctx.db, ctx.user)
     if not configs:
-        await send_message(ctx.bot_token, ctx.chat_id, i18n.CONFIGS_NONE)
+        await send_message(
+            ctx.bot_token,
+            ctx.chat_id,
+            i18n.CONFIGS_NONE if is_admin(ctx.user) else i18n.CONFIGS_NONE_USER,
+        )
         return
 
     protocol_map = _load_config_protocol_map(ctx, configs)
     configs_with_files = _configs_with_files(configs, protocol_map)
+    labels = node_labels(ctx.db, {config.node_id for config in configs})
+    if node_id and node_id not in labels:
+        node_id = 0
+    if node_id and not any(config.node_id == node_id for config in configs_with_files):
+        if is_admin(ctx.user):
+            text = i18n.CONFIGS_NODE_NO_FILES.format(
+                node=escape(labels.get(node_id, str(node_id)))
+            )
+        else:
+            text = i18n.CONFIGS_NODE_NO_FILES_USER
+        await send_message(ctx.bot_token, ctx.chat_id, text)
+        return
     if not configs_with_files:
-        await send_message(ctx.bot_token, ctx.chat_id, EMPTY_CATALOG_MESSAGE)
+        await send_message(
+            ctx.bot_token,
+            ctx.chat_id,
+            EMPTY_CATALOG_MESSAGE if is_admin(ctx.user) else EMPTY_CATALOG_MESSAGE_USER,
+        )
         return
 
     filter_key = _normalize_filter_key(filter_key)
-    filtered = _filter_configs(configs_with_files, filter_key, protocol_map)
+    scoped = [config for config in configs_with_files if node_id in (0, config.node_id)]
+    filtered = _filter_configs(scoped, filter_key, protocol_map)
 
     total_pages = max(1, (len(filtered) + _PAGE_SIZE - 1) // _PAGE_SIZE)
     page = max(0, min(page, total_pages - 1))
@@ -412,15 +546,15 @@ async def handle_configs(
     chunk = filtered[start : start + _PAGE_SIZE]
 
     counts = _count_by_protocol(protocol_map)
-    active_types = sum(1 for key in ("ovpn", "wg", "awg") if counts.get(key, 0) > 0)
+    active_types = sum(1 for key in ("ovpn", "wg_awg", "awg2") if counts.get(key, 0) > 0)
     hint = ""
-    if counts.get("wg", 0) > 0 and counts.get("awg", 0) > 0:
+    if counts.get("wg_awg", 0) > 0 and counts.get("awg2", 0) > 0:
         hint = i18n.CONFIGS_FILTER_HINT_WG_AWG
     elif active_types > 1 and filter_key == "all" and len(configs_with_files) > _PAGE_SIZE:
         hint = i18n.CONFIGS_FILTER_HINT
 
     preview = (
-        _configs_preview(chunk, start, protocol_map, filter_key=filter_key)
+        _configs_preview(chunk, start, protocol_map, filter_key=filter_key, labels=labels)
         if chunk
         else i18n.CONFIGS_FILTER_EMPTY
     )
@@ -437,6 +571,9 @@ async def handle_configs(
         page=page,
         filter_key=filter_key,
         protocol_map=protocol_map,
+        node_labels=labels,
+        node_id=node_id,
+        all_configs=configs,
     )
     await send_or_edit(ctx, text, markup=markup, message_id=message_id)
 
@@ -446,12 +583,31 @@ async def handle_config(ctx: BotContext, name: str) -> None:
         await send_message(ctx.bot_token, ctx.chat_id, unlinked_message())
         return
 
-    config = find_config_by_name(ctx.db, ctx.user, name)
-    if not config:
+    matches = find_configs_by_name(ctx.db, ctx.user, name)
+    if not matches:
         await send_message(ctx.bot_token, ctx.chat_id, i18n.CONFIG_NOT_FOUND.format(name=escape(name)))
         return
+    if len(matches) == 1:
+        await _show_config_picker(ctx, matches[0])
+        return
 
-    await _show_config_picker(ctx, config)
+    labels = node_labels(ctx.db, {config.node_id for config in matches})
+    rows = [
+        [
+            inline_button(
+                f"🌍 {escape(labels.get(config.node_id, str(config.node_id)))} · {config.vpn_type.value}",
+                callback_data=_cfg_callback(config.id),
+            )
+        ]
+        for config in matches
+    ]
+    rows.append([inline_button(i18n.BTN_MENU_HOME, callback_data="nav:home")])
+    await send_or_edit(
+        ctx,
+        i18n.CONFIG_CHOOSE_NODE.format(name=escape(name)),
+        markup=inline_keyboard(rows),
+        message_id=None,
+    )
 
 
 async def handle_config_callback(
@@ -502,6 +658,7 @@ async def handle_config_group_callback(
         group,
         filter_key=filter_key,
         message_id=message_id,
+        show_protocols=len(groups) > 1,
     )
 
 
@@ -522,7 +679,10 @@ async def handle_config_file_send(
         await send_message(ctx.bot_token, ctx.chat_id, i18n.CONFIG_NOT_FOUND_ID)
         return
 
-    adapter = get_active_adapter(ctx.db)
+    adapter = _node_adapter(ctx.db, config.node_id)
+    if adapter is None:
+        await send_message(ctx.bot_token, ctx.chat_id, i18n.CONFIG_NODE_UNAVAILABLE)
+        return
     raw_files = adapter.get_profile_files(config.client_name, VpnType(config.vpn_type.value))
     policy = resolve_effective_visible_vpn_profiles(ctx.db, ctx.user)
     raw_files = filter_profile_files(raw_files, policy)

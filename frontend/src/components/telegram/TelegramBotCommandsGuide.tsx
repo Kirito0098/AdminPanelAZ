@@ -15,7 +15,7 @@ const PUBLIC_COMMANDS: CommandRow[] = [
   { command: '/help', description: 'Справка по командам — список зависит от вашей роли', access: 'all' },
   {
     command: '/link <код>',
-    description: 'Привязка Telegram к аккаунту панели. Код получите ниже на этой вкладке',
+    description: 'Привязка Telegram к аккаунту панели. Код получите в «Мой профиль»',
     access: 'all',
     example: '/link a1b2c3d4',
   },
@@ -54,7 +54,7 @@ const ACCESS_LABELS = {
 function CommandTable({ title, rows }: { title: string; rows: CommandRow[] }) {
   return (
     <div className="space-y-2">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</p>
+      <p className="text-sm font-semibold">{title}</p>
       <div className="overflow-hidden rounded-lg border">
         <table className="w-full text-sm">
           <thead>
@@ -128,7 +128,7 @@ export default function TelegramBotCommandsGuide() {
       description="Как включить команды, подключить webhook и что умеет бот в личных сообщениях."
     >
       <div className="space-y-4">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Подключение</p>
+        <p className="text-sm font-semibold">Подключение</p>
         <GuideStep step={1} title="Сохраните токен бота">
           На вкладке <strong>Бот и авторизация</strong> укажите токен и username из @BotFather.
         </GuideStep>
@@ -138,6 +138,10 @@ export default function TelegramBotCommandsGuide() {
         <GuideStep step={3} title="Подключите webhook">
           Нажмите <strong>«Подключить бота к панели»</strong>. Telegram начнёт отправлять сообщения пользователей
           на ваш сервер — бот сможет отвечать без long polling.
+          <span className="mt-1 block">
+            Если включена <strong>«Связь через узел»</strong>, webhook не нужен: панель сама забирает сообщения бота
+            через узел.
+          </span>
         </GuideStep>
         <GuideStep step={4} title="Проверьте в Telegram">
           Откройте бота в личных сообщениях и отправьте <code>/start</code>. Должно появиться меню с кнопками внизу
@@ -217,7 +221,7 @@ export default function TelegramBotCommandsGuide() {
             <span className="text-muted-foreground/60">•</span>
             <span>
               Команды вроде <code>/status</code> требуют привязки — сначала выполните <code>/link</code> с кодом из
-              блока ниже.
+              раздела «Мой профиль» в настройках панели.
             </span>
           </li>
           <li className="flex gap-2">

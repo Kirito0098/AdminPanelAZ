@@ -34,6 +34,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 _CURRENT_PASSWORD_LOCKED = "Слишком много попыток ввода пароля. Повторите позже."
 
+# panel_login_enabled rejection must look identical to wrong credentials:
+# same status and detail, no "login is disabled" leakage.
+PANEL_LOGIN_DISABLED_DETAIL = "Неверный логин или пароль"
+
 
 def verify_current_password(user: User, password: str) -> None:
     key = f"current_password:{user.id}"
@@ -180,11 +184,32 @@ def decode_2fa_pending_token(token: str) -> str:
         raise credentials_exception from exc
 
 
+def assert_panel_login_allowed(user: User, *, mini: bool = False) -> None:
+    """Reject panel login when the user's ``panel_login_enabled`` is off.
+
+    Mini App sign-in goes through Telegram, not the panel password, so
+    ``mini=True`` is intentionally exempt — the Mini App keeps working.
+    Raises the same 401 as wrong credentials so nothing leaks about the flag.
+    """
+    if mini:
+        return
+    if not getattr(user, "panel_login_enabled", True):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=PANEL_LOGIN_DISABLED_DETAIL,
+        )
+
+
 def authenticate_user(db: Session, username: str, password: str) -> User | None:
     user = db.query(User).filter(User.username == username).first()
     if not user or not verify_password(password, user.password_hash):
         return None
     if not user.is_active:
+        return None
+    try:
+        assert_panel_login_allowed(user)
+    except HTTPException:
+        # Same observable result as wrong credentials: no hint that panel login is disabled.
         return None
     return user
 

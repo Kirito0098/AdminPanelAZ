@@ -20,8 +20,10 @@ from fastapi import HTTPException
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from app.config import DEFAULT_BACKEND_PORT
 from app.database import SessionLocal
 from app.models import BackgroundTask
+from app.services.cidr.apply_pipeline import apply_routing_changes, format_apply_output
 from app.services.expected_node import forget_confirmed_node
 from app.services.process_identity import current_process_owner, is_owner_alive
 
@@ -48,18 +50,40 @@ _PIPELINE_TASK_TYPES = {
     "cidr_estimate_from_db",
     "cidr_generate_from_db",
     "cidr_deploy",
+    "cidr_rollback",
+    "routing_sync",
     "antifilter_refresh",
     "config_bulk_op",
     "config_csv_import",
     "node_sync_push_full",
     "node_sync_shared_domain",
     "node_update_roll",
+    "user_provision",
+    "user_delete_cleanup",
+    "bulk_user_nodes",
+    "ha_client_sync",
+    "config_apply",
+    "recreate_profiles",
+    "ha_awg2_sync",
 }
+
+# Tasks that rewrite config/, result/ and iptables on a node: two of them on one
+# host race each other, so only one may be queued/running at a time.
+HEAVY_APPLY_TASK_TYPES = frozenset(
+    {
+        "run_doall",
+        "routing_apply",
+        "routing_apply_replica",
+        "config_apply",
+        "recreate_profiles",
+    }
+)
 
 _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "run_doall": ("AntiZapret: применение изменений…", "AntiZapret: запуск doall.sh…", 5),
     "routing_apply": ("Применение маршрутизации…", "Синхронизация провайдеров…", 5),
     "routing_apply_replica": ("Применение маршрутизации на replica…", "Синхронизация провайдеров…", 5),
+    "routing_sync": ("Синхронизация провайдеров…", "Чтение списков с активного узла…", 5),
     "restart_service": ("Перезапуск службы…", "Перезапуск службы…", 10),
     "update_system": ("Обновление кода и зависимостей…", "Обновление: проверка репозитория…", 5),
     "rebuild_frontend": ("Пересборка интерфейса…", "npm run build:all…", 10),
@@ -77,12 +101,20 @@ _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "node_sync_push_full": ("Синхронизация HA…", "Подготовка push-full…", 5),
     "node_sync_shared_domain": ("Применение shared domain…", "Запись хостов в setup…", 5),
     "node_update_roll": ("Rolling update узлов…", "Подготовка очереди…", 3),
+    "user_provision": ("Применение плана конфигов…", "Подготовка плана…", 5),
+    "user_delete_cleanup": ("Удаление пользователя…", "Подготовка очистки…", 5),
+    "bulk_user_nodes": ("Массовая выдача серверов…", "Запуск…", 5),
+    "ha_client_sync": ("Синхронизация HA клиентов…", "Подготовка…", 5),
+    "config_apply": ("Применение конфигурации…", "Подготовка…", 5),
+    "recreate_profiles": ("Пересоздание профилей…", "client.sh 7…", 5),
+    "ha_awg2_sync": ("HA-синхронизация AWG 2.0…", "Подготовка…", 5),
 }
 
 _TASK_DONE_PROGRESS: dict[str, str] = {
     "run_doall": "AntiZapret: изменения применены",
     "routing_apply": "Маршрутизация применена",
     "routing_apply_replica": "Маршрутизация на replica применена",
+    "routing_sync": "Провайдеры синхронизированы",
     "restart_service": "Служба перезапущена",
     "update_system": "Обновление завершено",
     "rebuild_frontend": "Пересборка завершена",
@@ -100,6 +132,13 @@ _TASK_DONE_PROGRESS: dict[str, str] = {
     "node_sync_push_full": "Синхронизация HA завершена",
     "node_sync_shared_domain": "Shared domain применён на узлах",
     "node_update_roll": "Rolling update завершён",
+    "user_provision": "План конфигов применён",
+    "user_delete_cleanup": "Пользователь удалён",
+    "bulk_user_nodes": "Массовая операция с серверами завершена",
+    "ha_client_sync": "Синхронизация HA клиентов завершена",
+    "config_apply": "Конфигурация применена",
+    "recreate_profiles": "Профили пересозданы",
+    "ha_awg2_sync": "HA-синхронизация AWG 2.0 завершена",
 }
 
 
@@ -203,18 +242,16 @@ class BackgroundTaskService:
         finally:
             db.close()
 
-    def find_active_task(self, task_type: str) -> BackgroundTask | None:
+    def find_active_task(self, task_type: str, subject_key: str | None = None) -> BackgroundTask | None:
         db = SessionLocal()
         try:
-            return (
-                db.query(BackgroundTask)
-                .filter(
-                    BackgroundTask.task_type == task_type,
-                    BackgroundTask.status.in_(["queued", "running"]),
-                )
-                .order_by(BackgroundTask.created_at.desc())
-                .first()
+            q = db.query(BackgroundTask).filter(
+                BackgroundTask.task_type == task_type,
+                BackgroundTask.status.in_(["queued", "running"]),
             )
+            if subject_key is not None:
+                q = q.filter(BackgroundTask.subject_key == subject_key)
+            return q.order_by(BackgroundTask.created_at.desc()).first()
         finally:
             db.close()
 
@@ -266,6 +303,8 @@ class BackgroundTaskService:
         message: str,
         *,
         created_by_username: str | None = None,
+        subject_key: str | None = None,
+        input: str | None = None,
     ) -> str:
         task_id = secrets.token_hex(16)
         owner = current_process_owner()
@@ -279,9 +318,11 @@ class BackgroundTaskService:
                         status="queued",
                         created_by_username=created_by_username,
                         message=(message or "Задача поставлена в очередь")[:255],
+                        input=input,
                         progress_percent=0,
                         progress_stage="Ожидание запуска задачи…",
                         owner=owner,
+                        subject_key=subject_key,
                     )
                 )
 
@@ -405,11 +446,13 @@ class BackgroundTaskService:
         *,
         created_by_username: str | None = None,
         queued_message: str | None = None,
+        subject_key: str | None = None,
     ) -> BackgroundTask:
         task_id = self.create_queued_task(
             task_type,
             queued_message or "Задача поставлена в очередь",
             created_by_username=created_by_username,
+            subject_key=subject_key,
         )
         _submit_in_current_context(self.run_background_task, task_id, task_callable)
         task = self.get_task(task_id)
@@ -449,8 +492,24 @@ class BackgroundTaskService:
             detail = exc.detail
             if isinstance(detail, list):
                 detail = "; ".join(str(item) for item in detail)
+            if isinstance(detail, dict):
+                return RuntimeError(self._detail_error_text(detail))
             return RuntimeError(str(detail or "Ошибка операции"))
         return RuntimeError(str(exc))
+
+    @staticmethod
+    def _detail_error_text(detail: dict[str, Any]) -> str:
+        # Link errors carry {"code", "message", "hint"}: show the message, not a Python dict repr.
+        message = str(detail.get("message") or "").strip()
+        if not message:
+            return json.dumps(detail, ensure_ascii=False)
+        hint = str(detail.get("hint") or "").strip()
+        if hint:
+            return f"{message} ({hint})"
+        code = str(detail.get("code") or "").strip()
+        if code:
+            return f"{message} [{code}]"
+        return message
 
     def task_run_doall(
         self,
@@ -460,50 +519,29 @@ class BackgroundTaskService:
         recreate_profiles: bool = True,
         hosts: list[str] | None = None,
         ensure_openvpn_multihome: bool = False,
+        ips_only: bool = False,
     ) -> dict[str, str]:
-        if progress_updater:
-            progress_updater(10, "AntiZapret: запуск doall.sh…")
         try:
-            doall_output = adapter.apply_config_changes()
+            result = apply_routing_changes(
+                adapter,
+                sync=False,
+                doall=True,
+                ips_only=ips_only,
+                recreate_profiles=recreate_profiles,
+                hosts=hosts,
+                ensure_multihome=ensure_openvpn_multihome,
+                run_config_queue=True,
+                progress=progress_updater,
+            )
         except Exception as exc:
             raise self._adapter_error(exc) from exc
-        recreate_output = ""
-        if recreate_profiles:
-            if progress_updater:
-                progress_updater(65, "AntiZapret: пересоздание профилей клиентов…")
-            try:
-                from app.services.openvpn_profile_repair import recreate_openvpn_profiles
-
-                result = recreate_openvpn_profiles(adapter, hosts=hosts)
-                if not result.success:
-                    raise RuntimeError(
-                        result.errors[0] if result.errors else "Ошибка пересоздания профилей"
-                    )
-                recreate_output = result.output
-            except Exception as exc:
-                raise self._adapter_error(exc) from exc
-        multihome_output = ""
-        if ensure_openvpn_multihome:
-            if progress_updater:
-                progress_updater(90, "AntiZapret: восстановление OpenVPN multihome…")
-            try:
-                mh = adapter.ensure_openvpn_multihome(True, restart_if_unchanged=False)
-                if isinstance(mh, dict):
-                    multihome_output = json.dumps(mh, ensure_ascii=False)
-                else:
-                    multihome_output = str(mh or "")
-            except Exception as exc:
-                raise self._adapter_error(exc) from exc
-        combined = "\n".join(
-            part for part in [doall_output, recreate_output, multihome_output] if part
-        ).strip()
         return {
             "message": (
                 "doall и пересоздание профилей клиентов выполнены успешно"
                 if recreate_profiles
                 else "doall выполнен успешно (профили не пересоздавались)"
             ),
-            "output": combined,
+            "output": format_apply_output(result),
         }
 
     def task_routing_apply(
@@ -515,24 +553,23 @@ class BackgroundTaskService:
         hosts: list[str] | None = None,
         ensure_openvpn_multihome: bool = False,
     ) -> dict[str, str]:
-        if progress_updater:
-            progress_updater(5, "Синхронизация провайдеров…")
         try:
-            sync_output = adapter.sync_cidr_providers()
+            # Routing apply only rewrites CIDR files: hosts/adblock lists are untouched, skip their download.
+            result = apply_routing_changes(
+                adapter,
+                sync=True,
+                doall=True,
+                ips_only=True,
+                recreate_profiles=recreate_profiles,
+                hosts=hosts,
+                ensure_multihome=ensure_openvpn_multihome,
+                progress=progress_updater,
+            )
         except Exception as exc:
             raise self._adapter_error(exc) from exc
-        sync_text = json.dumps(sync_output, ensure_ascii=False) if isinstance(sync_output, dict) else str(sync_output or "")
-        result = self.task_run_doall(
-            adapter,
-            progress_updater,
-            recreate_profiles=recreate_profiles,
-            hosts=hosts,
-            ensure_openvpn_multihome=ensure_openvpn_multihome,
-        )
-        combined = "\n".join(part for part in [sync_text, result.get("output", "")] if part).strip()
         return {
             "message": "Маршрутизация применена (doall.sh)",
-            "output": combined,
+            "output": format_apply_output(result),
         }
 
     def make_routing_apply_for_node_callable(
@@ -644,7 +681,7 @@ class BackgroundTaskService:
             raise RuntimeError(f"Неизвестный режим публикации: {mode}")
 
         uvicorn_modes = {"uvicorn_le", "uvicorn_selfsigned", "uvicorn_custom"}
-        backend_port = int(payload.get("backend_port") or 8000)
+        backend_port = int(payload.get("backend_port") or DEFAULT_BACKEND_PORT)
         domain = str(payload.get("domain") or "").strip()
         ssl_cert = str(payload.get("ssl_cert") or "").strip()
         ssl_key = str(payload.get("ssl_key") or "").strip()
@@ -798,7 +835,7 @@ class BackgroundTaskService:
         env_path = APP_ROOT / ".env"
         env = EnvFileService(env_path)
         mode = str(payload.get("publish_mode") or env.get_env_value("PUBLISH_MODE", "") or "").strip()
-        backend_port = str(payload.get("backend_port") or env.get_env_value("BACKEND_PORT", "8000") or "8000")
+        backend_port = str(payload.get("backend_port") or env.get_env_value("BACKEND_PORT", str(DEFAULT_BACKEND_PORT)) or DEFAULT_BACKEND_PORT)
         domain = str(payload.get("domain") or env.get_env_value("DOMAIN", "") or "").strip().split(":")[0]
         ssl_cert = str(payload.get("ssl_cert") or env.get_env_value("SSL_CERT", "") or "").strip()
         ssl_key = str(payload.get("ssl_key") or env.get_env_value("SSL_KEY", "") or "").strip()
@@ -1040,6 +1077,56 @@ class BackgroundTaskService:
             }
         )
         return payload
+
+
+def _subject_node_id(subject_key: str | None) -> int | None:
+    """Node id from a ``node:<id>:<scope>`` subject key; None when not pinned."""
+    parts = (subject_key or "").split(":")
+    if len(parts) >= 2 and parts[0] == "node":
+        try:
+            return int(parts[1])
+        except ValueError:
+            return None
+    return None
+
+
+def find_active_heavy_apply_task(
+    db: Session,
+    *,
+    node_id: int | None = None,
+) -> BackgroundTask | None:
+    """Unfinished heavy apply task, newest first.
+
+    ``node_id`` only narrows node-pinned tasks (``config_apply``,
+    ``recreate_profiles``): a task without a node in its subject key may act on
+    any node and therefore conflicts with every node.
+    """
+    active = list(
+        db.query(BackgroundTask)
+        .filter(
+            BackgroundTask.task_type.in_(HEAVY_APPLY_TASK_TYPES),
+            BackgroundTask.status.in_(["queued", "running"]),
+        )
+        .order_by(BackgroundTask.created_at.desc())
+        .all()
+    )
+    for task in active:
+        if node_id is None:
+            return task
+        pinned = _subject_node_id(task.subject_key)
+        if pinned is None or pinned == node_id:
+            return task
+    return None
+
+
+def assert_heavy_apply_idle(db: Session, *, node_id: int | None = None) -> None:
+    """Reject a second heavy apply with 409 while another one is unfinished."""
+    active = find_active_heavy_apply_task(db, node_id=node_id)
+    if active is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Применение уже выполняется: {active.task_type}",
+        )
 
 
 background_task_service = BackgroundTaskService()

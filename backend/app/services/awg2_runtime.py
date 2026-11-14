@@ -10,24 +10,12 @@ from pathlib import Path
 
 from app.services.runtime_peer_batch import block_peers_batch, group_peers_by_client
 from app.services.shared_helpers import normalize_client_name as _normalize_client_name
+from app.services.shared_helpers import read_kv_file as _read_kv_file
 
 AWG2_CONFIG_DIR = Path("/etc/amnezia/amneziawg")
 DEFAULT_AZ_IFACE = "antizapret-awg"
 DEFAULT_VPN_IFACE = "vpn-awg"
 COMMAND_TIMEOUT_SECONDS = 10
-
-
-def _read_kv_file(path: Path) -> dict[str, str]:
-    data: dict[str, str] = {}
-    if not path.is_file():
-        return data
-    for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, _, value = line.partition("=")
-        data[key.strip()] = value.strip().strip('"').strip("'")
-    return data
 
 
 def _build_config_files(config_dir: Path | str = AWG2_CONFIG_DIR) -> dict[str, Path]:

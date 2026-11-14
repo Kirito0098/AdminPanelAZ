@@ -28,6 +28,8 @@ from app.models import (
     TrafficLimitNotifyState,
     TrafficSessionState,
     UnlockCodeRedemption,
+    User,
+    UserNodeAssignment,
     UserTrafficSample,
     UserTrafficStatProtocol,
     VpnConfig,
@@ -38,6 +40,7 @@ from app.services.expected_node import confirmed_node_id, ensure_expected_node, 
 from app.services.antizapret import AntiZapretService
 from app.services.app_setting_store import _get_setting, _set_setting
 from app.services.node_adapter import LocalNodeAdapter, NodeAdapter, RemoteNodeAdapter
+from app.services.node_http_gate import NodeHttpBusy
 from app.services.node_health import HEALTH_METADATA_KEYS
 from app.services.node_transport import TRANSPORT_SSH, get_transport, node_uses_tls, resolve_transport_id
 from app.services.proxy_node_adapter import ProxyNodeAdapter
@@ -391,6 +394,28 @@ def purge_node_related(db: Session, node_id: int) -> None:
     ):
         db.query(model).filter(model.node_id == node_id).delete(synchronize_session=False)
 
+    # Присвоения пользователей к узлу удаляются; пользователи с планом переходят в pending.
+    assignment_rows = db.query(UserNodeAssignment).filter(
+        UserNodeAssignment.node_id == node_id
+    ).all()
+    affected_user_ids = {row.user_id for row in assignment_rows}
+    db.query(UserNodeAssignment).filter(
+        UserNodeAssignment.node_id == node_id
+    ).delete(synchronize_session=False)
+
+    if affected_user_ids:
+        from app.services.user_provisioning import user_has_plan
+
+        for user_id in affected_user_ids:
+            user_row = db.get(User, user_id)
+            if user_row is not None and user_has_plan(user_row):
+                user_row.provision_state = "pending"
+
+    # Шаблоны предоставления доступа не должны ссылаться на удалённый узел.
+    from app.services.provisioning_presets import remove_node_from_presets
+
+    remove_node_from_presets(db, node_id)
+
 
 def _remove_local_node(db: Session, local: Node) -> None:
     active_id = get_active_node_id(db)
@@ -481,6 +506,9 @@ def check_node_health(node: Node, api_key_override: str | None = None) -> dict:
         health = adapter.health_check()
         health["status"] = "online"
         return health
+    except NodeHttpBusy:
+        # Slot held by create/UI — caller must skip status update (do not mark offline).
+        raise
     except ValueError as exc:
         from app.services.node_link_errors import classify_ssh_error, link_error_detail
 
@@ -505,9 +533,12 @@ def check_node_health(node: Node, api_key_override: str | None = None) -> dict:
             },
         }
     except HTTPException as exc:
-        from app.services.node_link_errors import parse_link_error_from_http_detail
+        from app.services.node_link_errors import CODE_BUSY, parse_link_error_from_http_detail
 
         parsed = parse_link_error_from_http_detail(exc.detail)
+        if parsed and parsed["code"] == CODE_BUSY:
+            # Agent slot is held by another operation: the node is busy, not down.
+            raise
         if parsed:
             return {
                 "status": "offline",
@@ -546,6 +577,21 @@ def update_node_from_health(node: Node, health: dict, db: Session) -> None:
             meta["tls_mismatch"] = bool(expected_tls) != bool(health["listen_tls"])
         else:
             meta.pop("tls_mismatch", None)
+        if _node_kind(node) == NODE_KIND_VPN:
+            from app.services.node_http_gate import NodeHttpBusy, node_http_gate_nonblocking
+
+            try:
+                with node_http_gate_nonblocking():
+                    awg2_health = get_adapter_for_node(node).get_awg2_health()
+            except NodeHttpBusy:
+                logger.debug("awg2 probe skipped on node %s: agent slot busy", node.id)
+            except Exception as exc:
+                logger.warning("awg2 probe failed on node %s: %s", node.id, exc)
+                meta["awg2_installed"] = False
+                meta["awg2_checked_at"] = now_iso
+            else:
+                meta["awg2_installed"] = bool(awg2_health.get("installed"))
+                meta["awg2_checked_at"] = now_iso
         node.node_metadata = json.dumps(meta)
     elif health.get("error") or health.get("link_error"):
         meta = node_metadata_dict(node)

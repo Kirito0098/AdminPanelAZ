@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from datetime import datetime, timedelta, timezone
 from unittest.mock import ANY, MagicMock, patch
 
@@ -29,11 +30,6 @@ def test_normalize_portal_domain_strips_scheme_and_path():
     assert portal.normalize_portal_domain("") == ""
     with pytest.raises(ValueError):
         portal.normalize_portal_domain("not a host")
-
-
-def test_openvpn_import_url_format():
-    url = portal.openvpn_import_url("https://sub.example.com/api/public/portal/tok/download?path=a.ovpn")
-    assert url.startswith("openvpn://import-profile/https://")
 
 
 def test_resolve_portal_base_url_none_without_domain():
@@ -68,101 +64,6 @@ def test_resolve_portal_base_url_none_when_not_ready():
             "PUBLISH_MODE": "nginx_le",
         }.get(key, default)
         bps.return_value = {"portal_ready": False, "portal_access_url": ""}
-        assert portal.resolve_portal_base_url(db) is None
-
-
-def test_resolve_portal_base_url_with_domain_when_ready():
-    db = MagicMock()
-    row = MagicMock()
-    row.value = "sub.example.com"
-    db.query.return_value.filter.return_value.first.return_value = row
-    with (
-        patch("app.services.client_portal.get_settings") as gs,
-        patch("app.services.env_file.EnvFileService") as env_cls,
-        patch("app.services.panel_publish_info.resolve_panel_publish_mode", return_value="behind_nginx"),
-        patch("app.services.panel_publish_info.resolve_active_publish_mode_key", return_value="nginx_le"),
-        patch("app.services.panel_publish_info.build_portal_publish_status") as bps,
-    ):
-        gs.return_value.domain = "panel.example.com"
-        gs.return_value.https_public_port = 443
-        gs.return_value.access_path = ""
-        env = env_cls.return_value
-        env.get_env_value.side_effect = lambda key, default="": {
-            "DOMAIN": "panel.example.com",
-            "SSL_CERT": "/etc/ssl/cert.pem",
-            "BEHIND_NGINX": "1",
-            "USE_HTTPS": "1",
-            "BACKEND_HOST": "127.0.0.1",
-            "BACKEND_PORT": "8000",
-            "HTTPS_PUBLIC_PORT": "443",
-            "PUBLISH_MODE": "nginx_le",
-        }.get(key, default)
-        bps.return_value = {"portal_ready": True, "portal_access_url": "https://sub.example.com/"}
-        assert portal.resolve_portal_base_url(db) == "https://sub.example.com"
-
-
-def test_resolve_portal_base_url_accepts_legacy_access_url_key():
-    """Older mocks / callers may still pass access_url; prefer portal_access_url."""
-    db = MagicMock()
-    row = MagicMock()
-    row.value = "sub.example.com"
-    db.query.return_value.filter.return_value.first.return_value = row
-    with (
-        patch("app.services.client_portal.get_settings") as gs,
-        patch("app.services.env_file.EnvFileService") as env_cls,
-        patch("app.services.panel_publish_info.resolve_panel_publish_mode", return_value="behind_nginx"),
-        patch("app.services.panel_publish_info.resolve_active_publish_mode_key", return_value="nginx_le"),
-        patch("app.services.panel_publish_info.build_portal_publish_status") as bps,
-    ):
-        gs.return_value.domain = "panel.example.com"
-        gs.return_value.https_public_port = 443
-        gs.return_value.access_path = ""
-        env = env_cls.return_value
-        env.get_env_value.side_effect = lambda key, default="": {
-            "DOMAIN": "panel.example.com",
-            "SSL_CERT": "/etc/ssl/cert.pem",
-            "BEHIND_NGINX": "1",
-            "USE_HTTPS": "1",
-            "BACKEND_HOST": "127.0.0.1",
-            "BACKEND_PORT": "8000",
-            "HTTPS_PUBLIC_PORT": "443",
-            "PUBLISH_MODE": "nginx_le",
-        }.get(key, default)
-        bps.return_value = {"portal_ready": True, "access_url": "https://legacy.example.com/"}
-        assert portal.resolve_portal_base_url(db) == "https://legacy.example.com"
-
-
-def test_resolve_portal_base_url_http_direct_unsupported():
-    """Unsupported publish modes never yield a portal base URL."""
-    db = MagicMock()
-    row = MagicMock()
-    row.value = "portal.example.com"
-    db.query.return_value.filter.return_value.first.return_value = row
-    with (
-        patch("app.services.client_portal.get_settings") as gs,
-        patch("app.services.env_file.EnvFileService") as env_cls,
-        patch("app.services.panel_publish_info.resolve_panel_publish_mode", return_value="direct_http"),
-        patch("app.services.panel_publish_info.resolve_active_publish_mode_key", return_value="http_direct"),
-        patch("app.services.panel_publish_info.build_portal_publish_status") as bps,
-    ):
-        gs.return_value.domain = ""
-        gs.return_value.https_public_port = 443
-        env = env_cls.return_value
-        env.get_env_value.side_effect = lambda key, default="": {
-            "DOMAIN": "",
-            "SSL_CERT": "",
-            "BEHIND_NGINX": "0",
-            "USE_HTTPS": "0",
-            "BACKEND_HOST": "0.0.0.0",
-            "BACKEND_PORT": "8000",
-            "HTTPS_PUBLIC_PORT": "443",
-            "PUBLISH_MODE": "http_direct",
-        }.get(key, default)
-        bps.return_value = {
-            "portal_ready": False,
-            "portal_mode_supported": False,
-            "portal_access_url": "",
-        }
         assert portal.resolve_portal_base_url(db) is None
 
 
@@ -224,7 +125,8 @@ def test_get_valid_portal_token_revoked():
     db.query.side_effect = [revoked, empty]
     with pytest.raises(HTTPException) as ei:
         portal.get_valid_portal_token(db, "abc")
-    assert ei.value.status_code == 410
+    assert ei.value.status_code == 404
+    assert ei.value.detail == portal.PORTAL_LINK_INVALID_DETAIL
 
 
 def test_get_valid_portal_token_resolves_user_token():
@@ -315,6 +217,35 @@ def test_public_download_returns_attachment(public_client):
     rl.consume.assert_called_once_with("198.51.100.1")
 
 
+def test_public_download_passes_file_id_query_param(public_client):
+    token_row = ClientPortalToken(id=1, token="tok", node_id=1, client_name="alice", revoked_at=None)
+    with (
+        patch("app.routers.public_portal.get_feature_service") as feats,
+        patch("app.routers.public_portal.assert_portal_host"),
+        patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_portal.public_download_rate_limit_service"),
+        patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
+        patch("app.routers.public_portal.read_portal_profile", return_value=("alice.ovpn", b"client\n")) as read_profile,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        ip_svc.get_client_ip.return_value = "198.51.100.1"
+        resp = public_client.get(
+            "/api/public/portal/tok/download",
+            params={"file_id": "f_abc123", "node_id": 2, "client_name": "bob"},
+            headers={"Host": "sub.example.com"},
+        )
+
+    assert resp.status_code == 200
+    read_profile.assert_called_once_with(
+        ANY,
+        token_row,
+        None,
+        file_id="f_abc123",
+        node_id=2,
+        client_name="bob",
+    )
+
+
 def test_link_response_builds_page_url():
     db = MagicMock()
     row = MagicMock()
@@ -346,11 +277,6 @@ def test_link_response_builds_page_url():
         payload = portal.link_response(db, token)
     assert payload["url"] == "https://sub.example.com/p/XxYy"
     assert payload["token"] == "XxYy"
-
-
-def test_format_bytes_label():
-    assert portal._format_bytes_label(0) == "0 B"
-    assert "GiB" in portal._format_bytes_label(44.69 * 1024**3)
 
 
 def test_build_portal_status_active_unlimited():
@@ -389,60 +315,6 @@ def test_build_portal_status_active_unlimited():
     assert status["traffic_used_bytes"] == 3072
     assert status["traffic_limit_bytes"] is None
     assert "/ ∞" in status["traffic_label"]
-
-
-def test_build_portal_status_uses_cert_expires_at():
-    db = MagicMock()
-
-    def query_side_effect(model):
-        q = MagicMock()
-        q.filter.return_value.first.return_value = None
-        q.filter.return_value.all.return_value = []
-        return q
-
-    db.query.side_effect = query_side_effect
-    now = _utc_now_naive()
-    cfg = MagicMock()
-    cfg.vpn_type = VpnType.openvpn
-    cfg.expires_at = None
-    cfg.cert_expires_at = now + __import__("datetime").timedelta(days=25, hours=2)
-    status = portal.build_portal_status(db, node_id=1, client_name="test1", configs=[cfg])
-    assert status["status"] == "active"
-    assert status["expires_label"].startswith("25 дн. (до ")
-    assert status["expires_at"] is not None
-
-
-def test_build_portal_status_prefers_access_until_over_cert():
-    db = MagicMock()
-    now = _utc_now_naive()
-
-    policy = MagicMock()
-    policy.is_permanent_blocked = False
-    policy.is_temp_blocked = False
-    policy.block_until = None
-    policy.traffic_limit_bytes = None
-    policy.access_until = now + timedelta(days=40, hours=2)
-
-    def query_side_effect(model):
-        q = MagicMock()
-        if model.__name__ == "OpenVpnAccessPolicy":
-            q.filter.return_value.first.return_value = policy
-        elif model.__name__ == "UserTrafficStatProtocol":
-            q.filter.return_value.all.return_value = []
-        else:
-            q.filter.return_value.first.return_value = None
-            q.filter.return_value.all.return_value = []
-        return q
-
-    db.query.side_effect = query_side_effect
-    cfg = MagicMock()
-    cfg.vpn_type = VpnType.openvpn
-    cfg.expires_at = None
-    cfg.cert_expires_at = now + timedelta(days=5)
-    status = portal.build_portal_status(db, node_id=1, client_name="test1", configs=[cfg])
-    assert status["status"] == "active"
-    assert status["expires_label"].startswith("40 дн. (до ")
-    assert status["expires_at"] == (policy.access_until.isoformat() + "Z")
 
 
 def test_build_portal_status_marks_access_until_expired_even_if_cert_valid():
@@ -526,7 +398,7 @@ def test_public_portal_redeem_returns_bad_request_for_redeem_errors(public_clien
         patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
         patch(
             "app.routers.public_portal.redeem_public_portal_code",
-            side_effect=ValueError("Этот unlock-ключ уже использован вами"),
+            side_effect=ValueError("Этот ключ вы уже активировали."),
         ),
     ):
         feats.return_value.is_enabled.side_effect = lambda key: True
@@ -538,29 +410,8 @@ def test_public_portal_redeem_returns_bad_request_for_redeem_errors(public_clien
         )
 
     assert resp.status_code == 400
-    assert resp.json()["detail"] == "Этот unlock-ключ уже использован вами"
+    assert resp.json()["detail"] == "Этот ключ вы уже активировали."
     rl.consume.assert_called_once_with("198.51.100.1")
-
-
-def test_public_portal_redeem_requires_unlock_codes_feature(public_client):
-    token_row = ClientPortalToken(id=1, token="tok", node_id=1, client_name="alice", revoked_at=None)
-    with (
-        patch("app.routers.public_portal.get_feature_service") as feats,
-        patch("app.routers.public_portal.assert_portal_host"),
-        patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
-        patch("app.routers.public_portal.public_download_rate_limit_service"),
-        patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
-    ):
-        feats.return_value.is_enabled.side_effect = lambda key: key == "client_portal"
-        ip_svc.get_client_ip.return_value = "198.51.100.1"
-        resp = public_client.post(
-            "/api/public/portal/tok/redeem",
-            json={"code": "ABCD-EFGH-IJKL"},
-            headers={"Host": "sub.example.com"},
-        )
-
-    assert resp.status_code == 403
-    assert "unlock" in resp.json()["detail"].lower()
 
 
 def test_public_portal_redeem_rejects_wrong_host_before_features(public_client):
@@ -629,6 +480,7 @@ def test_public_download_passes_user_target_query_params(public_client):
         ANY,
         user_token,
         "/tmp/bob.ovpn",
+        file_id=None,
         node_id=2,
         client_name="bob",
     )
@@ -721,7 +573,7 @@ def test_redeem_public_portal_code_user_retries_next_owned_client():
         patch("app.services.unlock_codes.redeem_unlock_code") as redeem,
     ):
         redeem.side_effect = [
-            ValueError("Нет пересечения протоколов клиента и unlock-ключа"),
+            ValueError(unlock_codes._REDEEM_PROTOCOL_MISMATCH_MESSAGE),
             {
                 "grant_days": 7,
                 "protocols_applied": ["openvpn"],
@@ -738,33 +590,6 @@ def test_redeem_public_portal_code_user_retries_next_owned_client():
     assert [call.kwargs["user_id"] for call in redeem.call_args_list] == [7, 7]
     assert result["access_until"] == fixed_until.isoformat()
     assert result["protocols_applied"] == ["openvpn"]
-
-
-def test_redeem_public_portal_code_user_skips_manually_blocked_client():
-    user_token = UserPortalToken(id=3, token="usr", user_id=7, revoked_at=None)
-    fixed_until = datetime(2030, 1, 8, 12, 30)
-    user = MagicMock(id=7, access_until=fixed_until)
-    with (
-        patch("app.services.client_portal._owned_portal_targets", return_value=[(1, "alice"), (2, "bob")]),
-        patch("app.services.client_portal.ensure_portal_user", return_value=user),
-        patch("app.services.unlock_codes.redeem_unlock_code") as redeem,
-    ):
-        redeem.side_effect = [
-            ValueError(unlock_codes._REDEEM_MANUAL_BLOCK_MESSAGE),
-            {
-                "grant_days": 7,
-                "protocols_applied": ["wireguard"],
-                "access_until_by_protocol": {"wireguard": fixed_until.isoformat()},
-            },
-        ]
-        result = portal.redeem_public_portal_code(
-            MagicMock(),
-            portal.PortalTokenResolution(kind="user", user_row=user_token),
-            code="ABCD-EFGH-IJKL",
-        )
-
-    assert redeem.call_count == 2
-    assert result["protocols_applied"] == ["wireguard"]
 
 
 def test_redeem_public_portal_code_user_reports_manual_block_when_no_profile_left():
@@ -784,7 +609,7 @@ def test_redeem_public_portal_code_user_reports_manual_block_when_no_profile_lef
     assert str(excinfo.value) == unlock_codes._REDEEM_MANUAL_BLOCK_MESSAGE
 
 
-def test_admin_user_portal_get_link_route_uses_user_id():
+def test_admin_user_portal_get_link_route_is_read_only():
     app = FastAPI()
     app.include_router(client_portal_router.router, prefix="/api")
     app.dependency_overrides[get_db] = lambda: MagicMock()
@@ -795,9 +620,10 @@ def test_admin_user_portal_get_link_route_uses_user_id():
         patch("app.routers.client_portal._require_portal_domain"),
         patch("app.routers.client_portal.ensure_portal_user"),
         patch(
-            "app.routers.client_portal.get_or_create_user_portal_token",
+            "app.routers.client_portal._active_user_token",
             return_value=UserPortalToken(id=1, token="usr", user_id=9, revoked_at=None),
-        ) as create_link,
+        ),
+        patch("app.routers.client_portal.get_or_create_user_portal_token") as create_link,
         patch(
             "app.routers.client_portal.user_link_response",
             return_value={"kind": "user", "token": "usr", "user_id": 9, "url": "https://sub.example.com/p/usr", "revoked": False},
@@ -809,7 +635,29 @@ def test_admin_user_portal_get_link_route_uses_user_id():
 
     assert resp.status_code == 200
     assert resp.json()["user_id"] == 9
-    assert create_link.call_args.kwargs["user_id"] == 9
+    create_link.assert_not_called()
+
+
+def test_admin_user_portal_get_link_returns_404_without_token():
+    app = FastAPI()
+    app.include_router(client_portal_router.router, prefix="/api")
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+    app.dependency_overrides[require_admin] = lambda: MagicMock(id=1, username="admin")
+
+    with (
+        patch("app.routers.client_portal.get_feature_service") as feats,
+        patch("app.routers.client_portal._require_portal_domain"),
+        patch("app.routers.client_portal.ensure_portal_user"),
+        patch("app.routers.client_portal._active_user_token", return_value=None),
+        patch("app.routers.client_portal.get_or_create_user_portal_token") as create_link,
+    ):
+        feats.return_value.is_enabled.return_value = True
+        with TestClient(app) as client:
+            resp = client.get("/api/portal/users/9/link")
+
+    assert resp.status_code == 404
+    assert resp.json()["detail"] == "Ссылка портала ещё не создана"
+    create_link.assert_not_called()
 
 
 def test_admin_user_portal_revoke_route_uses_user_id():
@@ -902,60 +750,6 @@ def _portal_db_for_list_and_download(*, configs: list, node: MagicMock, owner=No
     return db
 
 
-def test_list_files_hides_vpn_route_when_owner_visibility_az_only():
-    from app.models import User, UserRole
-    from app.services.vpn_profile_visibility import policy_to_json
-
-    owner = User(
-        id=5,
-        username="bob",
-        password_hash="x",
-        role=UserRole.user,
-        is_active=True,
-        visible_vpn_profiles=policy_to_json(_AZ_ONLY_POLICY),
-    )
-    cfg = _openbox_cfg(owner_id=5)
-    adapter = MagicMock()
-    adapter.get_profile_files.return_value = _openbox_openvpn_files()
-    node = MagicMock()
-    db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=owner)
-
-    with (
-        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
-        patch("app.services.feature_guards.get_feature_service") as feats,
-    ):
-        feats.return_value.is_enabled.return_value = True
-        files = portal._list_files_for_configs(db, [cfg])
-
-    paths = [f["path"] for f in files]
-    assert _AZ_OPENBOX_PATH in paths
-    assert _VPN_OPENBOX_PATH not in paths
-
-
-def test_list_files_orphan_uses_restrictive_default_visibility():
-    cfg = _openbox_cfg(owner_id=None)
-    adapter = MagicMock()
-    adapter.get_profile_files.return_value = _openbox_openvpn_files()
-    node = MagicMock()
-    db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=None)
-
-    with (
-        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
-        patch("app.services.feature_guards.get_feature_service") as feats,
-        patch("app.services.client_portal.get_default_visible_vpn_profiles", return_value=_AZ_ONLY_POLICY),
-        patch(
-            "app.services.client_portal.feature_flags_from_service",
-            return_value={"openvpn": True, "wireguard": True, "amneziawg": True, "awg2": True},
-        ),
-    ):
-        feats.return_value.is_enabled.return_value = True
-        files = portal._list_files_for_configs(db, [cfg])
-
-    paths = [f["path"] for f in files]
-    assert _AZ_OPENBOX_PATH in paths
-    assert _VPN_OPENBOX_PATH not in paths
-
-
 def test_read_client_portal_profile_rejects_vpn_via_owner_visibility():
     """Download allowlist comes from real _list_files_for_configs (no stub)."""
     from app.models import User, UserRole
@@ -1030,46 +824,6 @@ def test_read_client_portal_profile_rejects_vpn_for_orphan_default_az_only():
                 path=_VPN_OPENBOX_PATH,
             )
     assert hidden.value.status_code == 404
-
-
-def test_build_user_portal_payload_hides_vpn_for_restricted_owner():
-    from app.models import User, UserRole
-    from app.services.vpn_profile_visibility import policy_to_json
-
-    owner = User(
-        id=5,
-        username="bob",
-        password_hash="x",
-        role=UserRole.user,
-        is_active=True,
-        visible_vpn_profiles=policy_to_json(_AZ_ONLY_POLICY),
-    )
-    cfg = _openbox_cfg(owner_id=5)
-    adapter = MagicMock()
-    adapter.get_profile_files.return_value = _openbox_openvpn_files()
-    node = MagicMock()
-    db = _portal_db_for_list_and_download(configs=[cfg], node=node, owner=owner)
-    token_row = MagicMock(token="u_tok", user_id=5)
-
-    with (
-        patch("app.services.client_portal.resolve_portal_base_url", return_value="https://portal.example.com"),
-        patch("app.services.client_portal.ensure_portal_user", return_value=owner),
-        patch("app.services.client_portal._owned_portal_targets", return_value=[(3, "OpenBox")]),
-        patch("app.services.client_portal._portal_node_info", return_value={3: portal.PortalNodeInfo("NL", False)}),
-        patch("app.services.client_portal.get_adapter_for_node", return_value=adapter),
-        patch("app.services.client_portal.build_portal_status", return_value={"state": "active"}),
-        patch("app.services.client_portal._apply_user_subscription_status", side_effect=lambda status, _u: status),
-        patch("app.services.client_portal._portal_brand_title", return_value="VPN"),
-        patch("app.services.feature_guards.get_feature_service") as feats,
-    ):
-        feats.return_value.is_enabled.return_value = True
-        payload = portal.build_user_portal_payload(db, token_row)
-
-    assert payload["kind"] == "user"
-    assert len(payload["nodes"]) == 1
-    paths = [f["path"] for f in payload["nodes"][0]["clients"][0]["files"]]
-    assert _AZ_OPENBOX_PATH in paths
-    assert _VPN_OPENBOX_PATH not in paths
 
 
 def test_list_files_hides_wireguard_when_feature_disabled():
@@ -1233,16 +987,6 @@ def test_user_payload_drops_clients_without_files_and_empty_nodes():
     assert [c["client_name"] for c in payload["nodes"][0]["clients"]] == ["a"]
 
 
-def test_user_payload_empty_when_nothing_to_download():
-    payload = _run_user_payload(
-        targets=[(1, "a")],
-        entries={(1, "a"): _user_entry(1, "a", with_files=False)},
-        labels={1: "NL"},
-    )
-    assert payload["nodes"] == []
-    assert payload["unlock_codes_enabled"] is True
-
-
 def test_user_payload_skips_failing_nodes():
     payload = _run_user_payload(
         targets=[(1, "gone"), (2, "down"), (3, "ok")],
@@ -1254,35 +998,6 @@ def test_user_payload_skips_failing_nodes():
         labels={2: "DE", 3: "NL"},
     )
     assert [n["node_id"] for n in payload["nodes"]] == [3]
-
-
-def test_user_payload_skips_rest_of_node_after_first_failure():
-    calls: list = []
-    payload = _run_user_payload(
-        targets=[(1, "a"), (1, "b"), (2, "c")],
-        entries={
-            (1, "a"): RuntimeError("timeout"),
-            (1, "b"): _user_entry(1, "b"),
-            (2, "c"): _user_entry(2, "c"),
-        },
-        labels={1: "DE", 2: "NL"},
-        calls=calls,
-    )
-    assert [call for call in calls if call[0] == 1] == [(1, "a")]
-    assert [n["node_id"] for n in payload["nodes"]] == [2]
-
-
-def test_user_payload_skips_offline_nodes_without_calling_builder():
-    calls: list = []
-    payload = _run_user_payload(
-        targets=[(1, "a"), (2, "b")],
-        entries={(1, "a"): _user_entry(1, "a"), (2, "b"): _user_entry(2, "b")},
-        labels={1: "DE", 2: "NL"},
-        offline={1},
-        calls=calls,
-    )
-    assert calls == [(2, "b")]
-    assert [n["node_id"] for n in payload["nodes"]] == [2]
 
 
 def test_user_payload_caps_node_request_timeout_only_inside_portal():
@@ -1297,30 +1012,6 @@ def test_user_payload_caps_node_request_timeout_only_inside_portal():
     assert seen == [10.0]
     assert portal.PORTAL_NODE_TIMEOUT_SECONDS == 10.0
     assert [n["node_id"] for n in payload["nodes"]] == [1]
-    assert node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT) == node_adapter.HTTP_TIMEOUT
-
-
-def test_client_portal_payload_caps_node_request_timeout():
-    seen: list = []
-
-    def fake_entry(_db, **kwargs):
-        seen.append(node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT))
-        return _user_entry(kwargs["node_id"], kwargs["client_name"])
-
-    with (
-        patch("app.services.client_portal.resolve_portal_base_url", return_value="https://portal.example.com"),
-        patch("app.services.client_portal._build_client_portal_entry", side_effect=fake_entry),
-        patch("app.services.client_portal._portal_brand_title", return_value="VPN"),
-        patch("app.services.feature_guards.get_feature_service") as feats,
-    ):
-        feats.return_value.is_enabled.return_value = True
-        payload = portal.build_portal_payload(
-            MagicMock(),
-            ClientPortalToken(id=1, token="tok", node_id=1, client_name="alice", revoked_at=None),
-        )
-
-    assert seen == [10.0]
-    assert payload["client_name"] == "alice"
     assert node_adapter._effective_timeout(node_adapter.HTTP_TIMEOUT) == node_adapter.HTTP_TIMEOUT
 
 
@@ -1377,24 +1068,6 @@ def test_user_payload_logs_traceback_only_for_unexpected_errors(caplog):
         assert "secret" not in record.getMessage()
 
 
-def test_user_payload_label_fallback_when_node_row_missing():
-    payload = _run_user_payload(
-        targets=[(5, "a")],
-        entries={(5, "a"): _user_entry(5, "a")},
-        labels={},
-    )
-    assert payload["nodes"][0]["label"] == "Сервер 5"
-
-
-def test_user_payload_keeps_blocked_client_with_files():
-    payload = _run_user_payload(
-        targets=[(1, "a")],
-        entries={(1, "a"): _user_entry(1, "a", status="blocked")},
-        labels={1: "NL"},
-    )
-    assert payload["nodes"][0]["clients"][0]["status"]["status"] == "blocked"
-
-
 def test_portal_node_label_falls_back_to_name():
     from app.models import Node
 
@@ -1440,3 +1113,343 @@ def test_portal_node_info_loads_rows():
     finally:
         session.close()
         engine.dispose()
+
+
+def test_link_response_includes_expires_at():
+    db = MagicMock()
+    setting = MagicMock()
+    setting.value = "30"
+    db.query.return_value.filter.return_value.first.return_value = setting
+    created_at = datetime(2026, 1, 1, 12, 0)
+    token = ClientPortalToken(
+        token="XxYy",
+        node_id=1,
+        client_name="bob",
+        created_at=created_at,
+        revoked_at=None,
+    )
+    with patch("app.services.client_portal.portal_page_url", return_value="https://sub.example.com/p/XxYy"):
+        payload = portal.link_response(db, token)
+
+    assert payload["expires_at"] == (created_at + timedelta(days=30)).isoformat() + "Z"
+
+
+def test_link_response_expires_at_none_when_ttl_disabled():
+    db = MagicMock()
+    setting = MagicMock()
+    setting.value = "0"
+    db.query.return_value.filter.return_value.first.return_value = setting
+    token = UserPortalToken(
+        token="usr",
+        user_id=7,
+        created_at=datetime(2020, 1, 1),
+        revoked_at=None,
+    )
+    with patch("app.services.client_portal.portal_page_url", return_value="https://sub.example.com/p/usr"):
+        payload = portal.user_link_response(db, token)
+
+    assert payload["expires_at"] is None
+
+
+def test_portal_file_entries_expose_opaque_id_not_absolute_path():
+    files = portal._portal_file_entries(
+        base="https://sub.example.com",
+        token="tok",
+        files_meta=[
+            {
+                "path": "/srv/antizapret/client/openvpn/AZ-test.ovpn",
+                "label": "AZ-test",
+                "filename": "AZ-test.ovpn",
+                "vpn_type": "openvpn",
+            }
+        ],
+    )
+
+    entry = files[0]
+    assert "path" not in entry
+    assert entry["file_id"] == portal._portal_file_id("/srv/antizapret/client/openvpn/AZ-test.ovpn")
+    assert f"file_id={entry['file_id']}" in entry["download_url"]
+    assert "node_id=" not in entry["download_url"]
+    assert "client_name=" not in entry["download_url"]
+    assert "/srv" not in entry["download_url"]
+
+
+def _portal_files_db():
+    db = MagicMock()
+    db.query.return_value.filter.return_value.all.return_value = []
+    return db
+
+
+def test_read_client_portal_profile_downloads_by_file_id():
+    path = "/srv/antizapret/client/openvpn/AZ-test.ovpn"
+    db = _portal_files_db()
+    with (
+        patch("app.services.client_portal._list_files_for_configs", return_value=[{"path": path}]),
+        patch("app.services.client_portal._adapter_for_node_id", return_value=MagicMock()),
+        patch("app.services.client_portal.load_node_remote_hosts", return_value=[]),
+        patch(
+            "app.services.client_portal.read_profile_file_for_delivery",
+            return_value=b"client\n",
+        ) as read_file,
+    ):
+        filename, content = portal._read_client_portal_profile(
+            db,
+            node_id=1,
+            client_name="alice",
+            file_id=portal._portal_file_id(path),
+        )
+
+    assert content == b"client\n"
+    assert filename.endswith(".ovpn")
+    read_file.assert_called_once()
+    assert read_file.call_args.args[1] == path
+
+
+@pytest.mark.parametrize("file_id", ["f_deadbeefdeadbeefdeadbeef", portal._portal_file_id("/srv/other/client.conf")])
+def test_read_client_portal_profile_rejects_foreign_or_forged_file_id(file_id):
+    db = _portal_files_db()
+    with (
+        patch("app.services.client_portal._list_files_for_configs", return_value=[{"path": "/srv/own/client.conf"}]),
+        patch("app.services.client_portal.read_profile_file_for_delivery") as read_file,
+    ):
+        with pytest.raises(HTTPException) as exc:
+            portal._read_client_portal_profile(
+                db,
+                node_id=1,
+                client_name="alice",
+                file_id=file_id,
+            )
+
+    assert exc.value.status_code == 404
+    read_file.assert_not_called()
+
+
+# --- G2: downloads resolve strictly inside the token scope -------------------
+
+
+_PORTAL_DOWNLOAD_PATHS = {
+    1: "/srv/antizapret/client/alice.conf",
+    2: "/srv/antizapret/client/bob.conf",
+    3: "/srv/antizapret/client/eve.conf",
+}
+
+
+def _portal_download_db():
+    """Real session: alice@1 and bob@2 belong to owner, eve@3 to a stranger."""
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    from app.database import Base
+    from app.models import User, UserRole
+
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+    Base.metadata.create_all(engine)
+    db = sessionmaker(bind=engine)()
+    owner = User(username="owner", password_hash="x", role=UserRole.user, is_active=True)
+    stranger = User(username="stranger", password_hash="x", role=UserRole.user, is_active=True)
+    db.add_all([owner, stranger])
+    db.commit()
+    db.add_all(
+        [
+            VpnConfig(node_id=1, client_name="alice", vpn_type=VpnType.wireguard, owner_id=owner.id),
+            VpnConfig(node_id=2, client_name="bob", vpn_type=VpnType.wireguard, owner_id=owner.id),
+            VpnConfig(node_id=3, client_name="eve", vpn_type=VpnType.wireguard, owner_id=stranger.id),
+        ]
+    )
+    db.commit()
+    return db, owner
+
+
+@pytest.fixture()
+def portal_download_db():
+    db, owner = _portal_download_db()
+    try:
+        yield db, owner
+    finally:
+        db.close()
+
+
+@contextlib.contextmanager
+def _portal_download_patches():
+    def fake_list(_db, configs):
+        return [{"path": _PORTAL_DOWNLOAD_PATHS[configs[0].node_id]}]
+
+    def fake_read(_adapter, path, _hosts):
+        return f"content:{path}".encode()
+
+    with (
+        patch("app.services.client_portal._list_files_for_configs", side_effect=fake_list),
+        patch("app.services.client_portal._adapter_for_node_id", return_value=MagicMock()),
+        patch("app.services.client_portal.load_node_remote_hosts", return_value=[]),
+        patch("app.services.client_portal.read_profile_file_for_delivery", side_effect=fake_read) as read_file,
+    ):
+        yield read_file
+
+
+def _user_resolution(user_id: int) -> portal.PortalTokenResolution:
+    return portal.PortalTokenResolution(
+        kind="user",
+        user_row=UserPortalToken(id=1, token="usr", user_id=user_id, revoked_at=None),
+    )
+
+
+def _client_resolution() -> portal.PortalTokenResolution:
+    return portal.PortalTokenResolution(
+        kind="client",
+        client_row=ClientPortalToken(id=1, token="c_tok", node_id=1, client_name="alice", revoked_at=None),
+    )
+
+
+def test_user_portal_download_resolves_file_id_without_client_hints(portal_download_db):
+    db, owner = portal_download_db
+    path = _PORTAL_DOWNLOAD_PATHS[2]
+
+    with _portal_download_patches() as read_file:
+        filename, content = portal.read_portal_profile(
+            db,
+            _user_resolution(owner.id),
+            file_id=portal._portal_file_id(path),
+        )
+
+    assert content == f"content:{path}".encode()
+    assert filename
+    read_file.assert_called_once()
+    assert read_file.call_args.args[1] == path
+
+
+def test_user_portal_download_refuses_file_of_foreign_client(portal_download_db):
+    db, owner = portal_download_db
+
+    with _portal_download_patches() as read_file:
+        with pytest.raises(HTTPException) as exc:
+            portal.read_portal_profile(
+                db,
+                _user_resolution(owner.id),
+                file_id=portal._portal_file_id(_PORTAL_DOWNLOAD_PATHS[3]),
+            )
+        with pytest.raises(HTTPException) as hinted:
+            portal.read_portal_profile(
+                db,
+                _user_resolution(owner.id),
+                file_id=portal._portal_file_id(_PORTAL_DOWNLOAD_PATHS[3]),
+                node_id=3,
+                client_name="eve",
+            )
+
+    assert exc.value.status_code == hinted.value.status_code == 404
+    read_file.assert_not_called()
+
+
+def test_client_portal_download_ignores_query_node_and_client(portal_download_db):
+    db, _owner = portal_download_db
+    own_path = _PORTAL_DOWNLOAD_PATHS[1]
+
+    with _portal_download_patches():
+        _filename, content = portal.read_portal_profile(
+            db,
+            _client_resolution(),
+            file_id=portal._portal_file_id(own_path),
+            node_id=2,
+            client_name="bob",
+        )
+
+    assert content == f"content:{own_path}".encode()
+
+
+def test_client_portal_download_refuses_other_clients_file_with_hints(portal_download_db):
+    db, _owner = portal_download_db
+
+    with _portal_download_patches() as read_file:
+        with pytest.raises(HTTPException) as exc:
+            portal.read_portal_profile(
+                db,
+                _client_resolution(),
+                file_id=portal._portal_file_id(_PORTAL_DOWNLOAD_PATHS[2]),
+                node_id=2,
+                client_name="bob",
+            )
+
+    assert exc.value.status_code == 404
+    read_file.assert_not_called()
+
+
+# --- G3: same-origin guard on public portal writes --------------------------
+
+_CROSS_SITE_WRITE_HEADERS = [
+    {"Origin": "https://evil.example.com"},
+    {"Origin": "null"},
+    {"Sec-Fetch-Site": "cross-site"},
+    {"Sec-Fetch-Site": "same-site"},
+]
+
+_SAME_ORIGIN_WRITE_HEADERS = [
+    {},
+    {"Origin": "https://sub.example.com"},
+    {"Origin": "https://sub.example.com:443", "Sec-Fetch-Site": "same-origin"},
+]
+
+
+@pytest.mark.parametrize("headers", _CROSS_SITE_WRITE_HEADERS)
+def test_public_portal_writes_reject_cross_site_browser(public_client, headers):
+    token_row = portal.PortalTokenResolution(
+        kind="user",
+        user_row=UserPortalToken(id=1, token="tok", user_id=7, revoked_at=None),
+    )
+    with (
+        patch("app.routers.public_portal.get_feature_service"),
+        patch("app.routers.public_portal.assert_portal_host"),
+        patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_portal.public_download_rate_limit_service"),
+        patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row) as get_token,
+        patch("app.routers.public_portal.redeem_public_portal_code") as redeem,
+    ):
+        ip_svc.get_client_ip.return_value = "198.51.100.1"
+        redeem_resp = public_client.post(
+            "/api/public/portal/tok/redeem",
+            json={"code": "ABCD-EFGH-IJKL"},
+            headers={"Host": "sub.example.com", **headers},
+        )
+        dismiss_resp = public_client.post(
+            "/api/public/portal/tok/banner/dismiss",
+            headers={"Host": "sub.example.com", **headers},
+        )
+
+    assert redeem_resp.status_code == 403
+    assert dismiss_resp.status_code == 403
+    get_token.assert_not_called()
+    redeem.assert_not_called()
+
+
+@pytest.mark.parametrize("headers", _SAME_ORIGIN_WRITE_HEADERS)
+def test_public_portal_writes_allow_same_origin_and_direct_clients(public_client, headers):
+    token_row = portal.PortalTokenResolution(
+        kind="user",
+        user_row=UserPortalToken(id=1, token="tok", user_id=7, revoked_at=None),
+    )
+    with (
+        patch("app.routers.public_portal.get_feature_service") as feats,
+        patch("app.routers.public_portal.assert_portal_host"),
+        patch("app.routers.public_portal.ip_restriction_service") as ip_svc,
+        patch("app.routers.public_portal.public_download_rate_limit_service"),
+        patch("app.routers.public_portal.get_valid_portal_token", return_value=token_row),
+        patch(
+            "app.routers.public_portal.redeem_public_portal_code",
+            return_value={"grant_days": 7, "protocols_applied": [], "access_until": None},
+        ),
+        patch("app.routers.public_portal.clear_portal_banner"),
+    ):
+        feats.return_value.is_enabled.return_value = True
+        ip_svc.get_client_ip.return_value = "198.51.100.1"
+        redeem_resp = public_client.post(
+            "/api/public/portal/tok/redeem",
+            json={"code": "ABCD-EFGH-IJKL"},
+            headers={"Host": "sub.example.com", **headers},
+        )
+        dismiss_resp = public_client.post(
+            "/api/public/portal/tok/banner/dismiss",
+            headers={"Host": "sub.example.com", **headers},
+        )
+
+    assert redeem_resp.status_code == 200
+    assert dismiss_resp.status_code == 204

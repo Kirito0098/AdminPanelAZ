@@ -7,7 +7,6 @@ import {
   Gauge,
   Link2,
   Loader2,
-  QrCode,
   RefreshCw,
   Shield,
   Trash2,
@@ -15,29 +14,24 @@ import {
   Zap,
 } from 'lucide-react'
 import {
-  awg2PermanentBlock,
-  awg2TempBlock,
-  awg2Unblock,
   ApiError,
-  createOneTimeLink,
   deleteConfig,
-  createPortalLink,
-  rotatePortalLink,
-  revokePortalLink,
   openvpnDisconnect,
-  openvpnPermanentBlock,
-  openvpnTempBlock,
-  openvpnUnblock,
   setConfigTags,
   updateConfig,
-  wgPermanentBlock,
   wgSetExpiry,
-  wgTempBlock,
-  wgUnblock,
 } from '@/api/client'
 import { setClientAccessUntil, syncClientAccessUntilFromOwner, type UnlockCodeProtocol } from '@/api/unlockCodes'
-import { dateInputToIso, isoToDateInput, parseAccessUntilConflict } from '@/lib/accessUntil'
-import { clientPortalActionConfirm, type ClientPortalAction } from '@/lib/clientPortalConfirm'
+import { isoToDateInput, parseAccessUntilConflict } from '@/lib/accessUntil'
+import {
+  copyConfigPortalLink,
+  permanentBlockConfig,
+  revokeConfigPortalLink,
+  rotateConfigPortalLink,
+  tempBlockConfig,
+  unblockConfig,
+} from '@/lib/configAccessOps'
+import { portalActionConfirm, type PortalAction } from '@/lib/portalConfirm'
 import {
   clearProfileTrafficLimits,
   formatProfileProtocols,
@@ -48,6 +42,7 @@ import ConfigOwnerSelect from '@/components/dashboard/ConfigOwnerSelect'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import ConfirmDialog, { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
 import { Badge } from '@/components/ui/badge'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -64,16 +59,15 @@ import { panelToday } from '@/lib/trafficPeriod'
 import {
   getConfigStatus,
   getDownloadFilename,
-  getProtocolBadgeVariant,
   hasAzProfiles,
   hasVpnProfiles,
   pickAzFile,
   pickVpnFile,
-  protocolLabel,
   type ProtocolTab,
 } from '@/lib/configCardUtils'
+import { protocolLabel } from '@/lib/vpnTypes'
 import { cn } from '@/lib/utils'
-import { formatDate } from '@/lib/datetime'
+import { endOfDayIso, formatDate } from '@/lib/datetime'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
 import { useConfirmDialog } from '@/hooks/useConfirmDialog'
@@ -95,16 +89,15 @@ interface ClientActionsDialogProps {
   allConfigs?: VpnConfig[]
   userRole: UserRole
   currentUserId?: number
+  canManageConfigs: boolean
   ownerCandidates?: User[]
   allTags?: ConfigTag[]
   open: boolean
   onOpenChange: (open: boolean) => void
   onRefresh: () => Promise<void>
-  onQr: (config: VpnConfig, path: string, filename: string) => Promise<void>
   onDownload: (config: VpnConfig, path: string, filename: string) => Promise<void>
   onNotifySuccess: (msg: string) => void
   onNotifyError: (msg: string) => void
-  showQrDownloads?: boolean
 }
 
 type PromptMode = 'number' | 'confirm' | 'renew' | 'expired-wg' | 'traffic-limit' | null
@@ -220,16 +213,15 @@ export default function ClientActionsDialog({
   allConfigs = [],
   userRole,
   currentUserId,
+  canManageConfigs,
   ownerCandidates = [],
   allTags = [],
   open,
   onOpenChange,
   onRefresh,
-  onQr,
   onDownload,
   onNotifySuccess,
   onNotifyError,
-  showQrDownloads = true,
 }: ClientActionsDialogProps) {
   const { activeNode } = useNode()
   const { isEnabled } = useFeatureModules()
@@ -303,14 +295,14 @@ export default function ClientActionsDialog({
     )
     if (applied.length === 0) {
       throw new Error(
-        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
+        failed.map((item) => `${protocolLabel(item.protocol)}: ${item.message}`).join('; ') ||
           'Не удалось установить лимит',
       )
     }
     if (failed.length > 0) {
       onNotifyError(
         `Лимит частично не применён: ${failed
-          .map((item) => `${item.protocol}: ${item.message}`)
+          .map((item) => `${protocolLabel(item.protocol)}: ${item.message}`)
           .join('; ')}`,
       )
     }
@@ -328,14 +320,14 @@ export default function ClientActionsDialog({
     )
     if (cleared.length === 0) {
       throw new Error(
-        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
+        failed.map((item) => `${protocolLabel(item.protocol)}: ${item.message}`).join('; ') ||
           'Не удалось снять лимит',
       )
     }
     if (failed.length > 0) {
       onNotifyError(
         `Лимит частично не снят: ${failed
-          .map((item) => `${item.protocol}: ${item.message}`)
+          .map((item) => `${protocolLabel(item.protocol)}: ${item.message}`)
           .join('; ')}`,
       )
     }
@@ -346,19 +338,19 @@ export default function ClientActionsDialog({
     )
   }
 
-  const applyProfileAccessUntil = async (iso: string | null) => {
+  const applyProfileAccessUntil = async (iso: string | null, override = false) => {
     const protocols = orderedProfileProtocols(profileVpnTypes)
     if (protocols.length === 0) return
     const applied: typeof protocols = []
     const failed: Array<{ protocol: (typeof protocols)[number]; message: string }> = []
     for (const protocol of protocols) {
       try {
-        await setClientAccessUntil(protocol, config.client_name, iso, false)
+        await setClientAccessUntil(protocol, config.client_name, iso, override)
         applied.push(protocol)
       } catch (err) {
         // Конфликт со сроком владельца пробрасываем как есть — handleAccessUntilSave
         // ждёт ApiError, чтобы открыть диалог подтверждения.
-        if (parseAccessUntilConflict(err)) {
+        if (!override && parseAccessUntilConflict(err)) {
           throw err
         }
         failed.push({
@@ -369,64 +361,26 @@ export default function ClientActionsDialog({
     }
     if (applied.length === 0) {
       throw new Error(
-        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
+        failed.map((item) => `${protocolLabel(item.protocol)}: ${item.message}`).join('; ') ||
           'Не удалось обновить срок доступа',
       )
     }
     if (failed.length > 0) {
       onNotifyError(
         `Срок доступа частично не обновлён: ${failed
-          .map((item) => `${item.protocol}: ${item.message}`)
+          .map((item) => `${protocolLabel(item.protocol)}: ${item.message}`)
           .join('; ')}`,
       )
     }
+    const prefix = override ? 'Срок доступа принудительно' : 'Срок доступа'
     onNotifySuccess(
       applied.length > 1
         ? iso
-          ? `Срок доступа обновлён для профиля (${formatProfileProtocols(applied)})`
-          : `Срок доступа сброшен для профиля (${formatProfileProtocols(applied)})`
+          ? `${prefix} обновлён для профиля (${formatProfileProtocols(applied)})`
+          : `${prefix} сброшен для профиля (${formatProfileProtocols(applied)})`
         : iso
-          ? 'Срок доступа обновлён'
-          : 'Срок доступа сброшен',
-    )
-  }
-
-  const applyProfileAccessUntilOverride = async (iso: string | null) => {
-    const protocols = orderedProfileProtocols(profileVpnTypes)
-    const applied: typeof protocols = []
-    const failed: Array<{ protocol: (typeof protocols)[number]; message: string }> = []
-    for (const protocol of protocols) {
-      try {
-        await setClientAccessUntil(protocol, config.client_name, iso, true)
-        applied.push(protocol)
-      } catch (err) {
-        failed.push({
-          protocol,
-          message: err instanceof ApiError ? err.message : 'ошибка',
-        })
-      }
-    }
-    if (applied.length === 0) {
-      throw new Error(
-        failed.map((item) => `${item.protocol}: ${item.message}`).join('; ') ||
-          'Не удалось обновить срок доступа',
-      )
-    }
-    if (failed.length > 0) {
-      onNotifyError(
-        `Срок доступа частично не обновлён: ${failed
-          .map((item) => `${item.protocol}: ${item.message}`)
-          .join('; ')}`,
-      )
-    }
-    onNotifySuccess(
-      applied.length > 1
-        ? iso
-          ? `Срок доступа принудительно обновлён для профиля (${formatProfileProtocols(applied)})`
-          : `Срок доступа принудительно сброшен для профиля (${formatProfileProtocols(applied)})`
-        : iso
-          ? 'Срок доступа принудительно обновлён'
-          : 'Срок доступа принудительно сброшен',
+          ? `${prefix} обновлён`
+          : `${prefix} сброшен`,
     )
   }
 
@@ -447,9 +401,14 @@ export default function ClientActionsDialog({
     }
   }
 
-  const isOwner = isAdmin || (userRole === 'user' && currentUserId != null && config.owner_id === currentUserId)
+  const canManageOwn =
+    isAdmin ||
+    (userRole === 'user' &&
+      currentUserId != null &&
+      config.owner_id === currentUserId &&
+      canManageConfigs)
   const canManage = isAdmin
-  const canDelete = isOwner
+  const canDelete = canManageOwn
   const vpnFile = pickVpnFile(config, tab)
   const azFile = pickAzFile(config, tab)
   const isOpenVpn = config.vpn_type === 'openvpn'
@@ -500,25 +459,10 @@ export default function ClientActionsDialog({
     setPromptMode('confirm')
   }
 
-  const handleOneTime = async (key: string, path: string) => {
-    setBusyAction(key)
-    try {
-      const link = await createOneTimeLink(config.id, path)
-      await navigator.clipboard.writeText(link.url)
-      onNotifySuccess('Одноразовая ссылка скопирована в буфер')
-    } catch (err) {
-      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка формирования ссылки')
-    } finally {
-      setBusyAction(null)
-    }
-  }
-
   const handlePortalCopy = async () => {
     setBusyAction('portal-copy')
     try {
-      const link = await createPortalLink(config.client_name)
-      setPortalUrl(link.url)
-      await navigator.clipboard.writeText(link.url)
+      setPortalUrl(await copyConfigPortalLink(config.client_name))
       onNotifySuccess('Ссылка портала скопирована')
     } catch (err) {
       onNotifyError(err instanceof ApiError ? err.message : 'Ошибка ссылки портала')
@@ -530,9 +474,7 @@ export default function ClientActionsDialog({
   const handlePortalRotate = async () => {
     setBusyAction('portal-rotate')
     try {
-      const link = await rotatePortalLink(config.client_name)
-      setPortalUrl(link.url)
-      await navigator.clipboard.writeText(link.url)
+      setPortalUrl(await rotateConfigPortalLink(config.client_name))
       onNotifySuccess('Ссылка портала перевыпущена и скопирована')
     } catch (err) {
       onNotifyError(err instanceof ApiError ? err.message : 'Ошибка перевыпуска')
@@ -544,7 +486,7 @@ export default function ClientActionsDialog({
   const handlePortalRevoke = async () => {
     setBusyAction('portal-revoke')
     try {
-      await revokePortalLink(config.client_name)
+      await revokeConfigPortalLink(config.client_name)
       setPortalUrl(null)
       onNotifySuccess('Ссылка портала отозвана')
     } catch (err) {
@@ -554,9 +496,9 @@ export default function ClientActionsDialog({
     }
   }
 
-  const confirmPortalAction = (action: ClientPortalAction) => {
+  const confirmPortalAction = (action: PortalAction) => {
     confirm({
-      ...clientPortalActionConfirm(action, config.client_name),
+      ...portalActionConfirm(action, config.client_name, 'клиенту'),
       destructive: true,
       onConfirm: () => (action === 'rotate' ? handlePortalRotate() : handlePortalRevoke()),
     })
@@ -573,19 +515,8 @@ export default function ClientActionsDialog({
     }
   }
 
-  const handleFileQr = async (key: string, path: string, filename: string) => {
-    setBusyAction(key)
-    try {
-      await onQr(config, path, filename)
-    } catch (err) {
-      onNotifyError(err instanceof ApiError ? err.message : 'Ошибка QR-кода')
-    } finally {
-      setBusyAction(null)
-    }
-  }
-
   const handleRenewCert = () => {
-    const defaultDays = String(config.cert_expire_days || 365)
+    const defaultDays = isAdmin ? String(config.cert_expire_days || 365) : '3650'
     setRenewDays(defaultDays)
     const days = Number.parseInt(defaultDays, 10) || 365
     const target = new Date()
@@ -621,10 +552,10 @@ export default function ClientActionsDialog({
 
   const handleAccessUntilSave = async (confirmOverride = false) => {
     setBusyAction('access-until')
-    const nextIso = dateInputToIso(accessUntilValue)
+    const nextIso = endOfDayIso(accessUntilValue)
     try {
       if (confirmOverride) {
-        await applyProfileAccessUntilOverride(nextIso)
+        await applyProfileAccessUntil(nextIso, true)
         setAccessUntilConflict(null)
       } else {
         await applyProfileAccessUntil(nextIso)
@@ -690,7 +621,7 @@ export default function ClientActionsDialog({
   }
 
   const submitRenew = async () => {
-    const days = Number.parseInt(renewDays, 10)
+    const days = isAdmin ? Number.parseInt(renewDays, 10) : 3650
     if (!Number.isFinite(days) || days < 1 || days > 3650) {
       onNotifyError('Срок должен быть от 1 до 3650 дней')
       return
@@ -710,7 +641,7 @@ export default function ClientActionsDialog({
       return
     }
     await runAction('unblock', async () => {
-      await wgUnblock(config.client_name)
+      await unblockConfig(config)
       onNotifySuccess(
         wgAccessExpired
           ? 'Блокировка снята временно; при истёкшем доступе воркер снова отключит'
@@ -732,7 +663,7 @@ export default function ClientActionsDialog({
               `Укажите срок блокировки для клиента «${config.client_name}»`,
               '7',
               async (days) => {
-                await openvpnTempBlock(config.client_name, days)
+                await tempBlockConfig(config, days)
                 onNotifySuccess('Клиент временно заблокирован')
               },
             ),
@@ -744,7 +675,7 @@ export default function ClientActionsDialog({
           hidden: !canManage || !isBlocked || haReplicaReadonly,
           onClick: () =>
             runAction('unblock', async () => {
-              await openvpnUnblock(config.client_name)
+              await unblockConfig(config)
               onNotifySuccess(
                 blockMode === 'access_expired'
                   ? 'Блокировка снята временно; при истёкшем доступе воркер снова отключит'
@@ -772,7 +703,7 @@ export default function ClientActionsDialog({
           key: 'renew-cert',
           label: 'Продлить сертификат',
           icon: <RefreshCw size={14} />,
-          hidden: !isOwner || haReplicaReadonly,
+          hidden: !canManageOwn || haReplicaReadonly,
           onClick: handleRenewCert,
         },
         {
@@ -823,7 +754,7 @@ export default function ClientActionsDialog({
                 `Укажите срок блокировки для клиента «${config.client_name}»`,
                 '7',
                 async (days) => {
-                  await awg2TempBlock(config.client_name, days)
+                  await tempBlockConfig(config, days)
                   onNotifySuccess('Клиент временно заблокирован')
                 },
               ),
@@ -836,7 +767,7 @@ export default function ClientActionsDialog({
             hidden: !canManage || !['temp', 'permanent', 'access_expired'].includes(blockMode) || haReplicaReadonly,
             onClick: () =>
               runAction('unblock', async () => {
-                await awg2Unblock(config.client_name)
+                await unblockConfig(config)
                 onNotifySuccess(
                   blockMode === 'access_expired'
                     ? 'Блокировка снята временно; при истёкшем доступе воркер снова отключит'
@@ -891,7 +822,7 @@ export default function ClientActionsDialog({
               `Укажите срок блокировки для клиента «${config.client_name}»`,
               '7',
               async (days) => {
-                await wgTempBlock(config.client_name, days)
+                await tempBlockConfig(config, days)
                 onNotifySuccess('Клиент временно заблокирован')
               },
             ),
@@ -970,13 +901,7 @@ export default function ClientActionsDialog({
           'Бессрочная блокировка',
           `Заблокировать клиента «${config.client_name}» до ручной разблокировки?`,
           async () => {
-            if (isOpenVpn) {
-              await openvpnPermanentBlock(config.client_name)
-            } else if (isAwg2) {
-              await awg2PermanentBlock(config.client_name)
-            } else {
-              await wgPermanentBlock(config.client_name)
-            }
+            await permanentBlockConfig(config)
             onNotifySuccess('Клиент заблокирован')
           },
         ),
@@ -1078,7 +1003,7 @@ export default function ClientActionsDialog({
               </DialogDescription>
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
-              <Badge variant={getProtocolBadgeVariant(tab)}>{protocolLabel(tab)}</Badge>
+              <ProtocolBadge protocol={tab} />
               <Badge variant={statusBadgeVariant} className="gap-1">
                 <StatusIcon size={12} />
                 {status.label}
@@ -1105,13 +1030,13 @@ export default function ClientActionsDialog({
           </DialogHeader>
 
           <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-5">
-            {(isOwner || (isAdmin && ownerCandidates.length > 0)) && (
+            {(canManageOwn || (isAdmin && ownerCandidates.length > 0)) && (
               <ProfileSection
                 title="Основное"
                 description="Описание видно на карточке. Владелец определяет, кто видит конфиг в своём списке."
               >
                 <div className="space-y-4">
-                  {isOwner && (
+                  {canManageOwn && (
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                       <div className="min-w-0 flex-1 space-y-2">
                         <Label htmlFor={`description-${config.id}`}>Описание</Label>
@@ -1150,7 +1075,7 @@ export default function ClientActionsDialog({
                       onChange={(ownerId) => void handleOwnerChange(ownerId)}
                       disabled={busyAction !== null}
                       currentOwner={
-                        config.owner_username
+                        config.owner_id != null && config.owner_username
                           ? { id: config.owner_id, username: config.owner_username }
                           : undefined
                       }
@@ -1339,8 +1264,8 @@ export default function ClientActionsDialog({
               </ProfileSection>
             )}
 
-            {fileRows.length > 0 && showQrDownloads && (
-              <ProfileSection title="Файлы и доступ" description="Скачивание, QR и одноразовые ссылки.">
+            {fileRows.length > 0 && (
+              <ProfileSection title="Файлы профиля" description="Скачивание готовых файлов конфигурации.">
                 <div className="space-y-2">
                   {fileRows.map((row) => (
                     <div
@@ -1365,36 +1290,6 @@ export default function ClientActionsDialog({
                             <Loader2 size={14} className="animate-spin" />
                           ) : (
                             <Download size={14} />
-                          )}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8"
-                          title="QR-код"
-                          disabled={busyAction !== null}
-                          onClick={() => void handleFileQr(`qr-${row.key}`, row.path, row.filename)}
-                        >
-                          {busyAction === `qr-${row.key}` ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : (
-                            <QrCode size={14} />
-                          )}
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8"
-                          title="Одноразовая ссылка"
-                          disabled={busyAction !== null}
-                          onClick={() => void handleOneTime(`link-${row.key}`, row.path)}
-                        >
-                          {busyAction === `link-${row.key}` ? (
-                            <Loader2 size={14} className="animate-spin" />
-                          ) : (
-                            <Link2 size={14} />
                           )}
                         </Button>
                       </div>
@@ -1508,7 +1403,11 @@ export default function ClientActionsDialog({
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle>Продлить сертификат</DialogTitle>
-            <DialogDescription>Укажите новый срок сертификата для клиента.</DialogDescription>
+            <DialogDescription>
+              {isAdmin
+                ? 'Укажите новый срок сертификата для клиента.'
+                : 'Сертификат будет обновлён на максимальный срок (3650 дней).'}
+            </DialogDescription>
           </DialogHeader>
           <form
             noValidate
@@ -1518,45 +1417,49 @@ export default function ClientActionsDialog({
             }}
             className="space-y-4"
           >
-            <div className="space-y-2">
-              <Label htmlFor="renewDays">Срок действия (дни, 1–3650)</Label>
-              <Input
-                id="renewDays"
-                type="number"
-                min={1}
-                max={3650}
-                value={renewDays}
-                onChange={(e) => {
-                  setRenewDays(e.target.value)
-                  const days = Number.parseInt(e.target.value, 10)
-                  if (Number.isFinite(days) && days >= 1) {
-                    const target = new Date()
-                    target.setDate(target.getDate() + days)
-                    setRenewDate(
-                      `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(target.getDate()).padStart(2, '0')}`,
-                    )
-                  }
-                }}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="renewDate">Дата окончания сертификата</Label>
-              <DatePickerField
-                id="renewDate"
-                value={renewDate}
-                allowClear={false}
-                fromDate={panelToday()}
-                onChange={(next) => {
-                  setRenewDate(next)
-                  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(next)
-                  if (!match) return
-                  const target = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
-                  const today = panelToday()
-                  const diff = Math.round((target.getTime() - today.getTime()) / 86400000)
-                  if (diff >= 1 && diff <= 3650) setRenewDays(String(diff))
-                }}
-              />
-            </div>
+            {isAdmin && (
+              <>
+                <div className="space-y-2">
+                  <Label htmlFor="renewDays">Срок действия (дни, 1–3650)</Label>
+                  <Input
+                    id="renewDays"
+                    type="number"
+                    min={1}
+                    max={3650}
+                    value={renewDays}
+                    onChange={(e) => {
+                      setRenewDays(e.target.value)
+                      const days = Number.parseInt(e.target.value, 10)
+                      if (Number.isFinite(days) && days >= 1) {
+                        const target = new Date()
+                        target.setDate(target.getDate() + days)
+                        setRenewDate(
+                          `${target.getFullYear()}-${String(target.getMonth() + 1).padStart(2, '0')}-${String(target.getDate()).padStart(2, '0')}`,
+                        )
+                      }
+                    }}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="renewDate">Дата окончания сертификата</Label>
+                  <DatePickerField
+                    id="renewDate"
+                    value={renewDate}
+                    allowClear={false}
+                    fromDate={panelToday()}
+                    onChange={(next) => {
+                      setRenewDate(next)
+                      const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(next)
+                      if (!match) return
+                      const target = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+                      const today = panelToday()
+                      const diff = Math.round((target.getTime() - today.getTime()) / 86400000)
+                      if (diff >= 1 && diff <= 3650) setRenewDays(String(diff))
+                    }}
+                  />
+                </div>
+              </>
+            )}
             <DialogFooter>
               <Button type="button" variant="outline" onClick={closePrompt} disabled={busyAction !== null}>
                 Отмена

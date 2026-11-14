@@ -1,11 +1,12 @@
 """CIDR database pipeline API (download, antifilter, generate)."""
 
+import logging
 import os
 import re
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -16,17 +17,20 @@ from app.database import get_db
 from app.schemas import CidrDbScheduleResponse, CidrDbScheduleUpdate, RouteBudgetInfo
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
+from app.services.background_tasks import assert_heavy_apply_idle
 from app.services.cidr.cidr_scheduler import compute_next_run_at, get_last_cron_run_at
 from app.services.cidr.cidr_tasks import (
-    create_cidr_task,
-    find_active_cidr_task,
-    find_any_active_pipeline_task,
-    find_last_completed_cidr_task,
+    CIDR_TASK_CANCELLED_MESSAGE,
+    assert_pipeline_idle,
+    find_active_pipeline_task,
     get_cidr_task,
+    is_cancel_requested,
     serialize_cidr_task,
     start_cidr_task,
+    start_pipeline_task,
 )
 from app.services.cidr.constants import IP_FILES
+from app.services.cidr.task_summary import summarize_last_compile, summarize_last_deploy
 from app.services.cidr.pipeline.db_pipeline import estimate_cidr_matches_from_db
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.models import Node, ProviderMeta, User
@@ -44,10 +48,13 @@ from app.services.cidr.pipeline.file_pipeline import list_runtime_backups
 from app.services.cidr.route_budget import build_route_budget_payload
 from app.services.env_file import EnvFileService
 from app.services.node_manager import get_active_adapter, get_active_node, get_adapter_for_node
+from app.services.node_sync.groups import require_ha_primary_for_config_ops
 from app.services.notify_time import get_client_timezone_from_request
 
 _ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/routing/cidr-db", tags=["cidr-db"])
 
@@ -71,6 +78,26 @@ class CidrDbGenerateRequest(BaseModel):
     sync_after: bool = True
     deploy_after: bool = True
     target_node_id: int | None = None
+    dpi_priority_files: list[str] | None = None
+    dpi_mandatory_files: list[str] | None = None
+    dpi_priority_min_budget: int | None = None
+
+    @field_validator("dpi_priority_files", "dpi_mandatory_files")
+    @classmethod
+    def _validate_dpi_file_names(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        unknown = [name for name in value if name not in IP_FILES]
+        if unknown:
+            raise ValueError(f"неизвестные CIDR-файлы: {', '.join(unknown)}")
+        return value
+
+    @field_validator("dpi_priority_min_budget")
+    @classmethod
+    def _validate_dpi_min_budget(cls, value: int | None) -> int | None:
+        if value is not None and value < 0:
+            raise ValueError("dpi_priority_min_budget не может быть меньше 0")
+        return value
 
 
 class CidrDbDeployRequest(BaseModel):
@@ -79,7 +106,6 @@ class CidrDbDeployRequest(BaseModel):
     all_online: bool = False
     sync_after: bool = True
     apply_after: bool = False
-    recreate_profiles_after: bool = False
     selected_files: list[str] | None = None
 
 
@@ -131,43 +157,6 @@ def _enrich_providers(status: dict) -> dict:
         }
     status["providers"] = providers
     return status
-
-
-def _summarize_last_compile() -> dict | None:
-    task = find_last_completed_cidr_task("cidr_generate_from_db")
-    if not task:
-        return None
-    result = task.get("result") or {}
-    updated = result.get("updated") or []
-    return {
-        "finished_at": task.get("finished_at"),
-        "status": task.get("status"),
-        "files_updated": len(updated),
-        "artifact_stamp": result.get("artifact_stamp"),
-        "message": task.get("message"),
-    }
-
-
-def _summarize_last_deploy() -> dict | None:
-    task = find_last_completed_cidr_task("cidr_deploy")
-    if not task:
-        return None
-    result = task.get("result") or {}
-    deploy = result.get("deploy") or {}
-    per_node = result.get("per_node") or []
-    return {
-        "finished_at": task.get("finished_at"),
-        "status": task.get("status"),
-        "pushed_count": len(deploy.get("pushed") or []),
-        "failed_count": len(deploy.get("failed") or []),
-        "target_node_id": result.get("target_node_id"),
-        "artifact_stamp": result.get("artifact_stamp"),
-        "nodes_deployed": result.get("nodes_deployed", len([n for n in per_node if n.get("status") == "success"])),
-        "nodes_failed": result.get("nodes_failed", len([n for n in per_node if n.get("status") == "failed"])),
-        "nodes_skipped": result.get("nodes_skipped", len([n for n in per_node if n.get("status") == "skipped"])),
-        "per_node": per_node,
-        "message": task.get("message"),
-    }
 
 
 def _deploy_target_label(payload: CidrDbDeployRequest) -> str:
@@ -227,6 +216,7 @@ def update_cidr_db_schedule(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
+    require_ha_primary_for_config_ops(db)
     env_service = EnvFileService(_ENV_FILE)
     cfg = get_settings()
 
@@ -301,11 +291,11 @@ def cidr_db_status(
         "providers": status_data.get("providers"),
         "alerts": status_data.get("alerts", []),
         "history": history,
-        "last_compile_at": _summarize_last_compile(),
-        "last_deploy": _summarize_last_deploy(),
+        "last_compile_at": summarize_last_compile(),
+        "last_deploy": summarize_last_deploy(),
         "compile_artifacts": list_compile_artifacts(),
         "runtime_backups": list_runtime_backups()[:10],
-        "active_task": find_any_active_pipeline_task(),
+        "active_task": find_active_pipeline_task(),
     }
 
 
@@ -316,17 +306,8 @@ def cidr_db_status_summary(_: User = Depends(require_admin), db: Session = Depen
     return {
         "success": True,
         "total_cidrs": total_cidrs,
-        "active_task": find_any_active_pipeline_task(),
+        "active_task": find_active_pipeline_task(),
     }
-
-
-@router.get("/deploy/status")
-def cidr_deploy_status(_: User = Depends(require_admin)):
-    """Last completed CIDR deploy with per-node results."""
-    summary = _summarize_last_deploy()
-    if not summary:
-        return {"success": True, "last_deploy": None}
-    return {"success": True, "last_deploy": summary}
 
 
 @router.get("/tasks/{task_id}")
@@ -345,6 +326,7 @@ def cidr_db_refresh(
     cidr_db: Session = Depends(get_cidr_db),
 ):
     svc = _svc(db, cidr_db)
+    require_ha_primary_for_config_ops(db)
     selected_files = payload.selected_files
     if payload.retry_failed_mode in {"last", "selected"}:
         failed = svc.get_last_failed_providers()
@@ -360,7 +342,7 @@ def cidr_db_refresh(
     task_type = "cidr_db_refresh_dry_run" if payload.dry_run else "cidr_db_refresh"
     message = "Dry-run CIDR БД запущен в фоне" if payload.dry_run else "Обновление CIDR БД запущено в фоне"
 
-    active = find_active_cidr_task(task_type)
+    task_id, active = start_pipeline_task(task_type, message)
     if active:
         return {
             "success": True,
@@ -368,8 +350,6 @@ def cidr_db_refresh(
             "task_id": active["task_id"],
             "message": "Обновление CIDR БД уже выполняется",
         }
-
-    task_id = create_cidr_task(task_type, message)
 
     def _runner(progress_callback):
         from app.database import SessionLocal
@@ -406,6 +386,8 @@ def cidr_db_generate(
     action = payload.action.strip().lower()
     dry_run = payload.dry_run
 
+    require_ha_primary_for_config_ops(db)
+
     common_kwargs = dict(
         selected_files=selected_files,
         region_scopes=region_scopes,
@@ -414,10 +396,13 @@ def cidr_db_generate(
         strict_geo_filter=payload.strict_geo_filter,
         filter_by_antifilter=payload.filter_by_antifilter,
         total_cidr_limit=None,
+        dpi_priority_files=payload.dpi_priority_files,
+        dpi_mandatory_files=payload.dpi_mandatory_files,
+        dpi_priority_min_budget=payload.dpi_priority_min_budget or 0,
     )
 
     if action in {"estimate", "estimate_dry_run"} or dry_run:
-        active = find_active_cidr_task("cidr_estimate_from_db")
+        task_id, active = start_pipeline_task("cidr_estimate_from_db", "Dry-run генерации из БД запущен")
         if active:
             return {
                 "success": True,
@@ -425,7 +410,6 @@ def cidr_db_generate(
                 "task_id": active["task_id"],
                 "message": "Оценка CIDR из БД уже выполняется",
             }
-        task_id = create_cidr_task("cidr_estimate_from_db", "Dry-run генерации из БД запущен")
 
         def _estimate_runner(progress_callback):
             return estimate_cidr_matches_from_db(progress_callback=progress_callback, **common_kwargs)
@@ -433,7 +417,19 @@ def cidr_db_generate(
         start_cidr_task(task_id, _estimate_runner)
         return {"success": True, "queued": True, "task_id": task_id, "message": "Dry-run генерации из БД запущен"}
 
-    task_id = create_cidr_task("cidr_generate_from_db", "Генерация CIDR-файлов из БД запущена")
+    # The compile is long and its apply step would fail on a busy node: reject
+    # before the task exists instead of failing after a 10-minute compile.
+    if payload.apply_after:
+        assert_heavy_apply_idle(db)
+
+    task_id, active = start_pipeline_task("cidr_generate_from_db", "Генерация CIDR-файлов из БД запущена")
+    if active:
+        return {
+            "success": True,
+            "queued": True,
+            "task_id": active["task_id"],
+            "message": "Генерация CIDR-файлов из БД уже выполняется",
+        }
 
     def _generate_runner(progress_callback):
         from app.database import SessionLocal
@@ -441,6 +437,8 @@ def cidr_db_generate(
         result = run_compile(progress_callback=progress_callback, **common_kwargs)
         if not (result.get("success") or result.get("updated")):
             return result
+        if is_cancel_requested(task_id):
+            return {"success": False, "cancelled": True, "message": CIDR_TASK_CANCELLED_MESSAGE}
 
         inner_db = SessionLocal()
         try:
@@ -458,7 +456,12 @@ def cidr_db_generate(
                 adapter = get_active_adapter(inner_db)
 
             if payload.deploy_after:
-                deploy_result = run_deploy(adapter, files=result.get("updated"))
+                deploy_result = run_deploy(
+                    adapter,
+                    files=result.get("updated"),
+                    db=inner_db,
+                    node=node,
+                )
                 result["deploy"] = {
                     "pushed": deploy_result.get("pushed", []),
                     "failed": deploy_result.get("failed", []),
@@ -466,7 +469,7 @@ def cidr_db_generate(
                 if deploy_result.get("sync") is not None:
                     result["sync"] = deploy_result["sync"]
 
-            if payload.sync_after:
+            if payload.sync_after and not is_cancel_requested(task_id):
                 apply_result = run_apply(
                     adapter,
                     sync_after=not payload.deploy_after,
@@ -498,19 +501,15 @@ def cidr_deploy_preview(
     return {"success": result.get("success", False), **result}
 
 
-@router.get("/rollback/backups")
-def cidr_rollback_backups(_: User = Depends(require_admin)):
-    backups = list_runtime_backups()
-    return {"success": True, "backups": backups}
-
-
 @router.post("/rollback", status_code=status.HTTP_202_ACCEPTED)
 def cidr_db_rollback(
     payload: CidrDbRollbackRequest,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    active = find_active_cidr_task("cidr_rollback")
+    require_ha_primary_for_config_ops(db)
+    triggered_by = f"manual:{user.username}"
+    task_id, active = start_pipeline_task("cidr_rollback", "Откат CIDR из runtime_backups запущен")
     if active:
         return {
             "success": True,
@@ -518,9 +517,6 @@ def cidr_db_rollback(
             "task_id": active["task_id"],
             "message": "Откат CIDR уже выполняется",
         }
-
-    triggered_by = f"manual:{user.username}"
-    task_id = create_cidr_task("cidr_rollback", "Откат CIDR из runtime_backups запущен")
 
     def _rollback_runner(progress_callback):
         from app.database import SessionLocal
@@ -567,6 +563,8 @@ def cidr_custom_provider_entries(
     db: Session = Depends(get_db),
     cidr_db: Session = Depends(get_cidr_db),
 ):
+    require_ha_primary_for_config_ops(db)
+    assert_pipeline_idle()
     result = _svc(db, cidr_db).add_custom_provider_entries(
         provider_key,
         cidrs=payload.cidrs,
@@ -592,7 +590,9 @@ def cidr_db_deploy(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    active = find_active_cidr_task("cidr_deploy")
+    require_ha_primary_for_config_ops(db)
+    triggered_by = f"manual:{user.username}"
+    task_id, active = start_pipeline_task("cidr_deploy", "Развёртывание CIDR-файлов на узел запущено")
     if active:
         return {
             "success": True,
@@ -601,11 +601,12 @@ def cidr_db_deploy(
             "message": "Развёртывание CIDR уже выполняется",
         }
 
-    triggered_by = f"manual:{user.username}"
-    task_id = create_cidr_task("cidr_deploy", "Развёртывание CIDR-файлов на узел запущено")
-
     def _deploy_runner(progress_callback):
         from app.database import SessionLocal
+
+        # Deploy reports no progress, so check the cancel flag before it starts.
+        if is_cancel_requested(task_id):
+            return {"success": False, "cancelled": True, "message": CIDR_TASK_CANCELLED_MESSAGE}
 
         inner_db = SessionLocal()
         try:
@@ -617,7 +618,6 @@ def cidr_db_deploy(
                 files=payload.selected_files,
                 sync_after=payload.sync_after,
                 apply_after=payload.apply_after,
-                recreate_profiles_after=payload.recreate_profiles_after,
                 triggered_by=triggered_by,
             )
             if payload.target_node_id is not None and not payload.target_node_ids and not payload.all_online:
@@ -649,6 +649,8 @@ def cidr_db_clear(
     db: Session = Depends(get_db),
     cidr_db: Session = Depends(get_cidr_db),
 ):
+    require_ha_primary_for_config_ops(db)
+    assert_pipeline_idle()
     result = _svc(db, cidr_db).clear_provider_data(
         selected_files=payload.selected_files,
         triggered_by=f"manual:{user.username}",
@@ -669,7 +671,8 @@ def antifilter_status(
 
 @router.post("/antifilter/refresh", status_code=status.HTTP_202_ACCEPTED)
 def antifilter_refresh(user: User = Depends(require_admin), db: Session = Depends(get_db)):
-    active = find_active_cidr_task("antifilter_refresh")
+    require_ha_primary_for_config_ops(db)
+    task_id, active = start_pipeline_task("antifilter_refresh", "Обновление антифильтра запущено в фоне")
     if active:
         return {
             "success": True,
@@ -678,7 +681,6 @@ def antifilter_refresh(user: User = Depends(require_admin), db: Session = Depend
             "message": "Обновление антифильтра уже выполняется (~3–5 минут)",
         }
 
-    task_id = create_cidr_task("antifilter_refresh", "Обновление антифильтра запущено в фоне")
     triggered_by = f"manual:{user.username}"
 
     def _runner(progress_callback):
@@ -705,8 +707,13 @@ def antifilter_refresh(user: User = Depends(require_admin), db: Session = Depend
 
 
 @router.get("/route-budget", response_model=RouteBudgetInfo)
-def route_budget(_: User = Depends(require_admin)):
-    return RouteBudgetInfo(**build_route_budget_payload())
+def route_budget(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    try:
+        adapter = get_active_adapter(db)
+    except Exception as exc:  # node offline - fall back to estimate/artifacts
+        logger.warning("route budget: active node adapter unavailable: %s", exc)
+        adapter = None
+    return RouteBudgetInfo(**build_route_budget_payload(adapter=adapter))
 
 
 @router.post("/analyze-dpi")

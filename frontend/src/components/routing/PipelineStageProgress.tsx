@@ -1,8 +1,9 @@
 import { AppProgress } from '@/components/ui/ProgressBar'
 import type { CidrPipelineTask } from '@/types'
+import { getPipelineStageMeta } from './routingWorkflow'
 import {
   isPipelineRunning,
-  pipelineTaskStatusLabel,
+  statusLabel,
   taskBelongsToStage,
   type IngestKind,
   type PipelineStage,
@@ -28,8 +29,9 @@ export default function PipelineStageProgress({
 
   if (!visible) return null
 
-  const stageLabel = task?.progress_stage || task?.message || 'Выполнение операции…'
-  const statusSuffix = task ? pipelineTaskStatusLabel(task.status) : 'Запуск…'
+  const stageMeta = getPipelineStageMeta(stage)
+  const stageLabel = task?.progress_stage || task?.message || stageMeta.description
+  const statusSuffix = task ? statusLabel(task.status) : 'Запуск…'
   const overallPct =
     activeTask && task!.progress_percent != null && task!.progress_percent >= 0
       ? Math.min(100, Math.max(0, task!.progress_percent))

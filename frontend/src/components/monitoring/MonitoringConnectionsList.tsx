@@ -6,6 +6,7 @@ import {
   ArrowUp,
   ArrowUpFromLine,
   Clock,
+  Laptop,
   MapPin,
   Unplug,
 } from 'lucide-react'
@@ -18,7 +19,15 @@ import {
 import EmptyState from '@/components/ui/EmptyState'
 import ResponsiveDataView from '@/components/shared/ResponsiveDataView'
 import { Badge } from '@/components/ui/badge'
+import { ProtocolBadge } from '@/components/ui/protocol-badge'
 import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import {
   Table,
   TableBody,
@@ -30,7 +39,6 @@ import {
 import { formatDateTime, parseTimestamp } from '@/lib/datetime'
 import { formatBitrate, formatDurationShort, sessionDurationSeconds } from '@/lib/formatTraffic'
 import { formatHaBadgeLabel, haBadgeTitle } from '@/lib/haBadgeLabel'
-import { formatProxyViaBadgeLabel } from '@/lib/proxyViaBadgeLabel'
 import { COL_CONNECTED_SINCE, COL_HANDSHAKE, COL_VPN_IP } from '@/lib/uiLabels'
 import { cn } from '@/lib/utils'
 import type { HaNodePresence, OpenVpnClient, VpnConfigHaInfo, WireGuardPeer } from '@/types'
@@ -43,7 +51,7 @@ type SortDir = 'asc' | 'desc'
 
 type MonitoringConnectionProtocol = 'openvpn' | 'wireguard' | 'amneziawg2'
 
-type MonitoringConnectionRow = {
+export type MonitoringConnectionRow = {
   key: string
   protocol: MonitoringConnectionProtocol
   clientName: string
@@ -52,6 +60,8 @@ type MonitoringConnectionRow = {
   activeNodeName?: string | null
   haNodes?: HaNodePresence[]
   ha?: VpnConfigHaInfo | null
+  ownerId?: number | null
+  ownerName?: string | null
   address: string
   geoLabel: string | null
   city?: string | null
@@ -68,18 +78,63 @@ type MonitoringConnectionRow = {
   txBps: number | null
   ratePending?: boolean
   interfaceName?: string
+  /** OpenVPN profile (unit suffix) the session lives in, e.g. ``antizapret-udp``. */
+  profile?: string | null
+  clientId?: string | null
+  peerId?: string | null
+  cipher?: string | null
+  nodeId?: number | null
 }
 
-function protocolLabel(protocol: MonitoringConnectionProtocol) {
-  if (protocol === 'openvpn') return 'OpenVPN'
-  if (protocol === 'amneziawg2') return 'AWG 2.0'
-  return 'WireGuard'
+/** AEAD ciphers are the only ones OpenVPN 2.7 should negotiate; others are a warning. */
+function isAeadCipher(cipher: string) {
+  return /^(AES-\d+-GCM|CHACHA20-POLY1305)/i.test(cipher.trim())
 }
 
-function protocolBadgeVariant(protocol: MonitoringConnectionProtocol): 'default' | 'secondary' | 'outline' {
-  if (protocol === 'openvpn') return 'default'
-  if (protocol === 'amneziawg2') return 'outline'
-  return 'secondary'
+export type DeviceDisconnectTarget = {
+  profile: string
+  clientId: string
+  nodeId?: number | null
+  clientName: string
+}
+
+/** Блокировка действует на клиента целиком (banned_clients по common name), не на устройство. */
+const DEVICE_BLOCK_MINUTES = [5, 15, 60]
+
+function DeviceDisconnectMenu({
+  target,
+  onDisconnect,
+  labeled = false,
+}: {
+  target: DeviceDisconnectTarget
+  onDisconnect: (target: DeviceDisconnectTarget, blockMinutes?: number) => void
+  labeled?: boolean
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant={labeled ? 'outline' : 'ghost'}
+          size="sm"
+          className={labeled ? 'gap-1.5' : undefined}
+          title={`Отключить устройство (Client ID ${target.clientId})`}
+        >
+          <Laptop size={14} />
+          {labeled ? 'Устройство' : null}
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={() => onDisconnect(target)}>Только отключить</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {DEVICE_BLOCK_MINUTES.map((minutes) => (
+          <DropdownMenuItem key={minutes} onSelect={() => onDisconnect(target, minutes)}>
+            Отключить + блок {minutes} мин
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 }
 
 function parseTime(value?: string | null): number {
@@ -121,6 +176,8 @@ function pushWireGuardStyleRows(
       activeNodeName: peer.active_node_name ?? peer.node_name,
       haNodes: peer.ha_nodes,
       ha: peer.ha,
+      ownerId: peer.owner_id ?? null,
+      ownerName: peer.owner_username ?? null,
       address: getConnectionDisplayAddress(peer, 'endpoint'),
       geoLabel: getConnectionGeoLabel(peer),
       city: peer.city,
@@ -170,6 +227,8 @@ export function buildMonitoringConnectionRows(
         activeNodeName: client.active_node_name ?? client.node_name,
         haNodes: client.ha_nodes,
         ha: client.ha,
+        ownerId: client.owner_id ?? null,
+        ownerName: client.owner_username ?? null,
         address: getConnectionDisplayAddress(client),
         geoLabel: getConnectionGeoLabel(client),
         city: client.city,
@@ -188,6 +247,11 @@ export function buildMonitoringConnectionRows(
         durationSec: sessionDurationSeconds(client.connected_since_ts, client.connected_since),
         rxBps: rate?.rxBps ?? null,
         txBps: rate?.txBps ?? null,
+        profile: client.profile ?? null,
+        clientId: client.client_id ?? null,
+        peerId: client.peer_id ?? null,
+        cipher: client.cipher ?? null,
+        nodeId: client.active_node_id ?? client.node_id ?? null,
       })
     }
   }
@@ -247,7 +311,7 @@ function AddressBlock({
                 : 'Сессия через прокси-узел; домашний IP не восстановлен'
             }
           >
-            {formatProxyViaBadgeLabel(proxyResolved)}
+            {proxyResolved ? 'через прокси' : 'через прокси · IP не восстановлен'}
           </Badge>
         )}
       </div>
@@ -295,16 +359,19 @@ type MonitoringConnectionsListProps = {
   sortDir?: SortDir
   onSortChange?: (key: SortKey, dir: SortDir) => void
   onDisconnectOpenVpn?: (clientName: string) => void
+  onDisconnectDevice?: (target: DeviceDisconnectTarget, blockMinutes?: number) => void
 }
 
 function ConnectionCard({
   row,
   showNodeColumn,
   onDisconnectOpenVpn,
+  onDisconnectDevice,
 }: {
   row: MonitoringConnectionRow
   showNodeColumn: boolean
   onDisconnectOpenVpn?: (clientName: string) => void
+  onDisconnectDevice?: (target: DeviceDisconnectTarget, blockMinutes?: number) => void
 }) {
   return (
     <div
@@ -316,7 +383,7 @@ function ConnectionCard({
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
           <Link
-            to={`/traffic?client=${encodeURIComponent(row.clientName)}`}
+            to={`/monitoring?tab=traffic&client=${encodeURIComponent(row.clientName)}`}
             className="truncate text-base font-semibold text-primary hover:underline"
           >
             {row.clientName}
@@ -325,9 +392,7 @@ function ConnectionCard({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {showNodeColumn && <NodeCell row={row} />}
-          <Badge variant={protocolBadgeVariant(row.protocol)} className="text-xs">
-            {protocolLabel(row.protocol)}
-          </Badge>
+          <ProtocolBadge protocol={row.protocol} />
           <Badge variant={row.online ? 'success' : 'secondary'} className="text-xs">
             {row.online ? 'Онлайн' : 'Офлайн'}
           </Badge>
@@ -375,18 +440,32 @@ function ConnectionCard({
           </p>
         </div>
       </div>
-      {row.protocol === 'openvpn' && onDisconnectOpenVpn && (
-        <div className="mt-3">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-1.5 text-destructive"
-            onClick={() => onDisconnectOpenVpn(row.clientName)}
-          >
-            <Unplug size={14} />
-            Отключить
-          </Button>
+      {row.protocol === 'openvpn' && (onDisconnectDevice || onDisconnectOpenVpn) && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {row.clientId && row.profile && onDisconnectDevice && (
+            <DeviceDisconnectMenu
+              target={{
+                profile: row.profile,
+                clientId: row.clientId,
+                nodeId: row.nodeId,
+                clientName: row.clientName,
+              }}
+              onDisconnect={onDisconnectDevice}
+              labeled
+            />
+          )}
+          {onDisconnectOpenVpn && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-destructive"
+              onClick={() => onDisconnectOpenVpn(row.clientName)}
+            >
+              <Unplug size={14} />
+              Отключить клиента
+            </Button>
+          )}
         </div>
       )}
     </div>
@@ -431,6 +510,7 @@ export default function MonitoringConnectionsList({
   sortDir: controlledSortDir,
   onSortChange,
   onDisconnectOpenVpn,
+  onDisconnectDevice,
 }: MonitoringConnectionsListProps) {
   const [localSortKey, setLocalSortKey] = useState<SortKey>('traffic')
   const [localSortDir, setLocalSortDir] = useState<SortDir>('desc')
@@ -525,6 +605,7 @@ export default function MonitoringConnectionsList({
             row={row}
             showNodeColumn={showNodeColumn}
             onDisconnectOpenVpn={onDisconnectOpenVpn}
+            onDisconnectDevice={onDisconnectDevice}
           />
         ))}
         desktop={
@@ -538,6 +619,7 @@ export default function MonitoringConnectionsList({
                 </TableHead>
                 <TableHead className="min-w-[240px]">Адрес / локация</TableHead>
                 <TableHead className="min-w-[140px]">{COL_VPN_IP}</TableHead>
+                <TableHead className="min-w-[110px]">Шифр</TableHead>
                 <TableHead className="min-w-[110px] text-right">
                   <SortHeader label="RX" sortKey="traffic" active={sortKey === 'traffic'} dir={sortDir} onSort={handleSort} className="justify-end" />
                 </TableHead>
@@ -561,15 +643,13 @@ export default function MonitoringConnectionsList({
                   key={row.key}
                   className={cn(
                     'align-top',
-                    row.online && row.protocol === 'wireguard' && 'bg-emerald-500/5',
-                    row.online && row.protocol === 'amneziawg2' && 'bg-amber-500/5',
+                    row.online && row.protocol === 'wireguard' && 'bg-[#D14343]/5',
+                    row.online && row.protocol === 'amneziawg2' && 'bg-[#4F7FBF]/5',
                   )}
                 >
                   <TableCell>
                     <div className="flex flex-col gap-1.5">
-                      <Badge variant={protocolBadgeVariant(row.protocol)} className="w-fit text-xs">
-                        {protocolLabel(row.protocol)}
-                      </Badge>
+                      <ProtocolBadge protocol={row.protocol} />
                       <Badge variant={row.online ? 'success' : 'secondary'} className="w-fit text-xs">
                         {row.online ? 'Онлайн' : 'Офлайн'}
                       </Badge>
@@ -583,13 +663,20 @@ export default function MonitoringConnectionsList({
                   <TableCell>
                     <div className="space-y-1">
                       <Link
-                        to={`/traffic?client=${encodeURIComponent(row.clientName)}`}
+                        to={`/monitoring?tab=traffic&client=${encodeURIComponent(row.clientName)}`}
                         className="text-sm font-semibold text-primary hover:underline"
                       >
                         {row.clientName}
                       </Link>
                       {row.interfaceName && (
                         <p className="font-mono text-xs text-muted-foreground">{row.interfaceName}</p>
+                      )}
+                      {(row.clientId || row.peerId) && (
+                        <p className="font-mono text-[11px] text-muted-foreground">
+                          {row.clientId ? `CID ${row.clientId}` : ''}
+                          {row.clientId && row.peerId ? ' · ' : ''}
+                          {row.peerId ? `peer ${row.peerId}` : ''}
+                        </p>
                       )}
                     </div>
                   </TableCell>
@@ -602,6 +689,19 @@ export default function MonitoringConnectionsList({
                     />
                   </TableCell>
                   <TableCell className="font-mono text-sm">{row.vpnIp}</TableCell>
+                  <TableCell>
+                    {row.cipher ? (
+                      <Badge
+                        variant={isAeadCipher(row.cipher) ? 'secondary' : 'destructive'}
+                        className="w-fit font-mono text-[10px]"
+                        title={isAeadCipher(row.cipher) ? row.cipher : `${row.cipher} — не AEAD`}
+                      >
+                        {row.cipher}
+                      </Badge>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
                   <TableCell className="text-right font-mono text-sm tabular-nums">
                     <span className="inline-flex items-center justify-end gap-1">
                       <ArrowDownToLine size={13} className="text-primary" />
@@ -628,17 +728,32 @@ export default function MonitoringConnectionsList({
                     </span>
                   </TableCell>
                   <TableCell>
-                    {row.protocol === 'openvpn' && onDisconnectOpenVpn ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="gap-1 text-destructive"
-                        onClick={() => onDisconnectOpenVpn(row.clientName)}
-                        title="Отключить сессию OpenVPN"
-                      >
-                        <Unplug size={14} />
-                      </Button>
+                    {row.protocol === 'openvpn' && ((row.clientId && row.profile && onDisconnectDevice) || onDisconnectOpenVpn) ? (
+                      <div className="flex items-center gap-1">
+                        {row.clientId && row.profile && onDisconnectDevice && (
+                          <DeviceDisconnectMenu
+                            target={{
+                              profile: row.profile,
+                              clientId: row.clientId,
+                              nodeId: row.nodeId,
+                              clientName: row.clientName,
+                            }}
+                            onDisconnect={onDisconnectDevice}
+                          />
+                        )}
+                        {onDisconnectOpenVpn && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1 text-destructive"
+                            onClick={() => onDisconnectOpenVpn(row.clientName)}
+                            title="Отключить клиента полностью (все устройства)"
+                          >
+                            <Unplug size={14} />
+                          </Button>
+                        )}
+                      </div>
                     ) : null}
                   </TableCell>
                 </TableRow>

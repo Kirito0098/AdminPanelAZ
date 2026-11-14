@@ -13,7 +13,8 @@ INSTALL="$TMP/install"
 OTHER="$TMP/other"
 for dir in "$INSTALL" "$OTHER"; do
   mkdir -p "$dir/scripts"
-  cp "$ROOT_DIR/scripts/adminpanel-menu.sh" "$ROOT_DIR/scripts/console-command.sh" "$dir/scripts/"
+  cp "$ROOT_DIR/scripts/adminpanel-menu.sh" "$ROOT_DIR/scripts/console-command.sh" \
+    "$ROOT_DIR/scripts/env-file.sh" "$dir/scripts/"
 done
 
 pass=0

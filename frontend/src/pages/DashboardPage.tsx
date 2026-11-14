@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import {
-  Copy,
   Download,
   FileKey,
   Loader2,
@@ -14,8 +13,6 @@ import {
 import {
   ApiError,
   downloadConfigsExport,
-  downloadProfile,
-  fetchQrBlob,
   getClientPolicies,
   getConfigProfileFiles,
   getConfigQuota,
@@ -27,8 +24,9 @@ import {
   importConfigsCsv,
   syncConfigs,
 } from '@/api/client'
+import { downloadUserConfigFile } from '@/api/users'
 import { buildDashboardSummary } from '@/lib/dashboardSummary'
-import DocsLink from '@/components/shared/DocsLink'
+import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import { DOCS } from '@/lib/docsUrls'
 import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
 import CreateClientDialog from '@/components/dashboard/CreateClientDialog'
@@ -41,14 +39,6 @@ import EmptyState from '@/components/ui/EmptyState'
 import Spinner from '@/components/ui/Spinner'
 import { Button } from '@/components/ui/button'
 import ToolbarButton from '@/components/shared/ToolbarButton'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog'
 import { NodeBadge } from '@/components/NodeSelector'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
@@ -59,6 +49,7 @@ import { useProgress } from '@/context/ProgressContext'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { buildClientConnectionMap, type ClientConnectionMap } from '@/lib/configCardUtils'
 import { cn } from '@/lib/utils'
+import { protocolLabel } from '@/lib/vpnTypes'
 import type {
   ClientPoliciesResponseEntry,
   DashboardSummary,
@@ -92,7 +83,7 @@ export default function DashboardPage() {
       visibilityPolicy.protocols.includes('amneziawg2'))
   const { activeNode, loading: nodeLoading } = useNode()
   const haReplicaReadonly = useHaReplicaReadonly()
-  const { success, error: notifyError, warning: notifyWarning } = useNotifications()
+  const { success, error: notifyError, warning: notifyWarning, info: notifyInfo } = useNotifications()
   const { startGlobal, doneGlobal, withInline } = useProgress()
   const { task: importTask, polling: importPolling, startPoll: startImportPoll } = useBackgroundTaskPoll()
   const csvInputRef = useRef<HTMLInputElement>(null)
@@ -106,18 +97,15 @@ export default function DashboardPage() {
   const [syncing, setSyncing] = useState(false)
   const [awg2Installed, setAwg2Installed] = useState(false)
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
-  const [qrPreview, setQrPreview] = useState<{
-    url: string
-    filename: string
-    contentMode: import('../api/client').QrContentMode
-    downloadUrl?: string
-  } | null>(null)
   const [policies, setPolicies] = useState<Record<string, ClientPoliciesResponseEntry>>({})
   const [connectionMap, setConnectionMap] = useState<ClientConnectionMap | null>(null)
   const [panelUsers, setPanelUsers] = useState<User[]>([])
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
   const isAdmin = user?.role === 'admin'
   const awg2CreateEnabled = awg2Visible && awg2Installed
+  const dialogAwg2Installed = isAdmin
+    ? activeNode?.awg2_installed === true
+    : awg2Installed
   // Hide create when can_create is false (flag off or quota exhausted) — including unlimited quota.
   const createBlocked = !isAdmin && quota != null && !quota.can_create
   const canCreateClient = (openvpnEnabled || wireguardEnabled || awg2CreateEnabled) && !createBlocked
@@ -182,14 +170,19 @@ export default function DashboardPage() {
       startGlobal()
     }
 
-    // Admin: one live probe via /monitoring/overview (feeds cards + connectionMap).
+    // Admin: federated overview so HA / multi-node clients online on any member
+    // still light the card (scope=node only saw the active node).
     // Config counts come from getConfigs — avoids a second /monitoring/summary probe.
     const monitoringPromise =
       user?.role === 'admin'
-        ? getMonitoring('node')
+        ? getMonitoring('all', 'dedupe')
             .then((data) => {
               setConnectionMap(
-                buildClientConnectionMap(data.openvpn_clients, data.wireguard_peers),
+                buildClientConnectionMap(
+                  data.openvpn_clients,
+                  data.wireguard_peers,
+                  data.amneziawg2_peers ?? [],
+                ),
               )
               return data
             })
@@ -263,10 +256,15 @@ export default function DashboardPage() {
   }, [isAdmin])
 
   const handleDownload = async (config: VpnConfig, path: string, filename: string) => {
+    const ownerId = config.owner_id
+    if (ownerId == null) {
+      notifyError('У конфига не указан владелец — скачивание недоступно')
+      return
+    }
     try {
       let downloadName = filename
       await withInline(async () => {
-        const res = await downloadProfile(config.id, path)
+        const res = await downloadUserConfigFile(ownerId, config.id, path)
         const blob = await res.blob()
         downloadName =
           parseContentDispositionFilename(res.headers.get('Content-Disposition')) ?? filename
@@ -275,28 +273,6 @@ export default function DashboardPage() {
       success(`Файл «${downloadName}» скачан`)
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка скачивания файла')
-    }
-  }
-
-  const handleQr = async (config: VpnConfig, path: string, filename: string) => {
-    try {
-      await withInline(async () => {
-        const { blob, contentMode, downloadUrl } = await fetchQrBlob(config.id, path)
-        const url = URL.createObjectURL(blob)
-        setQrPreview({ url, filename, contentMode, downloadUrl })
-      }, 'Генерация QR-кода...')
-    } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка генерации QR')
-    }
-  }
-
-  const copyQrDownloadUrl = async () => {
-    if (!qrPreview?.downloadUrl) return
-    try {
-      await navigator.clipboard.writeText(qrPreview.downloadUrl)
-      success('Ссылка скопирована в буфер')
-    } catch {
-      notifyError('Не удалось скопировать ссылку')
     }
   }
 
@@ -323,12 +299,7 @@ export default function DashboardPage() {
       const blob = await response.blob()
       const disposition = response.headers.get('content-disposition') || ''
       const filename = parseContentDispositionFilename(disposition) || 'vpn-configs.csv'
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = filename
-      link.click()
-      URL.revokeObjectURL(url)
+      triggerFileDownload(blob, filename)
       success('CSV экспортирован')
     } catch (err) {
       notifyError(err instanceof ApiError ? err.message : 'Ошибка экспорта CSV')
@@ -367,29 +338,22 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-4">
-      <div className="relative overflow-hidden rounded-2xl border border-border/80 bg-gradient-to-br from-primary/5 via-card to-card p-5 shadow-sm">
-        <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-primary/10 blur-3xl" />
-        <div className="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-primary shadow-sm">
-              <Shield size={26} strokeWidth={2} />
-            </div>
-            <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">Клиенты</h2>
-                <NodeBadge name={activeNode?.name} status={activeNode?.status} />
-              </div>
-              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                VPN-клиенты на узле{' '}
-                <strong className="font-medium text-foreground">{activeNode?.name ?? summary?.node_name ?? 'не выбран'}</strong>
-                {activeNode?.is_local ? ' (локальный controller)' : activeNode ? ' (удалённый node agent)' : ''}.
-                OpenVPN и WireGuard / AmneziaWG.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex w-full flex-wrap gap-2 lg:max-w-xl lg:justify-end">
-            <DocsLink href={DOCS.configurations} variant="button" />
+      <PageSectionHeader
+        card
+        icon={Shield}
+        title="Клиенты"
+        titleAddon={<NodeBadge name={activeNode?.name} status={activeNode?.status} />}
+        description={
+          <>
+            VPN-клиенты на узле{' '}
+            <strong className="font-medium text-foreground">{activeNode?.name ?? summary?.node_name ?? 'не выбран'}</strong>
+            {activeNode?.is_local ? ' (локальный controller)' : activeNode ? ' (удалённый node agent)' : ''}.
+            OpenVPN и WG/AWG 1.5.
+          </>
+        }
+        docsHref={DOCS.configurations}
+        actions={
+          <>
             {user?.role === 'admin' && (
               <>
                 <ToolbarButton
@@ -449,9 +413,9 @@ export default function DashboardPage() {
                 disabled={quotaReached || haReplicaReadonly}
               />
             )}
-          </div>
-        </div>
-      </div>
+          </>
+        }
+      />
 
       <HaReplicaBanner />
 
@@ -499,7 +463,7 @@ export default function DashboardPage() {
           <MetricCard
             label={isAdmin ? 'Всего клиентов' : 'Мои конфигурации'}
             value={String(summary.total_configs)}
-            sub={`OVPN ${summary.openvpn_configs} · WG ${summary.wireguard_configs}`}
+            sub={`${protocolLabel('openvpn')} ${summary.openvpn_configs} · ${protocolLabel('wireguard')} ${summary.wireguard_configs}`}
             icon={Users}
             accent="cyan"
           />
@@ -508,7 +472,7 @@ export default function DashboardPage() {
               <MetricCard
                 label="Онлайн"
                 value={String(summary.connected_openvpn + summary.connected_wireguard)}
-                sub={`OVPN ${summary.connected_openvpn} · WG ${summary.connected_wireguard}`}
+                sub={`${protocolLabel('openvpn')} ${summary.connected_openvpn} · ${protocolLabel('wireguard')} ${summary.connected_wireguard}`}
                 icon={Wifi}
                 accent="green"
               />
@@ -535,7 +499,8 @@ export default function DashboardPage() {
         onOpenChange={setShowForm}
         openvpnEnabled={openvpnEnabled}
         wireguardEnabled={wireguardEnabled}
-        awg2CreateEnabled={awg2CreateEnabled}
+        awg2CreateEnabled={awg2Visible}
+        awg2Installed={dialogAwg2Installed}
         isAdmin={isAdmin}
         currentUserId={user?.id}
         panelUsers={panelUsers}
@@ -544,53 +509,9 @@ export default function DashboardPage() {
         onSuccess={success}
         onError={notifyError}
         onWarning={notifyWarning}
+        onInfo={notifyInfo}
         withProgress={withInline}
       />
-
-      <Dialog
-        open={!!qrPreview}
-        onOpenChange={(open) => {
-          if (!open && qrPreview) {
-            URL.revokeObjectURL(qrPreview.url)
-            setQrPreview(null)
-          }
-        }}
-      >
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileKey size={18} />
-              {qrPreview?.contentMode === 'download-link' ? 'QR: ссылка для скачивания' : 'QR-код профиля'}
-            </DialogTitle>
-            <DialogDescription>
-              {qrPreview?.filename}
-              {qrPreview?.contentMode === 'download-link' ? (
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  Профиль не помещается в один QR (типично для AntiZapret WG/AWG и OpenVPN). Отсканируйте
-                  камерой телефона — откроется ссылка для скачивания файла, не импорт в VPN-приложение.
-                </span>
-              ) : (
-                <span className="mt-1 block text-xs text-muted-foreground">
-                  Отсканируйте VPN-приложением для импорта профиля.
-                </span>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          {qrPreview && (
-            <div className="flex justify-center rounded-lg border bg-muted/30 p-6">
-              <img src={qrPreview.url} alt="QR-код конфигурации" className="max-h-72 rounded-md" />
-            </div>
-          )}
-          {qrPreview?.downloadUrl && (
-            <DialogFooter className="sm:justify-center">
-              <Button type="button" variant="outline" onClick={() => void copyQrDownloadUrl()}>
-                <Copy size={14} />
-                Скопировать ссылку
-              </Button>
-            </DialogFooter>
-          )}
-        </DialogContent>
-      </Dialog>
 
       {loading ? (
         <div className="rounded-xl border bg-card p-6">
@@ -634,11 +555,11 @@ export default function DashboardPage() {
           visibilityPolicy={visibilityPolicy}
           userRole={user.role}
           currentUserId={user.id}
+          canManageConfigs={isAdmin || Boolean(user?.can_manage_configs)}
           ownerCandidates={panelUsers}
           connectionMap={connectionMap}
           filesLoading={loadingFiles}
           onRefresh={() => load({ silent: true })}
-          onQr={handleQr}
           onDownload={handleDownload}
           onNotifySuccess={success}
           onNotifyError={notifyError}

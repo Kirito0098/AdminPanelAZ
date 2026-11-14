@@ -1,87 +1,135 @@
-import { useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { LogOut, Menu, Moon, Radio, Shield, Sun, User } from 'lucide-react'
 import NodeSelector from '@/components/NodeSelector'
+import NotificationBell from '@/components/notifications/NotificationBell'
 import ActiveNodeChangedBanner from '@/components/ActiveNodeChangedBanner'
 import HaScopeEnforcer from '@/components/HaScopeEnforcer'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
 import { DOCS, FEEDBACK_URL } from '@/lib/docsUrls'
+import { getMessageUnreadCount } from '@/api/messages'
 import { useAuth } from '@/context/AuthContext'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
+import { useNotificationCenter } from '@/context/NotificationCenterContext'
 import { useTheme } from '@/context/ThemeContext'
 import {
-  getVisibleSidebarNavGroups,
+  getVisibleSidebarNav,
+  isSidebarItemActive,
+  SIDEBAR_NAV,
   type SidebarNavItem,
 } from '@/components/nav/sidebarNav'
+import { SidebarNavGroup } from '@/components/nav/SidebarNavGroup'
+import { readGroupOpen, writeGroupOpen } from '@/components/nav/sidebarPrefs'
 import LiveClock from './noc/LiveClock'
 import { ROLE_LABELS } from '@/components/settings/settingsLabels'
-
-function NavGroupHeader({ label }: { label: string }) {
-  return (
-    <p className="orientation-compact-sidebar-group-label px-3 pb-1 pt-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/80 first:pt-1">
-      {label}
-    </p>
-  )
-}
 
 function SidebarNavLink({
   item,
   onNavigate,
+  requestsBadge,
 }: {
   item: SidebarNavItem
   onNavigate?: () => void
+  requestsBadge?: number
 }) {
   const Icon = item.icon
+  const showRequests = item.to === '/users' && requestsBadge != null && requestsBadge > 0
 
   return (
-    <NavLink
-      to={item.to}
-      end={item.end}
-      onClick={onNavigate}
-      className={({ isActive }) =>
-        cn(
-          'orientation-compact-sidebar-link group relative flex items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-medium transition-colors',
-          isActive
-            ? 'bg-primary/10 text-foreground'
-            : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-        )
-      }
-    >
-      {({ isActive }) => (
-        <>
-          <span
-            className={cn(
-              'absolute bottom-2 left-0 top-2 w-0.5 rounded-full',
-              isActive ? 'bg-primary' : 'opacity-0',
-            )}
-            aria-hidden
-          />
-          <span
-            className={cn(
-              'orientation-compact-sidebar-link-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors',
-              isActive
-                ? 'border-primary/25 bg-primary/15 text-primary'
-                : 'border-transparent bg-muted/60 text-muted-foreground group-hover:bg-muted group-hover:text-foreground',
-            )}
-          >
-            <Icon size={17} strokeWidth={2} />
-          </span>
-          <span className="min-w-0 truncate leading-snug">{item.label}</span>
-        </>
-      )}
-    </NavLink>
+    <div className="relative">
+      <NavLink
+        to={item.to}
+        end={item.end}
+        onClick={onNavigate}
+        className={({ isActive }) =>
+          cn(
+            'orientation-compact-sidebar-link group relative flex items-center gap-3 rounded-xl px-2.5 py-2 text-sm font-medium transition-colors',
+            showRequests && 'pr-12',
+            isActive
+              ? 'bg-primary/10 text-foreground'
+              : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+          )
+        }
+      >
+        {({ isActive }) => (
+          <>
+            <span
+              className={cn(
+                'absolute bottom-2 left-0 top-2 w-0.5 rounded-full',
+                isActive ? 'bg-primary' : 'opacity-0',
+              )}
+              aria-hidden
+            />
+            <span
+              className={cn(
+                'orientation-compact-sidebar-link-icon flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition-colors',
+                isActive
+                  ? 'border-primary/25 bg-primary/15 text-primary'
+                  : 'border-transparent bg-muted/60 text-muted-foreground group-hover:bg-muted group-hover:text-foreground',
+              )}
+            >
+              <Icon size={17} strokeWidth={2} />
+            </span>
+            <span className="min-w-0 truncate leading-snug">{item.label}</span>
+            {item.badge != null && item.badge > 0 ? (
+              <Badge variant="destructive" className="text-[10px] shrink-0">
+                {item.badge > 9 ? '9+' : item.badge}
+              </Badge>
+            ) : null}
+          </>
+        )}
+      </NavLink>
+      {showRequests ? (
+        <Link
+          to="/users?requests=1"
+          onClick={onNavigate}
+          title="Заявки ждут решения"
+          className="absolute right-2 top-1/2 z-10 flex h-5 min-w-5 -translate-y-1/2 items-center justify-center rounded-full bg-primary px-1.5 text-[10px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        >
+          {requestsBadge > 9 ? '9+' : requestsBadge}
+        </Link>
+      ) : null}
+    </div>
   )
 }
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const { user, logout } = useAuth()
-  const { isEnabled } = useFeatureModules()
+  const { isEnabled, loading: featuresLoading, features } = useFeatureModules()
   const { theme, toggleTheme } = useTheme()
+  // Живой счётчик из общего SSE-потока: не застывает до перезагрузки страницы.
+  const { pendingRequestsCount } = useNotificationCenter()
+  const location = useLocation()
+  // Свёрнутость групп: одна точка хранения на весь сайдбар.
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(SIDEBAR_NAV.groups.map((group) => [group.id, readGroupOpen(group.id)])),
+  )
+  const [messagesUnread, setMessagesUnread] = useState(0)
+  useEffect(() => {
+    // Счётчик админский: обычным пользователям не опрашиваем (иначе 403 каждую минуту).
+    if (user?.role !== 'admin' || !isEnabled('user_messaging')) return
+    let cancelled = false
+    const tick = async () => {
+      if (document.hidden) return
+      try {
+        const { count } = await getMessageUnreadCount()
+        if (!cancelled) setMessagesUnread(count)
+      } catch {
+        // Счётчик не критичен: страница «Сообщения» работает и без него.
+      }
+    }
+    void tick()
+    const timer = window.setInterval(() => void tick(), 60_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [isEnabled, user?.role])
   const initials = user?.username?.slice(0, 2).toUpperCase() ?? '?'
-  const isAdmin = user?.role === 'admin'
   const profileItem: SidebarNavItem = {
     to: '/settings/personal',
     label: 'Мой профиль',
@@ -90,17 +138,39 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
     adminOnly: false,
     featureKey: null,
   }
-  let visibleGroups = getVisibleSidebarNavGroups(user?.role, isEnabled)
+  // Без кэша до загрузки модулей фильтруем пункты как выключенные: иначе на секунду
+  // мигают отключённые разделы и вытесняют остальные за границу сайдбара.
+  const hasCachedFeatures = Object.keys(features).length > 0
+  const navFeatureEnabled = (key: string) =>
+    featuresLoading && !hasCachedFeatures ? false : isEnabled(key)
+  const visibleNav = getVisibleSidebarNav(user?.role, navFeatureEnabled)
 
-  if (!isAdmin) {
-    const panelIndex = visibleGroups.findIndex((group) => group.label === 'Панель')
-    if (panelIndex >= 0) {
-      visibleGroups = visibleGroups.map((group, index) =>
-        index === panelIndex ? { ...group, items: [...group.items, profileItem] } : group,
-      )
-    } else {
-      visibleGroups = [...visibleGroups, { label: 'Панель', items: [profileItem] }]
-    }
+  const pinnedItems = visibleNav.pinned.map((item) =>
+    item.to === '/messages' ? { ...item, badge: messagesUnread } : item,
+  )
+  const footerItem = visibleNav.footer ?? profileItem
+
+  // Активная группа раскрыта; вручную её можно свернуть, но переход в группу
+  // снова её раскрывает. Зависимость — только набор активных id, не весь рендер.
+  const activeGroupKey = visibleNav.groups
+    .filter((group) => group.items.some((item) => isSidebarItemActive(item, location.pathname)))
+    .map((group) => group.id)
+    .join('|')
+
+  useEffect(() => {
+    if (!activeGroupKey) return
+    const ids = activeGroupKey.split('|')
+    setGroupOpen((prev) => {
+      if (ids.every((id) => prev[id] !== false)) return prev
+      const next = { ...prev }
+      for (const id of ids) next[id] = true
+      return next
+    })
+  }, [activeGroupKey, location.pathname])
+
+  const toggleGroupOpen = (id: string, open: boolean) => {
+    setGroupOpen((prev) => ({ ...prev, [id]: open }))
+    writeGroupOpen(id, open)
   }
 
   const themeToggle = (
@@ -143,18 +213,41 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         className="orientation-compact-sidebar-nav flex min-h-0 flex-1 flex-col overflow-y-auto px-2 py-2"
         aria-label="Основная навигация"
       >
-        {visibleGroups.map((group, index) => (
-          <div key={group.label} className={cn(index > 0 && 'mt-1 border-t border-border/40 pt-1')}>
-            <NavGroupHeader label={group.label} />
-            <ul className="space-y-0.5">
-              {group.items.map((item) => (
-                <li key={item.to}>
-                  <SidebarNavLink item={item} onNavigate={onNavigate} />
-                </li>
-              ))}
-            </ul>
-          </div>
-        ))}
+        <ul className="space-y-0.5">
+          {pinnedItems.map((item) => (
+            <li key={item.to}>
+              <SidebarNavLink
+                item={item}
+                onNavigate={onNavigate}
+                requestsBadge={pendingRequestsCount}
+              />
+            </li>
+          ))}
+        </ul>
+
+        {visibleNav.groups.map((group, index) => {
+          const open = groupOpen[group.id] ?? group.defaultOpen ?? true
+          return (
+            <div key={group.id} className={cn(index > 0 && 'mt-1 border-t border-border/40 pt-1')}>
+              <SidebarNavGroup
+                id={group.id}
+                label={group.label}
+                open={open}
+                onToggle={() => toggleGroupOpen(group.id, !open)}
+              >
+                {group.items.map((item) => (
+                  <li key={item.to}>
+                    <SidebarNavLink item={item} onNavigate={onNavigate} />
+                  </li>
+                ))}
+              </SidebarNavGroup>
+            </div>
+          )
+        })}
+
+        <div className="mt-auto border-t border-border/40 pt-1">
+          <SidebarNavLink item={footerItem} onNavigate={onNavigate} />
+        </div>
       </nav>
 
       <div className="orientation-compact-sidebar-footer shrink-0 border-t border-border/60 bg-card p-3 pb-safe">
@@ -256,19 +349,25 @@ export default function Layout() {
             <p className="orientation-compact-header-subtitle text-xs text-muted-foreground">Network Operations Center</p>
             <h1 className="truncate text-sm font-semibold leading-tight">AntiZapret VPN</h1>
           </div>
-          <div className="shrink-0 sm:hidden">
-            <NodeSelector compact />
-          </div>
-          <div className="hidden items-center gap-3 sm:flex">
-            <NodeSelector />
-            <span className="mono text-xs text-muted-foreground">SESS · {user?.username?.toUpperCase()}</span>
-            <span className="orientation-compact-header-subtitle">
+          <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+            <div className="sm:hidden">
+              <NodeSelector compact />
+            </div>
+            <div className="hidden sm:block">
+              <NodeSelector />
+            </div>
+            {/* Один экземпляр: два колокола давали дубли тостов и SSE. */}
+            <NotificationBell />
+            <span className="mono hidden text-xs text-muted-foreground sm:inline">
+              SESS · {user?.username?.toUpperCase()}
+            </span>
+            <span className="orientation-compact-header-subtitle hidden sm:inline">
               <LiveClock />
             </span>
           </div>
         </header>
 
-        <main className="flex-1 overflow-auto p-4 lg:p-6">
+        <main className="flex-1 p-4 lg:p-6">
           <ActiveNodeChangedBanner />
           <Outlet />
         </main>

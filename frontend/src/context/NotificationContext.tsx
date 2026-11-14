@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useMemo, useRef, useStat
 import Toast from '@/components/ui/Toast'
 import { randomId } from '@/lib/randomId'
 
-export type ToastType = 'success' | 'error' | 'warning' | 'info'
+type ToastType = 'success' | 'error' | 'warning' | 'info'
 
 export interface ToastItem {
   id: string

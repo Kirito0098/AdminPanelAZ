@@ -1,3 +1,4 @@
+import { nodeNameWithHost } from '@/lib/nodeLabels'
 import type { Awg2HealthResponse, Awg2StatusResponse, Node } from '@/types'
 
 export type Awg2Tab = 'obfuscation' | 'backup' | 'help'
@@ -54,10 +55,5 @@ export const AWG2_TTL_OPTIONS = [
 ] as const
 
 export function formatAwg2NodeLabel(health: Awg2HealthResponse | null, activeNode: Node | null): string {
-  const name = health?.node_name ?? activeNode?.name
-  const host = health?.node_host ?? activeNode?.host
-  if (name && host) return `${name} (${host})`
-  if (name) return name
-  if (host) return host
-  return 'активном узле панели'
+  return nodeNameWithHost(health, activeNode)
 }

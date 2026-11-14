@@ -1,4 +1,5 @@
 import { Info } from 'lucide-react'
+import { protocolLabel } from '@/lib/vpnTypes'
 import type { Awg2HealthResponse } from '@/types'
 import { AWG2_INSTALL_CMD } from './utils'
 
@@ -18,7 +19,7 @@ export default function Awg2HelpStub({ health }: Awg2HelpStubProps) {
         <div className="min-w-0 space-y-2 text-sm">
           <h2 className="text-base font-semibold tracking-tight">Справка</h2>
           <p className="text-muted-foreground">
-            AZ-AWG2 — параллельный слой AmneziaWG 2.0 (az-awg2) поверх AntiZapret.
+            {protocolLabel('amneziawg2')} — параллельный слой (модуль AZ-AWG2, az-awg2) поверх AntiZapret.
             Штатные WireGuard и стоковый AmneziaWG не затрагиваются.
           </p>
           <div className="space-y-1.5 text-muted-foreground">
@@ -31,10 +32,10 @@ export default function Awg2HelpStub({ health }: Awg2HelpStubProps) {
             <p>
               <span className="font-medium text-foreground">Vs AZ-WARP:</span> WARP точечно гонит
               выбранные домены через Cloudflare. AZ-AWG2 выдаёт полноценные VPN-профили (оба
-              туннеля: AntiZapret и полный VPN) для клиентов AmneziaWG 2.0.
+              туннеля: AntiZapret и полный VPN) для клиентов {protocolLabel('amneziawg2')}.
             </p>
             <p>
-              <span className="font-medium text-foreground">HA:</span> репликация клиентов AWG2 на
+              <span className="font-medium text-foreground">HA:</span> репликация клиентов {protocolLabel('amneziawg2')} на
               replica поддерживается. Если на replica не установлен слой AZ-AWG2, sync завершится
               ошибкой и вернёт команду установки для этого узла. <code className="text-xs">stats.db</code>{' '}
               в HA-архив не входит (локальная статистика узла).
@@ -42,7 +43,7 @@ export default function Awg2HelpStub({ health }: Awg2HelpStubProps) {
             <p>
               <span className="font-medium text-foreground">Клиенты:</span> создание, скачивание, блокировки
               и TTL — на странице{' '}
-              <strong className="text-foreground">Клиенты</strong> (вкладка AmneziaWG 2.0). Отдельной
+              <strong className="text-foreground">Клиенты</strong> (вкладка {protocolLabel('amneziawg2')}). Отдельной
               вкладки клиентов на `/awg2` нет.
             </p>
             <p>

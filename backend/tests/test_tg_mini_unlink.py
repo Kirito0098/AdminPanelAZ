@@ -3,7 +3,7 @@
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Response
 
 from app.auth import get_tg_mini_user, require_tg_mini_admin
 from app.models import UserRole
@@ -78,37 +78,10 @@ def test_tg_auth_does_not_auto_relink_tg_username(monkeypatch):
     payload = TelegramAuthRequest(init_data="user=%7B%22id%22%3A424242%7D&hash=x")
 
     with pytest.raises(HTTPException) as exc:
-        tg_auth(payload=payload, request=request, db=db)
+        tg_auth(payload=payload, request=request, response=Response(), db=db)
 
     assert exc.value.status_code == 401
     assert "не привязан" in exc.value.detail
     assert orphan.telegram_id is None
     db.commit.assert_not_called()
     notify.assert_called_once()
-
-
-def test_tg_auth_issues_token_when_linked(monkeypatch):
-    tg_id = "555"
-    linked = _user(username="bob", telegram_id=tg_id)
-
-    db = MagicMock()
-    query = MagicMock()
-    query.filter.return_value.first.return_value = linked
-    db.query.return_value = query
-
-    monkeypatch.setattr("app.routers.tg_mini._get_bot_token", lambda _db: "bot:token")
-    monkeypatch.setattr("app.routers.tg_mini._get_setting", lambda _db, _key, default="": "300")
-    monkeypatch.setattr(
-        "app.routers.tg_mini._verify_telegram_init_data",
-        lambda *_a, **_k: {"id": int(tg_id)},
-    )
-    monkeypatch.setattr("app.routers.tg_mini.create_tg_mini_token", lambda username, telegram_id, **_kw: "jwt-token")
-
-    request = MagicMock()
-    payload = TelegramAuthRequest(init_data="user=%7B%22id%22%3A555%7D&hash=x")
-
-    result = tg_auth(payload=payload, request=request, db=db)
-
-    assert result["access_token"] == "jwt-token"
-    assert result["telegram_id"] == tg_id
-    db.commit.assert_not_called()

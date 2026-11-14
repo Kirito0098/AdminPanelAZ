@@ -22,14 +22,12 @@ log() {
 
 UNIT_ROOT="${ADMINPANELAZ_UNIT_ROOT:-$ROOT_DIR}"
 
+# shellcheck source=scripts/systemd-unit-lib.sh
+source "$ROOT_DIR/scripts/systemd-unit-lib.sh"
+
 render_unit() {
-  sed \
-    -e "s|/opt/AdminPanelAZ|$UNIT_ROOT|g" \
-    -e "s|/var/lib/adminpanelaz-node|$STATE_DIR|g" \
-    -e "s|^User=root|User=$INSTALL_USER|" \
-    -e "s|^Group=root|Group=$INSTALL_GROUP|" \
-    -e "s|Environment=NODE_AGENT_PORT=9100|Environment=NODE_AGENT_PORT=${NODE_AGENT_PORT:-9100}|" \
-    "$UNIT_SRC"
+  systemd_unit_render "$UNIT_SRC" /var/lib/adminpanelaz-node "$STATE_DIR" \
+    "s|Environment=NODE_AGENT_PORT=9100|Environment=NODE_AGENT_PORT=${NODE_AGENT_PORT:-9100}|"
 }
 
 # Unit на пробу (предпросмотр полного обновления): только stdout, без root и записей.

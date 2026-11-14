@@ -41,6 +41,14 @@ class BotContext:
     user: User | None
     settings: TelegramBotSettingsSnapshot
     mini_app_url: str = ""
+    # Профиль отправителя из update (from): нужен карточкам заявок админам.
+    telegram_username: str = ""
+    telegram_name: str = ""
+
+
+def panel_root_url(mini_app_url: str) -> str:
+    """Корень веб-панели из URL Mini App (``https://host/api/tg-mini`` → ``https://host``)."""
+    return (mini_app_url or "").removesuffix("/api/tg-mini").rstrip("/")
 
 
 def resolve_user(db: Session, telegram_user_id: str) -> User | None:
