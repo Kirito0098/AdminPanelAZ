@@ -23,6 +23,8 @@ source "$FU_DIR/update-preview.sh"
 FU_FW_ARGS=()
 
 FU_STEPS=(backup code apt pip frontend systemd nginx firewall ddns restart)
+# Шаги, которые можно выбрать для --server-only (веб-обновление): ключи уходят в FU_ONLY/--only.
+FU_SELECTABLE_STEPS=" apt systemd nginx firewall ddns "
 declare -A FU_LABELS=(
   [backup]=Бэкап [code]=Код [apt]=Пакеты [pip]=Python [frontend]=Интерфейс
   [systemd]=systemd [nginx]=nginx [firewall]=firewall [ddns]=DDNS [restart]=Перезапуск
@@ -569,13 +571,36 @@ full_update_apply() {
 }
 
 # Веб: то, что обновление из панели не делает. Код, сборку и перезапуск панель уже выполнила сама.
+# FU_STEPS здесь — выбранные шаги (--only/FU_ONLY) или все пять по умолчанию.
 full_update_server_only() {
+  local step
   fu_sync_scenario_db
-  fu_run apt fu_step_apt
-  fu_run systemd fu_step_systemd
-  fu_run nginx fu_step_nginx
-  fu_run firewall fu_step_firewall
-  fu_run ddns fu_step_ddns
+  for step in "${FU_STEPS[@]}"; do
+    fu_run "$step" "fu_step_$step"
+  done
+}
+
+# --only/FU_ONLY: список ключей через запятую. Пустой или чужой ключ — ошибка до любых изменений.
+fu_select_steps() {
+  local raw="$1" item
+  local -a items=()
+  IFS=',' read -r -a items <<<"$raw"
+  FU_STEPS=()
+  for item in "${items[@]}"; do
+    item="${item//[[:space:]]/}"
+    [[ -n "$item" ]] || continue
+    if [[ "$FU_SELECTABLE_STEPS" != *" $item "* ]]; then
+      ui_fail "Неизвестный шаг: $item (доступны: apt, systemd, nginx, firewall, ddns)"
+      return 1
+    fi
+    if [[ " ${FU_STEPS[*]} " != *" $item "* ]]; then
+      FU_STEPS+=("$item")
+    fi
+  done
+  if [[ "${#FU_STEPS[@]}" -eq 0 ]]; then
+    ui_fail "Пустой список шагов (доступны: apt, systemd, nginx, firewall, ddns)"
+    return 1
+  fi
 }
 
 full_update_run() {
@@ -673,7 +698,7 @@ fu_show_preview() {
 FU_ASSUME_YES=false
 
 full_update_main() {
-  local resume="" preview=false preview_rev="" server_only=false
+  local resume="" preview=false preview_rev="" server_only=false only="" only_set=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --yes) FU_ASSUME_YES=true ;;
@@ -686,6 +711,16 @@ full_update_main() {
         shift
         ;;
       --server-only) server_only=true ;;
+      --only)
+        if [[ $# -lt 2 ]]; then
+          ui_fail "--only: нужен список шагов (apt,systemd,nginx,firewall,ddns)"
+          return 2
+        fi
+        only="$2"
+        only_set=true
+        shift
+        ;;
+      --only=*) only="${1#--only=}"; only_set=true ;;
       --report)
         if [[ $# -lt 2 ]]; then
           ui_fail "--report: нужен файл"
@@ -710,6 +745,14 @@ full_update_main() {
     esac
     shift
   done
+  if [[ "$only_set" == true || -n "${FU_ONLY:-}" ]]; then
+    if [[ "$server_only" != true ]]; then
+      ui_fail "--only/FU_ONLY: выборочное обновление работает только с --server-only"
+      return 2
+    fi
+    [[ "$only_set" == true ]] || only="$FU_ONLY"
+    fu_select_steps "$only" || return 2
+  fi
   require_root
   if [[ "$(menu_mode)" == none ]]; then
     ui_fail "AdminPanelAZ не установлена: используйте обычную установку (sudo ./install.sh)"
@@ -721,7 +764,9 @@ full_update_main() {
     return 0
   fi
   if [[ "$server_only" == true ]]; then
-    FU_STEPS=(apt systemd nginx firewall ddns)
+    if [[ -z "$only" ]]; then
+      FU_STEPS=(apt systemd nginx firewall ddns)
+    fi
     FU_STATE="$(mktemp "$(fu_state_dir)/adminpanelaz-update.XXXXXX")"
     full_update_server_only
     fu_finish

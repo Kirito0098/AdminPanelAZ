@@ -1509,10 +1509,62 @@ export interface ServerConfigDetail {
   info: string[]
 }
 
+export type ServerConfigStepKey = 'apt' | 'systemd' | 'nginx' | 'firewall' | 'ddns'
+
+export interface ServerConfigStep {
+  key: ServerConfigStepKey
+  label: string
+  available: boolean
+  reason?: string
+}
+
+export type NginxVhostRole = 'panel' | 'portal' | 'other' | 'statusopenvpn'
+
+export type NginxIntegrationMode = 'dedicated_vhost' | 'subpath_snippet' | 'unknown'
+
+export interface NginxVhostImpact {
+  host: string
+  role: NginxVhostRole
+  same_domain: boolean
+  will_change: boolean
+  note?: string
+}
+
+export interface NginxForeignLocation {
+  path: string
+  project: string
+  target?: string
+}
+
+export interface NginxStatusOpenVpn {
+  detected: boolean
+  in_nginx: boolean
+  outside_nginx: boolean
+  domain?: string
+  path?: string
+  detail?: string
+}
+
+export interface NginxImpact {
+  nginx_seen: boolean
+  panel_domain: string
+  vhosts: NginxVhostImpact[]
+  foreign_locations: NginxForeignLocation[]
+  global_changes: string[]
+  warnings: string[]
+  status_openvpn: NginxStatusOpenVpn | null
+  /** Как панель встроена в nginx: отдельный vhost или snippet внутри чужого. */
+  integration_mode?: NginxIntegrationMode
+  panel_vhost?: string | null
+  panel_snippet_includes?: string[]
+}
+
 export interface ServerConfigPreview {
   sections: Record<ServerConfigSection, string[]>
   details: Record<string, ServerConfigDetail>
   pending: number
+  steps: ServerConfigStep[]
+  nginx_impact: NginxImpact
 }
 
 export interface ServerConfigRow {

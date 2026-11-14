@@ -319,8 +319,11 @@ export async function getServerConfigPreview() {
   return apiFetch<ServerConfigPreview>('/system/update/server-config')
 }
 
-export async function applyServerConfig() {
-  return apiFetch<BackgroundTaskAcceptedResponse>('/system/update/server-config', { method: 'POST' })
+export async function applyServerConfig(steps: string[]) {
+  return apiFetch<BackgroundTaskAcceptedResponse>('/system/update/server-config', {
+    method: 'POST',
+    body: JSON.stringify({ steps }),
+  })
 }
 
 export async function applySystemUpdate() {

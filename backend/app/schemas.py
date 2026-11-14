@@ -1505,6 +1505,10 @@ class LatestChangelogResponse(BaseModel):
     pending: ChangelogBlockResponse | None = None
 
 
+class ServerConfigApplyRequest(BaseModel):
+    steps: list[str] = Field(default_factory=list)
+
+
 class TelegramRelayNode(BaseModel):
     id: int
     name: str
