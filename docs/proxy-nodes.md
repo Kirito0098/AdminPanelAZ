@@ -192,7 +192,7 @@ cd /opt/AdminPanelAZ && sudo ./install.sh --proxy-only --with-systemd -y
 | IP прокси, но маппинга нет / агент недоступен | Остаётся IP прокси, бейдж «через прокси · IP не восстановлен» |
 | Модуль выкл. или IP не из списка прокси | Как раньше, без бейджа |
 
-Учёт трафика и Telegram-сводки **не** меняются этой склейкой. Подробнее: [noc-monitoring.md](noc-monitoring.md#подключения-через-прокси-узел).
+Учёт трафика и Telegram-сводки **не** меняются этой склейкой. Подробнее: [monitoring.md](monitoring.md#подключения-через-прокси-узел).
 
 Mappings живут в conntrack на RU и забираются агентом; кэш на панели ~45 секунд.
 
@@ -292,7 +292,7 @@ netfilter-persistent save
 | Узлы (VPN + кратко прокси) | [uzly.md](uzly.md) |
 | Установка `proxy_agent` | [proxy-agent.md](proxy-agent.md) |
 | Несколько `remote` / allow-ips | [antizapret-config.md](antizapret-config.md) |
-| NOC и пометка «через прокси» | [noc-monitoring.md](noc-monitoring.md) |
+| NOC и пометка «через прокси» | [monitoring.md](monitoring.md) |
 | Модули | [nastrojki/moduli.md](nastrojki/moduli.md) |
 | Карта проекта (разработчикам) | [PROJECT_MAP.md](PROJECT_MAP.md) |
 

@@ -141,13 +141,13 @@ const TAB_META: Record<MonitoringTab, { label: string; icon: typeof Server; docs
   connections: {
     label: 'Подключения',
     icon: Wifi,
-    docsHref: DOCS.noc,
+    docsHref: DOCS.monitoring,
     description: `Активные VPN-подключения ${protocolLabel('openvpn')} и ${protocolLabel('wireguard')} в реальном времени`,
   },
   services: {
     label: 'Службы',
     icon: Server,
-    docsHref: DOCS.noc,
+    docsHref: DOCS.monitoring,
     description: 'Матрица служб узла и их состояние',
   },
   traffic: {

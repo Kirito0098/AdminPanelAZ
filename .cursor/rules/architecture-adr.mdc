@@ -1,7 +1,13 @@
+---
+description: Архитектура AdminPanelAZ — слои, границы модулей, точки связности и известный долг
+globs: backend/**/*.py,frontend/src/**/*.ts,frontend/src/**/*.tsx,scripts/**/*.sh,install.sh
+alwaysApply: false
+---
+
 # ADR-001. AdminPanelAZ: слои, границы и точки связности
 
 > Дубликат ADR из индекса `codebase-memory` (`manage_adr`), чтобы документ версионировался
-> в репозитории. Карта проекта — [`PROJECT_MAP.md`](PROJECT_MAP.md).
+> в репозитории. Карта проекта — `docs/PROJECT_MAP.md`.
 
 ## Статус
 

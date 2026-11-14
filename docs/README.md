@@ -21,7 +21,7 @@
 |-----------------|------------|----------|
 | Клиенты (конфигурации) | [konfiguracii.md](konfiguracii.md) | Все (создание — админ) |
 | Абоненты (вкладки «Абоненты» / «Портал и коды») | [podpiska.md](podpiska.md) | Только админ (модуль `user_provisioning`; вкладка — `client_portal` / `unlock_codes`) |
-| Наблюдение | [noc-monitoring.md](noc-monitoring.md), [traffic-monitoring.md](traffic-monitoring.md), [logs.md](logs.md), [server-monitor.md](server-monitor.md) | Только админ; вкладка «Трафик» — все |
+| Наблюдение | [monitoring.md](monitoring.md), [traffic-monitoring.md](traffic-monitoring.md), [logs.md](logs.md), [server-monitor.md](server-monitor.md) | Только админ; вкладка «Трафик» — все |
 | Сеть → Узлы | [uzly.md](uzly.md) | Только админ |
 | Сеть → Прокси | [proxy-nodes.md](proxy-nodes.md) | Только админ (модуль `proxy_nodes`) |
 | Сеть → Маршрутизация | [routing-cidr.md](routing-cidr.md) | Только админ |

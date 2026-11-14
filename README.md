@@ -116,7 +116,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
 | | | |
 | --- | --- | --- |
 | [<img src="docs/assets/telegram-promo/10-configurations.png" alt="Конфигурации" width="400">](docs/konfiguracii.md) | [<img src="docs/assets/telegram-promo/09-nodes.png" alt="Узлы VPN" width="400">](docs/uzly.md) | [<img src="docs/assets/telegram-promo/07-routing-cidr.png" alt="Маршрутизация CIDR" width="400">](docs/routing-cidr.md) |
-| [<img src="docs/assets/telegram-promo/08-routing-az-warp.png" alt="AZ-WARP" width="400">](docs/warper.md) | [<img src="docs/assets/telegram-promo/04-monitoring-noc.png" alt="Мониторинг и NOC" width="400">](docs/noc-monitoring.md) | [<img src="docs/assets/telegram-promo/03-telegram-integration.png" alt="Telegram" width="400">](docs/Telegram.md) |
+| [<img src="docs/assets/telegram-promo/08-routing-az-warp.png" alt="AZ-WARP" width="400">](docs/warper.md) | [<img src="docs/assets/telegram-promo/04-monitoring-noc.png" alt="Мониторинг и NOC" width="400">](docs/monitoring.md) | [<img src="docs/assets/telegram-promo/03-telegram-integration.png" alt="Telegram" width="400">](docs/Telegram.md) |
 | [<img src="docs/assets/telegram-promo/11-client-portal.png" alt="Клиентский портал" width="400">](docs/podpiska.md) | [<img src="docs/assets/telegram-promo/12-unlock-keys.png" alt="Unlock-ключи" width="400">](docs/podpiska.md) | |
 
 ## ✨ Возможности
@@ -176,7 +176,7 @@ sudo ./install.sh --proxy-only --with-systemd -y
 
 - **NOC** — кто подключён, откуда (город и провайдер), графики, состояние служб;
   **Telegram-сводки** — ежедневный/еженедельный текст и еженедельный PNG-дашборд
-  ([инструкция](docs/noc-monitoring.md))
+  ([инструкция](docs/monitoring.md))
 - **Трафик** — расход по клиентам и доля в общем объёме, лимиты, окна 1д / 7д / 30д ([инструкция](docs/traffic-monitoring.md))
 - **Сервер** — live CPU/RAM/диск, **история ресурсов** за 1 / 7 / 30 дней, vnStat ([инструкция](docs/server-monitor.md))
 - **Локальная GeoIP** — MaxMind GeoLite2 в `backend/data/geoip/` ([инструкция](docs/GeoIP.md))
@@ -261,7 +261,7 @@ AntiZapret и VPN-конфиги при удалении панели **не т�
 - **Подписка и клиентский портал** — [docs/podpiska.md](docs/podpiska.md): срок доступа на пользователе, unlock-коды, постоянные ссылки `/p/c_…` и `/p/u_…`
 - **Несколько серверов и HA** — [docs/uzly.md](docs/uzly.md) · [docs/NodeSync.md](docs/NodeSync.md) · [docs/node-ssh-transport.md](docs/node-ssh-transport.md)
 - **Прокси AntiZapret** — [docs/proxy-nodes.md](docs/proxy-nodes.md) · [docs/proxy-agent.md](docs/proxy-agent.md)
-- **NOC и трафик** — [docs/noc-monitoring.md](docs/noc-monitoring.md) · [docs/traffic-monitoring.md](docs/traffic-monitoring.md)
+- **NOC и трафик** — [docs/monitoring.md](docs/monitoring.md) · [docs/traffic-monitoring.md](docs/traffic-monitoring.md)
 - **Настройки и бэкапы** — [docs/nastrojki/README.md](docs/nastrojki/README.md)
 - **Адрес сайта, HTTPS, StatusOpenVPN** — [docs/nastrojki/set-i-publikaciya.md](docs/nastrojki/set-i-publikaciya.md)
 - **Telegram** — [docs/Telegram.md](docs/Telegram.md)

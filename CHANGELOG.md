@@ -1147,7 +1147,7 @@
   - Telegram NOC: текстовый статус + weekly PNG (текущие и peak по samples);
   - proxy/geo enrich для endpoint’ов как у WireGuard;
   - toggle off или слой не установлен → без UI AWG2 и без 500 на NOC/TG endpoints.
-  - Docs: [noc-monitoring.md](docs/noc-monitoring.md), [awg2.md](docs/awg2.md).
+  - Docs: [monitoring.md](docs/monitoring.md), [awg2.md](docs/awg2.md).
 - **AZ-AWG2: блокировки и статистика клиента** — temp / permanent / unblock для `amneziawg2` через `/api/client-access/amneziawg2/*` (Dashboard, `/awg2`; на HA replica — readonly):
   - после HA crypto-sync / import archive на replica восстанавливается runtime block peer’ов и реплицируются строки access-policy;
   - drawer статистики: `GET /api/awg2/clients/{name}/stats` — endpoint, GeoIP, дневной трафик (клик по строке Monitoring + «Статистика»);
@@ -1236,7 +1236,7 @@
 - **Маршрутизация / CIDR: расписание автообновления** — вкладка **Настройки** (`?tab=settings`): вкл/выкл, время (UTC) и интервал в днях (1/3/7/14 или своё); API `GET/PATCH /routing/cidr-db/schedule`; планировщик учитывает `CIDR_DB_REFRESH_INTERVAL_DAYS` и не гоняет ingest каждую ночь, если интервал ещё не прошёл (`cidr_scheduler.py`, `CidrScheduleCard.tsx`, `RoutingSettingsTab.tsx`).
 - **Карточка клиента: локальный IP** — в мета-блоке карточки на дашборде показывается выданный туннельный адрес (`local_ip` в `VpnConfigResponse`): WireGuard — `AllowedIPs` из серверного conf, OpenVPN — live `virtual_address` или последний из сессий трафика; переключатель «Локальный IP» в настройках карточек (`ConfigCard`, `client_local_ip.py`).
 - **Прокси-узлы (волна 1)** — feature toggle `proxy_nodes` / `FEATURE_PROXY_NODES_ENABLED` (**default off**): узлы `node_kind=proxy`, отдельный `proxy_agent` на RU (`:9101`, systemd `adminpanelaz-proxy`), панель через `ProxyNodeAdapter` — health/status, смена DESTINATION в iptables, mappings. Панель **не** ставит `proxy.sh`. Прокси нельзя активировать как VPN. Автоустановка агента: `sudo ./install.sh --proxy-only --with-systemd -y` (или мастер). Docs: [proxy-nodes.md](docs/proxy-nodes.md), [uzly.md](docs/uzly.md), [proxy-agent.md](docs/proxy-agent.md).
-- **Прокси-узлы (волна 2, NOC IP)** — при включённом модуле overview NOC склеивает сессию с mappings `proxy_agent`: домашний IP + geo при совпадении порта, иначе IP прокси + пометка «через прокси» / «IP не восстановлен» в списке подключений. Docs: [proxy-nodes.md](docs/proxy-nodes.md), [noc-monitoring.md](docs/noc-monitoring.md#подключения-через-прокси-узел).
+- **Прокси-узлы (волна 2, NOC IP)** — при включённом модуле overview NOC склеивает сессию с mappings `proxy_agent`: домашний IP + geo при совпадении порта, иначе IP прокси + пометка «через прокси» / «IP не восстановлен» в списке подключений. Docs: [proxy-nodes.md](docs/proxy-nodes.md), [monitoring.md](docs/monitoring.md#подключения-через-прокси-узел).
 - **install.sh --proxy-only** — роль «только proxy_agent» по образцу `--node-only`: env + ключ + systemd `adminpanelaz-proxy`, без панели и без `proxy.sh`.
 - **Несколько адресов OpenVPN на узле** — в **Конфиг AntiZapret → Адреса подключения** админ задаёт упорядоченный список IP/доменов (до 8) на активном узле; при скачивании `.ovpn` (сайт, QR, Telegram, публичная ссылка) панель подставляет несколько `remote` в этом порядке. Список в БД панели переживает `setup.sh`; непустой список пишет первый адрес в `OPENVPN_HOST`, пустой патч выключает и `OPENVPN_HOST` не трогает. API: `GET/PUT /nodes/{id}/remote-hosts`. Docs: [antizapret-config.md](docs/antizapret-config.md#несколько-адресов-подключения).
 - **Multi-remote этап 06** — после пересборки профилей из панели `.ovpn` на диске получают multi-`remote`; при скачивании WG/Amnezia `Endpoint` = первый адрес списка (порт сохраняется, на диск не пишется); кнопка «Добавить первый адрес в allow-ips» / `POST /nodes/{id}/remote-hosts/allow-first` идемпотентно дописывает `hosts[0]` в `allow-ips.txt`. После `setup.sh` диск снова сток до следующей пересборки из панели; выдача всегда патчит из БД.
@@ -1545,7 +1545,7 @@
 #### Документация и бот
 
 - Подсказки `/start`, `/link` и docs указывают на **Мой профиль** вместо «Telegram → Команды бота» / «Настройки → Личное» (`telegram_bot_i18n.py`, `telegram_link.py`, `docs/Telegram.md` и др.).
-- **`docs/noc-monitoring.md`**, `docs/Telegram.md`, `docs/nastrojki/monitoring-i-alerty.md` и план `docs/plans/noc-ops/` — NOC Ops (10 эпиков `done`) + grace offline-алерты.
+- **`docs/monitoring.md`**, `docs/Telegram.md`, `docs/nastrojki/monitoring-i-alerty.md` и план `docs/plans/noc-ops/` — NOC Ops (10 эпиков `done`) + grace offline-алерты.
 
 ### 🔒 Security
 
@@ -2611,7 +2611,7 @@
 
 ### ✨ Added
 
-- **Пользовательская документация** — простые инструкции по разделам веб-панели: [`docs/README.md`](docs/README.md), модули меню (`konfiguracii.md`, `noc-monitoring.md`, …), подразделы настроек [`docs/nastrojki/`](docs/nastrojki/README.md).
+- **Пользовательская документация** — простые инструкции по разделам веб-панели: [`docs/README.md`](docs/README.md), модули меню (`konfiguracii.md`, `monitoring.md`, …), подразделы настроек [`docs/nastrojki/`](docs/nastrojki/README.md).
 - **Редактор файлов — перенос на другие узлы** — копирование конфигурации AntiZapret с активного узла на один или несколько online-узлов: API `POST /api/edit-files/transfer` (`file_keys`, `target_node_ids` / `all_online`, `run_doall`, `content_overrides`); сервис `edit_files_transfer.py`; результат по каждому узлу в `per_node`; audit log `edit_files_transfer`. UI: кнопка **«Перенести на узлы»** в шапке страницы, диалог с выбором «все файлы» / «только открытый файл», целевых узлов и опционального doall.sh; предупреждение при несохранённых правках. Тесты: `test_edit_files_transfer.py`.
 - **Маршрутизация / CIDR — UX pipeline** — пошаговый гид **Ingest → Compile → Deploy → Провайдеры** (`RoutingWorkflowGuide`, `routingWorkflow.ts`): текущий шаг, кнопка «Следующий шаг», кликабельные этапы с переходом на вкладку/якорь; карточки быстрой навигации (`RoutingSectionCards`); синхронизация вкладок с URL (`?tab=overview|providers|pipeline`); описания под вкладками; липкая навигация по этапам 1–3 на вкладке Pipeline (`#pipeline-stage-1/2/3`).
 - **Маршрутизация / CIDR — провайдеры** — быстрые фильтры (все / включённые / ошибки / нужен deploy / нужна сборка); колонка CIDR объединена (**БД / Контр. / Узел**); кликабельные подсказки «нужен deploy / сборка» с переходом на Pipeline.

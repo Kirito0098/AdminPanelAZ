@@ -82,7 +82,7 @@
 ├── docs/
 │   ├── README.md                # оглавление пользовательских руководств
 │   ├── konfiguracii.md          # UI: Конфигурации
-│   ├── noc-monitoring.md
+│   ├── monitoring.md
 │   ├── traffic-monitoring.md
 │   ├── routing-cidr.md
 │   ├── antizapret-config.md
@@ -125,7 +125,7 @@
 |---------|----------|----------|
 | `/` | `DashboardPage` | [`konfiguracii.md`](konfiguracii.md) |
 | `/users` | `UsersPage` (вкладки **Абоненты** / **Портал и коды**) | [`podpiska.md`](podpiska.md) |
-| `/monitoring` | `MonitoringPage` (вкладки **Подключения · Службы · Трафик · Ресурсы · Журналы**; у «Ресурсов» чипы **Узел · Панель · Хост**) | [`noc-monitoring.md`](noc-monitoring.md), [`traffic-monitoring.md`](traffic-monitoring.md), [`logs.md`](logs.md), [`server-monitor.md`](server-monitor.md) |
+| `/monitoring` | `MonitoringPage` (вкладки **Подключения · Службы · Трафик · Ресурсы · Журналы**; у «Ресурсов» чипы **Узел · Панель · Хост**) | [`monitoring.md`](monitoring.md), [`traffic-monitoring.md`](traffic-monitoring.md), [`logs.md`](logs.md), [`server-monitor.md`](server-monitor.md) |
 | `/routing` | `RoutingPage` | [`routing-cidr.md`](routing-cidr.md) |
 | `/protocols/antizapret` | `AntizapretConfigPage` | [`antizapret-config.md`](antizapret-config.md) |
 | `/protocols/openvpn` | `OpenVpnPanelPage` | [`antizapret-config.md`](antizapret-config.md#openvpn-профили-логи-и-состояние-установки) |
@@ -172,7 +172,7 @@
 | `/` | `DashboardPage` | — | [konfiguracii](konfiguracii.md) | VPN-клиенты, карточки конфигов |
 | `/users` | `UsersPage` (вкладки **Абоненты** / **Портал и коды**) | `user_provisioning`; вкладка портала — `client_portal` / `unlock_codes` | [podpiska](podpiska.md) | Абоненты VPN, заявки, сроки, портал и unlock-коды |
 | `/messages` | `MessagesPage` | `user_messaging` | — | Чат абонент ↔ администратор |
-| `/monitoring` | `MonitoringPage` (вкладки; `?tab=connections\|services\|traffic\|resources\|logs`, ресурсы — `?scope=node\|panel\|host`, журналы — `?log=…`) | `anyOf(logs_dashboard, traffic_sync, server_monitor, action_logs)` | [noc-monitoring](noc-monitoring.md), [traffic-monitoring](traffic-monitoring.md), [logs](logs.md), [server-monitor](server-monitor.md) | Подключения, службы, трафик, ресурсы, журналы |
+| `/monitoring` | `MonitoringPage` (вкладки; `?tab=connections\|services\|traffic\|resources\|logs`, ресурсы — `?scope=node\|panel\|host`, журналы — `?log=…`) | `anyOf(logs_dashboard, traffic_sync, server_monitor, action_logs)` | [monitoring](monitoring.md), [traffic-monitoring](traffic-monitoring.md), [logs](logs.md), [server-monitor](server-monitor.md) | Подключения, службы, трафик, ресурсы, журналы |
 | `/traffic` | редирект → `/monitoring?tab=traffic` (query переносится) | — | [traffic-monitoring](traffic-monitoring.md) | Старый URL |
 | `/logs` | редирект → `/monitoring?tab=logs` (`?tab=` → `?log=`) | — | [logs](logs.md) | Старый URL |
 | `/server-monitor` | редирект → `/monitoring?tab=resources&scope=host` | — | [server-monitor](server-monitor.md) | Старый URL |

@@ -11,6 +11,7 @@
 | `.cursor/rules/lean-code.mdc` | проверки только на границах доверия |
 | `.cursor/rules/use-skills.mdc` | маршрутизация скиллов, режимы, запреты |
 | `.cursor/rules/release-train-branching.mdc` | ветки `release/X.Y.Z` |
+| `.cursor/rules/architecture-adr.mdc` | слои, границы, точки связности и известный долг |
 
 Скиллы — `.cursor/skills/`, маршрутизация — раздел «Скиллы» ниже.
 
@@ -125,7 +126,7 @@ Cursor режимов не знает: он видит весь `.cursor/skills`
 
 - сначала `mcp__codebase_memory__*`: `search_graph` (символ), `trace_path` (кто вызывает),
   `get_code_snippet` (исходник), `get_architecture` (слои и точки связности);
-- карта проекта и известный долг — [`docs/ADR-001-architecture.md`](docs/ADR-001-architecture.md);
+- карта проекта и известный долг — `.cursor/rules/architecture-adr.mdc`;
 - `rg`/`bat -r`/`read` — только если граф не ответил или файл вне индекса (`deploy/`,
   частично `types.ts`, `pytest.ini`, SQL-фикстуры, YAML и доки);
 - файл целиком не читать, если хватает `get_code_snippet` или диапазона строк;
