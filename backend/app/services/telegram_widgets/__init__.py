@@ -7,6 +7,7 @@ from app.services.telegram_widgets.access_request import (
 )
 from app.services.telegram_widgets.dispatch import handle_widget_query
 from app.services.telegram_widgets.hub import send_hub
+from app.services.telegram_widgets.portal import send_portal_card
 
 __all__ = [
     "handle_widget_query",
@@ -14,4 +15,5 @@ __all__ = [
     "refresh_access_request_cards_sync",
     "send_access_request_card",
     "send_hub",
+    "send_portal_card",
 ]

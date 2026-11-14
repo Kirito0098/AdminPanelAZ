@@ -79,6 +79,49 @@ def test_restore_backup_for_ha_replica_skips_client_sh_7(tmp_path, monkeypatch):
     assert result.get("ha_replica") is True
 
 
+def test_restore_backup_for_ha_replica_prunes_stale_provider_config(tmp_path, monkeypatch):
+    install_dir = tmp_path / "antizapret"
+    replica_config = install_dir / "config"
+    replica_config.mkdir(parents=True)
+    for name in ("AP-akamai-include-ips.txt", "AP-digitalocean-include-ips.txt"):
+        (replica_config / name).write_text("10.0.0.0/8\n", encoding="utf-8")
+    (replica_config / "include-hosts.txt").write_text("old\n", encoding="utf-8")
+    (replica_config / "custom-ips.txt").write_text("1.1.1.0/24\n", encoding="utf-8")
+    (replica_config / "warper-include-ips.txt").write_text("2.2.2.0/24\n", encoding="utf-8")
+
+    payload = tmp_path / "payload"
+    (payload / "easyrsa3" / "pki").mkdir(parents=True)
+    (payload / "easyrsa3" / "pki" / "index.txt").write_text("V", encoding="utf-8")
+    (payload / "config").mkdir()
+    (payload / "config" / "AP-cloudflare-include-ips.txt").write_text("3.3.3.0/24\n", encoding="utf-8")
+    (payload / "config" / "include-hosts.txt").write_text("new\n", encoding="utf-8")
+    archive = tmp_path / "backup.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(payload / "easyrsa3", arcname="easyrsa3")
+        tar.add(payload / "config", arcname="config")
+
+    monkeypatch.setattr("app.services.antizapret_backup._HA_EASYRSA3_ROOT", tmp_path / "dst_easyrsa3")
+    monkeypatch.setattr("app.services.antizapret_backup._HA_WIREGUARD_DIR", tmp_path / "dst_wg")
+    monkeypatch.setattr(
+        "app.services.wg_runtime.WG_CONFIG_FILES",
+        {"antizapret": tmp_path / "dst_wg" / "antizapret.conf"},
+    )
+    service = AntizapretBackupService(install_dir=install_dir, timeout_seconds=30)
+    monkeypatch.setattr(service, "_run_doall_sh", lambda: "")
+
+    service.restore_backup_for_ha_replica(archive)
+
+    assert not (replica_config / "AP-akamai-include-ips.txt").exists()
+    assert not (replica_config / "AP-digitalocean-include-ips.txt").exists()
+    assert (replica_config / "AP-cloudflare-include-ips.txt").read_text(encoding="utf-8") == "3.3.3.0/24\n"
+    assert (replica_config / "include-hosts.txt").read_text(encoding="utf-8") == "new\n"
+    assert (replica_config / "custom-ips.txt").read_text(encoding="utf-8") == "1.1.1.0/24\n"
+    assert (replica_config / "warper-include-ips.txt").read_text(encoding="utf-8") == "2.2.2.0/24\n"
+    banned = replica_config / "banned_clients"
+    assert banned.is_file()
+    assert banned.read_text(encoding="utf-8") == ""
+
+
 def test_extract_archive_uses_temp_dir_not_root(tmp_path, monkeypatch):
     archive = tmp_path / "backup.tar.gz"
     payload = b"V\n"

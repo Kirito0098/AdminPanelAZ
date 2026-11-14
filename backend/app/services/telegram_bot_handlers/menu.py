@@ -57,6 +57,9 @@ def _menu_button_label(action: str) -> str:
         "unlock": i18n.BTN_MENU_UNLOCK_CODES,
         "redeem_unlock": i18n.BTN_REDEEM_UNLOCK,
         "request_more_config": i18n.BTN_REQUEST_MORE_CONFIG,
+        "portal": "Портал",
+        "admin_chat": "Написать администратору",
+        "pay_request": "Оплатить (чек)",
     }[action]
 
 
@@ -89,6 +92,11 @@ def _more_menu_row_actions(ctx: BotContext) -> list[list[str]]:
     if _action_visible(ctx, "redeem_unlock"):
         rows.append(["redeem_unlock"])
     rows.append(["request_more_config"])
+    rows.append(["portal"])
+    if _user_messaging_enabled():
+        rows.append(["admin_chat"])
+    if _accept_requests(ctx.db):
+        rows.append(["pay_request"])
     rows.append(["help"])
     return rows
 
@@ -214,6 +222,10 @@ async def _dispatch_action(ctx: BotContext, action: str, *, message_id: int | No
         from app.services.telegram_bot_handlers.chat import handle_admin_chat
 
         await handle_admin_chat(ctx)
+    elif action == "portal":
+        from app.services.telegram_bot_handlers.portal import handle_portal
+
+        await handle_portal(ctx)
     elif action == "chat_stop":
         from app.services.telegram_bot_handlers.chat import handle_chat_stop
 

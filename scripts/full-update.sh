@@ -218,6 +218,13 @@ fu_step_apt() {
   fu_row apt ошибка "не доустановлено: ${missing[*]}"
 }
 
+fu_sync_scenario_db() {
+  # install.sh пишет scenario только в .env: без AppSetting панель покажет «Кастомный», grace = 0.
+  [[ -x "$VENV_PATH/bin/python" && -f "$INSTALL_DIR/scripts/sync-scenario-db.py" ]] || return 0
+  "$VENV_PATH/bin/python" "$INSTALL_DIR/scripts/sync-scenario-db.py" \
+    || ui_warn "Сценарий не синхронизирован с БД — grace-период останется прежним"
+}
+
 fu_step_pip() {
   local pip="$VENV_PATH/bin/pip"
   if [[ ! -x "$pip" ]]; then
@@ -229,6 +236,7 @@ fu_step_pip() {
   "$pip" install -q -r "$INSTALL_DIR/backend/requirements.txt"
   # Каталог локальной GeoIP (docs/GeoIP.md): mmdb кладут руками, но mkdir делает обновление.
   mkdir -p "$INSTALL_DIR/backend/data/geoip"
+  fu_sync_scenario_db
   ui_ok "Python-зависимости обновлены"
   fu_row pip ok
 }
@@ -339,9 +347,15 @@ fu_step_nginx() {
     fu_row nginx пропущен "нет своего vhost в $(nginx_sites_available_dir) — nginx не менялся"
     return 0
   fi
+  # Как nginx_install_site на свежей установке: vhost ссылается на log_format и длинные
+  # server_name, снипеты должны лежать в conf.d до nginx -t — иначе «unknown log format».
+  nginx_ensure_server_names_hash
+  nginx_ensure_privacy_log
   for i in "${!files[@]}"; do
     if ! confs[i]="$(fu_nginx_render "${kinds[i]}" "${hosts[i]}" "${files[i]}")"; then
       nginx_install_txn_rollback
+      nginx_rollback_server_names_hash
+      nginx_rollback_privacy_log
       ui_fail "Не удалось собрать vhost ${hosts[i]} — nginx не менялся"
       fu_row nginx ошибка "не удалось собрать vhost ${hosts[i]} — nginx не менялся"
       return 1
@@ -357,6 +371,8 @@ fu_step_nginx() {
   done
   if err="$(nginx -t 2>&1)"; then
     nginx_install_txn_commit
+    nginx_cleanup_server_names_hash_bak
+    nginx_cleanup_privacy_log_bak
     if ! systemctl reload nginx; then
       ui_fail "systemctl reload nginx не прошёл"
       fu_row nginx ошибка "конфиг обновлён, но systemctl reload nginx не прошёл"
@@ -371,6 +387,8 @@ fu_step_nginx() {
     cp -a -- "$file.bak-$stamp" "$file"
   done
   nginx_install_txn_rollback
+  nginx_rollback_server_names_hash
+  nginx_rollback_privacy_log
   if ! nginx -t >/dev/null 2>&1; then
     ui_warn "nginx -t не проходит и со старым конфигом — проверьте: sudo nginx -t"
   fi
@@ -552,6 +570,7 @@ full_update_apply() {
 
 # Веб: то, что обновление из панели не делает. Код, сборку и перезапуск панель уже выполнила сама.
 full_update_server_only() {
+  fu_sync_scenario_db
   fu_run apt fu_step_apt
   fu_run systemd fu_step_systemd
   fu_run nginx fu_step_nginx

@@ -62,7 +62,7 @@ git_url="${INSTALL_FROM_GIT}"
 target="${INSTALL_TARGET}"
 mkdir -p "$(dirname "$target")"
 if [[ -d "$target/.git" ]]; then
-  git -C "$target" pull --ff-only || true
+  git -C "$target" -c core.fileMode=false pull --ff-only || true
 elif [[ -d "$target" ]]; then
   echo "[install] ОШИБКА: $target существует, но это не git-репозиторий AdminPanelAZ" >&2
   exit 1
@@ -79,7 +79,7 @@ BOOTSTRAP
   mkdir -p "$(dirname "$target")"
   if [[ -d "$target/.git" ]]; then
     echo "[install] Репозиторий уже существует, обновление (git pull)..."
-    git -C "$target" pull --ff-only || echo "[install] ВНИМАНИЕ: git pull не удался, используем существующую копию" >&2
+    git -C "$target" -c core.fileMode=false pull --ff-only || echo "[install] ВНИМАНИЕ: git pull не удался, используем существующую копию" >&2
   elif [[ -d "$target" ]]; then
     echo "[install] ОШИБКА: $target существует, но это не git-репозиторий AdminPanelAZ" >&2
     exit 1
@@ -979,7 +979,7 @@ resolve_project_dir() {
     mkdir -p "$(dirname "$INSTALL_TARGET")"
     if [[ -d "$INSTALL_TARGET/.git" ]]; then
       log "Репозиторий уже существует, обновление (git pull)..."
-      git -C "$INSTALL_TARGET" pull --ff-only || warn "git pull не удался, используем существующую копию"
+      git -C "$INSTALL_TARGET" -c core.fileMode=false pull --ff-only || warn "git pull не удался, используем существующую копию"
     elif [[ -d "$INSTALL_TARGET" ]]; then
       die "Каталог $INSTALL_TARGET существует, но это не git-репозиторий AdminPanelAZ"
     else
@@ -1552,6 +1552,20 @@ seed_wizard_db_settings() {
     WIZ_AUTO_BACKUP_DAYS="${WIZ_AUTO_BACKUP_DAYS:-7}" \
       "$VENV_DIR/bin/python" "$ROOT_DIR/scripts/seed-wizard-db.py"
   ) || warn "Не удалось записать настройки в БД"
+}
+
+# scenario preset пишется только в .env; без AppSetting панель показывает «Кастомный», grace = 0.
+sync_scenario_db_settings() {
+  local script="$ROOT_DIR/scripts/sync-scenario-db.py"
+  if ! install_controller_selected || [[ ! -f "$script" ]]; then
+    return 0
+  fi
+  if [[ ! -x "$VENV_DIR/bin/python" ]]; then
+    return 0
+  fi
+  log "Синхронизация сценария с БД (grace-период неактивных)..."
+  (cd "$BACKEND_DIR" && "$VENV_DIR/bin/python" "$script") \
+    || warn "Не удалось синхронизировать сценарий с БД — примените пресет из настроек"
 }
 
 setup_frontend() {
@@ -2251,6 +2265,7 @@ run_install_flow() {
   setup_backend
   seed_admin_user_from_env
   seed_wizard_db_settings
+  sync_scenario_db_settings
   setup_frontend
   setup_runtime_dirs
 

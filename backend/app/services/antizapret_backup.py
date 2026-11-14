@@ -122,6 +122,7 @@ class AntizapretBackupService:
                 raise RuntimeError("Архив primary не содержит easyrsa3 — реплика не изменена")
             with stashed(ha_vpn_crypto_paths(install_dir=self.install_dir)):
                 self._copy_extracted_payload(extract_root)
+                self._prune_ha_replica_config(extract_root / "config")
         finally:
             self._cleanup_extract_artifacts(extract_root, archive.name)
 
@@ -222,6 +223,24 @@ class AntizapretBackupService:
         for item in src.iterdir():
             if item.is_file():
                 shutil.copy2(item, dst / item.name)
+
+    def _prune_ha_replica_config(self, primary_config_dir: Path) -> None:
+        """Make replica config match the primary's provider files and banned_clients.
+
+        A reused replica may keep provider include files from an older panel; Verify counts
+        them as drift, so drop ``AP-*-include-ips.txt`` files the primary does not have.
+        Everything else in config/ is left untouched.
+        """
+        replica_config = self.install_dir / "config"
+        replica_config.mkdir(parents=True, exist_ok=True)
+        if primary_config_dir.is_dir():
+            primary_names = {item.name for item in primary_config_dir.iterdir() if item.is_file()}
+            for path in replica_config.glob("AP-*-include-ips.txt"):
+                if path.is_file() and path.name not in primary_names:
+                    path.unlink(missing_ok=True)
+        banned = replica_config / "banned_clients"
+        if not banned.exists():
+            banned.touch()
 
     def _cleanup_extract_artifacts(self, extract_root: Path, archive_name: str) -> None:
         resolved = extract_root.resolve()

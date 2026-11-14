@@ -28,6 +28,11 @@ setup_repos() {
   git_identity "$TMP/dev"
   mkdir -p "$TMP/dev/scripts"
   printf '#!/usr/bin/env bash\necho "after $*" >>"$AFTER_LOG"\n' >"$TMP/dev/scripts/adminpanel-menu.sh"
+  # Как в 2.26.5: эти файлы лежат в git с режимом 100644 (install.sh делает их +x в рабочей копии).
+  local f
+  for f in console-command.sh lib-agent-key.sh update-preview.sh test-nginx-repair-health-check.sh; do
+    printf '#!/usr/bin/env bash\ntrue\n' >"$TMP/dev/scripts/$f"
+  done
   echo base >"$TMP/dev/version"
   git_q -C "$TMP/dev" add -A
   git_q -C "$TMP/dev" commit -m base
@@ -305,6 +310,41 @@ set -e
 [[ "$rc" == 0 ]] || fail "меню завершилось после отказа ($rc)"
 grep -q "detached HEAD" "$TMP/out" || fail "нет объяснения отказа"
 grep -q "menu alive" "$TMP/out" || fail "меню не продолжило работу"
+echo "  OK"
+
+echo "[test] 2.26.5: chmod +x файлов, которые в git 644, не мешает fast-forward"
+setup_repos
+exec_files=(scripts/console-command.sh scripts/lib-agent-key.sh scripts/update-preview.sh scripts/test-nginx-repair-health-check.sh)
+for f in "${exec_files[@]}"; do
+  chmod +x "$TMP/install/$f"
+done
+git_q -C "$TMP/dev" update-index --chmod=+x "${exec_files[@]}"
+git_q -C "$TMP/dev" commit -m "make scripts executable"
+git_q -C "$TMP/dev" push origin HEAD:main
+run_update_rc --update
+[[ "$rc" == 0 ]] || fail "обновление с chmod-изменениями завершилось ошибкой ($rc)"
+[[ "$(rev "$TMP/install" HEAD)" == "$(rev "$TMP/origin.git" main)" ]] || fail "main не на вершине origin/main"
+[[ "$(cat "$AFTER_LOG")" == "after --after-pull" ]] || fail "шаги после обновления не запущены"
+for f in "${exec_files[@]}"; do
+  [[ "$(git -C "$TMP/install" ls-files -s "$f" | awk '{print $1}')" == 100755 ]] || fail "$f: в индексе не 100755"
+  [[ -x "$TMP/install/$f" ]] || fail "$f: файл не исполняемый"
+done
+echo "  OK"
+
+echo "[test] 2.26.5: chmod вместе с реальной правкой содержимого — отказ, правка сохранена"
+setup_repos
+edit_file=scripts/lib-agent-key.sh
+chmod +x "$TMP/install/$edit_file"
+echo "local edit" >>"$TMP/install/$edit_file"
+git_q -C "$TMP/dev" update-index --chmod=+x "$edit_file"
+git_q -C "$TMP/dev" commit -m "make script executable"
+git_q -C "$TMP/dev" push origin HEAD:main
+before="$(rev "$TMP/install" HEAD)"
+run_update_rc --update
+[[ "$rc" != 0 ]] || fail "обновление с локальной правкой содержимого прошло без ошибки"
+[[ "$(rev "$TMP/install" HEAD)" == "$before" ]] || fail "HEAD изменился"
+grep -q "local edit" "$TMP/install/$edit_file" || fail "локальная правка потеряна"
+grep -qF "локальные изменения" "$TMP/out" || fail "нет объяснения про локальные изменения"
 echo "  OK"
 
 echo "All menu branch update checks passed."

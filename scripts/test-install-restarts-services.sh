@@ -32,7 +32,7 @@ run_flow() {
     install_proxy_selected() { return 0; }
     for fn in install_set_step check_os resolve_project_dir run_wizard_if_needed check_antizapret \
       install_preflight_ports install_system_deps ensure_executable_scripts setup_env setup_node_env \
-      setup_proxy_env setup_backend seed_admin_user_from_env seed_wizard_db_settings setup_frontend \
+      setup_proxy_env setup_backend seed_admin_user_from_env seed_wizard_db_settings sync_scenario_db_settings setup_frontend \
       setup_runtime_dirs setup_systemd setup_ddns_if_selected disable_openvpn_backup_tcp_if_port_conflict \
       setup_nginx_if_selected setup_firewall_if_selected \
       setup_node_agent_systemd setup_proxy_agent_systemd verify_controller_running setup_console_command print_post_install; do

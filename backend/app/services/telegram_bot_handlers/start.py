@@ -3,8 +3,8 @@ from __future__ import annotations
 from html import escape
 
 from app.services.telegram_api import send_message
-from app.services.telegram_bot_handlers.base import BotContext
-from app.services.telegram_bot_handlers.menu import build_reply_keyboard
+from app.services.telegram_bot_handlers.base import BotContext, inline_button
+from app.services.telegram_bot_handlers.menu import build_more_inline_menu, build_reply_keyboard
 from app.services.telegram_bot_handlers import settings_fsm
 from app.services.telegram_bot_handlers.ui import role_label
 from app.services import telegram_bot_i18n as i18n
@@ -67,4 +67,17 @@ async def handle_start(ctx: BotContext, *, payload: str | None = None) -> None:
         ctx.chat_id,
         text,
         reply_markup=build_reply_keyboard(ctx),
+    )
+    # Виджеты недоступны (например, INPUT_MEDIA_WIDGET_NOT_ALLOWED) — не теряем
+    # действия, которые переехали в hub: показываем их inline-меню.
+    fallback_menu = build_more_inline_menu(ctx)
+    if ctx.mini_app_url:
+        fallback_menu["inline_keyboard"].append(
+            [inline_button("Открыть Mini App", web_app_url=ctx.mini_app_url)]
+        )
+    await send_message(
+        ctx.bot_token,
+        ctx.chat_id,
+        i18n.MENU_MORE_TITLE,
+        reply_markup=fallback_menu,
     )

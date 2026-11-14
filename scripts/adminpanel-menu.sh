@@ -705,9 +705,12 @@ panel_update() {
 
   ui_info "Найдены обновления в $ref (отставание: $behind). git merge --ff-only $ref…"
   local merge_out status_out unpushed
-  if ! merge_out="$(git -C "$INSTALL_DIR" merge --ff-only "$ref" 2>&1)"; then
+  # 2.26.5: install.sh делает chmod +x файлам, которые в git лежат 644, — дерево «грязное» только
+  # режимами, и обычный ff упирается в «local changes would be overwritten». Один merge без учёта
+  # режимов пропускает такую копию; реальные правки содержимого по-прежнему дают отказ ниже.
+  if ! merge_out="$(git -C "$INSTALL_DIR" -c core.fileMode=false merge --ff-only "$ref" 2>&1)"; then
     # После force-push на origin история расходится при чистом дереве: сброс только на upstream той же ветки.
-    if ! status_out="$(git -C "$INSTALL_DIR" status --porcelain 2>/dev/null)" || [[ -n "$status_out" ]]; then
+    if ! status_out="$(git -C "$INSTALL_DIR" -c core.fileMode=false status --porcelain 2>/dev/null)" || [[ -n "$status_out" ]]; then
       [[ -n "$merge_out" ]] && printf '%s\n' "$merge_out" >&2
       ui_fail "Обновление не удалось: история расходится с $ref или есть локальные изменения — обновите вручную"
       return 1

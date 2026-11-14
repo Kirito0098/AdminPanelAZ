@@ -5,13 +5,14 @@ from __future__ import annotations
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Optional
-
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING, Optional
 
 from app.services.env_file import EnvFileService
 from app.services.protocols import protocol_module_label
 from app.services.shared_helpers import parse_bool as _parse_bool
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 RESOURCE_IMPACT_LEVELS = {
     "minimal": {"label": "минимальная"},
@@ -1449,6 +1450,29 @@ class FeatureToggleService:
             "toggles": self.list_toggles(),
             "presets": self.list_scenario_presets(db),
         }
+
+    def ensure_scenario_grace_setting(self, db: Session) -> bool:
+        """Create the scenario grace AppSetting left unwritten by install/CLI.
+
+        ``apply_scenario_preset`` writes it only with ``db`` (API path); install and
+        update scripts only touch ``.env``, so before this the UI shows «Кастомный»
+        and the grace worker reads 0. An existing AppSetting is an explicit admin
+        choice and is never overwritten.
+        """
+        if not self.env.env_key_defined_in_file("SCENARIO_PRESET"):
+            return False
+        meta = SCENARIO_PRESETS.get(self.get_scenario_preset())
+        if meta is None:
+            return False
+        from app.models import AppSetting
+        from app.services.user_grace import SETTING_GRACE_MONTHS, set_grace_months
+
+        if db.query(AppSetting).filter(AppSetting.key == SETTING_GRACE_MONTHS).first() is not None:
+            return False
+        grace_months = int(meta["settings"]["inactive_user_grace_period_months"])
+        set_grace_months(db, grace_months)
+        db.commit()
+        return True
 
     def resolve_scenario_state(self, db: Session | None = None) -> dict:
         """Current scenario or the computed «Кастомный» state.

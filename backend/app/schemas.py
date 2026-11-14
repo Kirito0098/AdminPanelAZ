@@ -1,3 +1,4 @@
+import json
 import re
 from datetime import datetime
 from typing import Any, Literal
@@ -1961,6 +1962,18 @@ class PresetResponse(PresetBase):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("node_ids", "protocols", mode="before")
+    @classmethod
+    def _parse_json_list(cls, value: Any) -> Any:
+        """ORM stores these as JSON strings; the API contract is a list."""
+        if isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except ValueError:
+                return []
+            return parsed if isinstance(parsed, list) else []
+        return value
 
 
 class AccessRequestResponse(BaseModel):
