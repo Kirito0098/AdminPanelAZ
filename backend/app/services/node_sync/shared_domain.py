@@ -24,6 +24,7 @@ from typing import Any, Callable
 from sqlalchemy.orm import Session
 
 from app.models import Node, NodeSyncGroup, SyncStatus
+from app.services.cidr.apply_pipeline import apply_key_for_adapter, apply_slot
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.group_status import fail_group_on_error
 from app.services.node_sync.groups import (
@@ -166,8 +167,9 @@ def apply_shared_domain_to_members(
             progress(percent, f"{node.name}: doall.sh + client.sh 7…")
             try:
                 adapter = get_adapter_for_node(node)
-                doall_output = adapter.apply_config_changes()
-                recreate_output = adapter.recreate_profiles()
+                with apply_slot(node_key=apply_key_for_adapter(adapter)):
+                    doall_output = adapter.apply_config_changes()
+                    recreate_output = adapter.recreate_profiles()
                 hosts = parse_hosts_json(node.openvpn_remote_hosts)
                 if is_primary:
                     primary_adapter = adapter

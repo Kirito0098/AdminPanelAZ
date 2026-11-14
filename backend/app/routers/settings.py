@@ -28,7 +28,7 @@ from app.services.admin_notify import admin_notify_service
 from app.services.env_file import EnvFileService
 from app.services.file_editor import EDITABLE_FILES
 from app.services.node_manager import get_active_adapter, get_active_node, get_node_antizapret_path
-from app.services.background_tasks import background_task_service
+from app.services.background_tasks import assert_heavy_apply_idle, background_task_service
 from app.services.config_apply_queue import enqueue_doall_and_replicate, enqueue_recreate_profiles
 from app.services.node_sync.groups import require_ha_primary_for_config_ops
 from app.services.noc_schedule import parse_cron_dow, parse_hhmm
@@ -236,6 +236,7 @@ def recreate_profiles(
     admin: User = Depends(require_admin),
 ):
     require_ha_primary_for_config_ops(db)
+    assert_heavy_apply_idle(db)
     node = get_active_node(db)
     task = enqueue_recreate_profiles(node_id=node.id, created_by_username=admin.username)
     admin_notify_service.send_settings_change(

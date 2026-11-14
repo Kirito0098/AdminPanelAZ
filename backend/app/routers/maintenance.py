@@ -9,7 +9,7 @@ from app.database import get_db
 from app.models import User
 from app.schemas import GeoIpStatusResponse, MessageResponse, ServiceRestartRequest
 from app.services.admin_notify import admin_notify_service
-from app.services.background_tasks import background_task_service
+from app.services.background_tasks import assert_heavy_apply_idle, background_task_service
 from app.services.node_manager import get_active_adapter, get_active_node
 from app.services.notify_time import get_client_timezone_from_request
 from app.services.profile_delivery import load_node_remote_hosts
@@ -51,6 +51,7 @@ def run_doall(
                 "active_task_id": active.id,
             },
         )
+    assert_heavy_apply_idle(db)
 
     client_timezone = get_client_timezone_from_request(request)
 

@@ -17,6 +17,7 @@ from app.database import get_db
 from app.schemas import CidrDbScheduleResponse, CidrDbScheduleUpdate, RouteBudgetInfo
 from app.services.action_log import log_action
 from app.services.admin_notify import admin_notify_service
+from app.services.background_tasks import assert_heavy_apply_idle
 from app.services.cidr.cidr_scheduler import compute_next_run_at, get_last_cron_run_at
 from app.services.cidr.cidr_tasks import (
     CIDR_TASK_CANCELLED_MESSAGE,
@@ -415,6 +416,11 @@ def cidr_db_generate(
 
         start_cidr_task(task_id, _estimate_runner)
         return {"success": True, "queued": True, "task_id": task_id, "message": "Dry-run генерации из БД запущен"}
+
+    # The compile is long and its apply step would fail on a busy node: reject
+    # before the task exists instead of failing after a 10-minute compile.
+    if payload.apply_after:
+        assert_heavy_apply_idle(db)
 
     task_id, active = start_pipeline_task("cidr_generate_from_db", "Генерация CIDR-файлов из БД запущена")
     if active:

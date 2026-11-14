@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.database import SessionLocal
 from app.models import BackgroundTask, Node
-from app.services.background_tasks import background_task_service
+from app.services.background_tasks import background_task_service, find_active_heavy_apply_task
+from app.services.cidr.apply_pipeline import apply_key_for_adapter, apply_slot
 from app.services.node_manager import get_adapter_for_node
 from app.services.node_sync.config_sync import maybe_replicate_config_files
 from app.services.node_sync.groups import find_sync_group_for_primary, get_replica_nodes
@@ -41,6 +42,24 @@ def enqueue_doall_and_replicate(
     captured_replicate = bool(run_replicate)
     captured_node_id = int(node_id)
 
+    # Files are already on disk, so a second doall is not queued behind a running
+    # heavy apply (it would only fail on the apply slot); HA replication still runs.
+    skipped_doall: str | None = None
+    if captured_doall:
+        check_db = SessionLocal()
+        try:
+            active = find_active_heavy_apply_task(check_db, node_id=captured_node_id)
+        finally:
+            check_db.close()
+        if active is not None:
+            skipped_doall = active.task_type
+            captured_doall = False
+            logger.warning(
+                "config_apply: %s is running, doall skipped for node %s",
+                skipped_doall,
+                captured_node_id,
+            )
+
     def _callable(progress_updater=None) -> dict[str, Any]:
         db = SessionLocal()
         try:
@@ -48,7 +67,9 @@ def enqueue_doall_and_replicate(
             if node is None:
                 raise RuntimeError(f"Узел {captured_node_id} не найден")
             adapter = get_adapter_for_node(node)
-            output = ""
+            output = (
+                f"doall пропущен: уже выполняется {skipped_doall}" if skipped_doall else ""
+            )
             if captured_doall:
                 if progress_updater:
                     progress_updater(15, f"{node.name}: doall.sh…")
@@ -101,10 +122,11 @@ def enqueue_recreate_profiles(
             if progress_updater:
                 progress_updater(20, f"{node.name}: client.sh 7…")
             adapter = get_adapter_for_node(node)
-            result = recreate_openvpn_profiles(
-                adapter,
-                hosts=load_node_remote_hosts(db, captured_node_id),
-            )
+            with apply_slot(node_key=apply_key_for_adapter(adapter)):
+                result = recreate_openvpn_profiles(
+                    adapter,
+                    hosts=load_node_remote_hosts(db, captured_node_id),
+                )
             if not result.success:
                 raise RuntimeError(
                     result.errors[0] if result.errors else "Ошибка пересоздания профилей"

@@ -67,6 +67,18 @@ _PIPELINE_TASK_TYPES = {
     "ha_awg2_sync",
 }
 
+# Tasks that rewrite config/, result/ and iptables on a node: two of them on one
+# host race each other, so only one may be queued/running at a time.
+HEAVY_APPLY_TASK_TYPES = frozenset(
+    {
+        "run_doall",
+        "routing_apply",
+        "routing_apply_replica",
+        "config_apply",
+        "recreate_profiles",
+    }
+)
+
 _TASK_START_PROGRESS: dict[str, tuple[str, str, int]] = {
     "run_doall": ("AntiZapret: применение изменений…", "AntiZapret: запуск doall.sh…", 5),
     "routing_apply": ("Применение маршрутизации…", "Синхронизация провайдеров…", 5),
@@ -1065,6 +1077,56 @@ class BackgroundTaskService:
             }
         )
         return payload
+
+
+def _subject_node_id(subject_key: str | None) -> int | None:
+    """Node id from a ``node:<id>:<scope>`` subject key; None when not pinned."""
+    parts = (subject_key or "").split(":")
+    if len(parts) >= 2 and parts[0] == "node":
+        try:
+            return int(parts[1])
+        except ValueError:
+            return None
+    return None
+
+
+def find_active_heavy_apply_task(
+    db: Session,
+    *,
+    node_id: int | None = None,
+) -> BackgroundTask | None:
+    """Unfinished heavy apply task, newest first.
+
+    ``node_id`` only narrows node-pinned tasks (``config_apply``,
+    ``recreate_profiles``): a task without a node in its subject key may act on
+    any node and therefore conflicts with every node.
+    """
+    active = list(
+        db.query(BackgroundTask)
+        .filter(
+            BackgroundTask.task_type.in_(HEAVY_APPLY_TASK_TYPES),
+            BackgroundTask.status.in_(["queued", "running"]),
+        )
+        .order_by(BackgroundTask.created_at.desc())
+        .all()
+    )
+    for task in active:
+        if node_id is None:
+            return task
+        pinned = _subject_node_id(task.subject_key)
+        if pinned is None or pinned == node_id:
+            return task
+    return None
+
+
+def assert_heavy_apply_idle(db: Session, *, node_id: int | None = None) -> None:
+    """Reject a second heavy apply with 409 while another one is unfinished."""
+    active = find_active_heavy_apply_task(db, node_id=node_id)
+    if active is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Применение уже выполняется: {active.task_type}",
+        )
 
 
 background_task_service = BackgroundTaskService()

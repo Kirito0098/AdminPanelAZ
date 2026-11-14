@@ -29,7 +29,11 @@ from app.services.antizapret_settings import (
     openvpn_backup_tcp_conflict_warnings,
     setting_write_mismatch_warnings,
 )
-from app.services.background_tasks import background_task_service
+from app.services.background_tasks import (
+    assert_heavy_apply_idle,
+    background_task_service,
+    find_active_heavy_apply_task,
+)
 from app.services.cidr.pipeline.db_service import CidrDbUpdaterService
 from app.services.cidr.pipeline.provider_sources import CUSTOM_PROVIDER_KEY
 from app.services.env_file import EnvFileService
@@ -60,6 +64,9 @@ def _enqueue_routing_apply_tasks(
 
     # Pin the node: activating another node in a parallel tab must not redirect this task.
     node_id = get_active_node(db).id
+    if find_active_heavy_apply_task(db, node_id=node_id):
+        logger.info("routing apply skipped: another heavy apply is running")
+        return None
 
     def _callable(progress_updater=None):
         from app.database import SessionLocal
@@ -443,6 +450,7 @@ def apply_routing(admin: User = Depends(require_admin), db: Session = Depends(ge
                 "active_task_id": active.id,
             },
         )
+    assert_heavy_apply_idle(db)
 
     task = _enqueue_routing_apply_tasks(db, created_by_username=admin.username)
     if task is None:
