@@ -212,6 +212,21 @@ def run_leader_startup_actions() -> None:
     except Exception:
         logger.exception("Failed to migrate RESOURCE_PROFILE label to SCENARIO_PRESET on startup")
     try:
+        from app.database import SessionLocal
+        from app.services.feature_guards import get_feature_service
+
+        # Update from 2.26.5 migrates RESOURCE_PROFILE -> SCENARIO_PRESET on startup; the
+        # install/update pip step runs before that and cannot create the grace AppSetting.
+        # Do it after the label migration so the UI shows the chosen scenario, not "custom".
+        startup_db = SessionLocal()
+        try:
+            if get_feature_service().ensure_scenario_grace_setting(startup_db):
+                logger.info("Scenario grace setting created on startup")
+        finally:
+            startup_db.close()
+    except Exception:
+        logger.exception("Failed to sync scenario grace setting on startup")
+    try:
         ip_restriction_service.sync_firewall()
     except Exception:
         logger.exception("Failed to sync IP restriction firewall on startup")
