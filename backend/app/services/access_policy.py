@@ -39,6 +39,7 @@ from app.services.traffic_limit import (
     TRAFFIC_LIMIT_PERIOD_DAYS_ALLOWED,
     TrafficLimitExceededError,
     get_client_consumed_traffic_bytes,
+    get_client_traffic_by_protocol,
     human_bytes,
     resolve_traffic_limit_state,
 )
@@ -284,6 +285,26 @@ class AccessPolicyService:
         if "traffic_consumed_tcp_bytes" in traffic_state:
             fields["traffic_consumed_tcp_human"] = human_bytes(traffic_state.get("traffic_consumed_tcp_bytes"))
         return fields
+
+    def _traffic_display_fields(
+        self,
+        by_protocol: dict[str, int],
+        protocols: frozenset[str],
+        period_days: int | None,
+    ) -> dict:
+        """Traffic for the card's display window (separate from limit accounting)."""
+        udp = int(by_protocol.get(OPENVPN_PROTOCOL_UDP, 0))
+        tcp = int(by_protocol.get(OPENVPN_PROTOCOL_TCP, 0))
+        total = sum(int(by_protocol.get(protocol, 0)) for protocol in protocols)
+        return {
+            "traffic_display_period_days": period_days,
+            "traffic_display_bytes": total,
+            "traffic_display_human": human_bytes(total),
+            "traffic_display_udp_bytes": udp,
+            "traffic_display_udp_human": human_bytes(udp),
+            "traffic_display_tcp_bytes": tcp,
+            "traffic_display_tcp_human": human_bytes(tcp),
+        }
 
     def read_banned_clients(self) -> set[str]:
         if self._adapter is not None:
@@ -1272,13 +1293,43 @@ class AccessPolicyService:
             })
         return self._wg_state(row)
 
-    def get_all_policies(self, client_names: list[str]) -> dict[str, dict]:
+    def get_all_policies(
+        self,
+        client_names: list[str],
+        *,
+        traffic_display_days: int | None = None,
+    ) -> dict[str, dict]:
+        if traffic_display_days is not None:
+            # Данные старше окна хранения уже удалены — не подписываем их как весь период.
+            retention = max(1, int(get_settings().traffic_sample_retention_days or 90))
+            traffic_display_days = min(int(traffic_display_days), retention)
+        display_by_client = get_client_traffic_by_protocol(
+            self.db,
+            client_names=client_names,
+            node_id=self.node_id,
+            days=traffic_display_days,
+            normalize_identity=lambda name: (name or "").strip().lower(),
+        )
         result: dict[str, dict] = {}
         for name in client_names:
+            by_protocol = display_by_client.get(name.strip().lower(), {})
             ovpn = self.get_openvpn_policy(name)
             wg = self.get_wg_policy(name)
             awg2 = self.get_awg2_policy(name)
-            result[name] = {"openvpn": ovpn, "wireguard": wg, "amneziawg2": awg2}
+            result[name] = {
+                "openvpn": {
+                    **ovpn,
+                    **self._traffic_display_fields(by_protocol, OPENVPN_PROTOCOL_ALL, traffic_display_days),
+                },
+                "wireguard": {
+                    **wg,
+                    **self._traffic_display_fields(by_protocol, WIREGUARD_PROTOCOL, traffic_display_days),
+                },
+                "amneziawg2": {
+                    **awg2,
+                    **self._traffic_display_fields(by_protocol, AMNEZIAWG2_PROTOCOL, traffic_display_days),
+                },
+            }
         return result
 
     def reconcile_all_wg_policies(

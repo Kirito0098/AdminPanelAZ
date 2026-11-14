@@ -19,10 +19,21 @@ import { Button } from '@/components/ui/button'
 import { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useHaReplicaReadonly } from '@/hooks/useHaReplicaReadonly'
+import {
+  CLIENTS_TRAFFIC_PERIOD_OPTIONS,
+  type ClientsTrafficPeriod,
+} from '@/lib/clientsTrafficPeriod'
 import {
   configMatchesTab,
   getConfigLocalIp,
@@ -73,6 +84,8 @@ interface ConfigCardsSectionProps {
   ownerCandidates?: User[]
   connectionMap?: ClientConnectionMap | null
   filesLoading?: boolean
+  trafficPeriod: ClientsTrafficPeriod
+  onTrafficPeriodChange: (period: ClientsTrafficPeriod) => void
   onRefresh: () => Promise<void>
   onDownload: (config: VpnConfig, path: string, filename: string) => Promise<void>
   onNotifySuccess: (msg: string) => void
@@ -114,6 +127,8 @@ export default function ConfigCardsSection({
   ownerCandidates = [],
   connectionMap = null,
   filesLoading = false,
+  trafficPeriod,
+  onTrafficPeriodChange,
   onRefresh,
   onDownload,
   onNotifySuccess,
@@ -476,7 +491,29 @@ export default function ConfigCardsSection({
                   : 'Клиенты не найдены'}
               </CardDescription>
             </div>
-            <div className="flex w-full items-center gap-2 lg:max-w-md">
+            <div className="flex w-full flex-wrap items-center gap-2 lg:max-w-2xl lg:flex-nowrap">
+              <div className="flex shrink-0 items-center gap-1.5">
+                <span className="hidden text-xs text-muted-foreground sm:inline">Трафик за</span>
+                <Select
+                  value={trafficPeriod}
+                  onValueChange={(value) => onTrafficPeriodChange(value as ClientsTrafficPeriod)}
+                >
+                  <SelectTrigger
+                    className="h-10 w-[7.75rem] text-xs"
+                    aria-label="Период отображения трафика"
+                    title="Период отображения трафика на карточках"
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CLIENTS_TRAFFIC_PERIOD_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="relative min-w-0 flex-1">
                 <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Input

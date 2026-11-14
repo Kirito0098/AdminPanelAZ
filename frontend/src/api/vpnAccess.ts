@@ -1,8 +1,13 @@
 import { apiFetch } from './http'
+import type { ClientsTrafficPeriod } from '../lib/clientsTrafficPeriod'
 import type { ClientPoliciesResponseEntry } from '../types'
 
-export async function getClientPolicies(clients: string) {
+export async function getClientPolicies(
+  clients: string,
+  trafficPeriod?: ClientsTrafficPeriod,
+) {
   const params = new URLSearchParams({ clients })
+  if (trafficPeriod) params.set('traffic_period', trafficPeriod)
   return apiFetch<Record<string, ClientPoliciesResponseEntry>>(
     `/client-access/policies?${params}`,
   )

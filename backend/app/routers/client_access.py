@@ -222,6 +222,7 @@ def _notify_client_ban(
 @tg_mini_token_allowed
 def list_policies(
     clients: str = "",
+    traffic_period: str = "30",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -229,10 +230,28 @@ def list_policies(
 
     Admins may query any client. Non-admins only receive policies for configs
     they own on the active node (mutations remain admin-only).
+    ``traffic_period`` is the card display window: ``1``, ``7``, ``30``, ``90``
+    days or ``all``. It never affects limit accounting.
     """
     names = [c.strip() for c in clients.split(",") if c.strip()] if clients else []
     if not names:
         return {}
+    raw_period = (traffic_period or "30").strip().lower()
+    if raw_period == "all":
+        display_days = None
+    else:
+        try:
+            display_days = int(raw_period)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Период трафика: 1, 7, 30, 90 дней или all",
+            ) from exc
+        if display_days not in (1, 7, 30, 90):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Период трафика: 1, 7, 30, 90 дней или all",
+            )
     if current_user.role != UserRole.admin:
         allowed = accessible_client_names(db, current_user, node_id=get_active_node(db).id)
         allowed_lower = {name.lower() for name in allowed}
@@ -240,7 +259,7 @@ def list_policies(
         if not names:
             return {}
     svc = _service(db)
-    return svc.get_all_policies(names)
+    return svc.get_all_policies(names, traffic_display_days=display_days)
 
 
 @router.get("/openvpn/{client_name}")

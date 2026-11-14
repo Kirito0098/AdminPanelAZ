@@ -174,7 +174,7 @@ function formatTrafficMeta(
   }
 
   const consumed = displayed.human && displayed.bytes > 0 ? displayed.human : '0 B'
-  return metaRow('traffic', Gauge, 'Трафик', `${consumed} · без лимита`, 'default')
+  return metaRow('traffic', Gauge, 'Трафик', consumed, 'default')
 }
 
 function formatBlockMeta(policy: ClientAccessPolicy | undefined): MetaRow {
@@ -702,7 +702,7 @@ export default function ConfigCard({
           )}
 
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+            <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-1.5">
               {showTraffic && (
                 <IconActionLink
                   title="Статистика трафика"
@@ -741,7 +741,7 @@ export default function ConfigCard({
             </div>
 
             {showDanger && (onBlock || onUnblock || onDelete) && (
-              <div className="flex flex-wrap items-center gap-1.5">
+              <div className="ml-auto flex flex-nowrap items-center gap-1.5">
                 {isAdmin && !isBlocked && onBlock && (
                   <IconActionButton
                     title="Заблокировать"

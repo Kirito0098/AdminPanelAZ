@@ -156,22 +156,40 @@ export function resolveDisplayedTraffic(
   if (!policy) {
     return { bytes: 0, human: null }
   }
+  // Лимит считается за свой период — его цифры не подменяем окном отображения.
+  const hasLimit = Boolean(policy.traffic_limit_human || (policy.traffic_limit_bytes ?? 0) > 0)
+  const pick = (
+    limitBytes: number | null | undefined,
+    limitHuman: string | null | undefined,
+    displayBytes: number | null | undefined,
+    displayHuman: string | null | undefined,
+  ) =>
+    hasLimit || displayBytes === undefined
+      ? { bytes: limitBytes ?? 0, human: limitHuman }
+      : { bytes: displayBytes ?? 0, human: displayHuman }
+
   if (openvpnGroup === 'GROUP_UDP') {
-    return {
-      bytes: policy.traffic_consumed_udp_bytes ?? 0,
-      human: policy.traffic_consumed_udp_human,
-    }
+    return pick(
+      policy.traffic_consumed_udp_bytes,
+      policy.traffic_consumed_udp_human,
+      policy.traffic_display_udp_bytes,
+      policy.traffic_display_udp_human,
+    )
   }
   if (openvpnGroup === 'GROUP_TCP') {
-    return {
-      bytes: policy.traffic_consumed_tcp_bytes ?? 0,
-      human: policy.traffic_consumed_tcp_human,
-    }
+    return pick(
+      policy.traffic_consumed_tcp_bytes,
+      policy.traffic_consumed_tcp_human,
+      policy.traffic_display_tcp_bytes,
+      policy.traffic_display_tcp_human,
+    )
   }
-  return {
-    bytes: policy.traffic_consumed_bytes ?? 0,
-    human: policy.traffic_consumed_human,
-  }
+  return pick(
+    policy.traffic_consumed_bytes,
+    policy.traffic_consumed_human,
+    policy.traffic_display_bytes,
+    policy.traffic_display_human,
+  )
 }
 
 export function buildAccessMeta(
@@ -222,10 +240,8 @@ export function buildAccessMeta(
       tone = 'expired'
     }
   } else if (!isBlocked) {
-    const hasTraffic = Boolean(displayed.human && displayed.bytes > 0)
-    lines.push({
-      text: hasTraffic ? `Трафик: ${displayed.human} · лимит не задан` : 'Трафик · Лимит не задан',
-    })
+    const value = displayed.human && displayed.bytes > 0 ? displayed.human : '0 B'
+    lines.push({ text: `Трафик: ${value}` })
   }
 
   if (blockMode === 'traffic_limit' || policy?.traffic_limit_exceeded) {

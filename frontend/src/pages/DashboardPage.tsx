@@ -48,6 +48,11 @@ import { useNotifications } from '@/context/NotificationContext'
 import { useProgress } from '@/context/ProgressContext'
 import { useBackgroundTaskPoll } from '@/hooks/useBackgroundTaskPoll'
 import { buildClientConnectionMap, type ClientConnectionMap } from '@/lib/configCardUtils'
+import {
+  loadClientsTrafficPeriod,
+  saveClientsTrafficPeriod,
+  type ClientsTrafficPeriod,
+} from '@/lib/clientsTrafficPeriod'
 import { cn } from '@/lib/utils'
 import { protocolLabel } from '@/lib/vpnTypes'
 import type {
@@ -98,6 +103,9 @@ export default function DashboardPage() {
   const [awg2Installed, setAwg2Installed] = useState(false)
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
   const [policies, setPolicies] = useState<Record<string, ClientPoliciesResponseEntry>>({})
+  const [trafficPeriod, setTrafficPeriod] = useState<ClientsTrafficPeriod>(() =>
+    loadClientsTrafficPeriod(),
+  )
   const [connectionMap, setConnectionMap] = useState<ClientConnectionMap | null>(null)
   const [panelUsers, setPanelUsers] = useState<User[]>([])
   const [quota, setQuota] = useState<SelfServiceQuota | null>(null)
@@ -205,7 +213,7 @@ export default function DashboardPage() {
       }
       if (configsData.length > 0) {
         const names = [...new Set(configsData.map((c) => c.client_name))].join(',')
-        getClientPolicies(names).then(setPolicies).catch(() => setPolicies({}))
+        getClientPolicies(names, trafficPeriod).then(setPolicies).catch(() => setPolicies({}))
       } else {
         setPolicies({})
       }
@@ -230,6 +238,19 @@ export default function DashboardPage() {
         doneGlobal()
       }
     }
+  }
+
+  const handleTrafficPeriodChange = (period: ClientsTrafficPeriod) => {
+    if (period === trafficPeriod) return
+    setTrafficPeriod(period)
+    saveClientsTrafficPeriod(period)
+    const names = [...new Set(configs.map((config) => config.client_name))].join(',')
+    if (!names) return
+    getClientPolicies(names, period)
+      .then(setPolicies)
+      .catch((err) => {
+        notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки трафика')
+      })
   }
 
   useEffect(() => {
@@ -559,6 +580,8 @@ export default function DashboardPage() {
           ownerCandidates={panelUsers}
           connectionMap={connectionMap}
           filesLoading={loadingFiles}
+          trafficPeriod={trafficPeriod}
+          onTrafficPeriodChange={handleTrafficPeriodChange}
           onRefresh={() => load({ silent: true })}
           onDownload={handleDownload}
           onNotifySuccess={success}

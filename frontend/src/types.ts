@@ -1725,6 +1725,14 @@ export interface ClientAccessPolicy {
   traffic_limit_exceeded?: boolean
   traffic_limit_unblock_at?: string | null
   traffic_limit_unblock_label?: string | null
+  /** Окно отображения на карточках клиентов; null — всё время. */
+  traffic_display_period_days?: number | null
+  traffic_display_bytes?: number | null
+  traffic_display_human?: string | null
+  traffic_display_udp_bytes?: number | null
+  traffic_display_udp_human?: string | null
+  traffic_display_tcp_bytes?: number | null
+  traffic_display_tcp_human?: string | null
 }
 
 export interface UnlockCodeRedemptionRecord {

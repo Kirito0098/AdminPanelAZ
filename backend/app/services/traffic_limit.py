@@ -287,3 +287,58 @@ def get_client_consumed_traffic_bytes(
     if allowed_protocols is not None:
         query = query.filter(model.protocol_type.in_(sorted(allowed_protocols)))
     return int(query.scalar() or 0)
+
+
+def get_client_traffic_by_protocol(
+    db,
+    *,
+    client_names: list[str] | set[str],
+    node_id: int | None = None,
+    days: int | None = None,
+    normalize_identity=None,
+) -> dict[str, dict[str, int]]:
+    """Per-protocol bytes for many clients in one query.
+
+    ``days`` is a rolling window ending now; ``None`` means all time (totals table).
+    Returns ``{normalized_name: {protocol_type: bytes}}``.
+    """
+    from sqlalchemy import func
+
+    from app.models import UserTrafficSample, UserTrafficStatProtocol
+
+    normalize_identity = normalize_identity or (lambda name: (name or "").strip().lower())
+    targets = {
+        normalize_identity(name)
+        for name in client_names
+        if normalize_identity(name)
+    }
+    if not targets:
+        return {}
+
+    if days is not None:
+        since_dt = datetime.now(timezone.utc) - timedelta(days=max(int(days), 1))
+        since_dt = _as_utc(since_dt).replace(tzinfo=None)
+        model = UserTrafficSample
+        total_expr = func.coalesce(model.delta_received, 0) + func.coalesce(model.delta_sent, 0)
+        query = db.query(model.common_name, model.protocol_type, func.sum(total_expr)).filter(
+            model.created_at >= since_dt
+        )
+    else:
+        model = UserTrafficStatProtocol
+        total_expr = func.coalesce(model.total_received, 0) + func.coalesce(model.total_sent, 0)
+        query = db.query(model.common_name, model.protocol_type, func.sum(total_expr))
+
+    if node_id is not None:
+        query = query.filter(model.node_id == node_id)
+
+    result: dict[str, dict[str, int]] = {}
+    for stored_name, protocol_type, total in query.group_by(
+        model.common_name, model.protocol_type
+    ).all():
+        key = normalize_identity(stored_name)
+        if key not in targets:
+            continue
+        protocol = (protocol_type or "").strip().lower()
+        entry = result.setdefault(key, {})
+        entry[protocol] = entry.get(protocol, 0) + int(total or 0)
+    return result
