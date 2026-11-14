@@ -203,7 +203,16 @@ def ha_env(monkeypatch):
     group.id = 10
     group.primary_node_id = primary.id
     adapter = MagicMock(name="primary_adapter")
-    adapter.sync_cidr_providers.return_value = {"restored": []}
+    adapter.sync_cidr_providers.return_value = {
+        "restored": [],
+        "sync": {
+            "synced_files": 1,
+            "updated_files": 0,
+            "missing_sources": [],
+            "synced": ["AP-1-include-ips.txt"],
+            "updated": [],
+        },
+    }
 
     monkeypatch.setattr(
         groups_module,

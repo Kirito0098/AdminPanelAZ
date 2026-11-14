@@ -95,6 +95,8 @@ class IpManager:
         synced_files = 0
         updated_files = 0
         missing_sources: list[str] = []
+        synced: list[str] = []
+        updated: list[str] = []
 
         for fname, enabled in self.get_file_states().items():
             if not enabled:
@@ -114,17 +116,21 @@ class IpManager:
             if source_data != target_data:
                 shutil.copyfile(source, target)
                 updated_files += 1
+                updated.append(fname)
 
             legacy = self._legacy_masked_path(fname)
             if legacy.exists():
                 legacy.unlink(missing_ok=True)
 
             synced_files += 1
+            synced.append(fname)
 
         return {
             "synced_files": synced_files,
             "updated_files": updated_files,
             "missing_sources": missing_sources,
+            "synced": synced,
+            "updated": updated,
         }
 
     def restore_source_from_config(self) -> dict[str, bool]:

@@ -81,7 +81,15 @@ def run_deploy(
         }
     else:
         sync_result = adapter.sync_cidr_providers()
-        result = {"mode": "local", "sync": sync_result}
+        inner = sync_result.get("sync") or {}
+        result = {
+            "mode": "local",
+            # ``pushed`` stays "really changed"; ``synced`` is the deploy volume for the UI.
+            "pushed": list(inner.get("updated") or []),
+            "synced": list(inner.get("synced") or []),
+            "skipped": list(inner.get("missing_sources") or []),
+            "sync": sync_result,
+        }
 
     if db is not None and node is not None:
         ha = _replicate_deploy_to_ha(
@@ -256,7 +264,11 @@ def _deploy_single_node(
 
     failed = deploy_result.get("failed") or []
     pushed = deploy_result.get("pushed") or []
+    synced = deploy_result.get("synced") or []
+    skipped = deploy_result.get("skipped") or []
     entry["pushed_files"] = pushed
+    entry["synced_files"] = synced
+    entry["updated_files"] = pushed
     entry["failed"] = failed
     if deploy_result.get("sync") is not None:
         entry["sync"] = deploy_result["sync"]
@@ -266,6 +278,12 @@ def _deploy_single_node(
     if failed:
         entry["status"] = "failed"
         entry["error"] = f"Ошибка развёртывания: {len(failed)} файл(ов)"
+        return entry
+
+    if not pushed and not synced and skipped:
+        # Nothing compiled for enabled providers: that is a real problem, not a success.
+        entry["status"] = "skipped"
+        entry["error"] = "Нечего разворачивать: нет собранных файлов для включённых провайдеров"
         return entry
 
     if apply_after:
@@ -281,6 +299,7 @@ def _deploy_single_node(
         entry.update(apply_result)
 
     entry["status"] = "success"
+    entry["noop"] = len(pushed) == 0
     return entry
 
 
@@ -356,18 +375,29 @@ def run_multi_deploy(
     failed_nodes = [e for e in per_node if e.get("status") == "failed"]
     skipped_nodes = [e for e in per_node if e.get("status") == "skipped"]
     warnings = [warning for entry in per_node for warning in _ha_replica_warnings(entry)]
+    pushed_total = len(all_pushed)
+    synced_total = sum(
+        len(entry.get("synced_files") or entry.get("pushed_files") or []) for entry in success_nodes
+    )
+    node_count = len(success_nodes)
 
     if failed_nodes:
         message = f"Развёртывание завершено с ошибками: {len(failed_nodes)} узел(ов)"
-    elif skipped_nodes and not success_nodes:
+    elif skipped_nodes and not success_nodes and not nodes:
         message = f"Нет online-узлов для развёртывания ({len(skipped_nodes)} пропущено)"
+    elif synced_total == 0:
+        message = "Нечего разворачивать: файлы не собраны (выполните сборку — этап 2)"
+    elif pushed_total == 0:
+        message = f"Развёрнуто на {node_count} узел(ов): файлов {synced_total}, изменений нет"
     else:
-        pushed_total = len(all_pushed)
-        node_count = len(success_nodes)
-        message = f"Развёрнуто на {node_count} узел(ов), файлов: {pushed_total}"
+        message = (
+            f"Развёрнуто на {node_count} узел(ов), файлов: {synced_total} "
+            f"(изменено {pushed_total})"
+        )
 
     result = {
-        "success": len(failed_nodes) == 0 and len(success_nodes) > 0,
+        "success": len(failed_nodes) == 0 and node_count > 0 and synced_total > 0,
+        "noop": pushed_total == 0 and not failed_nodes,
         "message": message,
         "artifact_stamp": compute_artifact_stamp(),
         "per_node": per_node,
@@ -375,7 +405,7 @@ def run_multi_deploy(
             "pushed": all_pushed,
             "failed": all_failed,
         },
-        "nodes_deployed": len(success_nodes),
+        "nodes_deployed": node_count,
         "nodes_failed": len(failed_nodes),
         "nodes_skipped": len(skipped_nodes),
     }

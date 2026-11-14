@@ -1446,6 +1446,9 @@ export interface CidrDeployPerNodeResult {
   node_name?: string | null
   status: 'success' | 'failed' | 'skipped'
   pushed_files?: string[]
+  synced_files?: string[]
+  updated_files?: string[]
+  noop?: boolean
   failed?: Array<{ file: string; error: string }>
   error?: string | null
 }

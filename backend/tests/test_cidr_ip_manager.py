@@ -104,7 +104,11 @@ def test_sync_updates_only_changed_files(manager):
 
     result = manager.sync_enabled_from_list()
 
-    assert result == {"synced_files": 2, "updated_files": 1, "missing_sources": []}
+    assert result["synced_files"] == 2
+    assert result["updated_files"] == 1
+    assert result["missing_sources"] == []
+    assert sorted(result["synced"]) == sorted([PROVIDER_A, PROVIDER_B])
+    assert result["updated"] == [PROVIDER_A]
     assert (manager.config_dir / "AP-cloudflare-include-ips.txt").read_text(encoding="utf-8") == (
         "1.1.1.0/24\n2.2.2.0/24\n"
     )

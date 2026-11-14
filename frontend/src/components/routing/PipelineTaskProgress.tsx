@@ -8,6 +8,15 @@ interface PipelineTaskProgressProps {
   task: CidrPipelineTask | null
 }
 
+function deployDetails(entry: CidrDeployPerNodeResult): string {
+  const updated = entry.updated_files?.length ?? 0
+  if (entry.noop || updated === 0) {
+    const deployed = (entry.synced_files?.length ?? entry.pushed_files?.length ?? 0) > 0
+    return deployed ? 'без изменений' : '—'
+  }
+  return `изменено: ${updated}`
+}
+
 function DeployPerNodeResults({ perNode }: { perNode: CidrDeployPerNodeResult[] }) {
   return (
     <div className="rounded-lg border bg-card p-4 space-y-3">
@@ -32,13 +41,13 @@ function DeployPerNodeResults({ perNode }: { perNode: CidrDeployPerNodeResult[] 
                   <Badge variant={statusBadgeVariant(entry.status)}>{statusLabel(entry.status)}</Badge>
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm">
-                  {entry.pushed_files?.length ?? 0}
+                  {entry.synced_files?.length ?? entry.pushed_files?.length ?? 0}
                 </TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {entry.error ??
                     (entry.failed?.length
                       ? entry.failed.map((f) => `${f.file}: ${f.error}`).join('; ')
-                      : '—')}
+                      : deployDetails(entry))}
                 </TableCell>
               </TableRow>
             ))}
