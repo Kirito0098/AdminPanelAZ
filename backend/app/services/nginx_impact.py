@@ -10,7 +10,7 @@ nginx actually loads and answers three questions:
 
 The detector never writes anything and never calls ``nginx -t``/``systemctl``: it is safe to run from
 the panel. Directory overrides (also used by ``scripts/nginx-common.sh``) make it testable:
-``NGINX_SITES_ENABLED_DIR``, ``NGINX_SITES_AVAILABLE_DIR``, ``NGINX_CONF_D_DIR``. The StatusOpenVPN
+``NGINX_SITES_ENABLED_DIR``, ``NGINX_CONF_D_DIR``. The StatusOpenVPN
 installer path can be overridden with ``STATUS_OPENVPN_SETUP`` (default ``/root/web/setup``).
 
 Contract::
@@ -48,7 +48,6 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_SITES_ENABLED = Path("/etc/nginx/sites-enabled")
-DEFAULT_SITES_AVAILABLE = Path("/etc/nginx/sites-available")
 DEFAULT_CONF_D = Path("/etc/nginx/conf.d")
 DEFAULT_STATUS_SETUP = Path("/root/web/setup")
 PANEL_TEMPLATE = Path("deploy") / "nginx" / "adminpanelaz.conf.template"
@@ -306,12 +305,13 @@ def build_nginx_impact(*, project_root: Path, panel_domain: str, portal_domain: 
     panel = _normalize_domain(panel_domain)
     portal = _normalize_domain(portal_domain)
     enabled = _env_dir("NGINX_SITES_ENABLED_DIR", DEFAULT_SITES_ENABLED)
-    available = _env_dir("NGINX_SITES_AVAILABLE_DIR", DEFAULT_SITES_AVAILABLE)
     conf_d = _env_dir("NGINX_CONF_D_DIR", DEFAULT_CONF_D)
-    if not enabled.is_dir() and not available.is_dir():
+    if not enabled.is_dir() and not conf_d.is_dir():
         return _empty_impact(panel)
 
-    vhosts = _read_vhosts([enabled, available])
+    # Only what nginx actually loads: enabled symlinks (resolved) and conf.d. `sites-available` also
+    # holds `.bak-*` copies that the server ignores — reading them reports stale vhosts as current.
+    vhosts = _read_vhosts([enabled, conf_d])
     rows: list[dict[str, Any]] = []
     panel_vhosts: list[dict[str, Any]] = []
     snippet_hosts: list[tuple[str, dict[str, Any]]] = []
@@ -364,8 +364,17 @@ def build_nginx_impact(*, project_root: Path, panel_domain: str, portal_domain: 
         integration_mode = "unknown"
         panel_vhost = None
 
+    seen_rows: set[tuple] = set()
+    unique_rows: list[dict[str, Any]] = []
     for row in rows:
         row["will_change"] = row["role"] in {"panel", "portal"} and integration_mode != "subpath_snippet"
+        # HTTP and HTTPS server blocks share one server_name; one line per host+role is enough.
+        key = (row["host"], row["role"], row["same_domain"], row["will_change"], row["note"])
+        if key in seen_rows:
+            continue
+        seen_rows.add(key)
+        unique_rows.append(row)
+    rows = unique_rows
 
     foreign_locations: list[dict[str, str | None]] = []
     warnings: list[str] = []

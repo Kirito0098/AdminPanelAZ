@@ -227,6 +227,37 @@ server {
     assert any("шаг nginx не должен переписывать" in warning for warning in result["warnings"])
 
 
+def test_sites_available_backups_are_ignored(nginx_dirs):
+    write_vhost(nginx_dirs, "panel", PANEL_VHOST)
+    (nginx_dirs["available"] / "panel.bak-20260101").write_text(
+        PANEL_VHOST.replace("panel.arbitrary.test", "old.arbitrary.test"), encoding="utf-8"
+    )
+
+    result = impact(nginx_dirs)
+
+    assert [row["host"] for row in result["vhosts"]] == [PANEL]
+    assert result["integration_mode"] == "dedicated_vhost"
+
+
+def test_http_and_https_blocks_share_one_row(nginx_dirs):
+    write_vhost(
+        nginx_dirs,
+        "panel",
+        PANEL_VHOST
+        + """server {
+    listen 80;
+    server_name panel.arbitrary.test;
+    location / { return 301 https://$host$request_uri; }
+}
+""",
+    )
+
+    result = impact(nginx_dirs)
+
+    assert [row["host"] for row in result["vhosts"]] == [PANEL]
+    assert [row["role"] for row in result["vhosts"]] == ["panel"]
+
+
 def test_global_changes(nginx_dirs):
     write_vhost(nginx_dirs, "panel", PANEL_VHOST)
     (nginx_dirs["conf_d"] / "adminpanelaz-server-names-hash.conf").write_text(
@@ -235,7 +266,7 @@ def test_global_changes(nginx_dirs):
     (nginx_dirs["conf_d"] / "adminpanelaz-privacy-log.conf").write_text(
         "log_format adminpanelaz_privacy '$remote_addr';\n", encoding="utf-8"
     )
-    (nginx_dirs["available"] / "00-adminpanelaz-default-deny").write_text(
+    (nginx_dirs["enabled"] / "00-adminpanelaz-default-deny").write_text(
         "server { listen 443 ssl default_server; server_name _; }\n", encoding="utf-8"
     )
 
