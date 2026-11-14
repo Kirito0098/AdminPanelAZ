@@ -26,8 +26,10 @@ def resolve_repo_root(start: Path | None = None) -> Path | None:
 
 
 def _git_run(args: list[str], cwd: Path, *, timeout: float = GIT_TIMEOUT) -> subprocess.CompletedProcess[str]:
+    # install.sh chmods scripts that are 644 in git; ignore mode-only dirt so a
+    # panel update from such an installation can still fast-forward.
     return subprocess.run(
-        ["git", *args],
+        ["git", "-c", "core.fileMode=false", *args],
         cwd=cwd,
         capture_output=True,
         text=True,

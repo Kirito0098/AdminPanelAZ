@@ -155,6 +155,22 @@ def test_detached_head_is_refused(repos):
     assert _git(panel, "rev-parse", "HEAD") == before
 
 
+def test_mode_only_dirty_tree_fast_forwards(repos):
+    """install.sh chmods scripts; a mode-only diff must not block the panel update."""
+    upstream, panel = repos
+    (panel / "release-work").chmod(0o755)
+    (upstream / "release-work").chmod(0o755)
+    _git(upstream, "add", "release-work")
+    _git(upstream, "commit", "-q", "-m", "make executable")
+    _git(upstream, "push", "-q", "origin", "release/9.9.9")
+    new_head = _git(upstream, "rev-parse", "HEAD")
+
+    result = git_pull(panel)
+
+    assert result["success"] is True, result
+    assert _git(panel, "rev-parse", "HEAD") == new_head
+
+
 def test_update_check_compares_with_the_branch_upstream(repos):
     upstream, panel = repos
     _git(upstream, "checkout", "-q", "main")
