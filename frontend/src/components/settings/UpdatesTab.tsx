@@ -271,6 +271,22 @@ export default function UpdatesTab() {
         </div>
       ) : null}
 
+            <SettingsAlert variant="info" title="Что меняет обновление панели">
+              <p>
+                Обновление панели меняет только код, зависимости и интерфейс. Nginx, сайты на других
+                доменах/поддоменах, пакеты и firewall не трогаются — для них откройте «Проверка работы →
+                Настройки сервера».
+              </p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-3"
+                onClick={() => navigate('/settings/tests?tab=server')}
+              >
+                Настройки сервера
+              </Button>
+            </SettingsAlert>
+
       {!hasUpdate && serverPending > 0 ? (
         <SettingsAlert variant="warning" title={`Осталось обновить настройки сервера: ${serverPending}`}>
           <p>Обновление через панель не меняет nginx, системные пакеты и команду adminpanelaz. Это можно сделать отсюда.</p>
@@ -332,21 +348,6 @@ export default function UpdatesTab() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            <SettingsAlert variant="info" title="Что меняет обновление панели">
-              <p>
-                Обновление панели меняет только код, зависимости и интерфейс. Nginx, сайты на других
-                доменах/поддоменах, пакеты и firewall не трогаются — для них откройте «Проверка работы →
-                Настройки сервера».
-              </p>
-              <Button
-                size="sm"
-                variant="outline"
-                className="mt-3"
-                onClick={() => navigate('/settings/tests?tab=server')}
-              >
-                Настройки сервера
-              </Button>
-            </SettingsAlert>
             <UpdatePipeline />
             <SettingsAlert variant="info" title="Длительность обновления">
               {UPDATE_LONG_RUNNING_NOTICE}
