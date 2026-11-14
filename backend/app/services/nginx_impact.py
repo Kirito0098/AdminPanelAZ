@@ -340,7 +340,7 @@ def build_nginx_impact(*, project_root: Path, panel_domain: str, portal_domain: 
                 if vhost not in panel_domain_foreign:
                     panel_domain_foreign.append(vhost)
             elif role == "other" and _is_sibling(host, panel):
-                note = "соседний поддомен"
+                note = "тот же домен, другой поддомен"
             rows.append(
                 {
                     "host": host,

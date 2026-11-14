@@ -118,10 +118,9 @@ function VhostLine({ vhost, riskNote }: { vhost: NginxVhostImpact; riskNote?: st
         <span className="font-mono text-xs">{vhost.host}</span>
         <Badge variant={VHOST_ROLE_BADGE[vhost.role]}>{VHOST_ROLE_LABEL[vhost.role]}</Badge>
         <span className="text-xs text-muted-foreground">
-          {vhost.same_domain ? 'тот же домен' : 'другой домен/поддомен'}
+          {vhost.note ?? (vhost.same_domain ? 'тот же домен' : 'другой домен/поддомен')}
         </span>
       </div>
-      {vhost.note ? <p className="text-xs text-muted-foreground">{vhost.note}</p> : null}
       {riskNote ? <p className="text-xs font-medium text-destructive">{riskNote}</p> : null}
     </li>
   )
@@ -486,23 +485,18 @@ export default function ServerConfigTab() {
             ) : null}
 
             <ul className="space-y-2">
-              {steps.map((step) => (
+              {steps.filter((step) => step.available).map((step) => (
                 <li key={step.key}>
                   <label className="flex items-start gap-3 rounded-lg border border-border/70 bg-muted/15 p-3">
                     <Checkbox
                       checked={selected.includes(step.key)}
-                      disabled={!step.available || applying}
+                      disabled={applying}
                       onCheckedChange={(next) => toggleStep(step.key, next)}
                       aria-label={step.label}
                       className="mt-0.5"
                     />
                     <span className="min-w-0 space-y-0.5">
                       <span className="block text-sm font-medium">{step.label}</span>
-                      {!step.available ? (
-                        <span className="block text-xs text-muted-foreground">
-                          {step.reason || 'Недоступно на этом сервере'}
-                        </span>
-                      ) : null}
                     </span>
                   </label>
                 </li>
