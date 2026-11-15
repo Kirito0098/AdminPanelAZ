@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: ["main", "release/**"]
+    tags: ["v*"]
   pull_request:
 
 # Cancel superseded runs on the same ref to save runner minutes.
@@ -110,10 +111,71 @@ jobs:
         working-directory: frontend
         run: npm run check:bundle
 
+      # Метка сборки: по ней установщик и меню понимают, что интерфейс уже собран для этого коммита,
+      # и не запускают npm на сервере. Тот же файл читает scripts/panel-frontend-deploy.sh.
+      - name: Build info (для деплоя интерфейса из релиза)
+        working-directory: frontend
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const { version } = require("./package.json");
+            fs.writeFileSync("dist/.build-info.json", JSON.stringify({
+              version,
+              commit: process.env.GITHUB_SHA,
+              ref: process.env.GITHUB_REF_NAME,
+              node: process.version,
+              built_at: new Date().toISOString(),
+            }, null, 2) + "\n");
+          '
+
+      - name: Pack frontend build
+        if: matrix.node == '22'
+        run: tar czf "$RUNNER_TEMP/adminpanelaz-frontend.tar.gz" frontend/dist backend/app/static/tg_mini
+
+      - name: Upload frontend build
+        if: matrix.node == '22'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: frontend-build
+          path: ${{ runner.temp }}/adminpanelaz-frontend.tar.gz
+          retention-days: 30
+
       # Build-only tooling (tailwindcss 3 → braces/micromatch) has unfixed advisories and never ships to the browser.
       - name: npm audit (production dependencies)
         working-directory: frontend
         run: npm audit --omit=dev --audit-level=high
+
+  # Релиз интерфейса: на тег vX.Y.Z кладём готовую сборку в GitHub Release, чтобы сервер без Node
+  # (и без запаса RAM на vite) ставил её скриптом scripts/panel-frontend-deploy.sh.
+  release:
+    name: release frontend asset
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download frontend build
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: frontend-build
+          path: ${{ runner.temp }}
+
+      - name: Publish release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          name="adminpanelaz-frontend-${GITHUB_REF_NAME}.tar.gz"
+          mv "$RUNNER_TEMP/adminpanelaz-frontend.tar.gz" "$RUNNER_TEMP/$name"
+          cd "$RUNNER_TEMP"
+          sha256sum "$name" >"$name.sha256"
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+                 --title "$GITHUB_REF_NAME" --notes "Сборка интерфейса панели и Mini App для $GITHUB_REF_NAME."
+          gh release upload "$GITHUB_REF_NAME" "$name" "$name.sha256" --repo "$GITHUB_REPOSITORY" --clobber
 
   shell:
     name: shell scripts
