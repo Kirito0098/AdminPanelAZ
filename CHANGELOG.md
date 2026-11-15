@@ -17,6 +17,7 @@
 
 ## Быстрая навигация
 
+- [2.27.1](#2271---2026-11-16) — 2026-11-16
 - [2.27.0](#2270---2026-11-15) — 2026-11-15
 - [2.26.5](#2265---2026-10-14) — 2026-10-14
 - [2.26.4](#2264---2026-10-12) — 2026-10-12
@@ -55,6 +56,20 @@
 - [Архив 1.x и 0.x](#архив-версии-1x-и-0x)
 
 ---
+
+## [2.27.1] - 2026-11-16
+
+### ✨ Added
+- **Интерфейс из CI для серверов без запаса RAM** — на тег `vX.Y.Z` GitHub Actions собирает панель и Mini App и публикует `adminpanelaz-frontend-<tag>.tar.gz` + `.sha256` в релиз; поставить без node можно скриптом `sudo ./scripts/panel-frontend-deploy.sh --tag v2.27.1` (или `--file` для офлайна). Скрипт сверяет коммит сборки (`frontend/dist/.build-info.json`) с `HEAD`, отказывается ставить чужой коммит без `--force` и подменяет `frontend/dist` и `tg_mini` двумя переименованиями — при сбое старый интерфейс цел (`.github/workflows/ci.yml`, `scripts/panel-frontend-deploy.sh`).
+
+### 🔄 Changed
+- **Сборка интерфейса пропускается, если `dist` уже собран для этого коммита** — `panel_build_frontend` (установщик, меню, `full-update.sh`) и обновление из панели смотрят на `frontend/dist/.build-info.json`: `npm ci` и `npm run build:all` не запускаются, когда метка совпадает с `HEAD`, а `--restart` больше не предупреждает «интерфейс собран до обновления» после деплоя из релиза. `PANEL_FRONTEND_SKIP_BUILD=1` отключает сборку полностью; кнопка «Пересобрать интерфейс» по-прежнему собирает принудительно (`scripts/adminpanel-menu.sh`, `services/system_update.py`).
+
+### 📝 Docs
+- «Обновление панели»: раздел про установку интерфейса из CI и подсказка про `heap out of memory`/swap; установщик при падении на шаге frontend выводит те же два пути (`docs/nastrojki/obnovleniya.md`, `install.sh`).
+
+### 🧪 Tests
+- Shell: CI-метка пропускает сборку в меню (`scripts/test-menu-update-rebuilds-frontend.sh`), деплой из архива проверяет коммит и не трогает старый интерфейс при отказе (`scripts/test-panel-frontend-deploy.sh`). Pytest: пропуск `npm ci`/`build:all` при совпадении коммита и принудительная пересборка (`tests/test_system_update_ci_build.py`).
 
 ## [2.27.0] - 2026-11-15
 
