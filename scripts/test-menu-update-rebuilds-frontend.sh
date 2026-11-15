@@ -11,7 +11,7 @@ NPM_LOG="$TMP/npm.log"
 mkdir -p "$TMP/git-only-bin" "$TMP/npm-bin"
 ln -s "$(command -v git)" "$TMP/git-only-bin/git"
 # Меню и обновлённый --after-pull используют базовые coreutils; npm в этом окружении нет.
-for tool in readlink dirname; do
+for tool in readlink dirname sed head; do
   ln -s "$(command -v "$tool")" "$TMP/git-only-bin/$tool"
 done
 # npm — отдельная программа: шаги после git pull выполняет уже обновлённый скрипт в новом процессе bash.
@@ -214,6 +214,54 @@ run_update true 'PANEL_UPDATE_CODE_ONLY=true; panel_update' >"$TMP/out" 2>&1 \
   || fail "обновление завершилось ошибкой: $(cat "$TMP/out")"
 [[ ! -s "$NPM_LOG" ]] || fail "устаревший интерфейс пересобран в шаге «Код»: $(cat "$NPM_LOG")"
 grep -qx "changed=false" "$TMP/out" || fail "без обновлений отмечено изменение: $(cat "$TMP/out")"
+echo "  OK"
+
+# build_info [коммит] — метка сборки из CI в frontend/dist; по умолчанию коммит текущего HEAD установки.
+build_info() {
+  local commit="${1:-$(git -C "$TMP/install" rev-parse HEAD)}"
+  printf '{"version":"test","commit":"%s"}\n' "$commit" >"$TMP/install/frontend/dist/.build-info.json"
+}
+
+echo "[test] интерфейс собран в CI для текущего коммита: npm не вызывается, даже если dist старее исходников"
+setup_repos
+build_dist '-2 hours'
+build_info
+: >"$NPM_LOG"
+run_update >"$TMP/out" 2>&1 || fail "обновление завершилось ошибкой: $(cat "$TMP/out")"
+[[ ! -s "$NPM_LOG" ]] || fail "npm вызван при CI-сборке текущего коммита: $(cat "$NPM_LOG")"
+run_update true panel_restart >"$TMP/out" 2>&1 || fail "перезапуск завершился ошибкой"
+! grep -q -- "--update" "$TMP/out" || fail "CI-сборка считается устаревшей: $(cat "$TMP/out")"
+echo "  OK"
+
+echo "[test] интерфейс собран в CI для другого коммита: пересборка"
+setup_repos
+build_dist
+build_info
+new_upstream_commit
+: >"$NPM_LOG"
+run_update >"$TMP/out" 2>&1 || fail "обновление завершилось ошибкой: $(cat "$TMP/out")"
+[[ "$(cat "$NPM_LOG")" == "npm ci @ $TMP/install/frontend"$'\n'"npm run build:all @ $TMP/install/frontend" ]] \
+  || fail "вызовы npm: $(cat "$NPM_LOG")"
+echo "  OK"
+
+echo "[test] PANEL_FRONTEND_SKIP_BUILD=1: сборка пропускается всегда (сервер без запаса RAM)"
+setup_repos
+build_dist '-2 hours'
+new_upstream_commit
+: >"$NPM_LOG"
+PANEL_FRONTEND_SKIP_BUILD=1 run_update >"$TMP/out" 2>&1 || fail "обновление завершилось ошибкой: $(cat "$TMP/out")"
+[[ ! -s "$NPM_LOG" ]] || fail "npm вызван при PANEL_FRONTEND_SKIP_BUILD=1: $(cat "$NPM_LOG")"
+grep -q "PANEL_FRONTEND_SKIP_BUILD=1" "$TMP/out" || fail "нет предупреждения о пропуске: $(cat "$TMP/out")"
+echo "  OK"
+
+echo "[test] npm нет, а CI-сборка для текущего коммита есть: обновление проходит без node"
+setup_repos
+build_dist
+new_upstream_commit
+build_info "$(git -C "$TMP/dev" rev-parse HEAD)"
+: >"$NPM_LOG"
+run_update false >"$TMP/out" 2>&1 || fail "без npm обновление не прошло при CI-сборке: $(cat "$TMP/out")"
+[[ ! -s "$NPM_LOG" ]] || fail "npm вызван без npm в PATH: $(cat "$NPM_LOG")"
 echo "  OK"
 
 echo "All menu update checks passed."

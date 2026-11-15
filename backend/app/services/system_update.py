@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -84,6 +85,9 @@ def install_frontend_requirements(repo_root: Path) -> dict[str, Any]:
     package_json = frontend_dir / "package.json"
     if not package_json.is_file():
         return {"skipped": True, "success": True, "output": "frontend/package.json не найден"}
+    reused = frontend_build_reused(repo_root)
+    if reused:
+        return {"skipped": True, "success": True, "output": f"{reused} — npm ci пропущен"}
     result = _run_command(
         ["npm", "ci"],
         cwd=frontend_dir,
@@ -94,19 +98,55 @@ def install_frontend_requirements(repo_root: Path) -> dict[str, Any]:
     return result
 
 
-def build_frontend(repo_root: Path) -> dict[str, Any]:
+def build_frontend(repo_root: Path, *, force: bool = False) -> dict[str, Any]:
     frontend_dir = repo_root / "frontend"
     package_json = frontend_dir / "package.json"
     if not package_json.is_file():
         return {"skipped": True, "success": True, "output": "frontend/package.json не найден"}
+    if not force:
+        reused = frontend_build_reused(repo_root)
+        if reused:
+            return {"skipped": True, "success": True, "output": f"{reused} — npm run build:all пропущен"}
     result = _run_command(
         ["npm", "run", "build:all"],
         cwd=frontend_dir,
         timeout=NPM_BUILD_TIMEOUT,
         label="npm run build:all",
     )
+    # Собрали на месте — метка CI больше не описывает dist.
+    (frontend_dir / "dist" / ".build-info.json").unlink(missing_ok=True)
     result["skipped"] = False
     return result
+
+
+def _git_head(repo_root: Path) -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.stdout.strip() or None
+
+
+def frontend_build_reused(repo_root: Path) -> str | None:
+    """Интерфейс уже собран для текущего коммита сборкой из CI (frontend/dist/.build-info.json)."""
+    frontend_dist = repo_root / "frontend" / "dist"
+    if not (frontend_dist / "index.html").is_file():
+        return None
+    try:
+        info = json.loads((frontend_dist / ".build-info.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    commit = info.get("commit") if isinstance(info, dict) else None
+    head = _git_head(repo_root)
+    if not isinstance(commit, str) or not commit or commit != head:
+        return None
+    return f"интерфейс уже собран для коммита {commit[:12]} (.build-info.json)"
 
 
 def _restart_log_path(repo_root: Path) -> Path:
@@ -284,7 +324,7 @@ def apply_controller_rebuild(
         }
 
     report(15, "Пересборка: сборка frontend…")
-    npm_build = build_frontend(repo_root)
+    npm_build = build_frontend(repo_root, force=True)
     detail["npm_build"] = npm_build
     if not _require_step(label="npm run build:all", result=npm_build, output_parts=output_parts, errors=errors):
         return {

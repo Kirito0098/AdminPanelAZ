@@ -430,12 +430,35 @@ panel_wait_health() {
   return 1
 }
 
+# Коммит, для которого собран интерфейс: frontend/dist/.build-info.json пишет CI (release-джоба).
+frontend_build_info_commit() {
+  local info="$INSTALL_DIR/frontend/dist/.build-info.json" commit
+  [[ -f "$info" ]] || return 1
+  commit="$(sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F]*\)".*/\1/p' "$info" | head -n1)"
+  [[ -n "$commit" ]] || return 1
+  printf '%s' "$commit"
+}
+
+# true, если на диске лежит сборка из CI именно для текущего коммита — её не нужно собирать заново.
+frontend_build_current() {
+  local commit head
+  commit="$(frontend_build_info_commit)" || return 1
+  [[ -f "$INSTALL_DIR/frontend/dist/index.html" ]] || return 1
+  head="$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null)" || return 1
+  [[ -n "$head" && "$commit" == "$head" ]]
+}
+
 # Интерфейс проверяется только там, где его уже собирали. Сборка устарела, если отслеживаемый файл frontend
 # новее собранного index.html: git pull ставит изменённым файлам текущее время.
 frontend_build_stale() {
   local index="$INSTALL_DIR/frontend/dist/index.html" path
   [[ -d "$INSTALL_DIR/frontend/dist" ]] || return 1
   [[ -f "$index" ]] || return 0
+  # Сборка из CI помнит свой коммит: mtime после git pull врёт, сравниваем коммиты.
+  if frontend_build_info_commit >/dev/null; then
+    frontend_build_current && return 1
+    return 0
+  fi
   while IFS= read -r -d '' path; do
     [[ "$INSTALL_DIR/$path" -nt "$index" ]] && return 0
   done < <(git -C "$INSTALL_DIR" ls-files -z -- frontend 2>/dev/null)
@@ -443,10 +466,20 @@ frontend_build_stale() {
 }
 
 # panel_build_frontend [reuse-deps] — npm ci, затем build:all. reuse-deps: без npm ci, если node_modules уже есть.
+# Интерфейс из CI (dist/.build-info.json для текущего коммита) не пересобирается; PANEL_FRONTEND_SKIP_BUILD=1
+# пропускает сборку всегда — для серверов, где vite не помещается в память.
 # shellcheck disable=SC2120 # reuse-deps передаёт install.sh, меню вызывает без аргумента.
 panel_build_frontend() {
   local ci_mode="${1:-always}"
   local frontend_dir="$INSTALL_DIR/frontend"
+  if [[ "${PANEL_FRONTEND_SKIP_BUILD:-0}" == "1" ]]; then
+    ui_warn "PANEL_FRONTEND_SKIP_BUILD=1 — сборка интерфейса пропущена, остаётся текущий dist"
+    return 0
+  fi
+  if frontend_build_current; then
+    ui_info "Интерфейс уже собран для текущего коммита (.build-info.json) — сборка пропущена"
+    return 0
+  fi
   if ! command -v npm >/dev/null 2>&1; then
     ui_fail "npm не найден — интерфейс не пересобран"
     return 1
@@ -462,6 +495,8 @@ panel_build_frontend() {
     ok=false
   fi
   if [[ "$ok" == true ]]; then
+    # Собрали на месте — метка CI больше не описывает dist; дальше решает mtime (frontend_build_stale).
+    rm -f "$frontend_dir/dist/.build-info.json"
     ui_ok "Интерфейс пересобран"
     return 0
   fi
@@ -471,6 +506,7 @@ panel_build_frontend() {
 
 panel_frontend_manual_hint() {
   ui_fail "Соберите интерфейс вручную: cd $INSTALL_DIR/frontend && npm ci && npm run build:all, затем $0 --restart"
+  ui_info "Если сборка падает с «JavaScript heap out of memory»: нужен swap (2 GB) и NODE_OPTIONS=--max-old-space-size=1536, либо готовый dist из релиза: $INSTALL_DIR/scripts/panel-frontend-deploy.sh"
 }
 
 panel_restart() {
