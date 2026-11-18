@@ -79,6 +79,10 @@ MCP даёт агенту доступ к внешним сервисам и и�
     },
     "context7": {
       "url": "https://mcp.context7.com/mcp/oauth"
+    },
+    "browse": {
+      "command": "browse",
+      "args": ["mcp"]
     }
   }
 }
