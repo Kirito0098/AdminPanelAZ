@@ -960,6 +960,13 @@ def approve_access_request(
     ad_hoc: dict[str, Any] | None = None
     if row.request_type == "new_user":
         if payload.preset_id is None:
+            if payload.config_ids is not None and not payload.config_ids:
+                # Явно выбран режим «без новых конфигов», но привязывать нечего.
+                # Иначе сервис уйдёт в проверку плана и ответит про узлы и протоколы.
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Выберите хотя бы один конфиг: абонент без конфигов не создаётся",
+                )
             ad_hoc = {
                 # Привязка готовых конфигов вместо выпуска новых: сервис по этому
                 # ключу пропускает требования узлов и протоколов (Fider #47).

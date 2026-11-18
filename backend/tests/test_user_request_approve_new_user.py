@@ -7,7 +7,10 @@
 было нельзя.
 """
 
+from unittest.mock import MagicMock
+
 import pytest
+from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -201,8 +204,6 @@ def test_approve_new_user_with_config_ids_keeps_them(db, monkeypatch):
     в ``ad_hoc`` для new_user уходили только узлы и протоколы, поэтому заявка
     отклонялась с «Укажите узлы и протоколы плана».
     """
-    from unittest.mock import MagicMock
-
     from app.routers import users as users_router
     from app.schemas import ApproveRequest
 
@@ -232,3 +233,29 @@ def test_approve_new_user_with_config_ids_keeps_them(db, monkeypatch):
     assert captured["ad_hoc"]["config_ids"] == [11, 12]
     assert captured["ad_hoc"]["username"] == "ivan"
     assert response.id == request_row.id
+
+
+def test_approve_new_user_with_empty_config_ids_explains_what_to_do(db, monkeypatch):
+    """Режим «без новых конфигов» без выбранных конфигов — внятная 400, а не про узлы."""
+    from app.routers import users as users_router
+    from app.schemas import ApproveRequest
+
+    request_row = _request(db)
+    monkeypatch.setattr(users_router, "_require_provisioning", lambda: None)
+
+    def _unexpected(*_a, **_k):
+        raise AssertionError("approve_request не должен вызываться")
+
+    monkeypatch.setattr(users_router, "approve_request", _unexpected)
+
+    with pytest.raises(HTTPException) as excinfo:
+        users_router.approve_access_request(
+            request_id=request_row.id,
+            payload=ApproveRequest(config_ids=[]),
+            request=MagicMock(),
+            db=db,
+            admin=_admin(db),
+        )
+
+    assert excinfo.value.status_code == 400
+    assert "хотя бы один конфиг" in excinfo.value.detail
