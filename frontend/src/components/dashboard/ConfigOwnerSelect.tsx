@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { configOwnerCandidates, formatOwnerLabel, resolveOwnerOptions } from '@/lib/configOwners'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -11,8 +11,8 @@ import {
 } from '@/components/ui/select'
 import type { User } from '@/types'
 
-/** До этого числа владельцев список короткий и поиск только мешает. */
-const SEARCH_THRESHOLD = 8
+/** До этого числа кандидатов список короткий и поиск только мешает. */
+const SEARCH_THRESHOLD = 5
 
 interface ConfigOwnerSelectProps {
   id?: string
@@ -35,6 +35,7 @@ export default function ConfigOwnerSelect({
   description,
   currentOwner,
 }: ConfigOwnerSelectProps) {
+  const blockRef = useRef<HTMLDivElement | null>(null)
   const options = useMemo(
     () => resolveOwnerOptions(users, value, currentOwner),
     [users, value, currentOwner],
@@ -51,6 +52,7 @@ export default function ConfigOwnerSelect({
     const matched = options.filter((user) =>
       formatOwnerLabel(user, !activeIds.has(user.id)).toLowerCase().includes(normalizedQuery),
     )
+    if (matched.length === 0) return []
     // Текущий владелец остаётся в списке при любом фильтре: иначе триггер
     // потеряет подпись, а выбор нельзя будет увидеть.
     const selected = options.find((user) => user.id === value)
@@ -63,7 +65,13 @@ export default function ConfigOwnerSelect({
   }
 
   return (
-    <div className="space-y-2">
+    <div
+      className="space-y-2"
+      ref={blockRef}
+      // Поле поиска живёт над триггером и в низких диалогах уводит его под футер:
+      // при фокусе прокручиваем блок целиком, чтобы список остался на виду.
+      onFocus={() => blockRef.current?.scrollIntoView({ block: 'nearest' })}
+    >
       <Label htmlFor={id}>{label}</Label>
       {description && <p className="text-xs text-muted-foreground">{description}</p>}
       {options.length > SEARCH_THRESHOLD && (
