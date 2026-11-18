@@ -5,6 +5,7 @@ import {
   ArrowDownToLine,
   ArrowUp,
   ArrowUpFromLine,
+  ChevronDown,
   Clock,
   Laptop,
   MapPin,
@@ -121,7 +122,12 @@ function DeviceDisconnectMenu({
           title={`Отключить устройство (Client ID ${target.clientId})`}
         >
           <Laptop size={14} />
-          {labeled ? 'Устройство' : null}
+          {labeled ? (
+            <>
+              Отключить
+              <ChevronDown size={12} aria-hidden />
+            </>
+          ) : null}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -567,11 +573,11 @@ export default function MonitoringConnectionsList({
 
   return (
     <>
-      <div className="mb-3 flex items-center justify-between gap-2 text-xs text-muted-foreground lg:hidden">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground lg:hidden">
         <span>
           Показано {visibleRows.length} из {sortedRows.length}
         </span>
-        <div className="inline-flex gap-1">
+        <div className="flex flex-wrap gap-1">
           {(['traffic', 'rate', 'duration', 'time', 'client'] as SortKey[]).map((key) => (
             <button
               key={key}

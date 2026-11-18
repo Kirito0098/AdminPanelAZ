@@ -110,7 +110,9 @@ export default function MiniBottomNav({ isAdmin, features }: MiniBottomNavProps)
       alive = false
       window.clearInterval(timer)
     }
-  }, [isAdmin])
+    // pathname в зависимостях: после одобрения заявки счётчик не должен
+    // ждать следующего опроса (Fider #46).
+  }, [isAdmin, pathname])
 
   useEffect(() => {
     if (!chatEnabled) {
