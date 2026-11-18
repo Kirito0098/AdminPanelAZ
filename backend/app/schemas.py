@@ -2854,3 +2854,14 @@ class MarkReadRequest(BaseModel):
 
 class MarkReadResponse(BaseModel):
     ok: bool = True
+
+
+class PortalAppLinksUpdate(BaseModel):
+    """Переопределения ссылок на приложения в клиентском портале (Fider #41)."""
+
+    links: dict[str, dict[str, str | None]] = Field(default_factory=dict)
+
+
+class PortalAppLinksResponse(BaseModel):
+    links: dict[str, dict[str, str]] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)

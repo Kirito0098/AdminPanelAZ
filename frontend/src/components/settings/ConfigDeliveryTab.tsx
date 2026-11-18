@@ -3,6 +3,7 @@ import { Router } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { ApiError, getSecuritySettings, updateSecuritySettings } from '@/api/client'
 import RouteResultsPanel from '@/components/settings/RouteResultsPanel'
+import PortalAppLinksCard from '@/components/settings/PortalAppLinksCard'
 import SettingsAlert from '@/components/settings/SettingsAlert'
 import {
   SettingsCard as Card,
@@ -98,6 +99,8 @@ export default function ConfigDeliveryTab() {
           <RouteResultsPanel showPublicLinks={settings.public_download_enabled} />
         </CardContent>
       </Card>
+
+      <PortalAppLinksCard />
     </div>
   )
 }

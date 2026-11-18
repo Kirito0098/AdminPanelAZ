@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, require_admin
+from app.config import get_settings
 from app.database import get_db
 from app.models import User, UserRole, VpnConfig
+from app.schemas import PortalAppLinksResponse, PortalAppLinksUpdate
 from app.services.client_portal import (
     _active_user_token,
     ensure_portal_user,
@@ -25,8 +27,13 @@ from app.services.feature_guards import get_feature_service, module_disabled_mes
 from app.services.node_manager import get_active_node
 from app.services.node_sync.groups import find_sync_group_containing_node
 from app.services.config_access import is_config_owner
+from app.services.action_log import log_action
+from app.services.ip_restriction import ip_restriction_service
+from app.services.portal_app_links import get_portal_app_links, set_portal_app_links
 
 router = APIRouter(prefix="/portal", tags=["portal"])
+
+settings = get_settings()
 
 
 def _require_portal_enabled() -> None:
@@ -73,6 +80,35 @@ def _assert_can_manage_client(user: User, db: Session, client_name: str) -> None
     if not any(is_config_owner(user, c) for c in configs):
         # Same 404 as missing — avoid probing client names via 403 vs 404.
         raise HTTPException(status_code=404, detail="Клиент не найден")
+
+
+@router.get("/app-links", response_model=PortalAppLinksResponse)
+def get_app_links(
+    _: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Ссылки на приложения в клиентском портале (пусто — официальные)."""
+    return PortalAppLinksResponse(links=get_portal_app_links(db))
+
+
+@router.put("/app-links", response_model=PortalAppLinksResponse)
+def put_app_links(
+    payload: PortalAppLinksUpdate,
+    request: Request,
+    admin: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    links, warnings = set_portal_app_links(db, payload.links)
+    if settings.audit_log_enabled:
+        log_action(
+            db,
+            action="portal_app_links_update",
+            user_id=admin.id,
+            username=admin.username,
+            remote_addr=ip_restriction_service.get_client_ip(request),
+            details=f"protocols={sorted(links)}",
+        )
+    return PortalAppLinksResponse(links=links, warnings=warnings)
 
 
 @router.post("/clients/{client_name}/link")
