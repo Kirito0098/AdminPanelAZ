@@ -67,7 +67,7 @@ Status meanings:
 
 ## ALREADY-SHIPPED.md
 
-Verify against the codebase (prefer codebase-memory graph `search_graph` / `get_file_outline`, else grep). Table columns:
+Verify against the codebase (prefer graphify MCP `query_graph` / `get_node`, else grep). Table columns:
 
 | Capability | Where in code | Used by stages | Notes |
 | ---------- | ------------- | -------------- | ----- |

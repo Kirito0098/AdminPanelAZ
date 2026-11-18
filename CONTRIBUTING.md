@@ -23,7 +23,7 @@
 | `.agents/mcp_config.json.example` | тот же шаблон для обёртки `.agents/bin/mcp` (симлинк на файл выше) |
 | `.agents/AGENTS.md` | краткая карта для агентов, которые смотрят в `.agents/` |
 
-**Не в git (локально):** `.cursor/mcp.json`, `.cursor/settings.json`, `.cursor/rules/gitea-agent-sync.mdc`, `.agents/mcp_config.json`, `.agents/bin/`, `.codebase-memory/`, `docs/plans/`, `docs/superpowers/`, `.env`, `*.db`.
+**Не в git (локально):** `.cursor/mcp.json`, `.cursor/settings.json`, `.cursor/rules/gitea-agent-sync.mdc`, `.agents/mcp_config.json`, `.agents/bin/`, `graphify-out/`, `docs/plans/`, `docs/superpowers/`, `.env`, `*.db`.
 
 Токены и личные MCP-конфиги в PR не кладём: пути, ключи и авторизация живут только на машине оператора.
 
@@ -47,14 +47,18 @@ MCP даёт агенту доступ к внешним сервисам и и�
 
 | Сервер (`serverName`) | Зачем | Когда |
 | --- | --- | --- |
-| `codebase_memory` | Граф символов: функции, классы, вызовы, HTTP-роуты, импорты. `search_graph`, `trace_path`, `get_code_snippet`, `get_architecture` | Навигация по незнакомому коду. После крупных рефакторингов и удаления модулей — переиндексация, иначе граф ссылается на удалённые файлы |
+| `graphify` | Граф символов: функции, классы, вызовы, импорты, сообщества. `query_graph`, `get_node`, `get_neighbors`, `shortest_path`, `graph_stats` | Навигация по незнакомому коду. Граф лежит в `graphify-out/`, после коммита обновляется git-хуком; вручную — `graphify update .` |
 | `github` | PR, issues, GitHub Actions и комментарии прямо из чата | Посмотреть PR, статус CI, triage комментариев. Только чтение |
 | `context7` | Актуальная документация библиотек | Правите интеграцию с FastAPI / React / Recharts / webauthn / redis — не гадаете API по памяти модели |
 | `playwright` | Браузер: клики, ввод, снимки DOM и экрана, логи консоли | UI-правки: логин, 2FA, NOC, Mini App, мастера настроек. В jsdom порталы и Radix-меню не воспроизводятся |
 | `siteaudit` | Audit публичного URL: HTTPS, HSTS, CSP, cookies, SSL | После смены CSP/HSTS и публикации домена |
 | `lazyweb` | Подбор референсов UI | Только когда нужны примеры интерфейсов |
 
-`codebase_memory`, `github`, `playwright` и `siteaudit` запускаются **по SSH на тот же хост, где лежит код**, поэтому граф и индексы — серверные, а не по локальному зеркалу.
+`graphify`, `github`, `playwright` и `siteaudit` запускаются **по SSH на тот же хост, где лежит код**, поэтому граф и индексы — серверные, а не по локальному зеркалу.
+
+Граф строится из рабочего дерева: `graphify extract . --code-only && graphify cluster-only . --no-label`
+(первый раз ~1 мин), дальше его обновляют git-хуки. В отдельном worktree — свой `graphify-out/`;
+чужой граф читается параметром `project_path` у инструментов.
 
 `siteaudit` и `lazyweb` тяжёлые и в обычной работе висят в каждом запросе зря: держите их выключенными в профиле и включайте на время аудита сайта и подбора референсов.
 
@@ -65,8 +69,9 @@ MCP даёт агенту доступ к внешним сервисам и и�
 ```json
 {
   "mcpServers": {
-    "codebase-memory-mcp": {
-      "command": "codebase-memory-mcp"
+    "graphify": {
+      "command": "graphify-mcp",
+      "args": ["/opt/AdminPanelAZ/graphify-out/graph.json"]
     },
     "siteaudit": {
       "command": "uvx",
@@ -103,9 +108,10 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 
 ```bash
 .agents/bin/mcp servers                        # список серверов из конфига
-.agents/bin/mcp tools codebase_memory          # инструменты сервера
-.agents/bin/mcp tools codebase_memory search_graph   # JSON-схема аргументов
-.agents/bin/mcp call codebase_memory search_graph '{"query": "node_sync"}'
+.agents/bin/mcp tools graphify                 # инструменты сервера
+.agents/bin/mcp tools graphify query_graph     # JSON-схема аргументов
+.agents/bin/mcp call graphify graph_stats '{}'
+.agents/bin/mcp call graphify query_graph '{"question": "node_sync"}'
 ```
 
 Конфиг ищется по порядку: `$MCP_CONFIG` → `.agents/mcp_config.json` → `.cursor/mcp.json` → `.cursor/mcp.json.example`.
@@ -188,7 +194,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 ## Как это стыкуется
 
 ```text
-Навигация по коду          → codebase_memory
+Навигация по коду          → graphify
 Доки библиотеки            → context7
 PR / CI / GitHub           → github
 UI глазами                 → playwright
@@ -210,7 +216,7 @@ Security диффа             → security-пак, точечно
 2. **Документация:** пользовательские тексты — простой русский в `docs/` и `docs/nastrojki/`. Новые/переименованные страницы и секции настроек — обновить соответствующий user-doc и таблицы в [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md).
 3. **API:** тонкие роутеры, логика в `backend/app/services/`; фронт ходит в API через `frontend/src/api/client.ts`.
 4. **Фичи:** учитывать feature toggles и активный узел (`FeatureModulesContext`, `NodeContext`).
-5. **Секреты:** `.env`, ключи, `*.pem`, GeoIP `*.mmdb`, граф `.codebase-memory/` — только локально.
+5. **Секреты:** `.env`, ключи, `*.pem`, GeoIP `*.mmdb`, граф `graphify-out/` — только локально.
 6. **Проверки:** как в CI — ruff, bandit, eslint (advisory), shellcheck `-S warning` для `install.sh` и `scripts/*.sh`.
 7. **Ключ NodeSource:** `install.sh` принимает ключ репозитория NodeSource только с отпечатком `NODESOURCE_KEY_FINGERPRINT`. Если NodeSource сменит ключ, установка Node.js остановится с ошибкой «Ключ NodeSource не совпал». Тогда сверить новый отпечаток с [инструкцией NodeSource](https://github.com/nodesource/distributions) и обновить `NODESOURCE_KEY_FINGERPRINT` в `install.sh` и `NODESOURCE_FPR` в `scripts/test-install-nodejs-lts.sh`.
 8. **Ветки релиза и Dependabot:** изменения идут в `release/X.Y.Z`, в `main` — одним PR, когда релиз готов. Создав новую `release/X.Y.Z`, первым коммитом в ней переключите `target-branch` в `.github/dependabot.yml` на эту ветку. Dependabot читает файл только из `main`, поэтому новое значение заработает после merge этой ветки в `main`; до этого его PR в старую ветку релиза закрывайте без merge.

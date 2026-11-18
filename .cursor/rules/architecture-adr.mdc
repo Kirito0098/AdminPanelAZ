@@ -6,7 +6,7 @@ alwaysApply: false
 
 # ADR-001. AdminPanelAZ: слои, границы и точки связности
 
-> Дубликат ADR из индекса `codebase-memory` (`manage_adr`), чтобы документ версионировался
+> Дубликат ADR из индекса `codebase-memory` (удалён вместе с MCP-сервером, граф теперь в `graphify-out/`), чтобы документ версионировался
 > в репозитории. Карта проекта — `docs/PROJECT_MAP.md`.
 
 ## Статус

@@ -32,7 +32,7 @@ rg -F -n "a.b(c)" .                            # литерал, без реге
 rg --files -g '!dist' -g '!node_modules'       # вместо find | grep
 ```
 
-- `rg` уважает `.gitignore`: `.codebase-memory/`, `.roo/`, `.agents/bin/`, `dist/` не находятся.
+- `rg` уважает `.gitignore`: `graphify-out/`, `.roo/`, `.agents/bin/`, `dist/` не находятся.
   Нужно заглянуть внутрь — `rg -uuu` (или `--no-ignore`).
 - Кириллица в коде ошибок и логах — `rg -n "Не удалось" backend`.
 - Не `grep | head -20`, а `rg -m 20` (лимит совпадений на файл).
