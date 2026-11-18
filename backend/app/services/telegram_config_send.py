@@ -15,6 +15,7 @@ from app.services.profile_delivery import load_node_remote_hosts, read_profile_f
 from app.services.profile_download_name import build_profile_download_filename
 from app.services.telegram_profile_ui import file_caption
 from app.services.telegram import send_tg_document_result, send_tg_message
+from app.services.portal_app_links import resolve_app_url
 from app.services.vpn_install_instructions import InstallPlatform, build_install_instruction_message
 from app.services.vpn_profile_visibility import filter_profile_files, resolve_effective_visible_vpn_profiles
 
@@ -114,12 +115,14 @@ def send_config_files_to_chat(
         last_file_item = file_item
 
     if install_platform and last_file_item and sent > 0:
+        protocol = last_file_item.get("protocol", "")
         instruction = build_install_instruction_message(
-            protocol=last_file_item.get("protocol", ""),
+            protocol=protocol,
             platform=install_platform,
             client_name=config.client_name,
             filename=last_file_item.get("download_filename") or last_file_item.get("filename"),
             path=last_file_item.get("path"),
+            app_url=resolve_app_url(db, protocol, install_platform),
         )
         if instruction:
             if not send_tg_message(bot_token, str(chat_id), instruction, run_async=run_async):

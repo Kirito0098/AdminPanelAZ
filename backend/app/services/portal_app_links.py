@@ -78,3 +78,51 @@ def set_portal_app_links(db: Session, raw: object) -> tuple[AppLinks, list[str]]
         row.value = value
     db.commit()
     return links, warnings
+
+# Официальные ссылки по умолчанию. Держим в синхроне с
+# frontend/src/lib/portalAppDownloads.ts: портал берёт их оттуда для плейсхолдеров,
+# бот — отсюда, чтобы дописать «Скачать: …» в инструкцию.
+DEFAULT_APP_URLS: dict[str, dict[str, str]] = {
+    "openvpn": {
+        "windows": "https://openvpn.net/client/",
+        "mac": "https://openvpn.net/client/",
+        "linux": "https://openvpn.net/community-downloads/",
+        "android": "https://play.google.com/store/apps/details?id=net.openvpn.openvpn",
+        "ios": "https://apps.apple.com/app/openvpn-connect/id590379981",
+    },
+    "wireguard": {
+        "windows": "https://www.wireguard.com/install/",
+        "mac": "https://apps.apple.com/app/wireguard/id1451685025",
+        "linux": "https://www.wireguard.com/install/",
+        "android": "https://play.google.com/store/apps/details?id=com.wireguard.android",
+        "ios": "https://apps.apple.com/app/wireguard/id1441195209",
+    },
+    "amneziawg": {
+        "windows": "https://github.com/amnezia-vpn/amneziawg-windows-client/releases",
+        "mac": "https://amnezia.org/en/downloads",
+        "linux": "https://amnezia.org/en/downloads",
+        "android": "https://amnezia.org/en/downloads",
+        "ios": "https://apps.apple.com/app/amneziawg/id6478942365",
+    },
+    "amneziawg2": {
+        "windows": "https://github.com/amnezia-vpn/amneziawg-windows-client/releases",
+        "mac": "https://amnezia.org/en/downloads",
+        "linux": "https://amnezia.org/en/downloads",
+        "android": "https://amnezia.org/en/downloads",
+        "ios": "https://apps.apple.com/app/amneziawg/id6478942365",
+    },
+}
+
+
+def resolve_app_url(db: Session, protocol: str, platform: str) -> str | None:
+    """Ссылка для инструкции: переопределение админа важнее официальной."""
+    proto = (protocol or "").strip().lower()
+    plat = (platform or "").strip().lower()
+    if not proto or not plat:
+        return None
+    overrides = get_portal_app_links(db)
+    return (
+        overrides.get(proto, {}).get(plat)
+        or DEFAULT_APP_URLS.get(proto, {}).get(plat)
+        or None
+    )
