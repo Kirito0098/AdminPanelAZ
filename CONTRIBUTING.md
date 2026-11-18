@@ -50,11 +50,9 @@ MCP даёт агенту доступ к внешним сервисам и и�
 | `graphify` | Граф символов: функции, классы, вызовы, импорты, сообщества. `query_graph`, `get_node`, `get_neighbors`, `shortest_path`, `graph_stats` | Навигация по незнакомому коду. Граф лежит в `graphify-out/`, после коммита обновляется git-хуком; вручную — `graphify update .` |
 | `github` | PR, issues, GitHub Actions и комментарии прямо из чата | Посмотреть PR, статус CI, triage комментариев. Только чтение |
 | `context7` | Актуальная документация библиотек | Правите интеграцию с FastAPI / React / Recharts / webauthn / redis — не гадаете API по памяти модели |
-| `playwright` | Браузер: клики, ввод, снимки DOM и экрана, логи консоли | UI-правки: логин, 2FA, NOC, Mini App, мастера настроек. В jsdom порталы и Radix-меню не воспроизводятся |
-| `siteaudit` | Audit публичного URL: HTTPS, HSTS, CSP, cookies, SSL | После смены CSP/HSTS и публикации домена |
-| `lazyweb` | Подбор референсов UI | Только когда нужны примеры интерфейсов |
+| `browse` | Браузер: клики, ввод, снимки DOM и экрана, логи консоли, настоящий Chrome с вашими логинами | UI-правки: логин, 2FA, NOC, Mini App, мастера настроек. В jsdom порталы и Radix-меню не воспроизводятся |
 
-`graphify`, `github`, `playwright` и `siteaudit` запускаются **по SSH на тот же хост, где лежит код**, поэтому граф и индексы — серверные, а не по локальному зеркалу.
+`graphify` и `github` запускаются **по SSH на тот же хост, где лежит код**, поэтому граф и индексы — серверные, а не по локальному зеркалу; `browse` работает через расширение в вашем браузере; `context7` — внешний HTTP.
 
 Граф строится из рабочего дерева: `graphify extract . --code-only && graphify cluster-only . --no-label`
 (первый раз ~1 мин), дальше его обновляют git-хуки по изменённому коду. Коммит только с
@@ -63,7 +61,7 @@ MCP даёт агенту доступ к внешним сервисам и и�
 `graphify update . --force`, иначе старые узлы остаются.
 В отдельном worktree — свой `graphify-out/`; чужой граф читается параметром `project_path` у инструментов.
 
-`siteaudit` и `lazyweb` тяжёлые и в обычной работе висят в каждом запросе зря: держите их выключенными в профиле и включайте на время аудита сайта и подбора референсов.
+`siteaudit` тяжёлый и в обычной работе висит в каждом запросе зря: держите его выключенным в профиле и включайте на время аудита сайта.
 
 ### Шаблон `mcp.json`
 
@@ -75,10 +73,6 @@ MCP даёт агенту доступ к внешним сервисам и и�
     "graphify": {
       "command": "graphify-mcp",
       "args": ["/opt/AdminPanelAZ/graphify-out/graph.json"]
-    },
-    "siteaudit": {
-      "command": "uvx",
-      "args": ["--from", "siteaudit-mcp", "siteaudit"]
     },
     "github": {
       "command": "github-mcp-stdio"
@@ -187,7 +181,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 | API abuse / rate limit | В проекте есть auth и global API rate limit (memory/Redis) — сверять дизайн и обходы |
 | Web/API OWASP (CSRF, SSRF, XSS) | Публичная раздача конфигов, webhook’и, SSRF-риски к node agent и внешним URL |
 | Secrets / supply chain | Не допустить токены и ключи в git; аудит зависимостей рядом с pip-audit/npm audit в CI |
-| TLS / HTTPS | Публикация через nginx/Let’s Encrypt — согласовать с `siteaudit` и `SECURITY.md` |
+| TLS / HTTPS | Публикация через nginx/Let’s Encrypt — согласовать с `SECURITY.md` |
 | AI/MCP (tool poisoning, prompt injection) | У контрибьюторов MCP и скиллы с полными правами агента — понимать риски tooling |
 
 Остальные сотни скиллов (чужие cloud IAM, ICS, red-team C2) без явной задачи не вызываем. Dual-use/offensive — только против систем с правом на тест.
@@ -200,15 +194,14 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 Навигация по коду          → graphify
 Доки библиотеки            → context7
 PR / CI / GitHub           → github
-UI глазами                 → playwright
-HTTPS заголовки домена     → siteaudit
-Референсы интерфейсов      → lazyweb
+UI глазами                 → browse
+HTTPS заголовки домена     → security-пак (audit-in-headers), вручную
 Фича (план)                → план в чате 2–5 пунктов → «да»
 Баг                        → root cause, потом фикс (+ project tdd)
 Перед «готово»             → реальные прогоны, вывод в чате
 Свой новый код             → karpathy-ponytail
 Security диффа             → security-пак, точечно
-Проверить UI после правок  → webapp-testing / playwright
+Проверить UI после правок  → webapp-testing / browse
 ```
 
 ---
