@@ -9,6 +9,7 @@ import {
   Download,
   Filter,
   LayoutGrid,
+  Layers,
   PauseCircle,
   Search,
   Table2,
@@ -91,6 +92,7 @@ import BulkUsersNotifyDialog from '@/components/users/BulkUsersNotifyDialog'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import SuspendUserDialog, { type SuspendUserPayload } from '@/components/users/SuspendUserDialog'
 import AccessRequestsDialog from '@/components/users/AccessRequestsDialog'
+import PresetsDialog from '@/components/users/PresetsDialog'
 import UsersBulkBar from '@/components/users/UsersBulkBar'
 import SubscriberCard from '@/components/users/SubscriberCard'
 import SubscriberRulesPanel from '@/components/users/SubscriberRulesPanel'
@@ -161,6 +163,7 @@ export default function UsersPage() {
   /** Заявка, которую одобряем через диалог «Создание пользователя». */
   const [approveReq, setApproveReq] = useState<AccessRequestResponse | null>(null)
   const [cooldownOpen, setCooldownOpen] = useState(false)
+  const [presetsOpen, setPresetsOpen] = useState(false)
   const [requestsCount, setRequestsCount] = useState(0)
   const [focusRequestId, setFocusRequestId] = useState<number | null>(null)
   /** Уже обработанный deep-link (?requests=1 / ?request=<id>), чтобы не открывать диалог циклично. */
@@ -616,6 +619,16 @@ export default function UsersPage() {
                   label={requestsCount > 0 ? `Заявки (${requestsCount})` : 'Заявки'}
                   shortLabel="Заявки"
                   onClick={() => setRequestsOpen(true)}
+                />
+              )}
+              {provisioningOn && (
+                <ToolbarButton
+                  variant="outline"
+                  className="bg-card/80"
+                  icon={<Layers size={16} />}
+                  label="Шаблоны"
+                  shortLabel="Шаблоны"
+                  onClick={() => setPresetsOpen(true)}
                 />
               )}
               {provisioningOn && (
@@ -1104,6 +1117,8 @@ export default function UsersPage() {
       )}
 
       <AccessCooldownDialog open={cooldownOpen} onOpenChange={setCooldownOpen} />
+
+      {provisioningOn && <PresetsDialog open={presetsOpen} onOpenChange={setPresetsOpen} />}
 
       {provisioningOn && (
         <AccessRequestsDialog

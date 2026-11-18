@@ -6,6 +6,7 @@ import type {
   BulkNodesRequest,
   BulkUsersRequest,
   BulkUsersResult,
+  PresetBase,
   PresetResponse,
   RejectRequest,
   TelegramLinkCodeResponse,
@@ -193,6 +194,27 @@ export async function deleteProvisionedUser(userId: number) {
 /** GET /users/presets — список шаблонов (только если модуль включён). */
 export async function listPresets() {
   return apiFetch<PresetResponse[]>('/users/presets')
+}
+
+/** POST /users/presets — создать шаблон (is_default снимается с остальных). */
+export async function createPreset(data: PresetBase) {
+  return apiFetch<PresetResponse>('/users/presets', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  })
+}
+
+/** PUT /users/presets/{id} — обновить шаблон (передаются только заполненные поля). */
+export async function updatePreset(presetId: number, data: Partial<PresetBase>) {
+  return apiFetch<PresetResponse>(`/users/presets/${presetId}`, {
+    method: 'PUT',
+    body: JSON.stringify(data),
+  })
+}
+
+/** DELETE /users/presets/{id} — удалить шаблон. */
+export async function deletePreset(presetId: number) {
+  return apiFetch<{ message: string }>(`/users/presets/${presetId}`, { method: 'DELETE' })
 }
 
 /* ------------------------- заявки на доступ ------------------------- */
