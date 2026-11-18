@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine, event
@@ -10,6 +12,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.models import Node, User, UserActionLog, UserRole, VpnConfig, VpnType
+from app.routers import users as users_router
 from app.services import user_provisioning as provisioning
 
 
@@ -149,3 +152,40 @@ def test_cleanup_deletes_user_referenced_by_action_log_as_target(factory, monkey
         link_log = db.query(UserActionLog).filter(UserActionLog.action == "telegram_link").one()
         assert link_log.user_id is None
         assert link_log.username == "test"
+
+
+def test_delete_user_without_plan_logs_history_without_dangling_target(factory, monkeypatch):
+    """Fider #48: журнал удаления не должен ссылаться на уже удалённого абонента.
+
+    Раньше запись в журнал шла после ``commit()`` удаления → FK без ON DELETE
+    отбивал вставку, и клиент получал 500 при фактически выполненном удалении.
+    """
+    user_id = _seed(factory)
+    monkeypatch.setattr(users_router, "revoke_creator_portal_links", lambda *_a, **_k: None)
+    monkeypatch.setattr(users_router, "delete_user_write_archive", lambda *_a, **_k: None)
+    monkeypatch.setattr(users_router.admin_notify_service, "send_user_delete", lambda *_a, **_k: None)
+
+    with factory() as db:
+        admin = db.query(User).filter(User.role == UserRole.admin).one()
+        user = db.get(User, user_id)
+        db.add(
+            UserActionLog(
+                user_id=admin.id,
+                username=admin.username,
+                action="user_suspend",
+                details="target=test",
+                target_user_id=user_id,
+            )
+        )
+        db.commit()
+
+        name, pending = users_router._delete_user_core(db, user, admin, MagicMock())
+
+    assert (name, pending) == ("test", False)
+    with factory() as db:
+        assert db.get(User, user_id) is None
+        delete_log = db.query(UserActionLog).filter(UserActionLog.action == "user_delete").one()
+        assert delete_log.target_user_id is None
+        assert delete_log.details == "deleted=test"
+        suspend_log = db.query(UserActionLog).filter(UserActionLog.action == "user_suspend").one()
+        assert suspend_log.target_user_id is None

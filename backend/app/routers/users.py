@@ -2276,7 +2276,9 @@ def _delete_user_core(db, user, current_user, request) -> tuple[str, bool]:
             username=current_user.username,
             remote_addr=remote_addr,
             details=f"deleted={deleted_username}",
-            target_user_id=target_id,
+            # target_user_id не пишем: абонента уже нет в users, а FK без ON DELETE
+            # отбил бы вставку и вернул 500 после фактического удаления (Fider #48).
+            target_user_id=None,
         )
         admin_notify_service.send_user_delete(
             db,
