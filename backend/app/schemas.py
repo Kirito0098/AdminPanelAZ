@@ -608,6 +608,7 @@ class SelfServiceQuotaResponse(BaseModel):
     limit: int | None = None
     remaining: int | None = None
     unlimited: bool = False
+    subscription_expired: bool = False
     can_create: bool = True
     can_manage: bool = True
     create_rate_max: int | None = None

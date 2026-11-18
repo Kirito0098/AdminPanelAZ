@@ -184,6 +184,25 @@ def test_expired_subscription_blocks_create_for_user():
     assert "subscription_expired" in str(exc.value.detail)
 
 
+def test_quota_payload_reports_expired_subscription():
+    """Фронт гасит «Новый клиент» по can_create: истёкший срок должен попадать в пейлоад."""
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    user = SimpleNamespace(
+        id=5,
+        role=UserRole.user,
+        can_create_configs=True,
+        config_quota=5,
+        access_until=past.replace(tzinfo=None),
+    )
+    db = _FakeDb(setting_value="5")
+
+    payload = build_quota_payload(db, user)
+
+    assert payload["subscription_expired"] is True
+    assert payload["can_create"] is False
+    assert payload["remaining"] == 5  # квота не «съедена», дело только в сроке
+
+
 def test_admin_is_exempt_from_expired_subscription_gate():
     user = SimpleNamespace(
         id=6,

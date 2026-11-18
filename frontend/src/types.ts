@@ -323,6 +323,7 @@ export interface SelfServiceQuota {
   limit: number | null
   remaining: number | null
   unlimited: boolean
+  subscription_expired?: boolean
   can_create: boolean
   can_manage?: boolean
   create_rate_max?: number | null
