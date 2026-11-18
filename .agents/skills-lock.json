@@ -4,7 +4,7 @@
     "brainstorming": {
       "source": "obra/superpowers",
       "sourceType": "github",
-      "skillPath": ".cursor/skills/brainstorming/SKILL.md",
+      "skillPath": ".agents/skills/brainstorming/SKILL.md",
       "upstreamCommit": "22f0b463e7a5e579904dd6211a520321035526f7",
       "upstreamHash": "2c9ca71f94886f9ca9f4aef055f7cafb3e1a9bdf3aeebf8f4cb547c69405d207",
       "computedHash": "b01fb48b8f9799e0634b28210b493e2397aa14c8e38d7d96e62306dfb114cd9f",
@@ -13,63 +13,63 @@
     "karpathy-ponytail": {
       "source": "AbdullahHameedKhan/karpathy-ponytail-skills",
       "sourceType": "github",
-      "skillPath": ".cursor/skills/karpathy-ponytail/SKILL.md",
+      "skillPath": ".agents/skills/karpathy-ponytail/SKILL.md",
       "computedHash": "2e314f4b8a717d1092386d577bd134616d7527b151eb8bfa69463a2bcf813753",
-      "note": "vendored into project .cursor/skills"
+      "note": "vendored into project .agents/skills"
     },
     "tui-design": {
       "source": "gfargo/skills",
       "sourceType": "github",
-      "skillPath": ".cursor/skills/tui-design/SKILL.md",
+      "skillPath": ".agents/skills/tui-design/SKILL.md",
       "computedHash": "8f26d4897417a5e582786cf9f190fce95d26d7dd6423b3a5c7e319be897183d8",
-      "note": "vendored into project .cursor/skills; ecosystem references removed (no TUI framework in this project)"
+      "note": "vendored into project .agents/skills; ecosystem references removed (no TUI framework in this project)"
     },
     "react-best-practices": {
       "source": "vercel",
       "sourceType": "vendor",
-      "skillPath": ".cursor/skills/react-best-practices/SKILL.md",
+      "skillPath": ".agents/skills/react-best-practices/SKILL.md",
       "note": "vendored from Vercel engineering rules (author in frontmatter); server/RSC rules removed for Vite SPA, compiled AGENTS.md removed"
     },
     "vercel-composition-patterns": {
       "source": "vercel",
       "sourceType": "vendor",
-      "skillPath": ".cursor/skills/vercel-composition-patterns/SKILL.md",
+      "skillPath": ".agents/skills/vercel-composition-patterns/SKILL.md",
       "note": "vendored from Vercel engineering rules (author in frontmatter); compiled AGENTS.md removed"
     },
     "web-design-guidelines": {
       "source": "vercel-labs/web-interface-guidelines",
       "sourceType": "vendor",
-      "skillPath": ".cursor/skills/web-design-guidelines/SKILL.md",
+      "skillPath": ".agents/skills/web-design-guidelines/SKILL.md",
       "note": "checklist inlined into SKILL.md; remote WebFetch dependency removed; Navigation block (aria-current, URL state, drawer focus, skip link) added locally from vercel-labs/web-interface-guidelines command.md"
     },
     "webapp-testing": {
       "source": "unknown",
       "sourceType": "vendor",
-      "skillPath": ".cursor/skills/webapp-testing/SKILL.md",
+      "skillPath": ".agents/skills/webapp-testing/SKILL.md",
       "note": "vendored with LICENSE.txt; original repository not recorded in the project"
     },
     "tdd": {
       "source": "project",
       "sourceType": "local",
-      "skillPath": ".cursor/skills/tdd/SKILL.md",
+      "skillPath": ".agents/skills/tdd/SKILL.md",
       "note": "project-specific workflow; test policy lives in AGENTS.md"
     },
     "split-design-spec": {
       "source": "project",
       "sourceType": "local",
-      "skillPath": ".cursor/skills/split-design-spec/SKILL.md",
+      "skillPath": ".agents/skills/split-design-spec/SKILL.md",
       "note": "project-specific workflow for docs/superpowers/specs"
     },
     "cli-toolbox": {
       "source": "project",
       "sourceType": "local",
-      "skillPath": ".cursor/skills/cli-toolbox/SKILL.md",
+      "skillPath": ".agents/skills/cli-toolbox/SKILL.md",
       "note": "project-specific server tool inventory"
     },
     "code-simplifier": {
       "source": "anthropics/claude-plugins-official",
       "sourceType": "github",
-      "skillPath": ".cursor/skills/code-simplifier/SKILL.md",
+      "skillPath": ".agents/skills/code-simplifier/SKILL.md",
       "upstreamPath": "plugins/code-simplifier/agents/code-simplifier.md",
       "upstreamCommit": "e0ab6e51219eef74e417a0e1d89e5d53e5e763d4",
       "upstreamHash": "2a51e8d210580d9f66ac2ed1226c41f9374565fc275da30d7bb95f65c2cc87bb",
@@ -79,11 +79,11 @@
     "surgical-edits": {
       "source": "PatrickJS/awesome-cursorrules + rohitg00/awesome-claude-code-toolkit",
       "sourceType": "github",
-      "skillPath": ".cursor/skills/surgical-edits/SKILL.md",
+      "skillPath": ".agents/skills/surgical-edits/SKILL.md",
       "upstreamSources": [
         {
           "repo": "PatrickJS/awesome-cursorrules",
-          "path": "rules/anti-sycophancy-code-discipline-cursorrules-prompt-file.mdc",
+          "path": "rules/anti-sycophancy-code-discipline-cursorrules-prompt-file.md",
           "commit": "b044f956f021b6e8877f16781bcfc466a6a120e9",
           "hash": "17fb2f719ddd7873e84a7f97a1c26825349f32dbd3b4cd4a1630611284322eb7",
           "license": "CC0-1.0"
@@ -102,17 +102,17 @@
     "ui-ux-pro-max": {
       "source": "nextlevelbuilder/ui-ux-pro-max-skill",
       "sourceType": "github",
-      "skillPath": ".cursor/skills/ui-ux-pro-max/SKILL.md",
+      "skillPath": ".agents/skills/ui-ux-pro-max/SKILL.md",
       "upstreamPath": ".claude/skills/ui-ux-pro-max",
       "upstreamCommit": "6ae86f61f520d6ca229d2f40e070410638c908c5",
       "upstreamHash": "14f43337edfbf7822e091428e4ae0c6f92f86e3353deda6a30f6613121e2cf2d",
       "computedHash": "cbca7f455dcea388ba1bbae223b356bf1369e6ffdf99b6d01a397ffdb6af0c04",
-      "note": "whole skill vendored untrimmed (data/, references/, scripts/, MIT LICENSE): 120 UX rules, styles, palettes, font pairs, 22 stacks; description shortened to one trigger line; real .cursor path added to the search-tool section; styles/palettes stay upstream material — the panel has its own design"
+      "note": "whole skill vendored untrimmed (data/, references/, scripts/, MIT LICENSE): 120 UX rules, styles, palettes, font pairs, 22 stacks; description shortened to one trigger line; real .agents path added to the search-tool section; styles/palettes stay upstream material — the panel has its own design"
     },
     "frontend-design": {
       "source": "anthropics/claude-plugins-official",
       "sourceType": "github",
-      "skillPath": ".cursor/skills/frontend-design/SKILL.md",
+      "skillPath": ".agents/skills/frontend-design/SKILL.md",
       "upstreamPath": "plugins/frontend-design/skills/frontend-design/SKILL.md",
       "upstreamCommit": "e0ab6e51219eef74e417a0e1d89e5d53e5e763d4",
       "upstreamHash": "d91970639e9f5c37682ac7ab60094d35f1c7c1f38d731bd56396563aee10c1d3",

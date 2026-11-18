@@ -8,15 +8,15 @@
 
 | Файл | О чём |
 | --- | --- |
-| `.cursor/rules/lean-code.mdc` | проверки только на границах доверия |
-| `.cursor/rules/use-skills.mdc` | маршрутизация скиллов, режимы, запреты |
-| `.cursor/rules/release-train-branching.mdc` | ветки `release/X.Y.Z` |
-| `.cursor/rules/architecture-adr.mdc` | слои, границы, точки связности и известный долг |
+| `.agents/rules/lean-code.md` | проверки только на границах доверия |
+| `.agents/rules/use-skills.md` | маршрутизация скиллов, режимы, запреты |
+| `.agents/rules/release-train-branching.md` | ветки `release/X.Y.Z` |
+| `.agents/rules/architecture-adr.md` | слои, границы, точки связности и известный долг |
 
-Скиллы — `.cursor/skills/`, маршрутизация — раздел «Скиллы» ниже.
+Скиллы — `.agents/skills/`, маршрутизация — раздел «Скиллы» ниже.
 
 Личная синхронизация с Gitea (адрес, pre-push хук, снимок агентских каталогов) — вне
-репозитория: правило `.cursor/rules/gitea-agent-sync.mdc` лежит только на сервере.
+репозитория: правило `.agents/rules/gitea-agent-sync.md` лежит только на сервере.
 
 ## Проект лежит на сервере
 
@@ -45,7 +45,7 @@
 Проверяем один раз там, где данные входят: Pydantic, ответы node/proxy agent, webhook Telegram,
 файлы и `.env`, вывод внешних команд, права и auth. Внутри доверяем типам, ORM и схемам.
 `except Exception` — только в фоновых циклах и best-effort очистке, с логом. Подробно и с
-примерами — [`.cursor/rules/lean-code.mdc`](.cursor/rules/lean-code.mdc:1).
+примерами — [`.agents/rules/lean-code.md`](.agents/rules/lean-code.md:1).
 
 ## Тесты — только на критических узлах
 
@@ -81,7 +81,7 @@ nginx/firewall/systemd/install, бэкапы и миграции, node/proxy age
 
 Работаем в активном `release/X.Y.Z`, не в `main`; перед правкой — `git branch --show-current`.
 Тег `vX.Y.Z` — только после merge релиза в `main`. Полный регламент, `feat/…` и dependabot —
-[`.cursor/rules/release-train-branching.mdc`](.cursor/rules/release-train-branching.mdc:1).
+[`.agents/rules/release-train-branching.md`](.agents/rules/release-train-branching.md:1).
 
 ## Перед «готово»
 
@@ -100,7 +100,7 @@ nginx/firewall/systemd/install, бэкапы и миграции, node/proxy age
 
 ## Скиллы
 
-Источник — `.cursor/skills/<name>/SKILL.md`. Zoo Code видит их через симлинки по режимам:
+Источник — `.agents/skills/<name>/SKILL.md`. Zoo Code видит их через симлинки по режимам:
 
 | Каталог Zoo | Когда активен | Что внутри |
 | --- | --- | --- |
@@ -108,11 +108,11 @@ nginx/firewall/systemd/install, бэкапы и миграции, node/proxy age
 | `.agents/skills-code/` | Code | `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `tdd`, `tui-design`, `surgical-edits`, `code-simplifier` |
 | `.agents/skills-architect/` | Architect | `brainstorming`, `split-design-spec` |
 
-Cursor режимов не знает: он видит весь `.cursor/skills`. Поэтому описания в frontmatter короткие
+Клиент без режимов видит весь `.agents/skills/`. Поэтому описания в frontmatter короткие
 (одна триггерная строка) — каталог скиллов попадает в каждый запрос, тело скилла читается только
 при вызове.
 
-Маршрутизация «ситуация → скилл» — [`.cursor/rules/use-skills.mdc`](.cursor/rules/use-skills.mdc:1).
+Маршрутизация «ситуация → скилл» — [`.agents/rules/use-skills.md`](.agents/rules/use-skills.md:1).
 Процесс отдельными скиллами не описан: фича — план в чате и «да» (раздел «Мелочь ≠ фича»),
 баг — сначала root cause, «готово» — прогоны из раздела «Перед «готово»».
 
@@ -127,7 +127,7 @@ Cursor режимов не знает: он видит весь `.cursor/skills`
 - сначала MCP `graphify`: `query_graph` (подграф по словам вопроса), `get_node` (символ и его
   связи), `get_neighbors` (кто вызывает, что вызывает), `shortest_path` (путь между символами),
   `get_section` (секция документа); статус графа — `graph_stats`;
-- карта проекта и известный долг — `.cursor/rules/architecture-adr.mdc`;
+- карта проекта и известный долг — `.agents/rules/architecture-adr.md`;
 - `rg`/`bat -r`/`read` — только если граф не ответил или файл вне индекса (`deploy/`,
   YAML и доки без символов, бинарные фикстуры);
 - файл целиком не читать: `get_node` даёт путь и строку символа — дальше `read` с `offset`;
@@ -135,8 +135,9 @@ Cursor режимов не знает: он видит весь `.cursor/skills`
 
 ## MCP
 
-Cursor берёт серверы из локального `.cursor/mcp.json` (шаблон — `.cursor/mcp.json.example`);
-Zoo Code — из настроек MCP своего клиента. Настройки в репозиторий не попадают.
+Серверы подключаются в конфиге клиента (opencode — `~/.config/opencode/opencode.json`,
+Zoo Code — настройки MCP); локальный `.agents/mcp.json` (шаблон — `.agents/mcp.json.example`)
+читает обёртка `.agents/bin/mcp`. Настройки в репозиторий не попадают.
 Зачем нужен каждый сервер и как проверить его из терминала — [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 Если в сессии есть инструменты `mcp__*`:

@@ -93,30 +93,23 @@ Thumbs.db
 # --- Cline: .clineignore — локальная настройка автозагрузки контекста (не коммитить) ---
 .clineignore
 
-# --- Cursor: curated pack in git; local secrets/settings out ---
-.cursor/*
-!.cursor/rules/
-!.cursor/rules/**
-!.cursor/skills/
-!.cursor/skills/**
-.cursor/skills/**/__pycache__/
-!.cursor/mcp.json.example
-# Личная синхронизация с Gitea — только на сервере, в репозиторий не попадает
-.cursor/rules/gitea-agent-sync.mdc
-
-# --- Zoo Code: локальный MCP-конфиг (пути, токены, настройки машины) ---
-.roo/mcp.json
-.roo/mcp_settings.json
-
-# --- Agents: AGENTS.md + relative skill links; local MCP/bin out ---
+# --- Agents: AGENTS.md, правила и скиллы в git; локальный MCP/bin — нет ---
 .agents/*
 !.agents/AGENTS.md
+!.agents/rules/
+!.agents/rules/**
+# Личная синхронизация с Gitea — только на сервере, в репозиторий не попадает
+.agents/rules/gitea-agent-sync.md
 !.agents/skills/
 !.agents/skills/**
+.agents/skills/**/__pycache__/
 !.agents/skills-*/
 !.agents/skills-*/**
 !.agents/skills-lock.json
+!.agents/mcp.json.example
 !.agents/mcp_config.json.example
+.agents/mcp.json
+.agents/mcp_settings.json
 .agents/bin/
 .agents/**/__pycache__/
 

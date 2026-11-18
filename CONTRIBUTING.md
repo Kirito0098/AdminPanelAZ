@@ -1,6 +1,6 @@
 # Участие в разработке AdminPanelAZ
 
-Гайд для тех, кто помогает с панелью: какие MCP и skills использует мейнтейнер, **зачем** каждый из них, и договорённости по коду. Работают два клиента — **Zoo Code** (DSH-профиль) и **Cursor**: правила и каталог скиллов лежат в репозитории и читаются как обычные файлы, а MCP-серверы каждый клиент подключает по-своему (настройки MCP клиента или локальный `.cursor/mcp.json`).
+Гайд для тех, кто помогает с панелью: какие MCP и skills использует мейнтейнер, **зачем** каждый из них, и договорённости по коду. Основной клиент — **Zoo Code** (DSH-профиль), но правила и каталог скиллов — обычные markdown-файлы в `.agents/`, их читает любой агент, а MCP-серверы каждый клиент подключает по-своему (настройки MCP клиента или локальный `.agents/mcp.json`).
 
 Пользовательские инструкции (для админов VPN): [`docs/README.md`](docs/README.md).
 Карта кода: [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md).
@@ -13,17 +13,16 @@
 
 | Путь | Что |
 | ------ | ----- |
-| `.cursor/rules/` | `use-skills`, `lean-code`, `release-train-branching`, `telegram-release-post`. Это просто markdown-правила, их читают оба клиента — и Zoo Code, и Cursor |
-| `.cursor/skills/` | project skills: `brainstorming`, `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
-| `.agents/skills/` | симлинки на `.cursor/skills/` для скиллов, нужных в любом режиме Zoo Code |
-| `.agents/skills-code/` | те же симлинки, активны только в Code: React, UI, tui, tdd, браузерные проверки |
-| `.agents/skills-architect/` | симлинк `split-design-spec`, активен только в Architect |
+| `.agents/rules/` | `use-skills`, `lean-code`, `release-train-branching`, `telegram-release-post`, `architecture-adr`. Markdown-правила, читаются как обычные файлы |
+| `.agents/skills/` | project skills: `brainstorming`, `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
+| `.agents/skills-code/` | симлинки в `.agents/skills/`, активны только в Code: React, UI, tui, tdd, браузерные проверки |
+| `.agents/skills-architect/` | симлинки `brainstorming` и `split-design-spec`, активны только в Architect |
 | `.agents/skills-lock.json` | провенанс скиллов: `karpathy-ponytail`, `tui-design` (хеши), вендорные Vercel и локальные |
-| `.cursor/mcp.json.example` | шаблон MCP **без** секретов |
+| `.agents/mcp.json.example` | шаблон MCP **без** секретов |
 | `.agents/mcp_config.json.example` | тот же шаблон для обёртки `.agents/bin/mcp` (симлинк на файл выше) |
 | `.agents/AGENTS.md` | краткая карта для агентов, которые смотрят в `.agents/` |
 
-**Не в git (локально):** `.cursor/mcp.json`, `.cursor/settings.json`, `.cursor/rules/gitea-agent-sync.mdc`, `.agents/mcp_config.json`, `.agents/bin/`, `graphify-out/`, `docs/plans/`, `docs/superpowers/`, `.env`, `*.db`.
+**Не в git (локально):** `.agents/mcp.json`, `.agents/mcp_settings.json`, `.agents/rules/gitea-agent-sync.md`, `.agents/mcp_config.json`, `.agents/bin/`, `graphify-out/`, `docs/plans/`, `docs/superpowers/`, `.env`, `*.db`.
 
 Токены и личные MCP-конфиги в PR не кладём: пути, ключи и авторизация живут только на машине оператора.
 
@@ -31,13 +30,14 @@
 
 ## MCP в двух клиентах
 
-**Cursor** берёт MCP из локального `.cursor/mcp.json` (шаблон — `.cursor/mcp.json.example`), правила — из `.cursor/rules/`, скиллы — из `.cursor/skills/`.
+**Любой клиент** берёт правила из `.agents/rules/`, скиллы — из `.agents/skills/`, MCP — из своего
+локального конфига (`.agents/mcp.json`, шаблон — `.agents/mcp.json.example`).
 
-**Zoo Code** подключает те же серверы в своих настройках MCP; файл `.cursor/mcp.json` там не читается, если не настроен явно.
+**Zoo Code** подключает те же серверы в своих настройках MCP; файл `.agents/mcp.json` там не читается, если не настроен явно.
 
 Ни то, ни другое в репозиторий не попадает: пути команд, ключи и токены — только локально. Формат — `{"mcpServers": {...}}`, как в шаблоне.
 
-Личная синхронизация с Gitea (адрес, pre-push хук, снимок агентских каталогов) настраивается только на сервере: правило `.cursor/rules/gitea-agent-sync.mdc` не коммитится и в GitHub не попадает.
+Личная синхронизация с Gitea (адрес, pre-push хук, снимок агентских каталогов) настраивается только на сервере: правило `.agents/rules/gitea-agent-sync.md` не коммитится и в GitHub не попадает.
 
 ---
 
@@ -117,7 +117,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 .agents/bin/mcp call graphify query_graph '{"question": "node_sync"}'
 ```
 
-Конфиг ищется по порядку: `$MCP_CONFIG` → `.agents/mcp_config.json` → `.cursor/mcp.json` → `.cursor/mcp.json.example`.
+Конфиг ищется по порядку: `$MCP_CONFIG` → `.agents/mcp_config.json` → `.agents/mcp.json` → `.agents/mcp.json.example`.
 
 ---
 
@@ -125,14 +125,14 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 
 | Где | Что |
 | ----- | ----- |
-| `.cursor/skills/<name>/` | скиллы этого репозитория: `karpathy-ponytail`, `tdd`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
-| `.agents/skills*/` | относительные симлинки на `.cursor/skills/`, разложенные по режимам Zoo Code |
+| `.agents/skills/<name>/` | скиллы этого репозитория: `karpathy-ponytail`, `tdd`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
+| `.agents/skills*/` | относительные симлинки на `.agents/skills/`, разложенные по режимам Zoo Code |
 
-Внешних каталогов скиллов нет: если скилла нет в `.cursor/skills/`, значит его нет.
+Внешних каталогов скиллов нет: если скилла нет в `.agents/skills/`, значит его нет.
 
 Скилл — это каталог с `SKILL.md` и frontmatter (`name`, `description`); `name` совпадает с именем каталога, иначе агент скилл не увидит.
 
-**Маршрутизация «ситуация → skill»** — [`use-skills.mdc`](.cursor/rules/use-skills.mdc) (always-on правило), короткая таблица — в [`AGENTS.md`](AGENTS.md).
+**Маршрутизация «ситуация → skill»** — [`use-skills.md`](.agents/rules/use-skills.md) (always-on правило), короткая таблица — в [`AGENTS.md`](AGENTS.md).
 
 ### Скиллы в репозитории
 
@@ -167,7 +167,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
   → план в чате на 2–5 пунктов → прогоны
 ```
 
-Процессные скиллы (`brainstorming`, `writing-plans`, `systematic-debugging`, `verification-before-completion` и т. п.) в репозитории не лежат: эти шаги описаны текстом в [`AGENTS.md`](AGENTS.md) и в [`use-skills.mdc`](.cursor/rules/use-skills.mdc).
+Процессные скиллы (`brainstorming`, `writing-plans`, `systematic-debugging`, `verification-before-completion` и т. п.) в репозитории не лежат: эти шаги описаны текстом в [`AGENTS.md`](AGENTS.md) и в [`use-skills.md`](.agents/rules/use-skills.md).
 
 ---
 
@@ -231,8 +231,8 @@ Security-критичные зоны (auth, middleware, public download, telegra
 ## Быстрый старт для разработчика
 
 1. Клон репозитория, Python/Node как в README / `install.sh` (или локальный venv + `frontend` npm).
-2. Открыть `/opt/AdminPanelAZ` в Zoo Code или Cursor и прочитать [`AGENTS.md`](AGENTS.md) + [`use-skills.mdc`](.cursor/rules/use-skills.mdc) — оттуда берётся выбор скилла и команды проверок.
-3. MCP: скопировать `.cursor/mcp.json.example` → `.cursor/mcp.json`, поправить пути команд под свою ОС; в Zoo Code те же серверы добавить в настройках MCP. Один раз — `gh auth login`.
+2. Открыть `/opt/AdminPanelAZ` в Zoo Code (или другом агенте) и прочитать [`AGENTS.md`](AGENTS.md) + [`use-skills.md`](.agents/rules/use-skills.md) — оттуда берётся выбор скилла и команды проверок.
+3. MCP: скопировать `.agents/mcp.json.example` → `.agents/mcp.json`, поправить пути команд под свою ОС; в Zoo Code те же серверы добавить в настройках MCP. Один раз — `gh auth login`.
 4. Проверить серверы: `.agents/bin/mcp servers` (список) и `mcp tools <server>` (инструменты).
 5. Команды прогонов — в [`AGENTS.md`](AGENTS.md), раздел «Команды проверок»: ruff, точечный pytest, `npm run typecheck && npm run lint`, для UI — `npm run build:all`.
 6. PR: понятное описание, зелёный CI. Крупные изменения — отдельными reviewable коммитами, ветка — активная `release/X.Y.Z`.

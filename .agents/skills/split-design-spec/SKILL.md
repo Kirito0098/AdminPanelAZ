@@ -125,7 +125,7 @@ For each part file, set `status` after checking code:
 ## Project notes (AdminPanelAZ)
 
 - Specs live under `docs/superpowers/` (gitignored). Do not commit them to `origin`.
-- Register nothing in GitHub CI. After creating this skill itself, add a row to `.cursor/rules/use-skills.mdc` if missing.
+- Register nothing in GitHub CI. After creating this skill itself, add a row to `.agents/rules/use-skills.md` if missing.
 - Do not start planning or implementation until the user picks a stage.
 
 ## Done when

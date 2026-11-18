@@ -32,7 +32,7 @@ rg -F -n "a.b(c)" .                            # литерал, без реге
 rg --files -g '!dist' -g '!node_modules'       # вместо find | grep
 ```
 
-- `rg` уважает `.gitignore`: `graphify-out/`, `.roo/`, `.agents/bin/`, `dist/` не находятся.
+- `rg` уважает `.gitignore`: `graphify-out/`, `.agents/bin/`, `dist/` не находятся.
   Нужно заглянуть внутрь — `rg -uuu` (или `--no-ignore`).
 - Кириллица в коде ошибок и логах — `rg -n "Не удалось" backend`.
 - Не `grep | head -20`, а `rg -m 20` (лимит совпадений на файл).
@@ -79,7 +79,7 @@ yq '.services.web.image' deploy/compose.yml        # вытащить значе
 yq -o=json '.' deploy/compose.yml | jaq -S '.'     # YAML -> сортированный JSON
 yq -i '.a.b = "c"' file.yml                        # in-place (осторожно, это запись)
 jaq -r '.scripts.build' frontend/package.json
-jaq '.mcpServers | keys' .roo/mcp.json
+jaq '.mcpServers | keys' .agents/mcp.json
 jaq -S '.scripts' frontend/package.json            # -S: стабильный порядок ключей
 ```
 

@@ -44,11 +44,11 @@ python "${CLAUDE_PLUGIN_ROOT}/.claude/skills/ui-ux-pro-max/scripts/search.py" "<
 
 If `python` is not found, try `python3`, then `py -3`. Requires Python 3.x, no external dependencies (see README for install instructions if Python is missing).
 
-**Local path (AdminPanelAZ):** the skill is vendored at `.cursor/skills/ui-ux-pro-max/`, so replace
+**Local path (AdminPanelAZ):** the skill is vendored at `.agents/skills/ui-ux-pro-max/`, so replace
 `${CLAUDE_PLUGIN_ROOT}/.claude/skills/ui-ux-pro-max` with that path:
 
 ```bash
-python3 .cursor/skills/ui-ux-pro-max/scripts/search.py "<query>" --domain ux
+python3 .agents/skills/ui-ux-pro-max/scripts/search.py "<query>" --domain ux
 ```
 
 For this project the relevant domains are `ux` (navigation, layout, forms, a11y),
