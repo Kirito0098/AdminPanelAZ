@@ -961,6 +961,9 @@ def approve_access_request(
     if row.request_type == "new_user":
         if payload.preset_id is None:
             ad_hoc = {
+                # Привязка готовых конфигов вместо выпуска новых: сервис по этому
+                # ключу пропускает требования узлов и протоколов (Fider #47).
+                "config_ids": payload.config_ids,
                 "node_ids": payload.node_ids or [],
                 "protocols": payload.protocols or [],
                 "config_count": payload.config_count,

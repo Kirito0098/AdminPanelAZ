@@ -192,3 +192,43 @@ def test_auto_login_skips_name_held_by_deleted_user(db):
     assert created.client_base_name == "tg777"
     assert decided.status == "approved"
     assert decided.user_id == created.id
+
+
+def test_approve_new_user_with_config_ids_keeps_them(db, monkeypatch):
+    """Fider #47: роутер терял config_ids, и «без новых конфигов» падало с 400.
+
+    Проверяется именно проброс: сервис умеет привязку готовых конфигов, но
+    в ``ad_hoc`` для new_user уходили только узлы и протоколы, поэтому заявка
+    отклонялась с «Укажите узлы и протоколы плана».
+    """
+    from unittest.mock import MagicMock
+
+    from app.routers import users as users_router
+    from app.schemas import ApproveRequest
+
+    request_row = _request(db)
+    captured: dict = {}
+
+    def _fake_approve(_db, **kwargs):
+        captured.update(kwargs)
+        return request_row
+
+    monkeypatch.setattr(users_router, "_require_provisioning", lambda: None)
+    monkeypatch.setattr(users_router, "approve_request", _fake_approve)
+    monkeypatch.setattr(users_router, "_sync_request_messages_after_decide", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "app.services.telegram_widgets.refresh_access_request_cards_sync", lambda *a, **k: None
+    )
+    monkeypatch.setattr(users_router.settings, "audit_log_enabled", False)
+
+    response = users_router.approve_access_request(
+        request_id=request_row.id,
+        payload=ApproveRequest(config_ids=[11, 12], username="ivan"),
+        request=MagicMock(),
+        db=db,
+        admin=_admin(db),
+    )
+
+    assert captured["ad_hoc"]["config_ids"] == [11, 12]
+    assert captured["ad_hoc"]["username"] == "ivan"
+    assert response.id == request_row.id
