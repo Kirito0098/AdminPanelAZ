@@ -161,7 +161,10 @@ export async function dismissPublicPortalBanner(token: string) {
 }
 
 export interface PortalAppLinksState {
+  /** Переопределения админа (пустая ячейка = официальная ссылка). */
   links: PortalAppLinks
+  /** Официальные ссылки для плейсхолдеров карточки настроек. */
+  defaults: PortalAppLinks
   warnings: string[]
 }
 

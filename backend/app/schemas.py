@@ -2864,4 +2864,6 @@ class PortalAppLinksUpdate(BaseModel):
 
 class PortalAppLinksResponse(BaseModel):
     links: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Официальные ссылки — плейсхолдеры карточки настроек.
+    defaults: dict[str, dict[str, str]] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)

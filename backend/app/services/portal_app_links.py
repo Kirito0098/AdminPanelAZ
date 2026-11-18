@@ -79,9 +79,9 @@ def set_portal_app_links(db: Session, raw: object) -> tuple[AppLinks, list[str]]
     db.commit()
     return links, warnings
 
-# Официальные ссылки по умолчанию. Держим в синхроне с
-# frontend/src/lib/portalAppDownloads.ts: портал берёт их оттуда для плейсхолдеров,
-# бот — отсюда, чтобы дописать «Скачать: …» в инструкцию.
+# Официальные ссылки по умолчанию — единственный источник: отсюда их получают
+# и бот («Скачать: …» в инструкции), и клиентский портал (через app_links в
+# публичном пейлоаде), и карточка настроек (поле defaults в GET /portal/app-links).
 DEFAULT_APP_URLS: dict[str, dict[str, str]] = {
     "openvpn": {
         "windows": "https://openvpn.net/client/",
@@ -126,3 +126,11 @@ def resolve_app_url(db: Session, protocol: str, platform: str) -> str | None:
         or DEFAULT_APP_URLS.get(proto, {}).get(plat)
         or None
     )
+
+
+def get_effective_app_links(db: Session) -> AppLinks:
+    """Дефолты, перекрытые настройками админа: то, что реально видят клиенты."""
+    effective: AppLinks = {proto: dict(urls) for proto, urls in DEFAULT_APP_URLS.items()}
+    for proto, platforms in get_portal_app_links(db).items():
+        effective.setdefault(proto, {}).update(platforms)
+    return effective

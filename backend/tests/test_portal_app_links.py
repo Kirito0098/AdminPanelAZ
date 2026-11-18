@@ -36,3 +36,17 @@ def test_normalize_drops_foreign_scheme_and_unknown_keys():
 def test_normalize_ignores_broken_payload_shape():
     assert normalize_app_links(["https://x"]) == ({}, [])
     assert normalize_app_links({"openvpn": "https://x"})[0] == {}
+
+
+def test_effective_links_override_defaults():
+    from app.services import portal_app_links as svc
+
+    saved = svc.get_portal_app_links
+    try:
+        svc.get_portal_app_links = lambda _db: {"openvpn": {"android": "https://own.example/a.apk"}}
+        effective = svc.get_effective_app_links(None)
+    finally:
+        svc.get_portal_app_links = saved
+
+    assert effective["openvpn"]["android"] == "https://own.example/a.apk"
+    assert effective["wireguard"]["ios"] == svc.DEFAULT_APP_URLS["wireguard"]["ios"]

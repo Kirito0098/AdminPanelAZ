@@ -3,7 +3,6 @@ import { Download, Loader2, RotateCcw, Smartphone } from 'lucide-react'
 import { ApiError } from '@/api/client'
 import { getPortalAppLinks, updatePortalAppLinks } from '@/api/portal'
 import {
-  APP_DOWNLOADS,
   PORTAL_APP_PROTOCOLS,
   PORTAL_OS_OPTIONS,
   type PortalAppLinks,
@@ -29,6 +28,7 @@ export default function PortalAppLinksCard() {
   const { success, error: notifyError, warning: notifyWarning } = useNotifications()
   const [links, setLinks] = useState<PortalAppLinks>({})
   const [saved, setSaved] = useState<PortalAppLinks>({})
+  const [defaults, setDefaults] = useState<PortalAppLinks>({})
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
@@ -38,6 +38,7 @@ export default function PortalAppLinksCard() {
       .then((data) => {
         setLinks(data.links ?? {})
         setSaved(data.links ?? {})
+        setDefaults(data.defaults ?? {})
       })
       .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки ссылок'))
       .finally(() => setLoading(false))
@@ -70,6 +71,7 @@ export default function PortalAppLinksCard() {
       const data = await updatePortalAppLinks(links)
       setLinks(data.links ?? {})
       setSaved(data.links ?? {})
+      setDefaults(data.defaults ?? {})
       if (data.warnings?.length) {
         notifyWarning(`Часть ссылок не сохранена: ${data.warnings.join('; ')}`)
       } else {
@@ -126,7 +128,7 @@ export default function PortalAppLinksCard() {
                   </div>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-5">
                     {PORTAL_OS_OPTIONS.map((os) => {
-                      const fallback = APP_DOWNLOADS[protocol.id]?.[os.id]?.url ?? ''
+                      const fallback = defaults[protocol.id]?.[os.id] ?? ''
                       const value = links[protocol.id]?.[os.id] ?? ''
                       const id = `portal-app-${protocol.id}-${os.id}`
                       return (

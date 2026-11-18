@@ -29,7 +29,11 @@ from app.services.node_sync.groups import find_sync_group_containing_node
 from app.services.config_access import is_config_owner
 from app.services.action_log import log_action
 from app.services.ip_restriction import ip_restriction_service
-from app.services.portal_app_links import get_portal_app_links, set_portal_app_links
+from app.services.portal_app_links import (
+    DEFAULT_APP_URLS,
+    get_portal_app_links,
+    set_portal_app_links,
+)
 
 router = APIRouter(prefix="/portal", tags=["portal"])
 
@@ -88,7 +92,7 @@ def get_app_links(
     db: Session = Depends(get_db),
 ):
     """Ссылки на приложения в клиентском портале (пусто — официальные)."""
-    return PortalAppLinksResponse(links=get_portal_app_links(db))
+    return PortalAppLinksResponse(links=get_portal_app_links(db), defaults=DEFAULT_APP_URLS)
 
 
 @router.put("/app-links", response_model=PortalAppLinksResponse)
@@ -108,7 +112,7 @@ def put_app_links(
             remote_addr=ip_restriction_service.get_client_ip(request),
             details=f"protocols={sorted(links)}",
         )
-    return PortalAppLinksResponse(links=links, warnings=warnings)
+    return PortalAppLinksResponse(links=links, defaults=DEFAULT_APP_URLS, warnings=warnings)
 
 
 @router.post("/clients/{client_name}/link")

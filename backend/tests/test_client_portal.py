@@ -947,7 +947,7 @@ def _run_user_payload(targets, entries: dict, labels: dict, offline=(), calls: l
         patch("app.services.client_portal._build_client_portal_entry", side_effect=fake_entry),
         patch("app.services.client_portal._apply_user_subscription_status", side_effect=lambda status, _u: status),
         patch("app.services.client_portal._portal_brand_title", return_value="VPN"),
-        patch("app.services.portal_app_links.get_portal_app_links", return_value={}),
+        patch("app.services.portal_app_links.get_effective_app_links", return_value={}),
         patch("app.services.feature_guards.get_feature_service") as feats,
     ):
         feats.return_value.is_enabled.return_value = True

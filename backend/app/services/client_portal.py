@@ -1076,14 +1076,14 @@ def build_portal_payload(db: Session, token_row: ClientPortalToken) -> dict:
             client_name=token_row.client_name,
             base=base,
         )
-    from app.services.portal_app_links import get_portal_app_links
+    from app.services.portal_app_links import get_effective_app_links
 
     return {
         "kind": "client",
         "node_id": token_row.node_id,
         "client_name": token_row.client_name,
         "brand_title": _portal_brand_title(db),
-        "app_links": get_portal_app_links(db),
+        "app_links": get_effective_app_links(db),
         "protocols": entry["protocols"],
         "files": entry["files"],
         "unlock_codes_enabled": get_feature_service().is_enabled("unlock_codes"),
@@ -1172,12 +1172,12 @@ def build_user_portal_payload(db: Session, token_row: UserPortalToken) -> dict:
     nodes.sort(key=lambda node: (node["label"].casefold(), node["node_id"]))
     from app.services.user_closed_access import closed_access_payload
 
-    from app.services.portal_app_links import get_portal_app_links
+    from app.services.portal_app_links import get_effective_app_links
 
     return {
         "kind": "user",
         "brand_title": _portal_brand_title(db),
-        "app_links": get_portal_app_links(db),
+        "app_links": get_effective_app_links(db),
         "unlock_codes_enabled": get_feature_service().is_enabled("unlock_codes"),
         "closed_access": closed_access_payload(db, user),
         "portal_banner": portal_banner_payload(user),
