@@ -18,9 +18,32 @@ cat >"$BIN/systemctl" <<'EOF'
 #!/usr/bin/env bash
 echo "systemctl $*" >>"$SYSTEMCTL_LOG"
 EOF
-chmod +x "$BIN/id" "$BIN/systemctl"
+# curl — отдаёт файлы из $CURL_FILES по имени из URL, иначе 404 (как GitHub без ассета).
+cat >"$BIN/curl" <<'EOF'
+#!/usr/bin/env bash
+url="" out=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o) out="$2"; shift 2 ;;
+    --max-time) shift 2 ;;
+    -*) shift ;;
+    *) url="$1"; shift ;;
+  esac
+done
+name="${url##*/}"
+echo "$url" >>"$CURL_LOG"
+[[ -f "$CURL_FILES/$name" ]] || exit 22
+cp "$CURL_FILES/$name" "$out"
+EOF
+chmod +x "$BIN/id" "$BIN/systemctl" "$BIN/curl"
 SYSTEMCTL_LOG="$TMP/systemctl.log"
-export SYSTEMCTL_LOG
+CURL_LOG="$TMP/curl.log"
+CURL_FILES="$TMP/curl-files"
+mkdir -p "$CURL_FILES"
+export SYSTEMCTL_LOG CURL_LOG CURL_FILES
+# Ожидание свежей сборки в тестах не нужно: одна попытка без паузы.
+export FRONTEND_ARTIFACT_ATTEMPTS=1 FRONTEND_ARTIFACT_RETRY_DELAY=0
+unset GITHUB_REPO
 PATH="$BIN:$PATH"
 
 git_q() { git -c user.email=t@t -c user.name=t -c init.defaultBranch=main "$@" >/dev/null 2>&1; }
@@ -30,9 +53,10 @@ fail() {
   exit 1
 }
 
-# install_tree — установка с уже собранным старым интерфейсом
+# install_tree — установка с уже собранным старым интерфейсом; «GitHub» очищается
 install_tree() {
-  rm -rf "${TMP:?}/install"
+  rm -rf "${TMP:?}/install" "${TMP:?}/curl-files"
+  mkdir -p "$TMP/curl-files"
   mkdir -p "$TMP/install/frontend/dist" "$TMP/install/backend/app/static/tg_mini"
   echo old >"$TMP/install/frontend/dist/index.html"
   echo old >"$TMP/install/frontend/dist/OLD-MARKER"
@@ -107,6 +131,114 @@ set -e
 [[ "$rc" != 0 ]] || fail "архив без manifest.json принят"
 grep -q "manifest.json" "$TMP/out" || fail "нет объяснения про manifest: $(cat "$TMP/out")"
 [[ "$(cat "$TMP/install/frontend/dist/index.html")" == old ]] || fail "интерфейс подменён без manifest"
+echo "  OK"
+
+# publish_asset <имя> — кладёт архив и его .sha256 в «GitHub» (каталог для стаба curl)
+publish_asset() {
+  local name="$1"
+  cp "$TMP/$name" "$CURL_FILES/$name"
+  (cd "$CURL_FILES" && sha256sum "$name" >"$name.sha256")
+}
+
+channel_url() {
+  echo "releases/download/frontend-builds/adminpanelaz-frontend-$(head_commit).tar.gz"
+}
+
+echo "[test] канал по коммиту: ассет скачивается по sha из frontend-builds, каталоги подменяются"
+install_tree
+git_q -C "$TMP/install" remote add origin https://github.com/owner/repo.git
+make_archive "$(head_commit)" "adminpanelaz-frontend-$(head_commit).tar.gz"
+publish_asset "adminpanelaz-frontend-$(head_commit).tar.gz"
+: >"$CURL_LOG"
+bash "$SCRIPT" --commit HEAD --dir "$TMP/install" --no-restart >"$TMP/out" 2>&1 \
+  || fail "канал не сработал: $(cat "$TMP/out")"
+grep -q "$(channel_url)" "$CURL_LOG" || fail "неверный URL канала: $(cat "$CURL_LOG")"
+[[ "$(cat "$TMP/install/frontend/dist/index.html")" == new ]] || fail "dist не обновлён из канала"
+[[ "$(cat "$TMP/install/backend/app/static/tg_mini/index.html")" == new ]] || fail "tg_mini не обновлён из канала"
+echo "  OK"
+
+echo "[test] канал: сборки для коммита нет — код 3, старый интерфейс цел"
+install_tree
+git_q -C "$TMP/install" remote add origin https://github.com/owner/repo.git
+set +e
+bash "$SCRIPT" --commit HEAD --dir "$TMP/install" --no-restart >"$TMP/out" 2>&1
+rc=$?
+set -e
+[[ "$rc" == 3 ]] || fail "ожидался код 3 (нет сборки), получен $rc: $(cat "$TMP/out")"
+[[ "$(cat "$TMP/install/frontend/dist/index.html")" == old ]] || fail "интерфейс подменён без сборки"
+echo "  OK"
+
+echo "[test] канал: у ассета нет .sha256 — отказ (код 1), сборка не ставится"
+install_tree
+git_q -C "$TMP/install" remote add origin https://github.com/owner/repo.git
+make_archive "$(head_commit)" "adminpanelaz-frontend-$(head_commit).tar.gz"
+cp "$TMP/adminpanelaz-frontend-$(head_commit).tar.gz" "$CURL_FILES/"
+set +e
+bash "$SCRIPT" --commit HEAD --dir "$TMP/install" --no-restart >"$TMP/out" 2>&1
+rc=$?
+set -e
+[[ "$rc" == 1 ]] || fail "ожидался код 1 (нет суммы), получен $rc: $(cat "$TMP/out")"
+grep -q "sha256" "$TMP/out" || fail "нет объяснения про сумму: $(cat "$TMP/out")"
+[[ "$(cat "$TMP/install/frontend/dist/index.html")" == old ]] || fail "интерфейс подменён без проверки суммы"
+echo "  OK"
+
+echo "[test] канал: контрольная сумма не совпала — отказ (код 1)"
+install_tree
+git_q -C "$TMP/install" remote add origin https://github.com/owner/repo.git
+make_archive "$(head_commit)" "adminpanelaz-frontend-$(head_commit).tar.gz"
+cp "$TMP/adminpanelaz-frontend-$(head_commit).tar.gz" "$CURL_FILES/"
+printf '%s  %s\n' "0000000000000000000000000000000000000000000000000000000000000000" \
+  "adminpanelaz-frontend-$(head_commit).tar.gz" >"$CURL_FILES/adminpanelaz-frontend-$(head_commit).tar.gz.sha256"
+set +e
+bash "$SCRIPT" --commit HEAD --dir "$TMP/install" --no-restart >"$TMP/out" 2>&1
+rc=$?
+set -e
+[[ "$rc" == 1 ]] || fail "ожидался код 1 (сумма не совпала), получен $rc: $(cat "$TMP/out")"
+echo "  OK"
+
+echo "[test] канал: origin не на github.com — код 4 (Gitea-зеркало, локальный клон)"
+install_tree
+set +e
+bash "$SCRIPT" --commit HEAD --dir "$TMP/install" --no-restart >"$TMP/out" 2>&1
+rc=$?
+set -e
+[[ "$rc" == 4 ]] || fail "ожидался код 4 (нет канала), получен $rc: $(cat "$TMP/out")"
+grep -q "github.com" "$TMP/out" || fail "нет объяснения про origin: $(cat "$TMP/out")"
+echo "  OK"
+
+echo "[test] архив: симлинк отклоняется до подмены"
+install_tree
+rm -rf "${TMP:?}/build-link"
+mkdir -p "$TMP/build-link/frontend/dist/.vite" "$TMP/build-link/backend/app/static/tg_mini"
+echo new >"$TMP/build-link/frontend/dist/index.html"
+echo '{}' >"$TMP/build-link/frontend/dist/.vite/manifest.json"
+printf '{"commit":"%s"}\n' "$(head_commit)" >"$TMP/build-link/frontend/dist/.build-info.json"
+ln -s /etc/passwd "$TMP/build-link/frontend/dist/evil"
+echo new >"$TMP/build-link/backend/app/static/tg_mini/index.html"
+tar czf "$TMP/link.tar.gz" -C "$TMP/build-link" frontend/dist backend/app/static/tg_mini
+set +e
+bash "$SCRIPT" --file "$TMP/link.tar.gz" --dir "$TMP/install" --no-restart >"$TMP/out" 2>&1
+rc=$?
+set -e
+[[ "$rc" == 1 ]] || fail "архив с симлинком принят: $(cat "$TMP/out")"
+grep -q "симлинк" "$TMP/out" || fail "нет объяснения про ссылку: $(cat "$TMP/out")"
+[[ "$(cat "$TMP/install/frontend/dist/index.html")" == old ]] || fail "интерфейс подменён архивом с симлинком"
+echo "  OK"
+
+echo "[test] архив: посторонний путь отклоняется до подмены"
+install_tree
+make_archive "$(head_commit)" plain.tar.gz
+rm -rf "${TMP:?}/build-extra"
+mkdir -p "$TMP/build-extra"
+cp -a "${TMP:?}/build/." "$TMP/build-extra/"
+echo x >"$TMP/build-extra/README"
+tar czf "$TMP/extra.tar.gz" -C "$TMP/build-extra" frontend/dist backend/app/static/tg_mini README
+set +e
+bash "$SCRIPT" --file "$TMP/extra.tar.gz" --dir "$TMP/install" --no-restart >"$TMP/out" 2>&1
+rc=$?
+set -e
+[[ "$rc" == 1 ]] || fail "архив с посторонним путём принят: $(cat "$TMP/out")"
+grep -q "неожиданный путь" "$TMP/out" || fail "нет объяснения про путь: $(cat "$TMP/out")"
 echo "  OK"
 
 echo "All frontend deploy checks passed."

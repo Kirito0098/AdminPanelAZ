@@ -1,16 +1,13 @@
-import { useState } from 'react'
-import { Hammer, Rocket, Server } from 'lucide-react'
-import { ApiError, rebuildPanel } from '@/api/client'
-import { ConfirmDialogHost } from '@/components/shared/ConfirmDialog'
-import SettingsAlert from '@/components/settings/SettingsAlert'
+import { ApiError, rebuildPanel } from "@/api/client";
+import SettingsAlert from "@/components/settings/SettingsAlert";
 import {
   SettingsCard as Card,
   SettingsCardContent as CardContent,
   SettingsCardDescription as CardDescription,
   SettingsCardHeader as CardHeader,
   SettingsCardTitle as CardTitle,
-} from '@/components/settings/SettingsCard'
-import { SettingsDangerZone } from '@/components/settings/SettingsChrome'
+} from "@/components/settings/SettingsCard";
+import { SettingsDangerZone } from "@/components/settings/SettingsChrome";
 import {
   UPDATE_CONFIRM_DURATION_NOTICE,
   UPDATE_LONG_RUNNING_NOTICE,
@@ -18,70 +15,79 @@ import {
   UPDATE_POLL_BUSY_ALERT_TITLE,
   isLikelyBuildBusyPollError,
   resolveUpdateTaskErrorMessage,
-} from '@/components/settings/updateGuidance'
-import { Button } from '@/components/ui/button'
-import { useConfirmDialog } from '@/hooks/useConfirmDialog'
-import { useNotifications } from '@/context/NotificationContext'
-import { useProgress } from '@/context/ProgressContext'
+} from "@/components/settings/updateGuidance";
+import { ConfirmDialogHost } from "@/components/shared/ConfirmDialog";
+import { Button } from "@/components/ui/button";
+import { useNotifications } from "@/context/NotificationContext";
+import { useProgress } from "@/context/ProgressContext";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog";
+import { Hammer, Rocket, Server } from "lucide-react";
+import { useState } from "react";
 
 const REBUILD_STEPS = [
-  { icon: Hammer, label: 'Сборка UI', detail: 'npm run build:all в frontend/' },
-  { icon: Server, label: 'Перезапуск', detail: 'adminpanelaz через systemd' },
-] as const
+  { icon: Hammer, label: "Готовая сборка", detail: "загрузка из GitHub без npm" },
+  { icon: Server, label: "Перезапуск", detail: "adminpanelaz через systemd" },
+] as const;
 
 type Props = {
-  className?: string
-}
+  className?: string;
+};
 
 export default function PanelRebuildCard({ className }: Props) {
-  const { success, error: notifyError, warning: notifyWarning } = useNotifications()
-  const { trackBackgroundTask } = useProgress()
-  const { confirm, dialogProps } = useConfirmDialog()
-  const [rebuilding, setRebuilding] = useState(false)
+  const { success, error: notifyError, warning: notifyWarning } = useNotifications();
+  const { trackBackgroundTask } = useProgress();
+  const { confirm, dialogProps } = useConfirmDialog();
+  const [rebuilding, setRebuilding] = useState(false);
 
   const handleRebuild = () => {
     confirm({
-      title: 'Пересобрать интерфейс и перезапустить?',
-      description: 'Выполнит npm run build:all и перезапустит сервис панели.',
+      title: "Переустановить интерфейс и перезапустить?",
+      description:
+        "Загрузит готовую сборку интерфейса из GitHub и перезапустит сервис панели. Если сборки для текущего коммита нет, интерфейс будет собран на сервере (npm run build:all).",
       alert: {
-        variant: 'warning',
-        title: 'Займёт продолжительное время',
+        variant: "warning",
+        title: "Панель будет недоступна",
         children: (
           <>
-            Панель будет недоступна после завершения сборки. Не запускайте одновременно с обновлением из Git.
+            Сервис перезапустится сразу после переустановки. Не запускайте одновременно
+            с обновлением из Git.
             <br />
             <br />
             {UPDATE_CONFIRM_DURATION_NOTICE}
           </>
         ),
       },
-      confirmLabel: 'Пересобрать и перезапустить',
+      confirmLabel: "Переустановить и перезапустить",
       destructive: true,
       onConfirm: async () => {
-        setRebuilding(true)
+        setRebuilding(true);
         try {
-          const resp = await rebuildPanel()
+          const resp = await rebuildPanel();
           trackBackgroundTask(resp.task_id, {
             onComplete: () => {
-              success(resp.message || 'Пересборка завершена, панель перезапускается')
+              success(
+                resp.message || "Интерфейс переустановлен, панель перезапускается",
+              );
             },
             onError: (task, message) => {
-              const resolved = resolveUpdateTaskErrorMessage(message, task)
+              const resolved = resolveUpdateTaskErrorMessage(message, task);
               if (isLikelyBuildBusyPollError(message, task)) {
-                notifyWarning(resolved)
-                return
+                notifyWarning(resolved);
+                return;
               }
-              notifyError(resolved)
+              notifyError(resolved);
             },
-          })
+          });
         } catch (err) {
-          notifyError(err instanceof ApiError ? err.message : 'Ошибка пересборки')
+          notifyError(
+            err instanceof ApiError ? err.message : "Ошибка переустановки интерфейса",
+          );
         } finally {
-          setRebuilding(false)
+          setRebuilding(false);
         }
       },
-    })
-  }
+    });
+  };
 
   return (
     <div className={className}>
@@ -93,12 +99,14 @@ export default function PanelRebuildCard({ className }: Props) {
               <Rocket size={16} aria-hidden />
             </span>
             <div className="min-w-0">
-              <CardTitle>Пересборка интерфейса</CardTitle>
+              <CardTitle>Переустановка интерфейса</CardTitle>
               <CardDescription className="mt-1">
-                Полная сборка frontend и mini-app без обновления кода из Git — как{' '}
+                Переустановка frontend и mini-app без обновления кода из Git: готовая
+                сборка из GitHub, а если её для текущего коммита нет —{" "}
                 <code className="rounded bg-muted px-1 py-0.5 text-[11px]">
-                  {'npm run build:all && systemctl restart adminpanelaz'}
-                </code>
+                  {"npm run build:all"}
+                </code>{" "}
+                на сервере.
               </CardDescription>
             </div>
           </div>
@@ -120,18 +128,19 @@ export default function PanelRebuildCard({ className }: Props) {
               </div>
             ))}
           </div>
-          <SettingsAlert variant="info" title="Длительность пересборки">
+          <SettingsAlert variant="info" title="Длительность переустановки">
             {UPDATE_LONG_RUNNING_NOTICE}
           </SettingsAlert>
           <SettingsAlert variant="info" title={UPDATE_POLL_BUSY_ALERT_TITLE}>
             {UPDATE_POLL_BUSY_ALERT_BODY}
           </SettingsAlert>
           <SettingsAlert variant="info" title="Когда использовать">
-            После ручного изменения файлов frontend на сервере или если UI не обновился после деплоя.
+            Если UI не обновился после обновления или деплоя: переустановка заново
+            ставит готовую сборку для текущего коммита.
           </SettingsAlert>
           <SettingsDangerZone
-            title="Пересобрать и перезапустить"
-            description="После сборки сервис перезапустится — дождитесь завершения процесса, не запускайте обновление параллельно."
+            title="Переустановить и перезапустить"
+            description="Сервис перезапустится после переустановки — дождитесь завершения процесса, не запускайте обновление параллельно."
           >
             <Button
               type="button"
@@ -141,11 +150,11 @@ export default function PanelRebuildCard({ className }: Props) {
               onClick={handleRebuild}
             >
               <Hammer size={16} />
-              {rebuilding ? 'Запуск...' : 'Пересобрать и перезапустить'}
+              {rebuilding ? "Запуск..." : "Переустановить и перезапустить"}
             </Button>
           </SettingsDangerZone>
         </CardContent>
       </Card>
     </div>
-  )
+  );
 }

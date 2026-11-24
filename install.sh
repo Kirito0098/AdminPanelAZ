@@ -968,7 +968,8 @@ install_system_deps() {
     "$ROOT_DIR/scripts/setup-vnstat.sh" || warn "setup-vnstat.sh завершился с ошибкой (можно повторить вручную)"
   fi
 
-  install_nodejs
+  # Node.js не ставим заранее: интерфейс обычно приходит готовой сборкой из GitHub, а Node
+  # устанавливается по требованию, если придётся собирать на сервере (panel_build_frontend).
   ui_progress_done "Системные зависимости"
 }
 

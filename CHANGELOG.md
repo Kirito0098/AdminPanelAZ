@@ -60,20 +60,29 @@
 ## [2.27.1] - 2026-11-16
 
 ### ✨ Added
+
 - **Интерфейс из CI для серверов без запаса RAM** — на тег `vX.Y.Z` GitHub Actions собирает панель и Mini App и публикует `adminpanelaz-frontend-<tag>.tar.gz` + `.sha256` в релиз; поставить без node можно скриптом `sudo ./scripts/panel-frontend-deploy.sh --tag v2.27.1` (или `--file` для офлайна). Скрипт сверяет коммит сборки (`frontend/dist/.build-info.json`) с `HEAD`, отказывается ставить чужой коммит без `--force` и подменяет `frontend/dist` и `tg_mini` двумя переименованиями — при сбое старый интерфейс цел (`.github/workflows/ci.yml`, `scripts/panel-frontend-deploy.sh`).
+- **Готовая сборка интерфейса на каждый коммит** — джоба `frontend-builds` в GitHub Actions на push в `main` и `release/**` публикует `adminpanelaz-frontend-<sha>.tar.gz` + `.sha256` в pre-release `frontend-builds` (хранятся 20 последних), поэтому сборка есть не только на теге, но и на обычном коммите, с которого обновляются серверы. `panel-frontend-deploy.sh` получил `--commit [SHA]`: качает сборку для `HEAD` из origin-репозитория (только github.com), требует `.sha256`, отказывается ставить архив без `.build-info.json`, проверяет, что внутри только `frontend/dist` и `backend/app/static/tg_mini` (без симлинков и посторонних путей), и ждёт свежую сборку до 2 минут (6 × 20 с). Коды возврата: `0` — поставлено, `3` — сборки нет, `4` — канал недоступен, `1` — проверка не прошла (`.github/workflows/ci.yml`, `scripts/panel-frontend-deploy.sh`).
 
 ### 🔄 Changed
+
 - **Сборка интерфейса пропускается, если `dist` уже собран для этого коммита** — `panel_build_frontend` (установщик, меню, `full-update.sh`) и обновление из панели смотрят на `frontend/dist/.build-info.json`: `npm ci` и `npm run build:all` не запускаются, когда метка совпадает с `HEAD`, а `--restart` больше не предупреждает «интерфейс собран до обновления» после деплоя из релиза. `PANEL_FRONTEND_SKIP_BUILD=1` отключает сборку полностью; кнопка «Пересобрать интерфейс» по-прежнему собирает принудительно (`scripts/adminpanel-menu.sh`, `services/system_update.py`).
+- **Обновление не собирает интерфейс на сервере** — установщик, меню, `full-update.sh` и обновление из веб-панели сначала ставят готовую сборку для текущего коммита, а `npm ci` и `npm run build:all` запускаются только как fallback: сборки для коммита ещё нет, сервер не на GitHub или архив не прошёл проверку. В прогрессе видно источник — «Интерфейс поставлен из готовой сборки GitHub» или «Готовой сборки для <sha> нет — собираем на сервере». `PANEL_FRONTEND_LOCAL_BUILD=1` всегда собирает на сервере (`scripts/adminpanel-menu.sh`, `services/system_update.py`).
+- **Node.js не ставится заранее** — `install.sh` больше не вызывает `install_nodejs` на шаге системных зависимостей: Node устанавливается только если интерфейс действительно придётся собирать на сервере. Меню и `full-update.sh` Node не ставят — при его отсутствии и промахе канала печатают подсказку запустить `install.sh --update` или поставить архив вручную (`install.sh`, `scripts/adminpanel-menu.sh`).
+- **«Пересобрать интерфейс» → «Переустановить интерфейс»** — карточка «Перезапуск и пересборка» и её кнопка ставят готовую сборку для текущего коммита заново, на сервере собирают только если её нет (`services/system_update.py`, `components/settings/PanelRebuildCard.tsx`).
 
 ### 📝 Docs
-- «Обновление панели»: раздел про установку интерфейса из CI и подсказка про `heap out of memory`/swap; установщик при падении на шаге frontend выводит те же два пути (`docs/nastrojki/obnovleniya.md`, `install.sh`).
+
+- «Обновление панели»: раздел про установку интерфейса из CI и подсказка про `heap out of memory`/swap; установщик при падении на шаге frontend выводит те же два пути (`docs/nastrojki/obnovleniya.md`, `install.sh`). Раздел переписан под обычный путь «интерфейс из GitHub»: когда всё-таки бывает сборка на сервере, коды возврата, `PANEL_FRONTEND_LOCAL_BUILD`; в «Перезапуске и пересборке» — переустановка интерфейса вместо сборки (`docs/nastrojki/perezapusk-i-peresborka.md`).
 
 ### 🧪 Tests
-- Shell: CI-метка пропускает сборку в меню (`scripts/test-menu-update-rebuilds-frontend.sh`), деплой из архива проверяет коммит и не трогает старый интерфейс при отказе (`scripts/test-panel-frontend-deploy.sh`). Pytest: пропуск `npm ci`/`build:all` при совпадении коммита и принудительная пересборка (`tests/test_system_update_ci_build.py`).
+
+- Shell: CI-метка пропускает сборку в меню (`scripts/test-menu-update-rebuilds-frontend.sh`), деплой из архива проверяет коммит и не трогает старый интерфейс при отказе (`scripts/test-panel-frontend-deploy.sh`). Pytest: пропуск `npm ci`/`build:all` при совпадении коммита и принудительная пересборка (`tests/test_system_update_ci_build.py`). Канал по коммиту: URL по sha, `404` → код `3`, нет `.sha256` и битая сумма → `1`, не-GitHub origin → `4`, симлинк и посторонний путь отклоняются; меню — готовая сборка отменяет npm, код `3` и `PANEL_FRONTEND_LOCAL_BUILD=1` проверены отдельно; `install_frontend_artifact` в pytest (`scripts/test-panel-frontend-deploy.sh`, `scripts/test-menu-update-rebuilds-frontend.sh`, `tests/test_system_update_frontend_artifact.py`).
 
 ## [2.27.0] - 2026-11-15
 
 ### ✨ Added
+
 - **Обновление сервера: выбор шагов и предупреждение о влиянии на nginx** — в «Проверка работы → Настройки сервера» появились галочки по шагам: пакеты, службы systemd, nginx, firewall и DDNS (DDNS показывается, только если он действительно настроен). Невыбранные шаги не выполняются, после применения видно, что осталось неприменённым. Рядом — карточка **«Влияние на nginx»**: какие vhost'ы изменятся (панель, портал), какие останутся (включая соседние поддомены с пометкой «тот же домен»), какие общие файлы nginx затрагиваются. Если в vhost панели есть чужие `location` (`/status/`, proxy на порт 1234) или панель подключена snippet'ом внутрь чужого/StatusOpenVPN-vhost, шаг nginx по умолчанию снят и показано предупреждение — обновление не ломает готовую связку. В «Обновлении панели» добавлено явное предупреждение, что оно меняет только код, зависимости и интерфейс, а nginx, сайты на других доменах/поддоменах, пакеты и firewall не трогает (`services/nginx_impact.py`, `services/server_config.py`, `full-update.sh --only`, `ServerConfigTab.tsx`).
 - **Чат в Telegram Mini App** — вкладка **«Чат»** для обеих ролей (модуль «Сообщения абонентов»): абонент видит свой диалог с админом и пишет из Mini App, админ — список диалогов с поиском и непрочитанными и отвечает в них. Сообщения идут в тот же `user_messages`, что бот и веб-панель: новый вопрос абонента даёт колокол и карточку в Telegram, ответ админа доставляется абоненту в Telegram. Непрочитанные считаются отдельно для каждой стороны (`user_messages.read_by_user_at`), вкладка показывает бейдж. Только текст, обновление каждые 7 секунд (`routers/tg_mini/messages.py`, `pages/Messages.tsx`, `MiniBottomNav.tsx`).
 - **Абонент сам получает ссылку клиентского портала** — в Mini App в «Конфигах» появилась карточка **Клиентский портал**, а в боте — карточка по кнопке/команде **`/portal`**: «Получить ссылку», «Скопировать», «Открыть», «Перевыпустить» (с подтверждением). Ссылка со всеми профилями абонента живёт по общему сроку `portal_link_ttl_days`; если срок истёк, кнопка сразу выпускает новую, а перевыпуск отзывает старую. API `/tg-mini/me/portal-link` и виджет `portal` — только своя ссылка, под модулем `client_portal` (`routers/tg_mini/me_portal.py`, `services/telegram_widgets/portal.py`, `components/PortalLinkCard.tsx`).
@@ -81,6 +90,7 @@
 - **Telegram-виджеты: живая карточка заявки** — в боте появились интерактивные HTML-карточки Bot API 10.4 (`sendWidget`). Первый сценарий: нерегистрированный пользователь после «Запросить доступ» получает карточку со статусом заявки, которая сама обновляется после одобрения/отклонения (пуш состояния + кнопка «Обновить», фон без таймера), а caption дублирует статус для клиентов без поддержки виджетов. Карточка привязана к заявке (`telegram_widgets.ref_id`), личность проверяется по `from.id`, `chat.id == from.id` и только личка; `widget_query` добавлен в `ALLOWED_UPDATES`, webhook перерегистрируется один раз по версии. Фича за тогглом `FEATURE_TELEGRAM_WIDGETS_ENABLED` (по умолчанию `false`), при ошибке API бот шлёт прежний текст (`services/telegram_widgets/`, `telegram_api.py`, `privacy_upgrade.py`, `database.py`).
 
 ### ✨ Added
+
 - **Конфиг AntiZapret: списки облаков** — в карточку **Другие параметры** вернулись `AMAZON_INCLUDE`, `HETZNER_INCLUDE`, `DIGITALOCEAN_INCLUDE`, `OVH_INCLUDE`, `GOOGLE_INCLUDE`, `AKAMAI_INCLUDE` (IP-списки `download/*-ips.txt`). Установщик AntiZapret-VPN эти вопросы больше не задаёт, а списки в upstream почти не обновляются (Amazon — с 2025 года, Google — с февраля 2026), поэтому у каждого флага стоит пометка об этом (`antizapret_params.py`, `docs/antizapret-config.md`).
 - **Конфиг AntiZapret: endpoint встроенного WARP и очистка DNS-кеша** — в разделе **Cloudflare WARP** появилось поле `WARP_ENDPOINT` (`host:port`, по умолчанию `162.159.192.1:500`; пусто — endpoint из API Cloudflare), а в **Очистке списков** — переключатель `CLEAR_DNS_CACHE` (сброс кеша Knot Resolver после `doall.sh` и ночью). `WARP_ENDPOINT` пишется в `setup` и применяется сразу (служба `antizapret` перезапускается), `CLEAR_DNS_CACHE` — через **Применить (doall.sh)**. Ключи появились в AntiZapret-VPN 09.11.2026; для записи на удалённый узел нужен **node agent 1.18.0**, иначе панель покажет предупреждение (`antizapret_params.py`, `antizapret_settings.py`, `AntizapretConfigTab.tsx`).
 - **Конфиг AntiZapret: защита от флуда и переподключение WARP** — в «Безопасности сервера» появился переключатель **Защита от флуда** (`FLOOD_PROTECTION`: hashlimit на поток новых соединений с одного клиентского адреса; применяется сразу, служба `antizapret` перезапускается), а в «Cloudflare WARP» — **Переподключать WARP** (`RECONNECT_WARP`: `parse.sh` переподключает встроенный WARP при обновлении списков, если сервер работает больше минуты; нужен **Применить (doall.sh)**). Оба ключа AntiZapret-VPN хранит в `setup`, но панель их не показывала (`antizapret_params.py`, `AntizapretConfigTab.tsx`). Не выведены осознанно: флаги облаков `AMAZON/HETZNER/DIGITALOCEAN/OVH/GOOGLE/AKAMAI_INCLUDE` (списки `download/*-ips.txt` в AntiZapret-VPN не обновляются с 2025 года — переключатель вводил бы в заблуждение) и ключи собственного WARP-конфига (`*_WARP_PRIVATE_KEY` и др. — секреты, регистрацию делает скрипт AntiZapret).
@@ -874,11 +884,13 @@
 > **Кратко:** portal readiness (check/prepare), Nginx-only gate, path allowlist на хосте портала, nested hosts, hash-bucket rollback, Let's Encrypt webroot + свободный :80.
 
 ### ✨ Added
+
 - **Подписка / portal readiness:** скрипт `nginx-portal-readiness.sh` (`--check` / `--prepare`) и кнопки «Проверить готовность» / «Подготовить» — preroll до «Настроить под текущую публикацию» (hash, stale vhost, sync env).
 - **Хост портала:** allowlist путей (`/p/`, `/api/public/`, `/assets`) — корень и админ-SPA на portal-хосте отдают **404** (nginx + middleware).
 - **Подписка / портал:** доступен только при `PUBLISH_MODE` Nginx (`nginx_le` / `nginx_custom` / `nginx_selfsigned`); uvicorn и http_direct — баннер + API 400 со ссылкой на `/settings/vpn_network`.
 
 ### 🐛 Fixed
+
 - **Клиентский портал:** хосты вида `portal.panel.example.ru` больше не блокируются и не автомигрируют на sibling — любой валидный хост ≠ DOMAIN панели допустим (подсказка sibling остаётся опциональной).
 - **Клиентский портал / nginx:** при установке vhost поднимается `server_names_hash_bucket_size 128` (длинные имена вроде `portal.panel.example.com` больше не валят `nginx -t`); если тест конфига всё же падает — новый site **и hash-сниппет откатываются** и не остаются в `sites-enabled`/`conf.d` (иначе после reboot/reload могли лечь все HTTPS-хосты). Существующий bucket ≥128 не перезаписывается.
 - **Клиентский портал:** статус «Готов» требует успешный `nginx -t`; предупреждение про **глобальный** провал конфига (не винит только vhost портала).
@@ -888,9 +900,11 @@
 - **Let's Encrypt / temp ACME:** после временного HTTP ACME-vhost восстанавливается `sites-enabled/default` (при ошибке `nginx -t` и при снятии temp site).
 
 ### 🔄 Changed
+
 - Сообщение Let's Encrypt «уже покрывает» уточнено: это пропуск выпуска сертификата, а не ошибка.
 
 ### 🧪 Tests
+
 - `scripts/test-nginx-portal-hardening.sh` — hash-сниппет, rollback site/hash, skip larger bucket, guard перед stop, wait/`ss` fail-closed для :80, temp ACME, restore `default`.
 - `scripts/test-nginx-portal-readiness.sh` — check/prepare trailer, nested keep, stale vhost, env mismatch.
 - Backend: `test_portal_publish` / `test_portal_host_gate` / `test_portal_task_conflicts_api` (в т.ч. unsupported publish mode → 400).
@@ -1193,6 +1207,7 @@
   - Docs: [NodeSync.md](docs/NodeSync.md), [uzly.md](docs/uzly.md).
 - **Конфиг AntiZapret → OpenVPN панели** — multi-remote и multihome вынесены из общей вкладки настроек AZ в отдельную вкладку `OpenVpnPanelTab` (панельные overrides, не `setup.sh`). Docs: [antizapret-config.md](docs/antizapret-config.md).
 - **Версия node agent `1.7.0`** — API AZ-AWG2 (`/awg2/*`, `/clients/amneziawg2`, install SSE, obfuscation, monitoring, stats, backup/restore, HA archive) и `POST /reboot` (`NODE_AGENT_VERSION`, `node_agent/main.py`). После обновления панели перезапустите агент на VPN-узлах.
+
 ### 🔄 Changed
 
 - **Настройки: denser toolbar chrome** — общие `SettingsChrome` вместо MetricPill-heroes и accent strips; единая иерархия на Backup, Maintenance, Security, Updates, Personal, VPN Network, Feature Toggles, Monitoring и др. (`SettingsChrome.tsx`, вкладки Settings).
@@ -1222,7 +1237,6 @@
 - **HA shared domain WG** — отдельные `shared_domain` / `shared_domain_wireguard` (`test_node_sync_shared_domain.py`, `haBadgeLabel.test.ts`).
 - **Прокси linked VPN** — модель/API и `proxyLinkTarget` (`test_proxy_nodes_model.py`, `proxyLinkTarget.test.ts`).
 - **light-diff** — пустые файлы и Myers reconstruction (`buildLightDiff.test.ts`).
-
 
 ---
 

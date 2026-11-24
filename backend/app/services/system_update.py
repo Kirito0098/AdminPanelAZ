@@ -23,6 +23,8 @@ ProgressCallback = Callable[[int, str], None] | None
 PIP_TIMEOUT = 300.0
 NPM_INSTALL_TIMEOUT = 600.0
 NPM_BUILD_TIMEOUT = 900.0
+# Скрипт сам ждёт свежую сборку до 2 минут (FRONTEND_ARTIFACT_ATTEMPTS × FRONTEND_ARTIFACT_RETRY_DELAY).
+FRONTEND_ARTIFACT_TIMEOUT = 300.0
 RESTART_DELAY_SECONDS = 2.0
 
 
@@ -56,13 +58,14 @@ def _run_command(
         success = result.returncode == 0
         return {
             "success": success,
+            "returncode": result.returncode,
             "output": output,
             "error": None if success else output or f"{label} failed (exit {result.returncode})",
         }
     except subprocess.TimeoutExpired:
-        return {"success": False, "output": "", "error": f"Таймаут: {label}"}
+        return {"success": False, "returncode": None, "output": "", "error": f"Таймаут: {label}"}
     except OSError as exc:
-        return {"success": False, "output": "", "error": str(exc)}
+        return {"success": False, "returncode": None, "output": "", "error": str(exc)}
 
 
 def install_backend_requirements(repo_root: Path) -> dict[str, Any]:
@@ -116,6 +119,43 @@ def build_frontend(repo_root: Path, *, force: bool = False) -> dict[str, Any]:
     # Собрали на месте — метка CI больше не описывает dist.
     (frontend_dir / "dist" / ".build-info.json").unlink(missing_ok=True)
     result["skipped"] = False
+    return result
+
+
+def install_frontend_artifact(repo_root: Path, *, reuse_local: bool = True) -> dict[str, Any]:
+    """Готовый интерфейс из GitHub (канал frontend-builds) без npm на сервере.
+
+    Коды scripts/panel-frontend-deploy.sh: 0 — поставлено, 3 — сборки нет,
+    4 — канал недоступен, 1 — не прошло проверку. reuse_local=False — переустановить,
+    даже если dist уже помечен текущим коммитом (кнопка «Переустановить интерфейс»).
+    """
+    script = repo_root / "scripts" / "panel-frontend-deploy.sh"
+    if not script.is_file():
+        return {"skipped": True, "success": False, "returncode": None, "output": "scripts/panel-frontend-deploy.sh не найден"}
+    head = _git_head(repo_root)
+    if not head:
+        return {"skipped": True, "success": False, "returncode": None, "output": "не удалось определить коммит HEAD"}
+    if reuse_local:
+        reused = frontend_build_reused(repo_root)
+        if reused:
+            return {"skipped": True, "success": True, "returncode": 0, "output": f"{reused} — загрузка пропущена"}
+    result = _run_command(
+        ["bash", str(script), "--commit", head, "--dir", str(repo_root), "--no-restart"],
+        cwd=repo_root,
+        timeout=FRONTEND_ARTIFACT_TIMEOUT,
+        label="panel-frontend-deploy.sh",
+    )
+    result["skipped"] = False
+    code = result.get("returncode")
+    if code == 0:
+        result["output"] = result.get("output") or f"готовый интерфейс поставлен из GitHub (коммит {head[:12]})"
+        result["error"] = None
+    elif code in (3, 4):
+        result["success"] = False
+        result["error"] = f"готовой сборки нет (код {code})"
+    else:
+        result["success"] = False
+        result["error"] = f"готовая сборка не прошла проверку (код {code})"
     return result
 
 
@@ -244,31 +284,40 @@ def apply_controller_update(
             "detail": detail,
         }
 
-    report(50, "Обновление: npm ci…")
-    npm_install = install_frontend_requirements(repo_root)
-    detail["npm_install"] = npm_install
-    if not _require_step(label="npm ci", result=npm_install, output_parts=output_parts, errors=errors):
-        return {
-            "success": False,
-            "message": "Обновление не выполнено",
-            "errors": errors,
-            "output": "\n\n".join(output_parts).strip(),
-            "restarting": False,
-            "detail": detail,
-        }
+    report(50, "Обновление: готовый интерфейс из GitHub…")
+    artifact = install_frontend_artifact(repo_root)
+    detail["frontend_artifact"] = artifact
+    if artifact.get("success"):
+        output_parts.append(f"[frontend] {artifact.get('output') or 'интерфейс уже собран'}")
+    else:
+        # Канала нет (нет сборки, не GitHub, нет сети) — прежняя сборка на сервере.
+        if artifact.get("output") or artifact.get("error"):
+            output_parts.append(f"[frontend] {artifact.get('output') or artifact.get('error')} — сборка на сервере")
+        report(55, "Обновление: npm ci…")
+        npm_install = install_frontend_requirements(repo_root)
+        detail["npm_install"] = npm_install
+        if not _require_step(label="npm ci", result=npm_install, output_parts=output_parts, errors=errors):
+            return {
+                "success": False,
+                "message": "Обновление не выполнено",
+                "errors": errors,
+                "output": "\n\n".join(output_parts).strip(),
+                "restarting": False,
+                "detail": detail,
+            }
 
-    report(70, "Обновление: сборка frontend…")
-    npm_build = build_frontend(repo_root)
-    detail["npm_build"] = npm_build
-    if not _require_step(label="npm run build:all", result=npm_build, output_parts=output_parts, errors=errors):
-        return {
-            "success": False,
-            "message": "Обновление не выполнено",
-            "errors": errors,
-            "output": "\n\n".join(output_parts).strip(),
-            "restarting": False,
-            "detail": detail,
-        }
+        report(70, "Обновление: сборка frontend…")
+        npm_build = build_frontend(repo_root)
+        detail["npm_build"] = npm_build
+        if not _require_step(label="npm run build:all", result=npm_build, output_parts=output_parts, errors=errors):
+            return {
+                "success": False,
+                "message": "Обновление не выполнено",
+                "errors": errors,
+                "output": "\n\n".join(output_parts).strip(),
+                "restarting": False,
+                "detail": detail,
+            }
 
     # Rewrite units before restart: a unit with legacy ExecStart=…/start.sh no longer boots.
     # Soft-fail: pull/build already succeeded; units on systemd-exec-*.sh restart fine without refresh.
@@ -305,7 +354,7 @@ def apply_controller_rebuild(
     repo_root: Path | None = None,
     progress: ProgressCallback = None,
 ) -> dict[str, Any]:
-    """Rebuild frontend (npm run build:all) and schedule panel restart."""
+    """Переустановить интерфейс (готовый архив из GitHub, иначе npm run build:all) и перезапустить панель."""
     repo_root = repo_root or resolve_repo_root()
     report = progress or _noop_progress
     output_parts: list[str] = []
@@ -323,28 +372,36 @@ def apply_controller_rebuild(
             "detail": detail,
         }
 
-    report(15, "Пересборка: сборка frontend…")
-    npm_build = build_frontend(repo_root, force=True)
-    detail["npm_build"] = npm_build
-    if not _require_step(label="npm run build:all", result=npm_build, output_parts=output_parts, errors=errors):
-        return {
-            "success": False,
-            "message": "Пересборка не выполнена",
-            "errors": errors,
-            "output": "\n\n".join(output_parts).strip(),
-            "restarting": False,
-            "detail": detail,
-        }
+    report(15, "Переустановка: готовый интерфейс из GitHub…")
+    artifact = install_frontend_artifact(repo_root, reuse_local=False)
+    detail["frontend_artifact"] = artifact
+    if artifact.get("success"):
+        output_parts.append(f"[frontend] {artifact.get('output') or 'интерфейс переустановлен из GitHub'}")
+    else:
+        if artifact.get("output") or artifact.get("error"):
+            output_parts.append(f"[frontend] {artifact.get('output') or artifact.get('error')} — сборка на сервере")
+        report(30, "Переустановка: сборка frontend…")
+        npm_build = build_frontend(repo_root, force=True)
+        detail["npm_build"] = npm_build
+        if not _require_step(label="npm run build:all", result=npm_build, output_parts=output_parts, errors=errors):
+            return {
+                "success": False,
+                "message": "Пересборка не выполнена",
+                "errors": errors,
+                "output": "\n\n".join(output_parts).strip(),
+                "restarting": False,
+                "detail": detail,
+            }
 
     report(90, "Пересборка: перезапуск панели…")
     schedule_controller_restart(repo_root)
     restarting = True
     output_parts.append("[restart] Перезапуск adminpanelaz запланирован через несколько секунд")
 
-    report(100, "Пересборка завершена")
+    report(100, "Переустановка завершена")
     return {
         "success": True,
-        "message": "Frontend пересобран, панель перезапускается",
+        "message": "Интерфейс переустановлен, панель перезапускается",
         "errors": [],
         "output": "\n\n".join(output_parts).strip(),
         "restarting": restarting,

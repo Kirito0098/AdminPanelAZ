@@ -264,4 +264,66 @@ run_update false >"$TMP/out" 2>&1 || fail "без npm обновление не 
 [[ ! -s "$NPM_LOG" ]] || fail "npm вызван без npm в PATH: $(cat "$NPM_LOG")"
 echo "  OK"
 
+# channel_stub <код> — подменный panel-frontend-deploy.sh в установке: пишет вызов, при 0 «ставит» сборку.
+channel_stub() {
+  local code="$1"
+  mkdir -p "$TMP/install/scripts"
+  cat >"$TMP/install/scripts/panel-frontend-deploy.sh" <<EOF
+#!/usr/bin/env bash
+echo "deploy \$*" >>"$TMP/deploy.log"
+[[ "$code" == 0 ]] || exit $code
+commit=""
+while [[ \$# -gt 0 ]]; do
+  case "\$1" in
+    --commit) commit="\$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+mkdir -p "\$INSTALL_DIR/frontend/dist"
+echo '<html>from-artifact</html>' >"\$INSTALL_DIR/frontend/dist/index.html"
+printf '{"commit":"%s"}\n' "\$commit" >"\$INSTALL_DIR/frontend/dist/.build-info.json"
+EOF
+  chmod +x "$TMP/install/scripts/panel-frontend-deploy.sh"
+}
+
+echo "[test] готовый интерфейс из GitHub для нового коммита: npm не вызывается, dist ставится из артефакта"
+setup_repos
+build_dist '-2 hours'
+new_upstream_commit
+channel_stub 0
+: >"$NPM_LOG"
+: >"$TMP/deploy.log"
+run_update >"$TMP/out" 2>&1 || fail "обновление завершилось ошибкой: $(cat "$TMP/out")"
+[[ ! -s "$NPM_LOG" ]] || fail "npm вызван при готовой сборке канала: $(cat "$NPM_LOG")"
+grep -q -- "--commit $(git -C "$TMP/install" rev-parse HEAD)" "$TMP/deploy.log" \
+  || fail "канал запрошен не для HEAD установки: $(cat "$TMP/deploy.log")"
+grep -q -- "--no-restart" "$TMP/deploy.log" || fail "деплой перезапускал панель сам: $(cat "$TMP/deploy.log")"
+grep -q "from-artifact" "$TMP/install/frontend/dist/index.html" || fail "dist не подменён готовой сборкой"
+grep -q "поставлен из готовой сборки" "$TMP/out" || fail "нет сообщения об источнике: $(cat "$TMP/out")"
+echo "  OK"
+
+echo "[test] готовой сборки для коммита нет (код 3): интерфейс собирается на сервере"
+setup_repos
+build_dist '-2 hours'
+new_upstream_commit
+channel_stub 3
+: >"$NPM_LOG"
+run_update >"$TMP/out" 2>&1 || fail "обновление завершилось ошибкой: $(cat "$TMP/out")"
+grep -q "Готовой сборки для" "$TMP/out" || fail "нет причины сборки на сервере: $(cat "$TMP/out")"
+[[ "$(cat "$NPM_LOG")" == "npm ci @ $TMP/install/frontend"$'\n'"npm run build:all @ $TMP/install/frontend" ]] \
+  || fail "вызовы npm: $(cat "$NPM_LOG")"
+echo "  OK"
+
+echo "[test] PANEL_FRONTEND_LOCAL_BUILD=1: канал не запрашивается, сборка на сервере"
+setup_repos
+build_dist '-2 hours'
+new_upstream_commit
+channel_stub 0
+: >"$NPM_LOG"
+: >"$TMP/deploy.log"
+PANEL_FRONTEND_LOCAL_BUILD=1 run_update >"$TMP/out" 2>&1 || fail "обновление завершилось ошибкой: $(cat "$TMP/out")"
+[[ ! -s "$TMP/deploy.log" ]] || fail "канал запрошен при PANEL_FRONTEND_LOCAL_BUILD=1: $(cat "$TMP/deploy.log")"
+[[ -s "$NPM_LOG" ]] || fail "при PANEL_FRONTEND_LOCAL_BUILD=1 нет сборки на сервере"
+echo "  OK"
+
 echo "All menu update checks passed."
