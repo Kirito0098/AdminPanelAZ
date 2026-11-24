@@ -199,7 +199,9 @@ function UserConfigs() {
   const limit = quota?.limit
   const unlimited = quota?.unlimited ?? false
   const quotaReached = limit != null && used >= limit
-  const createDisabledByAdmin = quota ? !quota.can_create && !quotaReached : false
+  const subscriptionExpired = quota?.subscription_expired === true
+  const createDisabledByAdmin =
+    quota ? !quota.can_create && !quotaReached && !subscriptionExpired : false
   const anyProtocolEnabled = openvpnEnabled || wireguardEnabled || awg2Enabled
   const canCreate =
     anyProtocolEnabled &&
@@ -476,7 +478,9 @@ function UserConfigs() {
         <p className="text-xs text-muted-foreground">
           {createDisabledByAdmin
             ? 'Создание новых конфигов отключено администратором.'
-            : 'Запросите ещё конфиг у администратора.'}
+            : subscriptionExpired
+              ? 'Срок доступа истёк — обратитесь к администратору для продления.'
+              : 'Запросите ещё конфиг у администратора.'}
         </p>
       )}
 

@@ -298,15 +298,15 @@ export default function AccessRequestsDialog({
                     key={r.id}
                     id={`access-request-${r.id}`}
                     className={cn(
-                      'flex items-center justify-between gap-3 rounded-lg border p-3',
+                      'flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between sm:gap-3',
                       focusRequestId === r.id && 'border-primary ring-2 ring-primary/30',
                     )}
                   >
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium">{title}</p>
-                      <p className="text-xs text-muted-foreground">{metaParts.join(' · ')}</p>
+                      <p className="truncate text-sm font-medium">{title}</p>
+                      <p className="truncate text-xs text-muted-foreground">{metaParts.join(' · ')}</p>
                     </div>
-                    <div className="flex gap-1">
+                    <div className="flex flex-wrap gap-1">
                       {r.receipt_file_id && (
                         <Button
                           type="button"

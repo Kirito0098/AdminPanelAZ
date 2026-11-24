@@ -67,7 +67,7 @@ Status meanings:
 
 ## ALREADY-SHIPPED.md
 
-Verify against the codebase (prefer codebase-memory graph `search_graph` / `get_file_outline`, else grep). Table columns:
+Verify against the codebase (prefer graphify MCP `query_graph` / `get_node`, else grep). Table columns:
 
 | Capability | Where in code | Used by stages | Notes |
 | ---------- | ------------- | -------------- | ----- |
@@ -125,7 +125,7 @@ For each part file, set `status` after checking code:
 ## Project notes (AdminPanelAZ)
 
 - Specs live under `docs/superpowers/` (gitignored). Do not commit them to `origin`.
-- Register nothing in GitHub CI. After creating this skill itself, add a row to `.cursor/rules/use-skills.mdc` if missing.
+- Register nothing in GitHub CI. After creating this skill itself, add a row to `.agents/rules/use-skills.md` if missing.
 - Do not start planning or implementation until the user picks a stage.
 
 ## Done when

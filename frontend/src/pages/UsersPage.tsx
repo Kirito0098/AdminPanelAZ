@@ -3,10 +3,13 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Activity,
   AlertTriangle,
+  ArrowDown,
+  ArrowUp,
   CalendarClock,
   Download,
   Filter,
   LayoutGrid,
+  Layers,
   PauseCircle,
   Search,
   Table2,
@@ -41,6 +44,13 @@ import { Button } from '@/components/ui/button'
 import { CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useFeatureModules } from '@/context/FeatureModulesContext'
 import { useNode } from '@/context/NodeContext'
@@ -82,6 +92,7 @@ import BulkUsersNotifyDialog from '@/components/users/BulkUsersNotifyDialog'
 import UnlockCodeCreateDialog from '@/components/dashboard/UnlockCodeCreateDialog'
 import SuspendUserDialog, { type SuspendUserPayload } from '@/components/users/SuspendUserDialog'
 import AccessRequestsDialog from '@/components/users/AccessRequestsDialog'
+import PresetsDialog from '@/components/users/PresetsDialog'
 import UsersBulkBar from '@/components/users/UsersBulkBar'
 import SubscriberCard from '@/components/users/SubscriberCard'
 import SubscriberRulesPanel from '@/components/users/SubscriberRulesPanel'
@@ -152,6 +163,7 @@ export default function UsersPage() {
   /** Заявка, которую одобряем через диалог «Создание пользователя». */
   const [approveReq, setApproveReq] = useState<AccessRequestResponse | null>(null)
   const [cooldownOpen, setCooldownOpen] = useState(false)
+  const [presetsOpen, setPresetsOpen] = useState(false)
   const [requestsCount, setRequestsCount] = useState(0)
   const [focusRequestId, setFocusRequestId] = useState<number | null>(null)
   /** Уже обработанный deep-link (?requests=1 / ?request=<id>), чтобы не открывать диалог циклично. */
@@ -613,6 +625,16 @@ export default function UsersPage() {
                 <ToolbarButton
                   variant="outline"
                   className="bg-card/80"
+                  icon={<Layers size={16} />}
+                  label="Шаблоны"
+                  shortLabel="Шаблоны"
+                  onClick={() => setPresetsOpen(true)}
+                />
+              )}
+              {provisioningOn && (
+                <ToolbarButton
+                  variant="outline"
+                  className="bg-card/80"
                   icon={<CalendarClock size={16} />}
                   label="Кулдаун"
                   shortLabel="Кулдаун"
@@ -699,7 +721,7 @@ export default function UsersPage() {
           <div className="overflow-hidden rounded-2xl border border-border/80 bg-card shadow-sm">
             <div className="h-1 bg-gradient-to-r from-primary/80 via-primary/40 to-transparent" />
             <CardHeader className="border-b border-border/60 bg-muted/15 pb-4">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div className="flex flex-col gap-3">
                 <div>
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Users size={18} />
@@ -711,8 +733,8 @@ export default function UsersPage() {
                       : 'Абоненты не найдены'}
                   </CardDescription>
                 </div>
-                <div className="flex w-full items-center gap-2 lg:max-w-md">
-                  <div className="relative min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative min-w-[12rem] flex-1 basis-[18rem]">
                     <Search
                       className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
                       aria-hidden
@@ -721,7 +743,7 @@ export default function UsersPage() {
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       placeholder="Поиск по логину, TG, заметке…"
-                      className="h-10 bg-background pl-9 pr-9"
+                      className="h-9 bg-background pl-9 pr-9"
                       aria-label="Поиск абонентов"
                     />
                     {search.trim() !== '' ? (
@@ -735,36 +757,45 @@ export default function UsersPage() {
                       </button>
                     ) : null}
                   </div>
-                  <select
-                    value={sortKey}
-                    onChange={(e) => setSortKey(e.target.value as SortKey)}
-                    className="h-10 shrink-0 rounded-md border border-input bg-background px-2 text-sm"
-                    aria-label="Сортировка"
-                    title="Сортировка"
-                  >
-                    {SORT_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-10 w-10 shrink-0"
-                    onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
-                    aria-label={sortDir === 'asc' ? 'По возрастанию' : 'По убыванию'}
-                    title={sortDir === 'asc' ? 'По возрастанию' : 'По убыванию'}
-                  >
-                    {sortDir === 'asc' ? '↑' : '↓'}
-                  </Button>
                   <div className="flex items-center gap-1">
+                    <Select value={sortKey} onValueChange={(next) => setSortKey(next as SortKey)}>
+                      <SelectTrigger
+                        className="h-9 w-[10.5rem] shrink-0"
+                        aria-label="Сортировка"
+                        title="Сортировка"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {SORT_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="icon"
+                      className="size-9 shrink-0"
+                      onClick={() => setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                      aria-label={
+                        sortDir === 'asc' ? 'Сортировать по убыванию' : 'Сортировать по возрастанию'
+                      }
+                      title={
+                        sortDir === 'asc' ? 'Сортировать по убыванию' : 'Сортировать по возрастанию'
+                      }
+                    >
+                      {sortDir === 'asc' ? <ArrowUp size={16} /> : <ArrowDown size={16} />}
+                    </Button>
+                  </div>
+                  <div className="ml-auto flex items-center gap-1">
                     <Button
                       type="button"
                       variant={viewMode === 'cards' ? 'secondary' : 'ghost'}
                       size="icon"
-                      className="h-10 w-10"
+                      className="size-9"
                       aria-pressed={viewMode === 'cards'}
                       aria-label="Вид карточками"
                       onClick={() => setViewMode('cards')}
@@ -775,7 +806,7 @@ export default function UsersPage() {
                       type="button"
                       variant={viewMode === 'table' ? 'secondary' : 'ghost'}
                       size="icon"
-                      className="h-10 w-10"
+                      className="size-9"
                       aria-pressed={viewMode === 'table'}
                       aria-label="Вид таблицей"
                       onClick={() => setViewMode('table')}
@@ -1086,6 +1117,8 @@ export default function UsersPage() {
       )}
 
       <AccessCooldownDialog open={cooldownOpen} onOpenChange={setCooldownOpen} />
+
+      {provisioningOn && <PresetsDialog open={presetsOpen} onOpenChange={setPresetsOpen} />}
 
       {provisioningOn && (
         <AccessRequestsDialog

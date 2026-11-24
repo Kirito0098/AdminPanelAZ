@@ -161,14 +161,18 @@ def build_quota_payload(db: Session, user: User) -> dict:
     remaining = None if limit is None else max(0, limit - used)
     rate_max = _create_rate_max(db)
     rate_window = _create_rate_window(db)
+    # Порядок проверок тот же, что в enforce_user_can_create_config: истёкший срок
+    # доступа важнее флага и квоты, иначе фронт покажет активную кнопку.
+    expired = user.role != UserRole.admin and user_subscription_expired(user)
     return {
         "used": used,
         "limit": limit,
         "remaining": remaining,
         "unlimited": limit is None,
+        "subscription_expired": expired,
         "can_manage": user.role == UserRole.admin or bool(getattr(user, "can_manage_configs", False)),
         "can_create": user.role == UserRole.admin
-        or (bool(user.can_create_configs) and (limit is None or used < limit)),
+        or (not expired and bool(user.can_create_configs) and (limit is None or used < limit)),
         "create_rate_max": rate_max if user.role == UserRole.user else None,
         "create_rate_window_seconds": rate_window if user.role == UserRole.user else None,
     }

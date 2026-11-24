@@ -1,6 +1,6 @@
 # Участие в разработке AdminPanelAZ
 
-Гайд для тех, кто помогает с панелью: какие MCP и skills использует мейнтейнер, **зачем** каждый из них, и договорённости по коду. Работают два клиента — **Zoo Code** (DSH-профиль) и **Cursor**: правила и каталог скиллов лежат в репозитории и читаются как обычные файлы, а MCP-серверы каждый клиент подключает по-своему (настройки MCP клиента или локальный `.cursor/mcp.json`).
+Гайд для тех, кто помогает с панелью: какие MCP и skills использует мейнтейнер, **зачем** каждый из них, и договорённости по коду. Основной клиент — **Zoo Code** (DSH-профиль), но правила и каталог скиллов — обычные markdown-файлы в `.agents/`, их читает любой агент, а MCP-серверы каждый клиент подключает по-своему (настройки MCP клиента или локальный `.agents/mcp.json`).
 
 Пользовательские инструкции (для админов VPN): [`docs/README.md`](docs/README.md).
 Карта кода: [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md).
@@ -13,17 +13,16 @@
 
 | Путь | Что |
 | ------ | ----- |
-| `.cursor/rules/` | `use-skills`, `lean-code`, `release-train-branching`, `telegram-release-post`. Это просто markdown-правила, их читают оба клиента — и Zoo Code, и Cursor |
-| `.cursor/skills/` | project skills: `brainstorming`, `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
-| `.agents/skills/` | симлинки на `.cursor/skills/` для скиллов, нужных в любом режиме Zoo Code |
-| `.agents/skills-code/` | те же симлинки, активны только в Code: React, UI, tui, tdd, браузерные проверки |
-| `.agents/skills-architect/` | симлинк `split-design-spec`, активен только в Architect |
+| `.agents/rules/` | `use-skills`, `lean-code`, `release-train-branching`, `telegram-release-post`, `architecture-adr`. Markdown-правила, читаются как обычные файлы |
+| `.agents/skills/` | project skills: `brainstorming`, `tdd`, `karpathy-ponytail`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
+| `.agents/skills-code/` | симлинки в `.agents/skills/`, активны только в Code: React, UI, tui, tdd, браузерные проверки |
+| `.agents/skills-architect/` | симлинки `brainstorming` и `split-design-spec`, активны только в Architect |
 | `.agents/skills-lock.json` | провенанс скиллов: `karpathy-ponytail`, `tui-design` (хеши), вендорные Vercel и локальные |
-| `.cursor/mcp.json.example` | шаблон MCP **без** секретов |
+| `.agents/mcp.json.example` | шаблон MCP **без** секретов |
 | `.agents/mcp_config.json.example` | тот же шаблон для обёртки `.agents/bin/mcp` (симлинк на файл выше) |
 | `.agents/AGENTS.md` | краткая карта для агентов, которые смотрят в `.agents/` |
 
-**Не в git (локально):** `.cursor/mcp.json`, `.cursor/settings.json`, `.cursor/rules/gitea-agent-sync.mdc`, `.agents/mcp_config.json`, `.agents/bin/`, `.codebase-memory/`, `docs/plans/`, `docs/superpowers/`, `.env`, `*.db`.
+**Не в git (локально):** `.agents/mcp.json`, `.agents/mcp_settings.json`, `.agents/rules/gitea-agent-sync.md`, `.agents/mcp_config.json`, `.agents/bin/`, `graphify-out/`, `docs/plans/`, `docs/superpowers/`, `.env`, `*.db`.
 
 Токены и личные MCP-конфиги в PR не кладём: пути, ключи и авторизация живут только на машине оператора.
 
@@ -31,13 +30,14 @@
 
 ## MCP в двух клиентах
 
-**Cursor** берёт MCP из локального `.cursor/mcp.json` (шаблон — `.cursor/mcp.json.example`), правила — из `.cursor/rules/`, скиллы — из `.cursor/skills/`.
+**Любой клиент** берёт правила из `.agents/rules/`, скиллы — из `.agents/skills/`, MCP — из своего
+локального конфига (`.agents/mcp.json`, шаблон — `.agents/mcp.json.example`).
 
-**Zoo Code** подключает те же серверы в своих настройках MCP; файл `.cursor/mcp.json` там не читается, если не настроен явно.
+**Zoo Code** подключает те же серверы в своих настройках MCP; файл `.agents/mcp.json` там не читается, если не настроен явно.
 
 Ни то, ни другое в репозиторий не попадает: пути команд, ключи и токены — только локально. Формат — `{"mcpServers": {...}}`, как в шаблоне.
 
-Личная синхронизация с Gitea (адрес, pre-push хук, снимок агентских каталогов) настраивается только на сервере: правило `.cursor/rules/gitea-agent-sync.mdc` не коммитится и в GitHub не попадает.
+Личная синхронизация с Gitea (адрес, pre-push хук, снимок агентских каталогов) настраивается только на сервере: правило `.agents/rules/gitea-agent-sync.md` не коммитится и в GitHub не попадает.
 
 ---
 
@@ -47,16 +47,21 @@ MCP даёт агенту доступ к внешним сервисам и и�
 
 | Сервер (`serverName`) | Зачем | Когда |
 | --- | --- | --- |
-| `codebase_memory` | Граф символов: функции, классы, вызовы, HTTP-роуты, импорты. `search_graph`, `trace_path`, `get_code_snippet`, `get_architecture` | Навигация по незнакомому коду. После крупных рефакторингов и удаления модулей — переиндексация, иначе граф ссылается на удалённые файлы |
+| `graphify` | Граф символов: функции, классы, вызовы, импорты, сообщества. `query_graph`, `get_node`, `get_neighbors`, `shortest_path`, `graph_stats` | Навигация по незнакомому коду. Граф лежит в `graphify-out/`, после коммита обновляется git-хуком; вручную — `graphify update .` |
 | `github` | PR, issues, GitHub Actions и комментарии прямо из чата | Посмотреть PR, статус CI, triage комментариев. Только чтение |
 | `context7` | Актуальная документация библиотек | Правите интеграцию с FastAPI / React / Recharts / webauthn / redis — не гадаете API по памяти модели |
-| `playwright` | Браузер: клики, ввод, снимки DOM и экрана, логи консоли | UI-правки: логин, 2FA, NOC, Mini App, мастера настроек. В jsdom порталы и Radix-меню не воспроизводятся |
-| `siteaudit` | Audit публичного URL: HTTPS, HSTS, CSP, cookies, SSL | После смены CSP/HSTS и публикации домена |
-| `lazyweb` | Подбор референсов UI | Только когда нужны примеры интерфейсов |
+| `browse` | Браузер: клики, ввод, снимки DOM и экрана, логи консоли, настоящий Chrome с вашими логинами | UI-правки: логин, 2FA, NOC, Mini App, мастера настроек. В jsdom порталы и Radix-меню не воспроизводятся |
 
-`codebase_memory`, `github`, `playwright` и `siteaudit` запускаются **по SSH на тот же хост, где лежит код**, поэтому граф и индексы — серверные, а не по локальному зеркалу.
+`graphify` и `github` запускаются **по SSH на тот же хост, где лежит код**, поэтому граф и индексы — серверные, а не по локальному зеркалу; `browse` работает через расширение в вашем браузере; `context7` — внешний HTTP.
 
-`siteaudit` и `lazyweb` тяжёлые и в обычной работе висят в каждом запросе зря: держите их выключенными в профиле и включайте на время аудита сайта и подбора референсов.
+Граф строится из рабочего дерева: `graphify extract . --code-only && graphify cluster-only . --no-label`
+(первый раз ~1 мин), дальше его обновляют git-хуки по изменённому коду. Коммит только с
+документацией граф не перестраивает, поэтому `graph_stats` покажет «may be stale» — это ожидаемо:
+код не менялся, отметка догонит на следующем коммите с кодом. После удаления модулей —
+`graphify update . --force`, иначе старые узлы остаются.
+В отдельном worktree — свой `graphify-out/`; чужой граф читается параметром `project_path` у инструментов.
+
+`siteaudit` тяжёлый и в обычной работе висит в каждом запросе зря: держите его выключенным в профиле и включайте на время аудита сайта.
 
 ### Шаблон `mcp.json`
 
@@ -65,18 +70,19 @@ MCP даёт агенту доступ к внешним сервисам и и�
 ```json
 {
   "mcpServers": {
-    "codebase-memory-mcp": {
-      "command": "codebase-memory-mcp"
-    },
-    "siteaudit": {
-      "command": "uvx",
-      "args": ["--from", "siteaudit-mcp", "siteaudit"]
+    "graphify": {
+      "command": "graphify-mcp",
+      "args": ["/opt/AdminPanelAZ/graphify-out/graph.json"]
     },
     "github": {
       "command": "github-mcp-stdio"
     },
     "context7": {
       "url": "https://mcp.context7.com/mcp/oauth"
+    },
+    "browse": {
+      "command": "browse",
+      "args": ["mcp"]
     }
   }
 }
@@ -103,12 +109,13 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 
 ```bash
 .agents/bin/mcp servers                        # список серверов из конфига
-.agents/bin/mcp tools codebase_memory          # инструменты сервера
-.agents/bin/mcp tools codebase_memory search_graph   # JSON-схема аргументов
-.agents/bin/mcp call codebase_memory search_graph '{"query": "node_sync"}'
+.agents/bin/mcp tools graphify                 # инструменты сервера
+.agents/bin/mcp tools graphify query_graph     # JSON-схема аргументов
+.agents/bin/mcp call graphify graph_stats '{}'
+.agents/bin/mcp call graphify query_graph '{"question": "node_sync"}'
 ```
 
-Конфиг ищется по порядку: `$MCP_CONFIG` → `.agents/mcp_config.json` → `.cursor/mcp.json` → `.cursor/mcp.json.example`.
+Конфиг ищется по порядку: `$MCP_CONFIG` → `.agents/mcp_config.json` → `.agents/mcp.json` → `.agents/mcp.json.example`.
 
 ---
 
@@ -116,14 +123,14 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 
 | Где | Что |
 | ----- | ----- |
-| `.cursor/skills/<name>/` | скиллы этого репозитория: `karpathy-ponytail`, `tdd`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
-| `.agents/skills*/` | относительные симлинки на `.cursor/skills/`, разложенные по режимам Zoo Code |
+| `.agents/skills/<name>/` | скиллы этого репозитория: `karpathy-ponytail`, `tdd`, `react-best-practices`, `vercel-composition-patterns`, `web-design-guidelines`, `ui-ux-pro-max`, `frontend-design`, `webapp-testing`, `split-design-spec`, `tui-design`, `cli-toolbox` |
+| `.agents/skills*/` | относительные симлинки на `.agents/skills/`, разложенные по режимам Zoo Code |
 
-Внешних каталогов скиллов нет: если скилла нет в `.cursor/skills/`, значит его нет.
+Внешних каталогов скиллов нет: если скилла нет в `.agents/skills/`, значит его нет.
 
 Скилл — это каталог с `SKILL.md` и frontmatter (`name`, `description`); `name` совпадает с именем каталога, иначе агент скилл не увидит.
 
-**Маршрутизация «ситуация → skill»** — [`use-skills.mdc`](.cursor/rules/use-skills.mdc) (always-on правило), короткая таблица — в [`AGENTS.md`](AGENTS.md).
+**Маршрутизация «ситуация → skill»** — [`use-skills.md`](.agents/rules/use-skills.md) (always-on правило), короткая таблица — в [`AGENTS.md`](AGENTS.md).
 
 ### Скиллы в репозитории
 
@@ -158,7 +165,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
   → план в чате на 2–5 пунктов → прогоны
 ```
 
-Процессные скиллы (`brainstorming`, `writing-plans`, `systematic-debugging`, `verification-before-completion` и т. п.) в репозитории не лежат: эти шаги описаны текстом в [`AGENTS.md`](AGENTS.md) и в [`use-skills.mdc`](.cursor/rules/use-skills.mdc).
+Процессные скиллы (`brainstorming`, `writing-plans`, `systematic-debugging`, `verification-before-completion` и т. п.) в репозитории не лежат: эти шаги описаны текстом в [`AGENTS.md`](AGENTS.md) и в [`use-skills.md`](.agents/rules/use-skills.md).
 
 ---
 
@@ -178,7 +185,7 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 | API abuse / rate limit | В проекте есть auth и global API rate limit (memory/Redis) — сверять дизайн и обходы |
 | Web/API OWASP (CSRF, SSRF, XSS) | Публичная раздача конфигов, webhook’и, SSRF-риски к node agent и внешним URL |
 | Secrets / supply chain | Не допустить токены и ключи в git; аудит зависимостей рядом с pip-audit/npm audit в CI |
-| TLS / HTTPS | Публикация через nginx/Let’s Encrypt — согласовать с `siteaudit` и `SECURITY.md` |
+| TLS / HTTPS | Публикация через nginx/Let’s Encrypt — согласовать с `SECURITY.md` |
 | AI/MCP (tool poisoning, prompt injection) | У контрибьюторов MCP и скиллы с полными правами агента — понимать риски tooling |
 
 Остальные сотни скиллов (чужие cloud IAM, ICS, red-team C2) без явной задачи не вызываем. Dual-use/offensive — только против систем с правом на тест.
@@ -188,18 +195,17 @@ gh auth login        # github-mcp-stdio берёт токен из gh
 ## Как это стыкуется
 
 ```text
-Навигация по коду          → codebase_memory
+Навигация по коду          → graphify
 Доки библиотеки            → context7
 PR / CI / GitHub           → github
-UI глазами                 → playwright
-HTTPS заголовки домена     → siteaudit
-Референсы интерфейсов      → lazyweb
+UI глазами                 → browse
+HTTPS заголовки домена     → security-пак (audit-in-headers), вручную
 Фича (план)                → план в чате 2–5 пунктов → «да»
 Баг                        → root cause, потом фикс (+ project tdd)
 Перед «готово»             → реальные прогоны, вывод в чате
 Свой новый код             → karpathy-ponytail
 Security диффа             → security-пак, точечно
-Проверить UI после правок  → webapp-testing / playwright
+Проверить UI после правок  → webapp-testing / browse
 ```
 
 ---
@@ -210,7 +216,7 @@ Security диффа             → security-пак, точечно
 2. **Документация:** пользовательские тексты — простой русский в `docs/` и `docs/nastrojki/`. Новые/переименованные страницы и секции настроек — обновить соответствующий user-doc и таблицы в [`docs/PROJECT_MAP.md`](docs/PROJECT_MAP.md).
 3. **API:** тонкие роутеры, логика в `backend/app/services/`; фронт ходит в API через `frontend/src/api/client.ts`.
 4. **Фичи:** учитывать feature toggles и активный узел (`FeatureModulesContext`, `NodeContext`).
-5. **Секреты:** `.env`, ключи, `*.pem`, GeoIP `*.mmdb`, граф `.codebase-memory/` — только локально.
+5. **Секреты:** `.env`, ключи, `*.pem`, GeoIP `*.mmdb`, граф `graphify-out/` — только локально.
 6. **Проверки:** как в CI — ruff, bandit, eslint (advisory), shellcheck `-S warning` для `install.sh` и `scripts/*.sh`.
 7. **Ключ NodeSource:** `install.sh` принимает ключ репозитория NodeSource только с отпечатком `NODESOURCE_KEY_FINGERPRINT`. Если NodeSource сменит ключ, установка Node.js остановится с ошибкой «Ключ NodeSource не совпал». Тогда сверить новый отпечаток с [инструкцией NodeSource](https://github.com/nodesource/distributions) и обновить `NODESOURCE_KEY_FINGERPRINT` в `install.sh` и `NODESOURCE_FPR` в `scripts/test-install-nodejs-lts.sh`.
 8. **Ветки релиза и Dependabot:** изменения идут в `release/X.Y.Z`, в `main` — одним PR, когда релиз готов. Создав новую `release/X.Y.Z`, первым коммитом в ней переключите `target-branch` в `.github/dependabot.yml` на эту ветку. Dependabot читает файл только из `main`, поэтому новое значение заработает после merge этой ветки в `main`; до этого его PR в старую ветку релиза закрывайте без merge.
@@ -222,8 +228,8 @@ Security-критичные зоны (auth, middleware, public download, telegra
 ## Быстрый старт для разработчика
 
 1. Клон репозитория, Python/Node как в README / `install.sh` (или локальный venv + `frontend` npm).
-2. Открыть `/opt/AdminPanelAZ` в Zoo Code или Cursor и прочитать [`AGENTS.md`](AGENTS.md) + [`use-skills.mdc`](.cursor/rules/use-skills.mdc) — оттуда берётся выбор скилла и команды проверок.
-3. MCP: скопировать `.cursor/mcp.json.example` → `.cursor/mcp.json`, поправить пути команд под свою ОС; в Zoo Code те же серверы добавить в настройках MCP. Один раз — `gh auth login`.
+2. Открыть `/opt/AdminPanelAZ` в Zoo Code (или другом агенте) и прочитать [`AGENTS.md`](AGENTS.md) + [`use-skills.md`](.agents/rules/use-skills.md) — оттуда берётся выбор скилла и команды проверок.
+3. MCP: скопировать `.agents/mcp.json.example` → `.agents/mcp.json`, поправить пути команд под свою ОС; в Zoo Code те же серверы добавить в настройках MCP. Один раз — `gh auth login`.
 4. Проверить серверы: `.agents/bin/mcp servers` (список) и `mcp tools <server>` (инструменты).
 5. Команды прогонов — в [`AGENTS.md`](AGENTS.md), раздел «Команды проверок»: ruff, точечный pytest, `npm run typecheck && npm run lint`, для UI — `npm run build:all`.
 6. PR: понятное описание, зелёный CI. Крупные изменения — отдельными reviewable коммитами, ветка — активная `release/X.Y.Z`.

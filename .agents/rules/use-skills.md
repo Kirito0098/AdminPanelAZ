@@ -5,9 +5,9 @@ alwaysApply: true
 
 # Skills — читать до действий, а не по памяти
 
-Скиллы лежат в `.cursor/skills/<name>/SKILL.md`; Zoo Code видит их через симлинки в `.agents/`.
+Скиллы лежат в `.agents/skills/<name>/SKILL.md`; Zoo Code видит их через симлинки в `.agents/`.
 Каталог зависит от режима: универсальные — `.agents/skills/`, только Code — `.agents/skills-code/`,
-только Architect — `.agents/skills-architect/`. Cursor режимов не знает и видит весь `.cursor/skills`.
+только Architect — `.agents/skills-architect/`. Клиент без режимов видит весь `.agents/skills/`.
 
 Перед задачей (кроме вопроса-справки и чтения кода) сопоставь её с таблицей. Подходит — прочитай
 файл скилла. Скилла нет в каталоге сессии — читай по пути из таблицы. В первом сообщении одной
@@ -23,7 +23,7 @@ alwaysApply: true
 | Терминал: поиск файлов и кода, диапазон строк, замена, YAML/JSON, diff | `cli-toolbox` | `.agents/skills/` |
 | Багфикс с дешёвым локальным тестом на критическом узле | `tdd` | `.agents/skills-code/` |
 | UI: страницы, компоненты, Mini App, вёрстка, a11y | `web-design-guidelines` | `.agents/skills-code/` |
-| Веб-меню, сайдбар, хедер, иерархия разделов, адаптивная навигация | `ui-ux-pro-max` (поиск: `python3 .cursor/skills/ui-ux-pro-max/scripts/search.py "<query>" --domain ux`) | `.agents/skills-code/` |
+| Веб-меню, сайдбар, хедер, иерархия разделов, адаптивная навигация | `ui-ux-pro-max` (поиск: `python3 .agents/skills/ui-ux-pro-max/scripts/search.py "<query>" --domain ux`) | `.agents/skills-code/` |
 | Визуальное направление нового экрана: палитра, типографика, тексты | `frontend-design` | `.agents/skills-code/` |
 | Проверить UI в браузере после правок фронта | `webapp-testing` | `.agents/skills-code/` |
 | React: ререндеры, бандл, тяжёлые вычисления | `react-best-practices` | `.agents/skills-code/` |

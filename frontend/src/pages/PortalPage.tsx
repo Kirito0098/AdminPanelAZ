@@ -27,63 +27,17 @@ import Spinner from '@/components/ui/Spinner'
 import { closedAccessCopy } from '@/lib/closedAccess'
 import { parseTimestamp } from '@/lib/datetime'
 import { normalizePortalNodes, pickPortalSelection, portalClientKey, portalProfileLabel } from '@/lib/portalNodes'
+import {
+  PORTAL_OS_OPTIONS as OS_OPTIONS,
+  resolveAppDownload,
+  type PortalOsId,
+} from '@/lib/portalAppDownloads'
 import { cn } from '@/lib/utils'
 import { protocolLabel } from '@/lib/vpnTypes'
 import type { ClosedAccessView } from '@/types'
 
-type OsId = 'windows' | 'android' | 'ios' | 'mac' | 'linux'
+type OsId = PortalOsId
 type KitStep = 'install' | 'profile' | 'connect'
-
-const OS_OPTIONS: { id: OsId; label: string }[] = [
-  { id: 'windows', label: 'Windows' },
-  { id: 'android', label: 'Android' },
-  { id: 'ios', label: 'iOS' },
-  { id: 'mac', label: 'macOS' },
-  { id: 'linux', label: 'Linux' },
-]
-
-const APP_DOWNLOADS: Record<string, Partial<Record<OsId, { label: string; url: string }>>> = {
-  openvpn: {
-    windows: { label: 'OpenVPN Connect', url: 'https://openvpn.net/client/' },
-    mac: { label: 'OpenVPN Connect', url: 'https://openvpn.net/client/' },
-    linux: { label: 'OpenVPN', url: 'https://openvpn.net/community-downloads/' },
-    android: {
-      label: 'OpenVPN Connect',
-      url: 'https://play.google.com/store/apps/details?id=net.openvpn.openvpn',
-    },
-    ios: { label: 'OpenVPN Connect', url: 'https://apps.apple.com/app/openvpn-connect/id590379981' },
-  },
-  wireguard: {
-    windows: { label: 'WireGuard', url: 'https://www.wireguard.com/install/' },
-    mac: { label: 'WireGuard', url: 'https://apps.apple.com/app/wireguard/id1451685025' },
-    linux: { label: 'WireGuard', url: 'https://www.wireguard.com/install/' },
-    android: {
-      label: 'WireGuard',
-      url: 'https://play.google.com/store/apps/details?id=com.wireguard.android',
-    },
-    ios: { label: 'WireGuard', url: 'https://apps.apple.com/app/wireguard/id1441195209' },
-  },
-  amneziawg: {
-    windows: {
-      label: 'AmneziaWG',
-      url: 'https://github.com/amnezia-vpn/amneziawg-windows-client/releases',
-    },
-    mac: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
-    linux: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
-    android: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
-    ios: { label: 'AmneziaWG', url: 'https://apps.apple.com/app/amneziawg/id6478942365' },
-  },
-  amneziawg2: {
-    windows: {
-      label: 'AmneziaWG',
-      url: 'https://github.com/amnezia-vpn/amneziawg-windows-client/releases',
-    },
-    mac: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
-    linux: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
-    android: { label: 'AmneziaWG', url: 'https://amnezia.org/en/downloads' },
-    ios: { label: 'AmneziaWG', url: 'https://apps.apple.com/app/amneziawg/id6478942365' },
-  },
-}
 
 function detectOs(): OsId {
   const ua = navigator.userAgent || ''
@@ -595,7 +549,7 @@ export default function PortalPage() {
     return activeClient.files.filter((f) => !protocol || f.vpn_type === protocol)
   }, [activeClient, protocol])
 
-  const appLink = protocol ? APP_DOWNLOADS[protocol]?.[os] : undefined
+  const appLink = resolveAppDownload(data?.app_links, protocol, os)
   const status = activeClient?.status
   const closedAccess: ClosedAccessView | null =
     data && data.kind === 'user' ? (data.closed_access ?? null) : null

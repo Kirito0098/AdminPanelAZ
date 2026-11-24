@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "graphify": {
+      "command": "graphify-mcp",
+      "args": ["/opt/AdminPanelAZ/graphify-out/graph.json"]
+    },
+    "github": {
+      "command": "github-mcp-stdio"
+    },
+    "context7": {
+      "url": "https://mcp.context7.com/mcp/oauth"
+    },
+    "browse": {
+      "command": "browse",
+      "args": ["mcp"]
+    }
+  }
+}

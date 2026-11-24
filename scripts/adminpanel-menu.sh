@@ -430,25 +430,100 @@ panel_wait_health() {
   return 1
 }
 
+# Коммит, для которого собран интерфейс: frontend/dist/.build-info.json пишет CI (release-джоба).
+frontend_build_info_commit() {
+  local info="$INSTALL_DIR/frontend/dist/.build-info.json" commit
+  [[ -f "$info" ]] || return 1
+  commit="$(sed -n 's/.*"commit"[[:space:]]*:[[:space:]]*"\([0-9a-fA-F]*\)".*/\1/p' "$info" | head -n1)"
+  [[ -n "$commit" ]] || return 1
+  printf '%s' "$commit"
+}
+
+# true, если на диске лежит сборка из CI именно для текущего коммита — её не нужно собирать заново.
+frontend_build_current() {
+  local commit head
+  commit="$(frontend_build_info_commit)" || return 1
+  [[ -f "$INSTALL_DIR/frontend/dist/index.html" ]] || return 1
+  head="$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null)" || return 1
+  [[ -n "$head" && "$commit" == "$head" ]]
+}
+
 # Интерфейс проверяется только там, где его уже собирали. Сборка устарела, если отслеживаемый файл frontend
 # новее собранного index.html: git pull ставит изменённым файлам текущее время.
 frontend_build_stale() {
   local index="$INSTALL_DIR/frontend/dist/index.html" path
   [[ -d "$INSTALL_DIR/frontend/dist" ]] || return 1
   [[ -f "$index" ]] || return 0
+  # Сборка из CI помнит свой коммит: mtime после git pull врёт, сравниваем коммиты.
+  if frontend_build_info_commit >/dev/null; then
+    frontend_build_current && return 1
+    return 0
+  fi
   while IFS= read -r -d '' path; do
     [[ "$INSTALL_DIR/$path" -nt "$index" ]] && return 0
   done < <(git -C "$INSTALL_DIR" ls-files -z -- frontend 2>/dev/null)
   return 1
 }
 
-# panel_build_frontend [reuse-deps] — npm ci, затем build:all. reuse-deps: без npm ci, если node_modules уже есть.
+# Готовый интерфейс из GitHub для коммита (канал frontend-builds), без npm. Возвращает коды
+# scripts/panel-frontend-deploy.sh: 0 — поставлено, 3 — сборки нет, 4 — канал недоступен, 1 — не прошло проверку.
+panel_frontend_from_channel() {
+  local commit="$1" deploy="$INSTALL_DIR/scripts/panel-frontend-deploy.sh" out rc=0 line
+  if [[ ! -f "$deploy" ]]; then
+    ui_info "Готовый интерфейс: $deploy не найден"
+    return 3
+  fi
+  ui_info "Загрузка готового интерфейса из GitHub (коммит ${commit:0:12})…"
+  out="$(mktemp)"
+  bash "$deploy" --commit "$commit" --dir "$INSTALL_DIR" --no-restart >"$out" 2>&1 || rc=$?
+  while IFS= read -r line; do
+    [[ -n "$line" ]] && ui_info "  $line"
+  done <"$out"
+  rm -f "$out"
+  return "$rc"
+}
+
+# panel_build_frontend [reuse-deps] — готовый интерфейс из GitHub, иначе npm ci и build:all.
+# reuse-deps: без npm ci, если node_modules уже есть. Интерфейс из CI (dist/.build-info.json для текущего
+# коммита) не переставляется; PANEL_FRONTEND_SKIP_BUILD=1 пропускает всё, PANEL_FRONTEND_LOCAL_BUILD=1
+# оставляет только сборку на сервере. Node.js ставит установщик: здесь он лишь проверяется.
 # shellcheck disable=SC2120 # reuse-deps передаёт install.sh, меню вызывает без аргумента.
 panel_build_frontend() {
   local ci_mode="${1:-always}"
   local frontend_dir="$INSTALL_DIR/frontend"
+  local head_commit="" channel_rc=0
+  if [[ "${PANEL_FRONTEND_SKIP_BUILD:-0}" == "1" ]]; then
+    ui_warn "PANEL_FRONTEND_SKIP_BUILD=1 — сборка интерфейса пропущена, остаётся текущий dist"
+    return 0
+  fi
+  if frontend_build_current; then
+    ui_info "Интерфейс уже собран для текущего коммита (.build-info.json) — сборка пропущена"
+    return 0
+  fi
+  if [[ "${PANEL_FRONTEND_LOCAL_BUILD:-0}" != "1" ]]; then
+    head_commit="$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null)" || head_commit=""
+    if [[ -n "$head_commit" ]]; then
+      panel_frontend_from_channel "$head_commit" || channel_rc=$?
+      case "$channel_rc" in
+        0)
+          ui_ok "Интерфейс поставлен из готовой сборки GitHub (коммит ${head_commit:0:12})"
+          return 0
+          ;;
+        3) ui_info "Готовой сборки для ${head_commit:0:12} нет — собираем на сервере" ;;
+        4) ui_info "GitHub-канал недоступен — собираем на сервере" ;;
+        *) ui_warn "Готовая сборка не прошла проверку (код $channel_rc) — собираем на сервере" ;;
+      esac
+    fi
+  fi
+  # Установщик объявляет install_nodejs; меню и full-update Node не ставят — только подсказывают.
+  if ! command -v npm >/dev/null 2>&1 && declare -F install_nodejs >/dev/null 2>&1; then
+    ui_info "Для сборки нужен Node.js ${NODE_MIN_MAJOR:-22}+ — установка…"
+    install_nodejs
+  fi
   if ! command -v npm >/dev/null 2>&1; then
     ui_fail "npm не найден — интерфейс не пересобран"
+    ui_info "Обновитесь установщиком, он поставит Node.js: sudo $INSTALL_DIR/install.sh --update"
+    ui_info "Или поставьте готовый архив: bash $INSTALL_DIR/scripts/panel-frontend-deploy.sh --tag vX.Y.Z"
     return 1
   fi
   local ok=true
@@ -462,6 +537,8 @@ panel_build_frontend() {
     ok=false
   fi
   if [[ "$ok" == true ]]; then
+    # Собрали на месте — метка CI больше не описывает dist; дальше решает mtime (frontend_build_stale).
+    rm -f "$frontend_dir/dist/.build-info.json"
     ui_ok "Интерфейс пересобран"
     return 0
   fi
@@ -471,6 +548,7 @@ panel_build_frontend() {
 
 panel_frontend_manual_hint() {
   ui_fail "Соберите интерфейс вручную: cd $INSTALL_DIR/frontend && npm ci && npm run build:all, затем $0 --restart"
+  ui_info "Если сборка падает с «JavaScript heap out of memory»: нужен swap (2 GB) и NODE_OPTIONS=--max-old-space-size=1536, либо готовый dist из релиза: $INSTALL_DIR/scripts/panel-frontend-deploy.sh"
 }
 
 panel_restart() {

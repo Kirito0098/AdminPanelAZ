@@ -23,7 +23,7 @@ export default function ServiceMatrix({
         <div
           key={s.name}
           className={cn(
-            'flex items-center gap-3 rounded-lg border p-3',
+            'flex min-w-0 items-center gap-3 overflow-hidden rounded-lg border p-3',
             s.active ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-destructive/20 bg-destructive/5',
           )}
         >

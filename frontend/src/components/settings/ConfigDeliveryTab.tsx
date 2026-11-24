@@ -1,103 +1,123 @@
-import { useEffect, useState } from 'react'
-import { Router } from 'lucide-react'
-import { Link } from 'react-router-dom'
-import { ApiError, getSecuritySettings, updateSecuritySettings } from '@/api/client'
-import RouteResultsPanel from '@/components/settings/RouteResultsPanel'
-import SettingsAlert from '@/components/settings/SettingsAlert'
+import { useEffect, useState } from "react";
+import { Router } from "lucide-react";
+import { Link } from "react-router-dom";
+import {
+  ApiError,
+  getSecuritySettings,
+  updateSecuritySettings,
+} from "@/api/client";
+import RouteResultsPanel from "@/components/settings/RouteResultsPanel";
+import PortalAppLinksCard from "@/components/settings/PortalAppLinksCard";
+import SettingsAlert from "@/components/settings/SettingsAlert";
 import {
   SettingsCard as Card,
   SettingsCardContent as CardContent,
   SettingsCardDescription as CardDescription,
   SettingsCardHeader as CardHeader,
   SettingsCardTitle as CardTitle,
-} from '@/components/settings/SettingsCard'
-import Spinner from '@/components/ui/Spinner'
-import { InlineProgressBar } from '@/components/ui/ProgressBar'
-import ToggleRow from '@/components/settings/ToggleRow'
-import { useNotifications } from '@/context/NotificationContext'
-import { useFeatureModules } from '@/context/FeatureModulesContext'
-import type { SecuritySettings } from '@/types'
+} from "@/components/settings/SettingsCard";
+import Spinner from "@/components/ui/Spinner";
+import { InlineProgressBar } from "@/components/ui/ProgressBar";
+import ToggleRow from "@/components/settings/ToggleRow";
+import { useNotifications } from "@/context/NotificationContext";
+import { useFeatureModules } from "@/context/FeatureModulesContext";
+import type { SecuritySettings } from "@/types";
 
 export default function ConfigDeliveryTab() {
-  const { success, error: notifyError } = useNotifications()
-  const { isEnabled } = useFeatureModules()
-  const openvpnEnabled = isEnabled('openvpn')
-  const [settings, setSettings] = useState<SecuritySettings | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
+  const { success, error: notifyError } = useNotifications();
+  const { isEnabled } = useFeatureModules();
+  const openvpnEnabled = isEnabled("openvpn");
+  const [settings, setSettings] = useState<SecuritySettings | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setLoading(true)
+    setLoading(true);
     getSecuritySettings()
       .then(setSettings)
-      .catch((err) => notifyError(err instanceof ApiError ? err.message : 'Ошибка загрузки'))
-      .finally(() => setLoading(false))
-  }, [notifyError])
+      .catch((err) =>
+        notifyError(err instanceof ApiError ? err.message : "Ошибка загрузки"),
+      )
+      .finally(() => setLoading(false));
+  }, [notifyError]);
 
   const savePublicDownload = async (enabled: boolean) => {
-    setSaving(true)
+    setSaving(true);
     try {
-      const updated = await updateSecuritySettings({ public_download_enabled: enabled })
-      setSettings(updated)
-      success('Настройки выдачи профилей сохранены')
+      const updated = await updateSecuritySettings({
+        public_download_enabled: enabled,
+      });
+      setSettings(updated);
+      success("Настройки выдачи профилей сохранены");
     } catch (err) {
-      notifyError(err instanceof ApiError ? err.message : 'Ошибка сохранения')
+      notifyError(err instanceof ApiError ? err.message : "Ошибка сохранения");
     } finally {
-      setSaving(false)
+      setSaving(false);
     }
-  }
+  };
 
   if (loading) {
-    return <Spinner label="Загрузка настроек выдачи профилей..." className="py-12" />
+    return (
+      <Spinner label="Загрузка настроек выдачи профилей..." className="py-12" />
+    );
   }
-
-  if (!settings || !openvpnEnabled) return null
 
   return (
     <div className="space-y-4">
-      <InlineProgressBar active={saving} label="Сохранение настроек..." />
+      {/* Ссылки на приложения не зависят от модуля OpenVPN: WireGuard/AWG настраиваются и без него. */}
+      {openvpnEnabled && settings && (
+        <>
+          <InlineProgressBar active={saving} label="Сохранение настроек..." />
 
-      <p className="text-sm text-muted-foreground">
-        Готовые файлы маршрутов для Keenetic, MikroTik и TP-Link. Портал и unlock-ключи — в разделе{' '}
-        <Link
-          to="/users?tab=portal"
-          className="font-medium text-foreground underline underline-offset-4 transition-colors hover:text-primary"
-        >
-          Подписка
-        </Link>
-        .
-      </p>
+          <p className="text-sm text-muted-foreground">
+            Готовые файлы маршрутов для Keenetic, MikroTik и TP-Link. Портал и
+            unlock-ключи — в разделе{" "}
+            <Link
+              to="/users?tab=portal"
+              className="font-medium text-foreground underline underline-offset-4 transition-colors hover:text-primary"
+            >
+              Подписка
+            </Link>
+            .
+          </p>
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <Router size={16} aria-hidden />
-            </span>
-            Скачивание маршрутов
-          </CardTitle>
-          <CardDescription>
-            Файлы активного узла — после настройки маршрутизации
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <ToggleRow
-            id="public-download"
-            label="Ссылка для клиента без входа в панель"
-            description="Если выключено — файлы можно скачать только здесь, будучи авторизованным"
-            checked={settings.public_download_enabled}
-            onCheckedChange={(checked) => void savePublicDownload(checked)}
-          />
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2.5">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Router size={16} aria-hidden />
+                </span>
+                Скачивание маршрутов
+              </CardTitle>
+              <CardDescription>
+                Файлы активного узла — после настройки маршрутизации
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <ToggleRow
+                id="public-download"
+                label="Ссылка для клиента без входа в панель"
+                description="Если выключено — файлы можно скачать только здесь, будучи авторизованным"
+                checked={settings.public_download_enabled}
+                onCheckedChange={(checked) => void savePublicDownload(checked)}
+              />
 
-          {settings.public_download_enabled && (
-            <SettingsAlert variant="warning" title="Публичный доступ">
-              Любой с ссылкой сможет скачать маршруты. Не публикуйте ссылку в открытых чатах.
-            </SettingsAlert>
-          )}
+              {settings.public_download_enabled && (
+                <SettingsAlert variant="warning" title="Публичный доступ">
+                  Любой с ссылкой сможет скачать маршруты. Не публикуйте ссылку
+                  в открытых чатах.
+                </SettingsAlert>
+              )}
 
-          <RouteResultsPanel showPublicLinks={settings.public_download_enabled} />
-        </CardContent>
-      </Card>
+              <RouteResultsPanel
+                showPublicLinks={settings.public_download_enabled}
+              />
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      <PortalAppLinksCard />
     </div>
-  )
+  );
 }

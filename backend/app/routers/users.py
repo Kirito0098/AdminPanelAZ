@@ -960,7 +960,17 @@ def approve_access_request(
     ad_hoc: dict[str, Any] | None = None
     if row.request_type == "new_user":
         if payload.preset_id is None:
+            if payload.config_ids is not None and not payload.config_ids:
+                # Явно выбран режим «без новых конфигов», но привязывать нечего.
+                # Иначе сервис уйдёт в проверку плана и ответит про узлы и протоколы.
+                raise HTTPException(
+                    status.HTTP_400_BAD_REQUEST,
+                    detail="Выберите хотя бы один конфиг: абонент без конфигов не создаётся",
+                )
             ad_hoc = {
+                # Привязка готовых конфигов вместо выпуска новых: сервис по этому
+                # ключу пропускает требования узлов и протоколов (Fider #47).
+                "config_ids": payload.config_ids,
                 "node_ids": payload.node_ids or [],
                 "protocols": payload.protocols or [],
                 "config_count": payload.config_count,
@@ -2276,7 +2286,9 @@ def _delete_user_core(db, user, current_user, request) -> tuple[str, bool]:
             username=current_user.username,
             remote_addr=remote_addr,
             details=f"deleted={deleted_username}",
-            target_user_id=target_id,
+            # target_user_id не пишем: абонента уже нет в users, а FK без ON DELETE
+            # отбил бы вставку и вернул 500 после фактического удаления (Fider #48).
+            target_user_id=None,
         )
         admin_notify_service.send_user_delete(
             db,

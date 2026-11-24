@@ -194,6 +194,10 @@ install_on_err() {
   if [[ ${#log_hints[@]} -eq 0 ]]; then
     log_hints+=("  journalctl -u adminpanelaz -n 50")
   fi
+  if [[ "$step" == *frontend* ]]; then
+    log_hints+=("  frontend: не хватает RAM (heap out of memory) — swap 2 GB и NODE_OPTIONS=--max-old-space-size=1536," \
+      "    либо готовый dist из релиза: sudo ./scripts/panel-frontend-deploy.sh --tag vX.Y.Z")
+  fi
 
   echo >&2
   if declare -F ui_warn_box >/dev/null 2>&1 && [[ "$NON_INTERACTIVE" != true ]] && [[ -t 2 || -t 1 ]]; then
@@ -964,7 +968,8 @@ install_system_deps() {
     "$ROOT_DIR/scripts/setup-vnstat.sh" || warn "setup-vnstat.sh завершился с ошибкой (можно повторить вручную)"
   fi
 
-  install_nodejs
+  # Node.js не ставим заранее: интерфейс обычно приходит готовой сборкой из GitHub, а Node
+  # устанавливается по требованию, если придётся собирать на сервере (panel_build_frontend).
   ui_progress_done "Системные зависимости"
 }
 

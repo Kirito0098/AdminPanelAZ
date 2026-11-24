@@ -608,6 +608,7 @@ class SelfServiceQuotaResponse(BaseModel):
     limit: int | None = None
     remaining: int | None = None
     unlimited: bool = False
+    subscription_expired: bool = False
     can_create: bool = True
     can_manage: bool = True
     create_rate_max: int | None = None
@@ -2853,3 +2854,16 @@ class MarkReadRequest(BaseModel):
 
 class MarkReadResponse(BaseModel):
     ok: bool = True
+
+
+class PortalAppLinksUpdate(BaseModel):
+    """Переопределения ссылок на приложения в клиентском портале (Fider #41)."""
+
+    links: dict[str, dict[str, str | None]] = Field(default_factory=dict)
+
+
+class PortalAppLinksResponse(BaseModel):
+    links: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Официальные ссылки — плейсхолдеры карточки настроек.
+    defaults: dict[str, dict[str, str]] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)

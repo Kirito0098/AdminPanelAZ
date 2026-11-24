@@ -163,7 +163,7 @@ export default function NotificationPopover({
   if (sheet) {
     return (
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent side="right" className="flex w-96 flex-col p-0">
+        <SheetContent side="right" className="flex w-full max-w-sm flex-col p-0">
           <SheetHeader className="px-4 pb-2">
             <SheetTitle>Уведомления</SheetTitle>
             <SheetDescription className="text-xs">

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 from typing import Callable, Literal
 
 from app.services.protocols import normalize_protocol
@@ -376,6 +377,16 @@ _BUILDERS: dict[tuple[str, str], Callable[[str], str]] = {
 }
 
 
+def _with_download_link(message: str, app_url: str | None) -> str:
+    """Вставить «Скачать: …» сразу под шапкой (заголовок + имя профиля)."""
+    if not app_url:
+        return message
+    head, sep, tail = message.partition("\n\n")
+    if not sep:
+        return message
+    return f"{head}\nСкачать: {html.escape(app_url)}{sep}{tail}"
+
+
 def build_install_instruction_message(
     *,
     protocol: str,
@@ -383,6 +394,7 @@ def build_install_instruction_message(
     client_name: str,
     filename: str | None = None,
     path: str | None = None,
+    app_url: str | None = None,
 ) -> str | None:
     proto = normalize_protocol(protocol)
     fmt = _detect_profile_format(filename, path)
@@ -394,12 +406,13 @@ def build_install_instruction_message(
             is_awg2=proto == "amneziawg2",
         )
         tip = _profile_format_tip(protocol=proto, filename=filename, path=path)
+        message = _with_download_link(message, app_url)
         return f"{message}\n\n{tip}" if tip else message
 
     builder = _BUILDERS.get((proto, platform))
     if not builder:
         return None
-    message = builder(client_name)
+    message = _with_download_link(builder(client_name), app_url)
     tip = _profile_format_tip(protocol=proto, filename=filename, path=path)
     if tip:
         return f"{message}\n\n{tip}"

@@ -52,7 +52,7 @@ export default function NocConnectionFilters({
   return (
     <div
       className={cn(
-        'flex gap-3 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible',
+        'grid grid-cols-2 gap-3 sm:flex sm:flex-wrap',
         className,
       )}
     >

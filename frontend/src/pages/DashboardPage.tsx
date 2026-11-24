@@ -26,6 +26,7 @@ import {
 } from '@/api/client'
 import { downloadUserConfigFile } from '@/api/users'
 import { buildDashboardSummary } from '@/lib/dashboardSummary'
+import { formatDate } from '@/lib/datetime'
 import PageSectionHeader from '@/components/shared/PageSectionHeader'
 import { DOCS } from '@/lib/docsUrls'
 import ConfigCardsSection from '@/components/dashboard/ConfigCardsSection'
@@ -114,11 +115,14 @@ export default function DashboardPage() {
   const dialogAwg2Installed = isAdmin
     ? activeNode?.awg2_installed === true
     : awg2Installed
-  // Hide create when can_create is false (flag off or quota exhausted) — including unlimited quota.
+  // Hide create when can_create is false (flag off, quota exhausted or subscription expired).
+  const subscriptionExpired = !isAdmin && quota?.subscription_expired === true
   const createBlocked = !isAdmin && quota != null && !quota.can_create
   const canCreateClient = (openvpnEnabled || wireguardEnabled || awg2CreateEnabled) && !createBlocked
-  const quotaReached = createBlocked && quota != null && !quota.unlimited
-  const createDisabledByAdmin = createBlocked && quota != null && quota.unlimited
+  const quotaReached =
+    createBlocked && !subscriptionExpired && quota != null && !quota.unlimited
+  const createDisabledByAdmin =
+    createBlocked && !subscriptionExpired && quota != null && quota.unlimited
 
   useEffect(() => {
     void getEffectiveVisibleVpnProfiles()
@@ -370,6 +374,7 @@ export default function DashboardPage() {
             <strong className="font-medium text-foreground">{activeNode?.name ?? summary?.node_name ?? 'не выбран'}</strong>
             {activeNode?.is_local ? ' (локальный controller)' : activeNode ? ' (удалённый node agent)' : ''}.
             OpenVPN и WG/AWG 1.5.
+            {!isAdmin && user?.access_until ? ` Доступ до ${formatDate(user.access_until)}.` : ''}
           </>
         }
         docsHref={DOCS.configurations}
@@ -444,6 +449,13 @@ export default function DashboardPage() {
         <SettingsAlert variant="info" title="Импорт CSV">
           {importTask?.progress_stage || importTask?.message || 'Импорт выполняется…'}
           {importTask?.progress_percent != null ? ` (${importTask.progress_percent}%)` : ''}
+        </SettingsAlert>
+      )}
+
+      {subscriptionExpired && (
+        <SettingsAlert variant="warning" title="Срок доступа истёк">
+          Доступ был до {user?.access_until ? formatDate(user.access_until) : '—'}. Создание новых
+          конфигов недоступно, существующие работают и скачиваются. Продлите доступ у администратора.
         </SettingsAlert>
       )}
 

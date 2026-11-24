@@ -1,4 +1,5 @@
 import { apiFetch } from './http'
+import type { PortalAppLinks } from '@/lib/portalAppDownloads'
 import type { ClosedAccessView, PortalLinkResponse } from '@/types'
 
 export interface PortalFileMeta {
@@ -38,6 +39,8 @@ interface ClientPortalMetaResponse extends PortalClientEntry {
   kind?: 'client'
   brand_title: string
   unlock_codes_enabled: boolean
+  /** Переопределения ссылок на приложения из настроек панели (Fider #41). */
+  app_links?: PortalAppLinks
 }
 
 export interface PortalBanner {
@@ -49,6 +52,8 @@ interface UserPortalMetaResponse {
   kind: 'user'
   brand_title: string
   unlock_codes_enabled: boolean
+  /** Переопределения ссылок на приложения из настроек панели (Fider #41). */
+  app_links?: PortalAppLinks
   /** Состояние закрытого доступа (спека 7.4); null — доступ открыт. */
   closed_access: ClosedAccessView | null
   /** Баннер портала (Stage 4) — уведомление о массовой операции с серверами. */
@@ -153,4 +158,23 @@ export async function dismissPublicPortalBanner(token: string) {
   if (!res.ok) {
     throw new Error('Не удалось скрыть уведомление')
   }
+}
+
+export interface PortalAppLinksState {
+  /** Переопределения админа (пустая ячейка = официальная ссылка). */
+  links: PortalAppLinks
+  /** Официальные ссылки для плейсхолдеров карточки настроек. */
+  defaults: PortalAppLinks
+  warnings: string[]
+}
+
+export async function getPortalAppLinks() {
+  return apiFetch<PortalAppLinksState>('/portal/app-links')
+}
+
+export async function updatePortalAppLinks(links: PortalAppLinks) {
+  return apiFetch<PortalAppLinksState>('/portal/app-links', {
+    method: 'PUT',
+    body: JSON.stringify({ links }),
+  })
 }
