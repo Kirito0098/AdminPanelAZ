@@ -96,7 +96,7 @@ from app.services.client_names import (
     parse_plan_indexes,
 )
 from app.services.client_portal import revoke_creator_portal_links
-from app.services.config_access import get_user_config_grants, set_user_config_access
+from app.services.config_access import get_user_config_grants, is_config_owner, set_user_config_access
 from app.services.feature_guards import get_feature_service, module_disabled_message
 from app.services.user_access_requests import (
     cooldown_hours,
@@ -1994,10 +1994,14 @@ def config_download(
     config_id: int,
     path: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
 ):
     """D2: скачать файл профиля с узла конфига."""
     config = _get_owned_config(db, user_id, config_id)
+    if not is_config_owner(current_user, config):
+        # Тот же 404, что у соседнего маршрута «Ссылка» (client_portal: _assert_can_manage_client):
+        # не палим существование чужого id.
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Конфигурация не найдена")
     op_config, node = _resolve_op_config_and_node(db, config)
     require_ha_primary_for_client_ops(db, node=node)
     adapter = get_adapter_for_node(node)
