@@ -90,11 +90,16 @@ fetch_with_wait() {
 
 # В архиве только dist панели и Mini App: без абсолютных путей, «..» и ссылок.
 validate_archive() {
-  local entry
-  if tar tvzf "$ARCHIVE" | grep -qE '^[lh]'; then
+  local entry listing="$TMP_DIR/archive.list"
+  # Листинг — в файл: `tar … | grep -q` под pipefail даёт SIGPIPE и проверка молча пропускается на большом архиве.
+  tar tvzf "$ARCHIVE" >"$listing" || die_code 1 "не удалось прочитать архив $ARCHIVE"
+  if grep -qE '^[lh]' "$listing"; then
     die_code 1 "в архиве есть симлинк или жёсткая ссылка"
   fi
   while IFS= read -r entry; do
+    if [[ "/$entry/" == *"/../"* ]]; then
+      die_code 1 "в архиве недопустимый путь: $entry"
+    fi
     case "$entry" in
       frontend/dist | frontend/dist/* | backend/app/static/tg_mini | backend/app/static/tg_mini/*) ;;
       *) die_code 1 "в архиве неожиданный путь: $entry" ;;

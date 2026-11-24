@@ -225,6 +225,28 @@ grep -q "симлинк" "$TMP/out" || fail "нет объяснения про 
 [[ "$(cat "$TMP/install/frontend/dist/index.html")" == old ]] || fail "интерфейс подменён архивом с симлинком"
 echo "  OK"
 
+echo "[test] архив: ссылка ловится и в большом архиве (листинг не глохнет на SIGPIPE)"
+install_tree
+rm -rf "${TMP:?}/build-many"
+mkdir -p "$TMP/build-many/frontend/dist/.vite" "$TMP/build-many/backend/app/static/tg_mini"
+echo new >"$TMP/build-many/frontend/dist/index.html"
+echo '{}' >"$TMP/build-many/frontend/dist/.vite/manifest.json"
+printf '{"commit":"%s"}\n' "$(head_commit)" >"$TMP/build-many/frontend/dist/.build-info.json"
+ln -s /etc/passwd "$TMP/build-many/frontend/dist/evil"
+for i in $(seq 1 1500); do echo x >"$TMP/build-many/frontend/dist/asset-$i.js"; done
+echo new >"$TMP/build-many/backend/app/static/tg_mini/index.html"
+# Ссылка — первым членом архива, чтобы `grep -q` вышел на первой строке и tar ещё писал остальное.
+(cd "$TMP/build-many" && tar czf "$TMP/link-big.tar.gz" \
+  frontend/dist/evil frontend/dist backend/app/static/tg_mini)
+set +e
+bash "$SCRIPT" --file "$TMP/link-big.tar.gz" --dir "$TMP/install" --no-restart >"$TMP/out" 2>&1
+rc=$?
+set -e
+[[ "$rc" == 1 ]] || fail "большой архив с симлинком принят (код $rc): $(cat "$TMP/out")"
+grep -q "симлинк" "$TMP/out" || fail "нет объяснения про ссылку в большом архиве: $(cat "$TMP/out")"
+[[ "$(cat "$TMP/install/frontend/dist/index.html")" == old ]] || fail "интерфейс подменён большим архивом с симлинком"
+echo "  OK"
+
 echo "[test] архив: посторонний путь отклоняется до подмены"
 install_tree
 make_archive "$(head_commit)" plain.tar.gz
